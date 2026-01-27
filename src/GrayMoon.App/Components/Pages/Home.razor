@@ -1,0 +1,41 @@
+@page "/"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+<PageTitle>Home - GrayMoon</PageTitle>
+
+<div class="container-fluid page-container">
+    <div class="row">
+        <div class="col-12">
+            <div class="jumbotron banner-card-style rounded p-4 mb-4 border">
+                <div class="d-flex align-items-center">
+                    <img src="moon.svg" alt="GrayMoon" class="me-4" style="height: 80px; width: auto; flex-shrink: 0;" />
+                    <div>
+                        <h1 class="display-5 mb-0">
+                            GrayMoon
+                        </h1>
+                        <p class="lead fs-6 mb-0">
+                            Lightweight orchestration and monitoring for GitHub Actions and repository dependencies.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 col-lg-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="bi bi-github"></i> Configure GitHub
+                    </h5>
+                    <p class="card-text">
+                        This will be the first step to configure access to GitHub Actions via API.
+                    </p>
+                    <a class="btn btn-primary" href="/github-connectors">
+                        GitHub Connectors
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

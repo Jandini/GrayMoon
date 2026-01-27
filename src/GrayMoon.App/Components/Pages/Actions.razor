@@ -1,0 +1,420 @@
+@page "/actions"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using GrayMoon.App.Models
+@using GrayMoon.App.Services
+@using Microsoft.AspNetCore.WebUtilities
+@inject GitHubActionsService ActionsService
+@inject GitHubRepositoryService RepositoryService
+@inject NavigationManager Navigation
+@inject ILogger<Actions> Logger
+
+<PageTitle>Actions - GrayMoon</PageTitle>
+
+<div class="container-fluid page-container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2>Actions</h2>
+            <p class="text-muted mb-0" style="min-height: 1.5rem;">
+                @if (actions?.Count > 0)
+                {
+                    @($"{actions.Count} {(actions.Count == 1 ? "action" : "actions")}")
+                }
+                &nbsp;
+            </p>
+        </div>
+        <div class="d-flex align-items-center">
+            <select class="form-select"
+                    @bind="selectedRepositoryKey"
+                    @bind:event="onchange"
+                    @bind:after="OnSelectedRepositoryChanged">
+                @if (isLoadingRepositories)
+                {
+                    <option value="">Loading...</option>
+                }
+                else
+                {
+                    <option value="">Select repository...</option>
+                }
+                @if (repositories != null)
+                {
+                    @foreach (var repository in repositories)
+                    {
+                        <option value="@BuildRepositoryKey(repository)">
+                            @($"{repository.ConnectorName} / {repository.OrgName} / {repository.RepositoryName}")
+                        </option>
+                    }
+                }
+            </select>
+            <button class="btn btn-outline-secondary ms-2"
+                    @onclick="RefreshActionsAsync"
+                    disabled="@(isLoading || string.IsNullOrWhiteSpace(selectedRepositoryKey))">
+                Refresh
+            </button>
+        </div>
+    </div>
+
+    @if (errorMessage != null)
+    {
+        <div class="alert alert-danger">
+            <i class="bi bi-exclamation-triangle"></i> @errorMessage
+        </div>
+    }
+    else
+    {
+        <div class="card page-card">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover mb-0 actions-table">
+                        <thead class="table-dark">
+                            <tr>
+                                <th class="col-repo">Repository</th>
+                                <th class="col-workflow">Workflow</th>
+                                <th class="col-event">Event</th>
+                                <th class="col-status">Status</th>
+                                <th class="col-conclusion">Conclusion</th>
+                                <th class="col-updated">Updated</th>
+                                <th class="col-action">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (isLoading)
+                            {
+                                <tr>
+                                    <td colspan="7" class="text-center py-5">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                        <p class="text-muted mt-2 mb-0">Loading actions...</p>
+                                    </td>
+                                </tr>
+                            }
+                            else if (actions == null)
+                            {
+                                <tr>
+                                    <td colspan="7" class="text-center py-5">
+                                        <p class="text-muted mt-2 mb-0">Select a repository to load actions.</p>
+                                    </td>
+                                </tr>
+                            }
+                            else if (actions.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="7" class="text-center text-muted py-4">
+                                        No actions found. Configure GitHub connectors to fetch actions.
+                                    </td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var action in actions)
+                                {
+                                    <tr>
+                                        <td class="col-repo">@action.RepositoryName</td>
+                                        <td class="col-workflow">
+                                            @if (!string.IsNullOrWhiteSpace(action.HtmlUrl))
+                                            {
+                                                <a class="action-link" href="@action.HtmlUrl" target="_blank" rel="noopener noreferrer">
+                                                    @action.WorkflowName
+                                                </a>
+                                            }
+                                            else
+                                            {
+                                                @action.WorkflowName
+                                            }
+                                        </td>
+                                        <td class="col-event">@GetEventLabel(action.Event)</td>
+                                        <td class="col-status">
+                                            <span class="badge @GetStatusBadgeClass(action.Status)">
+                                                @GetStatusLabel(action.Status)
+                                            </span>
+                                        </td>
+                                        <td class="col-conclusion">
+                                            <span class="badge @GetConclusionBadgeClass(action.Conclusion)">
+                                                @GetConclusionLabel(action.Conclusion)
+                                            </span>
+                                        </td>
+                                        <td class="col-updated">@(action.UpdatedAt?.ToLocalTime().ToString("g") ?? "-")</td>
+                                        <td class="col-action">
+                                            <div class="actions-buttons">
+                                                <button class="btn btn-sm btn-outline-secondary"
+                                                        @onclick="() => RunWorkflowAsync(action)"
+                                                        disabled="@(isLoading || isRunning || !CanRun(action))">
+                                                    @if (isRunning)
+                                                    {
+                                                        <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                                                        <span>Running...</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span>Run</span>
+                                                    }
+                                                </button>
+                                                <button class="btn btn-sm btn-outline-primary"
+                                                        @onclick="() => RerunWorkflowAsync(action)"
+                                                        disabled="@(isLoading || isRerunning || !CanRerun(action))">
+                                                    @if (isRerunning)
+                                                    {
+                                                        <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                                                        <span>Re-running...</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span>Re-run</span>
+                                                    }
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<GitHubActionEntry>? actions;
+    private List<GitHubRepositoryEntry>? repositories;
+    private string? errorMessage;
+    private string selectedRepositoryKey = string.Empty;
+    private bool isLoading;
+    private bool isLoadingRepositories;
+    private bool isRerunning;
+    private bool isRunning;
+
+    protected override async Task OnInitializedAsync()
+    {
+        selectedRepositoryKey = GetRepositoryKeyFromQuery();
+        await LoadRepositoriesAsync();
+        if (!string.IsNullOrWhiteSpace(selectedRepositoryKey))
+        {
+            await LoadActionsAsync();
+        }
+    }
+
+    private async Task OnSelectedRepositoryChanged()
+    {
+        UpdateRepositoryQuery(selectedRepositoryKey);
+        await LoadActionsAsync();
+    }
+
+    private async Task RefreshActionsAsync()
+    {
+        await LoadActionsAsync();
+    }
+
+    private async Task LoadRepositoriesAsync()
+    {
+        try
+        {
+            isLoadingRepositories = true;
+            errorMessage = null;
+            repositories = await RepositoryService.GetRepositoriesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading repositories");
+            errorMessage = "Failed to load repositories. Please try again later.";
+            repositories = new List<GitHubRepositoryEntry>();
+        }
+        finally
+        {
+            isLoadingRepositories = false;
+        }
+    }
+
+    private async Task LoadActionsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(selectedRepositoryKey))
+        {
+            actions = null;
+            return;
+        }
+
+        var repository = repositories?.FirstOrDefault(repo => BuildRepositoryKey(repo) == selectedRepositoryKey);
+        if (repository == null)
+        {
+            actions = new List<GitHubActionEntry>();
+            return;
+        }
+
+        try
+        {
+            isLoading = true;
+            errorMessage = null;
+            var action = await ActionsService.GetLatestActionAsync(repository);
+            actions = action == null ? new List<GitHubActionEntry>() : new List<GitHubActionEntry> { action };
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading actions");
+            errorMessage = "Failed to load actions. Please try again later.";
+            actions = new List<GitHubActionEntry>();
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task RerunWorkflowAsync(GitHubActionEntry action)
+    {
+        try
+        {
+            isRerunning = true;
+            errorMessage = null;
+            await ActionsService.RerunWorkflowAsync(action);
+            await LoadActionsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error re-running workflow for {Owner}/{Repo}", action.Owner, action.RepositoryName);
+            errorMessage = "Failed to re-run workflow. Please try again later.";
+        }
+        finally
+        {
+            isRerunning = false;
+        }
+    }
+
+    private async Task RunWorkflowAsync(GitHubActionEntry action)
+    {
+        try
+        {
+            isRunning = true;
+            errorMessage = null;
+            await ActionsService.RunWorkflowAsync(action);
+            await LoadActionsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error running workflow for {Owner}/{Repo}", action.Owner, action.RepositoryName);
+            errorMessage = "Failed to run workflow. Please try again later.";
+        }
+        finally
+        {
+            isRunning = false;
+        }
+    }
+
+    private static bool CanRerun(GitHubActionEntry action)
+    {
+        if (action.RunId <= 0)
+        {
+            return false;
+        }
+
+        return string.Equals(action.Status, "completed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool CanRun(GitHubActionEntry action)
+    {
+        return action.WorkflowId > 0 && !string.IsNullOrWhiteSpace(action.HeadBranch);
+    }
+
+    private static string BuildRepositoryKey(GitHubRepositoryEntry repository)
+    {
+        return $"{repository.ConnectorName}|{repository.OrgName}|{repository.RepositoryName}";
+    }
+
+    private string GetRepositoryKeyFromQuery()
+    {
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        var queryParams = QueryHelpers.ParseQuery(uri.Query);
+        return queryParams.TryGetValue("repo", out var value) ? value.ToString() : string.Empty;
+    }
+
+    private void UpdateRepositoryQuery(string repositoryKey)
+    {
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        var queryParams = QueryHelpers.ParseQuery(uri.Query);
+        var baseUri = uri.GetLeftPart(UriPartial.Path);
+        var updated = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in queryParams)
+        {
+            if (!string.Equals(item.Key, "repo", StringComparison.OrdinalIgnoreCase))
+            {
+                updated[item.Key] = item.Value.ToString();
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(repositoryKey))
+        {
+            updated["repo"] = repositoryKey;
+        }
+
+        var newQuery = QueryHelpers.AddQueryString(baseUri, updated);
+        Navigation.NavigateTo(newQuery, replace: true);
+    }
+
+    private static string GetStatusBadgeClass(string status)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "completed" => "bg-success",
+            "in_progress" => "bg-warning",
+            "queued" => "bg-secondary",
+            "waiting" => "bg-secondary",
+            "requested" => "bg-secondary",
+            "pending" => "bg-warning",
+            "skipped" => "bg-secondary",
+            _ => "bg-secondary"
+        };
+    }
+
+    private static string GetConclusionBadgeClass(string? conclusion)
+    {
+        return conclusion?.ToLowerInvariant() switch
+        {
+            "success" => "bg-success",
+            "failure" => "bg-danger",
+            "timed_out" => "bg-danger",
+            "cancelled" => "bg-secondary",
+            "skipped" => "bg-secondary",
+            "neutral" => "bg-secondary",
+            "action_required" => "bg-warning",
+            "stale" => "bg-secondary",
+            _ => "bg-secondary"
+        };
+    }
+
+    private static string GetStatusLabel(string status)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "in_progress" => "in progress",
+            "completed" => "completed",
+            "queued" => "queued",
+            "waiting" => "waiting",
+            "requested" => "requested",
+            "pending" => "pending",
+            "skipped" => "skipped",
+            _ => status
+        };
+    }
+
+    private static string GetConclusionLabel(string? conclusion)
+    {
+        return conclusion?.ToLowerInvariant() switch
+        {
+            "action_required" => "action required",
+            "timed_out" => "timed out",
+            "stale" => "stale",
+            "cancelled" => "cancelled",
+            "success" => "success",
+            "failure" => "failure",
+            "neutral" => "neutral",
+            "skipped" => "skipped",
+            _ => "unknown"
+        };
+    }
+
+    private static string GetEventLabel(string eventName)
+    {
+        return eventName.Replace('_', ' ');
+    }
+}

@@ -1,0 +1,47 @@
+<div class="top-row navbar navbar-dark">
+    <div class="container-fluid d-flex justify-content-center">
+        <a class="navbar-brand" href="">
+            <span class="navbar-brand-content">
+                <img src="moon.svg" alt="GrayMoon" class="navbar-brand-icon" />
+                <span>GrayMoon</span>
+            </span>
+        </a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="flex-column">
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="workspaces">
+                <i class="bi bi-grid" aria-hidden="true"></i> Workspaces
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="repositories">
+                <i class="bi bi-collection" aria-hidden="true"></i> Repositories
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="actions">
+                <i class="bi bi-lightning-charge" aria-hidden="true"></i> Actions
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="github-connectors">
+                <i class="bi bi-github" aria-hidden="true"></i> GitHub
+            </NavLink>
+        </div>
+
+    </nav>
+</div>
