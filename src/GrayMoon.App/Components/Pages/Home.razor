@@ -1,0 +1,140 @@
+@page "/"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using GrayMoon.App.Repositories
+@inject WorkspaceRepository WorkspaceRepository
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JsRuntime
+<PageTitle>Home - GrayMoon</PageTitle>
+
+@if (!showHome)
+{
+    <div class="container-fluid page-container">
+        <div class="text-muted py-4">Loading...</div>
+    </div>
+}
+else
+{
+<div class="container-fluid page-container">
+    <div class="row">
+        <div class="col-12">
+            <div class="jumbotron banner-card-style rounded p-4 mb-4 border">
+                <div class="d-flex align-items-center">
+                    <img src="moon.svg" alt="GrayMoon" class="me-4" style="height: 80px; width: auto; flex-shrink: 0;" />
+                    <div>
+                        <h1 class="display-5 mb-0">
+                            GrayMoon
+                        </h1>
+                        <p class="lead fs-6 mb-0">
+                            Lightweight orchestration and monitoring for GitHub Actions and repository dependencies.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 col-lg-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="bi bi-github"></i> GitHub Connectors
+                    </h5>
+                    <p class="card-text">
+                        Configure access to GitHub and manage connector tokens.
+                    </p>
+                    <a class="btn btn-primary" href="/github-connectors">
+                        Manage Connectors
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 col-lg-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="bi bi-collection"></i> Repositories
+                    </h5>
+                    <p class="card-text">
+                        Fetch and review repositories available from your connectors.
+                    </p>
+                    <a class="btn btn-primary" href="/repositories">
+                        View Repositories
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 col-lg-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="bi bi-grid"></i> Workspaces
+                    </h5>
+                    <p class="card-text">
+                        Group repositories into workspaces for quick access.
+                    </p>
+                    <a class="btn btn-primary" href="/workspaces">
+                        Manage Workspaces
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 col-lg-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="bi bi-lightning-charge"></i> Actions
+                    </h5>
+                    <p class="card-text">
+                        Inspect and trigger GitHub Actions for selected repositories.
+                    </p>
+                    <a class="btn btn-primary" href="/actions">
+                        View Actions
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+}
+
+@code {
+    private const string DefaultWorkspaceRedirectKey = "defaultWorkspaceRedirected";
+    private bool showHome;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || showHome)
+        {
+            return;
+        }
+
+        var alreadyRedirected = await JsRuntime.InvokeAsync<string?>(
+            "sessionStorage.getItem",
+            DefaultWorkspaceRedirectKey);
+
+        if (string.Equals(alreadyRedirected, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            showHome = true;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        var defaultWorkspace = await WorkspaceRepository.GetDefaultAsync();
+        if (defaultWorkspace != null)
+        {
+            await JsRuntime.InvokeVoidAsync(
+                "sessionStorage.setItem",
+                DefaultWorkspaceRedirectKey,
+                "true");
+            NavigationManager.NavigateTo($"/workspaces/{defaultWorkspace.WorkspaceId}", replace: true);
+            return;
+        }
+
+        showHome = true;
+        await InvokeAsync(StateHasChanged);
+    }
+}

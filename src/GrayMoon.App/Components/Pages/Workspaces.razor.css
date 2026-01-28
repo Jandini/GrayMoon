@@ -1,0 +1,145 @@
+.workspaces-table th,
+.workspaces-table td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.repository-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.repository-list.border {
+    border-color: #5a5a5a !important;
+    border-radius: 6px;
+}
+
+.repository-grid thead,
+.repository-grid tbody tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
+.repository-grid tbody {
+    display: block;
+    max-height: 260px;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.repository-grid thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.repository-grid {
+    border: none;
+    border-collapse: collapse;
+    background-color: #252526;
+}
+
+.repository-grid,
+.repository-grid th,
+.repository-grid td {
+    border-color: #3c3c3c;
+}
+
+.repository-grid th {
+    background-color: #2d2d30;
+    color: #f1f1f1;
+}
+
+.repository-grid td {
+    background-color: #252526;
+    color: #d4d4d4;
+}
+
+.col-select {
+    width: 40px;
+}
+
+.repository-grid th.col-select,
+.repository-grid td.col-select {
+    padding-left: 12px;
+}
+
+.workspace-name-input:disabled,
+.workspace-name-input.form-control:disabled {
+    background-color: #2b2b2b;
+    color: #b8b8b8;
+    border-color: #3a3a3a;
+    opacity: 1;
+}
+
+.repository-grid th:nth-child(2),
+.repository-grid td:nth-child(2) {
+    width: 55%;
+}
+
+.repository-grid th:nth-child(3),
+.repository-grid td:nth-child(3),
+.repository-grid th:nth-child(4),
+.repository-grid td:nth-child(4) {
+    width: 20%;
+}
+
+.repo-name-cell {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.col-name {
+    width: 50%;
+}
+
+.col-count {
+    width: 15%;
+    text-align: center;
+}
+
+.col-actions {
+    width: 35%;
+}
+
+.badge-default {
+    background-color: #2f6f9f;
+    color: #ffffff;
+}
+
+.default-star-icon {
+    color: #f1c40f;
+}
+
+.default-star-button {
+    padding: 0;
+    border: none;
+    background: transparent;
+    line-height: 1;
+}
+
+.default-star-button:hover,
+.default-star-button:focus {
+    text-decoration: none;
+}
+
+::deep .modal-dialog {
+    max-height: calc(100vh - 2rem);
+    margin: 1rem auto;
+}
+
+::deep .modal-content {
+    max-height: calc(100vh - 2rem);
+}
+
+::deep .modal-body {
+    overflow-y: auto;
+}
+
+::deep .loading-overlay {
+    z-index: 11050;
+}

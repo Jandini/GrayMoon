@@ -1,0 +1,93 @@
+.action-link {
+    color: inherit !important;
+    text-decoration: none;
+}
+
+.action-link:hover,
+.action-link:focus {
+    color: inherit !important;
+    text-decoration: underline;
+}
+
+.actions-table {
+    table-layout: fixed;
+    width: 100%;
+}
+
+.actions-table thead,
+.actions-table tbody tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
+.actions-table tbody {
+    display: block;
+    max-height: calc(100vh - (var(--bs-gutter-x) + var(--bs-gutter-x) + 260px));
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.actions-table th,
+.actions-table td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.col-repo {
+    width: 16%;
+}
+
+.col-workflow {
+    width: 19%;
+}
+
+.col-event {
+    width: 9%;
+}
+
+.col-status {
+    width: 9%;
+}
+
+.col-conclusion {
+    width: 10%;
+}
+
+.col-updated {
+    width: 13%;
+}
+
+.col-action {
+    width: 24%;
+}
+
+.actions-buttons {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.page-container {
+    padding-block: var(--bs-gutter-x);
+    display: flex;
+    flex-direction: column;
+}
+
+.page-card {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.page-card .card-body {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.page-card .table-responsive {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+}

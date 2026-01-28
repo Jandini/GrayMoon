@@ -1,0 +1,566 @@
+@page "/workspaces"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using GrayMoon.App.Models
+@using GrayMoon.App.Repositories
+@using GrayMoon.App.Services
+@using GrayMoon.App.Components.Shared
+@inject WorkspaceRepository WorkspaceRepository
+@inject GitHubConnectorRepository ConnectorRepository
+@inject GitHubRepositoryService RepositoryService
+@inject ILogger<Workspaces> Logger
+
+<PageTitle>Workspaces - GrayMoon</PageTitle>
+
+<div class="container-fluid page-container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2>Workspaces</h2>
+            <p class="text-muted mb-0" style="min-height: 1.5rem;">
+                @if (workspaces?.Count > 0)
+                {
+                    @($"{workspaces.Count} {(workspaces.Count == 1 ? "workspace" : "workspaces")}")
+                }
+                &nbsp;
+            </p>
+        </div>
+        <button class="btn btn-primary" @onclick="ShowCreateModalAsync">
+            Add Workspace
+        </button>
+    </div>
+
+    @if (errorMessage != null)
+    {
+        <div class="alert alert-danger">
+            <i class="bi bi-exclamation-triangle"></i> @errorMessage
+        </div>
+    }
+    else
+    {
+        <div class="card page-card">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover mb-0 workspaces-table">
+                        <thead class="table-dark">
+                            <tr>
+                                <th class="col-name">Name</th>
+                                <th class="col-count">Repositories</th>
+                                <th class="col-actions">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (workspaces == null)
+                            {
+                                <tr>
+                                    <td colspan="3" class="text-center text-muted py-4">
+                                        Loading workspaces...
+                                    </td>
+                                </tr>
+                            }
+                            else if (workspaces.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="3" class="text-center text-muted py-4">
+                                        No workspaces found. Add your first workspace to get started.
+                                    </td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var workspace in workspaces)
+                                {
+                                    <tr>
+                                        <td class="col-name">
+                                            <button class="btn btn-sm btn-link default-star-button me-2"
+                                                    @onclick="() => ToggleDefaultAsync(workspace.WorkspaceId)"
+                                                    disabled="@isTogglingDefault"
+                                                    title="Toggle default workspace">
+                                                @if (workspace.IsDefault)
+                                                {
+                                                    <i class="bi bi-star-fill default-star-icon" aria-hidden="true"></i>
+                                                }
+                                                else
+                                                {
+                                                    <i class="bi bi-star default-star-icon" aria-hidden="true"></i>
+                                                }
+                                            </button>
+                                            <NavLink class="link-primary text-decoration-none"
+                                                     href="@($"workspaces/{workspace.WorkspaceId}")">
+                                                <strong>@workspace.Name</strong>
+                                            </NavLink>
+                                            @if (workspace.IsDefault)
+                                            {
+                                                <span class="badge badge-default ms-2">Default</span>
+                                            }
+                                        </td>
+                                        <td class="col-count">@workspace.Repositories.Count</td>
+                                        <td class="col-actions">
+                                            <button class="btn btn-sm btn-outline-primary me-2"
+                                                    @onclick="() => ShowEditModalAsync(workspace.WorkspaceId)">
+                                                Edit
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-danger me-2"
+                                                    @onclick="() => ShowDeleteModal(workspace)">
+                                                Delete
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-secondary me-2"
+                                                    @onclick="() => ShowAddRepositoriesModalAsync(workspace.WorkspaceId)">
+                                                Add repositories
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@if (showEditorModal)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@editorTitle</h5>
+                    <button type="button" class="btn-close" @onclick="CloseEditorModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Workspace Name</label>
+                        <input class="form-control workspace-name-input"
+                               placeholder="Enter workspace name"
+                               @bind="workspaceName"
+                               @bind:event="oninput"
+                               disabled="@isRepoOnly" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label mb-2">
+                            Repositories
+                            <span class="text-muted ms-2">(@selectedRepositoryIds.Count selected)</span>
+                        </label>
+                        <div class="d-flex align-items-center mb-3">
+                            <input class="form-control"
+                                   placeholder="Search repositories..."
+                                   @bind="repositorySearch"
+                                   @bind:event="oninput" />
+                            <button type="button"
+                                    class="btn btn-outline-secondary ms-2"
+                                    @onclick="FetchRepositoriesAsync"
+                                    disabled="@(!hasConnectors || isPersisting)">
+                                Fetch
+                            </button>
+                        </div>
+                        <div class="repository-list border rounded">
+                            @if (repositories == null)
+                            {
+                                <div class="text-muted p-2">Loading repositories...</div>
+                            }
+                            else if (!hasConnectors)
+                            {
+                                <div class="text-muted p-2">No GitHub connectors configured.</div>
+                            }
+                            else if (repositories.Count == 0)
+                            {
+                                <div class="text-muted p-2">No repositories available. Fetch repositories first.</div>
+                            }
+                            else
+                            {
+                                var filtered = GetFilteredRepositories();
+                                <table class="table table-sm mb-0 repository-grid workspaces-table">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th class="col-select">
+                                                <input class="form-check-input"
+                                                       type="checkbox"
+                                                       checked="@AreAllFilteredSelected(filtered)"
+                                                       @onchange="(ChangeEventArgs e) => ToggleAllFiltered(filtered, (bool)e.Value!)" />
+                                            </th>
+                                            <th>Repository</th>
+                                            <th>Owner</th>
+                                            <th>Connector</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @if (filtered.Count == 0)
+                                        {
+                                            <tr>
+                                                <td colspan="4" class="text-muted p-2">No repositories match your search.</td>
+                                            </tr>
+                                        }
+                                        else
+                                        {
+                                            @foreach (var repository in filtered)
+                                            {
+                                                <tr>
+                                                    <td class="col-select">
+                                                        <input class="form-check-input"
+                                                               type="checkbox"
+                                                               checked="@selectedRepositoryIds.Contains(repository.GitHubRepositoryId)"
+                                                               @onchange="(ChangeEventArgs e) => ToggleRepository(repository.GitHubRepositoryId, (bool)e.Value!)" />
+                                                    </td>
+                                                    <td>
+                                                        <span class="repo-name-cell" title="@repository.RepositoryName">
+                                                            @repository.RepositoryName
+                                                        </span>
+                                                    </td>
+                                                    <td>@(repository.OrgName ?? "-")</td>
+                                                    <td>@repository.ConnectorName</td>
+                                                </tr>
+                                            }
+                                        }
+                                    </tbody>
+                                </table>
+                            }
+                        </div>
+                    </div>
+
+                    @if (editorErrorMessage != null)
+                    {
+                        <div class="alert alert-danger">@editorErrorMessage</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseEditorModal">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="SaveWorkspaceAsync" disabled="@isSaving">
+                        @if (isSaving)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Save
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showDeleteModal)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Delete Workspace</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDeleteModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-0">Delete workspace <strong>@workspaceToDelete?.Name</strong>?</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseDeleteModal">Cancel</button>
+                    <button type="button" class="btn btn-danger" @onclick="DeleteWorkspaceAsync" disabled="@isDeleting">
+                        @if (isDeleting)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Delete
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<LoadingOverlay IsVisible="@isPersisting" Message="Fetching repositories..." />
+
+@code {
+    private List<Workspace>? workspaces;
+    private List<GitHubRepositoryEntry>? repositories;
+    private string? errorMessage;
+    private bool showEditorModal;
+    private bool showDeleteModal;
+    private bool isSaving;
+    private bool isDeleting;
+    private bool isPersisting;
+    private bool isTogglingDefault;
+    private bool isRepoOnly;
+    private bool hasConnectors;
+    private string workspaceName = string.Empty;
+    private string repositorySearch = string.Empty;
+    private string? editorErrorMessage;
+    private string editorTitle = "Add Workspace";
+    private int? editingWorkspaceId;
+    private Workspace? workspaceToDelete;
+    private HashSet<int> selectedRepositoryIds = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadWorkspacesAsync();
+    }
+
+    private async Task LoadWorkspacesAsync()
+    {
+        try
+        {
+            errorMessage = null;
+            workspaces = await WorkspaceRepository.GetAllAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading workspaces");
+            errorMessage = "Failed to load workspaces. Please try again later.";
+            workspaces = new List<Workspace>();
+        }
+    }
+
+    private async Task EnsureRepositoriesAsync()
+    {
+        if (repositories != null)
+        {
+            return;
+        }
+
+        var connectors = await ConnectorRepository.GetAllAsync();
+        hasConnectors = connectors.Count > 0;
+        repositories = await RepositoryService.GetPersistedRepositoriesAsync();
+
+        if (hasConnectors && repositories.Count == 0)
+        {
+            await FetchRepositoriesAsync();
+        }
+    }
+
+    private async Task ShowCreateModalAsync()
+    {
+        editingWorkspaceId = null;
+        isRepoOnly = false;
+        editorTitle = "Add Workspace";
+        workspaceName = string.Empty;
+        repositorySearch = string.Empty;
+        editorErrorMessage = null;
+        selectedRepositoryIds = new HashSet<int>();
+        await EnsureRepositoriesAsync();
+        showEditorModal = true;
+    }
+
+    private async Task ShowEditModalAsync(int workspaceId)
+    {
+        var workspace = await WorkspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+        {
+            return;
+        }
+
+        editingWorkspaceId = workspaceId;
+        isRepoOnly = false;
+        editorTitle = "Edit Workspace";
+        workspaceName = workspace.Name;
+        repositorySearch = string.Empty;
+        editorErrorMessage = null;
+        selectedRepositoryIds = workspace.Repositories
+            .Select(link => link.GitHubRepositoryId)
+            .ToHashSet();
+        await EnsureRepositoriesAsync();
+        showEditorModal = true;
+    }
+
+    private async Task ShowAddRepositoriesModalAsync(int workspaceId)
+    {
+        var workspace = await WorkspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+        {
+            return;
+        }
+
+        editingWorkspaceId = workspaceId;
+        isRepoOnly = true;
+        editorTitle = "Add Repositories";
+        workspaceName = workspace.Name;
+        repositorySearch = string.Empty;
+        editorErrorMessage = null;
+        selectedRepositoryIds = workspace.Repositories
+            .Select(link => link.GitHubRepositoryId)
+            .ToHashSet();
+        await EnsureRepositoriesAsync();
+        showEditorModal = true;
+    }
+
+    private void CloseEditorModal()
+    {
+        showEditorModal = false;
+        editorErrorMessage = null;
+    }
+
+    private async Task SaveWorkspaceAsync()
+    {
+        if (string.IsNullOrWhiteSpace(workspaceName))
+        {
+            editorErrorMessage = "Workspace name is required.";
+            return;
+        }
+
+        if (selectedRepositoryIds.Count == 0)
+        {
+            editorErrorMessage = "Select at least one repository.";
+            return;
+        }
+
+        try
+        {
+            isSaving = true;
+            editorErrorMessage = null;
+
+            if (editingWorkspaceId == null)
+            {
+                await WorkspaceRepository.AddAsync(workspaceName, selectedRepositoryIds);
+            }
+            else
+            {
+                await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, workspaceName, selectedRepositoryIds);
+            }
+
+            CloseEditorModal();
+            await LoadWorkspacesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving workspace");
+            editorErrorMessage = ex.Message;
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private void ShowDeleteModal(Workspace workspace)
+    {
+        workspaceToDelete = workspace;
+        showDeleteModal = true;
+    }
+
+    private void CloseDeleteModal()
+    {
+        showDeleteModal = false;
+        workspaceToDelete = null;
+    }
+
+    private async Task DeleteWorkspaceAsync()
+    {
+        if (workspaceToDelete == null)
+        {
+            return;
+        }
+
+        try
+        {
+            isDeleting = true;
+            await WorkspaceRepository.DeleteAsync(workspaceToDelete.WorkspaceId);
+            CloseDeleteModal();
+            await LoadWorkspacesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deleting workspace");
+            errorMessage = "Failed to delete workspace. Please try again later.";
+        }
+        finally
+        {
+            isDeleting = false;
+        }
+    }
+
+    private async Task FetchRepositoriesAsync()
+    {
+        if (!hasConnectors || isPersisting)
+        {
+            return;
+        }
+
+        try
+        {
+            isPersisting = true;
+            editorErrorMessage = null;
+            await InvokeAsync(StateHasChanged);
+            repositories = await RepositoryService.RefreshRepositoriesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error fetching repositories for workspace editor");
+            editorErrorMessage = "Failed to fetch repositories. Please try again later.";
+            repositories = new List<GitHubRepositoryEntry>();
+        }
+        finally
+        {
+            isPersisting = false;
+        }
+    }
+
+    private async Task ToggleDefaultAsync(int workspaceId)
+    {
+        try
+        {
+            isTogglingDefault = true;
+            errorMessage = null;
+            await WorkspaceRepository.ToggleDefaultAsync(workspaceId);
+            await LoadWorkspacesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error toggling default workspace");
+            errorMessage = "Failed to update default workspace. Please try again later.";
+        }
+        finally
+        {
+            isTogglingDefault = false;
+        }
+    }
+
+    private List<GitHubRepositoryEntry> GetFilteredRepositories()
+    {
+        if (repositories == null)
+        {
+            return new List<GitHubRepositoryEntry>();
+        }
+
+        if (string.IsNullOrWhiteSpace(repositorySearch))
+        {
+            return repositories;
+        }
+
+        return repositories.Where(repository =>
+            repository.ConnectorName.Contains(repositorySearch, StringComparison.OrdinalIgnoreCase) ||
+            (repository.OrgName?.Contains(repositorySearch, StringComparison.OrdinalIgnoreCase) ?? false) ||
+            repository.RepositoryName.Contains(repositorySearch, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private void ToggleRepository(int repositoryId, bool isSelected)
+    {
+        if (isSelected)
+        {
+            selectedRepositoryIds.Add(repositoryId);
+        }
+        else
+        {
+            selectedRepositoryIds.Remove(repositoryId);
+        }
+    }
+
+    private bool AreAllFilteredSelected(IReadOnlyCollection<GitHubRepositoryEntry> filtered)
+    {
+        return filtered.Count > 0 && filtered.All(item => selectedRepositoryIds.Contains(item.GitHubRepositoryId));
+    }
+
+    private void ToggleAllFiltered(IReadOnlyCollection<GitHubRepositoryEntry> filtered, bool isSelected)
+    {
+        if (isSelected)
+        {
+            foreach (var repository in filtered)
+            {
+                selectedRepositoryIds.Add(repository.GitHubRepositoryId);
+            }
+        }
+        else
+        {
+            foreach (var repository in filtered)
+            {
+                selectedRepositoryIds.Remove(repository.GitHubRepositoryId);
+            }
+        }
+    }
+}

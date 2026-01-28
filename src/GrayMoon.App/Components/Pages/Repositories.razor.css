@@ -1,0 +1,76 @@
+.repositories-table th,
+.repositories-table td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.repositories-table thead,
+.repositories-table tbody tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
+.repositories-table tbody {
+    display: block;
+    max-height: calc(100vh - (var(--bs-gutter-x) + var(--bs-gutter-x) + 260px));
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.page-container {
+    padding-block: var(--bs-gutter-x);
+    display: flex;
+    flex-direction: column;
+}
+
+.page-card {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.page-card .card-body {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.page-card .table-responsive {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.col-repo {
+    width: 30%;
+}
+
+.col-owner {
+    width: 20%;
+}
+
+.col-visibility {
+    width: 15%;
+    text-align: center;
+}
+
+.col-connector {
+    width: 35%;
+}
+
+.badge-private,
+.badge-public {
+    display: inline-block;
+    min-width: 7ch;
+    text-align: center;
+}
+
+.badge-private {
+    background-color: #6c757d;
+    color: #000000;
+}
+
+.badge-public {
+    background-color: #b58900;
+    color: #000000;
+}
