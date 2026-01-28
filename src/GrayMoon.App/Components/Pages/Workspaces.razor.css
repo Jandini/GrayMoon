@@ -110,3 +110,36 @@
     background-color: #2f6f9f;
     color: #ffffff;
 }
+
+.default-star-icon {
+    color: #f1c40f;
+}
+
+.default-star-button {
+    padding: 0;
+    border: none;
+    background: transparent;
+    line-height: 1;
+}
+
+.default-star-button:hover,
+.default-star-button:focus {
+    text-decoration: none;
+}
+
+::deep .modal-dialog {
+    max-height: calc(100vh - 2rem);
+    margin: 1rem auto;
+}
+
+::deep .modal-content {
+    max-height: calc(100vh - 2rem);
+}
+
+::deep .modal-body {
+    overflow-y: auto;
+}
+
+::deep .loading-overlay {
+    z-index: 11050;
+}

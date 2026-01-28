@@ -254,7 +254,8 @@
 
     protected override async Task OnInitializedAsync()
     {
-        defaultUserToken = Configuration["GitHub:PersonalAccessToken"]
+        defaultUserToken = Configuration["GitHub__PersonalAccessToken"]
+            ?? Configuration["GitHub:PersonalAccessToken"]
             ?? Configuration["GitHub::PersonalAccessToken"]
             ?? string.Empty;
         await LoadConnectorsAsync();
@@ -331,7 +332,9 @@
         {
             ConnectorName = connector.ConnectorName,
             ApiBaseUrl = connector.ApiBaseUrl,
-            UserToken = connector.UserToken
+            UserToken = string.IsNullOrWhiteSpace(connector.UserToken)
+                ? defaultUserToken
+                : connector.UserToken
         };
 
         editErrorMessage = null;

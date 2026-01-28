@@ -3,6 +3,7 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
+@using GrayMoon.App.Components.Shared
 @inject WorkspaceRepository WorkspaceRepository
 @inject GitHubConnectorRepository ConnectorRepository
 @inject GitHubRepositoryService RepositoryService
@@ -84,18 +85,25 @@
                                                     @onclick="() => ShowEditModalAsync(workspace.WorkspaceId)">
                                                 Edit
                                             </button>
+                                            <button class="btn btn-sm btn-outline-danger me-2"
+                                                    @onclick="() => ShowDeleteModal(workspace)">
+                                                Delete
+                                            </button>
                                             <button class="btn btn-sm btn-outline-secondary me-2"
                                                     @onclick="() => ShowAddRepositoriesModalAsync(workspace.WorkspaceId)">
                                                 Add repositories
                                             </button>
-                                            <button class="btn btn-sm btn-outline-warning me-2"
+                                            <button class="btn btn-sm btn-link default-star-button"
                                                     @onclick="() => ToggleDefaultAsync(workspace.WorkspaceId)"
                                                     disabled="@isTogglingDefault">
-                                                @(workspace.IsDefault ? "Unset default" : "Set default")
-                                            </button>
-                                            <button class="btn btn-sm btn-outline-danger"
-                                                    @onclick="() => ShowDeleteModal(workspace)">
-                                                Delete
+                                                @if (workspace.IsDefault)
+                                                {
+                                                    <i class="bi bi-star-fill default-star-icon" aria-hidden="true"></i>
+                                                }
+                                                else
+                                                {
+                                                    <i class="bi bi-star default-star-icon" aria-hidden="true"></i>
+                                                }
                                             </button>
                                         </td>
                                     </tr>
@@ -129,14 +137,22 @@
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">
+                        <label class="form-label mb-2">
                             Repositories
                             <span class="text-muted ms-2">(@selectedRepositoryIds.Count selected)</span>
                         </label>
-                        <input class="form-control mb-3"
-                               placeholder="Search repositories..."
-                               @bind="repositorySearch"
-                               @bind:event="oninput" />
+                        <div class="d-flex align-items-center mb-3">
+                            <input class="form-control"
+                                   placeholder="Search repositories..."
+                                   @bind="repositorySearch"
+                                   @bind:event="oninput" />
+                            <button type="button"
+                                    class="btn btn-outline-secondary ms-2"
+                                    @onclick="FetchRepositoriesAsync"
+                                    disabled="@(!hasConnectors || isPersisting)">
+                                Fetch
+                            </button>
+                        </div>
                         <div class="repository-list border rounded">
                             @if (repositories == null)
                             {
@@ -248,6 +264,8 @@
     </div>
 }
 
+<LoadingOverlay IsVisible="@isPersisting" Message="Fetching repositories..." />
+
 @code {
     private List<Workspace>? workspaces;
     private List<GitHubRepositoryEntry>? repositories;
@@ -256,6 +274,7 @@
     private bool showDeleteModal;
     private bool isSaving;
     private bool isDeleting;
+    private bool isPersisting;
     private bool isTogglingDefault;
     private bool isRepoOnly;
     private bool hasConnectors;
@@ -297,6 +316,11 @@
         var connectors = await ConnectorRepository.GetAllAsync();
         hasConnectors = connectors.Count > 0;
         repositories = await RepositoryService.GetPersistedRepositoriesAsync();
+
+        if (hasConnectors && repositories.Count == 0)
+        {
+            await FetchRepositoriesAsync();
+        }
     }
 
     private async Task ShowCreateModalAsync()
@@ -436,6 +460,32 @@
         finally
         {
             isDeleting = false;
+        }
+    }
+
+    private async Task FetchRepositoriesAsync()
+    {
+        if (!hasConnectors || isPersisting)
+        {
+            return;
+        }
+
+        try
+        {
+            isPersisting = true;
+            editorErrorMessage = null;
+            await InvokeAsync(StateHasChanged);
+            repositories = await RepositoryService.RefreshRepositoriesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error fetching repositories for workspace editor");
+            editorErrorMessage = "Failed to fetch repositories. Please try again later.";
+            repositories = new List<GitHubRepositoryEntry>();
+        }
+        finally
+        {
+            isPersisting = false;
         }
     }
 
