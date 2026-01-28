@@ -1,7 +1,19 @@
 @page "/"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using GrayMoon.App.Repositories
+@inject WorkspaceRepository WorkspaceRepository
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JsRuntime
 <PageTitle>Home - GrayMoon</PageTitle>
 
+@if (!showHome)
+{
+    <div class="container-fluid page-container">
+        <div class="text-muted py-4">Loading...</div>
+    </div>
+}
+else
+{
 <div class="container-fluid page-container">
     <div class="row">
         <div class="col-12">
@@ -87,3 +99,42 @@
         </div>
     </div>
 </div>
+}
+
+@code {
+    private const string DefaultWorkspaceRedirectKey = "defaultWorkspaceRedirected";
+    private bool showHome;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || showHome)
+        {
+            return;
+        }
+
+        var alreadyRedirected = await JsRuntime.InvokeAsync<string?>(
+            "sessionStorage.getItem",
+            DefaultWorkspaceRedirectKey);
+
+        if (string.Equals(alreadyRedirected, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            showHome = true;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        var defaultWorkspace = await WorkspaceRepository.GetDefaultAsync();
+        if (defaultWorkspace != null)
+        {
+            await JsRuntime.InvokeVoidAsync(
+                "sessionStorage.setItem",
+                DefaultWorkspaceRedirectKey,
+                "true");
+            NavigationManager.NavigateTo($"/workspaces/{defaultWorkspace.WorkspaceId}", replace: true);
+            return;
+        }
+
+        showHome = true;
+        await InvokeAsync(StateHasChanged);
+    }
+}

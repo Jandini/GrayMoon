@@ -85,6 +85,13 @@ public class WorkspaceRepository
         await _dbContext.SaveChangesAsync();
     }
 
+    public async Task<Workspace?> GetDefaultAsync()
+    {
+        return await _dbContext.Workspaces
+            .AsNoTracking()
+            .FirstOrDefaultAsync(workspace => workspace.IsDefault);
+    }
+
     public async Task ToggleDefaultAsync(int workspaceId)
     {
         await using var transaction = await _dbContext.Database.BeginTransactionAsync();
