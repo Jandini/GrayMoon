@@ -94,9 +94,6 @@
                                             </span>
                                         </td>
                                         <td class="actions-col">
-                                            <button class="btn btn-sm btn-outline-secondary me-2" @onclick="() => TestConnectorAsync(connector)" disabled="@(testingConnectorId == connector.GitHubConnectorId)">
-                                                <span>Test</span>
-                                            </button>
                                             <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => ShowEditModal(connector)">Edit</button>
                                             <button class="btn btn-sm btn-outline-danger me-2" @onclick="() => ShowDeleteModal(connector)">Delete</button>
                                         </td>
@@ -435,7 +432,7 @@
         }
     }
 
-    private async Task TestConnectorAsync(GitHubConnector connector)
+    private async Task<bool> TestConnectorAsync(GitHubConnector connector)
     {
         try
         {
@@ -446,11 +443,13 @@
 
             await GitHubService.TestConnectionAsync(connector);
             await ConnectorRepository.UpdateStatusAsync(connector.GitHubConnectorId, "Ok", null);
+            return true;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error testing GitHub connector.");
             await ConnectorRepository.UpdateStatusAsync(connector.GitHubConnectorId, "Error", ex.Message);
+            return false;
         }
         finally
         {
@@ -470,6 +469,16 @@
             togglingConnectorId = connector.GitHubConnectorId;
             await ConnectorRepository.UpdateIsActiveAsync(connector.GitHubConnectorId, isActive);
             await LoadConnectorsAsync();
+
+            if (isActive)
+            {
+                var ok = await TestConnectorAsync(connector);
+                if (!ok)
+                {
+                    await ConnectorRepository.UpdateIsActiveAsync(connector.GitHubConnectorId, false);
+                    await LoadConnectorsAsync();
+                }
+            }
         }
         catch (Exception ex)
         {
