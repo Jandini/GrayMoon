@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <None Include="..\..\.github\workflows\docker-build.yml" Link="docker-build.yml" />
+    <None Include="..\..\README.md" Link="README.md" />
   </ItemGroup>
 
   <ItemGroup>
