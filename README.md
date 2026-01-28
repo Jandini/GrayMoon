@@ -10,17 +10,18 @@ GrayMoon is a lightweight orchestration and monitoring UI for GitHub Actions and
 - Workspace grouping with default workspace support
 - Actions overview for selected repositories
 
-## Local Development
-1. Open the solution `GrayMoon.sln` in your IDE.
-2. Run `GrayMoon.App` and browse to the configured port.
-
 ## Docker
 Build the image:
 ```
-docker build -t graymoon:local .
+docker build -t graymoon:latest .
 ```
 
 Run the container:
 ```
-docker run -p 8384:8384 graymoon:local
+docker run -p 8384:8384 graymoon:latest
+```
+
+Run with persistent database storage:
+```
+docker run -p 8384:8384 -v graymoon-data:/app/graymoon.db graymoon:latest
 ```
