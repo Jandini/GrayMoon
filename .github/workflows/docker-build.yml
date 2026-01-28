@@ -41,3 +41,4 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/graymoon:${{ steps.gitversion.outputs.SemVer }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/graymoon:latest
