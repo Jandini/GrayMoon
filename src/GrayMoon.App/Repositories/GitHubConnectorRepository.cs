@@ -23,6 +23,15 @@ public class GitHubConnectorRepository
             .ToListAsync();
     }
 
+    public async Task<List<GitHubConnector>> GetActiveAsync()
+    {
+        return await _dbContext.GitHubConnectors
+            .AsNoTracking()
+            .Where(connector => connector.IsActive)
+            .OrderBy(connector => connector.ConnectorName)
+            .ToListAsync();
+    }
+
     public async Task<GitHubConnector?> GetByIdAsync(int connectorId)
     {
         return await _dbContext.GitHubConnectors
@@ -72,6 +81,7 @@ public class GitHubConnectorRepository
         existing.ApiBaseUrl = connector.ApiBaseUrl;
         existing.UserToken = connector.UserToken;
         existing.Status = string.IsNullOrWhiteSpace(connector.Status) ? "Unknown" : connector.Status;
+        existing.IsActive = connector.IsActive;
         existing.LastError = string.IsNullOrWhiteSpace(connector.LastError) ? null : connector.LastError;
 
         await _dbContext.SaveChangesAsync();
@@ -106,6 +116,21 @@ public class GitHubConnectorRepository
 
         connector.Status = status;
         connector.LastError = string.IsNullOrWhiteSpace(errorMessage) ? null : errorMessage;
+        await _dbContext.SaveChangesAsync();
+    }
+
+    public async Task UpdateIsActiveAsync(int connectorId, bool isActive)
+    {
+        var connector = await _dbContext.GitHubConnectors
+            .FirstOrDefaultAsync(item => item.GitHubConnectorId == connectorId);
+
+        if (connector == null)
+        {
+            _logger.LogWarning("GitHub connector {ConnectorId} not found for active toggle.", connectorId);
+            return;
+        }
+
+        connector.IsActive = isActive;
         await _dbContext.SaveChangesAsync();
     }
 

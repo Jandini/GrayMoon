@@ -42,10 +42,11 @@ public class GitHubRepositoryService
     {
         var results = new List<GitHubRepositoryEntry>();
         var connectors = await _connectorRepository.GetAllAsync();
+        var activeConnectors = connectors.Where(connector => connector.IsActive).ToList();
         var connectorIds = connectors.Select(connector => connector.GitHubConnectorId).ToList();
         await _repositoryRepository.DeleteOrphanedAsync(connectorIds);
 
-        foreach (var connector in connectors)
+        foreach (var connector in activeConnectors)
         {
             try
             {

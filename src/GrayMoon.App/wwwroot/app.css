@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Cormorant+Garamond:wght@400;500;600;700&display=swap');
+
 /* VS Code Dark+ Inspired Theme */
 :root {
     --bg-primary: #1e1e1e;
@@ -492,6 +494,27 @@ input[list] {
 
 .jumbotron.banner-card-style.border {
     border-color: var(--border-color) !important;
+}
+
+.banner-title {
+    font-family: "Cinzel", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    letter-spacing: 0.02em;
+    text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000;
+}
+
+.navbar-brand-title {
+    font-family: "Cinzel", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    letter-spacing: 0.02em;
+    text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000;
+    font-size: 1.35rem;
+    line-height: 1;
+}
+
+.banner-subtitle {
+    font-family: "Cormorant Garamond", "Times New Roman", serif !important;
+    letter-spacing: 0.02em;
+    text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000;
+    font-weight: 500;
 }
 
 /* List groups */

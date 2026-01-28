@@ -22,6 +22,8 @@ public class GitHubConnector
     [MaxLength(20)]
     public string Status { get; set; } = "Unknown";
 
+    public bool IsActive { get; set; } = true;
+
     [MaxLength(1000)]
     public string? LastError { get; set; }
 }

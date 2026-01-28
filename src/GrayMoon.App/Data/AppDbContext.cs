@@ -40,6 +40,9 @@ public class AppDbContext : DbContext
                 .IsRequired()
                 .HasMaxLength(20);
 
+            entity.Property(connector => connector.IsActive)
+                .HasDefaultValue(true);
+
             entity.Property(connector => connector.LastError)
                 .HasMaxLength(1000);
         });

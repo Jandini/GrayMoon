@@ -6,8 +6,8 @@
 }
 
 .repository-list {
-    max-height: 300px;
-    overflow-y: auto;
+    max-height: 196px;
+    overflow-y: hidden;
 }
 
 .repository-list.border {
