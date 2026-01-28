@@ -44,6 +44,7 @@
                             <tr>
                                 <th>Name</th>
                                 <th>API Base URL</th>
+                                <th class="text-center">Active</th>
                                 <th class="status-col">Status</th>
                                 <th>Actions</th>
                             </tr>
@@ -52,7 +53,7 @@
                             @if (connectors == null)
                             {
                                 <tr>
-                                    <td colspan="4" class="text-center py-5">
+                                    <td colspan="5" class="text-center py-5">
                                         <div class="spinner-border text-primary" role="status">
                                             <span class="visually-hidden">Loading...</span>
                                         </div>
@@ -63,7 +64,7 @@
                             else if (connectors.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="4" class="text-center text-muted py-4">
+                                    <td colspan="5" class="text-center text-muted py-4">
                                         No connectors found. Add your first GitHub connector to get started.
                                     </td>
                                 </tr>
@@ -75,6 +76,17 @@
                                     <tr>
                                         <td><strong>@connector.ConnectorName</strong></td>
                                         <td>@connector.ApiBaseUrl</td>
+                                        <td class="text-center">
+                                            <div class="form-check form-switch d-inline-flex align-items-center m-0">
+                                                <input class="form-check-input"
+                                                       type="checkbox"
+                                                       role="switch"
+                                                       checked="@connector.IsActive"
+                                                       aria-label="Toggle connector active"
+                                                       disabled="@(testingConnectorId == connector.GitHubConnectorId || togglingConnectorId == connector.GitHubConnectorId)"
+                                                       @onchange="(args) => ToggleConnectorAsync(connector, args)" />
+                                            </div>
+                                        </td>
                                         <td class="status-col">
                                             <span class="badge @GetStatusBadgeClass(connector)"
                                                   title="@GetStatusTitle(connector)">
@@ -242,6 +254,7 @@
     private int editConnectorId;
     private GitHubConnector? selectedConnector;
     private int? testingConnectorId;
+    private int? togglingConnectorId;
 
     private bool isCreating;
     private bool isUpdating;
@@ -303,6 +316,7 @@
                 ConnectorName = createModel.ConnectorName.Trim(),
                 ApiBaseUrl = createModel.ApiBaseUrl.Trim(),
                 UserToken = createModel.UserToken.Trim(),
+                IsActive = true,
                 Status = "Testing",
                 LastError = null
             };
@@ -360,6 +374,7 @@
                 ConnectorName = editModel.ConnectorName.Trim(),
                 ApiBaseUrl = editModel.ApiBaseUrl.Trim(),
                 UserToken = editModel.UserToken.Trim(),
+                IsActive = selectedConnector?.IsActive ?? true,
                 Status = "Testing",
                 LastError = null
             };
@@ -441,6 +456,29 @@
         {
             testingConnectorId = null;
             await LoadConnectorsAsync();
+        }
+    }
+
+    private async Task ToggleConnectorAsync(GitHubConnector connector, ChangeEventArgs args)
+    {
+        var isActive = args.Value is bool value
+            ? value
+            : string.Equals(args.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+
+        try
+        {
+            togglingConnectorId = connector.GitHubConnectorId;
+            await ConnectorRepository.UpdateIsActiveAsync(connector.GitHubConnectorId, isActive);
+            await LoadConnectorsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error toggling GitHub connector active state.");
+            errorMessage = $"Failed to update connector status: {ex.Message}";
+        }
+        finally
+        {
+            togglingConnectorId = null;
         }
     }
 
