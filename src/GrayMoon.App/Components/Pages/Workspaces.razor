@@ -70,6 +70,19 @@
                                 {
                                     <tr>
                                         <td class="col-name">
+                                            <button class="btn btn-sm btn-link default-star-button me-2"
+                                                    @onclick="() => ToggleDefaultAsync(workspace.WorkspaceId)"
+                                                    disabled="@isTogglingDefault"
+                                                    title="Toggle default workspace">
+                                                @if (workspace.IsDefault)
+                                                {
+                                                    <i class="bi bi-star-fill default-star-icon" aria-hidden="true"></i>
+                                                }
+                                                else
+                                                {
+                                                    <i class="bi bi-star default-star-icon" aria-hidden="true"></i>
+                                                }
+                                            </button>
                                             <NavLink class="link-primary text-decoration-none"
                                                      href="@($"workspaces/{workspace.WorkspaceId}")">
                                                 <strong>@workspace.Name</strong>
@@ -92,18 +105,6 @@
                                             <button class="btn btn-sm btn-outline-secondary me-2"
                                                     @onclick="() => ShowAddRepositoriesModalAsync(workspace.WorkspaceId)">
                                                 Add repositories
-                                            </button>
-                                            <button class="btn btn-sm btn-link default-star-button"
-                                                    @onclick="() => ToggleDefaultAsync(workspace.WorkspaceId)"
-                                                    disabled="@isTogglingDefault">
-                                                @if (workspace.IsDefault)
-                                                {
-                                                    <i class="bi bi-star-fill default-star-icon" aria-hidden="true"></i>
-                                                }
-                                                else
-                                                {
-                                                    <i class="bi bi-star default-star-icon" aria-hidden="true"></i>
-                                                }
                                             </button>
                                         </td>
                                     </tr>
