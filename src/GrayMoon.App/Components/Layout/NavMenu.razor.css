@@ -18,6 +18,13 @@
 .top-row {
     height: 3.5rem;
     background-color: var(--bg-tertiary);
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.top-row .container-fluid {
+    padding-left: 0.75rem;
 }
 
 .navbar-brand {
@@ -25,7 +32,9 @@
     color: var(--text-primary) !important;
     text-align: center;
     width: 100%;
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .navbar-brand:hover {
@@ -36,6 +45,31 @@
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
+}
+
+@media (max-width: 640.98px) {
+    .top-row .container-fluid {
+        justify-content: flex-start !important;
+    }
+
+    .navbar-brand {
+        text-align: left;
+        width: auto;
+        justify-content: flex-start;
+    }
+}
+
+@media (min-width: 641px) {
+    .top-row .container-fluid {
+        justify-content: flex-start !important;
+        padding-right: 1.5rem;
+    }
+
+    .navbar-brand {
+        text-align: left;
+        width: auto;
+        justify-content: flex-start;
+    }
 }
 
 .navbar-brand-icon {
