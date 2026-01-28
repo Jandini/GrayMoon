@@ -1,0 +1,198 @@
+@page "/repositories"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using GrayMoon.App.Models
+@using GrayMoon.App.Services
+@using GrayMoon.App.Components.Shared
+@inject GitHubRepositoryService RepositoryService
+@inject ILogger<Repositories> Logger
+
+<PageTitle>Repositories - GrayMoon</PageTitle>
+
+<div class="container-fluid page-container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2>Repositories</h2>
+            <p class="text-muted mb-0" style="min-height: 1.5rem;">
+                @if (GetFilteredRepositories()?.Count > 0)
+                {
+                    var count = GetFilteredRepositories()?.Count ?? 0;
+                    @($"{count} {(count == 1 ? "repository" : "repositories")}")
+                }
+                &nbsp;
+            </p>
+        </div>
+        <div class="d-flex align-items-center">
+            <input class="form-control" placeholder="Search repositories..."
+                   @bind="searchTerm" @bind:event="oninput" />
+            <button class="btn btn-outline-secondary ms-2"
+                    @onclick="ReloadRepositoriesAsync"
+                    disabled="@(isPersisting)">
+                Fetch
+            </button>
+        </div>
+    </div>
+
+    @if (errorMessage != null)
+    {
+        <div class="alert alert-danger">
+            <i class="bi bi-exclamation-triangle"></i> @errorMessage
+        </div>
+    }
+    else
+    {
+        <div class="card page-card">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover mb-0 repositories-table">
+                        <thead class="table-dark">
+                            <tr>
+                                <th class="col-repo">Repository</th>
+                                <th class="col-owner">Owner</th>
+                                <th class="col-visibility">Visibility</th>
+                                <th class="col-connector">Connector</th>
+                                <th class="col-clone">Clone URL</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (repositories == null)
+                            {
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted py-4">
+                                        Loading repositories...
+                                    </td>
+                                </tr>
+                            }
+                            else if (repositories.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted py-4">
+                                        No repositories found. Configure GitHub connectors to fetch repositories.
+                                    </td>
+                                </tr>
+                            }
+                            else if (GetFilteredRepositories()?.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted py-4">
+                                        No repositories match your search.
+                                    </td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var repository in GetFilteredRepositories() ?? new List<GitHubRepositoryEntry>())
+                                {
+                                    <tr>
+                                        <td class="col-repo"><strong>@repository.RepositoryName</strong></td>
+                                        <td class="col-owner">@(string.IsNullOrWhiteSpace(repository.OrgName) ? "-" : repository.OrgName)</td>
+                                        <td class="col-visibility">
+                                            <span class="badge @(repository.Visibility == "Private" ? "badge-private" : "badge-public")">
+                                                @repository.Visibility.ToLowerInvariant()
+                                            </span>
+                                        </td>
+                                        <td class="col-connector">@repository.ConnectorName</td>
+                                        <td class="col-clone">
+                                            @if (string.IsNullOrWhiteSpace(repository.CloneUrl))
+                                            {
+                                                <span class="text-muted">-</span>
+                                            }
+                                            else
+                                            {
+                                                <a href="@repository.CloneUrl"
+                                                   target="_blank"
+                                                   rel="noopener noreferrer"
+                                                   title="@repository.CloneUrl">
+                                                    @repository.CloneUrl
+                                                </a>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<LoadingOverlay IsVisible="@isPersisting" Message="Fetching repositories..." />
+
+@code {
+    private List<GitHubRepositoryEntry>? repositories;
+    private string? errorMessage;
+    private string searchTerm = string.Empty;
+    private bool isPersisting;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadRepositoriesAsync();
+    }
+
+    private async Task LoadRepositoriesAsync()
+    {
+        try
+        {
+            repositories = null;
+            errorMessage = null;
+            var persisted = await RepositoryService.GetPersistedRepositoriesAsync();
+            if (persisted.Count > 0)
+            {
+                repositories = persisted;
+                return;
+            }
+
+            await ReloadRepositoriesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading repositories");
+            errorMessage = "Failed to load repositories. Please try again later.";
+            repositories = new List<GitHubRepositoryEntry>();
+        }
+    }
+
+    private async Task ReloadRepositoriesAsync()
+    {
+        try
+        {
+            isPersisting = true;
+            await InvokeAsync(StateHasChanged);
+            errorMessage = null;
+            repositories = await RepositoryService.RefreshRepositoriesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error refreshing repositories");
+            errorMessage = "Failed to refresh repositories. Please try again later.";
+            repositories = new List<GitHubRepositoryEntry>();
+        }
+        finally
+        {
+            isPersisting = false;
+        }
+    }
+
+    private List<GitHubRepositoryEntry>? GetFilteredRepositories()
+    {
+        if (repositories == null)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(searchTerm))
+        {
+            return repositories;
+        }
+
+        return repositories
+            .Where(repository =>
+                repository.ConnectorName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                (repository.OrgName?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                repository.RepositoryName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                repository.Visibility.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                repository.CloneUrl.Contains(searchTerm, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+}

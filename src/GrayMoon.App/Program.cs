@@ -20,24 +20,6 @@ builder.Services.AddScoped<WorkspaceRepository>();
 builder.Services.AddScoped<GitHubRepositoryService>();
 builder.Services.AddScoped<GitHubActionsService>();
 
-// Configure HttpClient for API service
-var apiBaseUrl = builder.Configuration["ApiSettings:BaseUrl"] ?? "http://localhost:5050/gateway/v1";
-
-if (string.IsNullOrWhiteSpace(apiBaseUrl))
-{
-    throw new InvalidOperationException("ApiSettings:BaseUrl is not configured in appsettings.json");
-}
-
-// Ensure base URL ends with a slash for proper path combination
-var baseUrl = apiBaseUrl.TrimEnd('/') + "/";
-var baseUri = new Uri(baseUrl, UriKind.Absolute);
-
-builder.Services.AddHttpClient<ApiService>(client =>
-{
-    client.BaseAddress = baseUri;
-    client.Timeout = TimeSpan.FromMinutes(5);
-});
-
 // GitHub API service
 builder.Services.AddHttpClient<GitHubService>();
 
