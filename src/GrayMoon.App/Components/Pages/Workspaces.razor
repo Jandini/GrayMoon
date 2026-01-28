@@ -68,7 +68,12 @@
                                 @foreach (var workspace in workspaces)
                                 {
                                     <tr>
-                                        <td class="col-name"><strong>@workspace.Name</strong></td>
+                                        <td class="col-name">
+                                            <NavLink class="link-primary text-decoration-none"
+                                                     href="@($"workspaces/{workspace.WorkspaceId}")">
+                                                <strong>@workspace.Name</strong>
+                                            </NavLink>
+                                        </td>
                                         <td class="col-count">@workspace.Repositories.Count</td>
                                         <td class="col-actions">
                                             <button class="btn btn-sm btn-outline-primary me-2"

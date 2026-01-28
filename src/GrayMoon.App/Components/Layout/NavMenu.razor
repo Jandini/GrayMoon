@@ -1,3 +1,8 @@
+@implements IDisposable
+@using GrayMoon.App.Repositories
+@inject NavigationManager NavigationManager
+@inject WorkspaceRepository WorkspaceRepository
+
 <div class="top-row navbar navbar-dark">
     <div class="container-fluid d-flex justify-content-center">
         <a class="navbar-brand" href="">
@@ -13,35 +18,101 @@
 
 <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
     <nav class="flex-column">
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
-            </NavLink>
-        </div>
+        @if (isWorkspaceView && workspaceId != null)
+        {
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                    <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
+                </NavLink>
+            </div>
 
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="workspaces">
-                <i class="bi bi-grid" aria-hidden="true"></i> Workspaces
-            </NavLink>
-        </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="@($"workspaces/{workspaceId}")">
+                    <i class="bi bi-grid" aria-hidden="true"></i> @(workspaceName ?? "Workspace")
+                </NavLink>
+            </div>
+        }
+        else
+        {
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                    <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
+                </NavLink>
+            </div>
 
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="repositories">
-                <i class="bi bi-collection" aria-hidden="true"></i> Repositories
-            </NavLink>
-        </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="workspaces">
+                    <i class="bi bi-grid" aria-hidden="true"></i> Workspaces
+                </NavLink>
+            </div>
 
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="actions">
-                <i class="bi bi-lightning-charge" aria-hidden="true"></i> Actions
-            </NavLink>
-        </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="repositories">
+                    <i class="bi bi-collection" aria-hidden="true"></i> Repositories
+                </NavLink>
+            </div>
 
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="github-connectors">
-                <i class="bi bi-github" aria-hidden="true"></i> GitHub
-            </NavLink>
-        </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="actions">
+                    <i class="bi bi-lightning-charge" aria-hidden="true"></i> Actions
+                </NavLink>
+            </div>
 
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="github-connectors">
+                    <i class="bi bi-github" aria-hidden="true"></i> GitHub
+                </NavLink>
+            </div>
+        }
     </nav>
 </div>
+
+@code {
+    private bool isWorkspaceView;
+    private int? workspaceId;
+    private string? workspaceName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        NavigationManager.LocationChanged += HandleLocationChanged;
+        await UpdateWorkspaceContextAsync();
+    }
+
+    private void HandleLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        _ = UpdateWorkspaceContextAsync();
+    }
+
+    private async Task UpdateWorkspaceContextAsync()
+    {
+        var relativePath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        var path = relativePath.Split('?', '#')[0];
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        if (segments.Length == 2 &&
+            string.Equals(segments[0], "workspaces", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(segments[1], out var parsedId))
+        {
+            isWorkspaceView = true;
+            if (workspaceId != parsedId || string.IsNullOrWhiteSpace(workspaceName))
+            {
+                workspaceId = parsedId;
+                var workspace = await WorkspaceRepository.GetByIdAsync(parsedId);
+                workspaceName = workspace?.Name ?? "Workspace";
+            }
+        }
+        else
+        {
+            isWorkspaceView = false;
+            workspaceId = null;
+            workspaceName = null;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= HandleLocationChanged;
+    }
+}

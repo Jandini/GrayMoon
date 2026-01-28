@@ -28,6 +28,7 @@ public class WorkspaceRepository
             .AsNoTracking()
             .Include(workspace => workspace.Repositories)
             .ThenInclude(link => link.GitHubRepository)
+            .ThenInclude(repository => repository!.GitHubConnector)
             .FirstOrDefaultAsync(workspace => workspace.WorkspaceId == workspaceId);
     }
 
