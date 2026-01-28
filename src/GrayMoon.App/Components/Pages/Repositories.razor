@@ -50,14 +50,13 @@
                                 <th class="col-owner">Owner</th>
                                 <th class="col-visibility">Visibility</th>
                                 <th class="col-connector">Connector</th>
-                                <th class="col-clone">Clone URL</th>
                             </tr>
                         </thead>
                         <tbody>
                             @if (repositories == null)
                             {
                                 <tr>
-                                    <td colspan="5" class="text-center text-muted py-4">
+                                    <td colspan="4" class="text-center text-muted py-4">
                                         Loading repositories...
                                     </td>
                                 </tr>
@@ -65,7 +64,7 @@
                             else if (repositories.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="5" class="text-center text-muted py-4">
+                                    <td colspan="4" class="text-center text-muted py-4">
                                         No repositories found. Configure GitHub connectors to fetch repositories.
                                     </td>
                                 </tr>
@@ -73,7 +72,7 @@
                             else if (GetFilteredRepositories()?.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="5" class="text-center text-muted py-4">
+                                    <td colspan="4" class="text-center text-muted py-4">
                                         No repositories match your search.
                                     </td>
                                 </tr>
@@ -91,21 +90,6 @@
                                             </span>
                                         </td>
                                         <td class="col-connector">@repository.ConnectorName</td>
-                                        <td class="col-clone">
-                                            @if (string.IsNullOrWhiteSpace(repository.CloneUrl))
-                                            {
-                                                <span class="text-muted">-</span>
-                                            }
-                                            else
-                                            {
-                                                <a href="@repository.CloneUrl"
-                                                   target="_blank"
-                                                   rel="noopener noreferrer"
-                                                   title="@repository.CloneUrl">
-                                                    @repository.CloneUrl
-                                                </a>
-                                            }
-                                        </td>
                                     </tr>
                                 }
                             }
