@@ -85,6 +85,40 @@ public class WorkspaceRepository
         await _dbContext.SaveChangesAsync();
     }
 
+    public async Task ToggleDefaultAsync(int workspaceId)
+    {
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+
+        var workspace = await _dbContext.Workspaces
+            .FirstOrDefaultAsync(item => item.WorkspaceId == workspaceId);
+
+        if (workspace == null)
+        {
+            return;
+        }
+
+        if (workspace.IsDefault)
+        {
+            workspace.IsDefault = false;
+            await _dbContext.SaveChangesAsync();
+            await transaction.CommitAsync();
+            return;
+        }
+
+        var currentDefaults = await _dbContext.Workspaces
+            .Where(item => item.IsDefault && item.WorkspaceId != workspaceId)
+            .ToListAsync();
+
+        foreach (var existing in currentDefaults)
+        {
+            existing.IsDefault = false;
+        }
+
+        workspace.IsDefault = true;
+        await _dbContext.SaveChangesAsync();
+        await transaction.CommitAsync();
+    }
+
     private async Task ReplaceRepositoriesAsync(int workspaceId, IReadOnlyCollection<int> repositoryIds)
     {
         var existing = _dbContext.WorkspaceRepositoryLinks

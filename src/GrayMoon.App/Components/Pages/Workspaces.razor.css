@@ -105,3 +105,8 @@
 .col-actions {
     width: 35%;
 }
+
+.badge-default {
+    background-color: #2f6f9f;
+    color: #ffffff;
+}
