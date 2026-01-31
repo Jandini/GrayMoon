@@ -44,16 +44,21 @@
             <div class="card-body p-0">
                 <div class="table-responsive">
                     <div class="repository-list border rounded">
-                        <table class="table table-striped table-hover mb-0 repositories-table">
-                        <thead class="table-dark">
-                            <tr>
-                                <th class="col-repo">Repository</th>
-                                <th class="col-owner">Owner</th>
-                                <th class="col-visibility">Visibility</th>
-                                <th class="col-connector">Connector</th>
-                            </tr>
-                        </thead>
-                        <tbody>
+                        <div class="repository-list-header">
+                            <table class="table table-dark mb-0 repositories-table repositories-table-header">
+                                <thead>
+                                    <tr>
+                                        <th class="col-repo">Repository</th>
+                                        <th class="col-owner">Owner</th>
+                                        <th class="col-visibility">Visibility</th>
+                                        <th class="col-connector">Connector</th>
+                                    </tr>
+                                </thead>
+                            </table>
+                        </div>
+                        <div class="repository-list-body">
+                            <table class="table table-striped table-hover mb-0 repositories-table">
+                                <tbody>
                             @if (repositories == null)
                             {
                                 <tr>
@@ -94,8 +99,9 @@
                                     </tr>
                                 }
                             }
-                        </tbody>
-                        </table>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>

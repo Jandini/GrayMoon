@@ -1,29 +1,46 @@
 .repository-list {
+    display: flex;
+    flex-direction: column;
     flex: 1 1 0;
     min-height: 0;
     max-height: 100%;
-    overflow-y: auto;
-    overflow-x: hidden;
+    overflow: hidden;
     border: 1px solid #5a5a5a;
     border-radius: 6px;
 }
 
-.repositories-table {
+.repository-list-header {
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.repository-list-body {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.repository-list-body .repositories-table tbody tr:first-child td {
+    border-top: none;
+}
+
+.repositories-table,
+.repositories-table-header {
     width: 100%;
     margin-bottom: 0;
+    table-layout: fixed;
 }
 
 .repositories-table th,
-.repositories-table td {
+.repositories-table td,
+.repositories-table-header th {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.repositories-table thead {
-    position: sticky;
-    top: 0;
-    z-index: 1;
+.repositories-table-header thead th {
     background-color: var(--bs-dark);
 }
 
