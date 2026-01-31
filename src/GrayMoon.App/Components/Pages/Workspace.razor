@@ -116,7 +116,7 @@
     private bool isSyncing = false;
     private string syncProgressMessage = "Syncing...";
     private bool? isOutOfSync = null;
-    private IReadOnlyDictionary<int, RepoSyncStatus>? repoSyncStatus;
+    private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private CancellationTokenSource? _syncCheckCts;
     private CancellationTokenSource? _syncCts;
 
@@ -139,7 +139,7 @@
         try
         {
             var status = await WorkspaceGitService.GetRepoSyncStatusAsync(WorkspaceId, _syncCheckCts.Token);
-            repoSyncStatus = status;
+            repoSyncStatus = new Dictionary<int, RepoSyncStatus>(status);
             isOutOfSync = status.Values.Any(v => v != RepoSyncStatus.InSync);
             await InvokeAsync(StateHasChanged);
         }
@@ -195,7 +195,7 @@
 
     private RenderFragment GetRepoSyncBadge(int repositoryId) => builder =>
     {
-        if (repoSyncStatus?.TryGetValue(repositoryId, out var status) == true)
+        if (repoSyncStatus.TryGetValue(repositoryId, out var status))
         {
             var (text, bgColor) = status switch
             {
@@ -233,27 +233,24 @@
         {
             var results = await WorkspaceGitService.SyncAsync(
                 WorkspaceId,
-                onProgress: (completed, total) =>
+                onProgress: (completed, total, repoId, info) =>
                 {
                     syncProgressMessage = $"Synchronized {completed} of {total}";
+                    repoSyncStatus[repoId] = RepoSyncStatus.InSync;
+
+                    var wr = workspaceRepositories.FirstOrDefault(w => w.GitHubRepositoryId == repoId);
+                    if (wr != null)
+                    {
+                        wr.GitVersion = info.Version == "-" ? null : info.Version;
+                        wr.BranchName = info.Branch == "-" ? null : info.Branch;
+                    }
+
                     InvokeAsync(StateHasChanged);
                 },
                 cancellationToken: _syncCts.Token);
             repoGitInfos = results;
 
-            foreach (var wr in workspaceRepositories)
-            {
-                if (wr.GitHubRepository != null && repoGitInfos.TryGetValue(wr.GitHubRepositoryId, out var info))
-                {
-                    wr.GitVersion = info.Version == "-" ? null : info.Version;
-                    wr.BranchName = info.Branch == "-" ? null : info.Branch;
-                }
-            }
-
             isOutOfSync = false;
-            repoSyncStatus = workspaceRepositories
-                .Where(wr => wr.GitHubRepository != null)
-                .ToDictionary(wr => wr.GitHubRepositoryId, _ => RepoSyncStatus.InSync);
         }
         catch (OperationCanceledException)
         {

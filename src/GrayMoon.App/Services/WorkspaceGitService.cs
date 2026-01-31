@@ -37,7 +37,7 @@ public class WorkspaceGitService
 
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
-        Action<int, int>? onProgress = null,
+        Action<int, int, int, RepoGitVersionInfo>? onProgress = null,
         CancellationToken cancellationToken = default)
     {
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
@@ -70,7 +70,7 @@ public class WorkspaceGitService
         {
             var result = await RunSyncJobAsync(repo, workspacePath, semaphore, cancellationToken);
             var count = Interlocked.Increment(ref completedCount);
-            onProgress?.Invoke(count, totalCount);
+            onProgress?.Invoke(count, totalCount, result.RepoId, result.Info);
             return result;
         });
         var results = await Task.WhenAll(syncTasks);
