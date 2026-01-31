@@ -42,19 +42,23 @@
 }
 
 .col-repo {
-    width: 25%;
+    width: auto;
+    min-width: 0;
 }
 
 .col-sync {
-    width: 10%;
-    min-width: 90px;
+    width: 100px;
+    min-width: 100px;
+    max-width: 100px;
     text-align: center;
 }
 
 .col-version {
-    width: 33%;
+    width: auto;
+    min-width: 0;
 }
 
 .col-branch {
-    width: 32%;
+    width: auto;
+    min-width: 0;
 }
