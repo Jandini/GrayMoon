@@ -67,8 +67,8 @@
 .page-container {
     padding-top: var(--bs-gutter-x);
     padding-bottom: 1.5rem;
-    padding-left: 1.1rem;
-    padding-right: 1.1rem;
+    padding-left: 0.8rem;
+    padding-right: 0.8rem;
     display: flex;
     flex-direction: column;
     flex: 1 1 0;
