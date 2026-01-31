@@ -1,17 +1,19 @@
 using System.Text.Json;
+using GrayMoon.App.Models;
 
 namespace GrayMoon.App.Services;
 
 public class GitVersionCommandService
 {
     private readonly ILogger<GitVersionCommandService> _logger;
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     public GitVersionCommandService(ILogger<GitVersionCommandService> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<string?> GetVersionAsync(string repositoryPath, CancellationToken cancellationToken = default)
+    public async Task<GitVersionResult?> GetVersionAsync(string repositoryPath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(repositoryPath))
         {
@@ -53,7 +55,7 @@ public class GitVersionCommandService
                 return null;
             }
 
-            return ParseSemVerFromJson(stdout);
+            return ParseGitVersionJson(stdout);
         }
         catch (Exception ex)
         {
@@ -62,7 +64,7 @@ public class GitVersionCommandService
         }
     }
 
-    private static string? ParseSemVerFromJson(string json)
+    private static GitVersionResult? ParseGitVersionJson(string json)
     {
         if (string.IsNullOrWhiteSpace(json))
         {
@@ -71,23 +73,11 @@ public class GitVersionCommandService
 
         try
         {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("SemVer", out var semVer))
-            {
-                return semVer.GetString();
-            }
-
-            if (root.TryGetProperty("FullSemVer", out var fullSemVer))
-            {
-                return fullSemVer.GetString();
-            }
+            return JsonSerializer.Deserialize<GitVersionResult>(json, JsonOptions);
         }
         catch (JsonException)
         {
-            // Not valid JSON or unexpected structure
+            return null;
         }
-
-        return null;
     }
 }

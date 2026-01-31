@@ -67,6 +67,12 @@ public class AppDbContext : DbContext
                 .IsRequired()
                 .HasMaxLength(500);
 
+            entity.Property(repository => repository.GitVersion)
+                .HasMaxLength(100);
+
+            entity.Property(repository => repository.BranchName)
+                .HasMaxLength(200);
+
             entity.HasOne(repository => repository.GitHubConnector)
                 .WithMany()
                 .HasForeignKey(repository => repository.GitHubConnectorId)

@@ -1,5 +1,6 @@
 @page "/workspaces/{WorkspaceId:int}"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@implements IDisposable
 @using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
@@ -23,14 +24,10 @@
                 &nbsp;
             </p>
         </div>
-        <button class="btn btn-primary"
-                @onclick="CloneAllAsync"
-                disabled="@(isCloning || repositories.Count == 0)">
-            @if (isCloning)
-            {
-                <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
-            }
-            Clone
+        <button class="btn @(isOutOfSync ? "btn-danger" : "btn-primary")"
+                @onclick="SyncAsync"
+                disabled="@(isSyncing || repositories.Count == 0)">
+            Sync
         </button>
     </div>
 
@@ -49,17 +46,18 @@
                         <thead class="table-dark">
                             <tr>
                                 <th class="col-repo">Repository</th>
-                                <th class="col-owner">Owner</th>
+                                <th class="col-version">Version</th>
+                                <th class="col-branch">Branch</th>
                                 <th class="col-visibility">Visibility</th>
+                                <th class="col-owner">Owner</th>
                                 <th class="col-connector">Connector</th>
-                                <th class="col-gitversion">Git Version</th>
                             </tr>
                         </thead>
                         <tbody>
                             @if (isLoading)
                             {
                                 <tr>
-                                    <td colspan="5" class="text-center text-muted py-4">
+                                    <td colspan="6" class="text-center text-muted py-4">
                                         Loading workspace...
                                     </td>
                                 </tr>
@@ -67,7 +65,7 @@
                             else if (repositories.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="5" class="text-center text-muted py-4">
+                                    <td colspan="6" class="text-center text-muted py-4">
                                         No repositories assigned to this workspace.
                                     </td>
                                 </tr>
@@ -78,14 +76,15 @@
                                 {
                                     <tr>
                                         <td class="col-repo"><strong>@repository.RepositoryName</strong></td>
-                                        <td class="col-owner">@(string.IsNullOrWhiteSpace(repository.OrgName) ? "-" : repository.OrgName)</td>
+                                        <td class="col-version text-muted">@GetRepoVersion(repository.GitHubRepositoryId)</td>
+                                        <td class="col-branch text-muted">@GetRepoBranch(repository.GitHubRepositoryId)</td>
                                         <td class="col-visibility">
                                             <span class="badge @(repository.Visibility == "Private" ? "badge-private" : "badge-public")">
                                                 @repository.Visibility.ToLowerInvariant()
                                             </span>
                                         </td>
+                                        <td class="col-owner">@(string.IsNullOrWhiteSpace(repository.OrgName) ? "-" : repository.OrgName)</td>
                                         <td class="col-connector">@(repository.GitHubConnector?.ConnectorName ?? "Unknown")</td>
-                                        <td class="col-gitversion text-muted">@GetRepoVersion(repository.GitHubRepositoryId)</td>
                                     </tr>
                                 }
                             }
@@ -98,21 +97,58 @@
 </div>
 
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
-<LoadingOverlay IsVisible="@isCloning" Message="Cloning repositories..." />
+<LoadingOverlay IsVisible="@isSyncing" Message="Syncing..." />
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
 
     private WorkspaceModel? workspace;
     private List<GitHubRepository> repositories = new();
-    private IReadOnlyDictionary<int, string> repoVersions = new Dictionary<int, string>();
+    private IReadOnlyDictionary<int, RepoGitVersionInfo> repoGitInfos = new Dictionary<int, RepoGitVersionInfo>();
     private string? errorMessage;
     private bool isLoading = true;
-    private bool isCloning = false;
+    private bool isSyncing = false;
+    private bool isOutOfSync = false;
+    private CancellationTokenSource? _syncCheckCts;
 
     protected override async Task OnInitializedAsync()
     {
         await LoadWorkspaceAsync();
+        _ = CheckSyncStatusAsync();
+    }
+
+    private async Task CheckSyncStatusAsync()
+    {
+        if (workspace == null || repositories.Count == 0)
+        {
+            return;
+        }
+
+        _syncCheckCts?.Cancel();
+        _syncCheckCts = new CancellationTokenSource();
+
+        try
+        {
+            var inSync = await WorkspaceGitService.IsInSyncAsync(WorkspaceId, _syncCheckCts.Token);
+            isOutOfSync = !inSync;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException)
+        {
+            // Check was cancelled, ignore
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Error checking sync status for workspace {WorkspaceId}", WorkspaceId);
+            isOutOfSync = true;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        _syncCheckCts?.Cancel();
+        _syncCheckCts?.Dispose();
     }
 
     private async Task LoadWorkspaceAsync()
@@ -135,8 +171,6 @@
                 .Select(repository => repository!)
                 .OrderBy(repository => repository.RepositoryName)
                 .ToList();
-
-            _ = LoadVersionsAsync();
         }
         catch (Exception ex)
         {
@@ -150,52 +184,56 @@
         }
     }
 
-    private async Task LoadVersionsAsync()
-    {
-        if (workspace == null || repositories.Count == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            var versions = await WorkspaceGitService.GetVersionsAsync(WorkspaceId);
-            repoVersions = versions;
-            await InvokeAsync(StateHasChanged);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogDebug(ex, "Error loading Git versions for workspace {WorkspaceId}", WorkspaceId);
-        }
-    }
-
     private string GetRepoVersion(int repositoryId)
     {
-        return repoVersions.TryGetValue(repositoryId, out var version) ? version : "-";
+        var repo = repositories.FirstOrDefault(r => r.GitHubRepositoryId == repositoryId);
+        return repo?.GitVersion ?? "-";
     }
 
-    private async Task CloneAllAsync()
+    private string GetRepoBranch(int repositoryId)
     {
-        if (workspace == null || repositories.Count == 0 || isCloning)
+        var repo = repositories.FirstOrDefault(r => r.GitHubRepositoryId == repositoryId);
+        return repo?.BranchName ?? "-";
+    }
+
+    private async Task SyncAsync()
+    {
+        if (workspace == null || repositories.Count == 0 || isSyncing)
         {
             return;
         }
 
+        isSyncing = true;
+        errorMessage = null;
+        StateHasChanged();
+        await Task.Yield();
+
         try
         {
-            isCloning = true;
-            errorMessage = null;
-            await WorkspaceGitService.CloneAllAsync(WorkspaceId);
-            _ = LoadVersionsAsync();
+            _syncCheckCts?.Cancel();
+
+            var results = await WorkspaceGitService.SyncAsync(WorkspaceId);
+            repoGitInfos = results;
+
+            foreach (var repo in repositories)
+            {
+                if (repoGitInfos.TryGetValue(repo.GitHubRepositoryId, out var info))
+                {
+                    repo.GitVersion = info.Version == "-" ? null : info.Version;
+                    repo.BranchName = info.Branch == "-" ? null : info.Branch;
+                }
+            }
+
+            isOutOfSync = false;
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error cloning repositories for workspace {WorkspaceId}", WorkspaceId);
-            errorMessage = "Failed to clone repositories. Please try again later.";
+            Logger.LogError(ex, "Error syncing workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Failed to sync. Please try again later.";
         }
         finally
         {
-            isCloning = false;
+            isSyncing = false;
         }
     }
 }
