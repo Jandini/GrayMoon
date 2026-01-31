@@ -1,5 +1,6 @@
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
+using GrayMoon.App.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
@@ -7,10 +8,12 @@ namespace GrayMoon.App.Repositories;
 public class WorkspaceRepository
 {
     private readonly AppDbContext _dbContext;
+    private readonly WorkspaceService _workspaceService;
 
-    public WorkspaceRepository(AppDbContext dbContext)
+    public WorkspaceRepository(AppDbContext dbContext, WorkspaceService workspaceService)
     {
-        _dbContext = dbContext;
+        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
     }
 
     public async Task<List<Workspace>> GetAllAsync()
@@ -43,6 +46,8 @@ public class WorkspaceRepository
         var workspace = new Workspace { Name = normalized };
         _dbContext.Workspaces.Add(workspace);
         await _dbContext.SaveChangesAsync();
+
+        _workspaceService.CreateDirectory(workspace.Name);
 
         await ReplaceRepositoriesAsync(workspace.WorkspaceId, repositoryIds);
         return workspace;

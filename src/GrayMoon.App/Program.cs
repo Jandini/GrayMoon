@@ -1,5 +1,6 @@
 using GrayMoon.App.Components;
 using GrayMoon.App.Data;
+using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
 using Microsoft.EntityFrameworkCore;
@@ -7,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddEnvironmentVariables();
 
+builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection("Workspace"));
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
@@ -18,6 +20,7 @@ builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connect
 builder.Services.AddScoped<GitHubConnectorRepository>();
 builder.Services.AddScoped<GitHubRepositoryRepository>();
 builder.Services.AddScoped<WorkspaceRepository>();
+builder.Services.AddScoped<WorkspaceService>();
 builder.Services.AddScoped<GitHubRepositoryService>();
 builder.Services.AddScoped<GitHubActionsService>();
 
