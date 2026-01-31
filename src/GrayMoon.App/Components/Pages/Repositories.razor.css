@@ -1,44 +1,113 @@
+.repository-list {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
+    border: 1px solid #252526;
+    border-radius: 6px;
+}
+
+.repository-list-header {
+    flex-shrink: 0;
+    overflow: hidden;
+    border-bottom: 1px solid #c0c0c0;
+}
+
+.repository-list-body {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-color: #4e4e52 #2d2d30;
+    scrollbar-width: thin;
+}
+
+.repository-list-body::-webkit-scrollbar {
+    width: 8px;
+}
+
+.repository-list-body::-webkit-scrollbar-track {
+    background: #2d2d30;
+}
+
+.repository-list-body::-webkit-scrollbar-thumb {
+    background: #4e4e52;
+    border-radius: 4px;
+}
+
+.repository-list-body::-webkit-scrollbar-thumb:hover {
+    background: #5e5e62;
+}
+
+.repository-list-body .repositories-table tbody tr:first-child td {
+    border-top: none;
+}
+
+.repositories-table,
+.repositories-table-header {
+    width: 100%;
+    margin-bottom: 0;
+    table-layout: fixed;
+}
+
 .repositories-table th,
-.repositories-table td {
+.repositories-table td,
+.repositories-table-header th {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.repositories-table thead,
-.repositories-table tbody tr {
-    display: table;
-    width: 100%;
-    table-layout: fixed;
-}
-
-.repositories-table tbody {
-    display: block;
-    max-height: calc(100vh - (var(--bs-gutter-x) + var(--bs-gutter-x) + 260px));
-    overflow-y: auto;
-    overflow-x: hidden;
+.repositories-table-header thead th {
+    background-color: var(--bs-dark);
 }
 
 .page-container {
-    padding-block: var(--bs-gutter-x);
+    padding-top: var(--bs-gutter-x);
+    padding-bottom: 1.5rem;
+    padding-left: 0.8rem;
+    padding-right: 0.8rem;
     display: flex;
     flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.page-container .page-header,
+.page-container .alert {
+    flex-shrink: 0;
 }
 
 .page-card {
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
 .page-card .card-body {
     display: flex;
     flex-direction: column;
-    height: 100%;
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
+    padding: 0;
 }
 
 .page-card .table-responsive {
-    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
     min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
 }
 
 .col-repo {

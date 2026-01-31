@@ -1,7 +1,145 @@
-.status-col {
-    width: 140px;
+/* Single table with sticky thead – one width so row backgrounds fill full width */
+.connector-list {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
+    border: 1px solid #252526;
+    border-radius: 6px;
 }
 
+.connector-list-body {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-color: #4e4e52 #2d2d30;
+    scrollbar-width: thin;
+}
+
+.connector-list-body::-webkit-scrollbar {
+    width: 8px;
+}
+
+.connector-list-body::-webkit-scrollbar-track {
+    background: #2d2d30;
+}
+
+.connector-list-body::-webkit-scrollbar-thumb {
+    background: #4e4e52;
+    border-radius: 4px;
+}
+
+.connector-list-body::-webkit-scrollbar-thumb:hover {
+    background: #5e5e62;
+}
+
+/* Extend table under scrollbar so row highlight (striped/hover) reaches the right edge */
+.connector-list-body-inner {
+    width: calc(100% + 8px);
+    min-width: 100%;
+    box-sizing: border-box;
+}
+
+.connector-list-body-inner .connectors-table {
+    width: 100%;
+    margin-bottom: 0;
+    table-layout: fixed;
+}
+
+/* Sticky header so it stays visible when body scrolls */
+.connector-list-body .connectors-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background-color: var(--bs-dark);
+    border-bottom: 1px solid #c0c0c0;
+    box-shadow: 0 1px 0 #c0c0c0;
+}
+
+.connectors-table th,
+.connectors-table td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.connectors-table td.col-actions,
+.connectors-table th.col-actions {
+    overflow: visible;
+}
+
+.page-container {
+    padding-top: var(--bs-gutter-x);
+    padding-bottom: 1.5rem;
+    padding-left: 0.8rem;
+    padding-right: 0.8rem;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.page-container .page-header,
+.page-container .alert {
+    flex-shrink: 0;
+}
+
+.page-card {
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.page-card .card-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
+    padding: 0;
+}
+
+.page-card .table-responsive {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
+}
+
+/* Column widths - percentages only, total 100% (same pattern as Repositories) */
+.col-name {
+    width: 20%;
+}
+
+.col-api {
+    width: 30%;
+}
+
+.col-active {
+    width: 10%;
+    text-align: center;
+}
+
+.col-status {
+    width: 15%;
+}
+
+.col-actions {
+    width: 25%;
+}
+
+/* Connector-specific: status badge, action buttons, active switch */
 .status-col .badge {
     display: inline-block;
     min-width: 70px;
@@ -10,15 +148,18 @@
 
 .actions-col {
     display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.25rem;
 }
 
-@media (min-width: 992px) {
-    .actions-col {
-        flex-direction: row;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.15rem;
-    }
+.connectors-table .form-check.form-switch {
+    margin: 0;
+    min-height: 0;
+    line-height: 1;
+}
+
+.connectors-table .form-check-input {
+    margin: 0;
 }
