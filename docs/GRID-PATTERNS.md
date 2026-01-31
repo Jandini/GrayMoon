@@ -218,6 +218,7 @@ Use the following pattern. Names are placeholders; replace with your wrapper and
 
 - Wrapper is a flex column; only the body section scrolls.
 - Border and radius are set here (do not rely on Bootstrap `border`).
+- The header block has a **header/body divider**: a light line (`border-bottom: 1px solid #c0c0c0`) so the fixed header is visually separated from the scrollable body, matching the static grid’s header/body separation.
 
 ```css
 .YOUR-GRID-WRAPPER {
@@ -234,6 +235,7 @@ Use the following pattern. Names are placeholders; replace with your wrapper and
 .YOUR-GRID-WRAPPER-header {
     flex-shrink: 0;
     overflow: hidden;
+    border-bottom: 1px solid #c0c0c0;
 }
 
 .YOUR-GRID-WRAPPER-body {

@@ -12,6 +12,7 @@
 .repository-list-header {
     flex-shrink: 0;
     overflow: hidden;
+    border-bottom: 1px solid #c0c0c0;
 }
 
 .repository-list-body {
