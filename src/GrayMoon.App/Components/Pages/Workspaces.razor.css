@@ -74,6 +74,15 @@
     opacity: 1;
 }
 
+.workspace-path-input:disabled,
+.workspace-path-input.form-control:disabled {
+    background-color: #1e1e1e;
+    color: #909090;
+    border-color: #3a3a3a;
+    opacity: 1;
+    cursor: not-allowed;
+}
+
 .repository-grid th:nth-child(2),
 .repository-grid td:nth-child(2) {
     width: 55%;

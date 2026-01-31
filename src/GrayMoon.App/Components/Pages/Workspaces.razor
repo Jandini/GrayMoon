@@ -7,6 +7,7 @@
 @inject WorkspaceRepository WorkspaceRepository
 @inject GitHubConnectorRepository ConnectorRepository
 @inject GitHubRepositoryService RepositoryService
+@inject WorkspaceService WorkspaceService
 @inject ILogger<Workspaces> Logger
 
 <PageTitle>Workspaces - GrayMoon</PageTitle>
@@ -135,6 +136,14 @@
                                @bind="workspaceName"
                                @bind:event="oninput"
                                disabled="@isRepoOnly" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Workspace Path</label>
+                        <input class="form-control workspace-path-input"
+                               value="@GetWorkspacePath()"
+                               readonly
+                               disabled />
                     </div>
 
                     <div class="mb-3">
@@ -562,5 +571,15 @@
                 selectedRepositoryIds.Remove(repository.GitHubRepositoryId);
             }
         }
+    }
+
+    private string GetWorkspacePath()
+    {
+        if (string.IsNullOrWhiteSpace(workspaceName))
+        {
+            return WorkspaceService.RootPath;
+        }
+
+        return WorkspaceService.GetWorkspacePath(workspaceName);
     }
 }
