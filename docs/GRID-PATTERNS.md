@@ -3,7 +3,7 @@
 This document describes two table/grid patterns used in GrayMoon and how to implement them. Column names and content are not specified—they vary by page.
 
 **Reference implementations:**
-- **Scrollable grid:** `src/GrayMoon.App/Components/Pages/Repositories.razor` (and `Repositories.razor.css`)
+- **Scrollable grid:** `src/GrayMoon.App/Components/Pages/Repositories.razor` (and `Repositories.razor.css`), `GitHubConnectors.razor` (and `GitHubConnectors.razor.css`)
 - **Static grid:** `src/GrayMoon.App/Components/Pages/Workspaces.razor` (and `Workspaces.razor.css`)
 
 ---
@@ -93,10 +93,10 @@ This pattern depends on **layout constraints** (MainLayout + page container) and
 The scrollable grid only works if the app layout constrains height and passes flex down to the page. In this project that is done in:
 
 **`MainLayout.razor.css`:**
-- `.page`: `height: 100vh`, `overflow: hidden`, flex column.
-- `main`: `flex: 1`, `min-height: 0`, `overflow: hidden`, flex column.
+- `.page`: `height: 100vh`, `overflow: hidden`, flex column (or row on desktop).
+- `main`: `flex: 1 1 0`, `min-height: 0`, **`min-width: 0`** (so the main content area gets width in a flex row), `overflow: hidden`, flex column.
 - `.top-row`: `flex-shrink: 0`.
-- `article.content`: `flex: 1 1 0`, `min-height: 0`, `overflow: hidden`, flex column.
+- `article.content`: `flex: 1 1 0`, `min-height: 0`, **`min-width: 0`**, **`width: 100%`** (so content is visible; without these the main area can collapse to a vertical line), `overflow: hidden`, flex column.
 
 So the page content (your grid page) is inside a flex chain that has a fixed height and does not overflow the viewport.
 
@@ -161,15 +161,20 @@ Use the following pattern. Names are placeholders; replace with your wrapper and
 
 - Page fills the layout and does not create a page-level scrollbar.
 - Header and alert must not shrink.
+- Use explicit horizontal padding so the scrollable grid matches other pages (avoids extra padding from `container-fluid`): **`padding-left: 0.8rem`** and **`padding-right: 0.8rem`**. Top/bottom use `padding-top: var(--bs-gutter-x)` and `padding-bottom: 1.5rem`.
+- **If the page shows nothing (blank):** the flex chain can collapse to zero height before the layout provides height. Add **`min-height: 300px`** (or similar) to `.page-container` so content is always visible. Optionally add `min-height` to the grid wrapper and body (e.g. grid wrapper `min-height: 200px`, body `min-height: 100px`) so the table area never collapses.
+- **If only a vertical line is visible (content has no width):** the flex chain can collapse to zero width. In **MainLayout.razor.css** give `main` **`min-width: 0`** and **`flex: 1 1 0`**, and give `article.content` **`min-width: 0`** and **`width: 100%`**. On the page, give `.page-container` and the flex chain (`.page-card`, `.card-body`, `.table-responsive`, grid wrapper, grid body) **`width: 100%`** and **`min-width: 0`** so they take the full width of the content area.
 
 ```css
 .page-container {
-    padding: var(--bs-gutter-x);
+    padding-top: var(--bs-gutter-x);
     padding-bottom: 1.5rem;
+    padding-left: 0.8rem;
+    padding-right: 0.8rem;
     display: flex;
     flex-direction: column;
     flex: 1 1 0;
-    min-height: 0;
+    min-height: 300px;
     overflow: hidden;
     box-sizing: border-box;
 }
@@ -231,6 +236,7 @@ Use the following pattern. Names are placeholders; replace with your wrapper and
     border: 1px solid #252526;
     border-radius: 6px;
 }
+/* Optional: if content still collapses, add min-height: 200px to wrapper and min-height: 100px to YOUR-GRID-WRAPPER-body */
 
 .YOUR-GRID-WRAPPER-header {
     flex-shrink: 0;
@@ -240,7 +246,7 @@ Use the following pattern. Names are placeholders; replace with your wrapper and
 
 .YOUR-GRID-WRAPPER-body {
     flex: 1 1 0;
-    min-height: 0;
+    min-height: 0;  /* or min-height: 100px if body collapses */
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-color: #4e4e52 #2d2d30;
