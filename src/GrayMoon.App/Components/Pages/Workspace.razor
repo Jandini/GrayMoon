@@ -49,14 +49,13 @@
                                 <th class="col-version">Version</th>
                                 <th class="col-branch">Branch</th>
                                 <th class="col-sync">Status</th>
-                                <th class="col-visibility">Visibility</th>
                             </tr>
                         </thead>
                         <tbody>
                             @if (isLoading)
                             {
                                 <tr>
-                                    <td colspan="5" class="text-center text-muted py-4">
+                                    <td colspan="4" class="text-center text-muted py-4">
                                         Loading workspace...
                                     </td>
                                 </tr>
@@ -64,7 +63,7 @@
                             else if (workspaceRepositories.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="5" class="text-center text-muted py-4">
+                                    <td colspan="4" class="text-center text-muted py-4">
                                         No repositories assigned to this workspace.
                                     </td>
                                 </tr>
@@ -81,11 +80,6 @@
                                             <td class="col-version text-muted">@(wr.GitVersion ?? "-")</td>
                                             <td class="col-branch text-muted">@(wr.BranchName ?? "-")</td>
                                             <td class="col-sync">@GetRepoSyncBadge(repo.GitHubRepositoryId)</td>
-                                            <td class="col-visibility">
-                                                <span class="badge @(repo.Visibility == "Private" ? "badge-private" : "badge-public")">
-                                                    @repo.Visibility.ToLowerInvariant()
-                                                </span>
-                                            </td>
                                         </tr>
                                     }
                                 }
