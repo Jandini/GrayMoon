@@ -25,13 +25,13 @@ wsl docker build -t jandini/graymoon:latest .
 Basic run on port 8384:
 
 ```bash
-wsl docker run -p 8384:8384 jandini/graymoon:latest
+docker run -p 8384:8384 jandini/graymoon:latest
 ```
 
 Run with persistent database and workspace root (for WSL, mount Windows `C:\workspaces` as `/mnt/c/workspaces`):
 
 ```bash
-wsl docker run -p 8384:8384 \
+docker run -p 8384:8384 \
   -v ./db:/app/db \
   -v /mnt/c/workspaces:/workspaces \
   -e Workspace__RootPath=/workspaces \
