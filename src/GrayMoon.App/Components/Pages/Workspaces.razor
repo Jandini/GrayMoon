@@ -4,6 +4,7 @@
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
 @using GrayMoon.App.Components.Shared
+@using GrayMoon.App.Components.Modals
 @inject WorkspaceRepository WorkspaceRepository
 @inject GitHubConnectorRepository ConnectorRepository
 @inject GitHubRepositoryService RepositoryService
@@ -119,133 +120,21 @@
     }
 </div>
 
-@if (showEditorModal)
-{
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">@editorTitle</h5>
-                    <button type="button" class="btn-close" @onclick="CloseEditorModal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Workspace Name</label>
-                        <input class="form-control workspace-name-input"
-                               placeholder="Enter workspace name"
-                               @bind="workspaceName"
-                               @bind:event="oninput"
-                               disabled="@isRepoOnly" />
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label">Workspace Path</label>
-                        <input class="form-control workspace-path-input"
-                               value="@GetWorkspacePath()"
-                               readonly
-                               disabled />
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label mb-2">
-                            Repositories
-                            <span class="text-muted ms-2">(@selectedRepositoryIds.Count selected)</span>
-                        </label>
-                        <div class="d-flex align-items-center mb-3">
-                            <input class="form-control"
-                                   placeholder="Search repositories..."
-                                   @bind="repositorySearch"
-                                   @bind:event="oninput" />
-                            <button type="button"
-                                    class="btn btn-outline-secondary ms-2"
-                                    @onclick="FetchRepositoriesAsync"
-                                    disabled="@(!hasConnectors || isPersisting)">
-                                Fetch
-                            </button>
-                        </div>
-                        <div class="repository-list border rounded">
-                            @if (repositories == null)
-                            {
-                                <div class="text-muted p-2">Loading repositories...</div>
-                            }
-                            else if (!hasConnectors)
-                            {
-                                <div class="text-muted p-2">No GitHub connectors configured.</div>
-                            }
-                            else if (repositories.Count == 0)
-                            {
-                                <div class="text-muted p-2">No repositories available. Fetch repositories first.</div>
-                            }
-                            else
-                            {
-                                var filtered = GetFilteredRepositories();
-                                <table class="table table-sm mb-0 repository-grid workspaces-table">
-                                    <thead class="table-dark">
-                                        <tr>
-                                            <th class="col-select">
-                                                <input class="form-check-input"
-                                                       type="checkbox"
-                                                       checked="@AreAllFilteredSelected(filtered)"
-                                                       @onchange="(ChangeEventArgs e) => ToggleAllFiltered(filtered, (bool)e.Value!)" />
-                                            </th>
-                                            <th>Repository</th>
-                                            <th>Owner</th>
-                                            <th>Connector</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @if (filtered.Count == 0)
-                                        {
-                                            <tr>
-                                                <td colspan="4" class="text-muted p-2">No repositories match your search.</td>
-                                            </tr>
-                                        }
-                                        else
-                                        {
-                                            @foreach (var repository in filtered)
-                                            {
-                                                <tr>
-                                                    <td class="col-select">
-                                                        <input class="form-check-input"
-                                                               type="checkbox"
-                                                               checked="@selectedRepositoryIds.Contains(repository.GitHubRepositoryId)"
-                                                               @onchange="(ChangeEventArgs e) => ToggleRepository(repository.GitHubRepositoryId, (bool)e.Value!)" />
-                                                    </td>
-                                                    <td>
-                                                        <span class="repo-name-cell" title="@repository.RepositoryName">
-                                                            @repository.RepositoryName
-                                                        </span>
-                                                    </td>
-                                                    <td>@(repository.OrgName ?? "-")</td>
-                                                    <td>@repository.ConnectorName</td>
-                                                </tr>
-                                            }
-                                        }
-                                    </tbody>
-                                </table>
-                            }
-                        </div>
-                    </div>
-
-                    @if (editorErrorMessage != null)
-                    {
-                        <div class="alert alert-danger">@editorErrorMessage</div>
-                    }
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" @onclick="CloseEditorModal">Cancel</button>
-                    <button type="button" class="btn btn-primary" @onclick="SaveWorkspaceAsync" disabled="@isSaving">
-                        @if (isSaving)
-                        {
-                            <span class="spinner-border spinner-border-sm me-2"></span>
-                        }
-                        Save
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-}
+<WorkspaceEditorModal IsVisible="@showEditorModal"
+                       Title="@editorTitle"
+                       WorkspaceName="@workspaceName"
+                       WorkspaceNameChanged="@((value) => workspaceName = value)"
+                       WorkspacePath="@GetWorkspacePath()"
+                       IsNameDisabled="@isRepoOnly"
+                       Repositories="@repositories"
+                       SelectedRepositoryIds="@selectedRepositoryIds"
+                       HasConnectors="@hasConnectors"
+                       IsSaving="@isSaving"
+                       IsFetching="@isPersisting"
+                       ErrorMessage="@editorErrorMessage"
+                       OnSave="@SaveWorkspaceAsync"
+                       OnCancel="@CloseEditorModal"
+                       OnFetchRepositories="@FetchRepositoriesAsync" />
 
 @if (showDeleteModal)
 {
@@ -289,7 +178,6 @@
     private bool isRepoOnly;
     private bool hasConnectors;
     private string workspaceName = string.Empty;
-    private string repositorySearch = string.Empty;
     private string? editorErrorMessage;
     private string editorTitle = "Add Workspace";
     private int? editingWorkspaceId;
@@ -339,7 +227,6 @@
         isRepoOnly = false;
         editorTitle = "Add Workspace";
         workspaceName = string.Empty;
-        repositorySearch = string.Empty;
         editorErrorMessage = null;
         selectedRepositoryIds = new HashSet<int>();
         await EnsureRepositoriesAsync();
@@ -358,7 +245,6 @@
         isRepoOnly = false;
         editorTitle = "Edit Workspace";
         workspaceName = workspace.Name;
-        repositorySearch = string.Empty;
         editorErrorMessage = null;
         selectedRepositoryIds = workspace.Repositories
             .Select(link => link.GitHubRepositoryId)
@@ -379,7 +265,6 @@
         isRepoOnly = true;
         editorTitle = "Add Repositories";
         workspaceName = workspace.Name;
-        repositorySearch = string.Empty;
         editorErrorMessage = null;
         selectedRepositoryIds = workspace.Repositories
             .Select(link => link.GitHubRepositoryId)
@@ -516,60 +401,6 @@
         finally
         {
             isTogglingDefault = false;
-        }
-    }
-
-    private List<GitHubRepositoryEntry> GetFilteredRepositories()
-    {
-        if (repositories == null)
-        {
-            return new List<GitHubRepositoryEntry>();
-        }
-
-        if (string.IsNullOrWhiteSpace(repositorySearch))
-        {
-            return repositories;
-        }
-
-        return repositories.Where(repository =>
-            repository.ConnectorName.Contains(repositorySearch, StringComparison.OrdinalIgnoreCase) ||
-            (repository.OrgName?.Contains(repositorySearch, StringComparison.OrdinalIgnoreCase) ?? false) ||
-            repository.RepositoryName.Contains(repositorySearch, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-    }
-
-    private void ToggleRepository(int repositoryId, bool isSelected)
-    {
-        if (isSelected)
-        {
-            selectedRepositoryIds.Add(repositoryId);
-        }
-        else
-        {
-            selectedRepositoryIds.Remove(repositoryId);
-        }
-    }
-
-    private bool AreAllFilteredSelected(IReadOnlyCollection<GitHubRepositoryEntry> filtered)
-    {
-        return filtered.Count > 0 && filtered.All(item => selectedRepositoryIds.Contains(item.GitHubRepositoryId));
-    }
-
-    private void ToggleAllFiltered(IReadOnlyCollection<GitHubRepositoryEntry> filtered, bool isSelected)
-    {
-        if (isSelected)
-        {
-            foreach (var repository in filtered)
-            {
-                selectedRepositoryIds.Add(repository.GitHubRepositoryId);
-            }
-        }
-        else
-        {
-            foreach (var repository in filtered)
-            {
-                selectedRepositoryIds.Remove(repository.GitHubRepositoryId);
-            }
         }
     }
 
