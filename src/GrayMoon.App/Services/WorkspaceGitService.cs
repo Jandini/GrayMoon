@@ -104,7 +104,7 @@ public class WorkspaceGitService
                 return false;
             }
 
-            var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, cancellationToken);
+            var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, useCacheIfAvailable: true, cancellationToken);
             if (gitVersion == null)
             {
                 _logger.LogDebug("Repository {RepoName} failed to get version", repo.RepositoryName);
@@ -124,6 +124,57 @@ public class WorkspaceGitService
 
         _logger.LogDebug("Workspace {WorkspaceName} is in sync", workspace.Name);
         return true;
+    }
+
+    public async Task<IReadOnlyDictionary<int, bool>> GetRepoSyncStatusAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var result = new Dictionary<int, bool>();
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+        {
+            return result;
+        }
+
+        var workspacePath = _workspaceService.GetWorkspacePath(workspace.Name);
+
+        var repos = workspace.Repositories
+            .Select(link => link.GitHubRepository)
+            .Where(r => r != null)
+            .Cast<GitHubRepository>()
+            .ToList();
+
+        if (repos.Count == 0)
+        {
+            return result;
+        }
+
+        foreach (var repo in repos)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var repoPath = Path.Combine(workspacePath, repo.RepositoryName);
+
+            if (!Directory.Exists(repoPath))
+            {
+                result[repo.GitHubRepositoryId] = false;
+                continue;
+            }
+
+            var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, useCacheIfAvailable: true, cancellationToken);
+            if (gitVersion == null)
+            {
+                result[repo.GitHubRepositoryId] = false;
+                continue;
+            }
+
+            var diskVersion = gitVersion.SemVer ?? gitVersion.FullSemVer;
+            var diskBranch = gitVersion.BranchName ?? gitVersion.EscapedBranchName;
+
+            var inSync = diskVersion == repo.GitVersion && diskBranch == repo.BranchName;
+            result[repo.GitHubRepositoryId] = inSync;
+        }
+
+        return result;
     }
 
     private async Task PersistVersionsAsync(

@@ -49,6 +49,11 @@
     width: 12%;
 }
 
+.col-sync {
+    width: 6%;
+    text-align: center;
+}
+
 .col-visibility {
     width: 8%;
     text-align: center;

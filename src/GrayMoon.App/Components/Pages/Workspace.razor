@@ -24,7 +24,7 @@
                 &nbsp;
             </p>
         </div>
-        <button class="btn @(isOutOfSync ? "btn-danger" : "btn-primary")"
+        <button class="btn @(isOutOfSync == null ? "btn-secondary" : isOutOfSync == true ? "btn-danger" : "btn-success")"
                 @onclick="SyncAsync"
                 disabled="@(isSyncing || repositories.Count == 0)">
             Sync
@@ -48,6 +48,7 @@
                                 <th class="col-repo">Repository</th>
                                 <th class="col-version">Version</th>
                                 <th class="col-branch">Branch</th>
+                                <th class="col-sync">Status</th>
                                 <th class="col-visibility">Visibility</th>
                                 <th class="col-owner">Owner</th>
                                 <th class="col-connector">Connector</th>
@@ -57,7 +58,7 @@
                             @if (isLoading)
                             {
                                 <tr>
-                                    <td colspan="6" class="text-center text-muted py-4">
+                                    <td colspan="7" class="text-center text-muted py-4">
                                         Loading workspace...
                                     </td>
                                 </tr>
@@ -65,7 +66,7 @@
                             else if (repositories.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="6" class="text-center text-muted py-4">
+                                    <td colspan="7" class="text-center text-muted py-4">
                                         No repositories assigned to this workspace.
                                     </td>
                                 </tr>
@@ -78,6 +79,7 @@
                                         <td class="col-repo"><strong>@repository.RepositoryName</strong></td>
                                         <td class="col-version text-muted">@GetRepoVersion(repository.GitHubRepositoryId)</td>
                                         <td class="col-branch text-muted">@GetRepoBranch(repository.GitHubRepositoryId)</td>
+                                        <td class="col-sync">@GetRepoSyncBadge(repository.GitHubRepositoryId)</td>
                                         <td class="col-visibility">
                                             <span class="badge @(repository.Visibility == "Private" ? "badge-private" : "badge-public")">
                                                 @repository.Visibility.ToLowerInvariant()
@@ -108,7 +110,8 @@
     private string? errorMessage;
     private bool isLoading = true;
     private bool isSyncing = false;
-    private bool isOutOfSync = false;
+    private bool? isOutOfSync = null;
+    private IReadOnlyDictionary<int, bool>? repoSyncStatus;
     private CancellationTokenSource? _syncCheckCts;
 
     protected override async Task OnInitializedAsync()
@@ -129,8 +132,9 @@
 
         try
         {
-            var inSync = await WorkspaceGitService.IsInSyncAsync(WorkspaceId, _syncCheckCts.Token);
-            isOutOfSync = !inSync;
+            var status = await WorkspaceGitService.GetRepoSyncStatusAsync(WorkspaceId, _syncCheckCts.Token);
+            repoSyncStatus = status;
+            isOutOfSync = status.Values.Any(v => !v);
             await InvokeAsync(StateHasChanged);
         }
         catch (OperationCanceledException)
@@ -196,6 +200,19 @@
         return repo?.BranchName ?? "-";
     }
 
+    private RenderFragment GetRepoSyncBadge(int repositoryId) => builder =>
+    {
+        if (repoSyncStatus?.TryGetValue(repositoryId, out var inSync) == true)
+        {
+            var bgColor = inSync ? "#198754" : "#dc3545";
+            builder.OpenElement(0, "span");
+            builder.AddAttribute(1, "class", "badge");
+            builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: #fff;");
+            builder.AddContent(3, "sync");
+            builder.CloseElement();
+        }
+    };
+
     private async Task SyncAsync()
     {
         if (workspace == null || repositories.Count == 0 || isSyncing)
@@ -225,6 +242,7 @@
             }
 
             isOutOfSync = false;
+            repoSyncStatus = repositories.ToDictionary(r => r.GitHubRepositoryId, _ => true);
         }
         catch (Exception ex)
         {
