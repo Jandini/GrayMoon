@@ -77,6 +77,9 @@ public class WorkspaceGitService
 
         await PersistVersionsAsync(workspaceId, results, cancellationToken);
 
+        var isInSync = results.All(r => r.Info.Version != "-" && r.Info.Branch != "-");
+        await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
+
         _logger.LogDebug("Sync completed for workspace {WorkspaceName}", workspace.Name);
         return results.ToDictionary(r => r.RepoId, r => r.Info);
     }

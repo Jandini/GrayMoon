@@ -33,11 +33,39 @@ builder.Services.AddHttpClient<GitHubService>();
 
 var app = builder.Build();
 
-// Ensure the local SQLite database is created
+// Ensure the local SQLite database is created and migrate schema if needed
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     dbContext.Database.EnsureCreated();
+    await MigrateWorkspaceSyncMetadataAsync(dbContext);
+}
+
+static async Task MigrateWorkspaceSyncMetadataAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Workspaces') WHERE name='LastSyncedAt'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Workspaces ADD COLUMN LastSyncedAt TEXT";
+                await cmd.ExecuteNonQueryAsync();
+                cmd.CommandText = "ALTER TABLE Workspaces ADD COLUMN IsInSync INTEGER NOT NULL DEFAULT 0";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
 }
 
 // Configure the HTTP request pipeline.

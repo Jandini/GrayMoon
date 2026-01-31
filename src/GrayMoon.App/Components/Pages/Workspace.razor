@@ -104,7 +104,7 @@
     private string? errorMessage;
     private bool isLoading = true;
     private bool isSyncing = false;
-    private string syncProgressMessage = "Syncing...";
+    private string syncProgressMessage = "Synchronizing...";
     private bool? isOutOfSync = null;
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private CancellationTokenSource? _syncCheckCts;
@@ -120,6 +120,26 @@
     {
         if (workspace == null || workspaceRepositories.Count == 0)
         {
+            return;
+        }
+
+        var lastSynced = workspace.LastSyncedAt;
+        var shouldValidate = lastSynced == null || (DateTime.UtcNow - lastSynced.Value).TotalHours >= 1;
+
+        if (!shouldValidate)
+        {
+            isOutOfSync = !workspace.IsInSync;
+            if (workspace.IsInSync)
+            {
+                repoSyncStatus = workspaceRepositories
+                    .Where(wr => wr.GitHubRepository != null)
+                    .ToDictionary(wr => wr.GitHubRepositoryId, _ => RepoSyncStatus.InSync);
+            }
+            else
+            {
+                repoSyncStatus = new Dictionary<int, RepoSyncStatus>();
+            }
+            await InvokeAsync(StateHasChanged);
             return;
         }
 
@@ -224,7 +244,7 @@
         _syncCts = new CancellationTokenSource();
 
         isSyncing = true;
-        syncProgressMessage = "Syncing...";
+        syncProgressMessage = "Synchronizing...";
         errorMessage = null;
         StateHasChanged();
         await Task.Yield();

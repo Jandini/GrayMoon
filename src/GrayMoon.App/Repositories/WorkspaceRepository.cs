@@ -90,6 +90,19 @@ public class WorkspaceRepository
         await _dbContext.SaveChangesAsync();
     }
 
+    public async Task UpdateSyncMetadataAsync(int workspaceId, DateTime lastSyncedAt, bool isInSync)
+    {
+        var workspace = await _dbContext.Workspaces
+            .FirstOrDefaultAsync(w => w.WorkspaceId == workspaceId);
+
+        if (workspace != null)
+        {
+            workspace.LastSyncedAt = lastSyncedAt;
+            workspace.IsInSync = isInSync;
+            await _dbContext.SaveChangesAsync();
+        }
+    }
+
     public async Task<Workspace?> GetDefaultAsync()
     {
         return await _dbContext.Workspaces

@@ -81,6 +81,9 @@ public class AppDbContext : DbContext
             entity.Property(workspace => workspace.Name)
                 .IsRequired()
                 .HasMaxLength(200);
+
+            entity.Property(workspace => workspace.IsInSync)
+                .HasDefaultValue(false);
         });
 
         modelBuilder.Entity<WorkspaceRepositoryLink>(entity =>
