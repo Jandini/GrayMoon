@@ -74,16 +74,18 @@
                                                 <input class="form-check-input"
                                                        type="checkbox"
                                                        checked="@AreAllFilteredSelected(filtered)"
-                                                       @onchange="(ChangeEventArgs e) => ToggleAllFiltered(filtered, (bool)e.Value!)" />
+                                                       @onchange="(ChangeEventArgs e) => _ = ToggleAllFiltered(filtered, (bool)e.Value!)" />
                                             </th>
                                             <th>Repository</th>
+                                            <th>Owner</th>
+                                            <th>Connector</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         @if (filtered.Count == 0)
                                         {
                                             <tr>
-                                                <td colspan="2" class="text-muted p-2">No repositories match your search.</td>
+                                                <td colspan="4" class="text-muted p-2">No repositories match your search.</td>
                                             </tr>
                                         }
                                         else
@@ -95,11 +97,21 @@
                                                         <input class="form-check-input"
                                                                type="checkbox"
                                                                checked="@SelectedRepositoryIds.Contains(repository.GitHubRepositoryId)"
-                                                               @onchange="(ChangeEventArgs e) => ToggleRepository(repository.GitHubRepositoryId, (bool)e.Value!)" />
+                                                               @onchange="(ChangeEventArgs e) => _ = ToggleRepository(repository.GitHubRepositoryId, (bool)e.Value!)" />
                                                     </td>
                                                     <td>
                                                         <span class="repo-name-cell" title="@repository.RepositoryName">
                                                             @repository.RepositoryName
+                                                        </span>
+                                                    </td>
+                                                    <td>
+                                                        <span class="repo-name-cell" title="@(repository.OrgName ?? "-")">
+                                                            @(repository.OrgName ?? "-")
+                                                        </span>
+                                                    </td>
+                                                    <td>
+                                                        <span class="repo-name-cell" title="@repository.ConnectorName">
+                                                            @repository.ConnectorName
                                                         </span>
                                                     </td>
                                                 </tr>
@@ -177,7 +189,7 @@
             .ToList();
     }
 
-    private void ToggleRepository(int repositoryId, bool isSelected)
+    private async Task ToggleRepository(int repositoryId, bool isSelected)
     {
         if (isSelected)
         {
@@ -187,6 +199,7 @@
         {
             SelectedRepositoryIds.Remove(repositoryId);
         }
+        await InvokeAsync(StateHasChanged);
     }
 
     private bool AreAllFilteredSelected(IReadOnlyCollection<GitHubRepositoryEntry> filtered)
@@ -194,7 +207,7 @@
         return filtered.Count > 0 && filtered.All(item => SelectedRepositoryIds.Contains(item.GitHubRepositoryId));
     }
 
-    private void ToggleAllFiltered(IReadOnlyCollection<GitHubRepositoryEntry> filtered, bool isSelected)
+    private async Task ToggleAllFiltered(IReadOnlyCollection<GitHubRepositoryEntry> filtered, bool isSelected)
     {
         if (isSelected)
         {
@@ -210,5 +223,6 @@
                 SelectedRepositoryIds.Remove(repository.GitHubRepositoryId);
             }
         }
+        await InvokeAsync(StateHasChanged);
     }
 }
