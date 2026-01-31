@@ -1,3 +1,18 @@
+.repository-list {
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    border: 1px solid #5a5a5a;
+    border-radius: 6px;
+}
+
+.repositories-table {
+    width: 100%;
+    margin-bottom: 0;
+}
+
 .repositories-table th,
 .repositories-table td {
     white-space: nowrap;
@@ -5,40 +20,55 @@
     text-overflow: ellipsis;
 }
 
-.repositories-table thead,
-.repositories-table tbody tr {
-    display: table;
-    width: 100%;
-    table-layout: fixed;
-}
-
-.repositories-table tbody {
-    display: block;
-    max-height: calc(100vh - (var(--bs-gutter-x) + var(--bs-gutter-x) + 260px));
-    overflow-y: auto;
-    overflow-x: hidden;
+.repositories-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background-color: var(--bs-dark);
 }
 
 .page-container {
-    padding-block: var(--bs-gutter-x);
+    padding: var(--bs-gutter-x);
+    padding-bottom: 1.5rem;
     display: flex;
     flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.page-container .page-header,
+.page-container .alert {
+    flex-shrink: 0;
 }
 
 .page-card {
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
 .page-card .card-body {
     display: flex;
     flex-direction: column;
-    height: 100%;
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
+    padding: 0;
 }
 
 .page-card .table-responsive {
-    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
     min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
 }
 
 .col-repo {
