@@ -17,16 +17,16 @@
         <div>
             <h2>@(workspace?.Name ?? "Workspace")</h2>
             <p class="text-muted mb-0" style="min-height: 1.5rem;">
-                @if (repositories.Count > 0)
+                @if (workspaceRepositories.Count > 0)
                 {
-                    @($"{repositories.Count} {(repositories.Count == 1 ? "repository" : "repositories")}")
+                    @($"{workspaceRepositories.Count} {(workspaceRepositories.Count == 1 ? "repository" : "repositories")}")
                 }
                 &nbsp;
             </p>
         </div>
         <button class="btn @(isOutOfSync == null ? "btn-secondary" : isOutOfSync == true ? "btn-danger" : "btn-success")"
                 @onclick="SyncAsync"
-                disabled="@(isSyncing || repositories.Count == 0)">
+                disabled="@(isSyncing || workspaceRepositories.Count == 0)">
             Sync
         </button>
     </div>
@@ -63,7 +63,7 @@
                                     </td>
                                 </tr>
                             }
-                            else if (repositories.Count == 0)
+                            else if (workspaceRepositories.Count == 0)
                             {
                                 <tr>
                                     <td colspan="7" class="text-center text-muted py-4">
@@ -73,21 +73,25 @@
                             }
                             else
                             {
-                                @foreach (var repository in repositories)
+                                @foreach (var wr in workspaceRepositories)
                                 {
-                                    <tr>
-                                        <td class="col-repo"><strong>@repository.RepositoryName</strong></td>
-                                        <td class="col-version text-muted">@GetRepoVersion(repository.GitHubRepositoryId)</td>
-                                        <td class="col-branch text-muted">@GetRepoBranch(repository.GitHubRepositoryId)</td>
-                                        <td class="col-sync">@GetRepoSyncBadge(repository.GitHubRepositoryId)</td>
-                                        <td class="col-visibility">
-                                            <span class="badge @(repository.Visibility == "Private" ? "badge-private" : "badge-public")">
-                                                @repository.Visibility.ToLowerInvariant()
-                                            </span>
-                                        </td>
-                                        <td class="col-owner">@(string.IsNullOrWhiteSpace(repository.OrgName) ? "-" : repository.OrgName)</td>
-                                        <td class="col-connector">@(repository.GitHubConnector?.ConnectorName ?? "Unknown")</td>
-                                    </tr>
+                                    var repo = wr.GitHubRepository;
+                                    @if (repo != null)
+                                    {
+                                        <tr>
+                                            <td class="col-repo"><strong>@repo.RepositoryName</strong></td>
+                                            <td class="col-version text-muted">@(wr.GitVersion ?? "-")</td>
+                                            <td class="col-branch text-muted">@(wr.BranchName ?? "-")</td>
+                                            <td class="col-sync">@GetRepoSyncBadge(repo.GitHubRepositoryId)</td>
+                                            <td class="col-visibility">
+                                                <span class="badge @(repo.Visibility == "Private" ? "badge-private" : "badge-public")">
+                                                    @repo.Visibility.ToLowerInvariant()
+                                                </span>
+                                            </td>
+                                            <td class="col-owner">@(string.IsNullOrWhiteSpace(repo.OrgName) ? "-" : repo.OrgName)</td>
+                                            <td class="col-connector">@(repo.GitHubConnector?.ConnectorName ?? "Unknown")</td>
+                                        </tr>
+                                    }
                                 }
                             }
                         </tbody>
@@ -105,7 +109,7 @@
     [Parameter] public int WorkspaceId { get; set; }
 
     private WorkspaceModel? workspace;
-    private List<GitHubRepository> repositories = new();
+    private List<WorkspaceRepositoryLink> workspaceRepositories = new();
     private IReadOnlyDictionary<int, RepoGitVersionInfo> repoGitInfos = new Dictionary<int, RepoGitVersionInfo>();
     private string? errorMessage;
     private bool isLoading = true;
@@ -122,7 +126,7 @@
 
     private async Task CheckSyncStatusAsync()
     {
-        if (workspace == null || repositories.Count == 0)
+        if (workspace == null || workspaceRepositories.Count == 0)
         {
             return;
         }
@@ -165,39 +169,24 @@
             if (workspace == null)
             {
                 errorMessage = "Workspace not found.";
-                repositories = new List<GitHubRepository>();
+                workspaceRepositories = new List<WorkspaceRepositoryLink>();
                 return;
             }
 
-            repositories = workspace.Repositories
-                .Select(link => link.GitHubRepository)
-                .Where(repository => repository != null)
-                .Select(repository => repository!)
-                .OrderBy(repository => repository.RepositoryName)
+            workspaceRepositories = workspace.Repositories
+                .OrderBy(wr => wr.GitHubRepository?.RepositoryName)
                 .ToList();
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error loading workspace {WorkspaceId}", WorkspaceId);
             errorMessage = "Failed to load workspace. Please try again later.";
-            repositories = new List<GitHubRepository>();
+            workspaceRepositories = new List<WorkspaceRepositoryLink>();
         }
         finally
         {
             isLoading = false;
         }
-    }
-
-    private string GetRepoVersion(int repositoryId)
-    {
-        var repo = repositories.FirstOrDefault(r => r.GitHubRepositoryId == repositoryId);
-        return repo?.GitVersion ?? "-";
-    }
-
-    private string GetRepoBranch(int repositoryId)
-    {
-        var repo = repositories.FirstOrDefault(r => r.GitHubRepositoryId == repositoryId);
-        return repo?.BranchName ?? "-";
     }
 
     private RenderFragment GetRepoSyncBadge(int repositoryId) => builder =>
@@ -221,7 +210,7 @@
 
     private async Task SyncAsync()
     {
-        if (workspace == null || repositories.Count == 0 || isSyncing)
+        if (workspace == null || workspaceRepositories.Count == 0 || isSyncing)
         {
             return;
         }
@@ -238,17 +227,19 @@
             var results = await WorkspaceGitService.SyncAsync(WorkspaceId);
             repoGitInfos = results;
 
-            foreach (var repo in repositories)
+            foreach (var wr in workspaceRepositories)
             {
-                if (repoGitInfos.TryGetValue(repo.GitHubRepositoryId, out var info))
+                if (wr.GitHubRepository != null && repoGitInfos.TryGetValue(wr.GitHubRepositoryId, out var info))
                 {
-                    repo.GitVersion = info.Version == "-" ? null : info.Version;
-                    repo.BranchName = info.Branch == "-" ? null : info.Branch;
+                    wr.GitVersion = info.Version == "-" ? null : info.Version;
+                    wr.BranchName = info.Branch == "-" ? null : info.Branch;
                 }
             }
 
             isOutOfSync = false;
-            repoSyncStatus = repositories.ToDictionary(r => r.GitHubRepositoryId, _ => RepoSyncStatus.InSync);
+            repoSyncStatus = workspaceRepositories
+                .Where(wr => wr.GitHubRepository != null)
+                .ToDictionary(wr => wr.GitHubRepositoryId, _ => RepoSyncStatus.InSync);
         }
         catch (Exception ex)
         {

@@ -27,10 +27,4 @@ public class GitHubRepository
     [Required]
     [MaxLength(500)]
     public string CloneUrl { get; set; } = string.Empty;
-
-    [MaxLength(100)]
-    public string? GitVersion { get; set; }
-
-    [MaxLength(200)]
-    public string? BranchName { get; set; }
 }

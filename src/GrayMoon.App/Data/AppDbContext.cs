@@ -13,7 +13,7 @@ public class AppDbContext : DbContext
     public DbSet<GitHubConnector> GitHubConnectors => Set<GitHubConnector>();
     public DbSet<GitHubRepository> GitHubRepositories => Set<GitHubRepository>();
     public DbSet<Workspace> Workspaces => Set<Workspace>();
-    public DbSet<WorkspaceRepositoryLink> WorkspaceRepositoryLinks => Set<WorkspaceRepositoryLink>();
+    public DbSet<WorkspaceRepositoryLink> WorkspaceRepositories => Set<WorkspaceRepositoryLink>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -67,12 +67,6 @@ public class AppDbContext : DbContext
                 .IsRequired()
                 .HasMaxLength(500);
 
-            entity.Property(repository => repository.GitVersion)
-                .HasMaxLength(100);
-
-            entity.Property(repository => repository.BranchName)
-                .HasMaxLength(200);
-
             entity.HasOne(repository => repository.GitHubConnector)
                 .WithMany()
                 .HasForeignKey(repository => repository.GitHubConnectorId)
@@ -91,17 +85,23 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<WorkspaceRepositoryLink>(entity =>
         {
-            entity.HasIndex(link => new { link.WorkspaceId, link.GitHubRepositoryId })
+            entity.HasIndex(wr => new { wr.WorkspaceId, wr.GitHubRepositoryId })
                 .IsUnique();
 
-            entity.HasOne(link => link.Workspace)
+            entity.Property(wr => wr.GitVersion)
+                .HasMaxLength(100);
+
+            entity.Property(wr => wr.BranchName)
+                .HasMaxLength(200);
+
+            entity.HasOne(wr => wr.Workspace)
                 .WithMany(workspace => workspace.Repositories)
-                .HasForeignKey(link => link.WorkspaceId)
+                .HasForeignKey(wr => wr.WorkspaceId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            entity.HasOne(link => link.GitHubRepository)
+            entity.HasOne(wr => wr.GitHubRepository)
                 .WithMany()
-                .HasForeignKey(link => link.GitHubRepositoryId)
+                .HasForeignKey(wr => wr.GitHubRepositoryId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

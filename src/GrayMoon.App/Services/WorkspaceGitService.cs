@@ -63,7 +63,7 @@ public class WorkspaceGitService
         var syncTasks = repos.Select(repo => RunSyncJobAsync(repo, workspacePath, semaphore, cancellationToken));
         var results = await Task.WhenAll(syncTasks);
 
-        await PersistVersionsAsync(results, cancellationToken);
+        await PersistVersionsAsync(workspaceId, results, cancellationToken);
 
         _logger.LogDebug("Sync completed for workspace {WorkspaceName}", workspace.Name);
         return results.ToDictionary(r => r.RepoId, r => r.Info);
@@ -79,22 +79,21 @@ public class WorkspaceGitService
 
         var workspacePath = _workspaceService.GetWorkspacePath(workspace.Name);
 
-        var repos = workspace.Repositories
-            .Select(link => link.GitHubRepository)
-            .Where(r => r != null)
-            .Cast<GitHubRepository>()
-            .ToList();
+        var workspaceRepos = workspace.Repositories.ToList();
 
-        if (repos.Count == 0)
+        if (workspaceRepos.Count == 0)
         {
             return true;
         }
 
-        _logger.LogDebug("Checking sync status for workspace {WorkspaceName} ({RepoCount} repositories)", workspace.Name, repos.Count);
+        _logger.LogDebug("Checking sync status for workspace {WorkspaceName} ({RepoCount} repositories)", workspace.Name, workspaceRepos.Count);
 
-        foreach (var repo in repos)
+        foreach (var wr in workspaceRepos)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            var repo = wr.GitHubRepository;
+            if (repo == null) continue;
 
             var repoPath = Path.Combine(workspacePath, repo.RepositoryName);
 
@@ -114,10 +113,10 @@ public class WorkspaceGitService
             var diskVersion = gitVersion.SemVer ?? gitVersion.FullSemVer;
             var diskBranch = gitVersion.BranchName ?? gitVersion.EscapedBranchName;
 
-            if (diskVersion != repo.GitVersion || diskBranch != repo.BranchName)
+            if (diskVersion != wr.GitVersion || diskBranch != wr.BranchName)
             {
                 _logger.LogDebug("Repository {RepoName} version/branch mismatch. Disk: {DiskVersion}/{DiskBranch}, Persisted: {PersistedVersion}/{PersistedBranch}",
-                    repo.RepositoryName, diskVersion, diskBranch, repo.GitVersion, repo.BranchName);
+                    repo.RepositoryName, diskVersion, diskBranch, wr.GitVersion, wr.BranchName);
                 return false;
             }
         }
@@ -137,20 +136,19 @@ public class WorkspaceGitService
 
         var workspacePath = _workspaceService.GetWorkspacePath(workspace.Name);
 
-        var repos = workspace.Repositories
-            .Select(link => link.GitHubRepository)
-            .Where(r => r != null)
-            .Cast<GitHubRepository>()
-            .ToList();
+        var workspaceRepos = workspace.Repositories.ToList();
 
-        if (repos.Count == 0)
+        if (workspaceRepos.Count == 0)
         {
             return result;
         }
 
-        foreach (var repo in repos)
+        foreach (var wr in workspaceRepos)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            var repo = wr.GitHubRepository;
+            if (repo == null) continue;
 
             var repoPath = Path.Combine(workspacePath, repo.RepositoryName);
 
@@ -170,7 +168,7 @@ public class WorkspaceGitService
             var diskVersion = gitVersion.SemVer ?? gitVersion.FullSemVer;
             var diskBranch = gitVersion.BranchName ?? gitVersion.EscapedBranchName;
 
-            if (diskVersion == repo.GitVersion && diskBranch == repo.BranchName)
+            if (diskVersion == wr.GitVersion && diskBranch == wr.BranchName)
             {
                 result[repo.GitHubRepositoryId] = RepoSyncStatus.InSync;
             }
@@ -184,6 +182,7 @@ public class WorkspaceGitService
     }
 
     private async Task PersistVersionsAsync(
+        int workspaceId,
         IEnumerable<(int RepoId, RepoGitVersionInfo Info)> results,
         CancellationToken cancellationToken)
     {
@@ -194,17 +193,17 @@ public class WorkspaceGitService
         }
 
         var repoIds = updates.Select(u => u.RepoId).ToList();
-        var repositoriesToUpdate = await _dbContext.GitHubRepositories
-            .Where(r => repoIds.Contains(r.GitHubRepositoryId))
+        var workspaceReposToUpdate = await _dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.GitHubRepositoryId))
             .ToListAsync(cancellationToken);
 
         foreach (var update in updates)
         {
-            var repo = repositoriesToUpdate.FirstOrDefault(r => r.GitHubRepositoryId == update.RepoId);
-            if (repo != null)
+            var wr = workspaceReposToUpdate.FirstOrDefault(wr => wr.GitHubRepositoryId == update.RepoId);
+            if (wr != null)
             {
-                repo.GitVersion = update.Info.Version == "-" ? null : update.Info.Version;
-                repo.BranchName = update.Info.Branch == "-" ? null : update.Info.Branch;
+                wr.GitVersion = update.Info.Version == "-" ? null : update.Info.Version;
+                wr.BranchName = update.Info.Branch == "-" ? null : update.Info.Branch;
             }
         }
 
