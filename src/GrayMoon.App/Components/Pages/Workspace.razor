@@ -145,11 +145,18 @@
 
         _syncCheckCts?.Cancel();
         _syncCheckCts = new CancellationTokenSource();
+        repoSyncStatus = new Dictionary<int, RepoSyncStatus>();
 
         try
         {
-            var status = await WorkspaceGitService.GetRepoSyncStatusAsync(WorkspaceId, _syncCheckCts.Token);
-            repoSyncStatus = new Dictionary<int, RepoSyncStatus>(status);
+            var status = await WorkspaceGitService.GetRepoSyncStatusAsync(
+                WorkspaceId,
+                onProgress: (repoId, repoStatus) =>
+                {
+                    repoSyncStatus[repoId] = repoStatus;
+                    _ = InvokeAsync(StateHasChanged);
+                },
+                cancellationToken: _syncCheckCts.Token);
             isOutOfSync = status.Values.Any(v => v != RepoSyncStatus.InSync);
             await InvokeAsync(StateHasChanged);
         }

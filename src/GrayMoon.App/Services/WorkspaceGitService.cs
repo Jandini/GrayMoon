@@ -140,7 +140,10 @@ public class WorkspaceGitService
         return true;
     }
 
-    public async Task<IReadOnlyDictionary<int, RepoSyncStatus>> GetRepoSyncStatusAsync(int workspaceId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyDictionary<int, RepoSyncStatus>> GetRepoSyncStatusAsync(
+        int workspaceId,
+        Action<int, RepoSyncStatus>? onProgress = null,
+        CancellationToken cancellationToken = default)
     {
         var result = new Dictionary<int, RepoSyncStatus>();
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
@@ -166,32 +169,35 @@ public class WorkspaceGitService
             if (repo == null) continue;
 
             var repoPath = Path.Combine(workspacePath, repo.RepositoryName);
+            RepoSyncStatus status;
 
             if (!Directory.Exists(repoPath))
             {
-                result[repo.GitHubRepositoryId] = RepoSyncStatus.NotCloned;
-                continue;
-            }
-
-            var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, useCacheIfAvailable: true, cancellationToken);
-            if (gitVersion == null)
-            {
-                result[repo.GitHubRepositoryId] = RepoSyncStatus.VersionMismatch;
-                continue;
-            }
-
-            var diskVersion = gitVersion.SemVer ?? gitVersion.FullSemVer;
-            var diskBranch = gitVersion.BranchName ?? gitVersion.EscapedBranchName;
-
-            if (diskVersion == wr.GitVersion && diskBranch == wr.BranchName)
-            {
-                result[repo.GitHubRepositoryId] = RepoSyncStatus.InSync;
+                status = RepoSyncStatus.NotCloned;
             }
             else
             {
-                result[repo.GitHubRepositoryId] = RepoSyncStatus.VersionMismatch;
+                var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, useCacheIfAvailable: true, cancellationToken);
+                if (gitVersion == null)
+                {
+                    status = RepoSyncStatus.VersionMismatch;
+                }
+                else
+                {
+                    var diskVersion = gitVersion.SemVer ?? gitVersion.FullSemVer;
+                    var diskBranch = gitVersion.BranchName ?? gitVersion.EscapedBranchName;
+                    status = diskVersion == wr.GitVersion && diskBranch == wr.BranchName
+                        ? RepoSyncStatus.InSync
+                        : RepoSyncStatus.VersionMismatch;
+                }
             }
+
+            result[repo.GitHubRepositoryId] = status;
+            onProgress?.Invoke(repo.GitHubRepositoryId, status);
         }
+
+        var isInSync = result.Values.All(v => v == RepoSyncStatus.InSync);
+        await _workspaceRepository.UpdateIsInSyncAsync(workspaceId, isInSync);
 
         return result;
     }

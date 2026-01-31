@@ -103,6 +103,18 @@ public class WorkspaceRepository
         }
     }
 
+    public async Task UpdateIsInSyncAsync(int workspaceId, bool isInSync)
+    {
+        var workspace = await _dbContext.Workspaces
+            .FirstOrDefaultAsync(w => w.WorkspaceId == workspaceId);
+
+        if (workspace != null)
+        {
+            workspace.IsInSync = isInSync;
+            await _dbContext.SaveChangesAsync();
+        }
+    }
+
     public async Task<Workspace?> GetDefaultAsync()
     {
         return await _dbContext.Workspaces
