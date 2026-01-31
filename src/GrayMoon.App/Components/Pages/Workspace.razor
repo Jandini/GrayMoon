@@ -203,6 +203,7 @@
             return;
         }
 
+        _syncCheckCts?.Cancel();
         isSyncing = true;
         errorMessage = null;
         StateHasChanged();
@@ -210,7 +211,6 @@
 
         try
         {
-            _syncCheckCts?.Cancel();
 
             var results = await WorkspaceGitService.SyncAsync(WorkspaceId);
             repoGitInfos = results;

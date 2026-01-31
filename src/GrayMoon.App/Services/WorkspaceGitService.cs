@@ -57,12 +57,15 @@ public class WorkspaceGitService
             return new Dictionary<int, RepoGitVersionInfo>();
         }
 
+        _logger.LogDebug("Starting sync for workspace {WorkspaceName} ({RepoCount} repositories)", workspace.Name, repos.Count);
+
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
         var syncTasks = repos.Select(repo => RunSyncJobAsync(repo, workspacePath, semaphore, cancellationToken));
         var results = await Task.WhenAll(syncTasks);
 
         await PersistVersionsAsync(results, cancellationToken);
 
+        _logger.LogDebug("Sync completed for workspace {WorkspaceName}", workspace.Name);
         return results.ToDictionary(r => r.RepoId, r => r.Info);
     }
 
@@ -86,6 +89,8 @@ public class WorkspaceGitService
         {
             return true;
         }
+
+        _logger.LogDebug("Checking sync status for workspace {WorkspaceName} ({RepoCount} repositories)", workspace.Name, repos.Count);
 
         foreach (var repo in repos)
         {
@@ -117,6 +122,7 @@ public class WorkspaceGitService
             }
         }
 
+        _logger.LogDebug("Workspace {WorkspaceName} is in sync", workspace.Name);
         return true;
     }
 
@@ -163,6 +169,7 @@ public class WorkspaceGitService
             {
                 if (!string.IsNullOrWhiteSpace(repo.CloneUrl))
                 {
+                    _logger.LogDebug("Cloning {RepositoryName}", repo.RepositoryName);
                     await _gitCommandService.CloneAsync(workspacePath, repo.CloneUrl, cancellationToken);
                 }
             }
@@ -171,6 +178,7 @@ public class WorkspaceGitService
             var branch = "-";
             if (Directory.Exists(repoPath))
             {
+                _logger.LogDebug("Getting version for {RepositoryName}", repo.RepositoryName);
                 var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, cancellationToken);
                 if (gitVersion != null)
                 {
