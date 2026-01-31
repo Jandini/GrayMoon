@@ -24,7 +24,7 @@
                 &nbsp;
             </p>
         </div>
-        <button class="btn @(isOutOfSync == null ? "btn-secondary" : isOutOfSync == true ? "btn-danger" : "btn-success")"
+        <button class="btn @(isOutOfSync == true ? "btn-danger" : "btn-primary")"
                 @onclick="SyncAsync"
                 disabled="@(isSyncing || workspaceRepositories.Count == 0)">
             Sync
