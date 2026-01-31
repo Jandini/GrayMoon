@@ -14,8 +14,8 @@ builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection("W
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// Database (SQLite) for persisted data
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=graymoon.db";
+// Database (SQLite) for persisted data - stored in db/ for easy container volume mounting
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=db/graymoon.db";
 builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connectionString));
 builder.Services.AddScoped<GitHubConnectorRepository>();
 builder.Services.AddScoped<GitHubRepositoryRepository>();
@@ -33,12 +33,30 @@ builder.Services.AddHttpClient<GitHubService>();
 
 var app = builder.Build();
 
+// Ensure the db directory exists (for both local dev and container volume mounts)
+var dbPath = GetDatabasePath(connectionString);
+if (!string.IsNullOrEmpty(dbPath))
+{
+    var dbDir = Path.GetDirectoryName(dbPath);
+    if (!string.IsNullOrEmpty(dbDir))
+        Directory.CreateDirectory(dbDir);
+}
+
 // Ensure the local SQLite database is created and migrate schema if needed
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     dbContext.Database.EnsureCreated();
     await MigrateWorkspaceSyncMetadataAsync(dbContext);
+}
+
+static string? GetDatabasePath(string connectionString)
+{
+    const string prefix = "Data Source=";
+    var idx = connectionString.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+    if (idx < 0) return null;
+    var path = connectionString[(idx + prefix.Length)..].Trim();
+    return string.IsNullOrEmpty(path) ? null : path;
 }
 
 static async Task MigrateWorkspaceSyncMetadataAsync(AppDbContext dbContext)

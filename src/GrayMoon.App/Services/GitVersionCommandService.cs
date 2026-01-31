@@ -148,10 +148,11 @@ public class GitVersionCommandService
 
     private async Task<GitVersionResult?> RunDotNetGitVersionAsync(string repositoryPath, CancellationToken cancellationToken)
     {
+        // Use dotnet-gitversion (in PATH from dotnet tool install -g) for Docker compatibility
         var startInfo = new System.Diagnostics.ProcessStartInfo
         {
-            FileName = "dotnet",
-            Arguments = "gitversion",
+            FileName = "dotnet-gitversion",
+            Arguments = "",
             WorkingDirectory = repositoryPath,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

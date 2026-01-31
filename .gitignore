@@ -419,3 +419,4 @@ FodyWeavers.xsd
 /src/GrayMoon.App/graymoon.db
 /src/GrayMoon.App/graymoon.db-shm
 /src/GrayMoon.App/graymoon.db-wal
+db/
