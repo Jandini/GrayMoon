@@ -5,7 +5,7 @@
     min-height: 0;
     max-height: 100%;
     overflow: hidden;
-    border: 1px solid #5a5a5a;
+    border: 1px solid #252526;
     border-radius: 6px;
 }
 
@@ -19,6 +19,25 @@
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
+    scrollbar-color: #4e4e52 #2d2d30;
+    scrollbar-width: thin;
+}
+
+.repository-list-body::-webkit-scrollbar {
+    width: 8px;
+}
+
+.repository-list-body::-webkit-scrollbar-track {
+    background: #2d2d30;
+}
+
+.repository-list-body::-webkit-scrollbar-thumb {
+    background: #4e4e52;
+    border-radius: 4px;
+}
+
+.repository-list-body::-webkit-scrollbar-thumb:hover {
+    background: #5e5e62;
 }
 
 .repository-list-body .repositories-table tbody tr:first-child td {
