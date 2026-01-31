@@ -1,5 +1,6 @@
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
+using GrayMoon.App.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
@@ -7,10 +8,12 @@ namespace GrayMoon.App.Repositories;
 public class WorkspaceRepository
 {
     private readonly AppDbContext _dbContext;
+    private readonly WorkspaceService _workspaceService;
 
-    public WorkspaceRepository(AppDbContext dbContext)
+    public WorkspaceRepository(AppDbContext dbContext, WorkspaceService workspaceService)
     {
-        _dbContext = dbContext;
+        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
     }
 
     public async Task<List<Workspace>> GetAllAsync()
@@ -43,6 +46,8 @@ public class WorkspaceRepository
         var workspace = new Workspace { Name = normalized };
         _dbContext.Workspaces.Add(workspace);
         await _dbContext.SaveChangesAsync();
+
+        _workspaceService.CreateDirectory(workspace.Name);
 
         await ReplaceRepositoriesAsync(workspace.WorkspaceId, repositoryIds);
         return workspace;
@@ -83,6 +88,31 @@ public class WorkspaceRepository
 
         _dbContext.Workspaces.Remove(workspace);
         await _dbContext.SaveChangesAsync();
+    }
+
+    public async Task UpdateSyncMetadataAsync(int workspaceId, DateTime lastSyncedAt, bool isInSync)
+    {
+        var workspace = await _dbContext.Workspaces
+            .FirstOrDefaultAsync(w => w.WorkspaceId == workspaceId);
+
+        if (workspace != null)
+        {
+            workspace.LastSyncedAt = lastSyncedAt;
+            workspace.IsInSync = isInSync;
+            await _dbContext.SaveChangesAsync();
+        }
+    }
+
+    public async Task UpdateIsInSyncAsync(int workspaceId, bool isInSync)
+    {
+        var workspace = await _dbContext.Workspaces
+            .FirstOrDefaultAsync(w => w.WorkspaceId == workspaceId);
+
+        if (workspace != null)
+        {
+            workspace.IsInSync = isInSync;
+            await _dbContext.SaveChangesAsync();
+        }
     }
 
     public async Task<Workspace?> GetDefaultAsync()
@@ -128,10 +158,10 @@ public class WorkspaceRepository
 
     private async Task ReplaceRepositoriesAsync(int workspaceId, IReadOnlyCollection<int> repositoryIds)
     {
-        var existing = _dbContext.WorkspaceRepositoryLinks
-            .Where(link => link.WorkspaceId == workspaceId);
+        var existing = _dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId);
 
-        _dbContext.WorkspaceRepositoryLinks.RemoveRange(existing);
+        _dbContext.WorkspaceRepositories.RemoveRange(existing);
         await _dbContext.SaveChangesAsync();
 
         if (repositoryIds.Count == 0)
@@ -139,16 +169,16 @@ public class WorkspaceRepository
             return;
         }
 
-        var links = repositoryIds
+        var workspaceRepos = repositoryIds
             .Distinct()
-            .Select(repositoryId => new WorkspaceRepositoryLink
+            .Select(repositoryId => new GrayMoon.App.Models.WorkspaceRepositoryLink
             {
                 WorkspaceId = workspaceId,
                 GitHubRepositoryId = repositoryId
             })
             .ToList();
 
-        await _dbContext.WorkspaceRepositoryLinks.AddRangeAsync(links);
+        await _dbContext.WorkspaceRepositories.AddRangeAsync(workspaceRepos);
         await _dbContext.SaveChangesAsync();
     }
 

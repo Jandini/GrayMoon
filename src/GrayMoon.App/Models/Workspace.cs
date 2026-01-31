@@ -12,5 +12,9 @@ public class Workspace
 
     public bool IsDefault { get; set; }
 
+    public DateTime? LastSyncedAt { get; set; }
+
+    public bool IsInSync { get; set; }
+
     public ICollection<WorkspaceRepositoryLink> Repositories { get; set; } = new List<WorkspaceRepositoryLink>();
 }

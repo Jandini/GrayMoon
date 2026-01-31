@@ -42,39 +42,23 @@
 }
 
 .col-repo {
-    width: 25%;
+    width: auto;
+    min-width: 0;
 }
 
-.col-owner {
-    width: 15%;
-}
-
-.col-visibility {
-    width: 10%;
+.col-sync {
+    width: 100px;
+    min-width: 100px;
+    max-width: 100px;
     text-align: center;
 }
 
-.col-connector {
-    width: 20%;
+.col-version {
+    width: auto;
+    min-width: 0;
 }
 
-.col-clone {
-    width: 30%;
-}
-
-.badge-private,
-.badge-public {
-    display: inline-block;
-    min-width: 7ch;
-    text-align: center;
-}
-
-.badge-private {
-    background-color: #6c757d;
-    color: #000000;
-}
-
-.badge-public {
-    background-color: #b58900;
-    color: #000000;
+.col-branch {
+    width: auto;
+    min-width: 0;
 }

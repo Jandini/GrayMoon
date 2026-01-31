@@ -1,0 +1,298 @@
+@page "/workspaces/{WorkspaceId:int}"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@implements IDisposable
+@using GrayMoon.App.Models
+@using GrayMoon.App.Repositories
+@using GrayMoon.App.Services
+@using GrayMoon.App.Components.Shared
+@inject WorkspaceRepository WorkspaceRepository
+@inject WorkspaceGitService WorkspaceGitService
+@inject ILogger<Workspace> Logger
+@using WorkspaceModel = GrayMoon.App.Models.Workspace
+
+<PageTitle>@(workspace?.Name ?? "Workspace")</PageTitle>
+
+<div class="container-fluid page-container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2>@(workspace?.Name ?? "Workspace")</h2>
+            <p class="text-muted mb-0" style="min-height: 1.5rem;">
+                @if (workspaceRepositories.Count > 0)
+                {
+                    @($"{workspaceRepositories.Count} {(workspaceRepositories.Count == 1 ? "repository" : "repositories")}")
+                }
+                &nbsp;
+            </p>
+        </div>
+        <button class="btn @(isOutOfSync == true ? "btn-danger" : "btn-primary")"
+                @onclick="SyncAsync"
+                disabled="@(isSyncing || workspaceRepositories.Count == 0)">
+            Sync
+        </button>
+    </div>
+
+    @if (errorMessage != null)
+    {
+        <div class="alert alert-danger">
+            <i class="bi bi-exclamation-triangle"></i> @errorMessage
+        </div>
+    }
+    else
+    {
+        <div class="card page-card mb-4">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover mb-0 repositories-table">
+                        <thead class="table-dark">
+                            <tr>
+                                <th class="col-repo">Repository</th>
+                                <th class="col-version">Version</th>
+                                <th class="col-branch">Branch</th>
+                                <th class="col-sync">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (isLoading)
+                            {
+                                <tr>
+                                    <td colspan="4" class="text-center text-muted py-4">
+                                        Loading workspace...
+                                    </td>
+                                </tr>
+                            }
+                            else if (workspaceRepositories.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="4" class="text-center text-muted py-4">
+                                        No repositories assigned to this workspace.
+                                    </td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var wr in workspaceRepositories)
+                                {
+                                    var repo = wr.GitHubRepository;
+                                    @if (repo != null)
+                                    {
+                                        <tr>
+                                            <td class="col-repo"><strong>@repo.RepositoryName</strong></td>
+                                            <td class="col-version text-muted">@(wr.GitVersion ?? "-")</td>
+                                            <td class="col-branch text-muted">@(wr.BranchName ?? "-")</td>
+                                            <td class="col-sync">@GetRepoSyncBadge(repo.GitHubRepositoryId)</td>
+                                        </tr>
+                                    }
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
+<LoadingOverlay IsVisible="@isSyncing" Message="@syncProgressMessage" OnAbort="AbortSyncAsync" />
+
+@code {
+    [Parameter] public int WorkspaceId { get; set; }
+
+    private WorkspaceModel? workspace;
+    private List<WorkspaceRepositoryLink> workspaceRepositories = new();
+    private IReadOnlyDictionary<int, RepoGitVersionInfo> repoGitInfos = new Dictionary<int, RepoGitVersionInfo>();
+    private string? errorMessage;
+    private bool isLoading = true;
+    private bool isSyncing = false;
+    private string syncProgressMessage = "Synchronizing...";
+    private bool? isOutOfSync = null;
+    private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
+    private CancellationTokenSource? _syncCheckCts;
+    private CancellationTokenSource? _syncCts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadWorkspaceAsync();
+        _ = CheckSyncStatusAsync();
+    }
+
+    private async Task CheckSyncStatusAsync()
+    {
+        if (workspace == null || workspaceRepositories.Count == 0)
+        {
+            return;
+        }
+
+        var lastSynced = workspace.LastSyncedAt;
+        var shouldValidate = lastSynced == null || (DateTime.UtcNow - lastSynced.Value).TotalHours >= 1;
+
+        if (!shouldValidate)
+        {
+            isOutOfSync = !workspace.IsInSync;
+            if (workspace.IsInSync)
+            {
+                repoSyncStatus = workspaceRepositories
+                    .Where(wr => wr.GitHubRepository != null)
+                    .ToDictionary(wr => wr.GitHubRepositoryId, _ => RepoSyncStatus.InSync);
+            }
+            else
+            {
+                repoSyncStatus = new Dictionary<int, RepoSyncStatus>();
+            }
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        _syncCheckCts?.Cancel();
+        _syncCheckCts = new CancellationTokenSource();
+        repoSyncStatus = new Dictionary<int, RepoSyncStatus>();
+
+        try
+        {
+            var status = await WorkspaceGitService.GetRepoSyncStatusAsync(
+                WorkspaceId,
+                onProgress: (repoId, repoStatus) =>
+                {
+                    repoSyncStatus[repoId] = repoStatus;
+                    _ = InvokeAsync(StateHasChanged);
+                },
+                cancellationToken: _syncCheckCts.Token);
+            isOutOfSync = status.Values.Any(v => v != RepoSyncStatus.InSync);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException)
+        {
+            // Check was cancelled, ignore
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Error checking sync status for workspace {WorkspaceId}", WorkspaceId);
+            isOutOfSync = true;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        _syncCheckCts?.Cancel();
+        _syncCheckCts?.Dispose();
+        _syncCts?.Cancel();
+        _syncCts?.Dispose();
+    }
+
+    private async Task LoadWorkspaceAsync()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = null;
+            await ReloadWorkspaceDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Failed to load workspace. Please try again later.";
+            workspaceRepositories = new List<WorkspaceRepositoryLink>();
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task ReloadWorkspaceDataAsync()
+    {
+        workspace = await WorkspaceRepository.GetByIdAsync(WorkspaceId);
+        if (workspace == null)
+        {
+            errorMessage = "Workspace not found.";
+            workspaceRepositories = new List<WorkspaceRepositoryLink>();
+            return;
+        }
+
+        workspaceRepositories = workspace.Repositories
+            .OrderBy(wr => wr.GitHubRepository?.RepositoryName)
+            .ToList();
+    }
+
+    private RenderFragment GetRepoSyncBadge(int repositoryId) => builder =>
+    {
+        if (repoSyncStatus.TryGetValue(repositoryId, out var status))
+        {
+            var (text, bgColor) = status switch
+            {
+                RepoSyncStatus.InSync => ("in sync", "#198754"),
+                RepoSyncStatus.NotCloned => ("not cloned", "#6c757d"),
+                RepoSyncStatus.VersionMismatch => ("version", "#dc3545"),
+                _ => ("sync", "#6c757d")
+            };
+            builder.OpenElement(0, "span");
+            builder.AddAttribute(1, "class", "badge");
+            builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: #fff;");
+            builder.AddContent(3, text);
+            builder.CloseElement();
+        }
+    };
+
+    private void AbortSyncAsync()
+    {
+        _syncCts?.Cancel();
+    }
+
+    private async Task SyncAsync()
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || isSyncing)
+        {
+            return;
+        }
+
+        _syncCheckCts?.Cancel();
+        _syncCts?.Cancel();
+        _syncCts = new CancellationTokenSource();
+
+        isSyncing = true;
+        syncProgressMessage = "Synchronizing...";
+        errorMessage = null;
+        StateHasChanged();
+        await Task.Yield();
+
+        try
+        {
+            var results = await WorkspaceGitService.SyncAsync(
+                WorkspaceId,
+                onProgress: (completed, total, repoId, info) =>
+                {
+                    syncProgressMessage = $"Synchronized {completed} of {total}";
+                    repoSyncStatus[repoId] = RepoSyncStatus.InSync;
+
+                    var wr = workspaceRepositories.FirstOrDefault(w => w.GitHubRepositoryId == repoId);
+                    if (wr != null)
+                    {
+                        wr.GitVersion = info.Version == "-" ? null : info.Version;
+                        wr.BranchName = info.Branch == "-" ? null : info.Branch;
+                    }
+
+                    InvokeAsync(StateHasChanged);
+                },
+                cancellationToken: _syncCts.Token);
+            repoGitInfos = results;
+
+            isOutOfSync = false;
+        }
+        catch (OperationCanceledException)
+        {
+            // Sync was cancelled - reload workspace to restore pre-sync data (onProgress may have partially updated in-memory state)
+            await ReloadWorkspaceDataAsync();
+            _ = CheckSyncStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error syncing workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Failed to sync. Please try again later.";
+        }
+        finally
+        {
+            isSyncing = false;
+        }
+    }
+}
