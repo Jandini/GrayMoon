@@ -103,7 +103,7 @@
 </div>
 
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
-<LoadingOverlay IsVisible="@isSyncing" Message="Syncing..." />
+<LoadingOverlay IsVisible="@isSyncing" Message="@syncProgressMessage" />
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
@@ -114,9 +114,11 @@
     private string? errorMessage;
     private bool isLoading = true;
     private bool isSyncing = false;
+    private string syncProgressMessage = "Syncing...";
     private bool? isOutOfSync = null;
     private IReadOnlyDictionary<int, RepoSyncStatus>? repoSyncStatus;
     private CancellationTokenSource? _syncCheckCts;
+    private CancellationTokenSource? _syncCts;
 
     protected override async Task OnInitializedAsync()
     {
@@ -157,6 +159,8 @@
     {
         _syncCheckCts?.Cancel();
         _syncCheckCts?.Dispose();
+        _syncCts?.Cancel();
+        _syncCts?.Dispose();
     }
 
     private async Task LoadWorkspaceAsync()
@@ -216,15 +220,25 @@
         }
 
         _syncCheckCts?.Cancel();
+        _syncCts?.Cancel();
+        _syncCts = new CancellationTokenSource();
+
         isSyncing = true;
+        syncProgressMessage = "Syncing...";
         errorMessage = null;
         StateHasChanged();
         await Task.Yield();
 
         try
         {
-
-            var results = await WorkspaceGitService.SyncAsync(WorkspaceId);
+            var results = await WorkspaceGitService.SyncAsync(
+                WorkspaceId,
+                onProgress: (completed, total) =>
+                {
+                    syncProgressMessage = $"Synchronized {completed} of {total}";
+                    InvokeAsync(StateHasChanged);
+                },
+                cancellationToken: _syncCts.Token);
             repoGitInfos = results;
 
             foreach (var wr in workspaceRepositories)
@@ -240,6 +254,10 @@
             repoSyncStatus = workspaceRepositories
                 .Where(wr => wr.GitHubRepository != null)
                 .ToDictionary(wr => wr.GitHubRepositoryId, _ => RepoSyncStatus.InSync);
+        }
+        catch (OperationCanceledException)
+        {
+            // Sync was cancelled (page navigation or refresh), ignore
         }
         catch (Exception ex)
         {

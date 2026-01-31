@@ -35,7 +35,10 @@ public class WorkspaceGitService
         _maxConcurrent = max < 1 ? 1 : max;
     }
 
-    public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(int workspaceId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
+        int workspaceId,
+        Action<int, int>? onProgress = null,
+        CancellationToken cancellationToken = default)
     {
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
@@ -59,8 +62,17 @@ public class WorkspaceGitService
 
         _logger.LogDebug("Starting sync for workspace {WorkspaceName} ({RepoCount} repositories)", workspace.Name, repos.Count);
 
+        var completedCount = 0;
+        var totalCount = repos.Count;
+
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
-        var syncTasks = repos.Select(repo => RunSyncJobAsync(repo, workspacePath, semaphore, cancellationToken));
+        var syncTasks = repos.Select(async repo =>
+        {
+            var result = await RunSyncJobAsync(repo, workspacePath, semaphore, cancellationToken);
+            var count = Interlocked.Increment(ref completedCount);
+            onProgress?.Invoke(count, totalCount);
+            return result;
+        });
         var results = await Task.WhenAll(syncTasks);
 
         await PersistVersionsAsync(workspaceId, results, cancellationToken);
