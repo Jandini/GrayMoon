@@ -25,6 +25,33 @@ public class WorkspaceService
         return Path.Combine(_rootPath, safeName);
     }
 
+    public bool DirectoryExists(string workspaceName)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceName))
+        {
+            return false;
+        }
+
+        var path = GetWorkspacePath(workspaceName);
+        return Directory.Exists(path);
+    }
+
+    public int GetRepositoryCount(string workspaceName)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceName))
+        {
+            return 0;
+        }
+
+        var path = GetWorkspacePath(workspaceName);
+        if (!Directory.Exists(path))
+        {
+            return 0;
+        }
+
+        return Directory.GetDirectories(path).Length;
+    }
+
     public void CreateDirectory(string workspaceName)
     {
         var path = GetWorkspacePath(workspaceName);

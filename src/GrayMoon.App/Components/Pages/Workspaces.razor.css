@@ -6,16 +6,20 @@
 }
 
 .col-name {
-    width: 50%;
+    width: 25%;
+}
+
+.col-path {
+    width: 35%;
 }
 
 .col-count {
-    width: 15%;
+    width: 10%;
     text-align: center;
 }
 
 .col-actions {
-    width: 35%;
+    width: 30%;
 }
 
 .badge-default {

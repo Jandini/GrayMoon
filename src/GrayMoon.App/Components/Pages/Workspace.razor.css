@@ -42,24 +42,20 @@
 }
 
 .col-repo {
-    width: 25%;
+    width: 30%;
 }
 
 .col-owner {
-    width: 15%;
+    width: 20%;
 }
 
 .col-visibility {
-    width: 10%;
+    width: 12%;
     text-align: center;
 }
 
 .col-connector {
-    width: 20%;
-}
-
-.col-clone {
-    width: 30%;
+    width: 38%;
 }
 
 .badge-private,
