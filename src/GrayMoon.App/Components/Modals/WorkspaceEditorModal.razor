@@ -77,15 +77,13 @@
                                                        @onchange="(ChangeEventArgs e) => ToggleAllFiltered(filtered, (bool)e.Value!)" />
                                             </th>
                                             <th>Repository</th>
-                                            <th>Owner</th>
-                                            <th>Connector</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         @if (filtered.Count == 0)
                                         {
                                             <tr>
-                                                <td colspan="4" class="text-muted p-2">No repositories match your search.</td>
+                                                <td colspan="2" class="text-muted p-2">No repositories match your search.</td>
                                             </tr>
                                         }
                                         else
@@ -104,8 +102,6 @@
                                                             @repository.RepositoryName
                                                         </span>
                                                     </td>
-                                                    <td>@(repository.OrgName ?? "-")</td>
-                                                    <td>@repository.ConnectorName</td>
                                                 </tr>
                                             }
                                         }

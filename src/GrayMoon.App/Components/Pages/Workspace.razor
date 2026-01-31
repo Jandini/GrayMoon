@@ -50,15 +50,13 @@
                                 <th class="col-branch">Branch</th>
                                 <th class="col-sync">Status</th>
                                 <th class="col-visibility">Visibility</th>
-                                <th class="col-owner">Owner</th>
-                                <th class="col-connector">Connector</th>
                             </tr>
                         </thead>
                         <tbody>
                             @if (isLoading)
                             {
                                 <tr>
-                                    <td colspan="7" class="text-center text-muted py-4">
+                                    <td colspan="5" class="text-center text-muted py-4">
                                         Loading workspace...
                                     </td>
                                 </tr>
@@ -66,7 +64,7 @@
                             else if (workspaceRepositories.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="7" class="text-center text-muted py-4">
+                                    <td colspan="5" class="text-center text-muted py-4">
                                         No repositories assigned to this workspace.
                                     </td>
                                 </tr>
@@ -88,8 +86,6 @@
                                                     @repo.Visibility.ToLowerInvariant()
                                                 </span>
                                             </td>
-                                            <td class="col-owner">@(string.IsNullOrWhiteSpace(repo.OrgName) ? "-" : repo.OrgName)</td>
-                                            <td class="col-connector">@(repo.GitHubConnector?.ConnectorName ?? "Unknown")</td>
                                         </tr>
                                     }
                                 }
