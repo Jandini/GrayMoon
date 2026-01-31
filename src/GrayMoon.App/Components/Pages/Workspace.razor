@@ -93,7 +93,7 @@
 </div>
 
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
-<LoadingOverlay IsVisible="@isSyncing" Message="@syncProgressMessage" />
+<LoadingOverlay IsVisible="@isSyncing" Message="@syncProgressMessage" OnAbort="AbortSyncAsync" />
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
@@ -159,17 +159,7 @@
         {
             isLoading = true;
             errorMessage = null;
-            workspace = await WorkspaceRepository.GetByIdAsync(WorkspaceId);
-            if (workspace == null)
-            {
-                errorMessage = "Workspace not found.";
-                workspaceRepositories = new List<WorkspaceRepositoryLink>();
-                return;
-            }
-
-            workspaceRepositories = workspace.Repositories
-                .OrderBy(wr => wr.GitHubRepository?.RepositoryName)
-                .ToList();
+            await ReloadWorkspaceDataAsync();
         }
         catch (Exception ex)
         {
@@ -181,6 +171,21 @@
         {
             isLoading = false;
         }
+    }
+
+    private async Task ReloadWorkspaceDataAsync()
+    {
+        workspace = await WorkspaceRepository.GetByIdAsync(WorkspaceId);
+        if (workspace == null)
+        {
+            errorMessage = "Workspace not found.";
+            workspaceRepositories = new List<WorkspaceRepositoryLink>();
+            return;
+        }
+
+        workspaceRepositories = workspace.Repositories
+            .OrderBy(wr => wr.GitHubRepository?.RepositoryName)
+            .ToList();
     }
 
     private RenderFragment GetRepoSyncBadge(int repositoryId) => builder =>
@@ -201,6 +206,11 @@
             builder.CloseElement();
         }
     };
+
+    private void AbortSyncAsync()
+    {
+        _syncCts?.Cancel();
+    }
 
     private async Task SyncAsync()
     {
@@ -244,7 +254,9 @@
         }
         catch (OperationCanceledException)
         {
-            // Sync was cancelled (page navigation or refresh), ignore
+            // Sync was cancelled - reload workspace to restore pre-sync data (onProgress may have partially updated in-memory state)
+            await ReloadWorkspaceDataAsync();
+            _ = CheckSyncStatusAsync();
         }
         catch (Exception ex)
         {

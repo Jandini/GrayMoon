@@ -7,7 +7,11 @@
             </div>
             @if (!string.IsNullOrEmpty(Message))
             {
-                <p class="mb-0">@Message</p>
+                <p class="loading-overlay-message">@Message</p>
+            }
+            @if (OnAbort.HasDelegate)
+            {
+                <button type="button" class="btn btn-outline-light btn-sm" @onclick="AbortClicked">Abort</button>
             }
         </div>
     </div>
@@ -16,4 +20,7 @@
 @code {
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public string? Message { get; set; }
+    [Parameter] public EventCallback OnAbort { get; set; }
+
+    private async Task AbortClicked() => await OnAbort.InvokeAsync();
 }
