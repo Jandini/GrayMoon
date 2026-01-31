@@ -21,6 +21,9 @@ builder.Services.AddScoped<GitHubConnectorRepository>();
 builder.Services.AddScoped<GitHubRepositoryRepository>();
 builder.Services.AddScoped<WorkspaceRepository>();
 builder.Services.AddScoped<WorkspaceService>();
+builder.Services.AddScoped<GitCommandService>();
+builder.Services.AddScoped<GitVersionCommandService>();
+builder.Services.AddScoped<WorkspaceGitService>();
 builder.Services.AddScoped<GitHubRepositoryService>();
 builder.Services.AddScoped<GitHubActionsService>();
 

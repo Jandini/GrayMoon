@@ -2,8 +2,10 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
+@using GrayMoon.App.Services
 @using GrayMoon.App.Components.Shared
 @inject WorkspaceRepository WorkspaceRepository
+@inject WorkspaceGitService WorkspaceGitService
 @inject ILogger<Workspace> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
@@ -21,6 +23,15 @@
                 &nbsp;
             </p>
         </div>
+        <button class="btn btn-primary"
+                @onclick="CloneAllAsync"
+                disabled="@(isCloning || repositories.Count == 0)">
+            @if (isCloning)
+            {
+                <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+            }
+            Clone
+        </button>
     </div>
 
     @if (errorMessage != null)
@@ -41,13 +52,14 @@
                                 <th class="col-owner">Owner</th>
                                 <th class="col-visibility">Visibility</th>
                                 <th class="col-connector">Connector</th>
+                                <th class="col-gitversion">Git Version</th>
                             </tr>
                         </thead>
                         <tbody>
                             @if (isLoading)
                             {
                                 <tr>
-                                    <td colspan="4" class="text-center text-muted py-4">
+                                    <td colspan="5" class="text-center text-muted py-4">
                                         Loading workspace...
                                     </td>
                                 </tr>
@@ -55,7 +67,7 @@
                             else if (repositories.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="4" class="text-center text-muted py-4">
+                                    <td colspan="5" class="text-center text-muted py-4">
                                         No repositories assigned to this workspace.
                                     </td>
                                 </tr>
@@ -73,6 +85,7 @@
                                             </span>
                                         </td>
                                         <td class="col-connector">@(repository.GitHubConnector?.ConnectorName ?? "Unknown")</td>
+                                        <td class="col-gitversion text-muted">@GetRepoVersion(repository.GitHubRepositoryId)</td>
                                     </tr>
                                 }
                             }
@@ -85,14 +98,17 @@
 </div>
 
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
+<LoadingOverlay IsVisible="@isCloning" Message="Cloning repositories..." />
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
 
     private WorkspaceModel? workspace;
     private List<GitHubRepository> repositories = new();
+    private IReadOnlyDictionary<int, string> repoVersions = new Dictionary<int, string>();
     private string? errorMessage;
     private bool isLoading = true;
+    private bool isCloning = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -119,6 +135,8 @@
                 .Select(repository => repository!)
                 .OrderBy(repository => repository.RepositoryName)
                 .ToList();
+
+            _ = LoadVersionsAsync();
         }
         catch (Exception ex)
         {
@@ -129,6 +147,55 @@
         finally
         {
             isLoading = false;
+        }
+    }
+
+    private async Task LoadVersionsAsync()
+    {
+        if (workspace == null || repositories.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var versions = await WorkspaceGitService.GetVersionsAsync(WorkspaceId);
+            repoVersions = versions;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Error loading Git versions for workspace {WorkspaceId}", WorkspaceId);
+        }
+    }
+
+    private string GetRepoVersion(int repositoryId)
+    {
+        return repoVersions.TryGetValue(repositoryId, out var version) ? version : "-";
+    }
+
+    private async Task CloneAllAsync()
+    {
+        if (workspace == null || repositories.Count == 0 || isCloning)
+        {
+            return;
+        }
+
+        try
+        {
+            isCloning = true;
+            errorMessage = null;
+            await WorkspaceGitService.CloneAllAsync(WorkspaceId);
+            _ = LoadVersionsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error cloning repositories for workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Failed to clone repositories. Please try again later.";
+        }
+        finally
+        {
+            isCloning = false;
         }
     }
 }

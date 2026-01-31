@@ -42,20 +42,24 @@
 }
 
 .col-repo {
-    width: 30%;
+    width: 22%;
 }
 
 .col-owner {
-    width: 20%;
+    width: 15%;
 }
 
 .col-visibility {
-    width: 12%;
+    width: 10%;
     text-align: center;
 }
 
 .col-connector {
-    width: 38%;
+    width: 23%;
+}
+
+.col-gitversion {
+    width: 30%;
 }
 
 .badge-private,
