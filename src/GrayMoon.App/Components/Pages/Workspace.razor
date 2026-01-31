@@ -111,7 +111,7 @@
     private bool isLoading = true;
     private bool isSyncing = false;
     private bool? isOutOfSync = null;
-    private IReadOnlyDictionary<int, bool>? repoSyncStatus;
+    private IReadOnlyDictionary<int, RepoSyncStatus>? repoSyncStatus;
     private CancellationTokenSource? _syncCheckCts;
 
     protected override async Task OnInitializedAsync()
@@ -134,7 +134,7 @@
         {
             var status = await WorkspaceGitService.GetRepoSyncStatusAsync(WorkspaceId, _syncCheckCts.Token);
             repoSyncStatus = status;
-            isOutOfSync = status.Values.Any(v => !v);
+            isOutOfSync = status.Values.Any(v => v != RepoSyncStatus.InSync);
             await InvokeAsync(StateHasChanged);
         }
         catch (OperationCanceledException)
@@ -202,13 +202,19 @@
 
     private RenderFragment GetRepoSyncBadge(int repositoryId) => builder =>
     {
-        if (repoSyncStatus?.TryGetValue(repositoryId, out var inSync) == true)
+        if (repoSyncStatus?.TryGetValue(repositoryId, out var status) == true)
         {
-            var bgColor = inSync ? "#198754" : "#dc3545";
+            var (text, bgColor) = status switch
+            {
+                RepoSyncStatus.InSync => ("in sync", "#198754"),
+                RepoSyncStatus.NotCloned => ("not cloned", "#6c757d"),
+                RepoSyncStatus.VersionMismatch => ("version", "#dc3545"),
+                _ => ("sync", "#6c757d")
+            };
             builder.OpenElement(0, "span");
             builder.AddAttribute(1, "class", "badge");
             builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: #fff;");
-            builder.AddContent(3, "sync");
+            builder.AddContent(3, text);
             builder.CloseElement();
         }
     };
@@ -242,7 +248,7 @@
             }
 
             isOutOfSync = false;
-            repoSyncStatus = repositories.ToDictionary(r => r.GitHubRepositoryId, _ => true);
+            repoSyncStatus = repositories.ToDictionary(r => r.GitHubRepositoryId, _ => RepoSyncStatus.InSync);
         }
         catch (Exception ex)
         {
