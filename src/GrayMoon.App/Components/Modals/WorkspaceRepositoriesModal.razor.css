@@ -106,6 +106,17 @@
     width: 40px;
 }
 
+/* Checkbox styling: dark gray fill, light gray frame when unselected; original blue when selected */
+.workspace-repo-checkbox {
+    background-color: var(--bg-input) !important;
+    border-color: var(--border-light) !important;
+}
+
+.workspace-repo-checkbox:checked {
+    background-color: var(--accent-blue) !important;
+    border-color: var(--accent-blue) !important;
+}
+
 .repository-grid th.col-select,
 .repository-grid td.col-select {
     padding-left: 12px;

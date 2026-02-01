@@ -47,7 +47,7 @@
                                     <thead class="table-dark">
                                         <tr>
                                             <th class="col-select">
-                                                <input class="form-check-input"
+                                                <input class="form-check-input workspace-repo-checkbox"
                                                        type="checkbox"
                                                        checked="@AreAllFilteredSelected(filtered)"
                                                        @onchange="(ChangeEventArgs e) => _ = ToggleAllFiltered(filtered, (bool)e.Value!)" />
@@ -70,7 +70,7 @@
                                             {
                                                 <tr>
                                                     <td class="col-select">
-                                                        <input class="form-check-input"
+                                                        <input class="form-check-input workspace-repo-checkbox"
                                                                type="checkbox"
                                                                checked="@SelectedRepositoryIds.Contains(repository.GitHubRepositoryId)"
                                                                @onchange="(ChangeEventArgs e) => _ = ToggleRepository(repository.GitHubRepositoryId, (bool)e.Value!)" />
