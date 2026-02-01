@@ -75,7 +75,7 @@
                                     <tr>
                                         <td class="col-name">
                                             <button class="btn btn-sm btn-link default-star-button me-2"
-                                                    @onclick="() => ToggleDefaultAsync(workspace.WorkspaceId)"
+                                                    @onclick="() => ToggleDefaultAsync(workspace.WorkspaceId, workspace.Name)"
                                                     disabled="@isTogglingDefault"
                                                     title="Toggle default workspace">
                                                 @if (workspace.IsDefault)
@@ -309,10 +309,12 @@
 
             if (editingWorkspaceId == null)
             {
+                Logger.LogInformation("User created workspace {WorkspaceName}", workspaceName);
                 await WorkspaceRepository.AddAsync(workspaceName, []);
             }
             else
             {
+                Logger.LogInformation("User edited workspace {WorkspaceName}", workspaceName);
                 await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, workspaceName, editingWorkspaceRepositoryIds);
             }
 
@@ -348,6 +350,7 @@
             isSavingRepositories = true;
             repositoriesModalErrorMessage = null;
 
+            Logger.LogInformation("User added {Count} repositories to workspace {WorkspaceName}", selectedRepositoryIds.Count, repositoriesModalWorkspaceName);
             await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, repositoriesModalWorkspaceName, selectedRepositoryIds);
 
             CloseRepositoriesModal();
@@ -386,6 +389,7 @@
         try
         {
             isDeleting = true;
+            Logger.LogInformation("User deleted workspace {WorkspaceName}", workspaceToDelete.Name);
             await WorkspaceRepository.DeleteAsync(workspaceToDelete.WorkspaceId);
             CloseDeleteModal();
             await LoadWorkspacesAsync();
@@ -427,12 +431,13 @@
         }
     }
 
-    private async Task ToggleDefaultAsync(int workspaceId)
+    private async Task ToggleDefaultAsync(int workspaceId, string workspaceName)
     {
         try
         {
             isTogglingDefault = true;
             errorMessage = null;
+            Logger.LogInformation("User toggled default workspace {WorkspaceName}", workspaceName);
             await WorkspaceRepository.ToggleDefaultAsync(workspaceId);
             await LoadWorkspacesAsync();
         }

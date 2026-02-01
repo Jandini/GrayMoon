@@ -43,7 +43,10 @@ public class GitVersionCommandService
             var cached = await TryGetVersionFromCacheAsync(repositoryPath, cancellationToken);
             if (cached != null)
             {
-                _logger.LogDebug("Using GitVersion cache for {Path}", repositoryPath);
+                if (_logger.IsEnabled(LogLevel.Trace))
+                {
+                    _logger.LogTrace("Using GitVersion cache for {Path}", repositoryPath);
+                }
                 return cached;
             }
         }
@@ -175,7 +178,10 @@ public class GitVersionCommandService
             if (process.ExitCode != 0)
             {
                 var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
-                _logger.LogDebug("GitVersion failed for {Path}: exit {Code}, {Stderr}", repositoryPath, process.ExitCode, stderr);
+                if (_logger.IsEnabled(LogLevel.Trace))
+                {
+                    _logger.LogTrace("GitVersion failed for {Path}: exit {Code}, {Stderr}", repositoryPath, process.ExitCode, stderr);
+                }
                 return null;
             }
 
@@ -183,7 +189,10 @@ public class GitVersionCommandService
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Error running dotnet gitversion for {Path}", repositoryPath);
+            if (_logger.IsEnabled(LogLevel.Trace))
+            {
+                _logger.LogTrace(ex, "Error running dotnet gitversion for {Path}", repositoryPath);
+            }
             return null;
         }
     }
