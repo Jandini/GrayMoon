@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace GrayMoon.App.Services;
 
 public class GitCommandService
@@ -74,15 +76,19 @@ public class GitCommandService
     }
 
     /// <summary>
-    /// Builds git clone arguments. When bearerToken is set, uses -c http.extraHeader="Authorization: Bearer TOKEN" for private HTTPS repos.
+    /// Builds git clone arguments. When bearerToken is set, uses -c http.extraHeader with Basic auth for private HTTPS repos.
+    /// GitHub expects Basic auth (x-access-token:TOKEN or username:TOKEN), not Bearer, for git clone.
     /// </summary>
     private static string BuildCloneArguments(string cloneUrl, string? bearerToken)
     {
         if (string.IsNullOrWhiteSpace(bearerToken))
             return $"clone \"{cloneUrl}\"";
 
-        var escapedToken = bearerToken.Replace("\\", "\\\\").Replace("\"", "\\\"");
-        return $"-c \"http.extraHeader=Authorization: Bearer {escapedToken}\" clone \"{cloneUrl}\"";
+        var credentials = "x-access-token:" + bearerToken;
+        var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
+        var headerValue = "Authorization: Basic " + base64;
+        var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        return $"-c \"http.extraHeader={escaped}\" clone \"{cloneUrl}\"";
     }
 
     public async Task<string?> GetHeadShaAsync(string repositoryPath, CancellationToken cancellationToken = default)
