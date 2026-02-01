@@ -36,6 +36,7 @@ COPY --from=build /app/publish .
 VOLUME ["/app/db"]
 
 ENV ASPNETCORE_URLS=http://+:8384
+ENV ASPNETCORE_HTTP_PORTS=8384
 EXPOSE 8384
 
 ENTRYPOINT ["dotnet", "GrayMoon.App.dll"]
