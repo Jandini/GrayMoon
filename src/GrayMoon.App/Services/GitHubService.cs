@@ -59,10 +59,10 @@ public class GitHubService
         return await GetRepositoriesPagedAsync("user/repos?visibility=all");
     }
 
-    public async Task<List<GitHubRepositoryDto>> GetRepositoriesAsync(GitHubConnector connector)
+    public async Task<List<GitHubRepositoryDto>> GetRepositoriesAsync(GitHubConnector connector, IProgress<int>? progress = null, CancellationToken cancellationToken = default)
     {
         EnsureConnectorConfigured(connector);
-        return await GetRepositoriesPagedAsync(connector, "user/repos?visibility=all");
+        return await GetRepositoriesPagedAsync(connector, "user/repos?visibility=all", progress, cancellationToken);
     }
 
     public async Task<List<GitHubWorkflowDto>> GetWorkflowsAsync(string owner, string repo)
@@ -196,7 +196,7 @@ public class GitHubService
         return await response.Content.ReadFromJsonAsync<T>(_jsonOptions);
     }
 
-    private async Task<T?> GetAsync<T>(GitHubConnector connector, string requestUri)
+    private async Task<T?> GetAsync<T>(GitHubConnector connector, string requestUri, CancellationToken cancellationToken = default)
     {
         var baseUrl = string.IsNullOrWhiteSpace(connector.ApiBaseUrl)
             ? "https://api.github.com/"
@@ -208,7 +208,7 @@ public class GitHubService
         request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", connector.UserToken);
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             var errorContent = await response.Content.ReadAsStringAsync();
@@ -257,7 +257,7 @@ public class GitHubService
     private async Task<List<GitHubRepositoryDto>> GetRepositoriesPagedAsync(string requestUri)
     {
         var results = new List<GitHubRepositoryDto>();
-        const int pageSize = 100;
+        const int pageSize = 20;
         var page = 1;
 
         while (true)
@@ -278,18 +278,20 @@ public class GitHubService
         return results;
     }
 
-    private async Task<List<GitHubRepositoryDto>> GetRepositoriesPagedAsync(GitHubConnector connector, string requestUri)
+    private async Task<List<GitHubRepositoryDto>> GetRepositoriesPagedAsync(GitHubConnector connector, string requestUri, IProgress<int>? progress = null, CancellationToken cancellationToken = default)
     {
         var results = new List<GitHubRepositoryDto>();
-        const int pageSize = 100;
+        const int pageSize = 20;
         var page = 1;
 
         while (true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var pageUri = $"{requestUri}&per_page={pageSize}&page={page}";
-            var pageItems = await GetAsync<List<GitHubRepositoryDto>>(connector, pageUri) ?? new List<GitHubRepositoryDto>();
+            var pageItems = await GetAsync<List<GitHubRepositoryDto>>(connector, pageUri, cancellationToken) ?? new List<GitHubRepositoryDto>();
 
             results.AddRange(pageItems);
+            progress?.Report(results.Count);
 
             if (pageItems.Count < pageSize)
             {

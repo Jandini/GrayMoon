@@ -38,6 +38,11 @@ docker run -p 8384:8384 \
   jandini/graymoon:latest
 ```
 
+```bash
+wsl docker run -p 8384:8384 -v ./db:/app/db -v /mnt/c/workspaces:/workspaces -e Workspace__RootPath=/workspaces jandini/graymoon:latest
+```
+
+
 | Option | Description |
 |--------|-------------|
 | `-p 8384:8384` | Exposes the app on port 8384 |

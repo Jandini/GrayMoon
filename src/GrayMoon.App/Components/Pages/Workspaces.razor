@@ -1,5 +1,6 @@
 @page "/workspaces"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@implements IDisposable
 @using GrayMoon.App.Models
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 @using GrayMoon.App.Repositories
@@ -178,7 +179,7 @@
     </div>
 }
 
-<LoadingOverlay IsVisible="@isPersisting" Message="Fetching repositories..." />
+<LoadingOverlay IsVisible="@isPersisting" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}...")" OnAbort="AbortFetchRepositories" />
 
 @code {
     private List<WorkspaceModel>? workspaces;
@@ -202,6 +203,14 @@
     private HashSet<int> editingWorkspaceRepositoryIds = new();
     private WorkspaceModel? workspaceToDelete;
     private HashSet<int> selectedRepositoryIds = new();
+    private int? fetchedRepositoryCount;
+    private CancellationTokenSource? _fetchRepositoriesCts;
+
+    public void Dispose()
+    {
+        _fetchRepositoriesCts?.Cancel();
+        _fetchRepositoriesCts?.Dispose();
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -407,6 +416,11 @@
         }
     }
 
+    private void AbortFetchRepositories()
+    {
+        _fetchRepositoriesCts?.Cancel();
+    }
+
     private async Task FetchRepositoriesAsync()
     {
         if (!hasConnectors || isPersisting)
@@ -414,12 +428,26 @@
             return;
         }
 
+        _fetchRepositoriesCts?.Cancel();
+        _fetchRepositoriesCts = new CancellationTokenSource();
+
         try
         {
             isPersisting = true;
+            fetchedRepositoryCount = null;
             repositoriesModalErrorMessage = null;
             await InvokeAsync(StateHasChanged);
-            repositories = await RepositoryService.RefreshRepositoriesAsync();
+
+            var progress = new Progress<int>(count =>
+            {
+                fetchedRepositoryCount = count;
+                _ = InvokeAsync(StateHasChanged);
+            });
+            repositories = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            repositories = await RepositoryService.GetPersistedRepositoriesAsync();
         }
         catch (Exception ex)
         {

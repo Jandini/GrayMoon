@@ -49,6 +49,15 @@ main {
 @media (max-width: 640.98px) {
     .top-row {
         justify-content: space-between;
+        height: 0;
+        min-height: 0;
+        padding: 0;
+        border: none;
+        overflow: hidden;
+    }
+
+    .header-version {
+        display: none;
     }
 
     .top-row ::deep a, .top-row ::deep .btn-link {

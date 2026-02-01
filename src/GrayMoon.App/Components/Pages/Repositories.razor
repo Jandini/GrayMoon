@@ -1,5 +1,6 @@
 @page "/repositories"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@implements IDisposable
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services
 @using GrayMoon.App.Components.Shared
@@ -50,8 +51,8 @@
                             <tr>
                                 <th class="col-repo">Repository</th>
                                 <th class="col-owner">Owner</th>
-                                <th class="col-visibility">Visibility</th>
                                 <th class="col-connector">Connector</th>
+                                <th class="col-visibility">Visibility</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -86,12 +87,12 @@
                                     <tr>
                                         <td class="col-repo"><strong>@repository.RepositoryName</strong></td>
                                         <td class="col-owner">@(string.IsNullOrWhiteSpace(repository.OrgName) ? "-" : repository.OrgName)</td>
+                                        <td class="col-connector">@repository.ConnectorName</td>
                                         <td class="col-visibility">
                                             <span class="badge @(repository.Visibility == "Private" ? "badge-private" : "badge-public")">
                                                 @repository.Visibility.ToLowerInvariant()
                                             </span>
                                         </td>
-                                        <td class="col-connector">@repository.ConnectorName</td>
                                     </tr>
                                 }
                             }
@@ -104,13 +105,21 @@
     }
 </div>
 
-<LoadingOverlay IsVisible="@isPersisting" Message="Fetching repositories..." />
+<LoadingOverlay IsVisible="@isPersisting" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}...")" OnAbort="AbortFetchRepositories" />
 
 @code {
     private List<GitHubRepositoryEntry>? repositories;
     private string? errorMessage;
     private string searchTerm = string.Empty;
     private bool isPersisting;
+    private int? fetchedRepositoryCount;
+    private CancellationTokenSource? _fetchRepositoriesCts;
+
+    public void Dispose()
+    {
+        _fetchRepositoriesCts?.Cancel();
+        _fetchRepositoriesCts?.Dispose();
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -140,14 +149,33 @@
         }
     }
 
+    private void AbortFetchRepositories()
+    {
+        _fetchRepositoriesCts?.Cancel();
+    }
+
     private async Task ReloadRepositoriesAsync()
     {
+        _fetchRepositoriesCts?.Cancel();
+        _fetchRepositoriesCts = new CancellationTokenSource();
+
         try
         {
             isPersisting = true;
+            fetchedRepositoryCount = null;
             await InvokeAsync(StateHasChanged);
             errorMessage = null;
-            repositories = await RepositoryService.RefreshRepositoriesAsync();
+
+            var progress = new Progress<int>(count =>
+            {
+                fetchedRepositoryCount = count;
+                _ = InvokeAsync(StateHasChanged);
+            });
+            repositories = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            repositories = await RepositoryService.GetPersistedRepositoriesAsync();
         }
         catch (Exception ex)
         {

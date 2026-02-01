@@ -51,6 +51,12 @@
     min-width: 0;
 }
 
+@media (max-width: 640.98px) {
+    .repositories-table .col-version {
+        display: none;
+    }
+}
+
 .col-branch {
     width: auto;
     min-width: 0;
