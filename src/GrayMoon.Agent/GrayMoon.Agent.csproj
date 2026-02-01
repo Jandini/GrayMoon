@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>GrayMoon.Agent</RootNamespace>
+    <AssemblyName>graymoon-agent</AssemblyName>
+    <PackageId>GrayMoon.Agent</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>GrayMoon</Authors>
+    <Description>Host-side agent for GrayMoon: executes git and repository I/O operations.</Description>
+    <PackageType>DotnetTool</PackageType>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>graymoon-agent</ToolCommandName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="8.0.1" />
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="8.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="8.0.4" />
+  </ItemGroup>
+
+</Project>
