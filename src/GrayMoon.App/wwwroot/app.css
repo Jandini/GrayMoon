@@ -309,6 +309,24 @@ h1:focus {
     border-bottom-width: 0;
 }
 
+/* Grid pages: page title, buttons, labels and grid header stay at top; only table body scrolls */
+.grid-page-header {
+    flex-shrink: 0;
+}
+
+.grid-page-body {
+    max-height: calc(100vh - 220px);
+    overflow-y: auto;
+}
+
+.grid-page-body .table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background-color: var(--bg-tertiary);
+    border-bottom-color: var(--border-color);
+}
+
 .table tbody td a {
     color: var(--accent-blue) !important;
 }

@@ -10,61 +10,63 @@
 
 <PageTitle>Actions - GrayMoon</PageTitle>
 
-<div class="container-fluid page-container">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h2>Actions</h2>
-            <p class="text-muted mb-0" style="min-height: 1.5rem;">
-                @if (actions?.Count > 0)
-                {
-                    @($"{actions.Count} {(actions.Count == 1 ? "action" : "actions")}")
-                }
-                &nbsp;
-            </p>
-        </div>
-        <div class="d-flex align-items-center">
-            <select class="form-select"
-                    @bind="selectedRepositoryKey"
-                    @bind:event="onchange"
-                    @bind:after="OnSelectedRepositoryChanged">
-                @if (isLoadingRepositories)
-                {
-                    <option value="">Loading...</option>
-                }
-                else
-                {
-                    <option value="">Select repository...</option>
-                }
-                @if (repositories != null)
-                {
-                    @foreach (var repository in repositories)
+<div class="container-fluid page-container grid-page">
+    <div class="grid-page-header">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h2>Actions</h2>
+                <p class="text-muted mb-0" style="min-height: 1.5rem;">
+                    @if (actions?.Count > 0)
                     {
-                        <option value="@BuildRepositoryKey(repository)">
-                            @($"{repository.ConnectorName} / {repository.OrgName} / {repository.RepositoryName}")
-                        </option>
+                        @($"{actions.Count} {(actions.Count == 1 ? "action" : "actions")}")
                     }
-                }
-            </select>
-            <button class="btn btn-outline-secondary ms-2"
-                    @onclick="RefreshActionsAsync"
-                    disabled="@(isLoading || string.IsNullOrWhiteSpace(selectedRepositoryKey))">
-                Refresh
-            </button>
+                    &nbsp;
+                </p>
+            </div>
+            <div class="d-flex align-items-center">
+                <select class="form-select"
+                        @bind="selectedRepositoryKey"
+                        @bind:event="onchange"
+                        @bind:after="OnSelectedRepositoryChanged">
+                    @if (isLoadingRepositories)
+                    {
+                        <option value="">Loading...</option>
+                    }
+                    else
+                    {
+                        <option value="">Select repository...</option>
+                    }
+                    @if (repositories != null)
+                    {
+                        @foreach (var repository in repositories)
+                        {
+                            <option value="@BuildRepositoryKey(repository)">
+                                @($"{repository.ConnectorName} / {repository.OrgName} / {repository.RepositoryName}")
+                            </option>
+                        }
+                    }
+                </select>
+                <button class="btn btn-outline-secondary ms-2"
+                        @onclick="RefreshActionsAsync"
+                        disabled="@(isLoading || string.IsNullOrWhiteSpace(selectedRepositoryKey))">
+                    Refresh
+                </button>
+            </div>
         </div>
+        @if (errorMessage != null)
+        {
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i> @errorMessage
+            </div>
+        }
     </div>
-
-    @if (errorMessage != null)
+    @if (errorMessage == null)
     {
-        <div class="alert alert-danger">
-            <i class="bi bi-exclamation-triangle"></i> @errorMessage
-        </div>
-    }
-    else
-    {
-        <div class="card page-card mb-4">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-striped table-hover mb-0 actions-table">
+        <div class="grid-page-body">
+            <div class="card page-card mb-4">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover mb-0 actions-table">
                         <thead class="table-dark">
                             <tr>
                                 <th class="col-repo">Repository</th>
@@ -171,6 +173,7 @@
                     </table>
                 </div>
             </div>
+        </div>
         </div>
     }
 </div>

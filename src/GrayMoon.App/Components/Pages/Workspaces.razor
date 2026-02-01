@@ -14,35 +14,37 @@
 
 <PageTitle>Workspaces - GrayMoon</PageTitle>
 
-<div class="container-fluid page-container">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h2>Workspaces</h2>
-            <p class="text-muted mb-0" style="min-height: 1.5rem;">
-                @if (workspaces?.Count > 0)
-                {
-                    @($"{workspaces.Count} {(workspaces.Count == 1 ? "workspace" : "workspaces")}")
-                }
-                &nbsp;
-            </p>
+<div class="container-fluid page-container grid-page">
+    <div class="grid-page-header">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h2>Workspaces</h2>
+                <p class="text-muted mb-0" style="min-height: 1.5rem;">
+                    @if (workspaces?.Count > 0)
+                    {
+                        @($"{workspaces.Count} {(workspaces.Count == 1 ? "workspace" : "workspaces")}")
+                    }
+                    &nbsp;
+                </p>
+            </div>
+            <button class="btn btn-primary" @onclick="ShowCreateModalAsync">
+                Add Workspace
+            </button>
         </div>
-        <button class="btn btn-primary" @onclick="ShowCreateModalAsync">
-            Add Workspace
-        </button>
+        @if (errorMessage != null)
+        {
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i> @errorMessage
+            </div>
+        }
     </div>
-
-    @if (errorMessage != null)
+    @if (errorMessage == null)
     {
-        <div class="alert alert-danger">
-            <i class="bi bi-exclamation-triangle"></i> @errorMessage
-        </div>
-    }
-    else
-    {
-        <div class="card page-card mb-4">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-striped table-hover mb-0 workspaces-table">
+        <div class="grid-page-body">
+            <div class="card page-card mb-4">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover mb-0 workspaces-table">
                         <thead class="table-dark">
                             <tr>
                                 <th class="col-name">Name</th>
@@ -119,6 +121,7 @@
                     </table>
                 </div>
             </div>
+        </div>
         </div>
     }
 </div>
