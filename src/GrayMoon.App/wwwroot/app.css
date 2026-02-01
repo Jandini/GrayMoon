@@ -303,6 +303,12 @@ h1:focus {
     color: var(--text-primary) !important;
 }
 
+/* Last row of every grid: no bottom border */
+.table tbody tr:last-child td,
+.table tbody tr:last-child th {
+    border-bottom-width: 0;
+}
+
 .table tbody td a {
     color: var(--accent-blue) !important;
 }
