@@ -9,11 +9,13 @@ public class WorkspaceRepository
 {
     private readonly AppDbContext _dbContext;
     private readonly WorkspaceService _workspaceService;
+    private readonly ILogger<WorkspaceRepository> _logger;
 
-    public WorkspaceRepository(AppDbContext dbContext, WorkspaceService workspaceService)
+    public WorkspaceRepository(AppDbContext dbContext, WorkspaceService workspaceService, ILogger<WorkspaceRepository> logger)
     {
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
         _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public async Task<List<Workspace>> GetAllAsync()
@@ -46,6 +48,7 @@ public class WorkspaceRepository
         var workspace = new Workspace { Name = normalized };
         _dbContext.Workspaces.Add(workspace);
         await _dbContext.SaveChangesAsync();
+        _logger.LogInformation("Persistence: saved Workspace. Action=Add, WorkspaceId={WorkspaceId}, Name={Name}", workspace.WorkspaceId, workspace.Name);
 
         _workspaceService.CreateDirectory(workspace.Name);
 
@@ -72,6 +75,7 @@ public class WorkspaceRepository
 
         workspace.Name = normalized;
         await _dbContext.SaveChangesAsync();
+        _logger.LogInformation("Persistence: saved Workspace. Action=Update, WorkspaceId={WorkspaceId}, Name={Name}", workspaceId, workspace.Name);
 
         await ReplaceRepositoriesAsync(workspace.WorkspaceId, repositoryIds);
     }
@@ -88,6 +92,7 @@ public class WorkspaceRepository
 
         _dbContext.Workspaces.Remove(workspace);
         await _dbContext.SaveChangesAsync();
+        _logger.LogInformation("Persistence: saved Workspace. Action=Delete, WorkspaceId={WorkspaceId}, Name={Name}", workspaceId, workspace.Name);
     }
 
     public async Task UpdateSyncMetadataAsync(int workspaceId, DateTime lastSyncedAt, bool isInSync)
@@ -100,6 +105,7 @@ public class WorkspaceRepository
             workspace.LastSyncedAt = lastSyncedAt;
             workspace.IsInSync = isInSync;
             await _dbContext.SaveChangesAsync();
+            _logger.LogInformation("Persistence: saved Workspace sync metadata. Action=UpdateSyncMetadata, WorkspaceId={WorkspaceId}, LastSyncedAt={LastSyncedAt:O}, IsInSync={IsInSync}", workspaceId, lastSyncedAt, isInSync);
         }
     }
 
@@ -112,6 +118,7 @@ public class WorkspaceRepository
         {
             workspace.IsInSync = isInSync;
             await _dbContext.SaveChangesAsync();
+            _logger.LogInformation("Persistence: saved Workspace. Action=UpdateIsInSync, WorkspaceId={WorkspaceId}, IsInSync={IsInSync}", workspaceId, isInSync);
         }
     }
 
@@ -139,6 +146,7 @@ public class WorkspaceRepository
             workspace.IsDefault = false;
             await _dbContext.SaveChangesAsync();
             await transaction.CommitAsync();
+            _logger.LogInformation("Persistence: saved Workspace. Action=ToggleDefault (cleared), WorkspaceId={WorkspaceId}, Name={Name}", workspaceId, workspace.Name);
             return;
         }
 
@@ -154,6 +162,7 @@ public class WorkspaceRepository
         workspace.IsDefault = true;
         await _dbContext.SaveChangesAsync();
         await transaction.CommitAsync();
+        _logger.LogInformation("Persistence: saved Workspace. Action=ToggleDefault (set), WorkspaceId={WorkspaceId}, Name={Name}", workspaceId, workspace.Name);
     }
 
     private async Task ReplaceRepositoriesAsync(int workspaceId, IReadOnlyCollection<int> repositoryIds)
@@ -187,6 +196,8 @@ public class WorkspaceRepository
 
         await _dbContext.SaveChangesAsync();
         await transaction.CommitAsync();
+        _logger.LogInformation("Persistence: saved WorkspaceRepository links. Action=ReplaceRepositories, WorkspaceId={WorkspaceId}, Removed={RemovedCount}, Added={AddedCount}, RepositoryIds=[{RepositoryIds}]",
+            workspaceId, toRemove.Count, toAdd.Count, string.Join(", ", newRepoIds));
     }
 
     private async Task<bool> NameExistsAsync(string name, int? ignoreId = null)

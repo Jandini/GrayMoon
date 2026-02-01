@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace GrayMoon.App.Services;
 
 public class GitCommandService
@@ -9,7 +11,7 @@ public class GitCommandService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<bool> CloneAsync(string workingDirectory, string cloneUrl, CancellationToken cancellationToken = default)
+    public async Task<bool> CloneAsync(string workingDirectory, string cloneUrl, string? bearerToken = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workingDirectory))
         {
@@ -26,10 +28,12 @@ public class GitCommandService
             Directory.CreateDirectory(workingDirectory);
         }
 
+        var arguments = BuildCloneArguments(cloneUrl, bearerToken);
+
         var startInfo = new System.Diagnostics.ProcessStartInfo
         {
             FileName = "git",
-            Arguments = $"clone \"{cloneUrl}\"",
+            Arguments = arguments,
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -69,6 +73,63 @@ public class GitCommandService
             _logger.LogError(ex, "Error running git clone for {Url}", cloneUrl);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Adds the repository path to git's safe.directory so git commands succeed when the repo is owned by another user (e.g. in containers).
+    /// </summary>
+    public async Task AddSafeDirectoryAsync(string repositoryPath, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(repositoryPath) || !Directory.Exists(repositoryPath))
+            return;
+
+        var fullPath = Path.GetFullPath(repositoryPath);
+        var arguments = $"config --global --add safe.directory \"{fullPath.Replace("\"", "\\\"")}\"";
+
+        var startInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = arguments,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        try
+        {
+            using var process = System.Diagnostics.Process.Start(startInfo);
+            if (process == null)
+                return;
+
+            await process.WaitForExitAsync(cancellationToken);
+            if (process.ExitCode != 0)
+            {
+                _logger.LogDebug("Git config safe.directory returned {ExitCode} for {Path} (may already be listed)", process.ExitCode, fullPath);
+                return;
+            }
+            _logger.LogTrace("Added safe.directory: {Path}", fullPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to add safe.directory for {Path}", fullPath);
+        }
+    }
+
+    /// <summary>
+    /// Builds git clone arguments. When bearerToken is set, uses -c http.extraHeader with Basic auth for private HTTPS repos.
+    /// GitHub expects Basic auth (x-access-token:TOKEN or username:TOKEN), not Bearer, for git clone.
+    /// </summary>
+    private static string BuildCloneArguments(string cloneUrl, string? bearerToken)
+    {
+        if (string.IsNullOrWhiteSpace(bearerToken))
+            return $"clone \"{cloneUrl}\"";
+
+        var credentials = "x-access-token:" + bearerToken;
+        var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
+        var headerValue = "Authorization: Basic " + base64;
+        var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        return $"-c \"http.extraHeader={escaped}\" clone \"{cloneUrl}\"";
     }
 
     public async Task<string?> GetHeadShaAsync(string repositoryPath, CancellationToken cancellationToken = default)

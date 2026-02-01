@@ -54,6 +54,7 @@ public class WorkspaceGitService
         _maxConcurrent = max < 1 ? 1 : max;
     }
 
+    /// <summary>Syncs only repositories that are linked to the workspace (workspace.Repositories).</summary>
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
         Action<int, int, int, RepoGitVersionInfo>? onProgress = null,
@@ -79,7 +80,7 @@ public class WorkspaceGitService
             return new Dictionary<int, RepoGitVersionInfo>();
         }
 
-        _logger.LogInformation("User triggered sync for workspace {WorkspaceName} ({RepoCount} repositories)", workspace.Name, repos.Count);
+        _logger.LogInformation("Sync triggered by user (workspace UI). Workspace={WorkspaceName}, RepoCount={RepoCount}", workspace.Name, repos.Count);
         _logger.LogDebug("Starting sync for workspace {WorkspaceName} ({RepoCount} repositories)", workspace.Name, repos.Count);
 
         var completedCount = 0;
@@ -105,7 +106,7 @@ public class WorkspaceGitService
     }
 
     /// <summary>
-    /// Syncs a single repository by its id in the given workspace only.
+    /// Syncs a single repository by its id only if it is linked to the given workspace.
     /// Call from a background task (e.g. after returning 202 from API); uses scoped services.
     /// Returns false if repo not found or repo is not in the workspace; true if sync was run.
     /// </summary>
@@ -122,17 +123,18 @@ public class WorkspaceGitService
             .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.GitHubRepositoryId == repo.GitHubRepositoryId, cancellationToken);
         if (!isInWorkspace)
         {
-            _logger.LogWarning("Sync skipped: repository {RepositoryName} (id {RepositoryId}) is not in workspace {WorkspaceId}", repo.RepositoryName, repositoryId, workspaceId);
+            _logger.LogWarning("Sync skipped: repository {RepositoryName} (id {RepositoryId}) is not linked to workspace {WorkspaceId}", repo.RepositoryName, repositoryId, workspaceId);
             return false;
         }
 
-        _logger.LogInformation("Syncing repository {RepositoryName} (id {RepositoryId}) in workspace {WorkspaceId}", repo.RepositoryName, repositoryId, workspaceId);
+        _logger.LogInformation("Syncing repository {RepositoryName} (id {RepositoryId}) in workspace {WorkspaceId} (trigger: API/hook)", repo.RepositoryName, repositoryId, workspaceId);
         await SyncSingleRepositoryInWorkspaceAsync(workspaceId, repo, cancellationToken);
         return true;
     }
 
     /// <summary>
-    /// Syncs one repository in a single workspace (clone if needed, get version, persist).
+    /// Syncs one repository in a single workspace (GitVersion only - no clone, no hooks).
+    /// Called by the background sync service when post-commit hooks fire.
     /// </summary>
     public async Task SyncSingleRepositoryInWorkspaceAsync(int workspaceId, GitHubRepository repo, CancellationToken cancellationToken = default)
     {
@@ -144,19 +146,41 @@ public class WorkspaceGitService
         }
 
         var workspacePath = _workspaceService.GetWorkspacePath(workspace.Name);
-        _workspaceService.CreateDirectory(workspace.Name);
+        var repoPath = Path.Combine(workspacePath, repo.RepositoryName);
 
-        using var semaphore = new SemaphoreSlim(1);
-        var (repoId, info) = await RunSyncJobAsync(workspaceId, repo, workspacePath, semaphore, cancellationToken);
-        await PersistVersionsAsync(workspaceId, new[] { (repoId, info) }, cancellationToken);
+        if (!Directory.Exists(repoPath))
+        {
+            _logger.LogWarning("Repository {RepositoryName} not cloned at {Path}, skipping sync", repo.RepositoryName, repoPath);
+            return;
+        }
 
-        var statuses = await GetRepoSyncStatusAsync(workspaceId, cancellationToken: cancellationToken);
-        var isInSync = statuses.Values.All(v => v == RepoSyncStatus.InSync);
+        // Only run GitVersion - no clone, no hooks (repo should already be cloned with hooks from full workspace sync)
+        await _gitCommandService.AddSafeDirectoryAsync(repoPath, cancellationToken);
+
+        var version = "-";
+        var branch = "-";
+        var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, cancellationToken);
+        if (gitVersion != null)
+        {
+            version = gitVersion.SemVer ?? gitVersion.FullSemVer ?? "-";
+            branch = gitVersion.BranchName ?? gitVersion.EscapedBranchName ?? "-";
+        }
+
+        var info = new RepoGitVersionInfo { Version = version, Branch = branch };
+        await PersistVersionsAsync(workspaceId, new[] { (repo.GitHubRepositoryId, info) }, cancellationToken);
+
+        // Compute workspace IsInSync from DB only (avoid re-running GitVersion for every repo in workspace, which was a major slowdown)
+        var allLinks = await _dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .Select(wr => wr.SyncStatus)
+            .ToListAsync(cancellationToken);
+        var isInSync = allLinks.Count > 0 && allLinks.All(s => s == RepoSyncStatus.InSync);
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
 
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
-        _logger.LogDebug("Single-repo sync completed for {RepositoryName} in workspace {WorkspaceName}", repo.RepositoryName, workspace.Name);
+        _logger.LogDebug("Single-repo sync completed for {RepositoryName} in workspace {WorkspaceName} (version: {Version}, branch: {Branch})",
+            repo.RepositoryName, workspace.Name, version, branch);
     }
 
     public async Task<bool> IsInSyncAsync(int workspaceId, CancellationToken cancellationToken = default)
@@ -196,7 +220,7 @@ public class WorkspaceGitService
                 return false;
             }
 
-            var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, useCacheIfAvailable: true, cancellationToken);
+            var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, cancellationToken);
             if (gitVersion == null)
             {
                 if (_logger.IsEnabled(LogLevel.Trace))
@@ -261,7 +285,7 @@ public class WorkspaceGitService
             }
             else
             {
-                var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, useCacheIfAvailable: true, cancellationToken);
+                var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, cancellationToken);
                 if (gitVersion == null)
                 {
                     status = RepoSyncStatus.VersionMismatch;
@@ -316,8 +340,14 @@ public class WorkspaceGitService
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Persistence: saved WorkspaceRepository link versions. Action=PersistVersions, WorkspaceId={WorkspaceId}, RepoCount={RepoCount}, RepoIds=[{RepoIds}]",
+            workspaceId, resultList.Count, string.Join(", ", resultList.Select(r => $"{r.RepoId}:{r.Info.Version}/{r.Info.Branch}")));
     }
 
+    /// <summary>
+    /// Full sync job for a repository: clone if needed, run GitVersion, set up hooks.
+    /// Used by full workspace sync only (not by the API single-repo sync).
+    /// </summary>
     private async Task<(int RepoId, RepoGitVersionInfo Info)> RunSyncJobAsync(
         int workspaceId,
         GitHubRepository repo,
@@ -338,7 +368,7 @@ public class WorkspaceGitService
                     {
                         _logger.LogTrace("Cloning {RepositoryName}", repo.RepositoryName);
                     }
-                    await _gitCommandService.CloneAsync(workspacePath, repo.CloneUrl, cancellationToken);
+                    await _gitCommandService.CloneAsync(workspacePath, repo.CloneUrl, repo.GitHubConnector?.UserToken, cancellationToken);
                 }
             }
 
@@ -346,6 +376,7 @@ public class WorkspaceGitService
             var branch = "-";
             if (Directory.Exists(repoPath))
             {
+                await _gitCommandService.AddSafeDirectoryAsync(repoPath, cancellationToken);
                 if (_logger.IsEnabled(LogLevel.Trace))
                 {
                     _logger.LogTrace("Getting version for {RepositoryName}", repo.RepositoryName);
@@ -419,6 +450,10 @@ public class WorkspaceGitService
         if (!string.IsNullOrEmpty(configured))
             return configured;
 
+        // Port-only: use 127.0.0.1 with configured port (app is designed for localhost)
+        if (_workspaceOptions.PostCommitHookPort is int port and > 0)
+            return BuildLocalHostHookUrl("http", port);
+
         var fromServer = GetBaseUrlFromServer();
         if (!string.IsNullOrEmpty(fromServer))
             return fromServer;
@@ -443,16 +478,25 @@ public class WorkspaceGitService
         return string.IsNullOrEmpty(first) ? null : NormalizeListenUrlForHook(first);
     }
 
+    /// <summary>Normalizes a listen URL (e.g. http://[::]:8384 or http://+:8384) to a localhost hook URL. Only the port is used; host is always 127.0.0.1 since the app is designed for local use.</summary>
     private static string NormalizeListenUrlForHook(string url)
     {
         if (string.IsNullOrWhiteSpace(url))
             return url;
-        if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) || !uri.IsAbsoluteUri)
-            return url.Trim();
-        var host = uri.Host;
-        if (host is "0.0.0.0" or "::" or "*" or "+")
-            host = "localhost";
-        var builder = new UriBuilder(uri.Scheme, host, uri.Port, uri.AbsolutePath);
+        var trimmed = url.Trim();
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) || !uri.IsAbsoluteUri)
+        {
+            // Try with default scheme (e.g. "[::]:8384" or "8384")
+            if (Uri.TryCreate("http://" + trimmed, UriKind.Absolute, out uri))
+                return BuildLocalHostHookUrl(uri.Scheme, uri.Port);
+            return trimmed;
+        }
+        return BuildLocalHostHookUrl(uri.Scheme, uri.Port);
+    }
+
+    private static string BuildLocalHostHookUrl(string scheme, int port)
+    {
+        var builder = new UriBuilder(scheme, "127.0.0.1", port);
         return builder.Uri.GetLeftPart(UriPartial.Authority);
     }
 }

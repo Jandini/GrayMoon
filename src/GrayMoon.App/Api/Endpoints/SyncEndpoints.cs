@@ -12,15 +12,17 @@ public static class SyncEndpoints
     public static IEndpointRouteBuilder MapSyncEndpoints(this IEndpointRouteBuilder routes)
     {
         routes.MapPost("/api/sync", PostSync);
+        routes.MapGet("/api/sync/queue", GetQueueStatus);
         return routes;
     }
 
+    /// <summary>Only repositories that are linked to the given workspace (WorkspaceRepositories) are accepted; others return 404.</summary>
     private static async Task<IResult> PostSync(
         SyncRequest? body,
         GitHubRepositoryRepository repoRepository,
         WorkspaceRepository workspaceRepository,
         AppDbContext dbContext,
-        IServiceScopeFactory scopeFactory,
+        SyncBackgroundService syncQueue,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.Sync");
@@ -29,6 +31,7 @@ public static class SyncEndpoints
             return Results.BadRequest("Request body is required.");
         var repositoryId = body.RepositoryId;
         var workspaceId = body.WorkspaceId;
+        var trigger = body.Trigger ?? "api";
         if (repositoryId <= 0)
             return Results.BadRequest("repositoryId is required and must be greater than 0.");
         if (workspaceId <= 0)
@@ -42,28 +45,30 @@ public static class SyncEndpoints
         if (repo == null)
             return Results.NotFound("Repository not found for the given repositoryId.");
 
+        // Only sync repos that are linked to this workspace; reject others
         var isInWorkspace = await dbContext.WorkspaceRepositories
             .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.GitHubRepositoryId == repo.GitHubRepositoryId);
         if (!isInWorkspace)
-            return Results.NotFound("Repository is not in the given workspace.");
-
-        logger.LogInformation("POST /api/sync accepted: repositoryId={RepositoryId}, workspaceId={WorkspaceId}", repositoryId, workspaceId);
-        _ = Task.Run(async () =>
         {
-            try
-            {
-                await using var scope = scopeFactory.CreateAsyncScope();
-                var svc = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-                await svc.SyncSingleRepositoryAsync(repositoryId, workspaceId, default);
-            }
-            catch (Exception ex)
-            {
-                using var scope = scopeFactory.CreateScope();
-                var logger = scope.ServiceProvider.GetRequiredService<ILogger<WorkspaceGitService>>();
-                logger.LogError(ex, "Background sync failed for repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, workspaceId);
-            }
-        });
+            logger.LogWarning("Sync rejected: repository {RepositoryId} is not linked to workspace {WorkspaceId}", repositoryId, workspaceId);
+            return Results.NotFound("Repository is not in the given workspace.");
+        }
+
+        logger.LogInformation("Sync requested. Trigger={Trigger}, repositoryId={RepositoryId}, workspaceId={WorkspaceId}", trigger, repositoryId, workspaceId);
+
+        // Enqueue the sync request to be processed by background workers with controlled parallelism
+        if (!syncQueue.EnqueueSync(repositoryId, workspaceId, trigger))
+        {
+            logger.LogWarning("Failed to enqueue sync request (queue service unavailable)");
+            return Results.Problem("Sync service is unavailable", statusCode: 503);
+        }
 
         return Results.Accepted();
+    }
+
+    private static IResult GetQueueStatus(SyncBackgroundService syncQueue)
+    {
+        var queueDepth = syncQueue.GetQueueDepth();
+        return Results.Ok(new { queueDepth, message = $"{queueDepth} sync request(s) pending" });
     }
 }

@@ -59,6 +59,7 @@ public class GitHubConnectorRepository
 
         _dbContext.GitHubConnectors.Add(connector);
         await _dbContext.SaveChangesAsync();
+        _logger.LogInformation("Persistence: saved GitHubConnector. Action=Add, ConnectorId={ConnectorId}, ConnectorName={ConnectorName}", connector.GitHubConnectorId, connector.ConnectorName);
         return connector;
     }
 
@@ -86,6 +87,7 @@ public class GitHubConnectorRepository
         existing.LastError = string.IsNullOrWhiteSpace(connector.LastError) ? null : connector.LastError;
 
         await _dbContext.SaveChangesAsync();
+        _logger.LogInformation("Persistence: saved GitHubConnector. Action=Update, ConnectorId={ConnectorId}, ConnectorName={ConnectorName}", existing.GitHubConnectorId, existing.ConnectorName);
         return existing;
     }
 
@@ -102,6 +104,7 @@ public class GitHubConnectorRepository
 
         _dbContext.GitHubConnectors.Remove(connector);
         await _dbContext.SaveChangesAsync();
+        _logger.LogInformation("Persistence: saved GitHubConnector. Action=Delete, ConnectorId={ConnectorId}, ConnectorName={ConnectorName}", connectorId, connector.ConnectorName);
     }
 
     public async Task UpdateStatusAsync(int connectorId, string status, string? errorMessage)
@@ -118,6 +121,7 @@ public class GitHubConnectorRepository
         connector.Status = status;
         connector.LastError = string.IsNullOrWhiteSpace(errorMessage) ? null : errorMessage;
         await _dbContext.SaveChangesAsync();
+        _logger.LogInformation("Persistence: saved GitHubConnector. Action=UpdateStatus, ConnectorId={ConnectorId}, Status={Status}", connectorId, status);
     }
 
     public async Task UpdateIsActiveAsync(int connectorId, bool isActive)
@@ -133,6 +137,7 @@ public class GitHubConnectorRepository
 
         connector.IsActive = isActive;
         await _dbContext.SaveChangesAsync();
+        _logger.LogInformation("Persistence: saved GitHubConnector. Action=UpdateIsActive, ConnectorId={ConnectorId}, IsActive={IsActive}", connectorId, isActive);
     }
 
     private async Task<bool> ConnectorNameExistsAsync(string connectorName, int? ignoreId = null)

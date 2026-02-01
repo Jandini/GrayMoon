@@ -41,10 +41,6 @@ public class GitHubService
             _httpClient.DefaultRequestHeaders.Authorization =
                 new AuthenticationHeaderValue("Bearer", _options.PersonalAccessToken);
         }
-        else
-        {
-            _logger.LogWarning("GitHub PersonalAccessToken is not configured.");
-        }
     }
 
     public async Task<List<GitHubOrganizationDto>> GetOrganizationsAsync()

@@ -6,6 +6,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 
@@ -43,22 +44,34 @@ builder.Services.AddScoped<WorkspaceGitService>();
 builder.Services.AddScoped<GitHubRepositoryService>();
 builder.Services.AddScoped<GitHubActionsService>();
 
+// Background sync service with controlled parallelism
+builder.Services.AddSingleton<SyncBackgroundService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SyncBackgroundService>());
+
 // GitHub API service
 builder.Services.AddHttpClient<GitHubService>();
 
+// Persist Data Protection keys to db volume so antiforgery and other protected data survive container restarts
+var keyRingDir = Path.Combine(Path.GetDirectoryName(GetDatabasePath(connectionString) ?? "db") ?? "db", "DataProtection-Keys");
+builder.Services.AddDataProtection()
+    .SetApplicationName("GrayMoon")
+    .PersistKeysToFileSystem(new DirectoryInfo(keyRingDir));
 
 var app = builder.Build();
 
 var version = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
 app.Logger.LogInformation("Starting GrayMoon {Version}...", version);
 
-// Ensure the db directory exists (for both local dev and container volume mounts)
+// Ensure the db directory and Data Protection key directory exist (for both local dev and container volume mounts)
 var dbPath = GetDatabasePath(connectionString);
 if (!string.IsNullOrEmpty(dbPath))
 {
     var dbDir = Path.GetDirectoryName(dbPath);
     if (!string.IsNullOrEmpty(dbDir))
+    {
         Directory.CreateDirectory(dbDir);
+        Directory.CreateDirectory(Path.Combine(dbDir, "DataProtection-Keys"));
+    }
 }
 
 // Ensure the local SQLite database is created and migrate schema if needed
@@ -166,7 +179,11 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
-app.UseHttpsRedirection();
+// Only redirect to HTTPS when URLs include HTTPS (skip in container when only HTTP is used)
+if ((app.Configuration["ASPNETCORE_URLS"] ?? "").Contains("https", StringComparison.OrdinalIgnoreCase))
+{
+    app.UseHttpsRedirection();
+}
 
 app.UseStaticFiles();
 app.UseAntiforgery();
