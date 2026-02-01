@@ -40,6 +40,7 @@ public class GitHubRepositoryService
 
     public async Task<List<GitHubRepositoryEntry>> RefreshRepositoriesAsync()
     {
+        _logger.LogInformation("User triggered fetch repositories from GitHub");
         var results = new List<GitHubRepositoryEntry>();
         var connectors = await _connectorRepository.GetAllAsync();
         var activeConnectors = connectors.Where(connector => connector.IsActive).ToList();

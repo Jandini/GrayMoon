@@ -1,0 +1,76 @@
+@using GrayMoon.App.Models
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@Title</h5>
+                    <button type="button" class="btn-close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Workspace Name</label>
+                        <input class="form-control workspace-name-input"
+                               placeholder="Enter workspace name"
+                               value="@WorkspaceName"
+                               @oninput="OnNameChanged"
+                               disabled="@IsNameDisabled" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Workspace Path</label>
+                        <input class="form-control workspace-path-input"
+                               value="@WorkspacePath"
+                               readonly
+                               disabled />
+                    </div>
+
+                    @if (DirectoryAlreadyExists)
+                    {
+                        <div class="alert alert-warning mb-3">
+                            The workspace directory exists with @ExistingRepositoryCount @(ExistingRepositoryCount == 1 ? "repository" : "repositories").
+                        </div>
+                    }
+
+                    @if (ErrorMessage != null)
+                    {
+                        <div class="alert alert-danger">@ErrorMessage</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="OnSave" disabled="@IsSaving">
+                        @if (IsSaving)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Save
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public string Title { get; set; } = "Add Workspace";
+    [Parameter] public string WorkspaceName { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> WorkspaceNameChanged { get; set; }
+    [Parameter] public string WorkspacePath { get; set; } = string.Empty;
+    [Parameter] public bool DirectoryAlreadyExists { get; set; }
+    [Parameter] public int ExistingRepositoryCount { get; set; }
+    [Parameter] public bool IsNameDisabled { get; set; }
+    [Parameter] public bool IsSaving { get; set; }
+    [Parameter] public string? ErrorMessage { get; set; }
+    [Parameter] public EventCallback OnSave { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private async Task OnNameChanged(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString() ?? string.Empty;
+        await WorkspaceNameChanged.InvokeAsync(value);
+    }
+}
