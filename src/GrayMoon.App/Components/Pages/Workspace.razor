@@ -110,75 +110,31 @@
     private string syncProgressMessage = "Synchronizing...";
     private bool? isOutOfSync = null;
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
-    private CancellationTokenSource? _syncCheckCts;
     private CancellationTokenSource? _syncCts;
 
     protected override async Task OnInitializedAsync()
     {
         await LoadWorkspaceAsync();
-        _ = CheckSyncStatusAsync();
+        ApplySyncStateFromWorkspace();
     }
 
-    private async Task CheckSyncStatusAsync()
+    private void ApplySyncStateFromWorkspace()
     {
         if (workspace == null || workspaceRepositories.Count == 0)
         {
             return;
         }
-
-        var lastSynced = workspace.LastSyncedAt;
-        var shouldValidate = lastSynced == null || (DateTime.UtcNow - lastSynced.Value).TotalHours >= 1;
-
-        if (!shouldValidate)
-        {
-            isOutOfSync = !workspace.IsInSync;
-            if (workspace.IsInSync)
-            {
-                repoSyncStatus = workspaceRepositories
-                    .Where(wr => wr.GitHubRepository != null)
-                    .ToDictionary(wr => wr.GitHubRepositoryId, _ => RepoSyncStatus.InSync);
-            }
-            else
-            {
-                repoSyncStatus = new Dictionary<int, RepoSyncStatus>();
-            }
-            await InvokeAsync(StateHasChanged);
-            return;
-        }
-
-        _syncCheckCts?.Cancel();
-        _syncCheckCts = new CancellationTokenSource();
-        repoSyncStatus = new Dictionary<int, RepoSyncStatus>();
-
-        try
-        {
-            var status = await WorkspaceGitService.GetRepoSyncStatusAsync(
-                WorkspaceId,
-                onProgress: (repoId, repoStatus) =>
-                {
-                    repoSyncStatus[repoId] = repoStatus;
-                    _ = InvokeAsync(StateHasChanged);
-                },
-                cancellationToken: _syncCheckCts.Token);
-            isOutOfSync = status.Values.Any(v => v != RepoSyncStatus.InSync);
-            await InvokeAsync(StateHasChanged);
-        }
-        catch (OperationCanceledException)
-        {
-            // Check was cancelled, ignore
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Error checking sync status for workspace {WorkspaceId}", WorkspaceId);
-            isOutOfSync = true;
-            await InvokeAsync(StateHasChanged);
-        }
+        isOutOfSync = !workspace.IsInSync;
+        repoSyncStatus = workspace.IsInSync && workspace.Repositories.Any()
+            ? workspaceRepositories
+                .Where(wr => wr.GitHubRepository != null)
+                .ToDictionary(wr => wr.GitHubRepositoryId, _ => RepoSyncStatus.InSync)
+            : new Dictionary<int, RepoSyncStatus>();
+        StateHasChanged();
     }
 
     public void Dispose()
     {
-        _syncCheckCts?.Cancel();
-        _syncCheckCts?.Dispose();
         _syncCts?.Cancel();
         _syncCts?.Dispose();
     }
@@ -250,7 +206,6 @@
             return;
         }
 
-        _syncCheckCts?.Cancel();
         _syncCts?.Cancel();
         _syncCts = new CancellationTokenSource();
 
@@ -289,7 +244,7 @@
         {
             // Sync was cancelled - reload workspace to restore pre-sync data (onProgress may have partially updated in-memory state)
             await ReloadWorkspaceDataAsync();
-            _ = CheckSyncStatusAsync();
+            ApplySyncStateFromWorkspace();
         }
         catch (Exception ex)
         {
