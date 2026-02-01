@@ -1,14 +1,22 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
+# SemVer injected by build script or CI (disables GitVersion.MsBuild inside container)
+ARG VERSION=0.0.0
+
 COPY GrayMoon.sln ./
 COPY src/GrayMoon.App/GrayMoon.App.csproj src/GrayMoon.App/
 RUN dotnet restore "GrayMoon.sln"
 
 COPY . .
-RUN dotnet publish "src/GrayMoon.App/GrayMoon.App.csproj" -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "src/GrayMoon.App/GrayMoon.App.csproj" -c Release -o /app/publish /p:UseAppHost=false \
+    /p:GetVersion=false \
+    /p:UpdateAssemblyInfo=false \
+    /p:UpdateVersionProperties=false \
+    /p:Version=${VERSION} \
+    /p:InformationalVersion=${VERSION}
 
-# Install GitVersion 5.12 to /gv for copying to runtime
+# Install GitVersion.Tool for use in runtime stage
 RUN dotnet tool install GitVersion.Tool --version 5.12.0 --tool-path /gv
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
@@ -18,7 +26,6 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy GitVersion to /app/tools (accessible by non-root app user in .NET 8 images)
 COPY --from=build /gv /app/tools
 RUN chmod -R 755 /app/tools
 ENV PATH="${PATH}:/app/tools"

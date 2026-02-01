@@ -338,7 +338,7 @@ public class WorkspaceGitService
                     {
                         _logger.LogTrace("Cloning {RepositoryName}", repo.RepositoryName);
                     }
-                    await _gitCommandService.CloneAsync(workspacePath, repo.CloneUrl, cancellationToken);
+                    await _gitCommandService.CloneAsync(workspacePath, repo.CloneUrl, repo.GitHubConnector?.UserToken, cancellationToken);
                 }
             }
 

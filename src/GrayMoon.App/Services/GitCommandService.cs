@@ -9,7 +9,7 @@ public class GitCommandService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<bool> CloneAsync(string workingDirectory, string cloneUrl, CancellationToken cancellationToken = default)
+    public async Task<bool> CloneAsync(string workingDirectory, string cloneUrl, string? bearerToken = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workingDirectory))
         {
@@ -26,10 +26,12 @@ public class GitCommandService
             Directory.CreateDirectory(workingDirectory);
         }
 
+        var arguments = BuildCloneArguments(cloneUrl, bearerToken);
+
         var startInfo = new System.Diagnostics.ProcessStartInfo
         {
             FileName = "git",
-            Arguments = $"clone \"{cloneUrl}\"",
+            Arguments = arguments,
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -69,6 +71,18 @@ public class GitCommandService
             _logger.LogError(ex, "Error running git clone for {Url}", cloneUrl);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Builds git clone arguments. When bearerToken is set, uses -c http.extraHeader="Authorization: Bearer TOKEN" for private HTTPS repos.
+    /// </summary>
+    private static string BuildCloneArguments(string cloneUrl, string? bearerToken)
+    {
+        if (string.IsNullOrWhiteSpace(bearerToken))
+            return $"clone \"{cloneUrl}\"";
+
+        var escapedToken = bearerToken.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        return $"-c \"http.extraHeader=Authorization: Bearer {escapedToken}\" clone \"{cloneUrl}\"";
     }
 
     public async Task<string?> GetHeadShaAsync(string repositoryPath, CancellationToken cancellationToken = default)

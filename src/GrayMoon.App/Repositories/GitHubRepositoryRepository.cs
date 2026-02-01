@@ -35,6 +35,7 @@ public class GitHubRepositoryRepository
     {
         return await _dbContext.GitHubRepositories
             .AsNoTracking()
+            .Include(repository => repository.GitHubConnector)
             .FirstOrDefaultAsync(r => r.GitHubRepositoryId == repositoryId, cancellationToken);
     }
 
