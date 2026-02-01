@@ -160,23 +160,29 @@ public class WorkspaceRepository
     {
         await using var transaction = await _dbContext.Database.BeginTransactionAsync();
 
-        var existing = _dbContext.WorkspaceRepositories
-            .Where(wr => wr.WorkspaceId == workspaceId);
+        var existing = await _dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .ToListAsync();
 
-        _dbContext.WorkspaceRepositories.RemoveRange(existing);
+        var existingRepoIds = existing.Select(wr => wr.GitHubRepositoryId).ToHashSet();
+        var newRepoIds = repositoryIds.Distinct().ToHashSet();
 
-        if (repositoryIds.Count > 0)
+        var toRemove = existing.Where(wr => !newRepoIds.Contains(wr.GitHubRepositoryId)).ToList();
+        var toAdd = newRepoIds.Except(existingRepoIds).ToList();
+
+        foreach (var wr in toRemove)
         {
-            var workspaceRepos = repositoryIds
-                .Distinct()
-                .Select(repositoryId => new GrayMoon.App.Models.WorkspaceRepositoryLink
-                {
-                    WorkspaceId = workspaceId,
-                    GitHubRepositoryId = repositoryId
-                })
-                .ToList();
+            _dbContext.WorkspaceRepositories.Remove(wr);
+        }
 
-            await _dbContext.WorkspaceRepositories.AddRangeAsync(workspaceRepos);
+        foreach (var repositoryId in toAdd)
+        {
+            _dbContext.WorkspaceRepositories.Add(new WorkspaceRepositoryLink
+            {
+                WorkspaceId = workspaceId,
+                GitHubRepositoryId = repositoryId,
+                SyncStatus = RepoSyncStatus.NeedsSync
+            });
         }
 
         await _dbContext.SaveChangesAsync();

@@ -25,4 +25,7 @@ public class WorkspaceRepositoryLink
 
     [MaxLength(200)]
     public string? BranchName { get; set; }
+
+    /// <summary>Persisted sync status. New links default to <see cref="RepoSyncStatus.NeedsSync"/>.</summary>
+    public RepoSyncStatus SyncStatus { get; set; } = RepoSyncStatus.NeedsSync;
 }
