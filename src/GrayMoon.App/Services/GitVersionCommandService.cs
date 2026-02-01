@@ -172,16 +172,18 @@ public class GitVersionCommandService
                 return null;
             }
 
-            var stdout = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
             await process.WaitForExitAsync(cancellationToken);
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
 
             if (process.ExitCode != 0)
             {
-                var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
-                if (_logger.IsEnabled(LogLevel.Trace))
-                {
-                    _logger.LogTrace("GitVersion failed for {Path}: exit {Code}, {Stderr}", repositoryPath, process.ExitCode, stderr);
-                }
+                _logger.LogWarning("dotnet-gitversion failed with exit code {ExitCode} in {Path}. Stdout: {Stdout} Stderr: {Stderr}",
+                    process.ExitCode, repositoryPath,
+                    string.IsNullOrWhiteSpace(stdout) ? "(none)" : stdout.Trim(),
+                    string.IsNullOrWhiteSpace(stderr) ? "(none)" : stderr.Trim());
                 return null;
             }
 
@@ -189,10 +191,7 @@ public class GitVersionCommandService
         }
         catch (Exception ex)
         {
-            if (_logger.IsEnabled(LogLevel.Trace))
-            {
-                _logger.LogTrace(ex, "Error running dotnet gitversion for {Path}", repositoryPath);
-            }
+            _logger.LogError(ex, "Error running dotnet-gitversion for {Path}", repositoryPath);
             return null;
         }
     }

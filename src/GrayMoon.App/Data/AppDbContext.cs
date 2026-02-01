@@ -101,7 +101,8 @@ public class AppDbContext : DbContext
                 .HasMaxLength(200);
 
             entity.Property(wr => wr.SyncStatus)
-                .HasDefaultValue(RepoSyncStatus.NeedsSync);
+                .HasDefaultValue(RepoSyncStatus.NeedsSync)
+                .HasSentinel(RepoSyncStatus.InSync);
 
             entity.HasOne(wr => wr.Workspace)
                 .WithMany(workspace => workspace.Repositories)

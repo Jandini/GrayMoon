@@ -1,3 +1,4 @@
+using System.Reflection;
 using GrayMoon.App.Components;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
@@ -45,6 +46,9 @@ builder.Services.AddHttpClient<GitHubService>();
 
 
 var app = builder.Build();
+
+var version = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+app.Logger.LogInformation("Starting GrayMoon {Version}...", version);
 
 // Ensure the db directory exists (for both local dev and container volume mounts)
 var dbPath = GetDatabasePath(connectionString);
