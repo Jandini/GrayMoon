@@ -346,6 +346,7 @@ public class WorkspaceGitService
             var branch = "-";
             if (Directory.Exists(repoPath))
             {
+                await _gitCommandService.AddSafeDirectoryAsync(repoPath, cancellationToken);
                 if (_logger.IsEnabled(LogLevel.Trace))
                 {
                     _logger.LogTrace("Getting version for {RepositoryName}", repo.RepositoryName);

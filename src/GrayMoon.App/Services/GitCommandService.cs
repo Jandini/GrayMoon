@@ -76,6 +76,47 @@ public class GitCommandService
     }
 
     /// <summary>
+    /// Adds the repository path to git's safe.directory so git commands succeed when the repo is owned by another user (e.g. in containers).
+    /// </summary>
+    public async Task AddSafeDirectoryAsync(string repositoryPath, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(repositoryPath) || !Directory.Exists(repositoryPath))
+            return;
+
+        var fullPath = Path.GetFullPath(repositoryPath);
+        var arguments = $"config --global --add safe.directory \"{fullPath.Replace("\"", "\\\"")}\"";
+
+        var startInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = arguments,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        try
+        {
+            using var process = System.Diagnostics.Process.Start(startInfo);
+            if (process == null)
+                return;
+
+            await process.WaitForExitAsync(cancellationToken);
+            if (process.ExitCode != 0)
+            {
+                _logger.LogDebug("Git config safe.directory returned {ExitCode} for {Path} (may already be listed)", process.ExitCode, fullPath);
+                return;
+            }
+            _logger.LogTrace("Added safe.directory: {Path}", fullPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to add safe.directory for {Path}", fullPath);
+        }
+    }
+
+    /// <summary>
     /// Builds git clone arguments. When bearerToken is set, uses -c http.extraHeader with Basic auth for private HTTPS repos.
     /// GitHub expects Basic auth (x-access-token:TOKEN or username:TOKEN), not Bearer, for git clone.
     /// </summary>
