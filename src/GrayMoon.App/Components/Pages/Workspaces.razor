@@ -109,7 +109,7 @@
                                             </button>
                                             <button class="btn btn-sm btn-outline-secondary me-2"
                                                     @onclick="() => ShowAddRepositoriesModalAsync(workspace.WorkspaceId)">
-                                                Add repositories
+                                                Select repositories
                                             </button>
                                         </td>
                                     </tr>
@@ -137,7 +137,7 @@
                OnCancel="@CloseEditorModal" />
 
 <WorkspaceRepositoriesModal IsVisible="@showRepositoriesModal"
-                            Title="@($"Add Repositories to {repositoriesModalWorkspaceName}")"
+                            Title="@($"Select repositories for {repositoriesModalWorkspaceName}")"
                             Repositories="@repositories"
                             SelectedRepositoryIds="@selectedRepositoryIds"
                             HasConnectors="@hasConnectors"
@@ -334,10 +334,8 @@
 
     private async Task SaveRepositoriesAsync()
     {
-        if (editingWorkspaceId == null)
-        {
-            return;
-        }
+        if (editingWorkspaceId == null) return;
+        if (isSavingRepositories) return;
 
         if (selectedRepositoryIds.Count == 0)
         {
@@ -345,11 +343,12 @@
             return;
         }
 
+        isSavingRepositories = true;
+        repositoriesModalErrorMessage = null;
+        await InvokeAsync(StateHasChanged);
+
         try
         {
-            isSavingRepositories = true;
-            repositoriesModalErrorMessage = null;
-
             Logger.LogInformation("User added {Count} repositories to workspace {WorkspaceName}", selectedRepositoryIds.Count, repositoriesModalWorkspaceName);
             await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, repositoriesModalWorkspaceName, selectedRepositoryIds);
 

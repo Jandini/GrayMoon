@@ -14,11 +14,11 @@ try
 {
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Logging.ClearProviders();
 builder.Host.UseSerilog((context, services, configuration) => configuration
     .ReadFrom.Configuration(context.Configuration)
     .ReadFrom.Services(services)
-    .Enrich.FromLogContext()
-    .WriteTo.Console());
+    .Enrich.FromLogContext());
 builder.Configuration.AddEnvironmentVariables();
 
 builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection("Workspace"));

@@ -121,7 +121,7 @@
 
 @code {
     [Parameter] public bool IsVisible { get; set; }
-    [Parameter] public string Title { get; set; } = "Add Repositories";
+    [Parameter] public string Title { get; set; } = "Select repositories";
     [Parameter] public List<GitHubRepositoryEntry>? Repositories { get; set; }
     [Parameter] public HashSet<int> SelectedRepositoryIds { get; set; } = new();
     [Parameter] public bool HasConnectors { get; set; }
