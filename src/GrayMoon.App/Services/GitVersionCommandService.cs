@@ -30,6 +30,8 @@ public class GitVersionCommandService
 
     private async Task<GitVersionResult?> RunDotNetGitVersionAsync(string repositoryPath, CancellationToken cancellationToken)
     {
+        _logger.LogDebug("Running dotnet-gitversion in {Path}", repositoryPath);
+
         // Use dotnet-gitversion (in PATH from dotnet tool install -g) for Docker compatibility
         var startInfo = new System.Diagnostics.ProcessStartInfo
         {
@@ -66,7 +68,13 @@ public class GitVersionCommandService
                 return null;
             }
 
-            return ParseGitVersionJson(stdout);
+            var result = ParseGitVersionJson(stdout);
+            if (result != null)
+            {
+                _logger.LogInformation("GitVersion for {Path}: {SemVer} ({Branch})", repositoryPath,
+                    result.SemVer ?? result.FullSemVer ?? "-", result.BranchName ?? result.EscapedBranchName ?? "-");
+            }
+            return result;
         }
         catch (Exception ex)
         {
