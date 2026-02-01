@@ -4,8 +4,21 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
 using Microsoft.EntityFrameworkCore;
+using Serilog;
 
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .CreateBootstrapLogger();
+
+try
+{
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Logging.ClearProviders();
+builder.Host.UseSerilog((context, services, configuration) => configuration
+    .ReadFrom.Configuration(context.Configuration)
+    .ReadFrom.Services(services)
+    .Enrich.FromLogContext());
 builder.Configuration.AddEnvironmentVariables();
 
 builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection("Workspace"));
@@ -14,8 +27,8 @@ builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection("W
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// Database (SQLite) for persisted data
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=graymoon.db";
+// Database (SQLite) for persisted data - stored in db/ for easy container volume mounting
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=db/graymoon.db";
 builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connectionString));
 builder.Services.AddScoped<GitHubConnectorRepository>();
 builder.Services.AddScoped<GitHubRepositoryRepository>();
@@ -33,12 +46,31 @@ builder.Services.AddHttpClient<GitHubService>();
 
 var app = builder.Build();
 
+// Ensure the db directory exists (for both local dev and container volume mounts)
+var dbPath = GetDatabasePath(connectionString);
+if (!string.IsNullOrEmpty(dbPath))
+{
+    var dbDir = Path.GetDirectoryName(dbPath);
+    if (!string.IsNullOrEmpty(dbDir))
+        Directory.CreateDirectory(dbDir);
+}
+
 // Ensure the local SQLite database is created and migrate schema if needed
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     dbContext.Database.EnsureCreated();
     await MigrateWorkspaceSyncMetadataAsync(dbContext);
+    await MigrateGitHubConnectorUserNameAsync(dbContext);
+}
+
+static string? GetDatabasePath(string connectionString)
+{
+    const string prefix = "Data Source=";
+    var idx = connectionString.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+    if (idx < 0) return null;
+    var path = connectionString[(idx + prefix.Length)..].Trim();
+    return string.IsNullOrEmpty(path) ? null : path;
 }
 
 static async Task MigrateWorkspaceSyncMetadataAsync(AppDbContext dbContext)
@@ -68,6 +100,31 @@ static async Task MigrateWorkspaceSyncMetadataAsync(AppDbContext dbContext)
     }
 }
 
+static async Task MigrateGitHubConnectorUserNameAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('GitHubConnectors') WHERE name='UserName'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE GitHubConnectors ADD COLUMN UserName TEXT";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
@@ -84,4 +141,15 @@ app.UseAntiforgery();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
-app.Run();
+await app.RunAsync();
+return 0;
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Application terminated unexpectedly");
+    return 1;
+}
+finally
+{
+    await Log.CloseAndFlushAsync();
+}

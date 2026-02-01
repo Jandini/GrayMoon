@@ -6,13 +6,30 @@
 }
 
 .repository-list {
-    max-height: 196px;
-    overflow-y: hidden;
+    min-height: 200px;
+    overflow: hidden;
+}
+
+/* When grid is present: fixed height so tbody scroll area matches visible grid */
+.repository-list:has(.repository-grid) {
+    height: min(420px, 55vh);
+    max-height: min(265px, 55vh);
+    display: flex;
+    flex-direction: column;
 }
 
 .repository-list.border {
     border-color: #5a5a5a !important;
     border-radius: 6px;
+}
+
+/* Table fills list; thead + tbody heights match container so scrollbar aligns with grid */
+.repository-list .repository-grid {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+    height: 100%;
 }
 
 .repository-grid thead,
@@ -22,11 +39,39 @@
     table-layout: fixed;
 }
 
+.repository-grid thead {
+    flex-shrink: 0;
+}
+
 .repository-grid tbody {
     display: block;
-    max-height: 260px;
+    flex: 1 1 0;
+    min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
+}
+
+/* Narrow gray scrollbar in modal grid (same as grid pages) */
+.repository-grid tbody::-webkit-scrollbar {
+    width: 8px;
+}
+
+.repository-grid tbody::-webkit-scrollbar-track {
+    background: var(--bg-card, #252526);
+}
+
+.repository-grid tbody::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.repository-grid tbody::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}
+
+.repository-grid tbody {
+    scrollbar-width: thin;
+    scrollbar-color: #5a5a5a var(--bg-card, #252526);
 }
 
 .repository-grid thead {
@@ -64,23 +109,6 @@
 .repository-grid th.col-select,
 .repository-grid td.col-select {
     padding-left: 12px;
-}
-
-.workspace-name-input:disabled,
-.workspace-name-input.form-control:disabled {
-    background-color: #2b2b2b;
-    color: #b8b8b8;
-    border-color: #3a3a3a;
-    opacity: 1;
-}
-
-.workspace-path-input:disabled,
-.workspace-path-input.form-control:disabled {
-    background-color: #1e1e1e;
-    color: #909090;
-    border-color: #3a3a3a;
-    opacity: 1;
-    cursor: not-allowed;
 }
 
 .repository-grid th:nth-child(2),

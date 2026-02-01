@@ -303,6 +303,140 @@ h1:focus {
     color: var(--text-primary) !important;
 }
 
+/* Last row of every grid: no bottom border */
+.table tbody tr:last-child td,
+.table tbody tr:last-child th {
+    border-bottom-width: 0;
+}
+
+/* Grid pages: page title, buttons, labels and grid header stay at top; only table body scrolls */
+.page-container.grid-page {
+    padding-block: var(--bs-gutter-x);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.grid-page {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.grid-page-header {
+    flex-shrink: 0;
+}
+
+.grid-page-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: calc(100vh - 190px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Card in grid body must fill space for table flex layout */
+.grid-page-body .page-card,
+.grid-page-body .card {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Match bottom spacing to left/right: remove extra card margin so padding-block provides equal gap */
+.grid-page-body .page-card.mb-4,
+.grid-page-body .card.mb-4 {
+    margin-bottom: 0;
+}
+
+.grid-page-body .card-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Prevent table-responsive from creating scroll; only tbody scrolls. No scrollbar here. */
+.grid-page-body .table-responsive {
+    overflow: hidden;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Grid tables: thead stays sticky (like Select Repositories modal), only tbody scrolls */
+.grid-page-body .table {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;  /* allow table to shrink so tbody can scroll */
+    margin-bottom: 0;
+}
+
+.grid-page-body .table thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    flex-shrink: 0;
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
+/* Solid background so content doesn't show through when scrolling under sticky header */
+.grid-page-body .table thead th {
+    background-color: var(--bg-tertiary) !important;
+    border-bottom-color: var(--border-color);
+}
+
+/* Only the table body scrolls; scrollbar is always visible and confined to tbody */
+.grid-page-body .table tbody {
+    flex: 1 1 auto;       /* take remaining space (flex-basis 0) so height is constrained and overflow scrolls */
+    min-height: 0;
+    overflow-y: scroll;  /* always show vertical scrollbar in table body */
+    overflow-x: auto;   /* horizontal scroll in tbody when needed */
+    display: block;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Custom scrollbar styling - narrow and gray, only in table body */
+.grid-page-body .table tbody::-webkit-scrollbar {
+    width: 8px;
+}
+
+.grid-page-body .table tbody::-webkit-scrollbar:horizontal {
+    height: 8px;
+}
+
+.grid-page-body .table tbody::-webkit-scrollbar-track {
+    background: var(--bg-card);
+}
+
+.grid-page-body .table tbody::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.grid-page-body .table tbody::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}
+
+/* Firefox: narrow gray scrollbar, always visible in table body */
+.grid-page-body .table tbody {
+    scrollbar-width: thin;
+    scrollbar-color: #5a5a5a var(--bg-card);
+    scrollbar-gutter: stable;  /* reserve space so scrollbar doesn't shift content */
+}
+
+.grid-page-body .table tbody tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
 .table tbody td a {
     color: var(--accent-blue) !important;
 }

@@ -4,5 +4,6 @@ public enum RepoSyncStatus
 {
     InSync,
     NotCloned,
-    VersionMismatch
+    VersionMismatch,
+    Error
 }

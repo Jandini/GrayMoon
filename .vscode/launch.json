@@ -7,9 +7,22 @@
         {
             "type": "chrome",
             "request": "launch",
-            "name": "Launch",
-            "url": "http://localhost:8080",
+            "name": "Launch (Chrome)",
+            "url": "http://localhost:5125",
             "webRoot": "${workspaceFolder}"
+        },
+        {
+            "name": "Docker (WSL)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8384",
+            "webRoot": "${workspaceFolder}",
+            "preLaunchTask": "docker-run",
+            "serverReadyAction": {
+                "pattern": "Now listening on:|Application started",
+                "action": "debugWithChrome",
+                "uriFormat": "http://localhost:8384"
+            }
         }
     ]
 }

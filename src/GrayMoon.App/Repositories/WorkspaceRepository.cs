@@ -158,28 +158,29 @@ public class WorkspaceRepository
 
     private async Task ReplaceRepositoriesAsync(int workspaceId, IReadOnlyCollection<int> repositoryIds)
     {
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+
         var existing = _dbContext.WorkspaceRepositories
             .Where(wr => wr.WorkspaceId == workspaceId);
 
         _dbContext.WorkspaceRepositories.RemoveRange(existing);
-        await _dbContext.SaveChangesAsync();
 
-        if (repositoryIds.Count == 0)
+        if (repositoryIds.Count > 0)
         {
-            return;
+            var workspaceRepos = repositoryIds
+                .Distinct()
+                .Select(repositoryId => new GrayMoon.App.Models.WorkspaceRepositoryLink
+                {
+                    WorkspaceId = workspaceId,
+                    GitHubRepositoryId = repositoryId
+                })
+                .ToList();
+
+            await _dbContext.WorkspaceRepositories.AddRangeAsync(workspaceRepos);
         }
 
-        var workspaceRepos = repositoryIds
-            .Distinct()
-            .Select(repositoryId => new GrayMoon.App.Models.WorkspaceRepositoryLink
-            {
-                WorkspaceId = workspaceId,
-                GitHubRepositoryId = repositoryId
-            })
-            .ToList();
-
-        await _dbContext.WorkspaceRepositories.AddRangeAsync(workspaceRepos);
         await _dbContext.SaveChangesAsync();
+        await transaction.CommitAsync();
     }
 
     private async Task<bool> NameExistsAsync(string name, int? ignoreId = null)

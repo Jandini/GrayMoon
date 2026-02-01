@@ -1,3 +1,15 @@
+.connectors-table {
+    table-layout: fixed;
+    width: 100%;
+}
+
+.connectors-table thead,
+.connectors-table tbody tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
 .status-col {
     width: 140px;
 }
@@ -6,6 +18,23 @@
     display: inline-block;
     min-width: 70px;
     text-align: center;
+}
+
+/* Status badge colors from Bootstrap RGB (blue=testing, green=ok, red=error) */
+.status-badge-testing,
+.status-badge-unknown {
+    background-color: rgb(var(--bs-primary-rgb));
+    color: #fff;
+}
+
+.status-badge-ok {
+    background-color: rgb(var(--bs-success-rgb));
+    color: #fff;
+}
+
+.status-badge-error {
+    background-color: rgb(var(--bs-danger-rgb));
+    color: #fff;
 }
 
 .actions-col {

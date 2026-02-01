@@ -1,0 +1,64 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "docker-build",
+            "type": "shell",
+            "command": "wsl",
+            "args": [
+                "--cd",
+                "${workspaceFolder}",
+                "docker",
+                "build",
+                "-t",
+                "graymoon:dev",
+                "-f",
+                "Dockerfile",
+                "."
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "silent"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "docker-run",
+            "type": "shell",
+            "command": "wsl",
+            "args": [
+                "docker",
+                "run",
+                "--rm",
+                "-p",
+                "8384:8384",
+                "-v",
+                "${workspaceFolder}/db:/app/db",
+                "graymoon:dev"
+            ],
+            "dependsOn": "docker-build",
+            "group": "none",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": {
+                "owner": "docker",
+                "pattern": {
+                    "regexp": "^(.*)(?!)",
+                    "file": 1,
+                    "message": 1
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "Now listening on",
+                    "endsPattern": "."
+                }
+            },
+            "isBackground": true,
+            "runOptions": {
+                "instanceLimit": 1
+            }
+        }
+    ]
+}

@@ -32,6 +32,9 @@ public class AppDbContext : DbContext
                 .IsRequired()
                 .HasMaxLength(300);
 
+            entity.Property(connector => connector.UserName)
+                .HasMaxLength(100);
+
             entity.Property(connector => connector.UserToken)
                 .IsRequired()
                 .HasMaxLength(500);

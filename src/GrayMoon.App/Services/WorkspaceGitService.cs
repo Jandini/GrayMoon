@@ -60,6 +60,7 @@ public class WorkspaceGitService
             return new Dictionary<int, RepoGitVersionInfo>();
         }
 
+        _logger.LogInformation("User triggered sync for workspace {WorkspaceName} ({RepoCount} repositories)", workspace.Name, repos.Count);
         _logger.LogDebug("Starting sync for workspace {WorkspaceName} ({RepoCount} repositories)", workspace.Name, repos.Count);
 
         var completedCount = 0;
@@ -114,14 +115,20 @@ public class WorkspaceGitService
 
             if (!Directory.Exists(repoPath))
             {
-                _logger.LogDebug("Repository {RepoName} is not cloned", repo.RepositoryName);
+                if (_logger.IsEnabled(LogLevel.Trace))
+                {
+                    _logger.LogTrace("Repository {RepoName} is not cloned", repo.RepositoryName);
+                }
                 return false;
             }
 
             var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, useCacheIfAvailable: true, cancellationToken);
             if (gitVersion == null)
             {
-                _logger.LogDebug("Repository {RepoName} failed to get version", repo.RepositoryName);
+                if (_logger.IsEnabled(LogLevel.Trace))
+                {
+                    _logger.LogTrace("Repository {RepoName} failed to get version", repo.RepositoryName);
+                }
                 return false;
             }
 
@@ -130,8 +137,11 @@ public class WorkspaceGitService
 
             if (diskVersion != wr.GitVersion || diskBranch != wr.BranchName)
             {
-                _logger.LogDebug("Repository {RepoName} version/branch mismatch. Disk: {DiskVersion}/{DiskBranch}, Persisted: {PersistedVersion}/{PersistedBranch}",
-                    repo.RepositoryName, diskVersion, diskBranch, wr.GitVersion, wr.BranchName);
+                if (_logger.IsEnabled(LogLevel.Trace))
+                {
+                    _logger.LogTrace("Repository {RepoName} version/branch mismatch. Disk: {DiskVersion}/{DiskBranch}, Persisted: {PersistedVersion}/{PersistedBranch}",
+                        repo.RepositoryName, diskVersion, diskBranch, wr.GitVersion, wr.BranchName);
+                }
                 return false;
             }
         }
@@ -246,7 +256,10 @@ public class WorkspaceGitService
             {
                 if (!string.IsNullOrWhiteSpace(repo.CloneUrl))
                 {
-                    _logger.LogDebug("Cloning {RepositoryName}", repo.RepositoryName);
+                    if (_logger.IsEnabled(LogLevel.Trace))
+                    {
+                        _logger.LogTrace("Cloning {RepositoryName}", repo.RepositoryName);
+                    }
                     await _gitCommandService.CloneAsync(workspacePath, repo.CloneUrl, cancellationToken);
                 }
             }
@@ -255,7 +268,10 @@ public class WorkspaceGitService
             var branch = "-";
             if (Directory.Exists(repoPath))
             {
-                _logger.LogDebug("Getting version for {RepositoryName}", repo.RepositoryName);
+                if (_logger.IsEnabled(LogLevel.Trace))
+                {
+                    _logger.LogTrace("Getting version for {RepositoryName}", repo.RepositoryName);
+                }
                 var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, cancellationToken);
                 if (gitVersion != null)
                 {
