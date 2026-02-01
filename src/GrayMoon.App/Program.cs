@@ -38,6 +38,7 @@ builder.Services.AddScoped<WorkspaceRepository>();
 builder.Services.AddScoped<WorkspaceService>();
 builder.Services.AddScoped<GitCommandService>();
 builder.Services.AddScoped<GitVersionCommandService>();
+builder.Services.AddSingleton<IWorkspaceSyncNotifier, WorkspaceSyncNotifier>();
 builder.Services.AddScoped<WorkspaceGitService>();
 builder.Services.AddScoped<GitHubRepositoryService>();
 builder.Services.AddScoped<GitHubActionsService>();

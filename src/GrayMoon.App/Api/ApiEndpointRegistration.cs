@@ -9,6 +9,7 @@ public static class ApiEndpointRegistration
     {
         routes.MapAboutEndpoints();
         routes.MapSyncEndpoints();
+        routes.MapWorkspaceEndpoints();
         return routes;
     }
 }

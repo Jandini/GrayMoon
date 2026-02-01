@@ -10,6 +10,8 @@
 @inject WorkspaceGitService WorkspaceGitService
 @inject GitHubConnectorRepository ConnectorRepository
 @inject GitHubRepositoryService RepositoryService
+@inject IJSRuntime JS
+@inject NavigationManager NavigationManager
 @inject ILogger<Workspace> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
@@ -134,6 +136,7 @@
     private bool? isOutOfSync = null;
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private CancellationTokenSource? _syncCts;
+    private DotNetObjectReference<Workspace>? _dotNetRef;
     private bool showRepositoriesModal;
     private bool isSavingRepositories;
     private bool isPersisting;
@@ -148,6 +151,15 @@
     {
         await LoadWorkspaceAsync();
         ApplySyncStateFromWorkspace();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && workspace != null && errorMessage == null)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("graymoonWorkspaceSync.subscribe", WorkspaceId, NavigationManager.BaseUri, _dotNetRef);
+        }
     }
 
     private void ApplySyncStateFromWorkspace()
@@ -165,10 +177,22 @@
 
     public void Dispose()
     {
+        try { _ = JS.InvokeVoidAsync("graymoonWorkspaceSync.unsubscribe", WorkspaceId); } catch { /* best effort */ }
+        _dotNetRef?.Dispose();
         _syncCts?.Cancel();
         _syncCts?.Dispose();
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
+    }
+
+    [JSInvokable]
+    public async Task OnSyncEvent()
+    {
+        if (isSyncing)
+            return;
+        await ReloadWorkspaceDataAsync();
+        ApplySyncStateFromWorkspace();
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task LoadWorkspaceAsync()

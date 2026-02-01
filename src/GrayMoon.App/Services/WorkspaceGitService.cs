@@ -22,6 +22,7 @@ public class WorkspaceGitService
     private readonly WorkspaceOptions _workspaceOptions;
     private readonly IServer? _server;
     private readonly IConfiguration _configuration;
+    private readonly IWorkspaceSyncNotifier? _syncNotifier;
 
     public WorkspaceGitService(
         GitCommandService gitCommandService,
@@ -33,7 +34,8 @@ public class WorkspaceGitService
         IOptions<WorkspaceOptions> workspaceOptions,
         IConfiguration configuration,
         ILogger<WorkspaceGitService> logger,
-        IServer? server = null)
+        IServer? server = null,
+        IWorkspaceSyncNotifier? syncNotifier = null)
     {
         _gitCommandService = gitCommandService ?? throw new ArgumentNullException(nameof(gitCommandService));
         _gitVersionCommandService = gitVersionCommandService ?? throw new ArgumentNullException(nameof(gitVersionCommandService));
@@ -44,6 +46,7 @@ public class WorkspaceGitService
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _server = server;
+        _syncNotifier = syncNotifier;
         _workspaceOptions = workspaceOptions?.Value ?? new WorkspaceOptions();
         var max = _workspaceOptions.MaxConcurrentGitOperations;
         _maxConcurrent = max < 1 ? 1 : max;
@@ -149,6 +152,7 @@ public class WorkspaceGitService
         var isInSync = statuses.Values.All(v => v == RepoSyncStatus.InSync);
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
 
+        _syncNotifier?.NotifySyncCompleted(workspaceId);
         _logger.LogDebug("Single-repo sync completed for {RepositoryName} in workspace {WorkspaceName}", repo.RepositoryName, workspace.Name);
     }
 
