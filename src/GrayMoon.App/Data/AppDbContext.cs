@@ -100,6 +100,10 @@ public class AppDbContext : DbContext
             entity.Property(wr => wr.BranchName)
                 .HasMaxLength(200);
 
+            entity.Property(wr => wr.SyncStatus)
+                .HasDefaultValue(RepoSyncStatus.NeedsSync)
+                .HasSentinel(RepoSyncStatus.InSync);
+
             entity.HasOne(wr => wr.Workspace)
                 .WithMany(workspace => workspace.Repositories)
                 .HasForeignKey(wr => wr.WorkspaceId)

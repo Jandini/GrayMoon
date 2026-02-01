@@ -5,8 +5,11 @@
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
 @using GrayMoon.App.Components.Shared
+@using GrayMoon.App.Components.Modals
 @inject WorkspaceRepository WorkspaceRepository
 @inject WorkspaceGitService WorkspaceGitService
+@inject GitHubConnectorRepository ConnectorRepository
+@inject GitHubRepositoryService RepositoryService
 @inject ILogger<Workspace> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
@@ -25,11 +28,18 @@
                     &nbsp;
                 </p>
             </div>
-            <button class="btn @(isOutOfSync == true ? "btn-danger" : "btn-primary")"
-                    @onclick="SyncAsync"
-                    disabled="@(isSyncing || workspaceRepositories.Count == 0)">
-                Sync
-            </button>
+            <div class="d-flex gap-2">
+                <button class="btn btn-secondary"
+                        @onclick="ShowRepositoriesModalAsync"
+                        disabled="@(workspace == null)">
+                    Repositories
+                </button>
+                <button class="btn @(isOutOfSync == true ? "btn-danger" : "btn-primary")"
+                        @onclick="SyncAsync"
+                        disabled="@(isSyncing || workspaceRepositories.Count == 0)">
+                    Sync
+                </button>
+            </div>
         </div>
         @if (errorMessage != null)
         {
@@ -95,8 +105,21 @@
     }
 </div>
 
+<WorkspaceRepositoriesModal IsVisible="@showRepositoriesModal"
+                            Title="@($"Repositories for {workspace?.Name ?? "Workspace"}")"
+                            Repositories="@repositoriesModalRepositories"
+                            SelectedRepositoryIds="@selectedRepositoryIds"
+                            HasConnectors="@hasConnectors"
+                            IsSaving="@isSavingRepositories"
+                            IsFetching="@isPersisting"
+                            ErrorMessage="@repositoriesModalErrorMessage"
+                            OnSave="@SaveRepositoriesAsync"
+                            OnCancel="@CloseRepositoriesModal"
+                            OnFetchRepositories="@FetchRepositoriesAsync" />
+
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
 <LoadingOverlay IsVisible="@isSyncing" Message="@syncProgressMessage" OnAbort="AbortSyncAsync" />
+<LoadingOverlay IsVisible="@(showRepositoriesModal && isPersisting)" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}...")" OnAbort="AbortFetchRepositories" />
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
@@ -110,77 +133,42 @@
     private string syncProgressMessage = "Synchronizing...";
     private bool? isOutOfSync = null;
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
-    private CancellationTokenSource? _syncCheckCts;
     private CancellationTokenSource? _syncCts;
+    private bool showRepositoriesModal;
+    private bool isSavingRepositories;
+    private bool isPersisting;
+    private bool hasConnectors;
+    private string? repositoriesModalErrorMessage;
+    private List<GitHubRepositoryEntry>? repositoriesModalRepositories;
+    private HashSet<int> selectedRepositoryIds = new();
+    private int? fetchedRepositoryCount;
+    private CancellationTokenSource? _fetchRepositoriesCts;
 
     protected override async Task OnInitializedAsync()
     {
         await LoadWorkspaceAsync();
-        _ = CheckSyncStatusAsync();
+        ApplySyncStateFromWorkspace();
     }
 
-    private async Task CheckSyncStatusAsync()
+    private void ApplySyncStateFromWorkspace()
     {
         if (workspace == null || workspaceRepositories.Count == 0)
         {
             return;
         }
-
-        var lastSynced = workspace.LastSyncedAt;
-        var shouldValidate = lastSynced == null || (DateTime.UtcNow - lastSynced.Value).TotalHours >= 1;
-
-        if (!shouldValidate)
-        {
-            isOutOfSync = !workspace.IsInSync;
-            if (workspace.IsInSync)
-            {
-                repoSyncStatus = workspaceRepositories
-                    .Where(wr => wr.GitHubRepository != null)
-                    .ToDictionary(wr => wr.GitHubRepositoryId, _ => RepoSyncStatus.InSync);
-            }
-            else
-            {
-                repoSyncStatus = new Dictionary<int, RepoSyncStatus>();
-            }
-            await InvokeAsync(StateHasChanged);
-            return;
-        }
-
-        _syncCheckCts?.Cancel();
-        _syncCheckCts = new CancellationTokenSource();
-        repoSyncStatus = new Dictionary<int, RepoSyncStatus>();
-
-        try
-        {
-            var status = await WorkspaceGitService.GetRepoSyncStatusAsync(
-                WorkspaceId,
-                onProgress: (repoId, repoStatus) =>
-                {
-                    repoSyncStatus[repoId] = repoStatus;
-                    _ = InvokeAsync(StateHasChanged);
-                },
-                cancellationToken: _syncCheckCts.Token);
-            isOutOfSync = status.Values.Any(v => v != RepoSyncStatus.InSync);
-            await InvokeAsync(StateHasChanged);
-        }
-        catch (OperationCanceledException)
-        {
-            // Check was cancelled, ignore
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Error checking sync status for workspace {WorkspaceId}", WorkspaceId);
-            isOutOfSync = true;
-            await InvokeAsync(StateHasChanged);
-        }
+        repoSyncStatus = workspaceRepositories
+            .Where(wr => wr.GitHubRepository != null)
+            .ToDictionary(wr => wr.GitHubRepositoryId, wr => wr.SyncStatus);
+        isOutOfSync = repoSyncStatus.Values.Any(s => s != RepoSyncStatus.InSync);
+        StateHasChanged();
     }
 
     public void Dispose()
     {
-        _syncCheckCts?.Cancel();
-        _syncCheckCts?.Dispose();
         _syncCts?.Cancel();
         _syncCts?.Dispose();
+        _fetchRepositoriesCts?.Cancel();
+        _fetchRepositoriesCts?.Dispose();
     }
 
     private async Task LoadWorkspaceAsync()
@@ -225,6 +213,7 @@
             var (text, bgColor) = status switch
             {
                 RepoSyncStatus.InSync => ("in sync", "#198754"),
+                RepoSyncStatus.NeedsSync => ("sync", "#dc3545"),
                 RepoSyncStatus.NotCloned => ("not cloned", "#6c757d"),
                 RepoSyncStatus.VersionMismatch => ("version", "#dc3545"),
                 RepoSyncStatus.Error => ("error", "#dc3545"),
@@ -243,6 +232,110 @@
         _syncCts?.Cancel();
     }
 
+    private async Task ShowRepositoriesModalAsync()
+    {
+        if (workspace == null)
+        {
+            return;
+        }
+        repositoriesModalErrorMessage = null;
+        selectedRepositoryIds = workspace.Repositories
+            .Select(link => link.GitHubRepositoryId)
+            .ToHashSet();
+        await EnsureRepositoriesForModalAsync();
+        showRepositoriesModal = true;
+    }
+
+    private async Task EnsureRepositoriesForModalAsync()
+    {
+        var connectors = await ConnectorRepository.GetAllAsync();
+        hasConnectors = connectors.Count > 0;
+        if (repositoriesModalRepositories == null && hasConnectors)
+        {
+            repositoriesModalRepositories = await RepositoryService.GetPersistedRepositoriesAsync();
+        }
+    }
+
+    private void CloseRepositoriesModal()
+    {
+        showRepositoriesModal = false;
+        repositoriesModalErrorMessage = null;
+    }
+
+    private async Task SaveRepositoriesAsync()
+    {
+        if (workspace == null || isSavingRepositories)
+        {
+            return;
+        }
+        if (selectedRepositoryIds.Count == 0)
+        {
+            repositoriesModalErrorMessage = "Select at least one repository.";
+            return;
+        }
+        isSavingRepositories = true;
+        repositoriesModalErrorMessage = null;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            await WorkspaceRepository.UpdateAsync(WorkspaceId, workspace.Name, selectedRepositoryIds);
+            CloseRepositoriesModal();
+            await ReloadWorkspaceDataAsync();
+            ApplySyncStateFromWorkspace();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving repositories for workspace {WorkspaceId}", WorkspaceId);
+            repositoriesModalErrorMessage = ex.Message;
+        }
+        finally
+        {
+            isSavingRepositories = false;
+        }
+    }
+
+    private void AbortFetchRepositories()
+    {
+        _fetchRepositoriesCts?.Cancel();
+    }
+
+    private async Task FetchRepositoriesAsync()
+    {
+        if (!hasConnectors || isPersisting)
+        {
+            return;
+        }
+        _fetchRepositoriesCts?.Cancel();
+        _fetchRepositoriesCts = new CancellationTokenSource();
+        try
+        {
+            isPersisting = true;
+            fetchedRepositoryCount = null;
+            repositoriesModalErrorMessage = null;
+            await InvokeAsync(StateHasChanged);
+            var progress = new Progress<int>(count =>
+            {
+                fetchedRepositoryCount = count;
+                _ = InvokeAsync(StateHasChanged);
+            });
+            repositoriesModalRepositories = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            repositoriesModalRepositories = await RepositoryService.GetPersistedRepositoriesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error fetching repositories");
+            repositoriesModalErrorMessage = "Failed to fetch repositories. Please try again later.";
+            repositoriesModalRepositories = new List<GitHubRepositoryEntry>();
+        }
+        finally
+        {
+            isPersisting = false;
+        }
+    }
+
     private async Task SyncAsync()
     {
         if (workspace == null || workspaceRepositories.Count == 0 || isSyncing)
@@ -250,7 +343,6 @@
             return;
         }
 
-        _syncCheckCts?.Cancel();
         _syncCts?.Cancel();
         _syncCts = new CancellationTokenSource();
 
@@ -289,7 +381,7 @@
         {
             // Sync was cancelled - reload workspace to restore pre-sync data (onProgress may have partially updated in-memory state)
             await ReloadWorkspaceDataAsync();
-            _ = CheckSyncStatusAsync();
+            ApplySyncStateFromWorkspace();
         }
         catch (Exception ex)
         {

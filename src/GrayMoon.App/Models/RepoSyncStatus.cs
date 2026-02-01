@@ -5,5 +5,7 @@ public enum RepoSyncStatus
     InSync,
     NotCloned,
     VersionMismatch,
-    Error
+    Error,
+    /// <summary>Unknown state for newly added repos (not yet cloned or version checked).</summary>
+    NeedsSync
 }

@@ -46,12 +46,18 @@ public class GitCommandService
                 return false;
             }
 
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
             await process.WaitForExitAsync(cancellationToken);
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
 
             if (process.ExitCode != 0)
             {
-                var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
-                _logger.LogWarning("Git clone failed with exit code {ExitCode}: {Stderr}", process.ExitCode, stderr);
+                _logger.LogWarning("Git clone failed with exit code {ExitCode}. Stdout: {Stdout} Stderr: {Stderr}",
+                    process.ExitCode,
+                    string.IsNullOrWhiteSpace(stdout) ? "(none)" : stdout.Trim(),
+                    string.IsNullOrWhiteSpace(stderr) ? "(none)" : stderr.Trim());
                 return false;
             }
 
@@ -88,21 +94,30 @@ public class GitCommandService
             using var process = System.Diagnostics.Process.Start(startInfo);
             if (process == null)
             {
+                _logger.LogWarning("Failed to start git process for rev-parse HEAD in {Path}", repositoryPath);
                 return null;
             }
 
-            var stdout = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
             await process.WaitForExitAsync(cancellationToken);
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
 
             if (process.ExitCode != 0)
             {
+                _logger.LogWarning("Git rev-parse HEAD failed with exit code {ExitCode} in {Path}. Stdout: {Stdout} Stderr: {Stderr}",
+                    process.ExitCode, repositoryPath,
+                    string.IsNullOrWhiteSpace(stdout) ? "(none)" : stdout.Trim(),
+                    string.IsNullOrWhiteSpace(stderr) ? "(none)" : stderr.Trim());
                 return null;
             }
 
             return stdout.Trim();
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Error running git rev-parse HEAD in {Path}", repositoryPath);
             return null;
         }
     }

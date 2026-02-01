@@ -217,24 +217,27 @@ public class WorkspaceGitService
         IEnumerable<(int RepoId, RepoGitVersionInfo Info)> results,
         CancellationToken cancellationToken)
     {
-        var updates = results.Where(r => r.Info.Version != "-" || r.Info.Branch != "-").ToList();
-        if (updates.Count == 0)
+        var resultList = results.ToList();
+        if (resultList.Count == 0)
         {
             return;
         }
 
-        var repoIds = updates.Select(u => u.RepoId).ToList();
+        var repoIds = resultList.Select(r => r.RepoId).ToList();
         var workspaceReposToUpdate = await _dbContext.WorkspaceRepositories
             .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.GitHubRepositoryId))
             .ToListAsync(cancellationToken);
 
-        foreach (var update in updates)
+        foreach (var result in resultList)
         {
-            var wr = workspaceReposToUpdate.FirstOrDefault(wr => wr.GitHubRepositoryId == update.RepoId);
+            var wr = workspaceReposToUpdate.FirstOrDefault(wr => wr.GitHubRepositoryId == result.RepoId);
             if (wr != null)
             {
-                wr.GitVersion = update.Info.Version == "-" ? null : update.Info.Version;
-                wr.BranchName = update.Info.Branch == "-" ? null : update.Info.Branch;
+                wr.GitVersion = result.Info.Version == "-" ? null : result.Info.Version;
+                wr.BranchName = result.Info.Branch == "-" ? null : result.Info.Branch;
+                wr.SyncStatus = (result.Info.Version == "-" || result.Info.Branch == "-")
+                    ? RepoSyncStatus.Error
+                    : RepoSyncStatus.InSync;
             }
         }
 

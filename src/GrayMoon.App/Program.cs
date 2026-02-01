@@ -1,3 +1,4 @@
+using System.Reflection;
 using GrayMoon.App.Components;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
@@ -46,6 +47,9 @@ builder.Services.AddHttpClient<GitHubService>();
 
 var app = builder.Build();
 
+var version = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+app.Logger.LogInformation("Starting GrayMoon {Version}...", version);
+
 // Ensure the db directory exists (for both local dev and container volume mounts)
 var dbPath = GetDatabasePath(connectionString);
 if (!string.IsNullOrEmpty(dbPath))
@@ -62,6 +66,7 @@ using (var scope = app.Services.CreateScope())
     dbContext.Database.EnsureCreated();
     await MigrateWorkspaceSyncMetadataAsync(dbContext);
     await MigrateGitHubConnectorUserNameAsync(dbContext);
+    await MigrateWorkspaceRepositoriesSyncStatusAsync(dbContext);
 }
 
 static string? GetDatabasePath(string connectionString)
@@ -115,6 +120,32 @@ static async Task MigrateGitHubConnectorUserNameAsync(AppDbContext dbContext)
             if (count == 0)
             {
                 cmd.CommandText = "ALTER TABLE GitHubConnectors ADD COLUMN UserName TEXT";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateWorkspaceRepositoriesSyncStatusAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='SyncStatus'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                // RepoSyncStatus.NeedsSync = 4; default new/unknown repos to needs sync
+                cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN SyncStatus INTEGER NOT NULL DEFAULT 4";
                 await cmd.ExecuteNonQueryAsync();
             }
         }
