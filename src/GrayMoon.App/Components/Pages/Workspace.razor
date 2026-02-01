@@ -6,11 +6,11 @@
 @using GrayMoon.App.Services
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Components.Modals
+@using Microsoft.AspNetCore.SignalR.Client
 @inject WorkspaceRepository WorkspaceRepository
 @inject WorkspaceGitService WorkspaceGitService
 @inject GitHubConnectorRepository ConnectorRepository
 @inject GitHubRepositoryService RepositoryService
-@inject IJSRuntime JS
 @inject NavigationManager NavigationManager
 @inject ILogger<Workspace> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
@@ -136,7 +136,7 @@
     private bool? isOutOfSync = null;
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private CancellationTokenSource? _syncCts;
-    private DotNetObjectReference<Workspace>? _dotNetRef;
+    private HubConnection? _hubConnection;
     private bool showRepositoriesModal;
     private bool isSavingRepositories;
     private bool isPersisting;
@@ -157,8 +157,16 @@
     {
         if (firstRender && workspace != null && errorMessage == null)
         {
-            _dotNetRef = DotNetObjectReference.Create(this);
-            await JS.InvokeVoidAsync("graymoonWorkspaceSync.subscribe", WorkspaceId, NavigationManager.BaseUri, _dotNetRef);
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(NavigationManager.ToAbsoluteUri("/hubs/workspace-sync"))
+                .WithAutomaticReconnect()
+                .Build();
+            _hubConnection.On<int>("WorkspaceSynced", async (workspaceId) =>
+            {
+                if (workspaceId == WorkspaceId)
+                    await InvokeAsync(RefreshFromSync);
+            });
+            await _hubConnection.StartAsync();
         }
     }
 
@@ -177,16 +185,15 @@
 
     public void Dispose()
     {
-        try { _ = JS.InvokeVoidAsync("graymoonWorkspaceSync.unsubscribe", WorkspaceId); } catch { /* best effort */ }
-        _dotNetRef?.Dispose();
+        _ = _hubConnection?.StopAsync();
+        _hubConnection?.DisposeAsync();
         _syncCts?.Cancel();
         _syncCts?.Dispose();
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
     }
 
-    [JSInvokable]
-    public async Task OnSyncEvent()
+    private async Task RefreshFromSync()
     {
         if (isSyncing)
             return;

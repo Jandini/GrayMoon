@@ -2,6 +2,7 @@ using System.Reflection;
 using GrayMoon.App.Api;
 using GrayMoon.App.Components;
 using GrayMoon.App.Data;
+using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
@@ -38,7 +39,6 @@ builder.Services.AddScoped<WorkspaceRepository>();
 builder.Services.AddScoped<WorkspaceService>();
 builder.Services.AddScoped<GitCommandService>();
 builder.Services.AddScoped<GitVersionCommandService>();
-builder.Services.AddSingleton<IWorkspaceSyncNotifier, WorkspaceSyncNotifier>();
 builder.Services.AddScoped<WorkspaceGitService>();
 builder.Services.AddScoped<GitHubRepositoryService>();
 builder.Services.AddScoped<GitHubActionsService>();
@@ -172,6 +172,7 @@ app.UseStaticFiles();
 app.UseAntiforgery();
 
 app.MapApiEndpoints();
+app.MapHub<WorkspaceSyncHub>("/hubs/workspace-sync");
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

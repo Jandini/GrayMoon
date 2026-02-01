@@ -1,9 +1,11 @@
 using System.Reflection;
 using GrayMoon.App.Data;
+using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -22,7 +24,7 @@ public class WorkspaceGitService
     private readonly WorkspaceOptions _workspaceOptions;
     private readonly IServer? _server;
     private readonly IConfiguration _configuration;
-    private readonly IWorkspaceSyncNotifier? _syncNotifier;
+    private readonly IHubContext<WorkspaceSyncHub>? _hubContext;
 
     public WorkspaceGitService(
         GitCommandService gitCommandService,
@@ -35,7 +37,7 @@ public class WorkspaceGitService
         IConfiguration configuration,
         ILogger<WorkspaceGitService> logger,
         IServer? server = null,
-        IWorkspaceSyncNotifier? syncNotifier = null)
+        IHubContext<WorkspaceSyncHub>? hubContext = null)
     {
         _gitCommandService = gitCommandService ?? throw new ArgumentNullException(nameof(gitCommandService));
         _gitVersionCommandService = gitVersionCommandService ?? throw new ArgumentNullException(nameof(gitVersionCommandService));
@@ -46,7 +48,7 @@ public class WorkspaceGitService
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _server = server;
-        _syncNotifier = syncNotifier;
+        _hubContext = hubContext;
         _workspaceOptions = workspaceOptions?.Value ?? new WorkspaceOptions();
         var max = _workspaceOptions.MaxConcurrentGitOperations;
         _maxConcurrent = max < 1 ? 1 : max;
@@ -152,7 +154,8 @@ public class WorkspaceGitService
         var isInSync = statuses.Values.All(v => v == RepoSyncStatus.InSync);
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
 
-        _syncNotifier?.NotifySyncCompleted(workspaceId);
+        if (_hubContext != null)
+            await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
         _logger.LogDebug("Single-repo sync completed for {RepositoryName} in workspace {WorkspaceName}", repo.RepositoryName, workspace.Name);
     }
 
