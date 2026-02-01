@@ -6,13 +6,30 @@
 }
 
 .repository-list {
-    max-height: 196px;
-    overflow-y: hidden;
+    min-height: 200px;
+    overflow: hidden;
+}
+
+/* When grid is present: fixed height so tbody scroll area matches visible grid */
+.repository-list:has(.repository-grid) {
+    height: min(420px, 55vh);
+    max-height: min(265px, 55vh);
+    display: flex;
+    flex-direction: column;
 }
 
 .repository-list.border {
     border-color: #5a5a5a !important;
     border-radius: 6px;
+}
+
+/* Table fills list; thead + tbody heights match container so scrollbar aligns with grid */
+.repository-list .repository-grid {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+    height: 100%;
 }
 
 .repository-grid thead,
@@ -22,9 +39,14 @@
     table-layout: fixed;
 }
 
+.repository-grid thead {
+    flex-shrink: 0;
+}
+
 .repository-grid tbody {
     display: block;
-    max-height: 260px;
+    flex: 1 1 0;
+    min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
 }
