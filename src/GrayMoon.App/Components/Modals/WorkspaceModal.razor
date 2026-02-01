@@ -2,7 +2,8 @@
 
 @if (IsVisible)
 {
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDown">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
@@ -16,7 +17,8 @@
                                placeholder="Enter workspace name"
                                value="@WorkspaceName"
                                @oninput="OnNameChanged"
-                               disabled="@IsNameDisabled" />
+                               disabled="@IsNameDisabled"
+                               @ref="firstInputElement" />
                     </div>
 
                     <div class="mb-3">
@@ -55,6 +57,8 @@
 }
 
 @code {
+    private ElementReference firstInputElement;
+
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public string Title { get; set; } = "Add Workspace";
     [Parameter] public string WorkspaceName { get; set; } = string.Empty;
@@ -67,6 +71,33 @@
     [Parameter] public string? ErrorMessage { get; set; }
     [Parameter] public EventCallback OnSave { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
+
+    private bool _wasVisible;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible && !_wasVisible && !IsNameDisabled)
+        {
+            _wasVisible = true;
+            await firstInputElement.FocusAsync();
+        }
+        else if (!IsVisible)
+        {
+            _wasVisible = false;
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            await OnCancel.InvokeAsync();
+        }
+        else if (e.Key == "Enter")
+        {
+            await OnSave.InvokeAsync();
+        }
+    }
 
     private async Task OnNameChanged(ChangeEventArgs e)
     {

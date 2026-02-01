@@ -6,10 +6,12 @@
 @using GrayMoon.App.Services
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Components.Modals
+@using Microsoft.AspNetCore.SignalR.Client
 @inject WorkspaceRepository WorkspaceRepository
 @inject WorkspaceGitService WorkspaceGitService
 @inject GitHubConnectorRepository ConnectorRepository
 @inject GitHubRepositoryService RepositoryService
+@inject NavigationManager NavigationManager
 @inject ILogger<Workspace> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
@@ -134,6 +136,7 @@
     private bool? isOutOfSync = null;
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private CancellationTokenSource? _syncCts;
+    private HubConnection? _hubConnection;
     private bool showRepositoriesModal;
     private bool isSavingRepositories;
     private bool isPersisting;
@@ -148,6 +151,23 @@
     {
         await LoadWorkspaceAsync();
         ApplySyncStateFromWorkspace();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && workspace != null && errorMessage == null)
+        {
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(NavigationManager.ToAbsoluteUri("/hubs/workspace-sync"))
+                .WithAutomaticReconnect()
+                .Build();
+            _hubConnection.On<int>("WorkspaceSynced", async (workspaceId) =>
+            {
+                if (workspaceId == WorkspaceId)
+                    await InvokeAsync(RefreshFromSync);
+            });
+            await _hubConnection.StartAsync();
+        }
     }
 
     private void ApplySyncStateFromWorkspace()
@@ -165,10 +185,21 @@
 
     public void Dispose()
     {
+        _ = _hubConnection?.StopAsync();
+        _hubConnection?.DisposeAsync();
         _syncCts?.Cancel();
         _syncCts?.Dispose();
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
+    }
+
+    private async Task RefreshFromSync()
+    {
+        if (isSyncing)
+            return;
+        await ReloadWorkspaceDataAsync();
+        ApplySyncStateFromWorkspace();
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task LoadWorkspaceAsync()

@@ -1,6 +1,11 @@
+using System.Reflection;
 using GrayMoon.App.Data;
+using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -12,26 +17,40 @@ public class WorkspaceGitService
     private readonly GitVersionCommandService _gitVersionCommandService;
     private readonly WorkspaceService _workspaceService;
     private readonly WorkspaceRepository _workspaceRepository;
+    private readonly GitHubRepositoryRepository _githubRepositoryRepository;
     private readonly AppDbContext _dbContext;
     private readonly ILogger<WorkspaceGitService> _logger;
     private readonly int _maxConcurrent;
+    private readonly WorkspaceOptions _workspaceOptions;
+    private readonly IServer? _server;
+    private readonly IConfiguration _configuration;
+    private readonly IHubContext<WorkspaceSyncHub>? _hubContext;
 
     public WorkspaceGitService(
         GitCommandService gitCommandService,
         GitVersionCommandService gitVersionCommandService,
         WorkspaceService workspaceService,
         WorkspaceRepository workspaceRepository,
+        GitHubRepositoryRepository githubRepositoryRepository,
         AppDbContext dbContext,
         IOptions<WorkspaceOptions> workspaceOptions,
-        ILogger<WorkspaceGitService> logger)
+        IConfiguration configuration,
+        ILogger<WorkspaceGitService> logger,
+        IServer? server = null,
+        IHubContext<WorkspaceSyncHub>? hubContext = null)
     {
         _gitCommandService = gitCommandService ?? throw new ArgumentNullException(nameof(gitCommandService));
         _gitVersionCommandService = gitVersionCommandService ?? throw new ArgumentNullException(nameof(gitVersionCommandService));
         _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
         _workspaceRepository = workspaceRepository ?? throw new ArgumentNullException(nameof(workspaceRepository));
+        _githubRepositoryRepository = githubRepositoryRepository ?? throw new ArgumentNullException(nameof(githubRepositoryRepository));
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        var max = workspaceOptions?.Value?.MaxConcurrentGitOperations ?? 8;
+        _server = server;
+        _hubContext = hubContext;
+        _workspaceOptions = workspaceOptions?.Value ?? new WorkspaceOptions();
+        var max = _workspaceOptions.MaxConcurrentGitOperations;
         _maxConcurrent = max < 1 ? 1 : max;
     }
 
@@ -69,7 +88,7 @@ public class WorkspaceGitService
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
         var syncTasks = repos.Select(async repo =>
         {
-            var result = await RunSyncJobAsync(repo, workspacePath, semaphore, cancellationToken);
+            var result = await RunSyncJobAsync(workspaceId, repo, workspacePath, semaphore, cancellationToken);
             var count = Interlocked.Increment(ref completedCount);
             onProgress?.Invoke(count, totalCount, result.RepoId, result.Info);
             return result;
@@ -83,6 +102,61 @@ public class WorkspaceGitService
 
         _logger.LogDebug("Sync completed for workspace {WorkspaceName}", workspace.Name);
         return results.ToDictionary(r => r.RepoId, r => r.Info);
+    }
+
+    /// <summary>
+    /// Syncs a single repository by its id in the given workspace only.
+    /// Call from a background task (e.g. after returning 202 from API); uses scoped services.
+    /// Returns false if repo not found or repo is not in the workspace; true if sync was run.
+    /// </summary>
+    public async Task<bool> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var repo = await _githubRepositoryRepository.GetByIdAsync(repositoryId, cancellationToken);
+        if (repo == null)
+        {
+            _logger.LogWarning("Sync skipped: repository not found for id {RepositoryId}", repositoryId);
+            return false;
+        }
+
+        var isInWorkspace = await _dbContext.WorkspaceRepositories
+            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.GitHubRepositoryId == repo.GitHubRepositoryId, cancellationToken);
+        if (!isInWorkspace)
+        {
+            _logger.LogWarning("Sync skipped: repository {RepositoryName} (id {RepositoryId}) is not in workspace {WorkspaceId}", repo.RepositoryName, repositoryId, workspaceId);
+            return false;
+        }
+
+        _logger.LogInformation("Syncing repository {RepositoryName} (id {RepositoryId}) in workspace {WorkspaceId}", repo.RepositoryName, repositoryId, workspaceId);
+        await SyncSingleRepositoryInWorkspaceAsync(workspaceId, repo, cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// Syncs one repository in a single workspace (clone if needed, get version, persist).
+    /// </summary>
+    public async Task SyncSingleRepositoryInWorkspaceAsync(int workspaceId, GitHubRepository repo, CancellationToken cancellationToken = default)
+    {
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+        {
+            _logger.LogWarning("Workspace {WorkspaceId} not found for single-repo sync", workspaceId);
+            return;
+        }
+
+        var workspacePath = _workspaceService.GetWorkspacePath(workspace.Name);
+        _workspaceService.CreateDirectory(workspace.Name);
+
+        using var semaphore = new SemaphoreSlim(1);
+        var (repoId, info) = await RunSyncJobAsync(workspaceId, repo, workspacePath, semaphore, cancellationToken);
+        await PersistVersionsAsync(workspaceId, new[] { (repoId, info) }, cancellationToken);
+
+        var statuses = await GetRepoSyncStatusAsync(workspaceId, cancellationToken: cancellationToken);
+        var isInSync = statuses.Values.All(v => v == RepoSyncStatus.InSync);
+        await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
+
+        if (_hubContext != null)
+            await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
+        _logger.LogDebug("Single-repo sync completed for {RepositoryName} in workspace {WorkspaceName}", repo.RepositoryName, workspace.Name);
     }
 
     public async Task<bool> IsInSyncAsync(int workspaceId, CancellationToken cancellationToken = default)
@@ -245,6 +319,7 @@ public class WorkspaceGitService
     }
 
     private async Task<(int RepoId, RepoGitVersionInfo Info)> RunSyncJobAsync(
+        int workspaceId,
         GitHubRepository repo,
         string workspacePath,
         SemaphoreSlim semaphore,
@@ -280,6 +355,9 @@ public class WorkspaceGitService
                 {
                     version = gitVersion.SemVer ?? gitVersion.FullSemVer ?? "-";
                     branch = gitVersion.BranchName ?? gitVersion.EscapedBranchName ?? "-";
+
+                    if (version != "-" && branch != "-")
+                        WriteSyncHooks(repoPath, workspaceId, repo.GitHubRepositoryId);
                 }
             }
 
@@ -289,5 +367,92 @@ public class WorkspaceGitService
         {
             semaphore.Release();
         }
+    }
+
+    private void WriteSyncHooks(string repoPath, int workflowId, int repoId)
+    {
+        var baseUrl = GetPostCommitHookBaseUrl();
+        if (string.IsNullOrEmpty(baseUrl))
+        {
+            _logger.LogDebug("Skipping sync hooks: no base URL (set Workspace:PostCommitHookBaseUrl or ensure urls/ASPNETCORE_URLS is set)");
+            return;
+        }
+        baseUrl = baseUrl.TrimEnd('/');
+        var version = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+        var now = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "Z";
+        var comment = $"# Created by GrayMoon {version} at {now}.\n";
+        var curlLine = $"curl -s -X POST \"{baseUrl}/api/sync\" -H \"Content-Type: application/json\" -d '{{\"repositoryId\":{repoId},\"workspaceId\":{workflowId}}}'\n";
+        var hooksDir = Path.Combine(repoPath, ".git", "hooks");
+        var utf8NoBom = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
+        try
+        {
+            Directory.CreateDirectory(hooksDir);
+
+            // post-commit: run after every commit
+            var postCommit = "#!/bin/sh\n" + comment + curlLine;
+            WriteHookFile(Path.Combine(hooksDir, "post-commit"), postCommit, utf8NoBom);
+
+            // post-checkout: run after checkout; $3=1 means branch checkout (not file checkout)
+            var postCheckout = "#!/bin/sh\n" + comment + "[ \"$3\" = \"1\" ] && " + curlLine.TrimEnd() + "\n";
+            WriteHookFile(Path.Combine(hooksDir, "post-checkout"), postCheckout, utf8NoBom);
+
+            _logger.LogDebug("Sync hooks (post-commit, post-checkout) written for repo {RepoId} in workspace {WorkflowId}", repoId, workflowId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to write sync hooks in {HooksDir}", hooksDir);
+        }
+    }
+
+    private static void WriteHookFile(string hookPath, string content, System.Text.Encoding encoding)
+    {
+        var normalized = content.Replace("\r\n", "\n").Replace("\r", "\n");
+        File.WriteAllText(hookPath, normalized, encoding);
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+            File.SetUnixFileMode(hookPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+    }
+
+    private string? GetPostCommitHookBaseUrl()
+    {
+        var configured = _workspaceOptions.PostCommitHookBaseUrl?.Trim();
+        if (!string.IsNullOrEmpty(configured))
+            return configured;
+
+        var fromServer = GetBaseUrlFromServer();
+        if (!string.IsNullOrEmpty(fromServer))
+            return fromServer;
+
+        var fromConfig = _configuration["urls"] ?? _configuration["ASPNETCORE_URLS"];
+        if (!string.IsNullOrEmpty(fromConfig))
+        {
+            var first = fromConfig.Split(';', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim();
+            if (!string.IsNullOrEmpty(first))
+                return NormalizeListenUrlForHook(first);
+        }
+
+        return null;
+    }
+
+    private string? GetBaseUrlFromServer()
+    {
+        if (_server?.Features == null)
+            return null;
+        var addresses = _server.Features.Get<IServerAddressesFeature>()?.Addresses;
+        var first = addresses?.FirstOrDefault();
+        return string.IsNullOrEmpty(first) ? null : NormalizeListenUrlForHook(first);
+    }
+
+    private static string NormalizeListenUrlForHook(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return url;
+        if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) || !uri.IsAbsoluteUri)
+            return url.Trim();
+        var host = uri.Host;
+        if (host is "0.0.0.0" or "::" or "*" or "+")
+            host = "localhost";
+        var builder = new UriBuilder(uri.Scheme, host, uri.Port, uri.AbsolutePath);
+        return builder.Uri.GetLeftPart(UriPartial.Authority);
     }
 }

@@ -1,6 +1,8 @@
 using System.Reflection;
+using GrayMoon.App.Api;
 using GrayMoon.App.Components;
 using GrayMoon.App.Data;
+using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
@@ -168,6 +170,9 @@ app.UseHttpsRedirection();
 
 app.UseStaticFiles();
 app.UseAntiforgery();
+
+app.MapApiEndpoints();
+app.MapHub<WorkspaceSyncHub>("/hubs/workspace-sync");
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

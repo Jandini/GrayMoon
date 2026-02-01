@@ -2,7 +2,8 @@
 
 @if (IsVisible)
 {
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDown">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
@@ -19,7 +20,8 @@
                             <input class="form-control"
                                    placeholder="Search repositories..."
                                    @bind="repositorySearch"
-                                   @bind:event="oninput" />
+                                   @bind:event="oninput"
+                                   @ref="firstInputElement" />
                             <button type="button"
                                     class="btn btn-outline-secondary ms-2"
                                     @onclick="OnFetchRepositories"
@@ -47,7 +49,7 @@
                                     <thead class="table-dark">
                                         <tr>
                                             <th class="col-select">
-                                                <input class="form-check-input"
+                                                <input class="form-check-input workspace-repo-checkbox"
                                                        type="checkbox"
                                                        checked="@AreAllFilteredSelected(filtered)"
                                                        @onchange="(ChangeEventArgs e) => _ = ToggleAllFiltered(filtered, (bool)e.Value!)" />
@@ -70,7 +72,7 @@
                                             {
                                                 <tr>
                                                     <td class="col-select">
-                                                        <input class="form-check-input"
+                                                        <input class="form-check-input workspace-repo-checkbox"
                                                                type="checkbox"
                                                                checked="@SelectedRepositoryIds.Contains(repository.GitHubRepositoryId)"
                                                                @onchange="(ChangeEventArgs e) => _ = ToggleRepository(repository.GitHubRepositoryId, (bool)e.Value!)" />
@@ -120,6 +122,8 @@
 }
 
 @code {
+    private ElementReference firstInputElement;
+
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public string Title { get; set; } = "Select repositories";
     [Parameter] public List<GitHubRepositoryEntry>? Repositories { get; set; }
@@ -133,6 +137,32 @@
     [Parameter] public EventCallback OnFetchRepositories { get; set; }
 
     private string repositorySearch = string.Empty;
+    private bool _wasVisible;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible && !_wasVisible)
+        {
+            _wasVisible = true;
+            await firstInputElement.FocusAsync();
+        }
+        else if (!IsVisible)
+        {
+            _wasVisible = false;
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            await OnCancel.InvokeAsync();
+        }
+        else if (e.Key == "Enter")
+        {
+            await OnSave.InvokeAsync();
+        }
+    }
 
     private List<GitHubRepositoryEntry> GetFilteredRepositories()
     {

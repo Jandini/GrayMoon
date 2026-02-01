@@ -154,7 +154,8 @@
 
 @if (showDeleteModal)
 {
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleDeleteModalKeyDown">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
@@ -388,6 +389,18 @@
     {
         showDeleteModal = false;
         workspaceToDelete = null;
+    }
+
+    private async Task HandleDeleteModalKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            CloseDeleteModal();
+        }
+        else if (e.Key == "Enter")
+        {
+            await DeleteWorkspaceAsync();
+        }
     }
 
     private async Task DeleteWorkspaceAsync()
