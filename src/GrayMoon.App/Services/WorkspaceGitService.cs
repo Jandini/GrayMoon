@@ -12,6 +12,7 @@ public class WorkspaceGitService
     private readonly GitVersionCommandService _gitVersionCommandService;
     private readonly WorkspaceService _workspaceService;
     private readonly WorkspaceRepository _workspaceRepository;
+    private readonly GitHubRepositoryRepository _githubRepositoryRepository;
     private readonly AppDbContext _dbContext;
     private readonly ILogger<WorkspaceGitService> _logger;
     private readonly int _maxConcurrent;
@@ -21,6 +22,7 @@ public class WorkspaceGitService
         GitVersionCommandService gitVersionCommandService,
         WorkspaceService workspaceService,
         WorkspaceRepository workspaceRepository,
+        GitHubRepositoryRepository githubRepositoryRepository,
         AppDbContext dbContext,
         IOptions<WorkspaceOptions> workspaceOptions,
         ILogger<WorkspaceGitService> logger)
@@ -29,6 +31,7 @@ public class WorkspaceGitService
         _gitVersionCommandService = gitVersionCommandService ?? throw new ArgumentNullException(nameof(gitVersionCommandService));
         _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
         _workspaceRepository = workspaceRepository ?? throw new ArgumentNullException(nameof(workspaceRepository));
+        _githubRepositoryRepository = githubRepositoryRepository ?? throw new ArgumentNullException(nameof(githubRepositoryRepository));
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         var max = workspaceOptions?.Value?.MaxConcurrentGitOperations ?? 8;
@@ -83,6 +86,59 @@ public class WorkspaceGitService
 
         _logger.LogDebug("Sync completed for workspace {WorkspaceName}", workspace.Name);
         return results.ToDictionary(r => r.RepoId, r => r.Info);
+    }
+
+    /// <summary>
+    /// Syncs a single repository by its id in the given workspace only.
+    /// Call from a background task (e.g. after returning 202 from API); uses scoped services.
+    /// Returns false if repo not found or repo is not in the workspace; true if sync was run.
+    /// </summary>
+    public async Task<bool> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var repo = await _githubRepositoryRepository.GetByIdAsync(repositoryId, cancellationToken);
+        if (repo == null)
+        {
+            _logger.LogWarning("Sync skipped: repository not found for id {RepositoryId}", repositoryId);
+            return false;
+        }
+
+        var isInWorkspace = await _dbContext.WorkspaceRepositories
+            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.GitHubRepositoryId == repo.GitHubRepositoryId, cancellationToken);
+        if (!isInWorkspace)
+        {
+            _logger.LogWarning("Sync skipped: repository {RepositoryName} (id {RepositoryId}) is not in workspace {WorkspaceId}", repo.RepositoryName, repositoryId, workspaceId);
+            return false;
+        }
+
+        _logger.LogInformation("Syncing repository {RepositoryName} (id {RepositoryId}) in workspace {WorkspaceId}", repo.RepositoryName, repositoryId, workspaceId);
+        await SyncSingleRepositoryInWorkspaceAsync(workspaceId, repo, cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// Syncs one repository in a single workspace (clone if needed, get version, persist).
+    /// </summary>
+    public async Task SyncSingleRepositoryInWorkspaceAsync(int workspaceId, GitHubRepository repo, CancellationToken cancellationToken = default)
+    {
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+        {
+            _logger.LogWarning("Workspace {WorkspaceId} not found for single-repo sync", workspaceId);
+            return;
+        }
+
+        var workspacePath = _workspaceService.GetWorkspacePath(workspace.Name);
+        _workspaceService.CreateDirectory(workspace.Name);
+
+        using var semaphore = new SemaphoreSlim(1);
+        var (repoId, info) = await RunSyncJobAsync(repo, workspacePath, semaphore, cancellationToken);
+        await PersistVersionsAsync(workspaceId, new[] { (repoId, info) }, cancellationToken);
+
+        var statuses = await GetRepoSyncStatusAsync(workspaceId, cancellationToken: cancellationToken);
+        var isInSync = statuses.Values.All(v => v == RepoSyncStatus.InSync);
+        await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
+
+        _logger.LogDebug("Single-repo sync completed for {RepositoryName} in workspace {WorkspaceName}", repo.RepositoryName, workspace.Name);
     }
 
     public async Task<bool> IsInSyncAsync(int workspaceId, CancellationToken cancellationToken = default)

@@ -31,6 +31,22 @@ public class GitHubRepositoryRepository
             .ToListAsync();
     }
 
+    public async Task<GitHubRepository?> GetByIdAsync(int repositoryId, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.GitHubRepositories
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.GitHubRepositoryId == repositoryId, cancellationToken);
+    }
+
+    public async Task<GitHubRepository?> GetByCloneUrlAsync(string cloneUrl, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(cloneUrl))
+            return null;
+        return await _dbContext.GitHubRepositories
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.CloneUrl == cloneUrl.Trim(), cancellationToken);
+    }
+
     public async Task<List<GitHubRepositoryEntry>> GetEntriesByConnectorIdAsync(int connectorId)
     {
         return await _dbContext.GitHubRepositories

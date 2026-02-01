@@ -1,4 +1,5 @@
 using System.Reflection;
+using GrayMoon.App.Api;
 using GrayMoon.App.Components;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
@@ -168,6 +169,8 @@ app.UseHttpsRedirection();
 
 app.UseStaticFiles();
 app.UseAntiforgery();
+
+app.MapApiEndpoints();
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
