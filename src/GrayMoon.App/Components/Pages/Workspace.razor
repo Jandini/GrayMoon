@@ -224,6 +224,7 @@
                 RepoSyncStatus.InSync => ("in sync", "#198754"),
                 RepoSyncStatus.NotCloned => ("not cloned", "#6c757d"),
                 RepoSyncStatus.VersionMismatch => ("version", "#dc3545"),
+                RepoSyncStatus.Error => ("error", "#dc3545"),
                 _ => ("sync", "#6c757d")
             };
             builder.OpenElement(0, "span");
@@ -263,7 +264,9 @@
                 onProgress: (completed, total, repoId, info) =>
                 {
                     syncProgressMessage = $"Synchronized {completed} of {total}";
-                    repoSyncStatus[repoId] = RepoSyncStatus.InSync;
+                    repoSyncStatus[repoId] = (info.Version == "-" && info.Branch == "-")
+                        ? RepoSyncStatus.Error
+                        : RepoSyncStatus.InSync;
 
                     var wr = workspaceRepositories.FirstOrDefault(w => w.GitHubRepositoryId == repoId);
                     if (wr != null)
@@ -277,7 +280,7 @@
                 cancellationToken: _syncCts.Token);
             repoGitInfos = results;
 
-            isOutOfSync = false;
+            isOutOfSync = repoSyncStatus.Values.Any(v => v != RepoSyncStatus.InSync);
         }
         catch (OperationCanceledException)
         {
