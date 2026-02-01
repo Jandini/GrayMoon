@@ -1,15 +1,17 @@
 @using GrayMoon.App.Models
+@inject IJSRuntime JSRuntime
 
 @if (IsVisible)
 {
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDown">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@Title</h5>
                     <button type="button" class="btn-close" @onclick="OnCancel"></button>
                 </div>
-                <div class="modal-body">
+                <div class="modal-body" id="github-connector-modal-body">
                     @if (Mode == GitHubConnectorModalMode.Create || Mode == GitHubConnectorModalMode.Edit)
                     {
                         <EditForm Model="@Model" OnValidSubmit="@(_ => OnSubmit.InvokeAsync())">
@@ -89,4 +91,34 @@
     [Parameter] public EventCallback OnCancel { get; set; }
 
     private string SubmitButtonText => Mode == GitHubConnectorModalMode.Edit ? "Update" : "Add";
+    private bool _wasVisible;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible && !_wasVisible && (Mode == GitHubConnectorModalMode.Create || Mode == GitHubConnectorModalMode.Edit))
+        {
+            _wasVisible = true;
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("focusFirstModalInput", "github-connector-modal-body");
+            }
+            catch { /* JS not yet loaded or DOM not ready */ }
+        }
+        else if (!IsVisible)
+        {
+            _wasVisible = false;
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            await OnCancel.InvokeAsync();
+        }
+        else if (e.Key == "Enter" && Mode == GitHubConnectorModalMode.Delete)
+        {
+            await OnDelete.InvokeAsync();
+        }
+    }
 }

@@ -16,6 +16,15 @@
 <body>
     <Routes />
     <script src="_framework/blazor.web.js"></script>
+    <script>
+        window.focusFirstModalInput = (id) => {
+            const el = document.getElementById(id);
+            if (el) {
+                const input = el.querySelector('input:not([type=hidden]):not([disabled]), textarea:not([disabled])');
+                if (input) input.focus();
+            }
+        };
+    </script>
 </body>
 
 </html>
