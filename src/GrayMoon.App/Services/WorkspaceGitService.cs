@@ -1,3 +1,4 @@
+using System.Reflection;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
@@ -349,7 +350,7 @@ public class WorkspaceGitService
                     branch = gitVersion.BranchName ?? gitVersion.EscapedBranchName ?? "-";
 
                     if (version != "-" && branch != "-")
-                        WritePostCommitHook(repoPath, workspaceId, repo.GitHubRepositoryId);
+                        WriteSyncHooks(repoPath, workspaceId, repo.GitHubRepositoryId);
                 }
             }
 
@@ -361,34 +362,48 @@ public class WorkspaceGitService
         }
     }
 
-    private void WritePostCommitHook(string repoPath, int workflowId, int repoId)
+    private void WriteSyncHooks(string repoPath, int workflowId, int repoId)
     {
         var baseUrl = GetPostCommitHookBaseUrl();
         if (string.IsNullOrEmpty(baseUrl))
         {
-            _logger.LogDebug("Skipping post-commit hook: no base URL (set Workspace:PostCommitHookBaseUrl or ensure urls/ASPNETCORE_URLS is set)");
+            _logger.LogDebug("Skipping sync hooks: no base URL (set Workspace:PostCommitHookBaseUrl or ensure urls/ASPNETCORE_URLS is set)");
             return;
         }
         baseUrl = baseUrl.TrimEnd('/');
+        var version = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+        var now = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "Z";
+        var comment = $"# Created by GrayMoon {version} at {now}.\n";
+        var curlLine = $"curl -s -X POST \"{baseUrl}/api/sync\" -H \"Content-Type: application/json\" -d '{{\"repositoryId\":{repoId},\"workspaceId\":{workflowId}}}'\n";
         var hooksDir = Path.Combine(repoPath, ".git", "hooks");
-        var hookPath = Path.Combine(hooksDir, "post-commit");
+        var utf8NoBom = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
         try
         {
             Directory.CreateDirectory(hooksDir);
-            // Use LF-only line endings so shebang is correct on both Windows (Git Bash) and Linux
-            var script = $"#!/bin/sh\n" +
-                "# GrayMoon post-commit hook - notifies app to sync (WorkflowId={workflowId}, RepoId={repoId})\n" +
-                $"curl -s -X POST \"{baseUrl}/api/sync\" -H \"Content-Type: application/json\" -d '{{\"repositoryId\":{repoId},\"workspaceId\":{workflowId}}}'\n";
-            var scriptLfOnly = script.Replace("\r\n", "\n").Replace("\r", "\n");
-            File.WriteAllText(hookPath, scriptLfOnly, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
-                File.SetUnixFileMode(hookPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            _logger.LogDebug("Post-commit hook written for repo {RepoId} in workspace {WorkflowId} at {HookPath}", repoId, workflowId, hookPath);
+
+            // post-commit: run after every commit
+            var postCommit = "#!/bin/sh\n" + comment + curlLine;
+            WriteHookFile(Path.Combine(hooksDir, "post-commit"), postCommit, utf8NoBom);
+
+            // post-checkout: run after checkout; $3=1 means branch checkout (not file checkout)
+            var postCheckout = "#!/bin/sh\n" + comment + "[ \"$3\" = \"1\" ] && " + curlLine.TrimEnd() + "\n";
+            WriteHookFile(Path.Combine(hooksDir, "post-checkout"), postCheckout, utf8NoBom);
+
+            _logger.LogDebug("Sync hooks (post-commit, post-checkout) written for repo {RepoId} in workspace {WorkflowId}", repoId, workflowId);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to write post-commit hook at {HookPath}", hookPath);
+            _logger.LogWarning(ex, "Failed to write sync hooks in {HooksDir}", hooksDir);
         }
+    }
+
+    private static void WriteHookFile(string hookPath, string content, System.Text.Encoding encoding)
+    {
+        var normalized = content.Replace("\r\n", "\n").Replace("\r", "\n");
+        File.WriteAllText(hookPath, normalized, encoding);
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+            File.SetUnixFileMode(hookPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
 
     private string? GetPostCommitHookBaseUrl()
