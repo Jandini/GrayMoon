@@ -1,6 +1,8 @@
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -16,6 +18,9 @@ public class WorkspaceGitService
     private readonly AppDbContext _dbContext;
     private readonly ILogger<WorkspaceGitService> _logger;
     private readonly int _maxConcurrent;
+    private readonly WorkspaceOptions _workspaceOptions;
+    private readonly IServer? _server;
+    private readonly IConfiguration _configuration;
 
     public WorkspaceGitService(
         GitCommandService gitCommandService,
@@ -25,7 +30,9 @@ public class WorkspaceGitService
         GitHubRepositoryRepository githubRepositoryRepository,
         AppDbContext dbContext,
         IOptions<WorkspaceOptions> workspaceOptions,
-        ILogger<WorkspaceGitService> logger)
+        IConfiguration configuration,
+        ILogger<WorkspaceGitService> logger,
+        IServer? server = null)
     {
         _gitCommandService = gitCommandService ?? throw new ArgumentNullException(nameof(gitCommandService));
         _gitVersionCommandService = gitVersionCommandService ?? throw new ArgumentNullException(nameof(gitVersionCommandService));
@@ -33,8 +40,11 @@ public class WorkspaceGitService
         _workspaceRepository = workspaceRepository ?? throw new ArgumentNullException(nameof(workspaceRepository));
         _githubRepositoryRepository = githubRepositoryRepository ?? throw new ArgumentNullException(nameof(githubRepositoryRepository));
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        var max = workspaceOptions?.Value?.MaxConcurrentGitOperations ?? 8;
+        _server = server;
+        _workspaceOptions = workspaceOptions?.Value ?? new WorkspaceOptions();
+        var max = _workspaceOptions.MaxConcurrentGitOperations;
         _maxConcurrent = max < 1 ? 1 : max;
     }
 
@@ -72,7 +82,7 @@ public class WorkspaceGitService
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
         var syncTasks = repos.Select(async repo =>
         {
-            var result = await RunSyncJobAsync(repo, workspacePath, semaphore, cancellationToken);
+            var result = await RunSyncJobAsync(workspaceId, repo, workspacePath, semaphore, cancellationToken);
             var count = Interlocked.Increment(ref completedCount);
             onProgress?.Invoke(count, totalCount, result.RepoId, result.Info);
             return result;
@@ -131,7 +141,7 @@ public class WorkspaceGitService
         _workspaceService.CreateDirectory(workspace.Name);
 
         using var semaphore = new SemaphoreSlim(1);
-        var (repoId, info) = await RunSyncJobAsync(repo, workspacePath, semaphore, cancellationToken);
+        var (repoId, info) = await RunSyncJobAsync(workspaceId, repo, workspacePath, semaphore, cancellationToken);
         await PersistVersionsAsync(workspaceId, new[] { (repoId, info) }, cancellationToken);
 
         var statuses = await GetRepoSyncStatusAsync(workspaceId, cancellationToken: cancellationToken);
@@ -301,6 +311,7 @@ public class WorkspaceGitService
     }
 
     private async Task<(int RepoId, RepoGitVersionInfo Info)> RunSyncJobAsync(
+        int workspaceId,
         GitHubRepository repo,
         string workspacePath,
         SemaphoreSlim semaphore,
@@ -336,6 +347,9 @@ public class WorkspaceGitService
                 {
                     version = gitVersion.SemVer ?? gitVersion.FullSemVer ?? "-";
                     branch = gitVersion.BranchName ?? gitVersion.EscapedBranchName ?? "-";
+
+                    if (version != "-" && branch != "-")
+                        WritePostCommitHook(repoPath, workspaceId, repo.GitHubRepositoryId);
                 }
             }
 
@@ -345,5 +359,78 @@ public class WorkspaceGitService
         {
             semaphore.Release();
         }
+    }
+
+    private void WritePostCommitHook(string repoPath, int workflowId, int repoId)
+    {
+        var baseUrl = GetPostCommitHookBaseUrl();
+        if (string.IsNullOrEmpty(baseUrl))
+        {
+            _logger.LogDebug("Skipping post-commit hook: no base URL (set Workspace:PostCommitHookBaseUrl or ensure urls/ASPNETCORE_URLS is set)");
+            return;
+        }
+        baseUrl = baseUrl.TrimEnd('/');
+        var hooksDir = Path.Combine(repoPath, ".git", "hooks");
+        var hookPath = Path.Combine(hooksDir, "post-commit");
+        try
+        {
+            Directory.CreateDirectory(hooksDir);
+            // Use LF-only line endings so shebang is correct on both Windows (Git Bash) and Linux
+            var script = $"#!/bin/sh\n" +
+                "# GrayMoon post-commit hook - notifies app to sync (WorkflowId={workflowId}, RepoId={repoId})\n" +
+                $"curl -s -X POST \"{baseUrl}/api/sync\" -H \"Content-Type: application/json\" -d '{{\"repositoryId\":{repoId},\"workspaceId\":{workflowId}}}'\n";
+            var scriptLfOnly = script.Replace("\r\n", "\n").Replace("\r", "\n");
+            File.WriteAllText(hookPath, scriptLfOnly, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+                File.SetUnixFileMode(hookPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            _logger.LogDebug("Post-commit hook written for repo {RepoId} in workspace {WorkflowId} at {HookPath}", repoId, workflowId, hookPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to write post-commit hook at {HookPath}", hookPath);
+        }
+    }
+
+    private string? GetPostCommitHookBaseUrl()
+    {
+        var configured = _workspaceOptions.PostCommitHookBaseUrl?.Trim();
+        if (!string.IsNullOrEmpty(configured))
+            return configured;
+
+        var fromServer = GetBaseUrlFromServer();
+        if (!string.IsNullOrEmpty(fromServer))
+            return fromServer;
+
+        var fromConfig = _configuration["urls"] ?? _configuration["ASPNETCORE_URLS"];
+        if (!string.IsNullOrEmpty(fromConfig))
+        {
+            var first = fromConfig.Split(';', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim();
+            if (!string.IsNullOrEmpty(first))
+                return NormalizeListenUrlForHook(first);
+        }
+
+        return null;
+    }
+
+    private string? GetBaseUrlFromServer()
+    {
+        if (_server?.Features == null)
+            return null;
+        var addresses = _server.Features.Get<IServerAddressesFeature>()?.Addresses;
+        var first = addresses?.FirstOrDefault();
+        return string.IsNullOrEmpty(first) ? null : NormalizeListenUrlForHook(first);
+    }
+
+    private static string NormalizeListenUrlForHook(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return url;
+        if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) || !uri.IsAbsoluteUri)
+            return url.Trim();
+        var host = uri.Host;
+        if (host is "0.0.0.0" or "::" or "*" or "+")
+            host = "localhost";
+        var builder = new UriBuilder(uri.Scheme, host, uri.Port, uri.AbsolutePath);
+        return builder.Uri.GetLeftPart(UriPartial.Authority);
     }
 }
