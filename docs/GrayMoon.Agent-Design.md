@@ -32,11 +32,14 @@ When offline: sync operations fail with a clear message. No silent failures.
 ## 2. Concurrency & Queuing
 
 - **One agent per host** — single process, single connection to the app
-- **Up to 8 concurrent commands** — configurable parallelism
-- **Command queue** — incoming commands are queued; when a slot frees, the next command is processed
+- **Up to 8 concurrent jobs** — configurable parallelism (`MaxConcurrentCommands`)
+- **Single shared queue** — both UI commands (SignalR `RequestCommand`) and hook notifications (`/notify`) are enqueued to the same queue
+- When a slot frees, the next job is processed (FIFO within the queue)
 
 ```
-[SignalR] → [Command Queue] → [Worker Pool (8)] → [Git / GitVersion / File I/O]
+[SignalR RequestCommand]  ─┐
+                           ├─→ [Command Queue] → [Worker Pool (8)] → [Git / GitVersion / File I/O]
+[/notify (hooks)]         ─┘
 ```
 
 ---
@@ -52,7 +55,7 @@ When offline: sync operations fail with a clear message. No silent failures.
   "GrayMoon": {
     "AppHubUrl": "http://host.docker.internal:8384/agent",
     "ListenPort": 9191,
-    "WorkspaceRootPath": "C:\\Workspace",
+    "WorkspaceRoot": "C:\\Workspace",
     "MaxConcurrentCommands": 8
   }
 }
@@ -62,30 +65,30 @@ When offline: sync operations fail with a clear message. No silent failures.
 |---------|-------------|---------|
 | `AppHubUrl` | SignalR hub URL the agent connects to | `http://host.docker.internal:8384/agent` |
 | `ListenPort` | HTTP port for hook notifications (`/notify`) | `9191` |
-| `WorkspaceRootPath` | Root path for workspace directories | `C:\Workspace` (Win) / `/var/graymoon/workspaces` (Linux) |
+| `WorkspaceRoot` | Root path for workspace directories | `C:\Workspace` (Win) / `/var/graymoon/workspaces` (Linux) |
 | `MaxConcurrentCommands` | Max parallel command executions | `8` |
 
 Environment variables override: `GrayMoon__AppHubUrl`, `GrayMoon__ListenPort`, etc.
 
 ---
 
-## 4. Hook Flow: Hooks → Agent (runs GitVersion) → SignalR push to App
+## 4. Hook Flow: Hooks → Agent (same queue) → SignalR push to App
 
 ```
-post-commit → curl http://127.0.0.1:9191/notify → Agent runs GitVersion → Agent pushes workspaceId, repositoryId, version, branch to App → App persists
+post-commit → curl http://127.0.0.1:9191/notify → Agent enqueues to same queue → Worker runs GitVersion → Agent pushes workspaceId, repositoryId, version, branch to App → App persists
 ```
 
 - Hooks always use `http://127.0.0.1:{ListenPort}/notify` — no Docker URL config
 - Agent runs on the host where repos live; hooks run in the same environment
-- Agent runs GitVersion immediately when `/notify` is hit, then pushes the result directly to the app — no round-trip, no enqueue
+- `/notify` enqueues a job to the **same queue** as UI commands; a worker picks it up (up to 8 concurrent)
 - Single network concern: agent must reach the app; hooks only reach localhost
 
 **Flow:**
 
 1. User commits → post-commit runs `curl -X POST http://127.0.0.1:9191/notify -d '{"repositoryId":1,"workspaceId":1,"repositoryPath":"/path/to/repo"}'`
-2. Agent HTTP listener receives the request (repositoryPath is embedded in the hook when written during SyncRepository)
-3. Agent runs AddSafeDirectory + GitVersion in repositoryPath
-4. Agent invokes hub method: `RepositoryVersionRefreshed(workspaceId, repositoryId, version, branch)`
+2. Agent HTTP listener receives the request and **enqueues** to the shared command queue (repositoryPath is embedded in the hook when written during SyncRepository)
+3. A worker picks up the job, runs AddSafeDirectory + GitVersion in repositoryPath
+4. Agent invokes hub method: `SyncCommand(workspaceId, repositoryId, version, branch)`
 5. App persists to DB, broadcasts `WorkspaceSynced(workspaceId)` to UI clients
 
 ---
@@ -120,14 +123,14 @@ Hub path is `/agent` (no `hubs/` prefix required — map via `MapHub<AgentHub>("
 
 | Method | Args | Purpose |
 |--------|------|---------|
-| `ReceiveCommand` | `requestId`, `command`, `args` | Execute command and respond |
+| `RequestCommand` | `requestId`, `command`, `args` | Execute command and respond |
 
 **Agent → Server (invoke from agent):**
 
 | Method | Args | Purpose |
 |--------|------|---------|
-| `CommandResponse` | `requestId`, `success`, `data`, `error` | Return command result |
-| `RepositoryVersionRefreshed` | `workspaceId`, `repositoryId`, `version`, `branch` | Hook flow: agent ran GitVersion and pushes result directly |
+| `ResponseCommand` | `requestId`, `success`, `data`, `error` | Return command result |
+| `SyncCommand` | `workspaceId`, `repositoryId`, `version`, `branch` | Hook flow: agent ran GitVersion and pushes result directly |
 
 ### Commands (domain-specific, Option A: App sends full details)
 
@@ -154,8 +157,8 @@ GrayMoon.Agent
 ├── Program.cs
 ├── appsettings.json
 ├── Hosted/
-│   ├── SignalRConnectionHostedService.cs   # Connect to hub, handle ReceiveCommand
-│   └── HookListenerHostedService.cs        # HTTP listener on ListenPort for /notify
+│   ├── SignalRConnectionHostedService.cs   # Connect to hub, enqueue RequestCommand to shared queue
+│   └── HookListenerHostedService.cs        # HTTP /notify → enqueue to same shared queue
 ├── Handlers/
 │   └── (SyncRepositoryHandler, RefreshRepositoryVersionHandler, EnsureWorkspaceHandler, ...)
 ├── Queue/
