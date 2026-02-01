@@ -54,6 +54,7 @@ public class WorkspaceGitService
         _maxConcurrent = max < 1 ? 1 : max;
     }
 
+    /// <summary>Syncs only repositories that are linked to the workspace (workspace.Repositories).</summary>
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
         Action<int, int, int, RepoGitVersionInfo>? onProgress = null,
@@ -79,7 +80,7 @@ public class WorkspaceGitService
             return new Dictionary<int, RepoGitVersionInfo>();
         }
 
-        _logger.LogInformation("User triggered sync for workspace {WorkspaceName} ({RepoCount} repositories)", workspace.Name, repos.Count);
+        _logger.LogInformation("Sync triggered by user (workspace UI). Workspace={WorkspaceName}, RepoCount={RepoCount}", workspace.Name, repos.Count);
         _logger.LogDebug("Starting sync for workspace {WorkspaceName} ({RepoCount} repositories)", workspace.Name, repos.Count);
 
         var completedCount = 0;
@@ -105,7 +106,7 @@ public class WorkspaceGitService
     }
 
     /// <summary>
-    /// Syncs a single repository by its id in the given workspace only.
+    /// Syncs a single repository by its id only if it is linked to the given workspace.
     /// Call from a background task (e.g. after returning 202 from API); uses scoped services.
     /// Returns false if repo not found or repo is not in the workspace; true if sync was run.
     /// </summary>
@@ -122,11 +123,11 @@ public class WorkspaceGitService
             .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.GitHubRepositoryId == repo.GitHubRepositoryId, cancellationToken);
         if (!isInWorkspace)
         {
-            _logger.LogWarning("Sync skipped: repository {RepositoryName} (id {RepositoryId}) is not in workspace {WorkspaceId}", repo.RepositoryName, repositoryId, workspaceId);
+            _logger.LogWarning("Sync skipped: repository {RepositoryName} (id {RepositoryId}) is not linked to workspace {WorkspaceId}", repo.RepositoryName, repositoryId, workspaceId);
             return false;
         }
 
-        _logger.LogInformation("Syncing repository {RepositoryName} (id {RepositoryId}) in workspace {WorkspaceId}", repo.RepositoryName, repositoryId, workspaceId);
+        _logger.LogInformation("Syncing repository {RepositoryName} (id {RepositoryId}) in workspace {WorkspaceId} (trigger: API/hook)", repo.RepositoryName, repositoryId, workspaceId);
         await SyncSingleRepositoryInWorkspaceAsync(workspaceId, repo, cancellationToken);
         return true;
     }
@@ -168,8 +169,12 @@ public class WorkspaceGitService
         var info = new RepoGitVersionInfo { Version = version, Branch = branch };
         await PersistVersionsAsync(workspaceId, new[] { (repo.GitHubRepositoryId, info) }, cancellationToken);
 
-        var statuses = await GetRepoSyncStatusAsync(workspaceId, cancellationToken: cancellationToken);
-        var isInSync = statuses.Values.All(v => v == RepoSyncStatus.InSync);
+        // Compute workspace IsInSync from DB only (avoid re-running GitVersion for every repo in workspace, which was a major slowdown)
+        var allLinks = await _dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .Select(wr => wr.SyncStatus)
+            .ToListAsync(cancellationToken);
+        var isInSync = allLinks.Count > 0 && allLinks.All(s => s == RepoSyncStatus.InSync);
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
 
         if (_hubContext != null)
@@ -335,6 +340,8 @@ public class WorkspaceGitService
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Persistence: saved WorkspaceRepository link versions. Action=PersistVersions, WorkspaceId={WorkspaceId}, RepoCount={RepoCount}, RepoIds=[{RepoIds}]",
+            workspaceId, resultList.Count, string.Join(", ", resultList.Select(r => $"{r.RepoId}:{r.Info.Version}/{r.Info.Branch}")));
     }
 
     /// <summary>
