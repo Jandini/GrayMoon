@@ -12,13 +12,6 @@
     table-layout: fixed;
 }
 
-.repositories-table tbody {
-    display: block;
-    max-height: calc(100vh - (var(--bs-gutter-x) + var(--bs-gutter-x) + 260px));
-    overflow-y: auto;
-    overflow-x: hidden;
-}
-
 .page-container {
     padding-block: var(--bs-gutter-x);
     display: flex;

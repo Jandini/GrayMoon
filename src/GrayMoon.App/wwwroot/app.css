@@ -310,21 +310,94 @@ h1:focus {
 }
 
 /* Grid pages: page title, buttons, labels and grid header stay at top; only table body scrolls */
+.page-container.grid-page {
+    padding-block: var(--bs-gutter-x);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.grid-page {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
 .grid-page-header {
     flex-shrink: 0;
 }
 
 .grid-page-body {
+    flex: 1 1 auto;
+    min-height: 0;
     max-height: calc(100vh - 220px);
-    overflow-y: auto;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
-.grid-page-body .table thead th {
+/* Card in grid body must fill space for table flex layout */
+.grid-page-body .page-card,
+.grid-page-body .card {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.grid-page-body .card-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Prevent table-responsive from creating scroll ancestor that breaks sticky; tbody handles scroll */
+.grid-page-body .table-responsive {
+    overflow-x: auto;
+    overflow-y: visible;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Grid tables: thead stays sticky (like Select Repositories modal), only tbody scrolls */
+.grid-page-body .table {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    margin-bottom: 0;
+}
+
+.grid-page-body .table thead {
     position: sticky;
     top: 0;
     z-index: 1;
-    background-color: var(--bg-tertiary);
+    flex-shrink: 0;
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
+/* Solid background so content doesn't show through when scrolling under sticky header */
+.grid-page-body .table thead th {
+    background-color: var(--bg-tertiary) !important;
     border-bottom-color: var(--border-color);
+}
+
+.grid-page-body .table tbody {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: block;
+}
+
+.grid-page-body .table tbody tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
 }
 
 .table tbody td a {

@@ -21,13 +21,6 @@
     table-layout: fixed;
 }
 
-.actions-table tbody {
-    display: block;
-    max-height: calc(100vh - (var(--bs-gutter-x) + var(--bs-gutter-x) + 260px));
-    overflow-y: auto;
-    overflow-x: hidden;
-}
-
 .actions-table th,
 .actions-table td {
     white-space: nowrap;
