@@ -14,15 +14,17 @@
                     {
                         <EditForm Model="@Model" OnValidSubmit="@(_ => OnSubmit.InvokeAsync())">
                             <DataAnnotationsValidator />
-                            <div class="mb-3">
-                                <label class="form-label">Connector Name <span class="text-danger">*</span></label>
-                                <InputText class="form-control" @bind-Value="Model!.ConnectorName" />
-                                <ValidationMessage For="@(() => Model!.ConnectorName)" />
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">API Base URL <span class="text-danger">*</span></label>
-                                <InputText class="form-control" @bind-Value="Model!.ApiBaseUrl" />
-                                <ValidationMessage For="@(() => Model!.ApiBaseUrl)" />
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Connector Name <span class="text-danger">*</span></label>
+                                    <InputText class="form-control" @bind-Value="Model!.ConnectorName" />
+                                    <ValidationMessage For="@(() => Model!.ConnectorName)" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">API Base URL <span class="text-danger">*</span></label>
+                                    <InputText class="form-control" @bind-Value="Model!.ApiBaseUrl" />
+                                    <ValidationMessage For="@(() => Model!.ApiBaseUrl)" />
+                                </div>
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">User Name</label>

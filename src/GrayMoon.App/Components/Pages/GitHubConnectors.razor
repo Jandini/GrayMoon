@@ -43,6 +43,7 @@
                             <tr>
                                 <th>Name</th>
                                 <th>API Base URL</th>
+                                <th>User Name</th>
                                 <th class="text-center">Active</th>
                                 <th class="status-col">Status</th>
                                 <th>Actions</th>
@@ -52,7 +53,7 @@
                             @if (connectors == null)
                             {
                                 <tr>
-                                    <td colspan="5" class="text-center py-5">
+                                    <td colspan="6" class="text-center py-5">
                                         <div class="spinner-border text-primary" role="status">
                                             <span class="visually-hidden">Loading...</span>
                                         </div>
@@ -63,7 +64,7 @@
                             else if (connectors.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="5" class="text-center text-muted py-4">
+                                    <td colspan="6" class="text-center text-muted py-4">
                                         No connectors found. Add your first GitHub connector to get started.
                                     </td>
                                 </tr>
@@ -75,6 +76,7 @@
                                     <tr>
                                         <td><strong>@connector.ConnectorName</strong></td>
                                         <td>@connector.ApiBaseUrl</td>
+                                        <td>@connector.UserName</td>
                                         <td class="text-center">
                                             <div class="form-check form-switch d-inline-flex align-items-center m-0">
                                                 <input class="form-check-input"
@@ -349,6 +351,7 @@
         {
             Logger.LogError(ex, "Error testing GitHub connector.");
             await ConnectorRepository.UpdateStatusAsync(connector.GitHubConnectorId, "Error", ex.Message);
+            await ConnectorRepository.UpdateIsActiveAsync(connector.GitHubConnectorId, false);
             return false;
         }
         finally
@@ -406,10 +409,10 @@
     {
         return connector.Status switch
         {
-            "Testing" => "bg-secondary",
-            "Ok" => "bg-success",
-            "Error" => "bg-danger",
-            _ => "bg-secondary"
+            "Testing" => "status-badge-testing",
+            "Ok" => "status-badge-ok",
+            "Error" => "status-badge-error",
+            _ => "status-badge-unknown"
         };
     }
 
