@@ -368,6 +368,29 @@ h1:focus {
     flex-direction: column;
 }
 
+/* Custom scrollbar for table-responsive (horizontal scroll) */
+.grid-page-body .table-responsive::-webkit-scrollbar {
+    height: 8px;
+}
+
+.grid-page-body .table-responsive::-webkit-scrollbar-track {
+    background: var(--bg-card);
+}
+
+.grid-page-body .table-responsive::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.grid-page-body .table-responsive::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}
+
+.grid-page-body .table-responsive {
+    scrollbar-width: thin;
+    scrollbar-color: #5a5a5a var(--bg-card);
+}
+
 /* Grid tables: thead stays sticky (like Select Repositories modal), only tbody scrolls */
 .grid-page-body .table {
     display: flex;
@@ -398,6 +421,30 @@ h1:focus {
     overflow-y: auto;
     overflow-x: hidden;
     display: block;
+}
+
+/* Custom scrollbar styling for grid pages - narrow and gray */
+.grid-page-body .table tbody::-webkit-scrollbar {
+    width: 8px;
+}
+
+.grid-page-body .table tbody::-webkit-scrollbar-track {
+    background: var(--bg-card);
+}
+
+.grid-page-body .table tbody::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.grid-page-body .table tbody::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}
+
+/* Firefox scrollbar styling */
+.grid-page-body .table tbody {
+    scrollbar-width: thin;
+    scrollbar-color: #5a5a5a var(--bg-card);
 }
 
 .grid-page-body .table tbody tr {
