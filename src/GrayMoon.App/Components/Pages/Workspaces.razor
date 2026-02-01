@@ -123,23 +123,30 @@
     }
 </div>
 
-<WorkspaceEditorModal IsVisible="@showEditorModal"
-                       Title="@editorTitle"
-                       WorkspaceName="@workspaceName"
-                       WorkspaceNameChanged="@((value) => workspaceName = value)"
-                       WorkspacePath="@GetWorkspacePath()"
-                       DirectoryAlreadyExists="@WorkspaceService.DirectoryExists(workspaceName)"
-                       ExistingRepositoryCount="@WorkspaceService.GetRepositoryCount(workspaceName)"
-                       IsNameDisabled="@isRepoOnly"
-                       Repositories="@repositories"
-                       SelectedRepositoryIds="@selectedRepositoryIds"
-                       HasConnectors="@hasConnectors"
-                       IsSaving="@isSaving"
-                       IsFetching="@isPersisting"
-                       ErrorMessage="@editorErrorMessage"
-                       OnSave="@SaveWorkspaceAsync"
-                       OnCancel="@CloseEditorModal"
-                       OnFetchRepositories="@FetchRepositoriesAsync" />
+<WorkspaceModal IsVisible="@showEditorModal"
+               Title="@editorTitle"
+               WorkspaceName="@workspaceName"
+               WorkspaceNameChanged="@((value) => workspaceName = value)"
+               WorkspacePath="@GetWorkspacePath()"
+               DirectoryAlreadyExists="@WorkspaceService.DirectoryExists(workspaceName)"
+               ExistingRepositoryCount="@WorkspaceService.GetRepositoryCount(workspaceName)"
+               IsNameDisabled="false"
+               IsSaving="@isSaving"
+               ErrorMessage="@editorErrorMessage"
+               OnSave="@SaveWorkspaceAsync"
+               OnCancel="@CloseEditorModal" />
+
+<WorkspaceRepositoriesModal IsVisible="@showRepositoriesModal"
+                            Title="@($"Add Repositories to {repositoriesModalWorkspaceName}")"
+                            Repositories="@repositories"
+                            SelectedRepositoryIds="@selectedRepositoryIds"
+                            HasConnectors="@hasConnectors"
+                            IsSaving="@isSavingRepositories"
+                            IsFetching="@isPersisting"
+                            ErrorMessage="@repositoriesModalErrorMessage"
+                            OnSave="@SaveRepositoriesAsync"
+                            OnCancel="@CloseRepositoriesModal"
+                            OnFetchRepositories="@FetchRepositoriesAsync" />
 
 @if (showDeleteModal)
 {
@@ -175,17 +182,21 @@
     private List<GitHubRepositoryEntry>? repositories;
     private string? errorMessage;
     private bool showEditorModal;
+    private bool showRepositoriesModal;
     private bool showDeleteModal;
     private bool isSaving;
+    private bool isSavingRepositories;
     private bool isDeleting;
     private bool isPersisting;
     private bool isTogglingDefault;
-    private bool isRepoOnly;
     private bool hasConnectors;
     private string workspaceName = string.Empty;
+    private string repositoriesModalWorkspaceName = string.Empty;
     private string? editorErrorMessage;
+    private string? repositoriesModalErrorMessage;
     private string editorTitle = "Add Workspace";
     private int? editingWorkspaceId;
+    private HashSet<int> editingWorkspaceRepositoryIds = new();
     private WorkspaceModel? workspaceToDelete;
     private HashSet<int> selectedRepositoryIds = new();
 
@@ -229,12 +240,9 @@
     private async Task ShowCreateModalAsync()
     {
         editingWorkspaceId = null;
-        isRepoOnly = false;
         editorTitle = "Add Workspace";
         workspaceName = string.Empty;
         editorErrorMessage = null;
-        selectedRepositoryIds = new HashSet<int>();
-        await EnsureRepositoriesAsync();
         showEditorModal = true;
     }
 
@@ -247,14 +255,12 @@
         }
 
         editingWorkspaceId = workspaceId;
-        isRepoOnly = false;
         editorTitle = "Edit Workspace";
         workspaceName = workspace.Name;
         editorErrorMessage = null;
-        selectedRepositoryIds = workspace.Repositories
+        editingWorkspaceRepositoryIds = workspace.Repositories
             .Select(link => link.GitHubRepositoryId)
             .ToHashSet();
-        await EnsureRepositoriesAsync();
         showEditorModal = true;
     }
 
@@ -267,21 +273,25 @@
         }
 
         editingWorkspaceId = workspaceId;
-        isRepoOnly = true;
-        editorTitle = "Add Repositories";
-        workspaceName = workspace.Name;
-        editorErrorMessage = null;
+        repositoriesModalWorkspaceName = workspace.Name;
+        repositoriesModalErrorMessage = null;
         selectedRepositoryIds = workspace.Repositories
             .Select(link => link.GitHubRepositoryId)
             .ToHashSet();
         await EnsureRepositoriesAsync();
-        showEditorModal = true;
+        showRepositoriesModal = true;
     }
 
     private void CloseEditorModal()
     {
         showEditorModal = false;
         editorErrorMessage = null;
+    }
+
+    private void CloseRepositoriesModal()
+    {
+        showRepositoriesModal = false;
+        repositoriesModalErrorMessage = null;
     }
 
     private async Task SaveWorkspaceAsync()
@@ -292,12 +302,6 @@
             return;
         }
 
-        if (selectedRepositoryIds.Count == 0)
-        {
-            editorErrorMessage = "Select at least one repository.";
-            return;
-        }
-
         try
         {
             isSaving = true;
@@ -305,11 +309,11 @@
 
             if (editingWorkspaceId == null)
             {
-                await WorkspaceRepository.AddAsync(workspaceName, selectedRepositoryIds);
+                await WorkspaceRepository.AddAsync(workspaceName, []);
             }
             else
             {
-                await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, workspaceName, selectedRepositoryIds);
+                await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, workspaceName, editingWorkspaceRepositoryIds);
             }
 
             CloseEditorModal();
@@ -323,6 +327,40 @@
         finally
         {
             isSaving = false;
+        }
+    }
+
+    private async Task SaveRepositoriesAsync()
+    {
+        if (editingWorkspaceId == null)
+        {
+            return;
+        }
+
+        if (selectedRepositoryIds.Count == 0)
+        {
+            repositoriesModalErrorMessage = "Select at least one repository.";
+            return;
+        }
+
+        try
+        {
+            isSavingRepositories = true;
+            repositoriesModalErrorMessage = null;
+
+            await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, repositoriesModalWorkspaceName, selectedRepositoryIds);
+
+            CloseRepositoriesModal();
+            await LoadWorkspacesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving repositories");
+            repositoriesModalErrorMessage = ex.Message;
+        }
+        finally
+        {
+            isSavingRepositories = false;
         }
     }
 
@@ -373,14 +411,14 @@
         try
         {
             isPersisting = true;
-            editorErrorMessage = null;
+            repositoriesModalErrorMessage = null;
             await InvokeAsync(StateHasChanged);
             repositories = await RepositoryService.RefreshRepositoriesAsync();
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error fetching repositories for workspace editor");
-            editorErrorMessage = "Failed to fetch repositories. Please try again later.";
+            Logger.LogError(ex, "Error fetching repositories");
+            repositoriesModalErrorMessage = "Failed to fetch repositories. Please try again later.";
             repositories = new List<GitHubRepositoryEntry>();
         }
         finally
