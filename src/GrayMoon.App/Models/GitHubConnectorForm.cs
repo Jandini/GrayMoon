@@ -2,10 +2,8 @@ using System.ComponentModel.DataAnnotations;
 
 namespace GrayMoon.App.Models;
 
-public class GitHubConnector
+public class GitHubConnectorForm
 {
-    public int GitHubConnectorId { get; set; }
-
     [Required]
     [MaxLength(100)]
     public string ConnectorName { get; set; } = "GitHub";
@@ -20,13 +18,4 @@ public class GitHubConnector
     [Required]
     [MaxLength(500)]
     public string UserToken { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(20)]
-    public string Status { get; set; } = "Unknown";
-
-    public bool IsActive { get; set; } = true;
-
-    [MaxLength(1000)]
-    public string? LastError { get; set; }
 }

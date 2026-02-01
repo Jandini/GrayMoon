@@ -61,6 +61,7 @@ using (var scope = app.Services.CreateScope())
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     dbContext.Database.EnsureCreated();
     await MigrateWorkspaceSyncMetadataAsync(dbContext);
+    await MigrateGitHubConnectorUserNameAsync(dbContext);
 }
 
 static string? GetDatabasePath(string connectionString)
@@ -89,6 +90,31 @@ static async Task MigrateWorkspaceSyncMetadataAsync(AppDbContext dbContext)
                 cmd.CommandText = "ALTER TABLE Workspaces ADD COLUMN LastSyncedAt TEXT";
                 await cmd.ExecuteNonQueryAsync();
                 cmd.CommandText = "ALTER TABLE Workspaces ADD COLUMN IsInSync INTEGER NOT NULL DEFAULT 0";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateGitHubConnectorUserNameAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('GitHubConnectors') WHERE name='UserName'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE GitHubConnectors ADD COLUMN UserName TEXT";
                 await cmd.ExecuteNonQueryAsync();
             }
         }

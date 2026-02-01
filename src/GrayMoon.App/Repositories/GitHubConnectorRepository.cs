@@ -79,6 +79,7 @@ public class GitHubConnectorRepository
 
         existing.ConnectorName = connector.ConnectorName;
         existing.ApiBaseUrl = connector.ApiBaseUrl;
+        existing.UserName = connector.UserName;
         existing.UserToken = connector.UserToken;
         existing.Status = string.IsNullOrWhiteSpace(connector.Status) ? "Unknown" : connector.Status;
         existing.IsActive = connector.IsActive;

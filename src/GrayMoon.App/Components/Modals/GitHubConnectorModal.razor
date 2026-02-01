@@ -1,0 +1,90 @@
+@using GrayMoon.App.Models
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@Title</h5>
+                    <button type="button" class="btn-close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body">
+                    @if (Mode == GitHubConnectorModalMode.Create || Mode == GitHubConnectorModalMode.Edit)
+                    {
+                        <EditForm Model="@Model" OnValidSubmit="@(_ => OnSubmit.InvokeAsync())">
+                            <DataAnnotationsValidator />
+                            <div class="mb-3">
+                                <label class="form-label">Connector Name <span class="text-danger">*</span></label>
+                                <InputText class="form-control" @bind-Value="Model!.ConnectorName" />
+                                <ValidationMessage For="@(() => Model!.ConnectorName)" />
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">API Base URL <span class="text-danger">*</span></label>
+                                <InputText class="form-control" @bind-Value="Model!.ApiBaseUrl" />
+                                <ValidationMessage For="@(() => Model!.ApiBaseUrl)" />
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">User Name</label>
+                                <InputText class="form-control" @bind-Value="Model!.UserName" />
+                                <ValidationMessage For="@(() => Model!.UserName)" />
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">User Token <span class="text-danger">*</span></label>
+                                <InputText class="form-control" type="password" @bind-Value="Model!.UserToken" />
+                                <ValidationMessage For="@(() => Model!.UserToken)" />
+                            </div>
+                            @if (ErrorMessage != null)
+                            {
+                                <div class="alert alert-danger">@ErrorMessage</div>
+                            }
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
+                                <button type="submit" class="btn btn-primary" disabled="@IsSubmitting">
+                                    @if (IsSubmitting)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-2"></span>
+                                    }
+                                    @(IsSubmitting ? (Mode == GitHubConnectorModalMode.Edit ? "Updating..." : "Adding...") : SubmitButtonText)
+                                </button>
+                            </div>
+                        </EditForm>
+                    }
+                    else if (Mode == GitHubConnectorModalMode.Delete)
+                    {
+                        <p>Are you sure you want to delete <strong>@ConnectorName</strong>?</p>
+                        @if (ErrorMessage != null)
+                        {
+                            <div class="alert alert-danger">@ErrorMessage</div>
+                        }
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
+                            <button type="button" class="btn btn-danger" @onclick="() => OnDelete.InvokeAsync()" disabled="@IsSubmitting">
+                                @if (IsSubmitting)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2"></span>
+                                }
+                                Delete
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public GitHubConnectorModalMode Mode { get; set; }
+    [Parameter] public string Title { get; set; } = string.Empty;
+    [Parameter] public GitHubConnectorForm? Model { get; set; }
+    [Parameter] public string? ConnectorName { get; set; }
+    [Parameter] public bool IsSubmitting { get; set; }
+    [Parameter] public string? ErrorMessage { get; set; }
+    [Parameter] public EventCallback OnSubmit { get; set; }
+    [Parameter] public EventCallback OnDelete { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private string SubmitButtonText => Mode == GitHubConnectorModalMode.Edit ? "Update" : "Add";
+}

@@ -1,6 +1,5 @@
 @page "/github-connectors"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
-@using System.ComponentModel.DataAnnotations
 @using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
@@ -108,136 +107,32 @@
     }
 </div>
 
-@if (showCreateModal)
-{
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Add GitHub Connector</h5>
-                    <button type="button" class="btn-close" @onclick="CloseCreateModal"></button>
-                </div>
-                <div class="modal-body">
-                    <EditForm Model="@createModel" OnValidSubmit="@HandleCreateConnector">
-                        <DataAnnotationsValidator />
-                        <div class="mb-3">
-                            <label class="form-label">Connector Name <span class="text-danger">*</span></label>
-                            <InputText class="form-control" @bind-Value="createModel.ConnectorName" />
-                            <ValidationMessage For="@(() => createModel.ConnectorName)" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">API Base URL <span class="text-danger">*</span></label>
-                            <InputText class="form-control" @bind-Value="createModel.ApiBaseUrl" />
-                            <ValidationMessage For="@(() => createModel.ApiBaseUrl)" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">User Token <span class="text-danger">*</span></label>
-                            <InputText class="form-control" type="password" @bind-Value="createModel.UserToken" />
-                            <ValidationMessage For="@(() => createModel.UserToken)" />
-                        </div>
-                        @if (createErrorMessage != null)
-                        {
-                            <div class="alert alert-danger">@createErrorMessage</div>
-                        }
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" @onclick="CloseCreateModal">Cancel</button>
-                            <button type="submit" class="btn btn-primary" disabled="@isCreating">
-                                @if (isCreating)
-                                {
-                                    <span class="spinner-border spinner-border-sm me-2"></span>
-                                }
-                                Add
-                            </button>
-                        </div>
-                    </EditForm>
-                </div>
-            </div>
-        </div>
-    </div>
-}
+<GitHubConnectorModal IsVisible="@showCreateModal"
+                     Mode="GitHubConnectorModalMode.Create"
+                     Title="Add GitHub Connector"
+                     Model="@createModel"
+                     IsSubmitting="@isCreating"
+                     ErrorMessage="@createErrorMessage"
+                     OnSubmit="HandleCreateConnector"
+                     OnCancel="CloseCreateModal" />
 
-@if (showEditModal)
-{
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Edit GitHub Connector</h5>
-                    <button type="button" class="btn-close" @onclick="CloseEditModal"></button>
-                </div>
-                <div class="modal-body">
-                    <EditForm Model="@editModel" OnValidSubmit="@HandleUpdateConnector">
-                        <DataAnnotationsValidator />
-                        <div class="mb-3">
-                            <label class="form-label">Connector Name <span class="text-danger">*</span></label>
-                            <InputText class="form-control" @bind-Value="editModel.ConnectorName" />
-                            <ValidationMessage For="@(() => editModel.ConnectorName)" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">API Base URL <span class="text-danger">*</span></label>
-                            <InputText class="form-control" @bind-Value="editModel.ApiBaseUrl" />
-                            <ValidationMessage For="@(() => editModel.ApiBaseUrl)" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">User Token <span class="text-danger">*</span></label>
-                            <InputText class="form-control" type="password" @bind-Value="editModel.UserToken" />
-                            <ValidationMessage For="@(() => editModel.UserToken)" />
-                        </div>
-                        @if (editErrorMessage != null)
-                        {
-                            <div class="alert alert-danger">@editErrorMessage</div>
-                        }
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" @onclick="CloseEditModal">Cancel</button>
-                            <button type="submit" class="btn btn-primary" disabled="@isUpdating">
-                                @if (isUpdating)
-                                {
-                                    <span class="spinner-border spinner-border-sm me-2"></span>
-                                    <span>Updating...</span>
-                                }
-                                else
-                                {
-                                    <span>Update</span>
-                                }
-                            </button>
-                        </div>
-                    </EditForm>
-                </div>
-            </div>
-        </div>
-    </div>
-}
+<GitHubConnectorModal IsVisible="@showEditModal"
+                     Mode="GitHubConnectorModalMode.Edit"
+                     Title="Edit GitHub Connector"
+                     Model="@editModel"
+                     IsSubmitting="@isUpdating"
+                     ErrorMessage="@editErrorMessage"
+                     OnSubmit="HandleUpdateConnector"
+                     OnCancel="CloseEditModal" />
 
-@if (showDeleteModal && selectedConnector != null)
-{
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Delete GitHub Connector</h5>
-                    <button type="button" class="btn-close" @onclick="CloseDeleteModal"></button>
-                </div>
-                <div class="modal-body">
-                    <p>Are you sure you want to delete <strong>@selectedConnector.ConnectorName</strong>?</p>
-                    @if (deleteErrorMessage != null)
-                    {
-                        <div class="alert alert-danger">@deleteErrorMessage</div>
-                    }
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" @onclick="CloseDeleteModal">Cancel</button>
-                    <button type="button" class="btn btn-danger" @onclick="HandleDeleteConnector" disabled="@isDeleting">
-                        @if (isDeleting)
-                        {
-                            <span class="spinner-border spinner-border-sm me-2"></span>
-                        }
-                        Delete
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-}
+<GitHubConnectorModal IsVisible="@(showDeleteModal && selectedConnector != null)"
+                     Mode="GitHubConnectorModalMode.Delete"
+                     Title="Delete GitHub Connector"
+                     ConnectorName="@(selectedConnector?.ConnectorName ?? string.Empty)"
+                     IsSubmitting="@isDeleting"
+                     ErrorMessage="@deleteErrorMessage"
+                     OnDelete="HandleDeleteConnector"
+                     OnCancel="CloseDeleteModal" />
 
 @code {
     private List<GitHubConnector>? connectors;
@@ -312,6 +207,7 @@
             {
                 ConnectorName = createModel.ConnectorName.Trim(),
                 ApiBaseUrl = createModel.ApiBaseUrl.Trim(),
+                UserName = string.IsNullOrWhiteSpace(createModel.UserName) ? null : createModel.UserName.Trim(),
                 UserToken = createModel.UserToken.Trim(),
                 IsActive = true,
                 Status = "Testing",
@@ -320,8 +216,9 @@
 
             var savedConnector = await ConnectorRepository.AddAsync(connector);
             showCreateModal = false;
-            await LoadConnectorsAsync();
+            isCreating = false;
             StateHasChanged();
+            await LoadConnectorsAsync();
             await TestConnectorAsync(savedConnector);
         }
         catch (Exception ex)
@@ -343,6 +240,7 @@
         {
             ConnectorName = connector.ConnectorName,
             ApiBaseUrl = connector.ApiBaseUrl,
+            UserName = connector.UserName,
             UserToken = string.IsNullOrWhiteSpace(connector.UserToken)
                 ? defaultUserToken
                 : connector.UserToken
@@ -370,6 +268,7 @@
                 GitHubConnectorId = editConnectorId,
                 ConnectorName = editModel.ConnectorName.Trim(),
                 ApiBaseUrl = editModel.ApiBaseUrl.Trim(),
+                UserName = string.IsNullOrWhiteSpace(editModel.UserName) ? null : editModel.UserName.Trim(),
                 UserToken = editModel.UserToken.Trim(),
                 IsActive = selectedConnector?.IsActive ?? true,
                 Status = "Testing",
@@ -378,8 +277,9 @@
 
             var savedConnector = await ConnectorRepository.UpdateAsync(connector);
             showEditModal = false;
-            await LoadConnectorsAsync();
+            isUpdating = false;
             StateHasChanged();
+            await LoadConnectorsAsync();
             await TestConnectorAsync(savedConnector);
         }
         catch (Exception ex)
@@ -489,21 +389,6 @@
         {
             togglingConnectorId = null;
         }
-    }
-
-    private class GitHubConnectorForm
-    {
-        [Required]
-        [MaxLength(100)]
-        public string ConnectorName { get; set; } = "GitHub";
-
-        [Required]
-        [MaxLength(300)]
-        public string ApiBaseUrl { get; set; } = "https://api.github.com/";
-
-        [Required]
-        [MaxLength(500)]
-        public string UserToken { get; set; } = string.Empty;
     }
 
     private static string GetStatusLabel(GitHubConnector connector)
