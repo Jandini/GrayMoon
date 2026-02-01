@@ -44,6 +44,10 @@ builder.Services.AddScoped<WorkspaceGitService>();
 builder.Services.AddScoped<GitHubRepositoryService>();
 builder.Services.AddScoped<GitHubActionsService>();
 
+// Background sync service with controlled parallelism
+builder.Services.AddSingleton<SyncBackgroundService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SyncBackgroundService>());
+
 // GitHub API service
 builder.Services.AddHttpClient<GitHubService>();
 

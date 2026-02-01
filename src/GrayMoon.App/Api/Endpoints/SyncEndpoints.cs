@@ -12,6 +12,7 @@ public static class SyncEndpoints
     public static IEndpointRouteBuilder MapSyncEndpoints(this IEndpointRouteBuilder routes)
     {
         routes.MapPost("/api/sync", PostSync);
+        routes.MapGet("/api/sync/queue", GetQueueStatus);
         return routes;
     }
 
@@ -20,7 +21,7 @@ public static class SyncEndpoints
         GitHubRepositoryRepository repoRepository,
         WorkspaceRepository workspaceRepository,
         AppDbContext dbContext,
-        IServiceScopeFactory scopeFactory,
+        SyncBackgroundService syncQueue,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.Sync");
@@ -48,22 +49,20 @@ public static class SyncEndpoints
             return Results.NotFound("Repository is not in the given workspace.");
 
         logger.LogInformation("POST /api/sync accepted: repositoryId={RepositoryId}, workspaceId={WorkspaceId}", repositoryId, workspaceId);
-        _ = Task.Run(async () =>
+
+        // Enqueue the sync request to be processed by background workers with controlled parallelism
+        if (!syncQueue.EnqueueSync(repositoryId, workspaceId))
         {
-            try
-            {
-                await using var scope = scopeFactory.CreateAsyncScope();
-                var svc = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-                await svc.SyncSingleRepositoryAsync(repositoryId, workspaceId, default);
-            }
-            catch (Exception ex)
-            {
-                using var scope = scopeFactory.CreateScope();
-                var logger = scope.ServiceProvider.GetRequiredService<ILogger<WorkspaceGitService>>();
-                logger.LogError(ex, "Background sync failed for repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, workspaceId);
-            }
-        });
+            logger.LogWarning("Failed to enqueue sync request (queue service unavailable)");
+            return Results.Problem("Sync service is unavailable", statusCode: 503);
+        }
 
         return Results.Accepted();
+    }
+
+    private static IResult GetQueueStatus(SyncBackgroundService syncQueue)
+    {
+        var queueDepth = syncQueue.GetQueueDepth();
+        return Results.Ok(new { queueDepth, message = $"{queueDepth} sync request(s) pending" });
     }
 }

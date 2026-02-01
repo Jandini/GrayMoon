@@ -9,6 +9,7 @@ GrayMoon is a .NET project dependency and GitHub Actions orchestrator. It helps 
 - Repository discovery and visibility tracking
 - Workspace grouping with default workspace support
 - Actions overview for selected repositories
+- Background sync queue with controlled parallelism (up to 8 concurrent sync operations by default)
 
 ## Docker
 
@@ -51,3 +52,40 @@ wsl docker run -p 8384:8384 -v ./db:/app/db -v /mnt/c/workspaces:/workspaces -e 
 | `-e Workspace__RootPath=/workspaces` | Configures the workspace root inside the container |
 
 Then open http://localhost:8384 in your browser.
+
+## Configuration
+
+### Sync Queue
+
+The sync queue processes repository sync requests in the background with controlled parallelism. Configure in `appsettings.json`:
+
+```json
+{
+  "Sync": {
+    "MaxConcurrency": 8,
+    "EnableDeduplication": true
+  }
+}
+```
+
+Or via environment variables:
+
+```bash
+-e Sync__MaxConcurrency=8
+-e Sync__EnableDeduplication=true
+```
+
+- `MaxConcurrency`: Number of parallel workers processing sync requests (default: 8)
+- `EnableDeduplication`: Skip duplicate sync requests if same repo+workspace is already queued or being processed (default: true)
+
+**API Endpoints:**
+- `POST /api/sync` - Enqueue a sync request (called by git post-commit hooks)
+- `GET /api/sync/queue` - Check queue status (returns pending request count)
+
+**How it works:**
+1. Git post-commit hooks call `POST /api/sync` with `repositoryId` and `workspaceId`
+2. Requests are queued in an unbounded channel (duplicates are skipped if deduplication is enabled)
+3. Background workers (default: 8) process requests concurrently
+4. Each worker clones/updates repos and runs GitVersion to determine semantic version
+5. Results are persisted to the database and broadcast via SignalR
+6. After processing, the request is removed from the in-flight tracking (allows future syncs)

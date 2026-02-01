@@ -132,7 +132,8 @@ public class WorkspaceGitService
     }
 
     /// <summary>
-    /// Syncs one repository in a single workspace (clone if needed, get version, persist).
+    /// Syncs one repository in a single workspace (GitVersion only - no clone, no hooks).
+    /// Called by the background sync service when post-commit hooks fire.
     /// </summary>
     public async Task SyncSingleRepositoryInWorkspaceAsync(int workspaceId, GitHubRepository repo, CancellationToken cancellationToken = default)
     {
@@ -144,11 +145,28 @@ public class WorkspaceGitService
         }
 
         var workspacePath = _workspaceService.GetWorkspacePath(workspace.Name);
-        _workspaceService.CreateDirectory(workspace.Name);
+        var repoPath = Path.Combine(workspacePath, repo.RepositoryName);
 
-        using var semaphore = new SemaphoreSlim(1);
-        var (repoId, info) = await RunSyncJobAsync(workspaceId, repo, workspacePath, semaphore, cancellationToken);
-        await PersistVersionsAsync(workspaceId, new[] { (repoId, info) }, cancellationToken);
+        if (!Directory.Exists(repoPath))
+        {
+            _logger.LogWarning("Repository {RepositoryName} not cloned at {Path}, skipping sync", repo.RepositoryName, repoPath);
+            return;
+        }
+
+        // Only run GitVersion - no clone, no hooks (repo should already be cloned with hooks from full workspace sync)
+        await _gitCommandService.AddSafeDirectoryAsync(repoPath, cancellationToken);
+
+        var version = "-";
+        var branch = "-";
+        var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, cancellationToken);
+        if (gitVersion != null)
+        {
+            version = gitVersion.SemVer ?? gitVersion.FullSemVer ?? "-";
+            branch = gitVersion.BranchName ?? gitVersion.EscapedBranchName ?? "-";
+        }
+
+        var info = new RepoGitVersionInfo { Version = version, Branch = branch };
+        await PersistVersionsAsync(workspaceId, new[] { (repo.GitHubRepositoryId, info) }, cancellationToken);
 
         var statuses = await GetRepoSyncStatusAsync(workspaceId, cancellationToken: cancellationToken);
         var isInSync = statuses.Values.All(v => v == RepoSyncStatus.InSync);
@@ -156,7 +174,8 @@ public class WorkspaceGitService
 
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
-        _logger.LogDebug("Single-repo sync completed for {RepositoryName} in workspace {WorkspaceName}", repo.RepositoryName, workspace.Name);
+        _logger.LogDebug("Single-repo sync completed for {RepositoryName} in workspace {WorkspaceName} (version: {Version}, branch: {Branch})",
+            repo.RepositoryName, workspace.Name, version, branch);
     }
 
     public async Task<bool> IsInSyncAsync(int workspaceId, CancellationToken cancellationToken = default)
@@ -196,7 +215,7 @@ public class WorkspaceGitService
                 return false;
             }
 
-            var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, useCacheIfAvailable: true, cancellationToken);
+            var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, cancellationToken);
             if (gitVersion == null)
             {
                 if (_logger.IsEnabled(LogLevel.Trace))
@@ -261,7 +280,7 @@ public class WorkspaceGitService
             }
             else
             {
-                var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, useCacheIfAvailable: true, cancellationToken);
+                var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, cancellationToken);
                 if (gitVersion == null)
                 {
                     status = RepoSyncStatus.VersionMismatch;
@@ -318,6 +337,10 @@ public class WorkspaceGitService
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Full sync job for a repository: clone if needed, run GitVersion, set up hooks.
+    /// Used by full workspace sync only (not by the API single-repo sync).
+    /// </summary>
     private async Task<(int RepoId, RepoGitVersionInfo Info)> RunSyncJobAsync(
         int workspaceId,
         GitHubRepository repo,
