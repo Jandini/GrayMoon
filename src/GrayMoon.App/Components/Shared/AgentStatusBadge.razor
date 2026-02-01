@@ -1,0 +1,33 @@
+@using GrayMoon.App.Services
+@inject AgentConnectionTracker AgentConnectionTracker
+
+<span class="badge @BadgeClass" title="Agent connection status">@StateLabel</span>
+
+@code {
+    private AgentConnectionState _state = AgentConnectionState.Offline;
+
+    protected override void OnInitialized()
+    {
+        AgentConnectionTracker.OnStateChanged(s =>
+        {
+            _state = s;
+            _ = InvokeAsync(StateHasChanged);
+        });
+    }
+
+    private string BadgeClass => _state switch
+    {
+        AgentConnectionState.Online => "bg-success",
+        AgentConnectionState.Offline => "bg-danger",
+        AgentConnectionState.Connecting => "bg-secondary",
+        _ => "bg-secondary"
+    };
+
+    private string StateLabel => _state switch
+    {
+        AgentConnectionState.Online => "online",
+        AgentConnectionState.Offline => "offline",
+        AgentConnectionState.Connecting => "connecting",
+        _ => "offline"
+    };
+}

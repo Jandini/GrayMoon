@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @using System.Reflection
+@using GrayMoon.App.Components.Shared
 
 <div class="page">
     <div class="sidebar" id="sidebar">
@@ -11,6 +12,7 @@
             @if (!string.IsNullOrEmpty(version))
             {
                 <span class="header-version"><span class="text-muted">ver</span> @version</span>
+                <span class="ms-2"><AgentStatusBadge /></span>
             }
         </div>
 

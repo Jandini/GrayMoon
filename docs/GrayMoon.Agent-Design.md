@@ -87,7 +87,7 @@ post-commit → curl http://127.0.0.1:9191/notify → Agent enqueues to same que
 
 1. User commits → post-commit runs `curl -X POST http://127.0.0.1:9191/notify -d '{"repositoryId":1,"workspaceId":1,"repositoryPath":"/path/to/repo"}'`
 2. Agent HTTP listener receives the request and **enqueues** to the shared command queue (repositoryPath is embedded in the hook when written during SyncRepository)
-3. A worker picks up the job, runs AddSafeDirectory + GitVersion in repositoryPath
+3. A worker picks up the job, runs GitVersion in repositoryPath (no AddSafeDirectory; repo was cloned with SyncRepository)
 4. Agent invokes hub method: `SyncCommand(workspaceId, repositoryId, version, branch)`
 5. App persists to DB, broadcasts `WorkspaceSynced(workspaceId)` to UI clients
 
@@ -134,7 +134,7 @@ Hub path is `/agent` (no `hubs/` prefix required — map via `MapHub<AgentHub>("
 
 ### Commands (domain-specific, Option A: App sends full details)
 
-The app sends all required data in each command. AddSafeDirectory is performed internally as part of Clone when needed.
+The app sends all required data in each command. **AddSafeDirectory is called only and only immediately after CloneAsync** (when a clone was actually performed); it is never called for pre-existing repos or in other commands.
 
 | Command | Args | Response `data` |
 |---------|------|-----------------|
@@ -144,9 +144,9 @@ The app sends all required data in each command. AddSafeDirectory is performed i
 | **GetWorkspaceRepositories** | `workspaceName` | `{ repositories: string[] }` |
 | **GetRepositoryVersion** | `workspaceName`, `repositoryName` | `{ exists, version?, branch? }` |
 
-**SyncRepository** — Full sync for one repo (used by workspace sync): ensures workspace dir exists, clones if repo missing (AddSafeDirectory included), adds safe dir, runs GitVersion, writes post-commit/post-checkout hooks. Hooks curl `http://127.0.0.1:{ListenPort}/notify` with `{ repositoryId, workspaceId, repositoryPath }` (repositoryPath embedded at hook-creation time so the agent can run GitVersion directly when the hook fires).
+**SyncRepository** — Full sync for one repo (used by workspace sync): ensures workspace dir exists, clones if repo missing. **AddSafeDirectory is called only immediately after CloneAsync** (when a clone was performed). Then runs GitVersion, writes post-commit/post-checkout hooks. Hooks curl `http://127.0.0.1:{ListenPort}/notify` with `{ repositoryId, workspaceId, repositoryPath }` (repositoryPath embedded at hook-creation time so the agent can run GitVersion directly when the hook fires).
 
-**RefreshRepositoryVersion** — Manual/API-triggered single-repo refresh: adds safe dir, runs GitVersion. Hook flow uses `/notify` instead (agent runs GitVersion and pushes result directly).
+**RefreshRepositoryVersion** — Manual/API-triggered single-repo refresh: runs GitVersion only (no AddSafeDirectory; repo was cloned earlier). Hook flow uses `/notify` instead (agent runs GitVersion and pushes result directly).
 
 ---
 

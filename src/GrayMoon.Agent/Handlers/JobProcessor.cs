@@ -73,7 +73,7 @@ public sealed class JobProcessor : BackgroundService
             return;
         }
 
-        await _git.AddSafeDirectoryAsync(job.RepositoryPath, ct);
+        // No AddSafeDirectory — repo was cloned by SyncRepository which calls it only after CloneAsync
         var versionResult = await _git.GetVersionAsync(job.RepositoryPath, ct);
         var version = versionResult?.SemVer ?? versionResult?.FullSemVer ?? "-";
         var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
@@ -101,6 +101,7 @@ public sealed class JobProcessor : BackgroundService
             "EnsureWorkspace" => await HandleEnsureWorkspaceAsync(args, ct),
             "GetWorkspaceRepositories" => await HandleGetWorkspaceRepositoriesAsync(args, ct),
             "GetRepositoryVersion" => await HandleGetRepositoryVersionAsync(args, ct),
+            "GetWorkspaceExists" => await HandleGetWorkspaceExistsAsync(args, ct),
             _ => throw new NotSupportedException($"Unknown command: {job.Command}")
         };
 
@@ -129,13 +130,14 @@ public sealed class JobProcessor : BackgroundService
         {
             var ok = await _git.CloneAsync(workspacePath, cloneUrl, bearerToken, ct);
             wasCloned = ok;
+            if (ok)
+                await _git.AddSafeDirectoryAsync(repoPath, ct); // only and only after CloneAsync
         }
 
         var version = "-";
         var branch = "-";
         if (_git.DirectoryExists(repoPath))
         {
-            await _git.AddSafeDirectoryAsync(repoPath, ct);
             var vr = await _git.GetVersionAsync(repoPath, ct);
             if (vr != null)
             {
@@ -164,7 +166,6 @@ public sealed class JobProcessor : BackgroundService
         var branch = "-";
         if (_git.DirectoryExists(repoPath))
         {
-            await _git.AddSafeDirectoryAsync(repoPath, ct);
             var vr = await _git.GetVersionAsync(repoPath, ct);
             if (vr != null)
             {
@@ -173,7 +174,7 @@ public sealed class JobProcessor : BackgroundService
             }
         }
 
-        return await Task.FromResult(new { version, branch });
+        return new { version, branch };
     }
 
     private Task<object> HandleEnsureWorkspaceAsync(JsonElement args, CancellationToken ct)
@@ -214,7 +215,6 @@ public sealed class JobProcessor : BackgroundService
         string? branch = null;
         if (exists)
         {
-            await _git.AddSafeDirectoryAsync(repoPath, ct);
             var vr = await _git.GetVersionAsync(repoPath, ct);
             if (vr != null)
             {
@@ -224,6 +224,17 @@ public sealed class JobProcessor : BackgroundService
         }
 
         return new { exists, version, branch };
+    }
+
+    private Task<object> HandleGetWorkspaceExistsAsync(JsonElement args, CancellationToken ct)
+    {
+        if (args.ValueKind == JsonValueKind.Null || args.ValueKind == JsonValueKind.Undefined)
+            throw new ArgumentException("Args required for GetWorkspaceExists");
+
+        var workspaceName = GetString(args, "workspaceName") ?? throw new ArgumentException("workspaceName required");
+        var path = _git.GetWorkspacePath(workspaceName);
+        var exists = _git.DirectoryExists(path);
+        return Task.FromResult<object>(new { exists });
     }
 
     private async Task SendResponseAsync(string requestId, bool success, object? data, string? error)

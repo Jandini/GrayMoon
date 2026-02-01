@@ -19,6 +19,7 @@ public static class SyncEndpoints
     /// <summary>Only repositories that are linked to the given workspace (WorkspaceRepositories) are accepted; others return 404.</summary>
     private static async Task<IResult> PostSync(
         SyncRequest? body,
+        IAgentBridge agentBridge,
         GitHubRepositoryRepository repoRepository,
         WorkspaceRepository workspaceRepository,
         AppDbContext dbContext,
@@ -52,6 +53,12 @@ public static class SyncEndpoints
         {
             logger.LogWarning("Sync rejected: repository {RepositoryId} is not linked to workspace {WorkspaceId}", repositoryId, workspaceId);
             return Results.NotFound("Repository is not in the given workspace.");
+        }
+
+        if (!agentBridge.IsAgentConnected)
+        {
+            logger.LogWarning("Sync rejected: agent not connected");
+            return Results.Problem("Agent not connected. Start GrayMoon.Agent to sync repositories.", statusCode: 503);
         }
 
         logger.LogInformation("Sync requested. Trigger={Trigger}, repositoryId={RepositoryId}, workspaceId={WorkspaceId}", trigger, repositoryId, workspaceId);

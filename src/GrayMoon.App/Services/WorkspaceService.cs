@@ -1,3 +1,4 @@
+using System.Text.Json;
 using GrayMoon.App.Models;
 using Microsoft.Extensions.Options;
 
@@ -6,14 +7,16 @@ namespace GrayMoon.App.Services;
 public class WorkspaceService
 {
     private readonly string _rootPath;
+    private readonly IAgentBridge _agentBridge;
     private readonly ILogger<WorkspaceService> _logger;
 
-    public WorkspaceService(IOptions<WorkspaceOptions> options, ILogger<WorkspaceService> logger)
+    public WorkspaceService(IOptions<WorkspaceOptions> options, IAgentBridge agentBridge, ILogger<WorkspaceService> logger)
     {
+        _agentBridge = agentBridge ?? throw new ArgumentNullException(nameof(agentBridge));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         var rootPath = options?.Value?.RootPath;
         _rootPath = string.IsNullOrWhiteSpace(rootPath)
-            ? @"C:\Projectes"
+            ? @"C:\Workspace"
             : rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
 
@@ -25,54 +28,60 @@ public class WorkspaceService
         return Path.Combine(_rootPath, safeName);
     }
 
-    public bool DirectoryExists(string workspaceName)
+    public async Task<bool> DirectoryExistsAsync(string workspaceName, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workspaceName))
-        {
             return false;
-        }
 
-        var path = GetWorkspacePath(workspaceName);
-        return Directory.Exists(path);
+        var response = await _agentBridge.SendCommandAsync("GetWorkspaceExists", new { workspaceName }, cancellationToken);
+        if (!response.Success || response.Data == null)
+            return false;
+
+        return GetProperty<bool>(response.Data, "exists");
     }
 
-    public int GetRepositoryCount(string workspaceName)
+    public async Task<int> GetRepositoryCountAsync(string workspaceName, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workspaceName))
-        {
             return 0;
-        }
 
-        var path = GetWorkspacePath(workspaceName);
-        if (!Directory.Exists(path))
-        {
+        var response = await _agentBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName }, cancellationToken);
+        if (!response.Success || response.Data == null)
             return 0;
-        }
 
-        return Directory.GetDirectories(path).Length;
+        var repos = GetProperty<string[]>(response.Data, "repositories");
+        return repos?.Length ?? 0;
     }
 
-    public void CreateDirectory(string workspaceName)
+    public async Task CreateDirectoryAsync(string workspaceName, CancellationToken cancellationToken = default)
     {
-        var path = GetWorkspacePath(workspaceName);
-
-        if (Directory.Exists(path))
-        {
-            _logger.LogDebug("Workspace directory already exists: {Path}", path);
+        if (string.IsNullOrWhiteSpace(workspaceName))
             return;
-        }
 
-        Directory.CreateDirectory(path);
-        _logger.LogInformation("Created workspace directory: {Path}", path);
+        await _agentBridge.SendCommandAsync("EnsureWorkspace", new { workspaceName }, cancellationToken);
+        _logger.LogInformation("Created workspace directory: {Name}", workspaceName);
+    }
+
+    private static T? GetProperty<T>(object data, string name)
+    {
+        if (data == null) return default;
+        var json = data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(data);
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty(name, out var prop))
+            return default;
+        if (typeof(T) == typeof(bool))
+            return (T)(object)prop.GetBoolean();
+        if (typeof(T) == typeof(string[]))
+            return (T)(object)prop.EnumerateArray().Select(e => e.GetString() ?? "").ToArray();
+        if (typeof(T) == typeof(int))
+            return (T)(object)prop.GetInt32();
+        return (T)Convert.ChangeType(prop.GetString() ?? "", typeof(T))!;
     }
 
     private static string SanitizeDirectoryName(string name)
     {
         if (string.IsNullOrWhiteSpace(name))
-        {
             return "workspace";
-        }
-
         var invalid = Path.GetInvalidFileNameChars();
         var sanitized = string.Join("_", name.Trim().Split(invalid, StringSplitOptions.RemoveEmptyEntries));
         return string.IsNullOrWhiteSpace(sanitized) ? "workspace" : sanitized;
