@@ -330,7 +330,7 @@ h1:focus {
 .grid-page-body {
     flex: 1 1 auto;
     min-height: 0;
-    max-height: calc(100vh - 220px);
+    max-height: calc(100vh - 190px);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -343,6 +343,12 @@ h1:focus {
     min-height: 0;
     display: flex;
     flex-direction: column;
+}
+
+/* Match bottom spacing to left/right: remove extra card margin so padding-block provides equal gap */
+.grid-page-body .page-card.mb-4,
+.grid-page-body .card.mb-4 {
+    margin-bottom: 0;
 }
 
 .grid-page-body .card-body {
