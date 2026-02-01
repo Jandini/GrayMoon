@@ -29,6 +29,29 @@
     overflow-x: hidden;
 }
 
+/* Narrow gray scrollbar in modal grid (same as grid pages) */
+.repository-grid tbody::-webkit-scrollbar {
+    width: 8px;
+}
+
+.repository-grid tbody::-webkit-scrollbar-track {
+    background: var(--bg-card, #252526);
+}
+
+.repository-grid tbody::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.repository-grid tbody::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}
+
+.repository-grid tbody {
+    scrollbar-width: thin;
+    scrollbar-color: #5a5a5a var(--bg-card, #252526);
+}
+
 .repository-grid thead {
     position: sticky;
     top: 0;
