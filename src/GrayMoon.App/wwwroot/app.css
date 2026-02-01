@@ -358,37 +358,13 @@ h1:focus {
     flex-direction: column;
 }
 
-/* Prevent table-responsive from creating scroll ancestor that breaks sticky; tbody handles scroll */
+/* Prevent table-responsive from creating scroll; only tbody scrolls. No scrollbar here. */
 .grid-page-body .table-responsive {
-    overflow-x: auto;
-    overflow-y: visible;
+    overflow: hidden;
     flex: 1 1 auto;
     min-height: 0;
     display: flex;
     flex-direction: column;
-}
-
-/* Custom scrollbar for table-responsive (horizontal scroll) */
-.grid-page-body .table-responsive::-webkit-scrollbar {
-    height: 8px;
-}
-
-.grid-page-body .table-responsive::-webkit-scrollbar-track {
-    background: var(--bg-card);
-}
-
-.grid-page-body .table-responsive::-webkit-scrollbar-thumb {
-    background: #5a5a5a;
-    border-radius: 4px;
-}
-
-.grid-page-body .table-responsive::-webkit-scrollbar-thumb:hover {
-    background: #6a6a6a;
-}
-
-.grid-page-body .table-responsive {
-    scrollbar-width: thin;
-    scrollbar-color: #5a5a5a var(--bg-card);
 }
 
 /* Grid tables: thead stays sticky (like Select Repositories modal), only tbody scrolls */
@@ -396,6 +372,7 @@ h1:focus {
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-height: 0;  /* allow table to shrink so tbody can scroll */
     margin-bottom: 0;
 }
 
@@ -415,17 +392,23 @@ h1:focus {
     border-bottom-color: var(--border-color);
 }
 
+/* Only the table body scrolls; scrollbar is always visible and confined to tbody */
 .grid-page-body .table tbody {
-    flex: 1 1 auto;
+    flex: 1 1 auto;       /* take remaining space (flex-basis 0) so height is constrained and overflow scrolls */
     min-height: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
+    overflow-y: scroll;  /* always show vertical scrollbar in table body */
+    overflow-x: auto;   /* horizontal scroll in tbody when needed */
     display: block;
+    -webkit-overflow-scrolling: touch;
 }
 
-/* Custom scrollbar styling for grid pages - narrow and gray */
+/* Custom scrollbar styling - narrow and gray, only in table body */
 .grid-page-body .table tbody::-webkit-scrollbar {
     width: 8px;
+}
+
+.grid-page-body .table tbody::-webkit-scrollbar:horizontal {
+    height: 8px;
 }
 
 .grid-page-body .table tbody::-webkit-scrollbar-track {
@@ -441,10 +424,11 @@ h1:focus {
     background: #6a6a6a;
 }
 
-/* Firefox scrollbar styling */
+/* Firefox: narrow gray scrollbar, always visible in table body */
 .grid-page-body .table tbody {
     scrollbar-width: thin;
     scrollbar-color: #5a5a5a var(--bg-card);
+    scrollbar-gutter: stable;  /* reserve space so scrollbar doesn't shift content */
 }
 
 .grid-page-body .table tbody tr {
