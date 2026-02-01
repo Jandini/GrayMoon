@@ -42,19 +42,27 @@
     width: 20%;
 }
 
-.col-visibility {
-    width: 15%;
-    text-align: center;
+.col-connector {
+    width: auto;
+    min-width: 0;
 }
 
-.col-connector {
-    width: 35%;
+.col-visibility {
+    width: 8rem;
+    min-width: 8rem;
+    text-align: right;
+    padding-right: 0.75rem;
+}
+
+.repositories-table th.col-visibility {
+    padding-right: 0.75rem;
 }
 
 .badge-private,
 .badge-public {
     display: inline-block;
-    min-width: 7ch;
+    width: calc(8ch + 2px);
+    min-width: calc(8ch + 2px);
     text-align: center;
 }
 
