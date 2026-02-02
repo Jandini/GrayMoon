@@ -38,6 +38,27 @@ else
             <div class="card h-100">
                 <div class="card-body">
                     <h5 class="card-title">
+                        <i class="bi bi-cpu"></i> Agent
+                    </h5>
+                    <p class="card-text">
+                        Run the host-side agent to execute git and repository operations. Download the single-file executable for your platform.
+                    </p>
+                    <div class="d-flex flex-wrap gap-2">
+                        <a class="btn btn-primary" href="/api/agent/download?platform=windows" download="graymoon-agent.exe" target="_blank" rel="noopener">
+                            Windows
+                        </a>
+                        <a class="btn btn-outline-primary" href="/api/agent/download" download="graymoon-agent" target="_blank" rel="noopener">
+                            Linux
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 col-lg-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
                         <i class="bi bi-grid"></i> Workspaces
                     </h5>
                     <p class="card-text">

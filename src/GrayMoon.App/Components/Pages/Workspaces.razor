@@ -255,7 +255,7 @@
         }
     }
 
-    private async Task ShowCreateModalAsync()
+    private Task ShowCreateModalAsync()
     {
         editingWorkspaceId = null;
         editorTitle = "Add Workspace";
@@ -264,6 +264,7 @@
         existingRepositoryCount = 0;
         editorErrorMessage = null;
         showEditorModal = true;
+        return Task.CompletedTask;
     }
 
     private async Task ShowEditModalAsync(int workspaceId)
