@@ -2,20 +2,18 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
 # SemVer injected by build script or CI (disables GitVersion.MsBuild inside container)
-ARG VERSION=0.0.0
+ARG VERSION=1.0.0
 
 COPY GrayMoon.sln ./
 COPY src/GrayMoon.App/GrayMoon.App.csproj src/GrayMoon.App/
 COPY src/GrayMoon.Agent/GrayMoon.Agent.csproj src/GrayMoon.Agent/
-RUN dotnet restore "GrayMoon.sln"
+RUN dotnet restore "GrayMoon.sln" /p:DisableGitVersionTask=true
 
 COPY . .
-RUN dotnet publish "src/GrayMoon.App/GrayMoon.App.csproj" -c Release -o /app/publish /p:UseAppHost=false \
-    /p:GetVersion=false \
-    /p:UpdateAssemblyInfo=false \
-    /p:UpdateVersionProperties=false \
-    /p:Version=${VERSION} \
-    /p:InformationalVersion=${VERSION}
+RUN dotnet publish "src/GrayMoon.App/GrayMoon.App.csproj" -c Release -o /app/publish \
+  /p:UseAppHost=false \
+  /p:Version=$VERSION \
+  /p:DisableGitVersionTask=true
 
 # Publish Agent as single-file trimmed self-contained (Linux x64 and Windows x64 for download)
 RUN dotnet publish "src/GrayMoon.Agent/GrayMoon.Agent.csproj" -c Release -r linux-x64 -o /agent/publish-linux
