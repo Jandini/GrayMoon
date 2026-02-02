@@ -38,9 +38,7 @@ try
     builder.Logging.ClearProviders();
     builder.Logging.AddSerilog(new LoggerConfiguration()
         .Enrich.WithMachineName()
-        .WriteTo.Console(
-            theme: AnsiConsoleTheme.Code,
-            outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u4}] [{MachineName}] [{SourceContext}] {Message}{NewLine}{Exception}")
+        .WriteTo.Console(theme: AnsiConsoleTheme.Code)
         .CreateLogger(), dispose: true);
 
     builder.Services.AddSingleton<IHubConnectionProvider, HubConnectionProvider>();

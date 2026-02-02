@@ -7,16 +7,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>GrayMoon.Agent</RootNamespace>
     <AssemblyName>graymoon-agent</AssemblyName>
-    <PackageId>GrayMoon.Agent</PackageId>
-    <Version>0.1.0</Version>
     <Authors>GrayMoon</Authors>
     <Description>Host-side agent for GrayMoon: executes git and repository I/O operations.</Description>
     <PackageType>DotnetTool</PackageType>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>graymoon-agent</ToolCommandName>
-    <!-- Single-file self-contained for distribution (not trimmed to avoid reflection/JSON issues) -->
     <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>true</SelfContained>
+    <SelfContained>false</SelfContained>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 

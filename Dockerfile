@@ -7,17 +7,16 @@ ARG VERSION=1.0.0
 COPY GrayMoon.sln ./
 COPY src/GrayMoon.App/GrayMoon.App.csproj src/GrayMoon.App/
 COPY src/GrayMoon.Agent/GrayMoon.Agent.csproj src/GrayMoon.Agent/
-RUN dotnet restore "GrayMoon.sln" /p:DisableGitVersionTask=true
+#RUN dotnet restore "GrayMoon.sln" /p:DisableGitVersionTask=true
 
 COPY . .
 RUN dotnet publish "src/GrayMoon.App/GrayMoon.App.csproj" -c Release -o /app/publish \
   /p:UseAppHost=false \
-  /p:Version=$VERSION \
-  /p:DisableGitVersionTask=true
+  /p:Version=$VERSION /p:DisableGitVersionTask=true
 
 # Publish Agent as single-file trimmed self-contained (Linux x64 and Windows x64 for download)
-RUN dotnet publish "src/GrayMoon.Agent/GrayMoon.Agent.csproj" -c Release -r linux-x64 -o /agent/publish-linux
-RUN dotnet publish "src/GrayMoon.Agent/GrayMoon.Agent.csproj" -c Release -r win-x64 -o /agent/publish-win
+RUN dotnet publish "src/GrayMoon.Agent/GrayMoon.Agent.csproj" -c Release -r linux-x64 -o /agent/publish-linux /p:Version=$VERSION /p:DisableGitVersionTask=true
+RUN dotnet publish "src/GrayMoon.Agent/GrayMoon.Agent.csproj" -c Release -r win-x64 -o /agent/publish-win /p:Version=$VERSION /p:DisableGitVersionTask=true
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
