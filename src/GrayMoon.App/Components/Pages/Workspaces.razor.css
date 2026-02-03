@@ -19,6 +19,7 @@
 
 .col-name {
     width: 25%;
+    vertical-align: middle;
 }
 
 .col-path {

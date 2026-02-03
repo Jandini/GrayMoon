@@ -41,52 +41,57 @@ public class GitHubRepositoryService
     public async Task<List<GitHubRepositoryEntry>> RefreshRepositoriesAsync(IProgress<int>? progress = null, CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("User triggered fetch repositories from GitHub");
-        var results = new List<GitHubRepositoryEntry>();
+        var allFetched = new List<GitHubRepository>();
+        var uniqueCloneUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var connectors = await _connectorRepository.GetAllAsync();
         var activeConnectors = connectors.Where(connector => connector.IsActive).ToList();
-        var connectorIds = connectors.Select(connector => connector.GitHubConnectorId).ToList();
-        await _repositoryRepository.DeleteOrphanedAsync(connectorIds);
 
         progress?.Report(0);
 
-        var runningTotal = 0;
+        var batchProgress = progress == null ? null : new Progress<IReadOnlyList<GitHubRepositoryDto>>(batch =>
+        {
+            foreach (var repo in batch)
+            {
+                var url = (repo.CloneUrl ?? string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(url))
+                    uniqueCloneUrls.Add(url);
+            }
+            progress.Report(uniqueCloneUrls.Count);
+        });
+
         foreach (var connector in activeConnectors)
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var connectorProgress = progress == null ? null : new Progress<int>(count => progress.Report(runningTotal + count));
-                var repositories = await _gitHubService.GetRepositoriesAsync(connector, connectorProgress, cancellationToken);
+                var repositories = await _gitHubService.GetRepositoriesAsync(connector, progress: null, batchProgress, cancellationToken);
                 var persisted = repositories.Select(repo => new GitHubRepository
                 {
                     GitHubConnectorId = connector.GitHubConnectorId,
                     OrgName = repo.Owner?.Login,
                     RepositoryName = repo.Name,
                     Visibility = repo.Private ? "Private" : "Public",
-                    CloneUrl = repo.CloneUrl
+                    CloneUrl = (repo.CloneUrl ?? string.Empty).Trim()
                 }).ToList();
-
-                await _repositoryRepository.ReplaceForConnectorAsync(connector.GitHubConnectorId, persisted);
-
-                var entries = await _repositoryRepository.GetEntriesByConnectorIdAsync(connector.GitHubConnectorId);
-                results.AddRange(entries);
-                runningTotal = results.Count;
-                progress?.Report(runningTotal);
+                allFetched.AddRange(persisted);
+                foreach (var r in persisted)
+                {
+                    if (!string.IsNullOrWhiteSpace(r.CloneUrl))
+                        uniqueCloneUrls.Add(r.CloneUrl);
+                }
+                progress?.Report(uniqueCloneUrls.Count);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error loading repositories for connector {ConnectorName}", connector.ConnectorName);
-                results.AddRange(await _repositoryRepository.GetEntriesByConnectorIdAsync(connector.GitHubConnectorId));
-                runningTotal = results.Count;
-                progress?.Report(runningTotal);
             }
         }
 
-        if (results.Count == 0)
+        if (allFetched.Count > 0)
         {
-            return await _repositoryRepository.GetAllEntriesAsync();
+            await _repositoryRepository.MergeRepositoriesAsync(allFetched);
         }
 
-        return results;
+        return await _repositoryRepository.GetAllEntriesAsync();
     }
 }

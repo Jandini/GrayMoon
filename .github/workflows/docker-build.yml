@@ -3,8 +3,13 @@ name: Docker Build
 on:
   push:
     branches: ["*"]
+    tags: ["*"]
   pull_request:
     branches: ["main"]
+
+env:
+  # Push to Docker Hub only on main, on tag push, or when commit message contains "prerelease"
+  push-to-registry: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || (github.event.head_commit && contains(github.event.head_commit.message, 'prerelease'))) }}
 
 jobs:
   build:
@@ -24,7 +29,7 @@ jobs:
         uses: gittools/actions/gitversion/execute@v0
 
       - name: Log in to Docker Hub
-        if: github.event_name != 'pull_request'
+        if: env.push-to-registry == 'true'
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -38,7 +43,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ env.push-to-registry == 'true' }}
           build-args: |
             VERSION=${{ steps.gitversion.outputs.SemVer }}
           tags: |

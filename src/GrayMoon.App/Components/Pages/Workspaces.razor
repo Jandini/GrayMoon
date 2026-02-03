@@ -77,27 +77,29 @@
                                 {
                                     <tr>
                                         <td class="col-name">
-                                            <button class="btn btn-sm btn-link default-star-button me-2"
-                                                    @onclick="() => ToggleDefaultAsync(workspace.WorkspaceId, workspace.Name)"
-                                                    disabled="@isTogglingDefault"
-                                                    title="Toggle default workspace">
+                                            <div class="d-flex align-items-center">
+                                                <button class="btn btn-sm btn-link default-star-button me-2 d-flex align-items-center"
+                                                        @onclick="() => ToggleDefaultAsync(workspace.WorkspaceId, workspace.Name)"
+                                                        disabled="@isTogglingDefault"
+                                                        title="Toggle default workspace">
+                                                    @if (workspace.IsDefault)
+                                                    {
+                                                        <i class="bi bi-star-fill default-star-icon" aria-hidden="true"></i>
+                                                    }
+                                                    else
+                                                    {
+                                                        <i class="bi bi-star default-star-icon" aria-hidden="true"></i>
+                                                    }
+                                                </button>
+                                                <NavLink class="link-primary text-decoration-none"
+                                                         href="@($"workspaces/{workspace.WorkspaceId}")">
+                                                    <strong>@workspace.Name</strong>
+                                                </NavLink>
                                                 @if (workspace.IsDefault)
                                                 {
-                                                    <i class="bi bi-star-fill default-star-icon" aria-hidden="true"></i>
+                                                    <span class="badge badge-default ms-2">Default</span>
                                                 }
-                                                else
-                                                {
-                                                    <i class="bi bi-star default-star-icon" aria-hidden="true"></i>
-                                                }
-                                            </button>
-                                            <NavLink class="link-primary text-decoration-none"
-                                                     href="@($"workspaces/{workspace.WorkspaceId}")">
-                                                <strong>@workspace.Name</strong>
-                                            </NavLink>
-                                            @if (workspace.IsDefault)
-                                            {
-                                                <span class="badge badge-default ms-2">Default</span>
-                                            }
+                                            </div>
                                         </td>
                                         <td class="col-path text-muted">@WorkspaceService.GetWorkspacePath(workspace.Name)</td>
                                         <td class="col-count">@workspace.Repositories.Count</td>

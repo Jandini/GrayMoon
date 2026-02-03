@@ -16,7 +16,7 @@
                             Repositories
                             <span class="text-muted ms-2">(@SelectedRepositoryIds.Count selected)</span>
                         </label>
-                        <div class="d-flex align-items-center mb-3">
+                        <div class="d-flex align-items-center mb-1">
                             <input class="form-control"
                                    placeholder="Search repositories..."
                                    @bind="repositorySearch"
@@ -29,6 +29,9 @@
                                 Fetch
                             </button>
                         </div>
+                        <small class="form-text text-muted mb-3 d-block">
+                            Search by repository name, owner, or connector; multiple words all must match.
+                        </small>
                         <div class="repository-list border rounded">
                             @if (Repositories == null)
                             {
@@ -171,16 +174,28 @@
             return new List<GitHubRepositoryEntry>();
         }
 
-        if (string.IsNullOrWhiteSpace(repositorySearch))
+        var words = repositorySearch
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(w => w.Trim())
+            .Where(w => w.Length > 0)
+            .ToList();
+
+        if (words.Count == 0)
         {
             return Repositories;
         }
 
         return Repositories.Where(repository =>
-            repository.ConnectorName.Contains(repositorySearch, StringComparison.OrdinalIgnoreCase) ||
-            (repository.OrgName?.Contains(repositorySearch, StringComparison.OrdinalIgnoreCase) ?? false) ||
-            repository.RepositoryName.Contains(repositorySearch, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        {
+            var repoName = repository.RepositoryName ?? string.Empty;
+            var ownerName = repository.OrgName ?? string.Empty;
+            var connectorName = repository.ConnectorName ?? string.Empty;
+
+            return words.All(word =>
+                repoName.Contains(word, StringComparison.OrdinalIgnoreCase) ||
+                ownerName.Contains(word, StringComparison.OrdinalIgnoreCase) ||
+                connectorName.Contains(word, StringComparison.OrdinalIgnoreCase));
+        }).ToList();
     }
 
     private async Task ToggleRepository(int repositoryId, bool isSelected)
