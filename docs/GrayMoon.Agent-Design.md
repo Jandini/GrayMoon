@@ -158,11 +158,12 @@ GrayMoon.Agent
 ├── appsettings.json
 ├── Hosted/
 │   ├── SignalRConnectionHostedService.cs   # Connect to hub, enqueue RequestCommand to shared queue
-│   └── HookListenerHostedService.cs        # HTTP /notify → enqueue to same shared queue
-├── Handlers/
-│   └── (SyncRepositoryHandler, RefreshRepositoryVersionHandler, EnsureWorkspaceHandler, ...)
+│   ├── HookListenerHostedService.cs        # HTTP /notify → enqueue to same shared queue
+│   └── JobBackgroundService.cs             # Dequeue → resolve command → execute → send response
+├── Commands/
+│   └── (ICommandHandler, SyncRepositoryHandler, RefreshRepositoryVersionHandler, ... when split out)
 ├── Queue/
-│   └── CommandQueueProcessor.cs            # Bounded channel, 8 workers
+│   └── (IJobQueue, JobQueue)               # Bounded channel, 8 workers
 └── Models/
 ```
 

@@ -8,22 +8,22 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace GrayMoon.Agent.Handlers;
+namespace GrayMoon.Agent.Hosted;
 
-public sealed class JobProcessor : BackgroundService
+public sealed class JobBackgroundService : BackgroundService
 {
     private readonly IJobQueue _jobQueue;
     private readonly GitOperations _git;
     private readonly IHubConnectionProvider _hubProvider;
-    private readonly ILogger<JobProcessor> _logger;
+    private readonly ILogger<JobBackgroundService> _logger;
     private readonly int _maxConcurrent;
 
-    public JobProcessor(
+    public JobBackgroundService(
         IJobQueue jobQueue,
         GitOperations git,
         IHubConnectionProvider hubProvider,
         IOptions<AgentOptions> options,
-        ILogger<JobProcessor> logger)
+        ILogger<JobBackgroundService> logger)
     {
         _jobQueue = jobQueue;
         _git = git;
@@ -34,7 +34,7 @@ public sealed class JobProcessor : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("JobProcessor starting with {MaxConcurrent} workers", _maxConcurrent);
+        _logger.LogInformation("JobBackgroundService starting with {MaxConcurrent} workers", _maxConcurrent);
         var workers = Enumerable.Range(0, _maxConcurrent)
             .Select(i => ProcessAsync(i, stoppingToken))
             .ToArray();

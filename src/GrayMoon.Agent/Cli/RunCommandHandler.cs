@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Reflection;
-using GrayMoon.Agent.Handlers;
 using GrayMoon.Agent.Hosted;
 using GrayMoon.Agent.Hub;
 using GrayMoon.Agent.Queue;
@@ -55,7 +54,7 @@ internal static class RunCommandHandler
 
         builder.Services.AddHostedService<SignalRConnectionHostedService>();
         builder.Services.AddHostedService<HookListenerHostedService>();
-        builder.Services.AddHostedService<JobProcessor>();
+        builder.Services.AddHostedService<JobBackgroundService>();
 
         if (OperatingSystem.IsWindows())
             builder.Services.AddWindowsService();
