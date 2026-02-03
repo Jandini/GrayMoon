@@ -1,10 +1,10 @@
 using GrayMoon.Agent.Jobs.Requests;
-using GrayMoon.Agent.Jobs.Results;
+using GrayMoon.Agent.Jobs.Response;
 using GrayMoon.Agent.Services;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class GetRepositoryVersionHandler : ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResult>
+public sealed class GetRepositoryVersionHandler : ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResponse>
 {
     private readonly GitOperations _git;
 
@@ -13,7 +13,7 @@ public sealed class GetRepositoryVersionHandler : ICommandHandler<GetRepositoryV
         _git = git;
     }
 
-    public async Task<GetRepositoryVersionResult> ExecuteAsync(GetRepositoryVersionRequest request, CancellationToken cancellationToken = default)
+    public async Task<GetRepositoryVersionResponse> ExecuteAsync(GetRepositoryVersionRequest request, CancellationToken cancellationToken = default)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
@@ -34,6 +34,6 @@ public sealed class GetRepositoryVersionHandler : ICommandHandler<GetRepositoryV
             }
         }
 
-        return new GetRepositoryVersionResult { Exists = exists, Version = version, Branch = branch };
+        return new GetRepositoryVersionResponse { Exists = exists, Version = version, Branch = branch };
     }
 }

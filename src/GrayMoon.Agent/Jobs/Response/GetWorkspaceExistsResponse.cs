@@ -1,8 +1,8 @@
 using System.Text.Json.Serialization;
 
-namespace GrayMoon.Agent.Jobs.Results;
+namespace GrayMoon.Agent.Jobs.Response;
 
-public sealed class GetWorkspaceExistsResult
+public sealed class GetWorkspaceExistsResponse
 {
     [JsonPropertyName("exists")]
     public bool Exists { get; set; }

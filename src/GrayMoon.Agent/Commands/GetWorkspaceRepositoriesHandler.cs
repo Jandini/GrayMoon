@@ -1,10 +1,10 @@
 using GrayMoon.Agent.Jobs.Requests;
-using GrayMoon.Agent.Jobs.Results;
+using GrayMoon.Agent.Jobs.Response;
 using GrayMoon.Agent.Services;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class GetWorkspaceRepositoriesHandler : ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResult>
+public sealed class GetWorkspaceRepositoriesHandler : ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResponse>
 {
     private readonly GitOperations _git;
 
@@ -13,11 +13,11 @@ public sealed class GetWorkspaceRepositoriesHandler : ICommandHandler<GetWorkspa
         _git = git;
     }
 
-    public Task<GetWorkspaceRepositoriesResult> ExecuteAsync(GetWorkspaceRepositoriesRequest request, CancellationToken cancellationToken = default)
+    public Task<GetWorkspaceRepositoriesResponse> ExecuteAsync(GetWorkspaceRepositoriesRequest request, CancellationToken cancellationToken = default)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var path = _git.GetWorkspacePath(workspaceName);
         var repositories = _git.GetDirectories(path);
-        return Task.FromResult(new GetWorkspaceRepositoriesResult { Repositories = repositories });
+        return Task.FromResult(new GetWorkspaceRepositoriesResponse { Repositories = repositories });
     }
 }

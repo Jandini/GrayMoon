@@ -37,9 +37,9 @@ GrayMoon.Agent/
 │       ├── GetRepositoryVersionRequest.cs
 │       └── GetWorkspaceExistsRequest.cs
 ├── Jobs/
-│   └── Results/                   # Typed results per command (optional but recommended)
-│       ├── SyncRepositoryResult.cs
-│       ├── RefreshRepositoryVersionResult.cs
+│   └── Response/                  # Typed response DTOs per command (optional but recommended)
+│       ├── SyncRepositoryResponse.cs
+│       ├── RefreshRepositoryVersionResponse.cs
 │       └── ...
 ```
 
@@ -69,7 +69,7 @@ This gives a **separate interface** for jobs and keeps **code separation**: queu
   - Use `System.Text.Json` attributes where needed (`[JsonPropertyName]`, etc.).
 
 - **Responses**  
-  - Define DTOs in `Jobs/Results/` for each command that returns data, e.g. `SyncRepositoryResult` (`Version`, `Branch`, `WasCloned`).  
+  - Define DTOs in `Jobs/Response/` for each command that returns data, e.g. `SyncRepositoryResponse` (`Version`, `Branch`, `WasCloned`).  
   - Handlers return these types; the response sender serializes them to JSON for `ResponseCommand(requestId, success, data, error)`.
 
 - **JSON handling**  
@@ -87,9 +87,9 @@ This is the **better JSON handling**: one deserialization at the boundary, stron
 
 One **handler** per command (and one for notify):
 
-- `ICommandHandler<TRequest, TResult>`  
-  - `Task<TResult> ExecuteAsync(TRequest request, CancellationToken cancellationToken)`  
-  - Implementations: `SyncRepositoryHandler`, `RefreshRepositoryVersionHandler`, etc., each taking the corresponding request/result types.
+- `ICommandHandler<TRequest, TResponse>`  
+  - `Task<TResponse> ExecuteAsync(TRequest request, CancellationToken cancellationToken)`  
+  - Implementations: `SyncRepositoryHandler`, `RefreshRepositoryVersionHandler`, etc., each taking the corresponding request/response types.
 
 - `INotifySyncHandler`  
   - `Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken)`  
@@ -100,12 +100,12 @@ Handlers do **not** receive `JsonElement` or raw JSON; they receive only the typ
 ### 3.2 Handler registration and resolution
 
 - Register each handler in DI, e.g.:
-  - `ICommandHandler<SyncRepositoryRequest, SyncRepositoryResult>` → `SyncRepositoryHandler`
-  - `ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResult>` → `RefreshRepositoryVersionHandler`
+  - `ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>` → `SyncRepositoryHandler`
+  - `ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse>` → `RefreshRepositoryVersionHandler`
   - etc.
 
 - **Command handler resolution**  
-  - By command name (e.g. `"SyncRepository"` → `ICommandHandler<SyncRepositoryRequest, SyncRepositoryResult>`).  
+  - By command name (e.g. `"SyncRepository"` → `ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>`).  
   - Options:
     - **Option A**: A small registry that maps `command` string → handler (or handler type). The processor looks up the handler, deserializes args to the handler’s request type, calls `ExecuteAsync`, then serializes the result for `ResponseCommand`.
     - **Option B**: Each handler is registered with its command name; a single `IJobHandlerResolver` or `ICommandHandlerFactory` returns the right handler for a given `ICommandJob` (or command name + args type).
@@ -119,7 +119,7 @@ So **separate services** = one service (class) per command/notify type, behind i
 
 - **JobBackgroundService** (or `JobQueueProcessor`) remains a **generic worker**:
   - Reads from the queue (`JobEnvelope`).
-  - If command job: resolve handler by command name, call handler with typed request, send `ResponseCommand` with typed result (or serialized result).
+  - If command job: resolve handler by command name, call handler with typed request, send `ResponseCommand` with typed response (or serialized response).
   - If notify job: call `INotifySyncHandler.ExecuteAsync`.
   - No switch on command strings; no `JsonElement` parsing. All command-specific logic lives in the handler services.
 
@@ -138,8 +138,8 @@ This keeps **proper code separation**: pipeline vs. command-specific logic.
    - Builds an `ICommandJob` (or `JobEnvelope` containing it) with `RequestId`, `Command`, and the typed request.
    - Enqueues to `IJobQueue`.
 3. **JobBackgroundService** dequeues `JobEnvelope`.
-4. For command jobs: **resolve handler** by command → get `ICommandHandler<TReq, TRes>` → run `ExecuteAsync(request)` → get typed result.
-5. **Response sender**: serializes result to JSON (if needed), calls hub `ResponseCommand(requestId, success, data, error)`.
+4. For command jobs: **resolve handler** by command → get `ICommandHandler<TReq, TRes>` → run `ExecuteAsync(request)` → get typed response.
+5. **Response sender**: serializes response to JSON (if needed), calls hub `ResponseCommand(requestId, success, data, error)`.
 
 All JSON for commands is at step 2 (in) and step 5 (out). Handlers only see typed DTOs.
 
@@ -172,15 +172,15 @@ GrayMoon.Agent/
 │   │   ├── GetWorkspaceRepositoriesRequest.cs
 │   │   ├── GetRepositoryVersionRequest.cs
 │   │   └── GetWorkspaceExistsRequest.cs
-│   └── Results/
-│       ├── SyncRepositoryResult.cs
-│       ├── RefreshRepositoryVersionResult.cs
-│       ├── EnsureWorkspaceResult.cs
-│       ├── GetWorkspaceRepositoriesResult.cs
-│       ├── GetRepositoryVersionResult.cs
-│       └── GetWorkspaceExistsResult.cs
+│   └── Response/
+│       ├── SyncRepositoryResponse.cs
+│       ├── RefreshRepositoryVersionResponse.cs
+│       ├── EnsureWorkspaceResponse.cs
+│       ├── GetWorkspaceRepositoriesResponse.cs
+│       ├── GetRepositoryVersionResponse.cs
+│       └── GetWorkspaceExistsResponse.cs
 ├── Commands/
-│   ├── ICommandHandler.cs          # ICommandHandler<TRequest, TResult>
+│   ├── ICommandHandler.cs          # ICommandHandler<TRequest, TResponse>
 │   ├── INotifySyncHandler.cs
 │   ├── SyncRepositoryHandler.cs
 │   ├── RefreshRepositoryVersionHandler.cs
@@ -200,7 +200,7 @@ GrayMoon.Agent/
 │   ├── SignalRConnectionHostedService.cs  # Uses CommandJobFactory to enqueue typed jobs
 │   ├── HookListenerHostedService.cs       # Builds INotifyJob from NotifyPayload
 │   ├── JobBackgroundService.cs    # Slim: dequeue → resolve handler → execute → send response
-│   └── (optional) ResponseSender.cs       # Sends ResponseCommand with serialized result
+│   └── (optional) ResponseSender.cs       # Sends ResponseCommand with serialized response
 └── Models/
     └── GitVersionResult.cs         # Keep; used by handlers
 ```
@@ -213,7 +213,7 @@ GrayMoon.Agent/
 ## 6. JSON Conventions
 
 - Use **System.Text.Json** consistently.
-- **Serialization options**: shared `JsonSerializerOptions` (e.g. property name policy, ignore nulls) in one place (e.g. `AgentJsonOptions`) and reuse when deserializing incoming args and when serializing result `data` for `ResponseCommand`.
+- **Serialization options**: shared `JsonSerializerOptions` (e.g. property name policy, ignore nulls) in one place (e.g. `AgentJsonOptions`) and reuse when deserializing incoming args and when serializing response `data` for `ResponseCommand`.
 - **Errors**: keep `ResponseCommand(requestId, success, data, error)`; on failure, `success: false`, `data: null`, `error` with message. No JSON in `error` required; string is enough.
 - **Backward compatibility**: typed request property names should match current app payloads (e.g. `workspaceName`, `repositoryId`, `repositoryName`, `cloneUrl`, `bearerToken`, `workspaceId`) so the existing App does not need to change.
 
@@ -226,6 +226,6 @@ GrayMoon.Agent/
 | Job representation | Single `QueuedJob` with `Command` + `JsonElement?` + notify fields | `IJob` / `ICommandJob` / `INotifyJob`, queue carries `JobEnvelope` with typed payloads |
 | JSON | Parsed inside `JobBackgroundService` via `GetString`/`GetInt` on `JsonElement` | Deserialize once at edge to typed Requests; handlers use DTOs only |
 | Commands | One big `JobBackgroundService` with a switch and private methods | One handler service per command + `INotifySyncHandler` in `Commands/`; `JobBackgroundService` in `Hosted/` resolves and invokes |
-| Code separation | All logic in `JobBackgroundService.cs` | Command handlers in `Commands/`, requests/results in `Jobs/Requests` and `Jobs/Results`, resolution in `Services/`, `JobBackgroundService` in `Hosted/` |
+| Code separation | All logic in `JobBackgroundService.cs` | Command handlers in `Commands/`, requests/responses in `Jobs/Requests` and `Jobs/Response`, resolution in `Services/`, `JobBackgroundService` in `Hosted/` |
 
 This design gives you **separate interfaces** for jobs, **separate services** for each job type, **better JSON handling** via typed DTOs at the boundary, and **clear code separation** between queue, resolution, and domain logic.

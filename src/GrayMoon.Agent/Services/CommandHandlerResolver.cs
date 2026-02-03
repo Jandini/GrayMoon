@@ -1,6 +1,6 @@
 using GrayMoon.Agent.Commands;
 using GrayMoon.Agent.Jobs.Requests;
-using GrayMoon.Agent.Jobs.Results;
+using GrayMoon.Agent.Jobs.Response;
 
 namespace GrayMoon.Agent.Services;
 
@@ -9,12 +9,12 @@ public sealed class CommandHandlerResolver : ICommandHandlerResolver
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors;
 
     public CommandHandlerResolver(
-        ICommandHandler<SyncRepositoryRequest, SyncRepositoryResult> syncRepository,
-        ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResult> refreshRepositoryVersion,
-        ICommandHandler<EnsureWorkspaceRequest, EnsureWorkspaceResult> ensureWorkspace,
-        ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResult> getWorkspaceRepositories,
-        ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResult> getRepositoryVersion,
-        ICommandHandler<GetWorkspaceExistsRequest, GetWorkspaceExistsResult> getWorkspaceExists)
+        ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse> syncRepository,
+        ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse> refreshRepositoryVersion,
+        ICommandHandler<EnsureWorkspaceRequest, EnsureWorkspaceResponse> ensureWorkspace,
+        ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResponse> getWorkspaceRepositories,
+        ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResponse> getRepositoryVersion,
+        ICommandHandler<GetWorkspaceExistsRequest, GetWorkspaceExistsResponse> getWorkspaceExists)
     {
         _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
         {

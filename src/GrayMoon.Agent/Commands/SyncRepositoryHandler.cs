@@ -1,10 +1,10 @@
 using GrayMoon.Agent.Jobs.Requests;
-using GrayMoon.Agent.Jobs.Results;
+using GrayMoon.Agent.Jobs.Response;
 using GrayMoon.Agent.Services;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class SyncRepositoryHandler : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResult>
+public sealed class SyncRepositoryHandler : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
 {
     private readonly GitOperations _git;
 
@@ -13,7 +13,7 @@ public sealed class SyncRepositoryHandler : ICommandHandler<SyncRepositoryReques
         _git = git;
     }
 
-    public async Task<SyncRepositoryResult> ExecuteAsync(SyncRepositoryRequest request, CancellationToken cancellationToken = default)
+    public async Task<SyncRepositoryResponse> ExecuteAsync(SyncRepositoryRequest request, CancellationToken cancellationToken = default)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryId = request.RepositoryId;
@@ -50,6 +50,6 @@ public sealed class SyncRepositoryHandler : ICommandHandler<SyncRepositoryReques
             }
         }
 
-        return new SyncRepositoryResult { Version = version, Branch = branch, WasCloned = wasCloned };
+        return new SyncRepositoryResponse { Version = version, Branch = branch, WasCloned = wasCloned };
     }
 }

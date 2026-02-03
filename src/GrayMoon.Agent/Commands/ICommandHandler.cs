@@ -1,9 +1,9 @@
 namespace GrayMoon.Agent.Commands;
 
 /// <summary>
-/// Handler for a single command type; receives typed request and returns typed result.
+/// Handler for a single command type; receives typed request and returns typed response.
 /// </summary>
-public interface ICommandHandler<in TRequest, TResult>
+public interface ICommandHandler<in TRequest, TResponse>
 {
-    Task<TResult> ExecuteAsync(TRequest request, CancellationToken cancellationToken = default);
+    Task<TResponse> ExecuteAsync(TRequest request, CancellationToken cancellationToken = default);
 }

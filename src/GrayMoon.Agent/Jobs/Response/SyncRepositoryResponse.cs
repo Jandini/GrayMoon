@@ -1,8 +1,8 @@
 using System.Text.Json.Serialization;
 
-namespace GrayMoon.Agent.Jobs.Results;
+namespace GrayMoon.Agent.Jobs.Response;
 
-public sealed class SyncRepositoryResult
+public sealed class SyncRepositoryResponse
 {
     [JsonPropertyName("version")]
     public string? Version { get; set; }

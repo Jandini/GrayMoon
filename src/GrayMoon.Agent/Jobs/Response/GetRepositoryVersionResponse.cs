@@ -1,9 +1,12 @@
 using System.Text.Json.Serialization;
 
-namespace GrayMoon.Agent.Jobs.Results;
+namespace GrayMoon.Agent.Jobs.Response;
 
-public sealed class RefreshRepositoryVersionResult
+public sealed class GetRepositoryVersionResponse
 {
+    [JsonPropertyName("exists")]
+    public bool Exists { get; set; }
+
     [JsonPropertyName("version")]
     public string? Version { get; set; }
 
