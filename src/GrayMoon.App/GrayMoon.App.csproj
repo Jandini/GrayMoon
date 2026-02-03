@@ -7,6 +7,7 @@
     <UserSecretsId>eec7d83f-6fc3-4f9d-93d7-29fd32d2f6dc</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <DockerfileFile>../../Dockerfile</DockerfileFile>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
