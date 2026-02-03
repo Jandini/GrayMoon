@@ -41,16 +41,11 @@ else
                         <i class="bi bi-cpu"></i> Agent
                     </h5>
                     <p class="card-text">
-                        Run the host-side agent to execute git and repository operations. Download the single-file executable for your platform.
+                        Host-side agent for git and repo operations.
                     </p>
-                    <div class="d-flex flex-wrap gap-2">
-                        <a class="btn btn-primary" href="/api/agent/download?platform=windows" download="graymoon-agent.exe" target="_blank" rel="noopener">
-                            Windows
-                        </a>
-                        <a class="btn btn-outline-primary" href="/api/agent/download" download="graymoon-agent" target="_blank" rel="noopener">
-                            Linux
-                        </a>
-                    </div>
+                    <button type="button" class="btn btn-primary" onclick="window.graymoonDownloadAgent()">
+                        Download Agent
+                    </button>
                 </div>
             </div>
         </div>
