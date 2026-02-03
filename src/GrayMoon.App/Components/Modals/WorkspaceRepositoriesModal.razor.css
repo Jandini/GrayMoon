@@ -12,8 +12,8 @@
 
 /* When grid is present: fixed height so tbody scroll area matches visible grid */
 .repository-list:has(.repository-grid) {
-    height: min(420px, 55vh);
-    max-height: min(265px, 55vh);
+    height: min(387px, calc(55vh - 33px));
+    max-height: min(232px, calc(55vh - 33px));
     display: flex;
     flex-direction: column;
 }
