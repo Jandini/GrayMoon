@@ -1,0 +1,21 @@
+# Keep wwwroot and all app source - do NOT exclude static assets.
+# Only exclude build artifacts and version control.
+
+**/bin/
+**/obj/
+**/out/
+.git/
+.gitignore
+.vs/
+.vscode/
+**/*.user
+**/*.suo
+**/packages/
+*.md
+!README.md
+**/logs/
+**/.history/
+db/
+*.db
+*.db-shm
+*.db-wal

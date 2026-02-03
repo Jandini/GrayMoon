@@ -2,35 +2,31 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
 # SemVer injected by build script or CI (disables GitVersion.MsBuild inside container)
-ARG VERSION=0.0.0
+ARG VERSION=1.0.0
 
 COPY GrayMoon.sln ./
 COPY src/GrayMoon.App/GrayMoon.App.csproj src/GrayMoon.App/
-RUN dotnet restore "GrayMoon.sln"
+COPY src/GrayMoon.Agent/GrayMoon.Agent.csproj src/GrayMoon.Agent/
+#RUN dotnet restore "GrayMoon.sln" /p:DisableGitVersionTask=true
 
 COPY . .
-RUN dotnet publish "src/GrayMoon.App/GrayMoon.App.csproj" -c Release -o /app/publish /p:UseAppHost=false \
-    /p:GetVersion=false \
-    /p:UpdateAssemblyInfo=false \
-    /p:UpdateVersionProperties=false \
-    /p:Version=${VERSION} \
-    /p:InformationalVersion=${VERSION}
+RUN dotnet publish "src/GrayMoon.App/GrayMoon.App.csproj" -c Release -o /app/publish \
+  /p:UseAppHost=false \
+  /p:Version=$VERSION /p:DisableGitVersionTask=true
 
-# Install GitVersion.Tool for use in runtime stage
-RUN dotnet tool install GitVersion.Tool --version 5.12.0 --tool-path /gv
+# Publish Agent as single-file trimmed self-contained (Linux x64 and Windows x64 for download)
+RUN dotnet publish "src/GrayMoon.Agent/GrayMoon.Agent.csproj" -c Release -r linux-x64 -o /agent/publish-linux /p:Version=$VERSION /p:DisableGitVersionTask=true
+RUN dotnet publish "src/GrayMoon.Agent/GrayMoon.Agent.csproj" -c Release -r win-x64 -o /agent/publish-win /p:Version=$VERSION /p:DisableGitVersionTask=true
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 
-# Install git and copy GitVersion from build stage
-RUN apt-get update && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=build /gv /app/tools
-RUN chmod -R 755 /app/tools
-ENV PATH="${PATH}:/app/tools"
-
 COPY --from=build /app/publish .
+# Pack agent executables for download (runs on host)
+RUN mkdir -p /app/agent
+COPY --from=build /agent/publish-linux/graymoon-agent /app/agent/graymoon-agent
+COPY --from=build /agent/publish-win/graymoon-agent.exe /app/agent/graymoon-agent.exe
+RUN chmod +x /app/agent/graymoon-agent
 
 # Database stored in /app/db for easy volume persistence: -v ./data:/app/db
 VOLUME ["/app/db"]

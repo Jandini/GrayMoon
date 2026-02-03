@@ -37,9 +37,10 @@ builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connect
 builder.Services.AddScoped<GitHubConnectorRepository>();
 builder.Services.AddScoped<GitHubRepositoryRepository>();
 builder.Services.AddScoped<WorkspaceRepository>();
+builder.Services.AddSingleton<AgentConnectionTracker>();
+builder.Services.AddScoped<SyncCommandHandler>();
+builder.Services.AddScoped<IAgentBridge, AgentBridge>();
 builder.Services.AddScoped<WorkspaceService>();
-builder.Services.AddScoped<GitCommandService>();
-builder.Services.AddScoped<GitVersionCommandService>();
 builder.Services.AddScoped<WorkspaceGitService>();
 builder.Services.AddScoped<GitHubRepositoryService>();
 builder.Services.AddScoped<GitHubActionsService>();
@@ -190,6 +191,7 @@ app.UseAntiforgery();
 
 app.MapApiEndpoints();
 app.MapHub<WorkspaceSyncHub>("/hubs/workspace-sync");
+app.MapHub<AgentHub>("/agent");
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

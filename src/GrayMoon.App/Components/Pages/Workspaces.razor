@@ -130,10 +130,10 @@
 <WorkspaceModal IsVisible="@showEditorModal"
                Title="@editorTitle"
                WorkspaceName="@workspaceName"
-               WorkspaceNameChanged="@((value) => workspaceName = value)"
+               WorkspaceNameChanged="@OnWorkspaceNameChangedAsync"
                WorkspacePath="@GetWorkspacePath()"
-               DirectoryAlreadyExists="@WorkspaceService.DirectoryExists(workspaceName)"
-               ExistingRepositoryCount="@WorkspaceService.GetRepositoryCount(workspaceName)"
+               DirectoryAlreadyExists="@directoryExists"
+               ExistingRepositoryCount="@existingRepositoryCount"
                IsNameDisabled="false"
                IsSaving="@isSaving"
                ErrorMessage="@editorErrorMessage"
@@ -206,11 +206,16 @@
     private HashSet<int> selectedRepositoryIds = new();
     private int? fetchedRepositoryCount;
     private CancellationTokenSource? _fetchRepositoriesCts;
+    private bool directoryExists;
+    private int existingRepositoryCount;
+    private CancellationTokenSource? _directoryInfoCts;
 
     public void Dispose()
     {
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
+        _directoryInfoCts?.Cancel();
+        _directoryInfoCts?.Dispose();
     }
 
     protected override async Task OnInitializedAsync()
@@ -250,13 +255,16 @@
         }
     }
 
-    private async Task ShowCreateModalAsync()
+    private Task ShowCreateModalAsync()
     {
         editingWorkspaceId = null;
         editorTitle = "Add Workspace";
         workspaceName = string.Empty;
+        directoryExists = false;
+        existingRepositoryCount = 0;
         editorErrorMessage = null;
         showEditorModal = true;
+        return Task.CompletedTask;
     }
 
     private async Task ShowEditModalAsync(int workspaceId)
@@ -275,6 +283,7 @@
             .Select(link => link.GitHubRepositoryId)
             .ToHashSet();
         showEditorModal = true;
+        await LoadDirectoryInfoAsync();
     }
 
     private async Task ShowAddRepositoriesModalAsync(int workspaceId)
@@ -498,10 +507,47 @@
     private string GetWorkspacePath()
     {
         if (string.IsNullOrWhiteSpace(workspaceName))
-        {
             return WorkspaceService.RootPath;
+        return WorkspaceService.GetWorkspacePath(workspaceName);
+    }
+
+    private async Task OnWorkspaceNameChangedAsync(string value)
+    {
+        workspaceName = value;
+        await LoadDirectoryInfoAsync();
+    }
+
+    private async Task LoadDirectoryInfoAsync()
+    {
+        if (string.IsNullOrWhiteSpace(workspaceName))
+        {
+            directoryExists = false;
+            existingRepositoryCount = 0;
+            StateHasChanged();
+            return;
         }
 
-        return WorkspaceService.GetWorkspacePath(workspaceName);
+        _directoryInfoCts?.Cancel();
+        _directoryInfoCts = new CancellationTokenSource();
+        var ct = _directoryInfoCts.Token;
+
+        try
+        {
+            var existsTask = WorkspaceService.DirectoryExistsAsync(workspaceName, ct);
+            var countTask = WorkspaceService.GetRepositoryCountAsync(workspaceName, ct);
+            directoryExists = await existsTask;
+            existingRepositoryCount = await countTask;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to load directory info for {WorkspaceName}", workspaceName);
+            directoryExists = false;
+            existingRepositoryCount = 0;
+        }
+        finally
+        {
+            await InvokeAsync(StateHasChanged);
+        }
     }
 }

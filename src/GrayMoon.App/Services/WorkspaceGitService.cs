@@ -1,73 +1,58 @@
-using System.Reflection;
+using System.Text.Json;
 using GrayMoon.App.Data;
+using Microsoft.AspNetCore.SignalR;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
-using Microsoft.AspNetCore.Hosting.Server;
-using Microsoft.AspNetCore.Hosting.Server.Features;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services;
 
 public class WorkspaceGitService
 {
-    private readonly GitCommandService _gitCommandService;
-    private readonly GitVersionCommandService _gitVersionCommandService;
+    private readonly IAgentBridge _agentBridge;
     private readonly WorkspaceService _workspaceService;
     private readonly WorkspaceRepository _workspaceRepository;
     private readonly GitHubRepositoryRepository _githubRepositoryRepository;
     private readonly AppDbContext _dbContext;
     private readonly ILogger<WorkspaceGitService> _logger;
     private readonly int _maxConcurrent;
-    private readonly WorkspaceOptions _workspaceOptions;
-    private readonly IServer? _server;
-    private readonly IConfiguration _configuration;
     private readonly IHubContext<WorkspaceSyncHub>? _hubContext;
 
     public WorkspaceGitService(
-        GitCommandService gitCommandService,
-        GitVersionCommandService gitVersionCommandService,
+        IAgentBridge agentBridge,
         WorkspaceService workspaceService,
         WorkspaceRepository workspaceRepository,
         GitHubRepositoryRepository githubRepositoryRepository,
         AppDbContext dbContext,
-        IOptions<WorkspaceOptions> workspaceOptions,
-        IConfiguration configuration,
+        Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions,
         ILogger<WorkspaceGitService> logger,
-        IServer? server = null,
         IHubContext<WorkspaceSyncHub>? hubContext = null)
     {
-        _gitCommandService = gitCommandService ?? throw new ArgumentNullException(nameof(gitCommandService));
-        _gitVersionCommandService = gitVersionCommandService ?? throw new ArgumentNullException(nameof(gitVersionCommandService));
+        _agentBridge = agentBridge ?? throw new ArgumentNullException(nameof(agentBridge));
         _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
         _workspaceRepository = workspaceRepository ?? throw new ArgumentNullException(nameof(workspaceRepository));
         _githubRepositoryRepository = githubRepositoryRepository ?? throw new ArgumentNullException(nameof(githubRepositoryRepository));
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _server = server;
         _hubContext = hubContext;
-        _workspaceOptions = workspaceOptions?.Value ?? new WorkspaceOptions();
-        var max = _workspaceOptions.MaxConcurrentGitOperations;
+        var max = workspaceOptions?.Value?.MaxConcurrentGitOperations ?? 8;
         _maxConcurrent = max < 1 ? 1 : max;
     }
 
-    /// <summary>Syncs only repositories that are linked to the workspace (workspace.Repositories).</summary>
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
         Action<int, int, int, RepoGitVersionInfo>? onProgress = null,
         CancellationToken cancellationToken = default)
     {
+        if (!_agentBridge.IsAgentConnected)
+            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to sync repositories.");
+
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
-        {
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
-        }
 
-        var workspacePath = _workspaceService.GetWorkspacePath(workspace.Name);
-        _workspaceService.CreateDirectory(workspace.Name);
+        await _workspaceService.CreateDirectoryAsync(workspace.Name, cancellationToken);
 
         var repos = workspace.Repositories
             .Select(link => link.GitHubRepository)
@@ -76,40 +61,51 @@ public class WorkspaceGitService
             .ToList();
 
         if (repos.Count == 0)
-        {
             return new Dictionary<int, RepoGitVersionInfo>();
-        }
 
         _logger.LogInformation("Sync triggered by user (workspace UI). Workspace={WorkspaceName}, RepoCount={RepoCount}", workspace.Name, repos.Count);
-        _logger.LogDebug("Starting sync for workspace {WorkspaceName} ({RepoCount} repositories)", workspace.Name, repos.Count);
 
         var completedCount = 0;
         var totalCount = repos.Count;
-
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
+
         var syncTasks = repos.Select(async repo =>
         {
-            var result = await RunSyncJobAsync(workspaceId, repo, workspacePath, semaphore, cancellationToken);
-            var count = Interlocked.Increment(ref completedCount);
-            onProgress?.Invoke(count, totalCount, result.RepoId, result.Info);
-            return result;
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                var args = new
+                {
+                    workspaceName = workspace.Name,
+                    repositoryId = repo.GitHubRepositoryId,
+                    repositoryName = repo.RepositoryName,
+                    cloneUrl = repo.CloneUrl,
+                    bearerToken = repo.GitHubConnector?.UserToken,
+                    workspaceId
+                };
+                var response = await _agentBridge.SendCommandAsync("SyncRepository", args, cancellationToken);
+                var info = ParseSyncRepositoryResponse(response);
+                var count = Interlocked.Increment(ref completedCount);
+                onProgress?.Invoke(count, totalCount, repo.GitHubRepositoryId, info);
+                return (repo.GitHubRepositoryId, info);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
         });
+
         var results = await Task.WhenAll(syncTasks);
 
         await PersistVersionsAsync(workspaceId, results, cancellationToken);
 
-        var isInSync = results.All(r => r.Info.Version != "-" && r.Info.Branch != "-");
+        var isInSync = results.All(r => r.info.Version != "-" && r.info.Branch != "-");
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
 
         _logger.LogDebug("Sync completed for workspace {WorkspaceName}", workspace.Name);
-        return results.ToDictionary(r => r.RepoId, r => r.Info);
+        return results.ToDictionary(r => r.GitHubRepositoryId, r => r.info);
     }
 
-    /// <summary>
-    /// Syncs a single repository by its id only if it is linked to the given workspace.
-    /// Call from a background task (e.g. after returning 202 from API); uses scoped services.
-    /// Returns false if repo not found or repo is not in the workspace; true if sync was run.
-    /// </summary>
     public async Task<bool> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
     {
         var repo = await _githubRepositoryRepository.GetByIdAsync(repositoryId, cancellationToken);
@@ -127,49 +123,15 @@ public class WorkspaceGitService
             return false;
         }
 
-        _logger.LogInformation("Syncing repository {RepositoryName} (id {RepositoryId}) in workspace {WorkspaceId} (trigger: API/hook)", repo.RepositoryName, repositoryId, workspaceId);
-        await SyncSingleRepositoryInWorkspaceAsync(workspaceId, repo, cancellationToken);
-        return true;
-    }
-
-    /// <summary>
-    /// Syncs one repository in a single workspace (GitVersion only - no clone, no hooks).
-    /// Called by the background sync service when post-commit hooks fire.
-    /// </summary>
-    public async Task SyncSingleRepositoryInWorkspaceAsync(int workspaceId, GitHubRepository repo, CancellationToken cancellationToken = default)
-    {
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
-        {
-            _logger.LogWarning("Workspace {WorkspaceId} not found for single-repo sync", workspaceId);
-            return;
-        }
+            return false;
 
-        var workspacePath = _workspaceService.GetWorkspacePath(workspace.Name);
-        var repoPath = Path.Combine(workspacePath, repo.RepositoryName);
+        var response = await _agentBridge.SendCommandAsync("RefreshRepositoryVersion", new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName }, cancellationToken);
+        var info = ParseRefreshRepositoryVersionResponse(response);
 
-        if (!Directory.Exists(repoPath))
-        {
-            _logger.LogWarning("Repository {RepositoryName} not cloned at {Path}, skipping sync", repo.RepositoryName, repoPath);
-            return;
-        }
+        await PersistVersionsAsync(workspaceId, [(repo.GitHubRepositoryId, info)], cancellationToken);
 
-        // Only run GitVersion - no clone, no hooks (repo should already be cloned with hooks from full workspace sync)
-        await _gitCommandService.AddSafeDirectoryAsync(repoPath, cancellationToken);
-
-        var version = "-";
-        var branch = "-";
-        var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, cancellationToken);
-        if (gitVersion != null)
-        {
-            version = gitVersion.SemVer ?? gitVersion.FullSemVer ?? "-";
-            branch = gitVersion.BranchName ?? gitVersion.EscapedBranchName ?? "-";
-        }
-
-        var info = new RepoGitVersionInfo { Version = version, Branch = branch };
-        await PersistVersionsAsync(workspaceId, new[] { (repo.GitHubRepositoryId, info) }, cancellationToken);
-
-        // Compute workspace IsInSync from DB only (avoid re-running GitVersion for every repo in workspace, which was a major slowdown)
         var allLinks = await _dbContext.WorkspaceRepositories
             .Where(wr => wr.WorkspaceId == workspaceId)
             .Select(wr => wr.SyncStatus)
@@ -179,72 +141,6 @@ public class WorkspaceGitService
 
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
-        _logger.LogDebug("Single-repo sync completed for {RepositoryName} in workspace {WorkspaceName} (version: {Version}, branch: {Branch})",
-            repo.RepositoryName, workspace.Name, version, branch);
-    }
-
-    public async Task<bool> IsInSyncAsync(int workspaceId, CancellationToken cancellationToken = default)
-    {
-        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
-        if (workspace == null)
-        {
-            return true;
-        }
-
-        var workspacePath = _workspaceService.GetWorkspacePath(workspace.Name);
-
-        var workspaceRepos = workspace.Repositories.ToList();
-
-        if (workspaceRepos.Count == 0)
-        {
-            return true;
-        }
-
-        _logger.LogDebug("Checking sync status for workspace {WorkspaceName} ({RepoCount} repositories)", workspace.Name, workspaceRepos.Count);
-
-        foreach (var wr in workspaceRepos)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var repo = wr.GitHubRepository;
-            if (repo == null) continue;
-
-            var repoPath = Path.Combine(workspacePath, repo.RepositoryName);
-
-            if (!Directory.Exists(repoPath))
-            {
-                if (_logger.IsEnabled(LogLevel.Trace))
-                {
-                    _logger.LogTrace("Repository {RepoName} is not cloned", repo.RepositoryName);
-                }
-                return false;
-            }
-
-            var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, cancellationToken);
-            if (gitVersion == null)
-            {
-                if (_logger.IsEnabled(LogLevel.Trace))
-                {
-                    _logger.LogTrace("Repository {RepoName} failed to get version", repo.RepositoryName);
-                }
-                return false;
-            }
-
-            var diskVersion = gitVersion.SemVer ?? gitVersion.FullSemVer;
-            var diskBranch = gitVersion.BranchName ?? gitVersion.EscapedBranchName;
-
-            if (diskVersion != wr.GitVersion || diskBranch != wr.BranchName)
-            {
-                if (_logger.IsEnabled(LogLevel.Trace))
-                {
-                    _logger.LogTrace("Repository {RepoName} version/branch mismatch. Disk: {DiskVersion}/{DiskBranch}, Persisted: {PersistedVersion}/{PersistedBranch}",
-                        repo.RepositoryName, diskVersion, diskBranch, wr.GitVersion, wr.BranchName);
-                }
-                return false;
-            }
-        }
-
-        _logger.LogDebug("Workspace {WorkspaceName} is in sync", workspace.Name);
         return true;
     }
 
@@ -256,49 +152,24 @@ public class WorkspaceGitService
         var result = new Dictionary<int, RepoSyncStatus>();
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
-        {
             return result;
-        }
-
-        var workspacePath = _workspaceService.GetWorkspacePath(workspace.Name);
 
         var workspaceRepos = workspace.Repositories.ToList();
-
         if (workspaceRepos.Count == 0)
-        {
             return result;
-        }
 
         foreach (var wr in workspaceRepos)
         {
             cancellationToken.ThrowIfCancellationRequested();
-
             var repo = wr.GitHubRepository;
             if (repo == null) continue;
 
-            var repoPath = Path.Combine(workspacePath, repo.RepositoryName);
+            var response = await _agentBridge.SendCommandAsync("GetRepositoryVersion", new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName }, cancellationToken);
             RepoSyncStatus status;
-
-            if (!Directory.Exists(repoPath))
-            {
-                status = RepoSyncStatus.NotCloned;
-            }
+            if (!response.Success || response.Data == null)
+                status = RepoSyncStatus.Error;
             else
-            {
-                var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, cancellationToken);
-                if (gitVersion == null)
-                {
-                    status = RepoSyncStatus.VersionMismatch;
-                }
-                else
-                {
-                    var diskVersion = gitVersion.SemVer ?? gitVersion.FullSemVer;
-                    var diskBranch = gitVersion.BranchName ?? gitVersion.EscapedBranchName;
-                    status = diskVersion == wr.GitVersion && diskBranch == wr.BranchName
-                        ? RepoSyncStatus.InSync
-                        : RepoSyncStatus.VersionMismatch;
-                }
-            }
+                status = ParseGetRepositoryVersionToStatus(response.Data, wr.GitVersion, wr.BranchName);
 
             result[repo.GitHubRepositoryId] = status;
             onProgress?.Invoke(repo.GitHubRepositoryId, status);
@@ -306,197 +177,80 @@ public class WorkspaceGitService
 
         var isInSync = result.Values.All(v => v == RepoSyncStatus.InSync);
         await _workspaceRepository.UpdateIsInSyncAsync(workspaceId, isInSync);
-
         return result;
+    }
+
+    private static RepoGitVersionInfo ParseSyncRepositoryResponse(AgentCommandResponse response)
+    {
+        if (!response.Success || response.Data == null)
+            return new RepoGitVersionInfo { Version = "-", Branch = "-" };
+
+        var (version, branch) = GetVersionBranch(response.Data);
+        return new RepoGitVersionInfo { Version = version, Branch = branch };
+    }
+
+    private static RepoGitVersionInfo ParseRefreshRepositoryVersionResponse(AgentCommandResponse response)
+    {
+        if (!response.Success || response.Data == null)
+            return new RepoGitVersionInfo { Version = "-", Branch = "-" };
+
+        var (version, branch) = GetVersionBranch(response.Data);
+        return new RepoGitVersionInfo { Version = version, Branch = branch };
+    }
+
+    private static (string version, string branch) GetVersionBranch(object data)
+    {
+        var json = data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(data);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        var version = root.TryGetProperty("version", out var v) ? v.GetString() ?? "-" : "-";
+        var branch = root.TryGetProperty("branch", out var b) ? b.GetString() ?? "-" : "-";
+        return (version, branch);
+    }
+
+    private static RepoSyncStatus ParseGetRepositoryVersionToStatus(object data, string? persistedVersion, string? persistedBranch)
+    {
+        var json = data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(data);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        var exists = root.TryGetProperty("exists", out var e) && e.GetBoolean();
+        if (!exists)
+            return RepoSyncStatus.NotCloned;
+
+        var version = root.TryGetProperty("version", out var v) ? v.GetString() : null;
+        var branch = root.TryGetProperty("branch", out var b) ? b.GetString() : null;
+        if (version == null || branch == null)
+            return RepoSyncStatus.VersionMismatch;
+
+        return (version == persistedVersion && branch == persistedBranch) ? RepoSyncStatus.InSync : RepoSyncStatus.VersionMismatch;
     }
 
     private async Task PersistVersionsAsync(
         int workspaceId,
-        IEnumerable<(int RepoId, RepoGitVersionInfo Info)> results,
+        IEnumerable<(int RepoId, RepoGitVersionInfo info)> results,
         CancellationToken cancellationToken)
     {
         var resultList = results.ToList();
-        if (resultList.Count == 0)
-        {
-            return;
-        }
+        if (resultList.Count == 0) return;
 
         var repoIds = resultList.Select(r => r.RepoId).ToList();
         var workspaceReposToUpdate = await _dbContext.WorkspaceRepositories
             .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.GitHubRepositoryId))
             .ToListAsync(cancellationToken);
 
-        foreach (var result in resultList)
+        foreach (var (repoId, info) in resultList)
         {
-            var wr = workspaceReposToUpdate.FirstOrDefault(wr => wr.GitHubRepositoryId == result.RepoId);
+            var wr = workspaceReposToUpdate.FirstOrDefault(w => w.GitHubRepositoryId == repoId);
             if (wr != null)
             {
-                wr.GitVersion = result.Info.Version == "-" ? null : result.Info.Version;
-                wr.BranchName = result.Info.Branch == "-" ? null : result.Info.Branch;
-                wr.SyncStatus = (result.Info.Version == "-" || result.Info.Branch == "-")
-                    ? RepoSyncStatus.Error
-                    : RepoSyncStatus.InSync;
+                wr.GitVersion = info.Version == "-" ? null : info.Version;
+                wr.BranchName = info.Branch == "-" ? null : info.Branch;
+                wr.SyncStatus = (info.Version == "-" || info.Branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
             }
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
-        _logger.LogInformation("Persistence: saved WorkspaceRepository link versions. Action=PersistVersions, WorkspaceId={WorkspaceId}, RepoCount={RepoCount}, RepoIds=[{RepoIds}]",
-            workspaceId, resultList.Count, string.Join(", ", resultList.Select(r => $"{r.RepoId}:{r.Info.Version}/{r.Info.Branch}")));
-    }
-
-    /// <summary>
-    /// Full sync job for a repository: clone if needed, run GitVersion, set up hooks.
-    /// Used by full workspace sync only (not by the API single-repo sync).
-    /// </summary>
-    private async Task<(int RepoId, RepoGitVersionInfo Info)> RunSyncJobAsync(
-        int workspaceId,
-        GitHubRepository repo,
-        string workspacePath,
-        SemaphoreSlim semaphore,
-        CancellationToken cancellationToken)
-    {
-        await semaphore.WaitAsync(cancellationToken);
-        try
-        {
-            var repoPath = Path.Combine(workspacePath, repo.RepositoryName);
-
-            if (!Directory.Exists(repoPath))
-            {
-                if (!string.IsNullOrWhiteSpace(repo.CloneUrl))
-                {
-                    if (_logger.IsEnabled(LogLevel.Trace))
-                    {
-                        _logger.LogTrace("Cloning {RepositoryName}", repo.RepositoryName);
-                    }
-                    await _gitCommandService.CloneAsync(workspacePath, repo.CloneUrl, repo.GitHubConnector?.UserToken, cancellationToken);
-                }
-            }
-
-            var version = "-";
-            var branch = "-";
-            if (Directory.Exists(repoPath))
-            {
-                await _gitCommandService.AddSafeDirectoryAsync(repoPath, cancellationToken);
-                if (_logger.IsEnabled(LogLevel.Trace))
-                {
-                    _logger.LogTrace("Getting version for {RepositoryName}", repo.RepositoryName);
-                }
-                var gitVersion = await _gitVersionCommandService.GetVersionAsync(repoPath, cancellationToken);
-                if (gitVersion != null)
-                {
-                    version = gitVersion.SemVer ?? gitVersion.FullSemVer ?? "-";
-                    branch = gitVersion.BranchName ?? gitVersion.EscapedBranchName ?? "-";
-
-                    if (version != "-" && branch != "-")
-                        WriteSyncHooks(repoPath, workspaceId, repo.GitHubRepositoryId);
-                }
-            }
-
-            return (repo.GitHubRepositoryId, new RepoGitVersionInfo { Version = version, Branch = branch });
-        }
-        finally
-        {
-            semaphore.Release();
-        }
-    }
-
-    private void WriteSyncHooks(string repoPath, int workflowId, int repoId)
-    {
-        var baseUrl = GetPostCommitHookBaseUrl();
-        if (string.IsNullOrEmpty(baseUrl))
-        {
-            _logger.LogDebug("Skipping sync hooks: no base URL (set Workspace:PostCommitHookBaseUrl or ensure urls/ASPNETCORE_URLS is set)");
-            return;
-        }
-        baseUrl = baseUrl.TrimEnd('/');
-        var version = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
-        var now = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "Z";
-        var comment = $"# Created by GrayMoon {version} at {now}.\n";
-        var curlLine = $"curl -s -X POST \"{baseUrl}/api/sync\" -H \"Content-Type: application/json\" -d '{{\"repositoryId\":{repoId},\"workspaceId\":{workflowId}}}'\n";
-        var hooksDir = Path.Combine(repoPath, ".git", "hooks");
-        var utf8NoBom = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-
-        try
-        {
-            Directory.CreateDirectory(hooksDir);
-
-            // post-commit: run after every commit
-            var postCommit = "#!/bin/sh\n" + comment + curlLine;
-            WriteHookFile(Path.Combine(hooksDir, "post-commit"), postCommit, utf8NoBom);
-
-            // post-checkout: run after checkout; $3=1 means branch checkout (not file checkout)
-            var postCheckout = "#!/bin/sh\n" + comment + "[ \"$3\" = \"1\" ] && " + curlLine.TrimEnd() + "\n";
-            WriteHookFile(Path.Combine(hooksDir, "post-checkout"), postCheckout, utf8NoBom);
-
-            _logger.LogDebug("Sync hooks (post-commit, post-checkout) written for repo {RepoId} in workspace {WorkflowId}", repoId, workflowId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to write sync hooks in {HooksDir}", hooksDir);
-        }
-    }
-
-    private static void WriteHookFile(string hookPath, string content, System.Text.Encoding encoding)
-    {
-        var normalized = content.Replace("\r\n", "\n").Replace("\r", "\n");
-        File.WriteAllText(hookPath, normalized, encoding);
-        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
-            File.SetUnixFileMode(hookPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-    }
-
-    private string? GetPostCommitHookBaseUrl()
-    {
-        var configured = _workspaceOptions.PostCommitHookBaseUrl?.Trim();
-        if (!string.IsNullOrEmpty(configured))
-            return configured;
-
-        // Port-only: use 127.0.0.1 with configured port (app is designed for localhost)
-        if (_workspaceOptions.PostCommitHookPort is int port and > 0)
-            return BuildLocalHostHookUrl("http", port);
-
-        var fromServer = GetBaseUrlFromServer();
-        if (!string.IsNullOrEmpty(fromServer))
-            return fromServer;
-
-        var fromConfig = _configuration["urls"] ?? _configuration["ASPNETCORE_URLS"];
-        if (!string.IsNullOrEmpty(fromConfig))
-        {
-            var first = fromConfig.Split(';', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim();
-            if (!string.IsNullOrEmpty(first))
-                return NormalizeListenUrlForHook(first);
-        }
-
-        return null;
-    }
-
-    private string? GetBaseUrlFromServer()
-    {
-        if (_server?.Features == null)
-            return null;
-        var addresses = _server.Features.Get<IServerAddressesFeature>()?.Addresses;
-        var first = addresses?.FirstOrDefault();
-        return string.IsNullOrEmpty(first) ? null : NormalizeListenUrlForHook(first);
-    }
-
-    /// <summary>Normalizes a listen URL (e.g. http://[::]:8384 or http://+:8384) to a localhost hook URL. Only the port is used; host is always 127.0.0.1 since the app is designed for local use.</summary>
-    private static string NormalizeListenUrlForHook(string url)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-            return url;
-        var trimmed = url.Trim();
-        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) || !uri.IsAbsoluteUri)
-        {
-            // Try with default scheme (e.g. "[::]:8384" or "8384")
-            if (Uri.TryCreate("http://" + trimmed, UriKind.Absolute, out uri))
-                return BuildLocalHostHookUrl(uri.Scheme, uri.Port);
-            return trimmed;
-        }
-        return BuildLocalHostHookUrl(uri.Scheme, uri.Port);
-    }
-
-    private static string BuildLocalHostHookUrl(string scheme, int port)
-    {
-        var builder = new UriBuilder(scheme, "127.0.0.1", port);
-        return builder.Uri.GetLeftPart(UriPartial.Authority);
+        _logger.LogInformation("Persistence: saved WorkspaceRepository link versions. WorkspaceId={WorkspaceId}, RepoCount={RepoCount}",
+            workspaceId, resultList.Count);
     }
 }

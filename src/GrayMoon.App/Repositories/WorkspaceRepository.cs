@@ -50,7 +50,7 @@ public class WorkspaceRepository
         await _dbContext.SaveChangesAsync();
         _logger.LogInformation("Persistence: saved Workspace. Action=Add, WorkspaceId={WorkspaceId}, Name={Name}", workspace.WorkspaceId, workspace.Name);
 
-        _workspaceService.CreateDirectory(workspace.Name);
+        await _workspaceService.CreateDirectoryAsync(workspace.Name);
 
         await ReplaceRepositoriesAsync(workspace.WorkspaceId, repositoryIds);
         return workspace;

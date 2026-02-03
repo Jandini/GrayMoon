@@ -24,6 +24,27 @@
                 if (input) input.focus();
             }
         };
+        window.getAgentDownloadInfo = () => {
+            const ua = navigator.userAgent.toLowerCase();
+            const platform = (navigator.platform || '').toLowerCase();
+            const isWindows = /win(dows|32|64|ce)/.test(ua) || platform.indexOf('win') === 0;
+            const qs = isWindows ? '?platform=windows' : '';
+            const filename = isWindows ? 'graymoon-agent.exe' : 'graymoon-agent';
+            const base = (document.querySelector('base')?.getAttribute('href') || '/').replace(/\/$/, '') || '';
+            const path = base + '/api/agent/download' + qs;
+            const url = path.startsWith('http') ? path : (window.location.origin + path);
+            return { url, filename };
+        };
+        window.graymoonDownloadAgent = () => {
+            const { url, filename } = window.getAgentDownloadInfo();
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.rel = 'noopener';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        };
     </script>
 </body>
 
