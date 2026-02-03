@@ -15,6 +15,7 @@
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
@@ -29,6 +30,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.11" />
+    <PackageReference Include="System.CommandLine" Version="2.0.2" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
