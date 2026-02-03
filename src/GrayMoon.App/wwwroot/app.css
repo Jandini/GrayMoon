@@ -392,11 +392,11 @@ h1:focus {
     border-bottom-color: var(--border-color);
 }
 
-/* Only the table body scrolls; scrollbar is always visible and confined to tbody */
+/* Only the table body scrolls; scrollbar visible only when overflow (confined to tbody) */
 .grid-page-body .table tbody {
     flex: 1 1 auto;       /* take remaining space (flex-basis 0) so height is constrained and overflow scrolls */
     min-height: 0;
-    overflow-y: scroll;  /* always show vertical scrollbar in table body */
+    overflow-y: auto !important;    /* show vertical scrollbar only when content overflows */
     overflow-x: auto;   /* horizontal scroll in tbody when needed */
     display: block;
     -webkit-overflow-scrolling: touch;
@@ -424,12 +424,12 @@ h1:focus {
     background: #6a6a6a;
 }
 
-/* Firefox: narrow gray scrollbar, always visible in table body */
-.grid-page-body .table tbody {
-    scrollbar-width: thin;
-    scrollbar-color: #5a5a5a var(--bg-card);
-    scrollbar-gutter: stable;  /* reserve space so scrollbar doesn't shift content */
-}
+/* Firefox: narrow gray scrollbar in table body (shown only when overflow) */
+    .grid-page-body .table tbody {
+        scrollbar-width: auto !important;
+        scrollbar-color: #5a5a5a var(--bg-card);
+        scrollbar-gutter: auto !important; /* reserve space so scrollbar doesn't shift content */
+    }
 
 .grid-page-body .table tbody tr {
     display: table;
