@@ -69,25 +69,63 @@ public class GitHubRepositoryRepository
             .ToListAsync();
     }
 
-    public async Task ReplaceForConnectorAsync(int connectorId, IReadOnlyCollection<GitHubRepository> repositories)
+    /// <summary>
+    /// Merges fetched repositories with existing ones using <see cref="GitHubRepository.CloneUrl"/> as the unique key.
+    /// Updates existing rows when CloneUrl matches; adds new rows for new CloneUrls.
+    /// Removes repositories that are not in <paramref name="repositories"/> (and their workspace links via cascade).
+    /// </summary>
+    public async Task MergeRepositoriesAsync(IReadOnlyCollection<GitHubRepository> repositories)
     {
+        var normalized = repositories
+            .Select(r => new GitHubRepository
+            {
+                GitHubConnectorId = r.GitHubConnectorId,
+                OrgName = r.OrgName,
+                RepositoryName = r.RepositoryName,
+                Visibility = r.Visibility,
+                CloneUrl = (r.CloneUrl ?? string.Empty).Trim()
+            })
+            .Where(r => !string.IsNullOrWhiteSpace(r.CloneUrl))
+            .GroupBy(r => r.CloneUrl, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
+
+        var fetchedUrls = new HashSet<string>(normalized.Select(r => r.CloneUrl), StringComparer.OrdinalIgnoreCase);
+
         await using var transaction = await _dbContext.Database.BeginTransactionAsync();
 
-        var existing = await _dbContext.GitHubRepositories
-            .Where(repository => repository.GitHubConnectorId == connectorId)
-            .ToListAsync();
-        var removedCount = existing.Count;
-        _dbContext.GitHubRepositories.RemoveRange(existing);
-        await _dbContext.SaveChangesAsync();
-        _logger.LogInformation("Persistence: saved GitHubRepository. Action=ReplaceForConnector (remove), ConnectorId={ConnectorId}, RemovedCount={RemovedCount}", connectorId, removedCount);
-
-        if (repositories.Count > 0)
+        var existing = await _dbContext.GitHubRepositories.ToListAsync();
+        var toRemove = existing.Where(r => !fetchedUrls.Contains(r.CloneUrl.Trim())).ToList();
+        if (toRemove.Count > 0)
         {
-            await _dbContext.GitHubRepositories.AddRangeAsync(repositories);
+            _dbContext.GitHubRepositories.RemoveRange(toRemove);
             await _dbContext.SaveChangesAsync();
-            _logger.LogInformation("Persistence: saved GitHubRepository. Action=ReplaceForConnector (add), ConnectorId={ConnectorId}, AddedCount={AddedCount}", connectorId, repositories.Count);
+            _logger.LogInformation("Persistence: GitHubRepository. Action=Merge (remove not fetched), RemovedCount={RemovedCount}", toRemove.Count);
         }
 
+        var existingByUrl = existing
+            .Where(r => fetchedUrls.Contains(r.CloneUrl.Trim()))
+            .GroupBy(r => r.CloneUrl.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var repo in normalized)
+        {
+            if (existingByUrl.TryGetValue(repo.CloneUrl, out var existingRepo))
+            {
+                existingRepo.GitHubConnectorId = repo.GitHubConnectorId;
+                existingRepo.OrgName = repo.OrgName;
+                existingRepo.RepositoryName = repo.RepositoryName;
+                existingRepo.Visibility = repo.Visibility;
+                existingRepo.CloneUrl = repo.CloneUrl;
+            }
+            else
+            {
+                await _dbContext.GitHubRepositories.AddAsync(repo);
+            }
+        }
+
+        await _dbContext.SaveChangesAsync();
+        _logger.LogInformation("Persistence: GitHubRepository. Action=Merge, TotalFetched={TotalFetched}, UpdatedOrAdded={UpdatedOrAdded}", normalized.Count, normalized.Count);
         await transaction.CommitAsync();
     }
 
