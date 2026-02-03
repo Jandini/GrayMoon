@@ -55,10 +55,10 @@ public class GitHubService
         return await GetRepositoriesPagedAsync("user/repos?visibility=all");
     }
 
-    public async Task<List<GitHubRepositoryDto>> GetRepositoriesAsync(GitHubConnector connector, IProgress<int>? progress = null, CancellationToken cancellationToken = default)
+    public async Task<List<GitHubRepositoryDto>> GetRepositoriesAsync(GitHubConnector connector, IProgress<int>? progress = null, IProgress<IReadOnlyList<GitHubRepositoryDto>>? batchProgress = null, CancellationToken cancellationToken = default)
     {
         EnsureConnectorConfigured(connector);
-        return await GetRepositoriesPagedAsync(connector, "user/repos?visibility=all", progress, cancellationToken);
+        return await GetRepositoriesPagedAsync(connector, "user/repos?visibility=all", progress, batchProgress, cancellationToken);
     }
 
     public async Task<List<GitHubWorkflowDto>> GetWorkflowsAsync(string owner, string repo)
@@ -274,7 +274,7 @@ public class GitHubService
         return results;
     }
 
-    private async Task<List<GitHubRepositoryDto>> GetRepositoriesPagedAsync(GitHubConnector connector, string requestUri, IProgress<int>? progress = null, CancellationToken cancellationToken = default)
+    private async Task<List<GitHubRepositoryDto>> GetRepositoriesPagedAsync(GitHubConnector connector, string requestUri, IProgress<int>? progress = null, IProgress<IReadOnlyList<GitHubRepositoryDto>>? batchProgress = null, CancellationToken cancellationToken = default)
     {
         var results = new List<GitHubRepositoryDto>();
         const int pageSize = 20;
@@ -288,6 +288,8 @@ public class GitHubService
 
             results.AddRange(pageItems);
             progress?.Report(results.Count);
+            if (pageItems.Count > 0)
+                batchProgress?.Report(pageItems);
 
             if (pageItems.Count < pageSize)
             {

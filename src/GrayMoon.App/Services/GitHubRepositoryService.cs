@@ -42,30 +42,44 @@ public class GitHubRepositoryService
     {
         _logger.LogInformation("User triggered fetch repositories from GitHub");
         var allFetched = new List<GitHubRepository>();
+        var uniqueCloneUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var connectors = await _connectorRepository.GetAllAsync();
         var activeConnectors = connectors.Where(connector => connector.IsActive).ToList();
 
         progress?.Report(0);
 
-        var runningTotal = 0;
+        var batchProgress = progress == null ? null : new Progress<IReadOnlyList<GitHubRepositoryDto>>(batch =>
+        {
+            foreach (var repo in batch)
+            {
+                var url = (repo.CloneUrl ?? string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(url))
+                    uniqueCloneUrls.Add(url);
+            }
+            progress.Report(uniqueCloneUrls.Count);
+        });
+
         foreach (var connector in activeConnectors)
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var connectorProgress = progress == null ? null : new Progress<int>(count => progress.Report(runningTotal + count));
-                var repositories = await _gitHubService.GetRepositoriesAsync(connector, connectorProgress, cancellationToken);
+                var repositories = await _gitHubService.GetRepositoriesAsync(connector, progress: null, batchProgress, cancellationToken);
                 var persisted = repositories.Select(repo => new GitHubRepository
                 {
                     GitHubConnectorId = connector.GitHubConnectorId,
                     OrgName = repo.Owner?.Login,
                     RepositoryName = repo.Name,
                     Visibility = repo.Private ? "Private" : "Public",
-                    CloneUrl = repo.CloneUrl ?? string.Empty
+                    CloneUrl = (repo.CloneUrl ?? string.Empty).Trim()
                 }).ToList();
                 allFetched.AddRange(persisted);
-                runningTotal = allFetched.Count;
-                progress?.Report(runningTotal);
+                foreach (var r in persisted)
+                {
+                    if (!string.IsNullOrWhiteSpace(r.CloneUrl))
+                        uniqueCloneUrls.Add(r.CloneUrl);
+                }
+                progress?.Report(uniqueCloneUrls.Count);
             }
             catch (Exception ex)
             {
