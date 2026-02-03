@@ -1,7 +1,10 @@
 using System.Collections.Generic;
 using System.Reflection;
+using GrayMoon.Agent.Commands;
 using GrayMoon.Agent.Hosted;
 using GrayMoon.Agent.Hub;
+using GrayMoon.Agent.Jobs.Requests;
+using GrayMoon.Agent.Jobs.Results;
 using GrayMoon.Agent.Queue;
 using GrayMoon.Agent.Services;
 using Microsoft.Extensions.Configuration;
@@ -51,6 +54,16 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<IHubConnectionProvider, HubConnectionProvider>();
         builder.Services.AddSingleton<IJobQueue, JobQueue>();
         builder.Services.AddSingleton<GitOperations>();
+        builder.Services.AddSingleton<CommandJobFactory>();
+        builder.Services.AddSingleton<ICommandHandlerResolver, CommandHandlerResolver>();
+
+        builder.Services.AddSingleton<ICommandHandler<SyncRepositoryRequest, SyncRepositoryResult>, SyncRepositoryHandler>();
+        builder.Services.AddSingleton<ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResult>, RefreshRepositoryVersionHandler>();
+        builder.Services.AddSingleton<ICommandHandler<EnsureWorkspaceRequest, EnsureWorkspaceResult>, EnsureWorkspaceHandler>();
+        builder.Services.AddSingleton<ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResult>, GetWorkspaceRepositoriesHandler>();
+        builder.Services.AddSingleton<ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResult>, GetRepositoryVersionHandler>();
+        builder.Services.AddSingleton<ICommandHandler<GetWorkspaceExistsRequest, GetWorkspaceExistsResult>, GetWorkspaceExistsHandler>();
+        builder.Services.AddSingleton<INotifySyncHandler, NotifySyncHandler>();
 
         builder.Services.AddHostedService<SignalRConnectionHostedService>();
         builder.Services.AddHostedService<HookListenerHostedService>();

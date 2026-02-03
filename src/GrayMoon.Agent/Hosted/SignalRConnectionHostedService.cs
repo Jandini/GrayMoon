@@ -1,7 +1,8 @@
 using System.Text.Json;
 using GrayMoon.Agent.Hub;
-using GrayMoon.Agent.Models;
+using GrayMoon.Agent.Jobs;
 using GrayMoon.Agent.Queue;
+using GrayMoon.Agent.Services;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -13,6 +14,7 @@ public sealed class SignalRConnectionHostedService : IHostedService, IAsyncDispo
 {
     private readonly IHubConnectionProvider _hubProvider;
     private readonly IJobQueue _jobQueue;
+    private readonly CommandJobFactory _commandJobFactory;
     private readonly AgentOptions _options;
     private readonly ILogger<SignalRConnectionHostedService> _logger;
     private HubConnection? _connection;
@@ -20,11 +22,13 @@ public sealed class SignalRConnectionHostedService : IHostedService, IAsyncDispo
     public SignalRConnectionHostedService(
         IHubConnectionProvider hubProvider,
         IJobQueue jobQueue,
+        CommandJobFactory commandJobFactory,
         IOptions<AgentOptions> options,
         ILogger<SignalRConnectionHostedService> logger)
     {
         _hubProvider = hubProvider;
         _jobQueue = jobQueue;
+        _commandJobFactory = commandJobFactory;
         _options = options.Value;
         _logger = logger;
     }
@@ -39,13 +43,8 @@ public sealed class SignalRConnectionHostedService : IHostedService, IAsyncDispo
         _connection.On<string, string, JsonElement?>("RequestCommand", async (requestId, command, args) =>
         {
             _logger.LogInformation("Received RequestCommand: {RequestId}, {Command}", requestId, command);
-            var job = new QueuedJob
-            {
-                RequestId = requestId,
-                Command = command,
-                Args = args
-            };
-            await _jobQueue.EnqueueAsync(job, cancellationToken);
+            var envelope = _commandJobFactory.CreateCommandJob(requestId, command, args);
+            await _jobQueue.EnqueueAsync(envelope, cancellationToken);
         });
 
         ((HubConnectionProvider)_hubProvider).Connection = _connection;

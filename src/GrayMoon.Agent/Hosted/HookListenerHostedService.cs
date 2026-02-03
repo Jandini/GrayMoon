@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using GrayMoon.Agent.Jobs;
 using GrayMoon.Agent.Models;
 using GrayMoon.Agent.Queue;
 using Microsoft.Extensions.Hosting;
@@ -85,14 +86,14 @@ public sealed class HookListenerHostedService : IHostedService, IAsyncDisposable
                 return;
             }
 
-            var job = new QueuedJob
+            var notifyJob = new NotifySyncJob
             {
-                Command = "NotifySync",
                 RepositoryId = payload.RepositoryId,
                 WorkspaceId = payload.WorkspaceId,
                 RepositoryPath = payload.RepositoryPath
             };
-            await _jobQueue.EnqueueAsync(job, ct);
+            var envelope = JobEnvelope.Notify(notifyJob);
+            await _jobQueue.EnqueueAsync(envelope, ct);
             _logger.LogDebug("Enqueued NotifySync: workspace={WorkspaceId}, repo={RepoId}", payload.WorkspaceId, payload.RepositoryId);
 
             context.Response.StatusCode = 202;
