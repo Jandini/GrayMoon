@@ -11,28 +11,15 @@ using Microsoft.Extensions.Options;
 
 namespace GrayMoon.Agent.Hosted;
 
-public sealed class SignalRConnectionHostedService : IHostedService, IAsyncDisposable
+public sealed class SignalRConnectionHostedService(
+    IHubConnectionProvider hubProvider,
+    IJobQueue jobQueue,
+    CommandJobFactory commandJobFactory,
+    IOptions<AgentOptions> options,
+    ILogger<SignalRConnectionHostedService> logger) : IHostedService, IAsyncDisposable
 {
-    private readonly IHubConnectionProvider _hubProvider;
-    private readonly IJobQueue _jobQueue;
-    private readonly CommandJobFactory _commandJobFactory;
-    private readonly AgentOptions _options;
-    private readonly ILogger<SignalRConnectionHostedService> _logger;
+    private readonly AgentOptions _options = options.Value;
     private HubConnection? _connection;
-
-    public SignalRConnectionHostedService(
-        IHubConnectionProvider hubProvider,
-        IJobQueue jobQueue,
-        CommandJobFactory commandJobFactory,
-        IOptions<AgentOptions> options,
-        ILogger<SignalRConnectionHostedService> logger)
-    {
-        _hubProvider = hubProvider;
-        _jobQueue = jobQueue;
-        _commandJobFactory = commandJobFactory;
-        _options = options.Value;
-        _logger = logger;
-    }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -43,12 +30,12 @@ public sealed class SignalRConnectionHostedService : IHostedService, IAsyncDispo
 
         _connection.On<string, string, JsonElement?>("RequestCommand", async (requestId, command, args) =>
         {
-            _logger.LogInformation("Received RequestCommand: {RequestId}, {Command}", requestId, command);
-            var envelope = _commandJobFactory.CreateCommandJob(requestId, command, args);
-            await _jobQueue.EnqueueAsync(envelope, cancellationToken);
+            logger.LogInformation("Received RequestCommand: {RequestId}, {Command}", requestId, command);
+            var envelope = commandJobFactory.CreateCommandJob(requestId, command, args);
+            await jobQueue.EnqueueAsync(envelope, cancellationToken);
         });
 
-        ((HubConnectionProvider)_hubProvider).Connection = _connection;
+        ((HubConnectionProvider)hubProvider).Connection = _connection;
 
         await ConnectWithRetryAsync(cancellationToken);
     }
@@ -60,12 +47,12 @@ public sealed class SignalRConnectionHostedService : IHostedService, IAsyncDispo
             try
             {
                 await _connection!.StartAsync(cancellationToken);
-                _logger.LogInformation("Connected to hub at {Url}", _options.AppHubUrl);
+                logger.LogInformation("Connected to hub at {Url}", _options.AppHubUrl);
                 return;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to connect to hub. Retrying in 5s...");
+                logger.LogWarning(ex, "Failed to connect to hub. Retrying in 5s...");
                 await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
             }
         }
@@ -76,7 +63,7 @@ public sealed class SignalRConnectionHostedService : IHostedService, IAsyncDispo
         if (_connection != null)
         {
             await _connection.StopAsync(cancellationToken);
-            _logger.LogInformation("Disconnected from hub");
+            logger.LogInformation("Disconnected from hub");
         }
     }
 

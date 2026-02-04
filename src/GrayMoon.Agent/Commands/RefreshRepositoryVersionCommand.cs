@@ -5,28 +5,21 @@ using GrayMoon.Agent.Services;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class RefreshRepositoryVersionCommand : ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse>
+public sealed class RefreshRepositoryVersionCommand(IGitService git) : ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse>
 {
-    private readonly IGitService _git;
-
-    public RefreshRepositoryVersionCommand(IGitService git)
-    {
-        _git = git;
-    }
-
     public async Task<RefreshRepositoryVersionResponse> ExecuteAsync(RefreshRepositoryVersionRequest request, CancellationToken cancellationToken = default)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
 
-        var workspacePath = _git.GetWorkspacePath(workspaceName);
+        var workspacePath = git.GetWorkspacePath(workspaceName);
         var repoPath = Path.Combine(workspacePath, repositoryName);
 
         var version = "-";
         var branch = "-";
-        if (_git.DirectoryExists(repoPath))
+        if (git.DirectoryExists(repoPath))
         {
-            var vr = await _git.GetVersionAsync(repoPath, cancellationToken);
+            var vr = await git.GetVersionAsync(repoPath, cancellationToken);
             if (vr != null)
             {
                 version = vr.SemVer ?? vr.FullSemVer ?? "-";

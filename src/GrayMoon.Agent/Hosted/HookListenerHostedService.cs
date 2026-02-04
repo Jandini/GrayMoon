@@ -10,31 +10,22 @@ using Microsoft.Extensions.Options;
 
 namespace GrayMoon.Agent.Hosted;
 
-public sealed class HookListenerHostedService : IHostedService, IAsyncDisposable
+public sealed class HookListenerHostedService(
+    IJobQueue jobQueue,
+    IOptions<AgentOptions> options,
+    ILogger<HookListenerHostedService> logger) : IHostedService, IAsyncDisposable
 {
-    private readonly IJobQueue _jobQueue;
-    private readonly AgentOptions _options;
-    private readonly ILogger<HookListenerHostedService> _logger;
+    private readonly AgentOptions _options = options.Value;
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
     private Task? _listenTask;
-
-    public HookListenerHostedService(
-        IJobQueue jobQueue,
-        IOptions<AgentOptions> options,
-        ILogger<HookListenerHostedService> logger)
-    {
-        _jobQueue = jobQueue;
-        _options = options.Value;
-        _logger = logger;
-    }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _listener = new HttpListener();
         _listener.Prefixes.Add($"http://127.0.0.1:{_options.ListenPort}/");
         _listener.Start();
-        _logger.LogInformation("Hook listener started on http://127.0.0.1:{Port}/", _options.ListenPort);
+        logger.LogInformation("Hook listener started on http://127.0.0.1:{Port}/", _options.ListenPort);
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _listenTask = ListenAsync(_cts.Token);
@@ -56,7 +47,7 @@ public sealed class HookListenerHostedService : IHostedService, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in hook listener");
+                logger.LogError(ex, "Error in hook listener");
             }
         }
     }
@@ -94,15 +85,15 @@ public sealed class HookListenerHostedService : IHostedService, IAsyncDisposable
                 RepositoryPath = payload.RepositoryPath
             };
             var envelope = JobEnvelope.Notify(notifyJob);
-            await _jobQueue.EnqueueAsync(envelope, ct);
-            _logger.LogDebug("Enqueued NotifySync: workspace={WorkspaceId}, repo={RepoId}", payload.WorkspaceId, payload.RepositoryId);
+            await jobQueue.EnqueueAsync(envelope, ct);
+            logger.LogDebug("Enqueued NotifySync: workspace={WorkspaceId}, repo={RepoId}", payload.WorkspaceId, payload.RepositoryId);
 
             context.Response.StatusCode = 202;
             context.Response.Close();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error handling /notify");
+            logger.LogError(ex, "Error handling /notify");
             context.Response.StatusCode = 500;
             context.Response.Close();
         }

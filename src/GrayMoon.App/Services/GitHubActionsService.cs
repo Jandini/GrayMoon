@@ -3,30 +3,17 @@ using GrayMoon.App.Repositories;
 
 namespace GrayMoon.App.Services;
 
-public class GitHubActionsService
+public class GitHubActionsService(
+    GitHubConnectorRepository connectorRepository,
+    GitHubRepositoryService repositoryService,
+    GitHubService gitHubService,
+    ILogger<GitHubActionsService> logger)
 {
-    private readonly GitHubConnectorRepository _connectorRepository;
-    private readonly GitHubRepositoryService _repositoryService;
-    private readonly GitHubService _gitHubService;
-    private readonly ILogger<GitHubActionsService> _logger;
-
-    public GitHubActionsService(
-        GitHubConnectorRepository connectorRepository,
-        GitHubRepositoryService repositoryService,
-        GitHubService gitHubService,
-        ILogger<GitHubActionsService> logger)
-    {
-        _connectorRepository = connectorRepository;
-        _repositoryService = repositoryService;
-        _gitHubService = gitHubService;
-        _logger = logger;
-    }
-
     public async Task<List<GitHubActionEntry>> GetLatestActionsAsync()
     {
         var results = new List<GitHubActionEntry>();
-        var connectors = await _connectorRepository.GetAllAsync();
-        var repositories = await _repositoryService.GetRepositoriesAsync();
+        var connectors = await connectorRepository.GetAllAsync();
+        var repositories = await repositoryService.GetRepositoriesAsync();
 
         foreach (var connector in connectors)
         {
@@ -43,7 +30,7 @@ public class GitHubActionsService
 
                 try
                 {
-                    var run = await _gitHubService.GetLatestWorkflowRunAsync(
+                    var run = await gitHubService.GetLatestWorkflowRunAsync(
                         connector,
                         repository.OrgName,
                         repository.RepositoryName);
@@ -71,7 +58,7 @@ public class GitHubActionsService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error loading latest action for {Owner}/{Repo}", repository.OrgName, repository.RepositoryName);
+                    logger.LogError(ex, "Error loading latest action for {Owner}/{Repo}", repository.OrgName, repository.RepositoryName);
                 }
             }
         }
@@ -86,16 +73,16 @@ public class GitHubActionsService
             return null;
         }
 
-        var connector = await _connectorRepository.GetByNameAsync(repository.ConnectorName);
+        var connector = await connectorRepository.GetByNameAsync(repository.ConnectorName);
         if (connector == null)
         {
-            _logger.LogWarning("Connector {ConnectorName} not found for actions.", repository.ConnectorName);
+            logger.LogWarning("Connector {ConnectorName} not found for actions.", repository.ConnectorName);
             return null;
         }
 
         try
         {
-            var run = await _gitHubService.GetLatestWorkflowRunAsync(
+            var run = await gitHubService.GetLatestWorkflowRunAsync(
                 connector,
                 repository.OrgName,
                 repository.RepositoryName);
@@ -123,7 +110,7 @@ public class GitHubActionsService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error loading latest action for {Owner}/{Repo}", repository.OrgName, repository.RepositoryName);
+            logger.LogError(ex, "Error loading latest action for {Owner}/{Repo}", repository.OrgName, repository.RepositoryName);
             return null;
         }
     }
@@ -140,14 +127,14 @@ public class GitHubActionsService
             throw new InvalidOperationException("Workflow owner and repository are required.");
         }
 
-        var connector = await _connectorRepository.GetByNameAsync(action.ConnectorName);
+        var connector = await connectorRepository.GetByNameAsync(action.ConnectorName);
         if (connector == null)
         {
-            _logger.LogWarning("Connector {ConnectorName} not found for rerun.", action.ConnectorName);
+            logger.LogWarning("Connector {ConnectorName} not found for rerun.", action.ConnectorName);
             throw new InvalidOperationException("Connector not found for this action.");
         }
 
-        await _gitHubService.RerunWorkflowRunAsync(connector, action.Owner, action.RepositoryName, action.RunId);
+        await gitHubService.RerunWorkflowRunAsync(connector, action.Owner, action.RepositoryName, action.RunId);
     }
 
     public async Task RunWorkflowAsync(GitHubActionEntry action)
@@ -167,14 +154,14 @@ public class GitHubActionsService
             throw new InvalidOperationException("Workflow branch is not available.");
         }
 
-        var connector = await _connectorRepository.GetByNameAsync(action.ConnectorName);
+        var connector = await connectorRepository.GetByNameAsync(action.ConnectorName);
         if (connector == null)
         {
-            _logger.LogWarning("Connector {ConnectorName} not found for run.", action.ConnectorName);
+            logger.LogWarning("Connector {ConnectorName} not found for run.", action.ConnectorName);
             throw new InvalidOperationException("Connector not found for this action.");
         }
 
-        await _gitHubService.DispatchWorkflowAsync(
+        await gitHubService.DispatchWorkflowAsync(
             connector,
             action.Owner,
             action.RepositoryName,

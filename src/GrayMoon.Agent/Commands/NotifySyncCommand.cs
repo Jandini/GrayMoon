@@ -6,41 +6,30 @@ using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class NotifySyncCommand : INotifySyncHandler
+public sealed class NotifySyncCommand(IGitService git, IHubConnectionProvider hubProvider, ILogger<NotifySyncCommand> logger) : INotifySyncHandler
 {
-    private readonly IGitService _git;
-    private readonly IHubConnectionProvider _hubProvider;
-    private readonly ILogger<NotifySyncCommand> _logger;
-
-    public NotifySyncCommand(IGitService git, IHubConnectionProvider hubProvider, ILogger<NotifySyncCommand> logger)
-    {
-        _git = git;
-        _hubProvider = hubProvider;
-        _logger = logger;
-    }
-
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(payload.RepositoryPath))
         {
-            _logger.LogWarning("NotifySync job missing repositoryPath");
+            logger.LogWarning("NotifySync job missing repositoryPath");
             return;
         }
 
-        var versionResult = await _git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
+        var versionResult = await git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
         var version = versionResult?.SemVer ?? versionResult?.FullSemVer ?? "-";
         var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
 
-        var connection = _hubProvider.Connection;
+        var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)
         {
             await connection.InvokeAsync("SyncCommand", payload.WorkspaceId, payload.RepositoryId, version, branch, cancellationToken);
-            _logger.LogInformation("SyncCommand sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}",
+            logger.LogInformation("SyncCommand sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}",
                 payload.WorkspaceId, payload.RepositoryId, version, branch);
         }
         else
         {
-            _logger.LogWarning("Hub not connected, cannot send SyncCommand");
+            logger.LogWarning("Hub not connected, cannot send SyncCommand");
         }
     }
 }

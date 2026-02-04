@@ -8,21 +8,17 @@ using Microsoft.Extensions.Options;
 
 namespace GrayMoon.Agent.Services;
 
-public sealed class GitService : IGitService
+public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitService> logger) : IGitService
 {
-    private readonly string _workspaceRoot;
-    private readonly int _listenPort;
-    private readonly ILogger<GitService> _logger;
+    private readonly string _workspaceRoot = GetWorkspaceRoot(options.Value.WorkspaceRoot);
+    private readonly int _listenPort = options.Value.ListenPort;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
-    public GitService(IOptions<AgentOptions> options, ILogger<GitService> logger)
+    private static string GetWorkspaceRoot(string? root)
     {
-        _logger = logger;
-        var root = options.Value.WorkspaceRoot;
-        _workspaceRoot = string.IsNullOrWhiteSpace(root)
-            ? (OperatingSystem.IsWindows() ? @"C:\Workspace" : "/var/graymoon/workspaces")
-            : root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        _listenPort = options.Value.ListenPort;
+        if (string.IsNullOrWhiteSpace(root))
+            return OperatingSystem.IsWindows() ? @"C:\Workspace" : "/var/graymoon/workspaces";
+        return root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
 
     public string WorkspaceRoot => _workspaceRoot;
@@ -47,10 +43,10 @@ public sealed class GitService : IGitService
         var (exitCode, _, stderr) = await RunProcessAsync("git", args, workingDir, ct);
         if (exitCode != 0)
         {
-            _logger.LogWarning("Git clone failed. ExitCode={ExitCode}, Stderr={Stderr}", exitCode, stderr);
+            logger.LogWarning("Git clone failed. ExitCode={ExitCode}, Stderr={Stderr}", exitCode, stderr);
             return false;
         }
-        _logger.LogInformation("Git clone completed: {Url} -> {Dir}", cloneUrl, workingDir);
+        logger.LogInformation("Git clone completed: {Url} -> {Dir}", cloneUrl, workingDir);
         return true;
     }
 
@@ -72,7 +68,7 @@ public sealed class GitService : IGitService
         var (exitCode, stdout, stderr) = await RunProcessAsync("dotnet-gitversion", "", repoPath, ct);
         if (exitCode != 0)
         {
-            _logger.LogWarning("dotnet-gitversion failed. ExitCode={ExitCode}, Stderr={Stderr}", exitCode, stderr);
+            logger.LogWarning("dotnet-gitversion failed. ExitCode={ExitCode}, Stderr={Stderr}", exitCode, stderr);
             return null;
         }
 
@@ -91,7 +87,7 @@ public sealed class GitService : IGitService
         if (Directory.Exists(path))
             return;
         Directory.CreateDirectory(path);
-        _logger.LogInformation("Created directory: {Path}", path);
+        logger.LogInformation("Created directory: {Path}", path);
     }
 
     public bool DirectoryExists(string path) => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path);
@@ -117,7 +113,7 @@ public sealed class GitService : IGitService
 
         WriteHookFile(Path.Combine(hooksDir, "post-commit"), "#!/bin/sh\n" + comment + curlLine + "\n", utf8);
         WriteHookFile(Path.Combine(hooksDir, "post-checkout"), "#!/bin/sh\n" + comment + "[ \"$3\" = \"1\" ] && " + curlLine.TrimEnd() + "\n", utf8);
-        _logger.LogDebug("Sync hooks written for repo {RepoId} in workspace {WorkspaceId}", repositoryId, workspaceId);
+        logger.LogDebug("Sync hooks written for repo {RepoId} in workspace {WorkspaceId}", repositoryId, workspaceId);
     }
 
     private static void WriteHookFile(string path, string content, Encoding encoding)

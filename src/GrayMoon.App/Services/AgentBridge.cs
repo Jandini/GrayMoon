@@ -11,27 +11,16 @@ public interface IAgentBridge
     Task<AgentCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default);
 }
 
-public sealed class AgentBridge : IAgentBridge
+public sealed class AgentBridge(
+    IHubContext<AgentHub> hubContext,
+    AgentConnectionTracker connectionTracker,
+    ILogger<AgentBridge> logger) : IAgentBridge
 {
-    private readonly IHubContext<AgentHub> _hubContext;
-    private readonly AgentConnectionTracker _connectionTracker;
-    private readonly ILogger<AgentBridge> _logger;
-
-    public AgentBridge(
-        IHubContext<AgentHub> hubContext,
-        AgentConnectionTracker connectionTracker,
-        ILogger<AgentBridge> logger)
-    {
-        _hubContext = hubContext;
-        _connectionTracker = connectionTracker;
-        _logger = logger;
-    }
-
-    public bool IsAgentConnected => _connectionTracker.GetAgentConnectionId() != null;
+    public bool IsAgentConnected => connectionTracker.GetAgentConnectionId() != null;
 
     public async Task<AgentCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default)
     {
-        var connectionId = _connectionTracker.GetAgentConnectionId();
+        var connectionId = connectionTracker.GetAgentConnectionId();
         if (string.IsNullOrEmpty(connectionId))
             return new AgentCommandResponse(false, null, "Agent not connected. Start GrayMoon.Agent to sync repositories.");
 
@@ -42,8 +31,8 @@ public sealed class AgentBridge : IAgentBridge
 
         try
         {
-            await _hubContext.Clients.Client(connectionId).SendAsync("RequestCommand", requestId, command, argsJson, cancellationToken);
-            _logger.LogDebug("Sent RequestCommand: {RequestId}, {Command}", requestId, command);
+            await hubContext.Clients.Client(connectionId).SendAsync("RequestCommand", requestId, command, argsJson, cancellationToken);
+            logger.LogDebug("Sent RequestCommand: {RequestId}, {Command}", requestId, command);
             return await task;
         }
         catch (OperationCanceledException)
@@ -52,7 +41,7 @@ public sealed class AgentBridge : IAgentBridge
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to send command {Command} to agent", command);
+            logger.LogError(ex, "Failed to send command {Command} to agent", command);
             return new AgentCommandResponse(false, null, ex.Message);
         }
     }

@@ -1,0 +1,29 @@
+---
+description: Use C# primary constructors where possible
+globs: **/*.cs
+alwaysApply: false
+---
+
+# Primary Constructors
+
+Prefer C# 12 primary constructors for classes that only need to capture constructor parameters as fields.
+
+- Use primary constructor syntax: `public sealed class MyService(ILogger<MyService> logger) : IMyService`
+- For computed values from options, use a private readonly field with an initializer or a static helper.
+- Keep an explicit constructor when the constructor body has non-trivial side effects (e.g. mutating injected HttpClient, multi-step setup).
+- When using primary constructor parameters, reference them directly in the class body; they are in scope as private fields.
+
+```csharp
+// Prefer
+public sealed class MyHandler(ILogger<MyHandler> logger) : IHandler
+{
+    public void Do() => logger.LogInformation("Done");
+}
+
+// Over explicit constructor when only assigning fields
+public sealed class MyHandler : IHandler
+{
+    private readonly ILogger<MyHandler> _logger;
+    public MyHandler(ILogger<MyHandler> logger) { _logger = logger; }
+}
+```

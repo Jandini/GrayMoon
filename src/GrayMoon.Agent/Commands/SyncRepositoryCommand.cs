@@ -4,15 +4,8 @@ using GrayMoon.Agent.Jobs.Response;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class SyncRepositoryCommand : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
+public sealed class SyncRepositoryCommand(IGitService git) : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
 {
-    private readonly IGitService _git;
-
-    public SyncRepositoryCommand(IGitService git)
-    {
-        _git = git;
-    }
-
     public async Task<SyncRepositoryResponse> ExecuteAsync(SyncRepositoryRequest request, CancellationToken cancellationToken = default)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
@@ -22,31 +15,31 @@ public sealed class SyncRepositoryCommand : ICommandHandler<SyncRepositoryReques
         var bearerToken = request.BearerToken;
         var workspaceId = request.WorkspaceId;
 
-        var workspacePath = _git.GetWorkspacePath(workspaceName);
+        var workspacePath = git.GetWorkspacePath(workspaceName);
         var repoPath = Path.Combine(workspacePath, repositoryName);
         var wasCloned = false;
 
-        _git.CreateDirectory(workspacePath);
+        git.CreateDirectory(workspacePath);
 
-        if (!_git.DirectoryExists(repoPath) && !string.IsNullOrWhiteSpace(cloneUrl))
+        if (!git.DirectoryExists(repoPath) && !string.IsNullOrWhiteSpace(cloneUrl))
         {
-            var ok = await _git.CloneAsync(workspacePath, cloneUrl, bearerToken, cancellationToken);
+            var ok = await git.CloneAsync(workspacePath, cloneUrl, bearerToken, cancellationToken);
             wasCloned = ok;
             if (ok)
-                await _git.AddSafeDirectoryAsync(repoPath, cancellationToken);
+                await git.AddSafeDirectoryAsync(repoPath, cancellationToken);
         }
 
         var version = "-";
         var branch = "-";
-        if (_git.DirectoryExists(repoPath))
+        if (git.DirectoryExists(repoPath))
         {
-            var vr = await _git.GetVersionAsync(repoPath, cancellationToken);
+            var vr = await git.GetVersionAsync(repoPath, cancellationToken);
             if (vr != null)
             {
                 version = vr.SemVer ?? vr.FullSemVer ?? "-";
                 branch = vr.BranchName ?? vr.EscapedBranchName ?? "-";
                 if (version != "-" && branch != "-")
-                    _git.WriteSyncHooks(repoPath, workspaceId, repositoryId);
+                    git.WriteSyncHooks(repoPath, workspaceId, repositoryId);
             }
         }
 

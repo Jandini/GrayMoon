@@ -6,39 +6,19 @@ namespace GrayMoon.App.Services;
 /// <summary>
 /// Background service that processes sync requests from a channel with controlled parallelism.
 /// </summary>
-public class SyncBackgroundService : BackgroundService
+public class SyncBackgroundService(
+    IServiceScopeFactory scopeFactory,
+    ILogger<SyncBackgroundService> logger,
+    IConfiguration configuration) : BackgroundService
 {
-    private readonly Channel<SyncRequestItem> _channel;
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<SyncBackgroundService> _logger;
-    private readonly int _maxConcurrency;
-    private readonly bool _enableDeduplication;
-    private readonly ConcurrentDictionary<(int RepositoryId, int WorkspaceId), byte> _inFlightRequests;
-
-    public SyncBackgroundService(
-        IServiceScopeFactory scopeFactory,
-        ILogger<SyncBackgroundService> logger,
-        IConfiguration configuration)
+    private readonly int _maxConcurrency = configuration.GetValue<int?>("Sync:MaxConcurrency") ?? 8;
+    private readonly bool _enableDeduplication = configuration.GetValue<bool?>("Sync:EnableDeduplication") ?? true;
+    private readonly Channel<SyncRequestItem> _channel = Channel.CreateUnbounded<SyncRequestItem>(new UnboundedChannelOptions
     {
-        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-
-        // Default to 8 parallel sync tasks, configurable via appsettings
-        _maxConcurrency = configuration.GetValue<int?>("Sync:MaxConcurrency") ?? 8;
-        _enableDeduplication = configuration.GetValue<bool?>("Sync:EnableDeduplication") ?? true;
-
-        // Unbounded channel - all sync requests are queued (could make this bounded with a limit)
-        _channel = Channel.CreateUnbounded<SyncRequestItem>(new UnboundedChannelOptions
-        {
-            SingleReader = false, // multiple workers read from the channel
-            SingleWriter = false  // multiple API calls write to the channel
-        });
-
-        _inFlightRequests = new ConcurrentDictionary<(int, int), byte>();
-
-        _logger.LogInformation("SyncBackgroundService initialized with max concurrency: {MaxConcurrency}, deduplication: {Deduplication}",
-            _maxConcurrency, _enableDeduplication);
-    }
+        SingleReader = false,
+        SingleWriter = false
+    });
+    private readonly ConcurrentDictionary<(int RepositoryId, int WorkspaceId), byte> _inFlightRequests = new();
 
     /// <summary>
     /// Enqueues a sync request. Returns true if enqueued, false if channel is closed or already in flight (when deduplication enabled).
@@ -52,13 +32,13 @@ public class SyncBackgroundService : BackgroundService
         // Deduplication: skip if same repo+workspace is already queued or being processed
         if (_enableDeduplication && !_inFlightRequests.TryAdd(dedupKey, 0))
         {
-            _logger.LogDebug("Skipped duplicate sync request. Trigger={Trigger}, repositoryId={RepositoryId}, workspaceId={WorkspaceId}", request.Trigger, repositoryId, workspaceId);
+            logger.LogDebug("Skipped duplicate sync request. Trigger={Trigger}, repositoryId={RepositoryId}, workspaceId={WorkspaceId}", request.Trigger, repositoryId, workspaceId);
             return true; // Return true since the sync will happen (just not a new one)
         }
 
         if (_channel.Writer.TryWrite(request))
         {
-            _logger.LogDebug("Enqueued sync request. Trigger={Trigger}, repositoryId={RepositoryId}, workspaceId={WorkspaceId}", request.Trigger, repositoryId, workspaceId);
+            logger.LogDebug("Enqueued sync request. Trigger={Trigger}, repositoryId={RepositoryId}, workspaceId={WorkspaceId}", request.Trigger, repositoryId, workspaceId);
             return true;
         }
 
@@ -66,7 +46,7 @@ public class SyncBackgroundService : BackgroundService
         if (_enableDeduplication)
             _inFlightRequests.TryRemove(dedupKey, out _);
 
-        _logger.LogWarning("Failed to enqueue sync request (channel closed). Trigger={Trigger}, repositoryId={RepositoryId}, workspaceId={WorkspaceId}", request.Trigger, repositoryId, workspaceId);
+        logger.LogWarning("Failed to enqueue sync request (channel closed). Trigger={Trigger}, repositoryId={RepositoryId}, workspaceId={WorkspaceId}", request.Trigger, repositoryId, workspaceId);
         return false;
     }
 
@@ -77,7 +57,7 @@ public class SyncBackgroundService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("SyncBackgroundService starting with {MaxConcurrency} workers", _maxConcurrency);
+        logger.LogInformation("SyncBackgroundService starting with {MaxConcurrency} workers", _maxConcurrency);
 
         // Create N worker tasks that process items from the channel
         var workers = Enumerable.Range(0, _maxConcurrency)
@@ -90,40 +70,40 @@ public class SyncBackgroundService : BackgroundService
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("SyncBackgroundService stopping");
+            logger.LogInformation("SyncBackgroundService stopping");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "SyncBackgroundService encountered an error");
+            logger.LogError(ex, "SyncBackgroundService encountered an error");
         }
     }
 
     private async Task ProcessQueueAsync(int workerId, CancellationToken stoppingToken)
     {
-        _logger.LogDebug("Worker {WorkerId} started", workerId);
+        logger.LogDebug("Worker {WorkerId} started", workerId);
 
         await foreach (var request in _channel.Reader.ReadAllAsync(stoppingToken))
         {
             try
             {
-                _logger.LogInformation("Processing sync. Trigger={Trigger}, repositoryId={RepositoryId}, workspaceId={WorkspaceId}, workerId={WorkerId}",
+                logger.LogInformation("Processing sync. Trigger={Trigger}, repositoryId={RepositoryId}, workspaceId={WorkspaceId}, workerId={WorkerId}",
                     request.Trigger, request.RepositoryId, request.WorkspaceId, workerId);
 
-                await using var scope = _scopeFactory.CreateAsyncScope();
+                await using var scope = scopeFactory.CreateAsyncScope();
                 var svc = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
                 await svc.SyncSingleRepositoryAsync(request.RepositoryId, request.WorkspaceId, stoppingToken);
 
-                _logger.LogDebug("Worker {WorkerId} completed sync. Trigger={Trigger}, repositoryId={RepositoryId}, workspaceId={WorkspaceId}",
+                logger.LogDebug("Worker {WorkerId} completed sync. Trigger={Trigger}, repositoryId={RepositoryId}, workspaceId={WorkspaceId}",
                     workerId, request.Trigger, request.RepositoryId, request.WorkspaceId);
             }
             catch (OperationCanceledException)
             {
-                _logger.LogInformation("Worker {WorkerId} cancelled", workerId);
+                logger.LogInformation("Worker {WorkerId} cancelled", workerId);
                 throw;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Worker {WorkerId} failed to sync repository {RepositoryId} in workspace {WorkspaceId} (trigger={Trigger})",
+                logger.LogError(ex, "Worker {WorkerId} failed to sync repository {RepositoryId} in workspace {WorkspaceId} (trigger={Trigger})",
                     workerId, request.RepositoryId, request.WorkspaceId, request.Trigger);
                 // Continue processing other requests
             }
@@ -135,12 +115,12 @@ public class SyncBackgroundService : BackgroundService
             }
         }
 
-        _logger.LogDebug("Worker {WorkerId} stopped", workerId);
+        logger.LogDebug("Worker {WorkerId} stopped", workerId);
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("SyncBackgroundService stopping - completing channel");
+        logger.LogInformation("SyncBackgroundService stopping - completing channel");
         _channel.Writer.Complete();
         await base.StopAsync(cancellationToken);
     }

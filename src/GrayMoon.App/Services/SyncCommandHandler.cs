@@ -7,32 +7,21 @@ using Microsoft.EntityFrameworkCore;
 namespace GrayMoon.App.Services;
 
 /// <summary>Handles SyncCommand from the agent (hook flow): persist version/branch and broadcast WorkspaceSynced.</summary>
-public sealed class SyncCommandHandler
+public sealed class SyncCommandHandler(
+    IServiceScopeFactory scopeFactory,
+    IHubContext<WorkspaceSyncHub> hubContext,
+    ILogger<SyncCommandHandler> logger)
 {
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IHubContext<WorkspaceSyncHub> _hubContext;
-    private readonly ILogger<SyncCommandHandler> _logger;
-
-    public SyncCommandHandler(
-        IServiceScopeFactory scopeFactory,
-        IHubContext<WorkspaceSyncHub> hubContext,
-        ILogger<SyncCommandHandler> logger)
-    {
-        _scopeFactory = scopeFactory;
-        _hubContext = hubContext;
-        _logger = logger;
-    }
-
     public async Task HandleAsync(int workspaceId, int repositoryId, string version, string branch)
     {
-        await using var scope = _scopeFactory.CreateAsyncScope();
+        await using var scope = scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         var wr = await dbContext.WorkspaceRepositories
             .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.GitHubRepositoryId == repositoryId);
         if (wr == null)
         {
-            _logger.LogWarning("SyncCommand: workspace {WorkspaceId} repo {RepositoryId} not found", workspaceId, repositoryId);
+            logger.LogWarning("SyncCommand: workspace {WorkspaceId} repo {RepositoryId} not found", workspaceId, repositoryId);
             return;
         }
 
@@ -56,8 +45,8 @@ public sealed class SyncCommandHandler
             await dbContext.SaveChangesAsync();
         }
 
-        await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
-        _logger.LogDebug("SyncCommand persisted: workspace={WorkspaceId}, repo={RepositoryId}, version={Version}, branch={Branch}",
+        await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
+        logger.LogDebug("SyncCommand persisted: workspace={WorkspaceId}, repo={RepositoryId}, version={Version}, branch={Branch}",
             workspaceId, repositoryId, version, branch);
     }
 }

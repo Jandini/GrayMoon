@@ -5,20 +5,13 @@ using GrayMoon.Agent.Services;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class GetWorkspaceRepositoriesCommand : ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResponse>
+public sealed class GetWorkspaceRepositoriesCommand(IGitService git) : ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResponse>
 {
-    private readonly IGitService _git;
-
-    public GetWorkspaceRepositoriesCommand(IGitService git)
-    {
-        _git = git;
-    }
-
     public Task<GetWorkspaceRepositoriesResponse> ExecuteAsync(GetWorkspaceRepositoriesRequest request, CancellationToken cancellationToken = default)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
-        var path = _git.GetWorkspacePath(workspaceName);
-        var repositories = _git.GetDirectories(path);
+        var path = git.GetWorkspacePath(workspaceName);
+        var repositories = git.GetDirectories(path);
         return Task.FromResult(new GetWorkspaceRepositoriesResponse { Repositories = repositories });
     }
 }
