@@ -68,18 +68,16 @@
 
 .repositories-table thead th.col-projects {
     text-align: center;
-    padding-left: 0
 }
 
 .repositories-table tbody td.col-projects {
-    text-align: center;
-    padding-left: 0;
+    text-align: center;   
 }
 
 .col-projects {
     width: auto;
-    min-width: 75px;
-    max-width: 75px;
+    padding-left: 0;
+    max-width: 50px;
 }
 
 .col-version {
