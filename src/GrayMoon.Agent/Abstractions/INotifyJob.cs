@@ -1,4 +1,4 @@
-namespace GrayMoon.Agent.Jobs;
+namespace GrayMoon.Agent.Abstractions;
 
 /// <summary>
 /// Job from HTTP /notify (e.g. NotifySync): no request ID; agent pushes SyncCommand to the app.

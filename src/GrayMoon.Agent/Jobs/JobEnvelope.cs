@@ -1,3 +1,5 @@
+using GrayMoon.Agent.Abstractions;
+
 namespace GrayMoon.Agent.Jobs;
 
 /// <summary>

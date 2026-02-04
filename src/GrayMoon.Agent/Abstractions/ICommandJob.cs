@@ -1,4 +1,4 @@
-namespace GrayMoon.Agent.Jobs;
+namespace GrayMoon.Agent.Abstractions;
 
 /// <summary>
 /// Job from SignalR RequestCommand: has request ID and typed request; requires ResponseCommand back.

@@ -1,4 +1,4 @@
-using GrayMoon.Agent.Commands;
+using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Hub;
 using GrayMoon.Agent.Jobs;
 using GrayMoon.Agent.Queue;
@@ -13,7 +13,7 @@ namespace GrayMoon.Agent.Hosted;
 public sealed class JobBackgroundService : BackgroundService
 {
     private readonly IJobQueue _jobQueue;
-    private readonly ICommandHandlerResolver _resolver;
+    private readonly ICommandDispatcher _dispatcher;
     private readonly INotifySyncHandler _notifySyncHandler;
     private readonly IHubConnectionProvider _hubProvider;
     private readonly ILogger<JobBackgroundService> _logger;
@@ -21,14 +21,14 @@ public sealed class JobBackgroundService : BackgroundService
 
     public JobBackgroundService(
         IJobQueue jobQueue,
-        ICommandHandlerResolver resolver,
+        ICommandDispatcher dispatcher,
         INotifySyncHandler notifySyncHandler,
         IHubConnectionProvider hubProvider,
         IOptions<AgentOptions> options,
         ILogger<JobBackgroundService> logger)
     {
         _jobQueue = jobQueue;
-        _resolver = resolver;
+        _dispatcher = dispatcher;
         _notifySyncHandler = notifySyncHandler;
         _hubProvider = hubProvider;
         _logger = logger;
@@ -70,7 +70,7 @@ public sealed class JobBackgroundService : BackgroundService
 
     private async Task ProcessCommandAsync(ICommandJob job, CancellationToken ct)
     {
-        var result = await _resolver.ExecuteAsync(job.Command, job.Request, ct);
+        var result = await _dispatcher.ExecuteAsync(job.Command, job.Request, ct);
         await SendResponseAsync(job.RequestId, true, result, null);
     }
 

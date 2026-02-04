@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs;
 using GrayMoon.Agent.Models;
 using GrayMoon.Agent.Queue;

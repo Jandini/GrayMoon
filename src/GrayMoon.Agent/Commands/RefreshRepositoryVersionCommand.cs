@@ -1,14 +1,15 @@
+using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
 using GrayMoon.Agent.Services;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class RefreshRepositoryVersionHandler : ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse>
+public sealed class RefreshRepositoryVersionCommand : ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse>
 {
-    private readonly GitOperations _git;
+    private readonly IGitService _git;
 
-    public RefreshRepositoryVersionHandler(GitOperations git)
+    public RefreshRepositoryVersionCommand(IGitService git)
     {
         _git = git;
     }

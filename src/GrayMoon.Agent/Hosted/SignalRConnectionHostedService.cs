@@ -1,4 +1,5 @@
 using System.Text.Json;
+using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Hub;
 using GrayMoon.Agent.Jobs;
 using GrayMoon.Agent.Queue;

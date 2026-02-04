@@ -1,14 +1,14 @@
+using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
-using GrayMoon.Agent.Services;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class SyncRepositoryHandler : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
+public sealed class SyncRepositoryCommand : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
 {
-    private readonly GitOperations _git;
+    private readonly IGitService _git;
 
-    public SyncRepositoryHandler(GitOperations git)
+    public SyncRepositoryCommand(IGitService git)
     {
         _git = git;
     }

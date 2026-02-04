@@ -1,18 +1,18 @@
+using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Hub;
-using GrayMoon.Agent.Jobs;
 using GrayMoon.Agent.Services;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class NotifySyncHandler : INotifySyncHandler
+public sealed class NotifySyncCommand : INotifySyncHandler
 {
-    private readonly GitOperations _git;
+    private readonly IGitService _git;
     private readonly IHubConnectionProvider _hubProvider;
-    private readonly ILogger<NotifySyncHandler> _logger;
+    private readonly ILogger<NotifySyncCommand> _logger;
 
-    public NotifySyncHandler(GitOperations git, IHubConnectionProvider hubProvider, ILogger<NotifySyncHandler> logger)
+    public NotifySyncCommand(IGitService git, IHubConnectionProvider hubProvider, ILogger<NotifySyncCommand> logger)
     {
         _git = git;
         _hubProvider = hubProvider;

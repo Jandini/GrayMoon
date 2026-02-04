@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs;
 using Microsoft.Extensions.Options;
 

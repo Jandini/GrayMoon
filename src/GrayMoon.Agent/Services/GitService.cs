@@ -1,20 +1,21 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.Logging;
+using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Models;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace GrayMoon.Agent.Services;
 
-public sealed class GitOperations
+public sealed class GitService : IGitService
 {
     private readonly string _workspaceRoot;
     private readonly int _listenPort;
-    private readonly ILogger<GitOperations> _logger;
+    private readonly ILogger<GitService> _logger;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
-    public GitOperations(IOptions<AgentOptions> options, ILogger<GitOperations> logger)
+    public GitService(IOptions<AgentOptions> options, ILogger<GitService> logger)
     {
         _logger = logger;
         var root = options.Value.WorkspaceRoot;

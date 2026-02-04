@@ -1,4 +1,4 @@
-namespace GrayMoon.Agent.Commands;
+namespace GrayMoon.Agent.Abstractions;
 
 /// <summary>
 /// Handler for a single command type; receives typed request and returns typed response.

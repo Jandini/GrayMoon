@@ -1,6 +1,6 @@
 using GrayMoon.Agent.Jobs;
 
-namespace GrayMoon.Agent.Queue;
+namespace GrayMoon.Agent.Abstractions;
 
 public interface IJobQueue
 {

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Reflection;
+using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Commands;
 using GrayMoon.Agent.Hosted;
 using GrayMoon.Agent.Hub;
@@ -53,17 +54,17 @@ internal static class RunCommandHandler
 
         builder.Services.AddSingleton<IHubConnectionProvider, HubConnectionProvider>();
         builder.Services.AddSingleton<IJobQueue, JobQueue>();
-        builder.Services.AddSingleton<GitOperations>();
+        builder.Services.AddSingleton<IGitService, GitService>();
         builder.Services.AddSingleton<CommandJobFactory>();
-        builder.Services.AddSingleton<ICommandHandlerResolver, CommandHandlerResolver>();
+        builder.Services.AddSingleton<ICommandDispatcher, CommandDispatcher>();
 
-        builder.Services.AddSingleton<ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>, SyncRepositoryHandler>();
-        builder.Services.AddSingleton<ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse>, RefreshRepositoryVersionHandler>();
-        builder.Services.AddSingleton<ICommandHandler<EnsureWorkspaceRequest, EnsureWorkspaceResponse>, EnsureWorkspaceHandler>();
-        builder.Services.AddSingleton<ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResponse>, GetWorkspaceRepositoriesHandler>();
-        builder.Services.AddSingleton<ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResponse>, GetRepositoryVersionHandler>();
-        builder.Services.AddSingleton<ICommandHandler<GetWorkspaceExistsRequest, GetWorkspaceExistsResponse>, GetWorkspaceExistsHandler>();
-        builder.Services.AddSingleton<INotifySyncHandler, NotifySyncHandler>();
+        builder.Services.AddSingleton<ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>, SyncRepositoryCommand>();
+        builder.Services.AddSingleton<ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse>, RefreshRepositoryVersionCommand>();
+        builder.Services.AddSingleton<ICommandHandler<EnsureWorkspaceRequest, EnsureWorkspaceResponse>, EnsureWorkspaceCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResponse>, GetWorkspaceRepositoriesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResponse>, GetRepositoryVersionCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetWorkspaceExistsRequest, GetWorkspaceExistsResponse>, GetWorkspaceExistsCommand>();
+        builder.Services.AddSingleton<INotifySyncHandler, NotifySyncCommand>();
 
         builder.Services.AddHostedService<SignalRConnectionHostedService>();
         builder.Services.AddHostedService<HookListenerHostedService>();

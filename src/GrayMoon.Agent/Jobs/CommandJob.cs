@@ -1,3 +1,5 @@
+using GrayMoon.Agent.Abstractions;
+
 namespace GrayMoon.Agent.Jobs;
 
 public sealed class CommandJob : ICommandJob

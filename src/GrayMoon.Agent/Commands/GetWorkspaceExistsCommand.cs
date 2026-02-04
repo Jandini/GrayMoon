@@ -1,14 +1,15 @@
+using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
 using GrayMoon.Agent.Services;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class GetWorkspaceExistsHandler : ICommandHandler<GetWorkspaceExistsRequest, GetWorkspaceExistsResponse>
+public sealed class GetWorkspaceExistsCommand : ICommandHandler<GetWorkspaceExistsRequest, GetWorkspaceExistsResponse>
 {
-    private readonly GitOperations _git;
+    private readonly IGitService _git;
 
-    public GetWorkspaceExistsHandler(GitOperations git)
+    public GetWorkspaceExistsCommand(IGitService git)
     {
         _git = git;
     }
