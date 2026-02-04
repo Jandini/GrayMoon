@@ -27,4 +27,7 @@ public class GitHubRepository
     [Required]
     [MaxLength(500)]
     public string CloneUrl { get; set; } = string.Empty;
+
+    /// <summary>Number of .csproj projects in the repository. Updated during workspace sync.</summary>
+    public int? ProjectCount { get; set; }
 }

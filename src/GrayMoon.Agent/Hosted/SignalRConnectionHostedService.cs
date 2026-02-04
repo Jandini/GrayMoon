@@ -30,7 +30,6 @@ public sealed class SignalRConnectionHostedService(
 
         _connection.On<string, string, JsonElement?>("RequestCommand", async (requestId, command, args) =>
         {
-            logger.LogInformation("Received RequestCommand: {RequestId}, {Command}", requestId, command);
             var envelope = commandJobFactory.CreateCommandJob(requestId, command, args);
             await jobQueue.EnqueueAsync(envelope, cancellationToken);
         });

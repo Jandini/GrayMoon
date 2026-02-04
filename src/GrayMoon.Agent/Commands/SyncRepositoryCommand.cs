@@ -4,7 +4,7 @@ using GrayMoon.Agent.Jobs.Response;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class SyncRepositoryCommand(IGitService git) : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
+public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService csProjFileService) : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
 {
     public async Task<SyncRepositoryResponse> ExecuteAsync(SyncRepositoryRequest request, CancellationToken cancellationToken = default)
     {
@@ -31,6 +31,7 @@ public sealed class SyncRepositoryCommand(IGitService git) : ICommandHandler<Syn
 
         var version = "-";
         var branch = "-";
+        var projects = 0;
         if (git.DirectoryExists(repoPath))
         {
             var vr = await git.GetVersionAsync(repoPath, cancellationToken);
@@ -41,8 +42,9 @@ public sealed class SyncRepositoryCommand(IGitService git) : ICommandHandler<Syn
                 if (version != "-" && branch != "-")
                     git.WriteSyncHooks(repoPath, workspaceId, repositoryId);
             }
+            projects = await csProjFileService.FindAsync(repoPath, cancellationToken);
         }
 
-        return new SyncRepositoryResponse { Version = version, Branch = branch, WasCloned = wasCloned };
+        return new SyncRepositoryResponse { Version = version, Branch = branch, WasCloned = wasCloned, Projects = projects };
     }
 }

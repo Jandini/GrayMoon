@@ -12,4 +12,7 @@ public sealed class SyncRepositoryResponse
 
     [JsonPropertyName("wasCloned")]
     public bool WasCloned { get; set; }
+
+    [JsonPropertyName("projects")]
+    public int Projects { get; set; }
 }

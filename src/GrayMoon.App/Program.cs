@@ -83,6 +83,8 @@ using (var scope = app.Services.CreateScope())
     await MigrateWorkspaceSyncMetadataAsync(dbContext);
     await MigrateGitHubConnectorUserNameAsync(dbContext);
     await MigrateWorkspaceRepositoriesSyncStatusAsync(dbContext);
+    await MigrateWorkspaceRepositoriesProjectsAsync(dbContext);
+    await MigrateGitHubRepositoriesProjectCountAsync(dbContext);
 }
 
 static string? GetDatabasePath(string connectionString)
@@ -162,6 +164,56 @@ static async Task MigrateWorkspaceRepositoriesSyncStatusAsync(AppDbContext dbCon
             {
                 // RepoSyncStatus.NeedsSync = 4; default new/unknown repos to needs sync
                 cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN SyncStatus INTEGER NOT NULL DEFAULT 4";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateWorkspaceRepositoriesProjectsAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='Projects'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN Projects INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateGitHubRepositoriesProjectCountAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('GitHubRepositories') WHERE name='ProjectCount'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE GitHubRepositories ADD COLUMN ProjectCount INTEGER";
                 await cmd.ExecuteNonQueryAsync();
             }
         }

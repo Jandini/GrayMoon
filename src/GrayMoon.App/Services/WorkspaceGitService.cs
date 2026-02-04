@@ -173,7 +173,8 @@ public class WorkspaceGitService(
             return new RepoGitVersionInfo { Version = "-", Branch = "-" };
 
         var (version, branch) = GetVersionBranch(response.Data);
-        return new RepoGitVersionInfo { Version = version, Branch = branch };
+        var projects = GetProjects(response.Data);
+        return new RepoGitVersionInfo { Version = version, Branch = branch, Projects = projects };
     }
 
     private static RepoGitVersionInfo ParseRefreshRepositoryVersionResponse(AgentCommandResponse response)
@@ -193,6 +194,16 @@ public class WorkspaceGitService(
         var version = root.TryGetProperty("version", out var v) ? v.GetString() ?? "-" : "-";
         var branch = root.TryGetProperty("branch", out var b) ? b.GetString() ?? "-" : "-";
         return (version, branch);
+    }
+
+    private static int? GetProjects(object data)
+    {
+        var json = data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(data);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (root.TryGetProperty("projects", out var p) && p.ValueKind == System.Text.Json.JsonValueKind.Number && p.TryGetInt32(out var n))
+            return n;
+        return null;
     }
 
     private static RepoSyncStatus ParseGetRepositoryVersionToStatus(object data, string? persistedVersion, string? persistedBranch)
@@ -225,6 +236,10 @@ public class WorkspaceGitService(
             .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.GitHubRepositoryId))
             .ToListAsync(cancellationToken);
 
+        var githubReposToUpdate = await _dbContext.GitHubRepositories
+            .Where(r => repoIds.Contains(r.GitHubRepositoryId))
+            .ToListAsync(cancellationToken);
+
         foreach (var (repoId, info) in resultList)
         {
             var wr = workspaceReposToUpdate.FirstOrDefault(w => w.GitHubRepositoryId == repoId);
@@ -232,8 +247,13 @@ public class WorkspaceGitService(
             {
                 wr.GitVersion = info.Version == "-" ? null : info.Version;
                 wr.BranchName = info.Branch == "-" ? null : info.Branch;
+                wr.Projects = info.Projects;
                 wr.SyncStatus = (info.Version == "-" || info.Branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
             }
+
+            var repo = githubReposToUpdate.FirstOrDefault(r => r.GitHubRepositoryId == repoId);
+            if (repo != null)
+                repo.ProjectCount = info.Projects;
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
