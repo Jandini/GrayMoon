@@ -17,7 +17,8 @@ public class GitHubRepositoryService(
             return persisted;
         }
 
-        return await RefreshRepositoriesAsync();
+        var result = await RefreshRepositoriesAsync();
+        return result.Repositories.ToList();
     }
 
     public async Task<List<GitHubRepositoryEntry>> GetPersistedRepositoriesAsync()
@@ -25,10 +26,11 @@ public class GitHubRepositoryService(
         return await repositoryRepository.GetAllEntriesAsync();
     }
 
-    public async Task<List<GitHubRepositoryEntry>> RefreshRepositoriesAsync(IProgress<int>? progress = null, CancellationToken cancellationToken = default)
+    public async Task<RefreshRepositoriesResult> RefreshRepositoriesAsync(IProgress<int>? progress = null, CancellationToken cancellationToken = default)
     {
         logger.LogInformation("User triggered fetch repositories from GitHub");
         var allFetched = new List<GitHubRepository>();
+        var connectorErrors = new List<ConnectorFetchError>();
         var uniqueCloneUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var connectors = await connectorRepository.GetAllAsync();
         var activeConnectors = connectors.Where(connector => connector.IsActive).ToList();
@@ -71,6 +73,9 @@ public class GitHubRepositoryService(
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error loading repositories for connector {ConnectorName}", connector.ConnectorName);
+                var message = ex is InvalidOperationException ? ex.Message : "Failed to fetch repositories. Please check the connector configuration.";
+                connectorErrors.Add(new ConnectorFetchError { ConnectorName = connector.ConnectorName, Message = message });
+                await connectorRepository.UpdateStatusAsync(connector.GitHubConnectorId, "Error", message);
             }
         }
 
@@ -79,6 +84,7 @@ public class GitHubRepositoryService(
             await repositoryRepository.MergeRepositoriesAsync(allFetched);
         }
 
-        return await repositoryRepository.GetAllEntriesAsync();
+        var repositoriesList = await repositoryRepository.GetAllEntriesAsync();
+        return new RefreshRepositoriesResult { Repositories = repositoriesList, ConnectorErrors = connectorErrors };
     }
 }
