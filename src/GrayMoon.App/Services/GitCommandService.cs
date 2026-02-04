@@ -2,15 +2,8 @@ using System.Text;
 
 namespace GrayMoon.App.Services;
 
-public class GitCommandService
+public class GitCommandService(ILogger<GitCommandService> logger)
 {
-    private readonly ILogger<GitCommandService> _logger;
-
-    public GitCommandService(ILogger<GitCommandService> logger)
-    {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
-
     public async Task<bool> CloneAsync(string workingDirectory, string cloneUrl, string? bearerToken = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workingDirectory))
@@ -46,7 +39,7 @@ public class GitCommandService
             using var process = System.Diagnostics.Process.Start(startInfo);
             if (process == null)
             {
-                _logger.LogError("Failed to start git process.");
+                logger.LogError("Failed to start git process.");
                 return false;
             }
 
@@ -58,19 +51,19 @@ public class GitCommandService
 
             if (process.ExitCode != 0)
             {
-                _logger.LogWarning("Git clone failed with exit code {ExitCode}. Stdout: {Stdout} Stderr: {Stderr}",
+                logger.LogWarning("Git clone failed with exit code {ExitCode}. Stdout: {Stdout} Stderr: {Stderr}",
                     process.ExitCode,
                     string.IsNullOrWhiteSpace(stdout) ? "(none)" : stdout.Trim(),
                     string.IsNullOrWhiteSpace(stderr) ? "(none)" : stderr.Trim());
                 return false;
             }
 
-            _logger.LogInformation("Git clone completed: {Url} into {Directory}", cloneUrl, workingDirectory);
+            logger.LogInformation("Git clone completed: {Url} into {Directory}", cloneUrl, workingDirectory);
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error running git clone for {Url}", cloneUrl);
+            logger.LogError(ex, "Error running git clone for {Url}", cloneUrl);
             throw;
         }
     }
@@ -105,14 +98,14 @@ public class GitCommandService
             await process.WaitForExitAsync(cancellationToken);
             if (process.ExitCode != 0)
             {
-                _logger.LogDebug("Git config safe.directory returned {ExitCode} for {Path} (may already be listed)", process.ExitCode, fullPath);
+                logger.LogDebug("Git config safe.directory returned {ExitCode} for {Path} (may already be listed)", process.ExitCode, fullPath);
                 return;
             }
-            _logger.LogTrace("Added safe.directory: {Path}", fullPath);
+            logger.LogTrace("Added safe.directory: {Path}", fullPath);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to add safe.directory for {Path}", fullPath);
+            logger.LogWarning(ex, "Failed to add safe.directory for {Path}", fullPath);
         }
     }
 
@@ -155,7 +148,7 @@ public class GitCommandService
             using var process = System.Diagnostics.Process.Start(startInfo);
             if (process == null)
             {
-                _logger.LogWarning("Failed to start git process for rev-parse HEAD in {Path}", repositoryPath);
+                logger.LogWarning("Failed to start git process for rev-parse HEAD in {Path}", repositoryPath);
                 return null;
             }
 
@@ -167,7 +160,7 @@ public class GitCommandService
 
             if (process.ExitCode != 0)
             {
-                _logger.LogWarning("Git rev-parse HEAD failed with exit code {ExitCode} in {Path}. Stdout: {Stdout} Stderr: {Stderr}",
+                logger.LogWarning("Git rev-parse HEAD failed with exit code {ExitCode} in {Path}. Stdout: {Stdout} Stderr: {Stderr}",
                     process.ExitCode, repositoryPath,
                     string.IsNullOrWhiteSpace(stdout) ? "(none)" : stdout.Trim(),
                     string.IsNullOrWhiteSpace(stderr) ? "(none)" : stderr.Trim());
@@ -178,7 +171,7 @@ public class GitCommandService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error running git rev-parse HEAD in {Path}", repositoryPath);
+            logger.LogError(ex, "Error running git rev-parse HEAD in {Path}", repositoryPath);
             return null;
         }
     }

@@ -4,21 +4,13 @@ using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services;
 
-public class WorkspaceService
+public class WorkspaceService(IOptions<WorkspaceOptions> options, IAgentBridge agentBridge, ILogger<WorkspaceService> logger)
 {
-    private readonly string _rootPath;
-    private readonly IAgentBridge _agentBridge;
-    private readonly ILogger<WorkspaceService> _logger;
-
-    public WorkspaceService(IOptions<WorkspaceOptions> options, IAgentBridge agentBridge, ILogger<WorkspaceService> logger)
-    {
-        _agentBridge = agentBridge ?? throw new ArgumentNullException(nameof(agentBridge));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        var rootPath = options?.Value?.RootPath;
-        _rootPath = string.IsNullOrWhiteSpace(rootPath)
+    private readonly string _rootPath = GetRootPath(options?.Value?.RootPath);
+    private static string GetRootPath(string? rootPath) =>
+        string.IsNullOrWhiteSpace(rootPath)
             ? @"C:\Workspace"
             : rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-    }
 
     public string RootPath => _rootPath;
 
@@ -33,7 +25,7 @@ public class WorkspaceService
         if (string.IsNullOrWhiteSpace(workspaceName))
             return false;
 
-        var response = await _agentBridge.SendCommandAsync("GetWorkspaceExists", new { workspaceName }, cancellationToken);
+        var response = await agentBridge.SendCommandAsync("GetWorkspaceExists", new { workspaceName }, cancellationToken);
         if (!response.Success || response.Data == null)
             return false;
 
@@ -45,7 +37,7 @@ public class WorkspaceService
         if (string.IsNullOrWhiteSpace(workspaceName))
             return 0;
 
-        var response = await _agentBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName }, cancellationToken);
+        var response = await agentBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName }, cancellationToken);
         if (!response.Success || response.Data == null)
             return 0;
 
@@ -58,8 +50,8 @@ public class WorkspaceService
         if (string.IsNullOrWhiteSpace(workspaceName))
             return;
 
-        await _agentBridge.SendCommandAsync("EnsureWorkspace", new { workspaceName }, cancellationToken);
-        _logger.LogInformation("Created workspace directory: {Name}", workspaceName);
+        await agentBridge.SendCommandAsync("EnsureWorkspace", new { workspaceName }, cancellationToken);
+        logger.LogInformation("Created workspace directory: {Name}", workspaceName);
     }
 
     private static T? GetProperty<T>(object data, string name)

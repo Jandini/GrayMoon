@@ -3,13 +3,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Data;
 
-public class AppDbContext : DbContext
+public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
-    public AppDbContext(DbContextOptions<AppDbContext> options)
-        : base(options)
-    {
-    }
-
     public DbSet<GitHubConnector> GitHubConnectors => Set<GitHubConnector>();
     public DbSet<GitHubRepository> GitHubRepositories => Set<GitHubRepository>();
     public DbSet<Workspace> Workspaces => Set<Workspace>();

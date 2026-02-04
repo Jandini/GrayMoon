@@ -8,37 +8,24 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services;
 
-public class WorkspaceGitService
+public class WorkspaceGitService(
+    IAgentBridge agentBridge,
+    WorkspaceService workspaceService,
+    WorkspaceRepository workspaceRepository,
+    GitHubRepositoryRepository githubRepositoryRepository,
+    AppDbContext dbContext,
+    Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions,
+    ILogger<WorkspaceGitService> logger,
+    IHubContext<WorkspaceSyncHub>? hubContext = null)
 {
-    private readonly IAgentBridge _agentBridge;
-    private readonly WorkspaceService _workspaceService;
-    private readonly WorkspaceRepository _workspaceRepository;
-    private readonly GitHubRepositoryRepository _githubRepositoryRepository;
-    private readonly AppDbContext _dbContext;
-    private readonly ILogger<WorkspaceGitService> _logger;
-    private readonly int _maxConcurrent;
-    private readonly IHubContext<WorkspaceSyncHub>? _hubContext;
-
-    public WorkspaceGitService(
-        IAgentBridge agentBridge,
-        WorkspaceService workspaceService,
-        WorkspaceRepository workspaceRepository,
-        GitHubRepositoryRepository githubRepositoryRepository,
-        AppDbContext dbContext,
-        Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions,
-        ILogger<WorkspaceGitService> logger,
-        IHubContext<WorkspaceSyncHub>? hubContext = null)
-    {
-        _agentBridge = agentBridge ?? throw new ArgumentNullException(nameof(agentBridge));
-        _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
-        _workspaceRepository = workspaceRepository ?? throw new ArgumentNullException(nameof(workspaceRepository));
-        _githubRepositoryRepository = githubRepositoryRepository ?? throw new ArgumentNullException(nameof(githubRepositoryRepository));
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _hubContext = hubContext;
-        var max = workspaceOptions?.Value?.MaxConcurrentGitOperations ?? 8;
-        _maxConcurrent = max < 1 ? 1 : max;
-    }
+    private readonly IAgentBridge _agentBridge = agentBridge ?? throw new ArgumentNullException(nameof(agentBridge));
+    private readonly WorkspaceService _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
+    private readonly WorkspaceRepository _workspaceRepository = workspaceRepository ?? throw new ArgumentNullException(nameof(workspaceRepository));
+    private readonly GitHubRepositoryRepository _githubRepositoryRepository = githubRepositoryRepository ?? throw new ArgumentNullException(nameof(githubRepositoryRepository));
+    private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly ILogger<WorkspaceGitService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxConcurrentGitOperations ?? 8);
+    private readonly IHubContext<WorkspaceSyncHub>? _hubContext = hubContext;
 
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,

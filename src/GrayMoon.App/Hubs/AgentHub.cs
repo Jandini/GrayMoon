@@ -3,26 +3,17 @@ using Microsoft.AspNetCore.SignalR;
 
 namespace GrayMoon.App.Hubs;
 
-public sealed class AgentHub : Hub
+public sealed class AgentHub(AgentConnectionTracker connectionTracker, SyncCommandHandler syncCommandHandler) : Hub
 {
-    private readonly AgentConnectionTracker _connectionTracker;
-    private readonly SyncCommandHandler _syncCommandHandler;
-
-    public AgentHub(AgentConnectionTracker connectionTracker, SyncCommandHandler syncCommandHandler)
-    {
-        _connectionTracker = connectionTracker;
-        _syncCommandHandler = syncCommandHandler;
-    }
-
     public override async Task OnConnectedAsync()
     {
-        _connectionTracker.OnAgentConnected(Context.ConnectionId);
+        connectionTracker.OnAgentConnected(Context.ConnectionId);
         await base.OnConnectedAsync();
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        _connectionTracker.OnAgentDisconnected(Context.ConnectionId);
+        connectionTracker.OnAgentDisconnected(Context.ConnectionId);
         await base.OnDisconnectedAsync(exception);
     }
 
@@ -36,6 +27,6 @@ public sealed class AgentHub : Hub
     /// <summary>Invoked by the agent when a hook fires: agent ran GitVersion and pushes result for app to persist.</summary>
     public async Task SyncCommand(int workspaceId, int repositoryId, string version, string branch)
     {
-        await _syncCommandHandler.HandleAsync(workspaceId, repositoryId, version, branch);
+        await syncCommandHandler.HandleAsync(workspaceId, repositoryId, version, branch);
     }
 }

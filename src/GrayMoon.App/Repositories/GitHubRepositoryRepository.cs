@@ -4,16 +4,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
 
-public class GitHubRepositoryRepository
+public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRepositoryRepository> logger)
 {
-    private readonly AppDbContext _dbContext;
-    private readonly ILogger<GitHubRepositoryRepository> _logger;
-
-    public GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRepositoryRepository> logger)
-    {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly ILogger<GitHubRepositoryRepository> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task<List<GitHubRepositoryEntry>> GetAllEntriesAsync()
     {

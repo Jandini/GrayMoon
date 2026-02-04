@@ -5,18 +5,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
 
-public class WorkspaceRepository
+public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService workspaceService, ILogger<WorkspaceRepository> logger)
 {
-    private readonly AppDbContext _dbContext;
-    private readonly WorkspaceService _workspaceService;
-    private readonly ILogger<WorkspaceRepository> _logger;
-
-    public WorkspaceRepository(AppDbContext dbContext, WorkspaceService workspaceService, ILogger<WorkspaceRepository> logger)
-    {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-        _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly WorkspaceService _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
+    private readonly ILogger<WorkspaceRepository> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task<List<Workspace>> GetAllAsync()
     {

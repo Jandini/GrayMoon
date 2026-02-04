@@ -49,6 +49,19 @@
     {
         <div class="grid-page-body">
             <div class="card page-card mb-4">
+                @if (connectorErrors?.Count > 0)
+                {
+                    <div class="alert alert-danger alert-dismissible fade show rounded-0 mb-0 border-0 border-bottom" role="alert">
+                        <strong><i class="bi bi-exclamation-triangle-fill me-1"></i>GitHub connector error(s)</strong>
+                        <ul class="mb-0 mt-1 ps-3">
+                            @foreach (var err in connectorErrors)
+                            {
+                                <li><strong>@err.ConnectorName:</strong> @err.Message</li>
+                            }
+                        </ul>
+                        <button type="button" class="btn-close" aria-label="Close" @onclick="DismissConnectorErrors"></button>
+                    </div>
+                }
                 <div class="card-body p-0">
                     <div class="table-responsive">
                         <table class="table table-striped table-hover mb-0 repositories-table">
@@ -114,11 +127,17 @@
 
 @code {
     private List<GitHubRepositoryEntry>? repositories;
+    private IReadOnlyList<ConnectorFetchError>? connectorErrors;
     private string? errorMessage;
     private string searchTerm = string.Empty;
     private bool isPersisting;
     private int? fetchedRepositoryCount;
     private CancellationTokenSource? _fetchRepositoriesCts;
+
+    private void DismissConnectorErrors()
+    {
+        connectorErrors = null;
+    }
 
     public void Dispose()
     {
@@ -136,6 +155,7 @@
         try
         {
             repositories = null;
+            connectorErrors = null;
             errorMessage = null;
             var persisted = await RepositoryService.GetPersistedRepositoriesAsync();
             if (persisted.Count > 0)
@@ -170,17 +190,20 @@
             fetchedRepositoryCount = null;
             await InvokeAsync(StateHasChanged);
             errorMessage = null;
+            connectorErrors = null;
 
             var progress = new Progress<int>(count =>
             {
                 fetchedRepositoryCount = count;
                 _ = InvokeAsync(StateHasChanged);
             });
-            repositories = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
+            var result = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
+            repositories = result.Repositories.ToList();
+            connectorErrors = result.ConnectorErrors.Count > 0 ? result.ConnectorErrors : null;
         }
         catch (OperationCanceledException)
         {
-            repositories = await RepositoryService.GetPersistedRepositoriesAsync();
+            repositories = (await RepositoryService.GetPersistedRepositoriesAsync()).ToList();
         }
         catch (Exception ex)
         {

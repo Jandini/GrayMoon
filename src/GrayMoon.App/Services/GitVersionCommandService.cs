@@ -3,15 +3,9 @@ using GrayMoon.App.Models;
 
 namespace GrayMoon.App.Services;
 
-public class GitVersionCommandService
+public class GitVersionCommandService(ILogger<GitVersionCommandService> logger)
 {
-    private readonly ILogger<GitVersionCommandService> _logger;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
-
-    public GitVersionCommandService(ILogger<GitVersionCommandService> logger)
-    {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
 
     public async Task<GitVersionResult?> GetVersionAsync(string repositoryPath, CancellationToken cancellationToken = default)
     {
@@ -30,7 +24,7 @@ public class GitVersionCommandService
 
     private async Task<GitVersionResult?> RunDotNetGitVersionAsync(string repositoryPath, CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Running dotnet-gitversion in {Path}", repositoryPath);
+        logger.LogDebug("Running dotnet-gitversion in {Path}", repositoryPath);
 
         // Use dotnet-gitversion (in PATH from dotnet tool install -g) for Docker compatibility
         var startInfo = new System.Diagnostics.ProcessStartInfo
@@ -49,7 +43,7 @@ public class GitVersionCommandService
             using var process = System.Diagnostics.Process.Start(startInfo);
             if (process == null)
             {
-                _logger.LogWarning("Failed to start dotnet gitversion process for {Path}", repositoryPath);
+                logger.LogWarning("Failed to start dotnet gitversion process for {Path}", repositoryPath);
                 return null;
             }
 
@@ -61,7 +55,7 @@ public class GitVersionCommandService
 
             if (process.ExitCode != 0)
             {
-                _logger.LogWarning("dotnet-gitversion failed with exit code {ExitCode} in {Path}. Stdout: {Stdout} Stderr: {Stderr}",
+                logger.LogWarning("dotnet-gitversion failed with exit code {ExitCode} in {Path}. Stdout: {Stdout} Stderr: {Stderr}",
                     process.ExitCode, repositoryPath,
                     string.IsNullOrWhiteSpace(stdout) ? "(none)" : stdout.Trim(),
                     string.IsNullOrWhiteSpace(stderr) ? "(none)" : stderr.Trim());
@@ -71,14 +65,14 @@ public class GitVersionCommandService
             var result = ParseGitVersionJson(stdout);
             if (result != null)
             {
-                _logger.LogInformation("GitVersion for {Path}: {SemVer} ({Branch})", repositoryPath,
+                logger.LogInformation("GitVersion for {Path}: {SemVer} ({Branch})", repositoryPath,
                     result.SemVer ?? result.FullSemVer ?? "-", result.BranchName ?? result.EscapedBranchName ?? "-");
             }
             return result;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error running dotnet-gitversion for {Path}", repositoryPath);
+            logger.LogError(ex, "Error running dotnet-gitversion for {Path}", repositoryPath);
             return null;
         }
     }

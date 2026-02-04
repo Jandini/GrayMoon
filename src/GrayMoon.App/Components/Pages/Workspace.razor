@@ -349,7 +349,8 @@
                 fetchedRepositoryCount = count;
                 _ = InvokeAsync(StateHasChanged);
             });
-            repositoriesModalRepositories = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
+            var result = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
+            repositoriesModalRepositories = result.Repositories.ToList();
         }
         catch (OperationCanceledException)
         {

@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.SignalR.Client;
 
-namespace GrayMoon.Agent.Hub;
+namespace GrayMoon.Agent.Abstractions;
 
 public interface IHubConnectionProvider
 {
