@@ -58,6 +58,14 @@
     text-align: center;
 }
 
+.repositories-table thead th.col-sync {
+    text-align: center;
+}
+
+.repositories-table tbody td.col-sync {
+    text-align: right;
+}
+
 .col-version {
     width: auto;
     min-width: 0;
