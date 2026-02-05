@@ -1,35 +1,84 @@
 using GrayMoon.Agent.Abstractions;
+using GrayMoon.Agent.Models;
 
 namespace GrayMoon.Agent.Services;
 
-public sealed class CsProjFileService : ICsProjFileService
+public sealed class CsProjFileService(ICsProjFileParser parser) : ICsProjFileService
 {
     private const int MaxConcurrentSubdirSearches = 8;
+    private const int MaxConcurrentParses = 8;
 
-    public async Task<int> FindAsync(string repoPath, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<CsProjFileInfo>> FindAsync(string repoPath, CancellationToken cancellationToken = default)
+    {
+        var paths = await GetProjectPathsAsync(repoPath, cancellationToken);
+        if (paths.Count == 0)
+            return [];
+
+        var results = new List<CsProjFileInfo>();
+        using var semaphore = new SemaphoreSlim(MaxConcurrentParses);
+        var tasks = paths.Select(async path =>
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    var parsed = await parser.ParseAsync(path, cancellationToken);
+                    if (parsed != null)
+                        return new CsProjFileInfo
+                        {
+                            ProjectPath = path,
+                            ProjectType = parsed.ProjectType,
+                            TargetFramework = parsed.TargetFramework,
+                            Name = parsed.Name,
+                            PackageReferences = parsed.PackageReferences
+                        };
+                }
+                catch
+                {
+                    // Skip this file; do not affect others
+                }
+                return null;
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+        var parsedResults = await Task.WhenAll(tasks);
+        foreach (var r in parsedResults)
+        {
+            if (r != null)
+                results.Add(r);
+        }
+        return results;
+    }
+
+    public async Task<IReadOnlyList<string>> GetProjectPathsAsync(string repoPath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
-            return 0;
+            return [];
 
         try
         {
-            var rootCount = CountCsprojInDirectory(repoPath, topLevelOnly: true);
+            var rootPaths = EnumerateCsprojInDirectory(repoPath, topLevelOnly: true);
 
             var subdirs = Directory.GetDirectories(repoPath)
                 .Where(d => !string.Equals(Path.GetFileName(d), ".git", StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
             if (subdirs.Count == 0)
-                return rootCount;
+                return rootPaths;
 
             using var semaphore = new SemaphoreSlim(MaxConcurrentSubdirSearches);
-            var subdirCounts = await Task.WhenAll(subdirs.Select(async subdir =>
+            var subdirPaths = await Task.WhenAll(subdirs.Select(async subdir =>
             {
                 await semaphore.WaitAsync(cancellationToken);
                 try
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    return CountCsprojInDirectory(subdir, topLevelOnly: false);
+                    return EnumerateCsprojInDirectory(subdir, topLevelOnly: false);
                 }
                 finally
                 {
@@ -37,7 +86,7 @@ public sealed class CsProjFileService : ICsProjFileService
                 }
             }));
 
-            return rootCount + subdirCounts.Sum();
+            return rootPaths.Concat(subdirPaths.SelectMany(x => x)).ToList();
         }
         catch (OperationCanceledException)
         {
@@ -45,20 +94,23 @@ public sealed class CsProjFileService : ICsProjFileService
         }
         catch
         {
-            return 0;
+            return [];
         }
     }
 
-    private static int CountCsprojInDirectory(string path, bool topLevelOnly)
+    public Task<CsProjFileInfo?> ParseAsync(string csprojPath, CancellationToken cancellationToken = default) =>
+        parser.ParseAsync(csprojPath, cancellationToken);
+
+    private static List<string> EnumerateCsprojInDirectory(string path, bool topLevelOnly)
     {
         try
         {
             var option = topLevelOnly ? SearchOption.TopDirectoryOnly : SearchOption.AllDirectories;
-            return Directory.EnumerateFiles(path, "*.csproj", option).Count();
+            return Directory.EnumerateFiles(path, "*.csproj", option).ToList();
         }
         catch
         {
-            return 0;
+            return [];
         }
     }
 }

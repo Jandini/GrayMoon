@@ -31,7 +31,7 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
 
         var version = "-";
         var branch = "-";
-        var projects = 0;
+        var projectCount = 0;
         if (git.DirectoryExists(repoPath))
         {
             var vr = await git.GetVersionAsync(repoPath, cancellationToken);
@@ -42,9 +42,10 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 if (version != "-" && branch != "-")
                     git.WriteSyncHooks(repoPath, workspaceId, repositoryId);
             }
-            projects = await csProjFileService.FindAsync(repoPath, cancellationToken);
+            var projects = await csProjFileService.FindAsync(repoPath, cancellationToken);
+            projectCount = projects.Count;
         }
 
-        return new SyncRepositoryResponse { Version = version, Branch = branch, WasCloned = wasCloned, Projects = projects };
+        return new SyncRepositoryResponse { Version = version, Branch = branch, WasCloned = wasCloned, Projects = projectCount };
     }
 }
