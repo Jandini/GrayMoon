@@ -18,15 +18,7 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
 
     container.style.backgroundColor = '#1a1a1a';
 
-    var layoutOpts = {
-        name: 'breadthfirst',
-        directed: true,
-        spacingFactor: 1.5,
-        padding: 0
-    };
-    if (roots && roots.length > 0) {
-        layoutOpts.roots = roots.map(String);
-    }
+    if (typeof cytoscapeDagre !== 'undefined') cytoscape.use(cytoscapeDagre);
 
     var cy = cytoscape({
         container: container,
@@ -67,7 +59,15 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
         wheelSensitivity: 0.3
     });
 
-    var layout = cy.layout(layoutOpts);
+    var layoutOpts = { name: 'dagre', rankDir: 'TB', nodeSep: 50, rankSep: 70, edgeSep: 20, padding: 10, ranker: 'network-simplex' };
+    var layout;
+    try {
+        layout = cy.layout(layoutOpts);
+    } catch (e) {
+        layoutOpts = { name: 'breadthfirst', directed: true, spacingFactor: 1.5, padding: 0 };
+        if (roots && roots.length > 0) layoutOpts.roots = roots.map(String);
+        layout = cy.layout(layoutOpts);
+    }
     layout.run();
     function fitToContainer() {
         if (cy && !cy.destroyed()) {

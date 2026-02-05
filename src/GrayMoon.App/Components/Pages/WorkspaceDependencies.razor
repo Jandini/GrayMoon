@@ -49,9 +49,7 @@
     @if (errorMessage == null && graph != null)
     {
         <div class="grid-page-body dependencies-graph-container">
-            <div class="cytoscape-graph-wrapper">
-                <div id="cytoscape-dependency-graph" class="cytoscape-graph @(graph.Nodes.Count == 0 ? "cytoscape-graph-empty" : "")"></div>
-            </div>
+            <div id="cytoscape-dependency-graph" class="cytoscape-graph @(graph.Nodes.Count == 0 ? "cytoscape-graph-empty" : "")"></div>
             @if (graph.Nodes.Count == 0)
             {
                 <p class="dependencies-empty-message text-muted text-center mb-0">No dependencies to display. Sync repositories to discover projects and dependencies.</p>

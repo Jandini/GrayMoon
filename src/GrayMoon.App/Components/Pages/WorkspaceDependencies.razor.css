@@ -8,28 +8,17 @@
     flex: 1 1 auto;
     width: 100%;
     position: relative;
+    background: #1a1a1a;
     border-radius: var(--bs-border-radius, 0.25rem);
     overflow: hidden;
 }
 
-/* Wrapper: 20px padding and background so graph has visual margin without relying on cy.fit() */
-.dependencies-page .cytoscape-graph-wrapper {
-    position: absolute;
-    inset: 0;
-    padding: 20px;
-    background: #1a1a1a;
-    box-sizing: border-box;
-}
-
-/* Cytoscape div: fill wrapper content area (Cytoscape needs explicit dimensions) */
+/* Cytoscape div: fill container (Cytoscape needs explicit dimensions) */
 .dependencies-page .cytoscape-graph {
     position: absolute;
-    top: 20px;
-    left: 20px;
-    right: 20px;
-    bottom: 20px;
-    width: auto;
-    height: auto;
+    inset: 0;
+    width: 100%;
+    height: 100%;
     background: #1a1a1a;
 }
 
