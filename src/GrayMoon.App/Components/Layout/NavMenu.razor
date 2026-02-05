@@ -33,6 +33,13 @@
                     <span class="nav-link-text">@(workspaceName ?? "Workspace")</span>
                 </NavLink>
             </div>
+
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/projects")">
+                    <i class="bi bi-folder2-open" aria-hidden="true"></i>
+                    <span class="nav-link-text">Projects</span>
+                </NavLink>
+            </div>
         }
         else
         {
@@ -96,7 +103,7 @@
         var path = relativePath.Split('?', '#')[0];
         var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
-        if (segments.Length == 2 &&
+        if (segments.Length >= 2 &&
             string.Equals(segments[0], "workspaces", StringComparison.OrdinalIgnoreCase) &&
             int.TryParse(segments[1], out var parsedId))
         {
