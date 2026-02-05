@@ -12,7 +12,7 @@
 
 <PageTitle>@(workspace?.Name ?? "Workspace") - Dependencies</PageTitle>
 
-<div class="container-fluid page-container dependencies-page">
+<div class="container-fluid page-container grid-page dependencies-page">
     <div class="grid-page-header">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <div>
@@ -20,11 +20,24 @@
                 <p class="text-muted mb-0" style="min-height: 1.5rem;">
                     @if (graph != null)
                     {
-                        @($"{graph.Nodes.Count} repositories, {graph.Edges.Count} dependencies")
+                        var (nodeCount, edgeCount) = GetFilteredCounts();
+                        @($"{nodeCount} repositories, {edgeCount} dependencies")
                     }
                     &nbsp;
                 </p>
             </div>
+            @if (graph != null && graph.Nodes.Count > 0)
+            {
+                <div class="dependencies-filter">
+                    <select id="repo-filter" class="form-select form-select-sm" style="min-width: 200px;" value="@(selectedFilterRepoId?.ToString() ?? "")" @onchange="OnFilterChanged">
+                        <option value="">All repositories</option>
+                        @foreach (var n in graph.Nodes.OrderBy(n => n.RepositoryName, StringComparer.OrdinalIgnoreCase))
+                        {
+                            <option value="@n.RepositoryId">@n.RepositoryName</option>
+                        }
+                    </select>
+                </div>
+            }
         </div>
         @if (errorMessage != null)
         {
@@ -54,6 +67,8 @@
     private RepositoryDependencyGraph? graph;
     private string? errorMessage;
     private bool isLoading = true;
+    private int? selectedFilterRepoId;
+    private int? _lastRenderedFilter = int.MinValue;
     private const string GraphContainerId = "cytoscape-dependency-graph";
 
     protected override async Task OnInitializedAsync()
@@ -63,25 +78,60 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && graph != null && graph.Nodes.Count > 0)
+        if (graph == null || graph.Nodes.Count == 0) return;
+        if (firstRender || _lastRenderedFilter != selectedFilterRepoId)
+        {
+            _lastRenderedFilter = selectedFilterRepoId;
+            try
             {
-                try
+                await JSRuntime.InvokeVoidAsync("destroyCytoscapeGraph", GraphContainerId);
+            }
+            catch { /* ignore */ }
+
+            try
+            {
+                var prefixByRepoId = GetLabelsWithGroupPrefixStripped(graph.Nodes.Select(n => (n.RepositoryId, n.RepositoryName)).ToList());
+                var (filteredNodes, filteredEdges) = GetFilteredNodesAndEdges();
+                var nodes = filteredNodes.Select(n => new
                 {
-                    var prefixByRepoId = GetLabelsWithGroupPrefixStripped(graph.Nodes.Select(n => (n.RepositoryId, n.RepositoryName)).ToList());
-                    var nodes = graph.Nodes.Select(n => new
-                    {
-                        id = n.RepositoryId.ToString(),
-                        label = prefixByRepoId.TryGetValue(n.RepositoryId, out var label) ? label : n.RepositoryName
-                    }).ToList();
-                    var edges = graph.Edges.Select(e => new { source = e.DependentRepositoryId.ToString(), target = e.ReferencedRepositoryId.ToString() }).ToList();
-                    var roots = graph.Nodes.Select(n => n.RepositoryId.ToString()).Except(edges.Select(e => e.target)).ToList();
-                    await JSRuntime.InvokeVoidAsync("renderCytoscapeGraph", GraphContainerId, nodes, edges, roots);
-                }
+                    id = n.RepositoryId.ToString(),
+                    label = prefixByRepoId.TryGetValue(n.RepositoryId, out var label) ? label : n.RepositoryName
+                }).ToList();
+                var edges = filteredEdges.Select(e => new { source = e.DependentRepositoryId.ToString(), target = e.ReferencedRepositoryId.ToString() }).ToList();
+                var roots = filteredNodes.Select(n => n.RepositoryId.ToString()).Except(edges.Select(e => e.target)).ToList();
+                await JSRuntime.InvokeVoidAsync("renderCytoscapeGraph", GraphContainerId, nodes, edges, roots);
+            }
             catch (Exception ex)
             {
                 Logger.LogWarning(ex, "Cytoscape render failed for workspace {WorkspaceId}", WorkspaceId);
             }
         }
+    }
+
+    private void OnFilterChanged(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString();
+        selectedFilterRepoId = string.IsNullOrEmpty(value) || !int.TryParse(value, out var id) ? null : id;
+    }
+
+    private (IReadOnlyList<RepositoryDependencyNode> Nodes, IReadOnlyList<RepositoryDependencyEdge> Edges) GetFilteredNodesAndEdges()
+    {
+        if (graph == null) return (new List<RepositoryDependencyNode>(), new List<RepositoryDependencyEdge>());
+        if (selectedFilterRepoId == null)
+            return (graph.Nodes, graph.Edges);
+
+        var repoId = selectedFilterRepoId.Value;
+        var edgesFromSelected = graph.Edges.Where(e => e.DependentRepositoryId == repoId).ToList();
+        var referencedIds = edgesFromSelected.Select(e => e.ReferencedRepositoryId).ToHashSet();
+        var nodeIds = referencedIds.Union([repoId]).ToHashSet();
+        var filteredNodes = graph.Nodes.Where(n => nodeIds.Contains(n.RepositoryId)).ToList();
+        return (filteredNodes, edgesFromSelected);
+    }
+
+    private (int NodeCount, int EdgeCount) GetFilteredCounts()
+    {
+        var (nodes, edges) = GetFilteredNodesAndEdges();
+        return (nodes.Count, edges.Count);
     }
 
     private async Task LoadAsync()

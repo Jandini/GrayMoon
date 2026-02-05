@@ -22,7 +22,7 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
         name: 'breadthfirst',
         directed: true,
         spacingFactor: 1.5,
-        padding: { top: 28, right: 28, bottom: 52, left: 28 }
+        padding: 0
     };
     if (roots && roots.length > 0) {
         layoutOpts.roots = roots.map(String);
@@ -47,8 +47,7 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
                     'border-width': 1,
                     'border-color': '#3f3f46',
                     'width': 140,
-                    'height': 40,
-                    'padding': '6px'
+                    'height': 40
                 }
             },
             {
@@ -63,10 +62,20 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
                 }
             }
         ],
-        layout: layoutOpts,
         minZoom: 0.2,
         maxZoom: 3,
         wheelSensitivity: 0.3
+    });
+
+    var layout = cy.layout(layoutOpts);
+    layout.run();
+    layout.promise().then(function () {
+        requestAnimationFrame(function () {
+            // Sync viewport to container (avoids bottom cut-off when container size is set after init)
+            cy.resize();
+            // Fit entire graph in view with small padding; fit() centers the graph
+            cy.fit(20);
+        });
     });
 
     window['__cy_' + containerId] = cy;
