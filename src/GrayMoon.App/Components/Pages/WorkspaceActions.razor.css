@@ -29,7 +29,7 @@
 }
 
 .col-repo {
-    width: 30%;
+    width: 33%;
 }
 
 .col-workflow {
@@ -37,23 +37,24 @@
 }
 
 .col-event {
-    width: 13%;
+    width: 18%;
 }
 
 .col-status {
-    width: 9%;
+    width: 11%;
 }
 
-.col-conclusion {
-    width: 10%;
+.col-result {
+    width: 8%;
 }
 
 .col-updated {
-    width: 15%;
+    width: 12%;
 }
 
 .col-action {
-    width: 13%;
+    width: 8%;
+    text-align: right;
 }
 
 .actions-buttons {

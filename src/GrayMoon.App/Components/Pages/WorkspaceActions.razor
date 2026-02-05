@@ -53,8 +53,8 @@
                                     <th class="col-workflow">Workflow</th>
                                     <th class="col-event">Event</th>
                                     <th class="col-status">Status</th>
-                                    <th class="col-conclusion">Conclusion</th>
-                                    <th class="col-updated">Updated</th>
+                                    <th class="col-result">Result</th>
+                                    <th class="col-updated">Date & time</th>
                                     <th class="col-action">Action</th>
                                 </tr>
                             </thead>
@@ -88,7 +88,6 @@
                                             {
                                                 <td colspan="6" class="text-end py-2">
                                                     <span class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></span>
-                                                    <span class="text-muted ms-1">@(row.LoadingMessage ?? "Loading...")</span>
                                                 </td>
                                             }
                                             else if (row.Action == null)
@@ -116,25 +115,29 @@
                                                         @GetStatusLabel(action.Status)
                                                     </span>
                                                 </td>
-                                                <td class="col-conclusion">
+                                                <td class="col-result">
                                                     <span class="badge @GetConclusionBadgeClass(action.Conclusion)">
                                                         @GetConclusionLabel(action.Conclusion)
                                                     </span>
                                                 </td>
                                                 <td class="col-updated">@(action.UpdatedAt?.ToLocalTime().ToString("g") ?? "-")</td>
                                                 <td class="col-action">
-                                                    <div class="actions-buttons">
-                                                        <button class="btn btn-sm btn-outline-secondary"
-                                                                @onclick="() => RunWorkflowAsync(action, row)"
-                                                                disabled="@(isRunning || !CanRun(action))">
-                                                            Run
-                                                        </button>
+                                                    @if (IsFailed(action))
+                                                    {
                                                         <button class="btn btn-sm btn-outline-primary"
                                                                 @onclick="() => RerunWorkflowAsync(action, row)"
                                                                 disabled="@(isRerunning || !CanRerun(action))">
                                                             Re-run
                                                         </button>
-                                                    </div>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button class="btn btn-sm btn-outline-secondary"
+                                                                @onclick="() => RunWorkflowAsync(action, row)"
+                                                                disabled="@(isRunning || !CanRun(action))">
+                                                            Run
+                                                        </button>
+                                                    }
                                                 </td>
                                             }
                                         </tr>
@@ -157,7 +160,6 @@
         public GitHubRepositoryEntry Repo { get; init; } = null!;
         public GitHubActionEntry? Action { get; set; }
         public bool Loading { get; set; } = true;
-        public string? LoadingMessage { get; set; }
     }
 
     private WorkspaceModel? workspace;
@@ -253,7 +255,6 @@
             {
                 row.Action = null;
                 row.Loading = true;
-                row.LoadingMessage = null;
             }
             await InvokeAsync(StateHasChanged);
             foreach (var row in rows)
@@ -276,10 +277,8 @@
             errorMessage = null;
             row.Action = null;
             row.Loading = true;
-            row.LoadingMessage = "Re-running...";
             await InvokeAsync(StateHasChanged);
             await ActionsService.RerunWorkflowAsync(action);
-            row.LoadingMessage = "Loading...";
             await InvokeAsync(StateHasChanged);
             await LoadActionForRowAsync(row);
         }
@@ -291,7 +290,6 @@
         finally
         {
             isRerunning = false;
-            row.LoadingMessage = null;
         }
     }
 
@@ -303,10 +301,8 @@
             errorMessage = null;
             row.Action = null;
             row.Loading = true;
-            row.LoadingMessage = "Running...";
             await InvokeAsync(StateHasChanged);
             await ActionsService.RunWorkflowAsync(action);
-            row.LoadingMessage = "Loading...";
             await InvokeAsync(StateHasChanged);
             await LoadActionForRowAsync(row);
         }
@@ -318,8 +314,12 @@
         finally
         {
             isRunning = false;
-            row.LoadingMessage = null;
         }
+    }
+
+    private static bool IsFailed(GitHubActionEntry action)
+    {
+        return string.Equals(action.Conclusion, "failure", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool CanRerun(GitHubActionEntry action)
