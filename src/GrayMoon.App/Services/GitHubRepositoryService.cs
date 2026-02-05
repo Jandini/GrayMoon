@@ -4,8 +4,8 @@ using GrayMoon.App.Repositories;
 namespace GrayMoon.App.Services;
 
 public class GitHubRepositoryService(
-    GitHubConnectorRepository connectorRepository,
-    GitHubRepositoryRepository repositoryRepository,
+    ConnectorRepository connectorRepository,
+    RepositoryRepository repositoryRepository,
     GitHubService gitHubService,
     ILogger<GitHubRepositoryService> logger)
 {
@@ -29,7 +29,7 @@ public class GitHubRepositoryService(
     public async Task<RefreshRepositoriesResult> RefreshRepositoriesAsync(IProgress<int>? progress = null, CancellationToken cancellationToken = default)
     {
         logger.LogInformation("User triggered fetch repositories from GitHub");
-        var allFetched = new List<GitHubRepository>();
+        var allFetched = new List<Repository>();
         var connectorErrors = new List<ConnectorFetchError>();
         var uniqueCloneUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var connectors = await connectorRepository.GetAllAsync();
@@ -54,9 +54,9 @@ public class GitHubRepositoryService(
             try
             {
                 var repositories = await gitHubService.GetRepositoriesAsync(connector, progress: null, batchProgress, cancellationToken);
-                var persisted = repositories.Select(repo => new GitHubRepository
+                var persisted = repositories.Select(repo => new Repository
                 {
-                    GitHubConnectorId = connector.GitHubConnectorId,
+                    ConnectorId = connector.ConnectorId,
                     OrgName = repo.Owner?.Login,
                     RepositoryName = repo.Name,
                     Visibility = repo.Private ? "Private" : "Public",
@@ -75,7 +75,7 @@ public class GitHubRepositoryService(
                 logger.LogError(ex, "Error loading repositories for connector {ConnectorName}", connector.ConnectorName);
                 var message = ex is InvalidOperationException ? ex.Message : "Failed to fetch repositories. Please check the connector configuration.";
                 connectorErrors.Add(new ConnectorFetchError { ConnectorName = connector.ConnectorName, Message = message });
-                await connectorRepository.UpdateStatusAsync(connector.GitHubConnectorId, "Error", message);
+                await connectorRepository.UpdateStatusAsync(connector.ConnectorId, "Error", message);
             }
         }
 

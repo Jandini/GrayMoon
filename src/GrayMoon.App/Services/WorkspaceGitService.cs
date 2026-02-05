@@ -12,7 +12,8 @@ public class WorkspaceGitService(
     IAgentBridge agentBridge,
     WorkspaceService workspaceService,
     WorkspaceRepository workspaceRepository,
-    GitHubRepositoryRepository githubRepositoryRepository,
+    RepositoryRepository repositoryRepository,
+    RepositoryProjectRepository repositoryProjectRepository,
     AppDbContext dbContext,
     Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<WorkspaceGitService> logger,
@@ -21,7 +22,8 @@ public class WorkspaceGitService(
     private readonly IAgentBridge _agentBridge = agentBridge ?? throw new ArgumentNullException(nameof(agentBridge));
     private readonly WorkspaceService _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
     private readonly WorkspaceRepository _workspaceRepository = workspaceRepository ?? throw new ArgumentNullException(nameof(workspaceRepository));
-    private readonly GitHubRepositoryRepository _githubRepositoryRepository = githubRepositoryRepository ?? throw new ArgumentNullException(nameof(githubRepositoryRepository));
+    private readonly RepositoryRepository _repositoryRepository = repositoryRepository ?? throw new ArgumentNullException(nameof(repositoryRepository));
+    private readonly RepositoryProjectRepository _repositoryProjectRepository = repositoryProjectRepository ?? throw new ArgumentNullException(nameof(repositoryProjectRepository));
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly ILogger<WorkspaceGitService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxConcurrentGitOperations ?? 8);
@@ -42,9 +44,9 @@ public class WorkspaceGitService(
         await _workspaceService.CreateDirectoryAsync(workspace.Name, cancellationToken);
 
         var repos = workspace.Repositories
-            .Select(link => link.GitHubRepository)
+            .Select(link => link.Repository)
             .Where(r => r != null)
-            .Cast<GitHubRepository>()
+            .Cast<Repository>()
             .ToList();
 
         if (repos.Count == 0)
@@ -64,17 +66,17 @@ public class WorkspaceGitService(
                 var args = new
                 {
                     workspaceName = workspace.Name,
-                    repositoryId = repo.GitHubRepositoryId,
+                    repositoryId = repo.RepositoryId,
                     repositoryName = repo.RepositoryName,
                     cloneUrl = repo.CloneUrl,
-                    bearerToken = repo.GitHubConnector?.UserToken,
+                    bearerToken = repo.Connector?.UserToken,
                     workspaceId
                 };
                 var response = await _agentBridge.SendCommandAsync("SyncRepository", args, cancellationToken);
                 var info = ParseSyncRepositoryResponse(response);
                 var count = Interlocked.Increment(ref completedCount);
-                onProgress?.Invoke(count, totalCount, repo.GitHubRepositoryId, info);
-                return (repo.GitHubRepositoryId, info);
+                onProgress?.Invoke(count, totalCount, repo.RepositoryId, info);
+                return (repo.RepositoryId, info);
             }
             finally
             {
@@ -90,12 +92,12 @@ public class WorkspaceGitService(
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
 
         _logger.LogDebug("Sync completed for workspace {WorkspaceName}", workspace.Name);
-        return results.ToDictionary(r => r.GitHubRepositoryId, r => r.info);
+        return results.ToDictionary(r => r.RepositoryId, r => r.info);
     }
 
     public async Task<bool> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
     {
-        var repo = await _githubRepositoryRepository.GetByIdAsync(repositoryId, cancellationToken);
+        var repo = await _repositoryRepository.GetByIdAsync(repositoryId, cancellationToken);
         if (repo == null)
         {
             _logger.LogWarning("Sync skipped: repository not found for id {RepositoryId}", repositoryId);
@@ -103,7 +105,7 @@ public class WorkspaceGitService(
         }
 
         var isInWorkspace = await _dbContext.WorkspaceRepositories
-            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.GitHubRepositoryId == repo.GitHubRepositoryId, cancellationToken);
+            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.LinkedRepositoryId == repo.RepositoryId, cancellationToken);
         if (!isInWorkspace)
         {
             _logger.LogWarning("Sync skipped: repository {RepositoryName} (id {RepositoryId}) is not linked to workspace {WorkspaceId}", repo.RepositoryName, repositoryId, workspaceId);
@@ -117,7 +119,7 @@ public class WorkspaceGitService(
         var response = await _agentBridge.SendCommandAsync("RefreshRepositoryVersion", new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName }, cancellationToken);
         var info = ParseRefreshRepositoryVersionResponse(response);
 
-        await PersistVersionsAsync(workspaceId, [(repo.GitHubRepositoryId, info)], cancellationToken);
+        await PersistVersionsAsync(workspaceId, [(repo.RepositoryId, info)], cancellationToken);
 
         var allLinks = await _dbContext.WorkspaceRepositories
             .Where(wr => wr.WorkspaceId == workspaceId)
@@ -148,7 +150,7 @@ public class WorkspaceGitService(
         foreach (var wr in workspaceRepos)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var repo = wr.GitHubRepository;
+            var repo = wr.Repository;
             if (repo == null) continue;
 
             var response = await _agentBridge.SendCommandAsync("GetRepositoryVersion", new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName }, cancellationToken);
@@ -158,8 +160,8 @@ public class WorkspaceGitService(
             else
                 status = ParseGetRepositoryVersionToStatus(response.Data, wr.GitVersion, wr.BranchName);
 
-            result[repo.GitHubRepositoryId] = status;
-            onProgress?.Invoke(repo.GitHubRepositoryId, status);
+            result[repo.RepositoryId] = status;
+            onProgress?.Invoke(repo.RepositoryId, status);
         }
 
         var isInSync = result.Values.All(v => v == RepoSyncStatus.InSync);
@@ -173,8 +175,9 @@ public class WorkspaceGitService(
             return new RepoGitVersionInfo { Version = "-", Branch = "-" };
 
         var (version, branch) = GetVersionBranch(response.Data);
-        var projects = GetProjects(response.Data);
-        return new RepoGitVersionInfo { Version = version, Branch = branch, Projects = projects };
+        var projectsCount = GetProjects(response.Data);
+        var projectsDetail = GetProjectsDetail(response.Data);
+        return new RepoGitVersionInfo { Version = version, Branch = branch, Projects = projectsCount, ProjectsDetail = projectsDetail };
     }
 
     private static RepoGitVersionInfo ParseRefreshRepositoryVersionResponse(AgentCommandResponse response)
@@ -203,11 +206,35 @@ public class WorkspaceGitService(
         var root = doc.RootElement;
         if (!root.TryGetProperty("projects", out var p))
             return null;
-        if (p.ValueKind == System.Text.Json.JsonValueKind.Array)
+        if (p.ValueKind == JsonValueKind.Array)
             return p.GetArrayLength();
-        if (p.ValueKind == System.Text.Json.JsonValueKind.Number && p.TryGetInt32(out var n))
+        if (p.ValueKind == JsonValueKind.Number && p.TryGetInt32(out var n))
             return n;
         return null;
+    }
+
+    private static IReadOnlyList<SyncProjectInfo>? GetProjectsDetail(object data)
+    {
+        var json = data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(data);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (!root.TryGetProperty("projects", out var p) || p.ValueKind != JsonValueKind.Array)
+            return null;
+        var list = new List<SyncProjectInfo>();
+        foreach (var el in p.EnumerateArray())
+        {
+            var name = el.TryGetProperty("name", out var n) ? n.GetString() : null;
+            if (string.IsNullOrWhiteSpace(name))
+                continue;
+            var projectType = ProjectType.Library;
+            if (el.TryGetProperty("projectType", out var pt) && pt.TryGetInt32(out var ptVal) && ptVal >= 0 && ptVal <= 4)
+                projectType = (ProjectType)ptVal;
+            var projectPath = el.TryGetProperty("projectPath", out var pp) ? pp.GetString() ?? "" : "";
+            var targetFramework = el.TryGetProperty("targetFramework", out var tf) ? tf.GetString() ?? "" : "";
+            var packageId = el.TryGetProperty("packageId", out var pi) ? pi.GetString() : null;
+            list.Add(new SyncProjectInfo(name, projectType, projectPath, targetFramework, packageId));
+        }
+        return list.Count > 0 ? list : null;
     }
 
     private static RepoSyncStatus ParseGetRepositoryVersionToStatus(object data, string? persistedVersion, string? persistedBranch)
@@ -237,16 +264,16 @@ public class WorkspaceGitService(
 
         var repoIds = resultList.Select(r => r.RepoId).ToList();
         var workspaceReposToUpdate = await _dbContext.WorkspaceRepositories
-            .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.GitHubRepositoryId))
+            .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.LinkedRepositoryId))
             .ToListAsync(cancellationToken);
 
-        var githubReposToUpdate = await _dbContext.GitHubRepositories
-            .Where(r => repoIds.Contains(r.GitHubRepositoryId))
+        var reposToUpdate = await _dbContext.Repositories
+            .Where(r => repoIds.Contains(r.RepositoryId))
             .ToListAsync(cancellationToken);
 
         foreach (var (repoId, info) in resultList)
         {
-            var wr = workspaceReposToUpdate.FirstOrDefault(w => w.GitHubRepositoryId == repoId);
+            var wr = workspaceReposToUpdate.FirstOrDefault(w => w.LinkedRepositoryId == repoId);
             if (wr != null)
             {
                 wr.GitVersion = info.Version == "-" ? null : info.Version;
@@ -255,9 +282,12 @@ public class WorkspaceGitService(
                 wr.SyncStatus = (info.Version == "-" || info.Branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
             }
 
-            var repo = githubReposToUpdate.FirstOrDefault(r => r.GitHubRepositoryId == repoId);
+            var repo = reposToUpdate.FirstOrDefault(r => r.RepositoryId == repoId);
             if (repo != null)
                 repo.ProjectCount = info.Projects;
+
+            if (info.ProjectsDetail is { Count: > 0 })
+                await _repositoryProjectRepository.MergeRepositoryProjectsAsync(repoId, info.ProjectsDetail, cancellationToken);
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);

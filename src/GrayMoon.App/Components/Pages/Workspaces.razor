@@ -8,7 +8,7 @@
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Components.Modals
 @inject WorkspaceRepository WorkspaceRepository
-@inject GitHubConnectorRepository ConnectorRepository
+@inject ConnectorRepository ConnectorRepository
 @inject GitHubRepositoryService RepositoryService
 @inject WorkspaceService WorkspaceService
 @inject ILogger<Workspaces> Logger
@@ -284,7 +284,7 @@
         workspaceName = workspace.Name;
         editorErrorMessage = null;
         editingWorkspaceRepositoryIds = workspace.Repositories
-            .Select(link => link.GitHubRepositoryId)
+            .Select(link => link.LinkedRepositoryId)
             .ToHashSet();
         showEditorModal = true;
         await LoadDirectoryInfoAsync();
@@ -302,7 +302,7 @@
         repositoriesModalWorkspaceName = workspace.Name;
         repositoriesModalErrorMessage = null;
         selectedRepositoryIds = workspace.Repositories
-            .Select(link => link.GitHubRepositoryId)
+            .Select(link => link.LinkedRepositoryId)
             .ToHashSet();
         await EnsureRepositoriesAsync();
         showRepositoriesModal = true;

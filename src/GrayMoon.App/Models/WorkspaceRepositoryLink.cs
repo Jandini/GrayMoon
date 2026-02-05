@@ -6,7 +6,8 @@ namespace GrayMoon.App.Models;
 [Table("WorkspaceRepositories")]
 public class WorkspaceRepositoryLink
 {
-    public int WorkspaceRepositoryLinkId { get; set; }
+    /// <summary>Primary key (column renamed from WorkspaceRepositoryLinkId).</summary>
+    public int RepositoryId { get; set; }
 
     [Required]
     public int WorkspaceId { get; set; }
@@ -15,10 +16,10 @@ public class WorkspaceRepositoryLink
     public Workspace? Workspace { get; set; }
 
     [Required]
-    public int GitHubRepositoryId { get; set; }
+    public int LinkedRepositoryId { get; set; }
 
-    [ForeignKey(nameof(GitHubRepositoryId))]
-    public GitHubRepository? GitHubRepository { get; set; }
+    [ForeignKey(nameof(LinkedRepositoryId))]
+    public Repository? Repository { get; set; }
 
     [MaxLength(100)]
     public string? GitVersion { get; set; }

@@ -77,8 +77,8 @@
                                                     <td class="col-select">
                                                         <input class="form-check-input workspace-repo-checkbox"
                                                                type="checkbox"
-                                                               checked="@SelectedRepositoryIds.Contains(repository.GitHubRepositoryId)"
-                                                               @onchange="(ChangeEventArgs e) => _ = ToggleRepository(repository.GitHubRepositoryId, (bool)e.Value!)" />
+                                                               checked="@SelectedRepositoryIds.Contains(repository.RepositoryId)"
+                                                               @onchange="(ChangeEventArgs e) => _ = ToggleRepository(repository.RepositoryId, (bool)e.Value!)" />
                                                     </td>
                                                     <td>
                                                         <span class="repo-name-cell" title="@repository.RepositoryName">
@@ -213,7 +213,7 @@
 
     private bool AreAllFilteredSelected(IReadOnlyCollection<GitHubRepositoryEntry> filtered)
     {
-        return filtered.Count > 0 && filtered.All(item => SelectedRepositoryIds.Contains(item.GitHubRepositoryId));
+        return filtered.Count > 0 && filtered.All(item => SelectedRepositoryIds.Contains(item.RepositoryId));
     }
 
     private async Task ToggleAllFiltered(IReadOnlyCollection<GitHubRepositoryEntry> filtered, bool isSelected)
@@ -222,14 +222,14 @@
         {
             foreach (var repository in filtered)
             {
-                SelectedRepositoryIds.Add(repository.GitHubRepositoryId);
+                SelectedRepositoryIds.Add(repository.RepositoryId);
             }
         }
         else
         {
             foreach (var repository in filtered)
             {
-                SelectedRepositoryIds.Remove(repository.GitHubRepositoryId);
+                SelectedRepositoryIds.Remove(repository.RepositoryId);
             }
         }
         await InvokeAsync(StateHasChanged);

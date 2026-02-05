@@ -4,7 +4,7 @@
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
 @inject IConfiguration Configuration
-@inject GitHubConnectorRepository ConnectorRepository
+@inject ConnectorRepository ConnectorRepository
 @inject GitHubService GitHubService
 @inject ILogger<GitHubConnectors> Logger
 
@@ -86,7 +86,7 @@
                                                        role="switch"
                                                        checked="@connector.IsActive"
                                                        aria-label="Toggle connector active"
-                                                       disabled="@(testingConnectorId == connector.GitHubConnectorId || togglingConnectorId == connector.GitHubConnectorId)"
+                                                       disabled="@(testingConnectorId == connector.ConnectorId || togglingConnectorId == connector.ConnectorId)"
                                                        @onchange="(args) => ToggleConnectorAsync(connector, args)" />
                                             </div>
                                         </td>
@@ -140,7 +140,7 @@
                      OnCancel="CloseDeleteModal" />
 
 @code {
-    private List<GitHubConnector>? connectors;
+    private List<Connector>? connectors;
     private string? errorMessage;
     private bool showCreateModal;
     private bool showEditModal;
@@ -149,7 +149,7 @@
     private GitHubConnectorForm createModel = new();
     private GitHubConnectorForm editModel = new();
     private int editConnectorId;
-    private GitHubConnector? selectedConnector;
+    private Connector? selectedConnector;
     private int? testingConnectorId;
     private int? togglingConnectorId;
 
@@ -208,7 +208,7 @@
             isCreating = true;
             createErrorMessage = null;
 
-            var connector = new GitHubConnector
+            var connector = new Connector
             {
                 ConnectorName = createModel.ConnectorName.Trim(),
                 ApiBaseUrl = createModel.ApiBaseUrl.Trim(),
@@ -237,10 +237,10 @@
         }
     }
 
-    private void ShowEditModal(GitHubConnector connector)
+    private void ShowEditModal(Connector connector)
     {
         selectedConnector = connector;
-        editConnectorId = connector.GitHubConnectorId;
+        editConnectorId = connector.ConnectorId;
         editModel = new GitHubConnectorForm
         {
             ConnectorName = connector.ConnectorName,
@@ -268,9 +268,9 @@
             isUpdating = true;
             editErrorMessage = null;
 
-            var connector = new GitHubConnector
+            var connector = new Connector
             {
-                GitHubConnectorId = editConnectorId,
+                ConnectorId = editConnectorId,
                 ConnectorName = editModel.ConnectorName.Trim(),
                 ApiBaseUrl = editModel.ApiBaseUrl.Trim(),
                 UserName = string.IsNullOrWhiteSpace(editModel.UserName) ? null : editModel.UserName.Trim(),
@@ -298,7 +298,7 @@
         }
     }
 
-    private void ShowDeleteModal(GitHubConnector connector)
+    private void ShowDeleteModal(Connector connector)
     {
         selectedConnector = connector;
         deleteErrorMessage = null;
@@ -322,7 +322,7 @@
         {
             isDeleting = true;
             deleteErrorMessage = null;
-            await ConnectorRepository.DeleteAsync(selectedConnector.GitHubConnectorId);
+            await ConnectorRepository.DeleteAsync(selectedConnector.ConnectorId);
             showDeleteModal = false;
             await LoadConnectorsAsync();
         }
@@ -337,24 +337,24 @@
         }
     }
 
-    private async Task<bool> TestConnectorAsync(GitHubConnector connector)
+    private async Task<bool> TestConnectorAsync(Connector connector)
     {
         try
         {
-            testingConnectorId = connector.GitHubConnectorId;
-            await ConnectorRepository.UpdateStatusAsync(connector.GitHubConnectorId, "Testing", null);
+            testingConnectorId = connector.ConnectorId;
+            await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Testing", null);
             await LoadConnectorsAsync();
             StateHasChanged();
 
             await GitHubService.TestConnectionAsync(connector);
-            await ConnectorRepository.UpdateStatusAsync(connector.GitHubConnectorId, "Ok", null);
+            await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Ok", null);
             return true;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error testing GitHub connector.");
-            await ConnectorRepository.UpdateStatusAsync(connector.GitHubConnectorId, "Error", ex.Message);
-            await ConnectorRepository.UpdateIsActiveAsync(connector.GitHubConnectorId, false);
+            await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Error", ex.Message);
+                await ConnectorRepository.UpdateIsActiveAsync(connector.ConnectorId, false);
             return false;
         }
         finally
@@ -364,7 +364,7 @@
         }
     }
 
-    private async Task ToggleConnectorAsync(GitHubConnector connector, ChangeEventArgs args)
+    private async Task ToggleConnectorAsync(Connector connector, ChangeEventArgs args)
     {
         var isActive = args.Value is bool value
             ? value
@@ -372,8 +372,8 @@
 
         try
         {
-            togglingConnectorId = connector.GitHubConnectorId;
-            await ConnectorRepository.UpdateIsActiveAsync(connector.GitHubConnectorId, isActive);
+            togglingConnectorId = connector.ConnectorId;
+            await ConnectorRepository.UpdateIsActiveAsync(connector.ConnectorId, isActive);
             await LoadConnectorsAsync();
 
             if (isActive)
@@ -381,7 +381,7 @@
                 var ok = await TestConnectorAsync(connector);
                 if (!ok)
                 {
-                    await ConnectorRepository.UpdateIsActiveAsync(connector.GitHubConnectorId, false);
+                    await ConnectorRepository.UpdateIsActiveAsync(connector.ConnectorId, false);
                     await LoadConnectorsAsync();
                 }
             }
@@ -397,7 +397,7 @@
         }
     }
 
-    private static string GetStatusLabel(GitHubConnector connector)
+    private static string GetStatusLabel(Connector connector)
     {
         return connector.Status switch
         {
@@ -408,7 +408,7 @@
         };
     }
 
-    private static string GetStatusBadgeClass(GitHubConnector connector)
+    private static string GetStatusBadgeClass(Connector connector)
     {
         return connector.Status switch
         {
@@ -419,7 +419,7 @@
         };
     }
 
-    private static string GetStatusTitle(GitHubConnector connector)
+    private static string GetStatusTitle(Connector connector)
     {
         return connector.Status switch
         {
