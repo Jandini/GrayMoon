@@ -69,14 +69,20 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
 
     var layout = cy.layout(layoutOpts);
     layout.run();
-    layout.promise().then(function () {
-        requestAnimationFrame(function () {
-            // Sync viewport to container (avoids bottom cut-off when container size is set after init)
+    function fitToContainer() {
+        if (cy && !cy.destroyed()) {
             cy.resize();
-            // Fit entire graph in view with small padding; fit() centers the graph
             cy.fit(20);
-        });
+        }
+    }
+
+    layout.promise().then(function () {
+        requestAnimationFrame(fitToContainer);
     });
+
+    var resizeHandler = function () { requestAnimationFrame(fitToContainer); };
+    window.addEventListener('resize', resizeHandler);
+    window['__cy_resize_' + containerId] = resizeHandler;
 
     window['__cy_' + containerId] = cy;
     return true;
@@ -87,6 +93,8 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
  * @param {string} containerId - Id used when calling renderCytoscapeGraph
  */
 window.destroyCytoscapeGraph = function (containerId) {
+    window.removeEventListener('resize', window['__cy_resize_' + containerId]);
+    window['__cy_resize_' + containerId] = null;
     var key = '__cy_' + containerId;
     var cy = window[key];
     if (cy) {

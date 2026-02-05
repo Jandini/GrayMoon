@@ -1,9 +1,11 @@
+/* Same as grid pages: body gets viewport-relative height so content can resize */
+.dependencies-page .grid-page-body {
+    min-height: min(380px, calc(200vh - 250px));
+}
 
-
-/* Wrapper: fills body; min-height so it never collapses when only child is absolute */
+/* Match .grid-page-body .page-card: fill body and shrink on resize */
 .dependencies-page .dependencies-graph-container {
     flex: 1 1 auto;
-    min-height: 370px;
     width: 100%;
     position: relative;
     background: #1a1a1a;
