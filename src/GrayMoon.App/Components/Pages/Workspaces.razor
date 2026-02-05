@@ -8,7 +8,7 @@
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Components.Modals
 @inject WorkspaceRepository WorkspaceRepository
-@inject GitHubConnectorRepository ConnectorRepository
+@inject ConnectorRepository ConnectorRepository
 @inject GitHubRepositoryService RepositoryService
 @inject WorkspaceService WorkspaceService
 @inject ILogger<Workspaces> Logger
@@ -51,6 +51,7 @@
                                 <th class="col-name">Name</th>
                                 <th class="col-path">Path</th>
                                 <th class="col-count">Repos</th>
+                                <th class="col-count">Projects</th>
                                 <th class="col-actions">Actions</th>
                             </tr>
                         </thead>
@@ -58,7 +59,7 @@
                             @if (workspaces == null)
                             {
                                 <tr>
-                                    <td colspan="4" class="text-center text-muted py-4">
+                                    <td colspan="5" class="text-center text-muted py-4">
                                         Loading workspaces...
                                     </td>
                                 </tr>
@@ -66,7 +67,7 @@
                             else if (workspaces.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="4" class="text-center text-muted py-4">
+                                    <td colspan="5" class="text-center text-muted py-4">
                                         No workspaces found. Add your first workspace to get started.
                                     </td>
                                 </tr>
@@ -103,6 +104,7 @@
                                         </td>
                                         <td class="col-path text-muted">@WorkspaceService.GetWorkspacePath(workspace.Name)</td>
                                         <td class="col-count">@workspace.Repositories.Count</td>
+                                        <td class="col-count">@workspace.Repositories.Sum(r => r.Projects ?? 0)</td>
                                         <td class="col-actions">
                                             <button class="btn btn-sm btn-outline-primary me-2"
                                                     @onclick="() => ShowEditModalAsync(workspace.WorkspaceId)">
@@ -282,7 +284,7 @@
         workspaceName = workspace.Name;
         editorErrorMessage = null;
         editingWorkspaceRepositoryIds = workspace.Repositories
-            .Select(link => link.GitHubRepositoryId)
+            .Select(link => link.LinkedRepositoryId)
             .ToHashSet();
         showEditorModal = true;
         await LoadDirectoryInfoAsync();
@@ -300,7 +302,7 @@
         repositoriesModalWorkspaceName = workspace.Name;
         repositoriesModalErrorMessage = null;
         selectedRepositoryIds = workspace.Repositories
-            .Select(link => link.GitHubRepositoryId)
+            .Select(link => link.LinkedRepositoryId)
             .ToHashSet();
         await EnsureRepositoriesAsync();
         showRepositoriesModal = true;

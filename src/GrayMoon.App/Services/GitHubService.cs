@@ -55,7 +55,7 @@ public class GitHubService
         return await GetRepositoriesPagedAsync("user/repos?visibility=all");
     }
 
-    public async Task<List<GitHubRepositoryDto>> GetRepositoriesAsync(GitHubConnector connector, IProgress<int>? progress = null, IProgress<IReadOnlyList<GitHubRepositoryDto>>? batchProgress = null, CancellationToken cancellationToken = default)
+    public async Task<List<GitHubRepositoryDto>> GetRepositoriesAsync(Connector connector, IProgress<int>? progress = null, IProgress<IReadOnlyList<GitHubRepositoryDto>>? batchProgress = null, CancellationToken cancellationToken = default)
     {
         EnsureConnectorConfigured(connector);
         return await GetRepositoriesPagedAsync(connector, "user/repos?visibility=all", progress, batchProgress, cancellationToken);
@@ -78,7 +78,7 @@ public class GitHubService
         return response?.Workflows ?? new List<GitHubWorkflowDto>();
     }
 
-    public async Task<GitHubWorkflowRunDto?> GetLatestWorkflowRunAsync(GitHubConnector connector, string owner, string repo)
+    public async Task<GitHubWorkflowRunDto?> GetLatestWorkflowRunAsync(Connector connector, string owner, string repo)
     {
         EnsureConnectorConfigured(connector);
 
@@ -99,7 +99,7 @@ public class GitHubService
         return response?.WorkflowRuns.FirstOrDefault();
     }
 
-    public async Task RerunWorkflowRunAsync(GitHubConnector connector, string owner, string repo, long runId)
+    public async Task RerunWorkflowRunAsync(Connector connector, string owner, string repo, long runId)
     {
         EnsureConnectorConfigured(connector);
 
@@ -121,7 +121,7 @@ public class GitHubService
         await PostAsync(connector, $"repos/{owner}/{repo}/actions/runs/{runId}/rerun");
     }
 
-    public async Task DispatchWorkflowAsync(GitHubConnector connector, string owner, string repo, long workflowId, string branch)
+    public async Task DispatchWorkflowAsync(Connector connector, string owner, string repo, long workflowId, string branch)
     {
         EnsureConnectorConfigured(connector);
 
@@ -149,7 +149,7 @@ public class GitHubService
         await PostAsync(connector, $"repos/{owner}/{repo}/actions/workflows/{workflowId}/dispatches", payload);
     }
 
-    public async Task<(int OrganizationCount, int RepositoryCount)> TestConnectionAsync(GitHubConnector connector)
+    public async Task<(int OrganizationCount, int RepositoryCount)> TestConnectionAsync(Connector connector)
     {
         EnsureConnectorConfigured(connector);
 
@@ -168,7 +168,7 @@ public class GitHubService
         }
     }
 
-    private static void EnsureConnectorConfigured(GitHubConnector connector)
+    private static void EnsureConnectorConfigured(Connector connector)
     {
         if (string.IsNullOrWhiteSpace(connector.UserToken))
         {
@@ -192,7 +192,7 @@ public class GitHubService
         return await response.Content.ReadFromJsonAsync<T>(_jsonOptions);
     }
 
-    private async Task<T?> GetAsync<T>(GitHubConnector connector, string requestUri, CancellationToken cancellationToken = default)
+    private async Task<T?> GetAsync<T>(Connector connector, string requestUri, CancellationToken cancellationToken = default)
     {
         var baseUrl = string.IsNullOrWhiteSpace(connector.ApiBaseUrl)
             ? "https://api.github.com/"
@@ -218,7 +218,7 @@ public class GitHubService
         return await response.Content.ReadFromJsonAsync<T>(_jsonOptions);
     }
 
-    private async Task PostAsync(GitHubConnector connector, string requestUri, string? payload = null)
+    private async Task PostAsync(Connector connector, string requestUri, string? payload = null)
     {
         var baseUrl = string.IsNullOrWhiteSpace(connector.ApiBaseUrl)
             ? "https://api.github.com/"
@@ -274,7 +274,7 @@ public class GitHubService
         return results;
     }
 
-    private async Task<List<GitHubRepositoryDto>> GetRepositoriesPagedAsync(GitHubConnector connector, string requestUri, IProgress<int>? progress = null, IProgress<IReadOnlyList<GitHubRepositoryDto>>? batchProgress = null, CancellationToken cancellationToken = default)
+    private async Task<List<GitHubRepositoryDto>> GetRepositoriesPagedAsync(Connector connector, string requestUri, IProgress<int>? progress = null, IProgress<IReadOnlyList<GitHubRepositoryDto>>? batchProgress = null, CancellationToken cancellationToken = default)
     {
         var results = new List<GitHubRepositoryDto>();
         const int pageSize = 20;

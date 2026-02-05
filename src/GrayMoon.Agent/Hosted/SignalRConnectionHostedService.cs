@@ -1,10 +1,12 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Hub;
 using GrayMoon.Agent.Jobs;
 using GrayMoon.Agent.Queue;
 using GrayMoon.Agent.Services;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -26,11 +28,15 @@ public sealed class SignalRConnectionHostedService(
         _connection = new HubConnectionBuilder()
             .WithUrl(_options.AppHubUrl)
             .WithAutomaticReconnect()
+            .AddJsonProtocol(options =>
+            {
+                options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+                options.PayloadSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.Never;
+            })
             .Build();
 
         _connection.On<string, string, JsonElement?>("RequestCommand", async (requestId, command, args) =>
         {
-            logger.LogInformation("Received RequestCommand: {RequestId}, {Command}", requestId, command);
             var envelope = commandJobFactory.CreateCommandJob(requestId, command, args);
             await jobQueue.EnqueueAsync(envelope, cancellationToken);
         });

@@ -20,7 +20,7 @@ public static class SyncEndpoints
     private static async Task<IResult> PostSync(
         SyncRequest? body,
         IAgentBridge agentBridge,
-        GitHubRepositoryRepository repoRepository,
+        RepositoryRepository repoRepository,
         WorkspaceRepository workspaceRepository,
         AppDbContext dbContext,
         SyncBackgroundService syncQueue,
@@ -48,7 +48,7 @@ public static class SyncEndpoints
 
         // Only sync repos that are linked to this workspace; reject others
         var isInWorkspace = await dbContext.WorkspaceRepositories
-            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.GitHubRepositoryId == repo.GitHubRepositoryId);
+            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.LinkedRepositoryId == repo.RepositoryId);
         if (!isInWorkspace)
         {
             logger.LogWarning("Sync rejected: repository {RepositoryId} is not linked to workspace {WorkspaceId}", repositoryId, workspaceId);

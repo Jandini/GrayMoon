@@ -34,8 +34,9 @@ builder.Services.AddRazorComponents()
 // Database (SQLite) for persisted data - stored in db/ for easy container volume mounting
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=db/graymoon.db";
 builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connectionString));
-builder.Services.AddScoped<GitHubConnectorRepository>();
-builder.Services.AddScoped<GitHubRepositoryRepository>();
+builder.Services.AddScoped<ConnectorRepository>();
+builder.Services.AddScoped<RepositoryRepository>();
+builder.Services.AddScoped<RepositoryProjectRepository>();
 builder.Services.AddScoped<WorkspaceRepository>();
 builder.Services.AddSingleton<AgentConnectionTracker>();
 builder.Services.AddScoped<SyncCommandHandler>();
@@ -81,8 +82,10 @@ using (var scope = app.Services.CreateScope())
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     dbContext.Database.EnsureCreated();
     await MigrateWorkspaceSyncMetadataAsync(dbContext);
-    await MigrateGitHubConnectorUserNameAsync(dbContext);
+    await MigrateConnectorUserNameAsync(dbContext);
     await MigrateWorkspaceRepositoriesSyncStatusAsync(dbContext);
+    await MigrateWorkspaceRepositoriesProjectsAsync(dbContext);
+    await MigrateRepositoriesProjectCountAsync(dbContext);
 }
 
 static string? GetDatabasePath(string connectionString)
@@ -121,7 +124,7 @@ static async Task MigrateWorkspaceSyncMetadataAsync(AppDbContext dbContext)
     }
 }
 
-static async Task MigrateGitHubConnectorUserNameAsync(AppDbContext dbContext)
+static async Task MigrateConnectorUserNameAsync(AppDbContext dbContext)
 {
     try
     {
@@ -131,11 +134,11 @@ static async Task MigrateGitHubConnectorUserNameAsync(AppDbContext dbContext)
 
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('GitHubConnectors') WHERE name='UserName'";
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Connectors') WHERE name='UserName'";
             var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
             if (count == 0)
             {
-                cmd.CommandText = "ALTER TABLE GitHubConnectors ADD COLUMN UserName TEXT";
+                cmd.CommandText = "ALTER TABLE Connectors ADD COLUMN UserName TEXT";
                 await cmd.ExecuteNonQueryAsync();
             }
         }
@@ -162,6 +165,56 @@ static async Task MigrateWorkspaceRepositoriesSyncStatusAsync(AppDbContext dbCon
             {
                 // RepoSyncStatus.NeedsSync = 4; default new/unknown repos to needs sync
                 cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN SyncStatus INTEGER NOT NULL DEFAULT 4";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateWorkspaceRepositoriesProjectsAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='Projects'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN Projects INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateRepositoriesProjectCountAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Repositories') WHERE name='ProjectCount'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Repositories ADD COLUMN ProjectCount INTEGER";
                 await cmd.ExecuteNonQueryAsync();
             }
         }

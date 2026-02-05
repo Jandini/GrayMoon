@@ -5,17 +5,19 @@ namespace GrayMoon.App.Data;
 
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
-    public DbSet<GitHubConnector> GitHubConnectors => Set<GitHubConnector>();
-    public DbSet<GitHubRepository> GitHubRepositories => Set<GitHubRepository>();
+    public DbSet<Connector> Connectors => Set<Connector>();
+    public DbSet<Repository> Repositories => Set<Repository>();
     public DbSet<Workspace> Workspaces => Set<Workspace>();
     public DbSet<WorkspaceRepositoryLink> WorkspaceRepositories => Set<WorkspaceRepositoryLink>();
+    public DbSet<RepositoryProject> RepositoryProjects => Set<RepositoryProject>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
-        modelBuilder.Entity<GitHubConnector>(entity =>
+        modelBuilder.Entity<Connector>(entity =>
         {
+            entity.ToTable("Connectors");
             entity.HasIndex(connector => connector.ConnectorName)
                 .IsUnique();
 
@@ -45,9 +47,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasMaxLength(1000);
         });
 
-        modelBuilder.Entity<GitHubRepository>(entity =>
+        modelBuilder.Entity<Repository>(entity =>
         {
-            entity.HasIndex(repository => new { repository.GitHubConnectorId, repository.RepositoryName, repository.OrgName })
+            entity.ToTable("Repositories");
+            entity.HasIndex(repository => new { repository.ConnectorId, repository.RepositoryName, repository.OrgName })
                 .IsUnique();
 
             entity.Property(repository => repository.RepositoryName)
@@ -65,9 +68,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .IsRequired()
                 .HasMaxLength(500);
 
-            entity.HasOne(repository => repository.GitHubConnector)
+            entity.HasOne(repository => repository.Connector)
                 .WithMany()
-                .HasForeignKey(repository => repository.GitHubConnectorId)
+                .HasForeignKey(repository => repository.ConnectorId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -86,7 +89,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         modelBuilder.Entity<WorkspaceRepositoryLink>(entity =>
         {
-            entity.HasIndex(wr => new { wr.WorkspaceId, wr.GitHubRepositoryId })
+            entity.ToTable("WorkspaceRepositories");
+            entity.HasKey(wr => wr.RepositoryId);
+            entity.Property(wr => wr.RepositoryId).ValueGeneratedOnAdd();
+
+            entity.HasIndex(wr => new { wr.WorkspaceId, wr.LinkedRepositoryId })
                 .IsUnique();
 
             entity.Property(wr => wr.GitVersion)
@@ -104,9 +111,36 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(wr => wr.WorkspaceId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            entity.HasOne(wr => wr.GitHubRepository)
+            entity.HasOne(wr => wr.Repository)
                 .WithMany()
-                .HasForeignKey(wr => wr.GitHubRepositoryId)
+                .HasForeignKey(wr => wr.LinkedRepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RepositoryProject>(entity =>
+        {
+            entity.HasKey(p => p.ProjectId);
+            entity.HasIndex(p => new { p.RepositoryId, p.ProjectName })
+                .IsUnique();
+
+            entity.Property(p => p.ProjectName)
+                .IsRequired()
+                .HasMaxLength(200);
+
+            entity.Property(p => p.ProjectFilePath)
+                .IsRequired()
+                .HasMaxLength(500);
+
+            entity.Property(p => p.TargetFramework)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.Property(p => p.PackageId)
+                .HasMaxLength(200);
+
+            entity.HasOne(p => p.Repository)
+                .WithMany()
+                .HasForeignKey(p => p.RepositoryId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

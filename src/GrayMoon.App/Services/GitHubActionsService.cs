@@ -4,7 +4,7 @@ using GrayMoon.App.Repositories;
 namespace GrayMoon.App.Services;
 
 public class GitHubActionsService(
-    GitHubConnectorRepository connectorRepository,
+    ConnectorRepository connectorRepository,
     GitHubRepositoryService repositoryService,
     GitHubService gitHubService,
     ILogger<GitHubActionsService> logger)

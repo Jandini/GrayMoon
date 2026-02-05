@@ -25,8 +25,8 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
         return await _dbContext.Workspaces
             .AsNoTracking()
             .Include(workspace => workspace.Repositories)
-            .ThenInclude(link => link.GitHubRepository)
-            .ThenInclude(repository => repository!.GitHubConnector)
+            .ThenInclude(link => link.Repository)
+            .ThenInclude(repository => repository!.Connector)
             .FirstOrDefaultAsync(workspace => workspace.WorkspaceId == workspaceId);
     }
 
@@ -166,10 +166,10 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
             .Where(wr => wr.WorkspaceId == workspaceId)
             .ToListAsync();
 
-        var existingRepoIds = existing.Select(wr => wr.GitHubRepositoryId).ToHashSet();
+        var existingRepoIds = existing.Select(wr => wr.LinkedRepositoryId).ToHashSet();
         var newRepoIds = repositoryIds.Distinct().ToHashSet();
 
-        var toRemove = existing.Where(wr => !newRepoIds.Contains(wr.GitHubRepositoryId)).ToList();
+        var toRemove = existing.Where(wr => !newRepoIds.Contains(wr.LinkedRepositoryId)).ToList();
         var toAdd = newRepoIds.Except(existingRepoIds).ToList();
 
         foreach (var wr in toRemove)
@@ -182,7 +182,7 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
             _dbContext.WorkspaceRepositories.Add(new WorkspaceRepositoryLink
             {
                 WorkspaceId = workspaceId,
-                GitHubRepositoryId = repositoryId,
+                LinkedRepositoryId = repositoryId,
                 SyncStatus = RepoSyncStatus.NeedsSync
             });
         }

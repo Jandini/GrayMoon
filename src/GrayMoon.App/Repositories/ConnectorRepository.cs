@@ -4,41 +4,41 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
 
-public class GitHubConnectorRepository(AppDbContext dbContext, ILogger<GitHubConnectorRepository> logger)
+public class ConnectorRepository(AppDbContext dbContext, ILogger<ConnectorRepository> logger)
 {
-    public async Task<List<GitHubConnector>> GetAllAsync()
+    public async Task<List<Connector>> GetAllAsync()
     {
-        return await dbContext.GitHubConnectors
+        return await dbContext.Connectors
             .AsNoTracking()
             .OrderBy(connector => connector.ConnectorName)
             .ToListAsync();
     }
 
-    public async Task<List<GitHubConnector>> GetActiveAsync()
+    public async Task<List<Connector>> GetActiveAsync()
     {
-        return await dbContext.GitHubConnectors
+        return await dbContext.Connectors
             .AsNoTracking()
             .Where(connector => connector.IsActive)
             .OrderBy(connector => connector.ConnectorName)
             .ToListAsync();
     }
 
-    public async Task<GitHubConnector?> GetByIdAsync(int connectorId)
+    public async Task<Connector?> GetByIdAsync(int connectorId)
     {
-        return await dbContext.GitHubConnectors
+        return await dbContext.Connectors
             .AsNoTracking()
-            .FirstOrDefaultAsync(connector => connector.GitHubConnectorId == connectorId);
+            .FirstOrDefaultAsync(connector => connector.ConnectorId == connectorId);
     }
 
-    public async Task<GitHubConnector?> GetByNameAsync(string connectorName)
+    public async Task<Connector?> GetByNameAsync(string connectorName)
     {
         var normalized = connectorName.Trim().ToLowerInvariant();
-        return await dbContext.GitHubConnectors
+        return await dbContext.Connectors
             .AsNoTracking()
             .FirstOrDefaultAsync(connector => connector.ConnectorName.ToLower() == normalized);
     }
 
-    public async Task<GitHubConnector> AddAsync(GitHubConnector connector)
+    public async Task<Connector> AddAsync(Connector connector)
     {
         if (await ConnectorNameExistsAsync(connector.ConnectorName))
         {
@@ -48,23 +48,23 @@ public class GitHubConnectorRepository(AppDbContext dbContext, ILogger<GitHubCon
         connector.Status = string.IsNullOrWhiteSpace(connector.Status) ? "Unknown" : connector.Status;
         connector.LastError = string.IsNullOrWhiteSpace(connector.LastError) ? null : connector.LastError;
 
-        dbContext.GitHubConnectors.Add(connector);
+        dbContext.Connectors.Add(connector);
         await dbContext.SaveChangesAsync();
-        logger.LogInformation("Persistence: saved GitHubConnector. Action=Add, ConnectorId={ConnectorId}, ConnectorName={ConnectorName}", connector.GitHubConnectorId, connector.ConnectorName);
+        logger.LogInformation("Persistence: saved Connector. Action=Add, ConnectorId={ConnectorId}, ConnectorName={ConnectorName}", connector.ConnectorId, connector.ConnectorName);
         return connector;
     }
 
-    public async Task<GitHubConnector> UpdateAsync(GitHubConnector connector)
+    public async Task<Connector> UpdateAsync(Connector connector)
     {
-        var existing = await dbContext.GitHubConnectors
-            .FirstOrDefaultAsync(item => item.GitHubConnectorId == connector.GitHubConnectorId);
+        var existing = await dbContext.Connectors
+            .FirstOrDefaultAsync(item => item.ConnectorId == connector.ConnectorId);
 
         if (existing == null)
         {
             throw new InvalidOperationException("Connector not found.");
         }
 
-        if (await ConnectorNameExistsAsync(connector.ConnectorName, connector.GitHubConnectorId))
+        if (await ConnectorNameExistsAsync(connector.ConnectorName, connector.ConnectorId))
         {
             throw new InvalidOperationException($"Connector name '{connector.ConnectorName}' already exists.");
         }
@@ -78,65 +78,65 @@ public class GitHubConnectorRepository(AppDbContext dbContext, ILogger<GitHubCon
         existing.LastError = string.IsNullOrWhiteSpace(connector.LastError) ? null : connector.LastError;
 
         await dbContext.SaveChangesAsync();
-        logger.LogInformation("Persistence: saved GitHubConnector. Action=Update, ConnectorId={ConnectorId}, ConnectorName={ConnectorName}", existing.GitHubConnectorId, existing.ConnectorName);
+        logger.LogInformation("Persistence: saved Connector. Action=Update, ConnectorId={ConnectorId}, ConnectorName={ConnectorName}", existing.ConnectorId, existing.ConnectorName);
         return existing;
     }
 
     public async Task DeleteAsync(int connectorId)
     {
-        var connector = await dbContext.GitHubConnectors
-            .FirstOrDefaultAsync(item => item.GitHubConnectorId == connectorId);
+        var connector = await dbContext.Connectors
+            .FirstOrDefaultAsync(item => item.ConnectorId == connectorId);
 
         if (connector == null)
         {
-            logger.LogWarning("GitHub connector {ConnectorId} not found for deletion.", connectorId);
+            logger.LogWarning("Connector {ConnectorId} not found for deletion.", connectorId);
             return;
         }
 
-        dbContext.GitHubConnectors.Remove(connector);
+        dbContext.Connectors.Remove(connector);
         await dbContext.SaveChangesAsync();
-        logger.LogInformation("Persistence: saved GitHubConnector. Action=Delete, ConnectorId={ConnectorId}, ConnectorName={ConnectorName}", connectorId, connector.ConnectorName);
+        logger.LogInformation("Persistence: saved Connector. Action=Delete, ConnectorId={ConnectorId}, ConnectorName={ConnectorName}", connectorId, connector.ConnectorName);
     }
 
     public async Task UpdateStatusAsync(int connectorId, string status, string? errorMessage)
     {
-        var connector = await dbContext.GitHubConnectors
-            .FirstOrDefaultAsync(item => item.GitHubConnectorId == connectorId);
+        var connector = await dbContext.Connectors
+            .FirstOrDefaultAsync(item => item.ConnectorId == connectorId);
 
         if (connector == null)
         {
-            logger.LogWarning("GitHub connector {ConnectorId} not found for status update.", connectorId);
+            logger.LogWarning("Connector {ConnectorId} not found for status update.", connectorId);
             return;
         }
 
         connector.Status = status;
         connector.LastError = string.IsNullOrWhiteSpace(errorMessage) ? null : errorMessage;
         await dbContext.SaveChangesAsync();
-        logger.LogInformation("Persistence: saved GitHubConnector. Action=UpdateStatus, ConnectorId={ConnectorId}, Status={Status}", connectorId, status);
+        logger.LogInformation("Persistence: saved Connector. Action=UpdateStatus, ConnectorId={ConnectorId}, Status={Status}", connectorId, status);
     }
 
     public async Task UpdateIsActiveAsync(int connectorId, bool isActive)
     {
-        var connector = await dbContext.GitHubConnectors
-            .FirstOrDefaultAsync(item => item.GitHubConnectorId == connectorId);
+        var connector = await dbContext.Connectors
+            .FirstOrDefaultAsync(item => item.ConnectorId == connectorId);
 
         if (connector == null)
         {
-            logger.LogWarning("GitHub connector {ConnectorId} not found for active toggle.", connectorId);
+            logger.LogWarning("Connector {ConnectorId} not found for active toggle.", connectorId);
             return;
         }
 
         connector.IsActive = isActive;
         await dbContext.SaveChangesAsync();
-        logger.LogInformation("Persistence: saved GitHubConnector. Action=UpdateIsActive, ConnectorId={ConnectorId}, IsActive={IsActive}", connectorId, isActive);
+        logger.LogInformation("Persistence: saved Connector. Action=UpdateIsActive, ConnectorId={ConnectorId}, IsActive={IsActive}", connectorId, isActive);
     }
 
     private async Task<bool> ConnectorNameExistsAsync(string connectorName, int? ignoreId = null)
     {
         var normalized = connectorName.Trim().ToLowerInvariant();
-        return await dbContext.GitHubConnectors
+        return await dbContext.Connectors
             .AnyAsync(connector =>
-                connector.GitHubConnectorId != ignoreId &&
+                connector.ConnectorId != ignoreId &&
                 connector.ConnectorName.ToLower() == normalized);
     }
 }

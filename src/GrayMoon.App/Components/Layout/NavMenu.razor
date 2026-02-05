@@ -28,9 +28,23 @@
             </div>
 
             <div class="nav-item px-3">
-                <NavLink class="nav-link" href="@($"workspaces/{workspaceId}")">
+                <NavLink class="nav-link" href="@($"workspaces/{workspaceId}")" Match="NavLinkMatch.All">
                     <i class="bi bi-grid" aria-hidden="true"></i>
                     <span class="nav-link-text">@(workspaceName ?? "Workspace")</span>
+                </NavLink>
+            </div>
+
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/projects")" Match="NavLinkMatch.All">
+                    <i class="bi bi-journal-code" aria-hidden="true"></i>
+                    <span class="nav-link-text">Projects</span>
+                </NavLink>
+            </div>
+
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/packages")" Match="NavLinkMatch.All">
+                    <i class="bi bi-box-seam" aria-hidden="true"></i>
+                    <span class="nav-link-text">Packages</span>
                 </NavLink>
             </div>
         }
@@ -96,7 +110,7 @@
         var path = relativePath.Split('?', '#')[0];
         var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
-        if (segments.Length == 2 &&
+        if (segments.Length >= 2 &&
             string.Equals(segments[0], "workspaces", StringComparison.OrdinalIgnoreCase) &&
             int.TryParse(segments[1], out var parsedId))
         {

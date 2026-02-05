@@ -138,7 +138,7 @@ The app sends all required data in each command. **AddSafeDirectory is called on
 
 | Command | Args | Response `data` |
 |---------|------|-----------------|
-| **SyncRepository** | `workspaceName`, `repositoryId`, `repositoryName`, `cloneUrl`, `bearerToken?`, `workspaceId` | `{ version, branch, wasCloned }` |
+| **SyncRepository** | `workspaceName`, `repositoryId`, `repositoryName`, `cloneUrl`, `bearerToken?`, `workspaceId` | `{ version, branch, projects }` |
 | **RefreshRepositoryVersion** | `workspaceName`, `repositoryName` | `{ version, branch }` |
 | **EnsureWorkspace** | `workspaceName` | `{ }` |
 | **GetWorkspaceRepositories** | `workspaceName` | `{ repositories: string[] }` |

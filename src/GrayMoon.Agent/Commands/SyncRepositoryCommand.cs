@@ -1,10 +1,11 @@
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
+using GrayMoon.Agent.Models;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class SyncRepositoryCommand(IGitService git) : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
+public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService csProjFileService) : ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>
 {
     public async Task<SyncRepositoryResponse> ExecuteAsync(SyncRepositoryRequest request, CancellationToken cancellationToken = default)
     {
@@ -17,20 +18,19 @@ public sealed class SyncRepositoryCommand(IGitService git) : ICommandHandler<Syn
 
         var workspacePath = git.GetWorkspacePath(workspaceName);
         var repoPath = Path.Combine(workspacePath, repositoryName);
-        var wasCloned = false;
 
         git.CreateDirectory(workspacePath);
 
         if (!git.DirectoryExists(repoPath) && !string.IsNullOrWhiteSpace(cloneUrl))
         {
             var ok = await git.CloneAsync(workspacePath, cloneUrl, bearerToken, cancellationToken);
-            wasCloned = ok;
             if (ok)
                 await git.AddSafeDirectoryAsync(repoPath, cancellationToken);
         }
 
         var version = "-";
         var branch = "-";
+        IReadOnlyList<CsProjFileInfo>? projects = null;
         if (git.DirectoryExists(repoPath))
         {
             var vr = await git.GetVersionAsync(repoPath, cancellationToken);
@@ -41,8 +41,9 @@ public sealed class SyncRepositoryCommand(IGitService git) : ICommandHandler<Syn
                 if (version != "-" && branch != "-")
                     git.WriteSyncHooks(repoPath, workspaceId, repositoryId);
             }
+            projects = await csProjFileService.FindAsync(repoPath, cancellationToken);
         }
 
-        return new SyncRepositoryResponse { Version = version, Branch = branch, WasCloned = wasCloned };
+        return new SyncRepositoryResponse { Version = version, Branch = branch, Projects = projects };
     }
 }

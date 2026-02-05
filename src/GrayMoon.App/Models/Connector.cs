@@ -2,9 +2,10 @@ using System.ComponentModel.DataAnnotations;
 
 namespace GrayMoon.App.Models;
 
-public class GitHubConnector
+/// <summary>Connector (formerly GitHubConnector). Table: Connectors.</summary>
+public class Connector
 {
-    public int GitHubConnectorId { get; set; }
+    public int ConnectorId { get; set; }
 
     [Required]
     [MaxLength(100)]

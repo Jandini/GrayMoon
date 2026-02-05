@@ -55,6 +55,8 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<IHubConnectionProvider, HubConnectionProvider>();
         builder.Services.AddSingleton<IJobQueue, JobQueue>();
         builder.Services.AddSingleton<IGitService, GitService>();
+        builder.Services.AddSingleton<ICsProjFileParser, CsProjFileParser>();
+        builder.Services.AddSingleton<ICsProjFileService, CsProjFileService>();
         builder.Services.AddSingleton<CommandJobFactory>();
         builder.Services.AddSingleton<ICommandDispatcher, CommandDispatcher>();
 

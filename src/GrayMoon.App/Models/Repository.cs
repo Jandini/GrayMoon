@@ -3,15 +3,16 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace GrayMoon.App.Models;
 
-public class GitHubRepository
+/// <summary>Repository (formerly GitHubRepository). Table: Repositories.</summary>
+public class Repository
 {
-    public int GitHubRepositoryId { get; set; }
+    public int RepositoryId { get; set; }
 
     [Required]
-    public int GitHubConnectorId { get; set; }
+    public int ConnectorId { get; set; }
 
-    [ForeignKey(nameof(GitHubConnectorId))]
-    public GitHubConnector? GitHubConnector { get; set; }
+    [ForeignKey(nameof(ConnectorId))]
+    public Connector? Connector { get; set; }
 
     [Required]
     [MaxLength(200)]
@@ -27,4 +28,7 @@ public class GitHubRepository
     [Required]
     [MaxLength(500)]
     public string CloneUrl { get; set; } = string.Empty;
+
+    /// <summary>Number of .csproj projects in the repository. Updated during workspace sync.</summary>
+    public int? ProjectCount { get; set; }
 }

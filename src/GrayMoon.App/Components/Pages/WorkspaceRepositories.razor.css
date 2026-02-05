@@ -1,8 +1,20 @@
-.repositories-table th,
-.repositories-table td {
+
+/* Match Workspaces grid: no left padding on Repository column header text */
+.repositories-table thead th.col-repo {
+    padding-left: 8px;
+}
+
+.repositories-table th {
+    text-align: left;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    padding-left: 0;
+}
+.repositories-table td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;  
 }
 
 .repositories-table thead,
@@ -35,7 +47,7 @@
 }
 
 .col-repo {
-    width: auto;
+    width: 50%;
     min-width: 0;
 }
 
@@ -44,6 +56,28 @@
     min-width: 100px;
     max-width: 100px;
     text-align: center;
+}
+
+.repositories-table thead th.col-sync {
+    text-align: center;
+}
+
+.repositories-table tbody td.col-sync {
+    text-align: right;
+}
+
+.repositories-table thead th.col-projects {
+    text-align: center;
+}
+
+.repositories-table tbody td.col-projects {
+    text-align: center;   
+}
+
+.col-projects {
+    width: auto;
+    padding-left: 0;
+    max-width: 50px;
 }
 
 .col-version {

@@ -48,7 +48,11 @@ public sealed class JobBackgroundService(
             {
                 logger.LogError(ex, "Worker {WorkerId} failed processing job", workerId);
                 if (envelope.CommandJob != null)
+                {
+                    var errorBody = new { Success = false, Error = ex.Message };
+                    logger.LogInformation("ResponseCommand {RequestId} {@ResponseBody}", envelope.CommandJob.RequestId, errorBody);
                     await SendResponseAsync(envelope.CommandJob.RequestId, false, null, ex.Message);
+                }
             }
         }
     }
@@ -56,6 +60,7 @@ public sealed class JobBackgroundService(
     private async Task ProcessCommandAsync(ICommandJob job, CancellationToken ct)
     {
         var result = await dispatcher.ExecuteAsync(job.Command, job.Request, ct);
+        logger.LogInformation("ResponseCommand {RequestId} {@ResponseBody}", job.RequestId, result);
         await SendResponseAsync(job.RequestId, true, result, null);
     }
 
