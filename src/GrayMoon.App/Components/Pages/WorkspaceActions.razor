@@ -86,19 +86,24 @@
                                         </td>
                                     </tr>
                                 }
+                                else if (rows.All(r => r.Loading))
+                                {
+                                    <tr>
+                                        <td colspan="7" class="text-center py-5">
+                                            <div class="spinner-border text-primary" role="status">
+                                                <span class="visually-hidden">Loading...</span>
+                                            </div>
+                                            <p class="text-muted mt-2 mb-0">Loading actions...</p>
+                                        </td>
+                                    </tr>
+                                }
                                 else
                                 {
                                     @foreach (var row in rows)
                                     {
                                         <tr>
                                             <td class="col-repo">@row.Repo.RepositoryName</td>
-                                            @if (row.Loading)
-                                            {
-                                                <td colspan="6" class="text-end py-2">
-                                                    <span class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></span>
-                                                </td>
-                                            }
-                                            else if (row.Action == null)
+                                            @if (row.Action == null)
                                             {
                                                 <td colspan="6" class="text-muted">No workflow runs</td>
                                             }
@@ -132,23 +137,42 @@
                                                 <td class="col-action">
                                                     @if (IsFailed(action))
                                                     {
-                                                        <button class="btn btn-sm btn-outline-primary"
+                                                        <button class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1"
                                                                 @onclick="() => RerunWorkflowAsync(action, row)"
-                                                                disabled="@(isRerunning || !CanRerun(action))">
+                                                                disabled="@(row.RunInProgress || !CanRerun(action))">
+                                                            @if (row.RunInProgress)
+                                                            {
+                                                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                                            }
                                                             Re-run
                                                         </button>
                                                     }
                                                     else
                                                     {
-                                                        <button class="btn btn-sm btn-outline-secondary"
+                                                        <button class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
                                                                 @onclick="() => RunWorkflowAsync(action, row)"
-                                                                disabled="@(isRunning || !CanRun(action))">
+                                                                disabled="@(row.RunInProgress || !CanRun(action))">
+                                                            @if (row.RunInProgress)
+                                                            {
+                                                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                                            }
                                                             Run
                                                         </button>
                                                     }
                                                 </td>
                                             }
                                         </tr>
+                                        @if (row.RunError != null)
+                                        {
+                                            <tr class="table-danger">
+                                                <td colspan="7" class="py-2">
+                                                    <div class="d-flex align-items-center gap-2 text-danger small">
+                                                        <i class="bi bi-exclamation-triangle"></i>
+                                                        @row.RunError
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
                                     }
                                 }
                             </tbody>
@@ -168,6 +192,8 @@
         public GitHubRepositoryEntry Repo { get; init; } = null!;
         public GitHubActionEntry? Action { get; set; }
         public bool Loading { get; set; } = true;
+        public bool RunInProgress { get; set; }
+        public string? RunError { get; set; }
     }
 
     private WorkspaceModel? workspace;
@@ -261,7 +287,6 @@
         {
             foreach (var row in rows)
             {
-                row.Action = null;
                 row.Loading = true;
             }
             await InvokeAsync(StateHasChanged);
@@ -283,7 +308,8 @@
         {
             isRerunning = true;
             errorMessage = null;
-            row.Action = null;
+            row.RunError = null;
+            row.RunInProgress = true;
             row.Loading = true;
             await InvokeAsync(StateHasChanged);
             await ActionsService.RerunWorkflowAsync(action);
@@ -293,10 +319,13 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error re-running workflow for {Owner}/{Repo}", action.Owner, action.RepositoryName);
-            errorMessage = "Failed to re-run workflow. Please try again later.";
+            row.RunError = ex.Message;
+            _ = ClearRowErrorAfterDelayAsync(row, 5000, row.RunError);
+            await InvokeAsync(StateHasChanged);
         }
         finally
         {
+            row.RunInProgress = false;
             isRerunning = false;
         }
     }
@@ -307,7 +336,8 @@
         {
             isRunning = true;
             errorMessage = null;
-            row.Action = null;
+            row.RunError = null;
+            row.RunInProgress = true;
             row.Loading = true;
             await InvokeAsync(StateHasChanged);
             await ActionsService.RunWorkflowAsync(action);
@@ -317,11 +347,24 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error running workflow for {Owner}/{Repo}", action.Owner, action.RepositoryName);
-            errorMessage = "Failed to run workflow. Please try again later.";
+            row.RunError = ex.Message;
+            _ = ClearRowErrorAfterDelayAsync(row, 5000, row.RunError);
+            await InvokeAsync(StateHasChanged);
         }
         finally
         {
+            row.RunInProgress = false;
             isRunning = false;
+        }
+    }
+
+    private async Task ClearRowErrorAfterDelayAsync(WorkspaceActionRow row, int delayMs, string messageToClear)
+    {
+        await Task.Delay(delayMs);
+        if (row.RunError == messageToClear)
+        {
+            row.RunError = null;
+            await InvokeAsync(StateHasChanged);
         }
     }
 
