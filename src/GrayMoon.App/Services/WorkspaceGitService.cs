@@ -201,7 +201,11 @@ public class WorkspaceGitService(
         var json = data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(data);
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
-        if (root.TryGetProperty("projects", out var p) && p.ValueKind == System.Text.Json.JsonValueKind.Number && p.TryGetInt32(out var n))
+        if (!root.TryGetProperty("projects", out var p))
+            return null;
+        if (p.ValueKind == System.Text.Json.JsonValueKind.Array)
+            return p.GetArrayLength();
+        if (p.ValueKind == System.Text.Json.JsonValueKind.Number && p.TryGetInt32(out var n))
             return n;
         return null;
     }

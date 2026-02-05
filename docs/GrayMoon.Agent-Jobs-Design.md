@@ -69,7 +69,7 @@ This gives a **separate interface** for jobs and keeps **code separation**: queu
   - Use `System.Text.Json` attributes where needed (`[JsonPropertyName]`, etc.).
 
 - **Responses**  
-  - Define DTOs in `Jobs/Response/` for each command that returns data, e.g. `SyncRepositoryResponse` (`Version`, `Branch`, `WasCloned`).  
+  - Define DTOs in `Jobs/Response/` for each command that returns data, e.g. `SyncRepositoryResponse` (`Version`, `Branch`, `Projects`).  
   - Handlers return these types; the response sender serializes them to JSON for `ResponseCommand(requestId, success, data, error)`.
 
 - **JSON handling**  

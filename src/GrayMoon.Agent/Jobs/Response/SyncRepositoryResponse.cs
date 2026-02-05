@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using GrayMoon.Agent.Models;
 
 namespace GrayMoon.Agent.Jobs.Response;
 
@@ -10,9 +11,6 @@ public sealed class SyncRepositoryResponse
     [JsonPropertyName("branch")]
     public string? Branch { get; set; }
 
-    [JsonPropertyName("wasCloned")]
-    public bool WasCloned { get; set; }
-
     [JsonPropertyName("projects")]
-    public int Projects { get; set; }
+    public IReadOnlyList<CsProjFileInfo>? Projects { get; set; }
 }
