@@ -1,0 +1,228 @@
+@page "/workspaces/{WorkspaceId:int}/dependencies"
+@rendermode InteractiveServer
+@using GrayMoon.App.Models
+@using GrayMoon.App.Repositories
+@using GrayMoon.App.Components.Shared
+@inject WorkspaceRepository WorkspaceRepository
+@inject RepositoryProjectRepository RepositoryProjectRepository
+@inject IJSRuntime JSRuntime
+@inject ILogger<WorkspaceDependencies> Logger
+@using WorkspaceModel = GrayMoon.App.Models.Workspace
+@implements IAsyncDisposable
+
+<PageTitle>@(workspace?.Name ?? "Workspace") - Dependencies</PageTitle>
+
+<div class="container-fluid page-container dependencies-page">
+    <div class="grid-page-header">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h2>@(workspace?.Name ?? "Workspace") Dependencies</h2>
+                <p class="text-muted mb-0" style="min-height: 1.5rem;">
+                    @if (graph != null)
+                    {
+                        @($"{graph.Nodes.Count} repositories, {graph.Edges.Count} dependencies")
+                    }
+                    &nbsp;
+                </p>
+            </div>
+        </div>
+        @if (errorMessage != null)
+        {
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i> @errorMessage
+            </div>
+        }
+    </div>
+    @if (errorMessage == null && graph != null)
+    {
+        <div class="grid-page-body dependencies-graph-container">
+            <div id="cytoscape-dependency-graph" class="cytoscape-graph @(graph.Nodes.Count == 0 ? "cytoscape-graph-empty" : "")"></div>
+            @if (graph.Nodes.Count == 0)
+            {
+                <p class="dependencies-empty-message text-muted text-center mb-0">No dependencies to display. Sync repositories to discover projects and dependencies.</p>
+            }
+        </div>
+    }
+</div>
+
+<LoadingOverlay IsVisible="@isLoading" Message="Loading dependencies..." />
+
+@code {
+    [Parameter] public int WorkspaceId { get; set; }
+
+    private WorkspaceModel? workspace;
+    private RepositoryDependencyGraph? graph;
+    private string? errorMessage;
+    private bool isLoading = true;
+    private const string GraphContainerId = "cytoscape-dependency-graph";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && graph != null && graph.Nodes.Count > 0)
+            {
+                try
+                {
+                    var prefixByRepoId = GetLabelsWithGroupPrefixStripped(graph.Nodes.Select(n => (n.RepositoryId, n.RepositoryName)).ToList());
+                    var nodes = graph.Nodes.Select(n => new
+                    {
+                        id = n.RepositoryId.ToString(),
+                        label = prefixByRepoId.TryGetValue(n.RepositoryId, out var label) ? label : n.RepositoryName
+                    }).ToList();
+                    var edges = graph.Edges.Select(e => new { source = e.DependentRepositoryId.ToString(), target = e.ReferencedRepositoryId.ToString() }).ToList();
+                    var roots = graph.Nodes.Select(n => n.RepositoryId.ToString()).Except(edges.Select(e => e.target)).ToList();
+                    await JSRuntime.InvokeVoidAsync("renderCytoscapeGraph", GraphContainerId, nodes, edges, roots);
+                }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Cytoscape render failed for workspace {WorkspaceId}", WorkspaceId);
+            }
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = null;
+            workspace = await WorkspaceRepository.GetByIdAsync(WorkspaceId);
+            if (workspace == null)
+            {
+                errorMessage = "Workspace not found.";
+                graph = null;
+                return;
+            }
+            graph = await RepositoryProjectRepository.GetRepositoryDependencyGraphAsync(WorkspaceId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading dependencies for workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Failed to load dependencies. Please try again later.";
+            graph = null;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    /// <summary>Groups names by first segment (prefix before . - _), strips each group's common prefix, returns repo id -> display label.</summary>
+    private static Dictionary<int, string> GetLabelsWithGroupPrefixStripped(IReadOnlyList<(int RepositoryId, string Name)> repos)
+    {
+        var result = new Dictionary<int, string>();
+        if (repos == null || repos.Count == 0) return result;
+
+        var sorted = repos.OrderBy(r => NormalizeForCompare(GetFirstSegment(r.Name))).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
+
+        var firstSegmentKey = NormalizeForCompare(GetFirstSegment(sorted[0].Name));
+        var groups = new List<List<(int Id, string Name)>>();
+        var current = new List<(int Id, string Name)> { (sorted[0].RepositoryId, sorted[0].Name) };
+        var currentSegmentKey = firstSegmentKey;
+
+        for (var i = 1; i < sorted.Count; i++)
+        {
+            var segKey = NormalizeForCompare(GetFirstSegment(sorted[i].Name));
+            if (segKey == currentSegmentKey)
+            {
+                current.Add((sorted[i].RepositoryId, sorted[i].Name));
+            }
+            else
+            {
+                groups.Add(current);
+                current = new List<(int Id, string Name)> { (sorted[i].RepositoryId, sorted[i].Name) };
+                currentSegmentKey = segKey;
+            }
+        }
+        groups.Add(current);
+
+        foreach (var group in groups)
+        {
+            var names = group.Select(g => g.Name).ToList();
+            var commonNormLen = GetCommonNormalizedPrefixLength(names);
+            foreach (var (id, name) in group)
+            {
+                var prefix = GetPrefixToStrip(name, commonNormLen);
+                var label = string.IsNullOrEmpty(prefix) ? name : name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? name[prefix.Length..].TrimStart('.', '-', '_') : name;
+                label = string.IsNullOrWhiteSpace(label) ? name : label;
+                result[id] = ReplaceSeparatorsWithSpaces(label);
+            }
+        }
+
+        return result;
+    }
+
+    private static string GetFirstSegment(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return "";
+        var i = 0;
+        while (i < name.Length && !IsSeparator(name[i])) i++;
+        return name[..i];
+    }
+
+    private static bool IsSeparator(char c) => c == '.' || c == '-' || c == '_';
+
+    /// <summary>Normalize for comparison: case insensitive, ignore dots, minuses, underscores.</summary>
+    private static string NormalizeForCompare(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        return new string(s.Where(c => !IsSeparator(c)).ToArray()).ToLowerInvariant();
+    }
+
+    /// <summary>Length of longest common prefix of normalized names (case insensitive, separators ignored).</summary>
+    private static int GetCommonNormalizedPrefixLength(IReadOnlyList<string> names)
+    {
+        if (names == null || names.Count < 2) return 0;
+        var normalized = names.Select(NormalizeForCompare).ToList();
+        if (normalized[0].Length == 0) return 0;
+        var commonNormLen = normalized[0].Length;
+        for (var i = 1; i < normalized.Count; i++)
+        {
+            var a = normalized[0];
+            var b = normalized[i];
+            var j = 0;
+            while (j < commonNormLen && j < b.Length && a[j] == b[j]) j++;
+            commonNormLen = j;
+            if (commonNormLen == 0) return 0;
+        }
+        return commonNormLen;
+    }
+
+    /// <summary>Prefix to strip from this name: first commonNormLen non-sep chars, extended to end of token and trailing separators.</summary>
+    private static string GetPrefixToStrip(string name, int commonNormLen)
+    {
+        if (string.IsNullOrEmpty(name) || commonNormLen <= 0) return "";
+        var count = 0;
+        var end = 0;
+        for (var i = 0; i < name.Length && count < commonNormLen; i++)
+        {
+            if (!IsSeparator(name[i])) count++;
+            end = i + 1;
+        }
+        if (count < commonNormLen) return "";
+        // Extend to end of current token so we don't cut in the middle of a word (e.g. "express" not "expre")
+        while (end < name.Length && !IsSeparator(name[end])) end++;
+        while (end < name.Length && IsSeparator(name[end])) end++;
+        return name[..end];
+    }
+
+    /// <summary>Replace dots, minuses, underscores with spaces for display.</summary>
+    private static string ReplaceSeparatorsWithSpaces(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return s;
+        return new string(s.Select(c => IsSeparator(c) ? ' ' : c).ToArray());
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("destroyCytoscapeGraph", GraphContainerId);
+        }
+        catch { /* ignore if JS not loaded */ }
+    }
+}

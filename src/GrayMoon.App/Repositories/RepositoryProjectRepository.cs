@@ -254,6 +254,33 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
         return new ProjectDependencyGraph(nodes, edgeList);
     }
 
+    /// <summary>Returns repository-level dependency graph (nodes = repos, edges = repo depends on repo). For Cytoscape.</summary>
+    public async Task<RepositoryDependencyGraph> GetRepositoryDependencyGraphAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var projects = await GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        if (projects.Count == 0) return new RepositoryDependencyGraph(new List<RepositoryDependencyNode>(), new List<RepositoryDependencyEdge>());
+
+        var edges = await GetDependencyEdgesAsync(workspaceId, cancellationToken);
+        var byProject = projects.ToDictionary(p => p.ProjectId);
+
+        var repoNodes = projects
+            .GroupBy(p => p.RepositoryId)
+            .Select(g => new RepositoryDependencyNode(g.Key, g.First().Repository?.RepositoryName ?? "Repo " + g.Key))
+            .Where(n => !string.IsNullOrEmpty(n.RepositoryName))
+            .ToList();
+
+        var repoEdges = new HashSet<(int Dep, int Ref)>();
+        foreach (var (depProjectId, refProjectId) in edges)
+        {
+            if (!byProject.TryGetValue(depProjectId, out var depProj) || !byProject.TryGetValue(refProjectId, out var refProj)) continue;
+            if (depProj.RepositoryId == refProj.RepositoryId) continue;
+            repoEdges.Add((depProj.RepositoryId, refProj.RepositoryId));
+        }
+
+        var edgeList = repoEdges.Select(e => new RepositoryDependencyEdge(e.Dep, e.Ref)).ToList();
+        return new RepositoryDependencyGraph(repoNodes, edgeList);
+    }
+
     /// <summary>Returns repositories in build order with sequence (same sequence = build in parallel) and dependency count per repo.</summary>
     public async Task<List<RepositoryBuildOrderRow>> GetRepositoryBuildOrderAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
