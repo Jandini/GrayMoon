@@ -1,0 +1,126 @@
+@page "/workspaces/{WorkspaceId:int}/build"
+@rendermode InteractiveServer
+@using GrayMoon.App.Models
+@using GrayMoon.App.Repositories
+@using GrayMoon.App.Components.Shared
+@inject WorkspaceRepository WorkspaceRepository
+@inject RepositoryProjectRepository RepositoryProjectRepository
+@inject ILogger<WorkspaceBuild> Logger
+@using WorkspaceModel = GrayMoon.App.Models.Workspace
+
+<PageTitle>@(workspace?.Name ?? "Workspace") - Build</PageTitle>
+
+<div class="container-fluid page-container grid-page">
+    <div class="grid-page-header">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h2>@(workspace?.Name ?? "Workspace") Build</h2>
+                <p class="text-muted mb-0" style="min-height: 1.5rem;">
+                    @if (rows.Count > 0)
+                    {
+                        @($"{rows.Count} {(rows.Count == 1 ? "repository" : "repositories")} in build order.")
+                    }
+                    &nbsp;
+                </p>
+            </div>
+        </div>
+        @if (errorMessage != null)
+        {
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i> @errorMessage
+            </div>
+        }
+    </div>
+    @if (errorMessage == null)
+    {
+        <div class="grid-page-body">
+            <div class="card page-card mb-4">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover mb-0 build-order-table">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th class="col-repository">Repository</th>
+                                    <th class="col-sequence">Sequence</th>
+                                    <th class="col-dependencies">Dependencies</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (isLoading)
+                                {
+                                    <tr>
+                                        <td colspan="3" class="text-center text-muted py-4">
+                                            Loading build order...
+                                        </td>
+                                    </tr>
+                                }
+                                else if (rows.Count == 0)
+                                {
+                                    <tr>
+                                        <td colspan="3" class="text-center text-muted py-4">
+                                            No repositories in build order. Sync repositories to discover projects and dependencies.
+                                        </td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    @foreach (var row in rows)
+                                    {
+                                        <tr>
+                                            <td class="col-repository"><strong>@row.RepositoryName</strong></td>
+                                            <td class="col-sequence">@row.Sequence</td>
+                                            <td class="col-dependencies">@row.DependencyCount</td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<LoadingOverlay IsVisible="@isLoading" Message="Loading build order..." />
+
+@code {
+    [Parameter] public int WorkspaceId { get; set; }
+
+    private WorkspaceModel? workspace;
+    private List<RepositoryBuildOrderRow> rows = new();
+    private string? errorMessage;
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = null;
+            workspace = await WorkspaceRepository.GetByIdAsync(WorkspaceId);
+            if (workspace == null)
+            {
+                errorMessage = "Workspace not found.";
+                rows = new List<RepositoryBuildOrderRow>();
+                return;
+            }
+            rows = await RepositoryProjectRepository.GetRepositoryBuildOrderAsync(WorkspaceId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading build order for workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Failed to load build order. Please try again later.";
+            rows = new List<RepositoryBuildOrderRow>();
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}

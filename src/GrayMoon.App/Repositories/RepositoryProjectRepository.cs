@@ -253,4 +253,72 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
 
         return new ProjectDependencyGraph(nodes, edgeList);
     }
+
+    /// <summary>Returns repositories in build order with sequence (same sequence = build in parallel) and dependency count per repo.</summary>
+    public async Task<List<RepositoryBuildOrderRow>> GetRepositoryBuildOrderAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var projects = await GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        if (projects.Count == 0) return new List<RepositoryBuildOrderRow>();
+
+        var edges = await GetDependencyEdgesAsync(workspaceId, cancellationToken);
+        var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
+        var byProject = projects.ToDictionary(p => p.ProjectId);
+
+        var inDegree = projects.ToDictionary(p => p.ProjectId, _ => 0);
+        var revEdges = projects.ToDictionary(p => p.ProjectId, _ => new List<int>());
+        foreach (var (depId, refId) in edges)
+        {
+            if (!projectIds.Contains(depId) || !projectIds.Contains(refId)) continue;
+            inDegree[depId]++;
+            revEdges[refId].Add(depId);
+        }
+
+        var levelByProject = new Dictionary<int, int>();
+        var queue = new Queue<int>(projects.Where(p => inDegree[p.ProjectId] == 0).Select(p => p.ProjectId));
+        var currentLevel = 1;
+        var remaining = projects.Count;
+        while (queue.Count > 0)
+        {
+            var levelSize = queue.Count;
+            for (var i = 0; i < levelSize; i++)
+            {
+                var n = queue.Dequeue();
+                levelByProject[n] = currentLevel;
+                remaining--;
+                foreach (var depId in revEdges[n])
+                {
+                    inDegree[depId]--;
+                    if (inDegree[depId] == 0)
+                        queue.Enqueue(depId);
+                }
+            }
+            currentLevel++;
+        }
+
+        if (remaining != 0)
+            return new List<RepositoryBuildOrderRow>();
+
+        var depCountByRepo = projects.GroupBy(p => p.RepositoryId).ToDictionary(g => g.Key, _ => 0);
+        foreach (var (depId, _) in edges)
+        {
+            if (!byProject.TryGetValue(depId, out var p)) continue;
+            depCountByRepo[p.RepositoryId]++;
+        }
+
+        var repoSequence = projects
+            .GroupBy(p => p.RepositoryId)
+            .Select(g => (
+                RepositoryId: g.Key,
+                Sequence: g.Max(p => levelByProject.GetValueOrDefault(p.ProjectId, currentLevel)),
+                RepositoryName: g.First().Repository?.RepositoryName ?? ""
+            ))
+            .Where(t => !string.IsNullOrEmpty(t.RepositoryName))
+            .ToList();
+
+        return repoSequence
+            .Select(t => new RepositoryBuildOrderRow(t.Sequence, t.RepositoryName, depCountByRepo.GetValueOrDefault(t.RepositoryId, 0)))
+            .OrderBy(r => r.Sequence)
+            .ThenBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 }
