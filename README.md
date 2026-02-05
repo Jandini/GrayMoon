@@ -2,7 +2,7 @@
 
 [![Docker Build](https://github.com/Jandini/GrayMoon/actions/workflows/docker-build.yml/badge.svg)](https://github.com/Jandini/GrayMoon/actions/workflows/docker-build.yml)
 
-.NET project dependency and GitHub Actions orchestrator: connector management, repository visibility, workspace grouping, and sync with GitVersion.
+.NET dependency orchestrator: connector management, repository visibility, workspace grouping, and sync with GitVersion.
 
 ## Features
 

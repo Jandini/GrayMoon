@@ -421,7 +421,7 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error syncing workspace {WorkspaceId}", WorkspaceId);
-            errorMessage = "Failed to sync. Please try again later.";
+            errorMessage = "Sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
         }
         finally
         {

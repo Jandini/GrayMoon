@@ -1,0 +1,124 @@
+@page "/workspaces/{WorkspaceId:int}/packages"
+@rendermode InteractiveServer
+@using GrayMoon.App.Models
+@using GrayMoon.App.Repositories
+@using GrayMoon.App.Components.Shared
+@inject WorkspaceRepository WorkspaceRepository
+@inject RepositoryProjectRepository RepositoryProjectRepository
+@inject ILogger<WorkspacePackages> Logger
+@using WorkspaceModel = GrayMoon.App.Models.Workspace
+
+<PageTitle>@(workspace?.Name ?? "Workspace") - Packages</PageTitle>
+
+<div class="container-fluid page-container grid-page">
+    <div class="grid-page-header">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h2>@(workspace?.Name ?? "Workspace") Packages</h2>
+                <p class="text-muted mb-0" style="min-height: 1.5rem;">
+                    @if (packages.Count > 0)
+                    {
+                        @($"{packages.Count} {(packages.Count == 1 ? "package" : "packages")}")
+                    }
+                    &nbsp;
+                </p>
+            </div>
+        </div>
+        @if (errorMessage != null)
+        {
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i> @errorMessage
+            </div>
+        }
+    </div>
+    @if (errorMessage == null)
+    {
+        <div class="grid-page-body">
+            <div class="card page-card mb-4">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover mb-0 packages-table">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th class="col-packageid">Package Id</th>
+                                    <th class="col-framework">Framework</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (isLoading)
+                                {
+                                    <tr>
+                                        <td colspan="2" class="text-center text-muted py-4">
+                                            Loading packages...
+                                        </td>
+                                    </tr>
+                                }
+                                else if (packages.Count == 0)
+                                {
+                                    <tr>
+                                        <td colspan="2" class="text-center text-muted py-4">
+                                            No NuGet packages in this workspace. Sync repositories to discover package projects.
+                                        </td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    @foreach (var p in packages)
+                                    {
+                                        <tr>
+                                            <td class="col-packageid"><strong>@(p.PackageId ?? "-")</strong></td>
+                                            <td class="col-framework text-muted">@p.TargetFramework</td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<LoadingOverlay IsVisible="@isLoading" Message="Loading packages..." />
+
+@code {
+    [Parameter] public int WorkspaceId { get; set; }
+
+    private WorkspaceModel? workspace;
+    private List<RepositoryProject> packages = new();
+    private string? errorMessage;
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = null;
+            workspace = await WorkspaceRepository.GetByIdAsync(WorkspaceId);
+            if (workspace == null)
+            {
+                errorMessage = "Workspace not found.";
+                packages = new List<RepositoryProject>();
+                return;
+            }
+            packages = await RepositoryProjectRepository.GetPackagesByWorkspaceIdAsync(WorkspaceId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading packages for workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Failed to load packages. Please try again later.";
+            packages = new List<RepositoryProject>();
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}
