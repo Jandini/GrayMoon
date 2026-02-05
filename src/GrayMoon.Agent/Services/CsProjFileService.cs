@@ -28,10 +28,11 @@ public sealed class CsProjFileService(ICsProjFileParser parser) : ICsProjFileSer
                     if (parsed != null)
                         return new CsProjFileInfo
                         {
-                            ProjectPath = path,
+                            ProjectPath = Path.GetRelativePath(repoPath, path),
                             ProjectType = parsed.ProjectType,
                             TargetFramework = parsed.TargetFramework,
                             Name = parsed.Name,
+                            PackageId = parsed.PackageId,
                             PackageReferences = parsed.PackageReferences
                         };
                 }

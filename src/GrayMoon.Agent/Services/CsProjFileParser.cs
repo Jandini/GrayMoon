@@ -71,12 +71,15 @@ public sealed class CsProjFileParser : ICsProjFileParser
             .ToList();
 
         var projectType = ResolveProjectType(sdk, outputType, packageRefs, packageId, isPackable);
+        // When project has PackageId and it differs from assembly/file name, Name already uses PackageId; return PackageId for Package type
+        var resultPackageId = projectType == ProjectType.Package && !string.IsNullOrWhiteSpace(packageId) ? packageId : null;
 
         return new CsProjFileInfo
         {
             ProjectType = projectType,
             TargetFramework = framework,
             Name = name,
+            PackageId = resultPackageId,
             PackageReferences = packageRefs
         };
     }
