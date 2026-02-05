@@ -19,8 +19,16 @@
                 <p class="text-muted mb-0" style="min-height: 1.5rem;">
                     @if (rows.Count > 0)
                     {
-                        var actionCount = rows.Count(r => r.Action != null);
-                        @($"{actionCount} {(actionCount == 1 ? "action" : "actions")}")
+                        var anyLoading = rows.Any(r => r.Loading);
+                        if (anyLoading)
+                        {
+                            @:Loading...
+                        }
+                        else
+                        {
+                            var actionCount = rows.Count(r => r.Action != null);
+                            @($"{actionCount} {(actionCount == 1 ? "action" : "actions")}")
+                        }
                     }
                     &nbsp;
                 </p>
