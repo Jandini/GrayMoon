@@ -232,9 +232,25 @@ public class WorkspaceGitService(
             var projectPath = el.TryGetProperty("projectPath", out var pp) ? pp.GetString() ?? "" : "";
             var targetFramework = el.TryGetProperty("targetFramework", out var tf) ? tf.GetString() ?? "" : "";
             var packageId = el.TryGetProperty("packageId", out var pi) ? pi.GetString() : null;
-            list.Add(new SyncProjectInfo(name, projectType, projectPath, targetFramework, packageId));
+            var packageRefs = ParsePackageReferences(el);
+            list.Add(new SyncProjectInfo(name, projectType, projectPath, targetFramework, packageId, packageRefs));
         }
         return list.Count > 0 ? list : null;
+    }
+
+    private static IReadOnlyList<SyncPackageReference> ParsePackageReferences(JsonElement projectEl)
+    {
+        if (!projectEl.TryGetProperty("packageReferences", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return Array.Empty<SyncPackageReference>();
+        var list = new List<SyncPackageReference>();
+        foreach (var refEl in arr.EnumerateArray())
+        {
+            var refName = refEl.TryGetProperty("name", out var n) ? n.GetString() : null;
+            if (string.IsNullOrWhiteSpace(refName)) continue;
+            var version = refEl.TryGetProperty("version", out var v) ? v.GetString() ?? "" : "";
+            list.Add(new SyncPackageReference(refName.Trim(), version));
+        }
+        return list;
     }
 
     private static RepoSyncStatus ParseGetRepositoryVersionToStatus(object data, string? persistedVersion, string? persistedBranch)
@@ -291,6 +307,10 @@ public class WorkspaceGitService(
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        var syncResults = resultList.Select(r => (r.RepoId, r.info.ProjectsDetail)).ToList();
+        await _repositoryProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, syncResults, cancellationToken);
+
         _logger.LogInformation("Persistence: saved WorkspaceRepository link versions. WorkspaceId={WorkspaceId}, RepoCount={RepoCount}",
             workspaceId, resultList.Count);
     }

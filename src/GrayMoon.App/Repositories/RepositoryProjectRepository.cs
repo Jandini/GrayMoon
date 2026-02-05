@@ -98,4 +98,159 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
         logger.LogInformation("Persistence: RepositoryProjects. Action=Merge, RepositoryId={RepositoryId}, Removed={Removed}, AddedOrUpdated={Count}",
             repositoryId, toRemove.Count, byName.Count);
     }
+
+    /// <summary>Replaces project dependencies for workspace projects from sync results. Only dependencies where the referenced package is a workspace project are persisted.</summary>
+    public async Task MergeWorkspaceProjectDependenciesAsync(
+        int workspaceId,
+        IReadOnlyList<(int RepoId, IReadOnlyList<SyncProjectInfo>? ProjectsDetail)> syncResults,
+        CancellationToken cancellationToken = default)
+    {
+        var repoIds = await dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .Select(wr => wr.LinkedRepositoryId)
+            .ToListAsync(cancellationToken);
+        if (repoIds.Count == 0) return;
+
+        var workspaceProjects = await dbContext.RepositoryProjects
+            .AsNoTracking()
+            .Where(p => repoIds.Contains(p.RepositoryId))
+            .ToListAsync(cancellationToken);
+
+        var packageNameToProjectId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in workspaceProjects)
+        {
+            var key = !string.IsNullOrWhiteSpace(p.PackageId) ? p.PackageId!.Trim() : p.ProjectName.Trim();
+            if (!string.IsNullOrEmpty(key) && !packageNameToProjectId.ContainsKey(key))
+                packageNameToProjectId[key] = p.ProjectId;
+        }
+
+        var dependentProjectIds = new HashSet<int>();
+        var edges = new List<(int DependentProjectId, int ReferencedProjectId)>();
+
+        foreach (var (repoId, projectsDetail) in syncResults)
+        {
+            if (projectsDetail == null || projectsDetail.Count == 0) continue;
+
+            var repoProjects = workspaceProjects.Where(p => p.RepositoryId == repoId).ToDictionary(p => p.ProjectName.Trim(), p => p.ProjectId, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var info in projectsDetail)
+            {
+                if (string.IsNullOrWhiteSpace(info.ProjectName)) continue;
+                if (!repoProjects.TryGetValue(info.ProjectName.Trim(), out var dependentProjectId)) continue;
+
+                dependentProjectIds.Add(dependentProjectId);
+
+                if (info.PackageReferences.Count == 0) continue;
+                foreach (var pr in info.PackageReferences)
+                {
+                    if (string.IsNullOrWhiteSpace(pr.Name)) continue;
+                    if (!packageNameToProjectId.TryGetValue(pr.Name.Trim(), out var referencedProjectId)) continue;
+                    if (referencedProjectId == dependentProjectId) continue;
+                    edges.Add((dependentProjectId, referencedProjectId));
+                }
+            }
+        }
+
+        if (dependentProjectIds.Count == 0) return;
+
+        var existing = await dbContext.ProjectDependencies
+            .Where(d => dependentProjectIds.Contains(d.DependentProjectId))
+            .ToListAsync(cancellationToken);
+        dbContext.ProjectDependencies.RemoveRange(existing);
+
+        var uniqueEdges = edges.Distinct().ToHashSet();
+        foreach (var (depId, refId) in uniqueEdges)
+        {
+            dbContext.ProjectDependencies.Add(new ProjectDependency
+            {
+                DependentProjectId = depId,
+                ReferencedProjectId = refId
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Persistence: ProjectDependencies. WorkspaceId={WorkspaceId}, DependentCount={Count}, EdgeCount={Edges}",
+            workspaceId, dependentProjectIds.Count, uniqueEdges.Count);
+    }
+
+    /// <summary>Returns dependency edges (DependentProjectId, ReferencedProjectId) for the workspace. Suitable for Cytoscape: nodes = projects, edges = this list.</summary>
+    public async Task<List<(int DependentProjectId, int ReferencedProjectId)>> GetDependencyEdgesAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var repoIds = await dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .Select(wr => wr.LinkedRepositoryId)
+            .ToListAsync(cancellationToken);
+        if (repoIds.Count == 0) return new List<(int, int)>();
+
+        var workspaceProjectIds = await dbContext.RepositoryProjects
+            .Where(p => repoIds.Contains(p.RepositoryId))
+            .Select(p => p.ProjectId)
+            .ToListAsync(cancellationToken);
+        if (workspaceProjectIds.Count == 0) return new List<(int, int)>();
+
+        var idSet = workspaceProjectIds.ToHashSet();
+        var rows = await dbContext.ProjectDependencies
+            .AsNoTracking()
+            .Where(d => idSet.Contains(d.DependentProjectId) && idSet.Contains(d.ReferencedProjectId))
+            .Select(d => new { d.DependentProjectId, d.ReferencedProjectId })
+            .ToListAsync(cancellationToken);
+        return rows.Select(r => (r.DependentProjectId, r.ReferencedProjectId)).ToList();
+    }
+
+    /// <summary>Returns workspace projects in build order (dependencies first). Uses topological sort; returns empty list if cycle detected.</summary>
+    public async Task<List<RepositoryProject>> GetBuildOrderAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var projects = await GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        if (projects.Count == 0) return projects;
+
+        var edges = await GetDependencyEdgesAsync(workspaceId, cancellationToken);
+        var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
+        var byProject = projects.ToDictionary(p => p.ProjectId);
+
+        var inDegree = projects.ToDictionary(p => p.ProjectId, _ => 0);
+        var revEdges = projects.ToDictionary(p => p.ProjectId, _ => new List<int>());
+        foreach (var (depId, refId) in edges)
+        {
+            if (!projectIds.Contains(depId) || !projectIds.Contains(refId)) continue;
+            inDegree[depId]++;
+            revEdges[refId].Add(depId);
+        }
+
+        var queue = new Queue<int>(projects.Where(p => inDegree[p.ProjectId] == 0).Select(p => p.ProjectId));
+        var order = new List<int>();
+        while (queue.Count > 0)
+        {
+            var n = queue.Dequeue();
+            order.Add(n);
+            foreach (var depId in revEdges[n])
+            {
+                inDegree[depId]--;
+                if (inDegree[depId] == 0)
+                    queue.Enqueue(depId);
+            }
+        }
+
+        if (order.Count != projects.Count)
+            return new List<RepositoryProject>();
+
+        return order.Select(id => byProject[id]).ToList();
+    }
+
+    /// <summary>Returns the dependency graph for the workspace: nodes (projects with labels) and edges. Suitable for Cytoscape (nodes + edges).</summary>
+    public async Task<ProjectDependencyGraph> GetDependencyGraphAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var projects = await GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        var edges = await GetDependencyEdgesAsync(workspaceId, cancellationToken);
+
+        var nodes = projects.Select(p => new ProjectDependencyNode(
+            p.ProjectId,
+            p.PackageId ?? p.ProjectName,
+            p.PackageId,
+            p.ProjectName,
+            p.Repository?.RepositoryName ?? "")).ToList();
+
+        var edgeList = edges.Select(e => new ProjectDependencyEdge(e.DependentProjectId, e.ReferencedProjectId)).ToList();
+
+        return new ProjectDependencyGraph(nodes, edgeList);
+    }
 }

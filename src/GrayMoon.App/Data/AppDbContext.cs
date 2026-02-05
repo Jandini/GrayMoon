@@ -10,6 +10,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Workspace> Workspaces => Set<Workspace>();
     public DbSet<WorkspaceRepositoryLink> WorkspaceRepositories => Set<WorkspaceRepositoryLink>();
     public DbSet<RepositoryProject> RepositoryProjects => Set<RepositoryProject>();
+    public DbSet<ProjectDependency> ProjectDependencies => Set<ProjectDependency>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -141,6 +142,23 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasOne(p => p.Repository)
                 .WithMany()
                 .HasForeignKey(p => p.RepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectDependency>(entity =>
+        {
+            entity.HasKey(d => d.ProjectDependencyId);
+            entity.HasIndex(d => new { d.DependentProjectId, d.ReferencedProjectId })
+                .IsUnique();
+
+            entity.HasOne(d => d.DependentProject)
+                .WithMany(p => p.DependsOn)
+                .HasForeignKey(d => d.DependentProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(d => d.ReferencedProject)
+                .WithMany(p => p.ReferencedBy)
+                .HasForeignKey(d => d.ReferencedProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

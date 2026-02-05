@@ -31,4 +31,12 @@ public class RepositoryProject
 
     [MaxLength(200)]
     public string? PackageId { get; set; }
+
+    /// <summary>Outgoing dependencies (projects this one references).</summary>
+    [InverseProperty(nameof(ProjectDependency.DependentProject))]
+    public ICollection<ProjectDependency> DependsOn { get; set; } = new List<ProjectDependency>();
+
+    /// <summary>Incoming dependencies (projects that reference this one).</summary>
+    [InverseProperty(nameof(ProjectDependency.ReferencedProject))]
+    public ICollection<ProjectDependency> ReferencedBy { get; set; } = new List<ProjectDependency>();
 }
