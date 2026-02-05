@@ -31,6 +31,7 @@ public sealed class CsProjFileParser : ICsProjFileParser
         if (root == null)
             return null;
 
+        var sdk = root.Attribute("Sdk")?.Value?.Trim();
         var allElements = root.Descendants().ToList();
 
         string? GetFirstPropertyValue(string localName)
@@ -44,6 +45,7 @@ public sealed class CsProjFileParser : ICsProjFileParser
         var targetFrameworks = GetFirstPropertyValue("TargetFrameworks");
         var packageId = GetFirstPropertyValue("PackageId");
         var assemblyName = GetFirstPropertyValue("AssemblyName");
+        var isPackable = GetFirstPropertyValue("IsPackable");
 
         var framework = !string.IsNullOrWhiteSpace(targetFramework)
             ? targetFramework
@@ -68,7 +70,7 @@ public sealed class CsProjFileParser : ICsProjFileParser
             .Select(t => new NuGetPackageReference { Name = t.Include!, Version = t.Version })
             .ToList();
 
-        var projectType = ResolveProjectType(outputType, packageRefs);
+        var projectType = ResolveProjectType(sdk, outputType, packageRefs, packageId, isPackable);
 
         return new CsProjFileInfo
         {
@@ -79,7 +81,12 @@ public sealed class CsProjFileParser : ICsProjFileParser
         };
     }
 
-    private static ProjectType ResolveProjectType(string? outputType, IReadOnlyList<NuGetPackageReference> packageRefs)
+    private static ProjectType ResolveProjectType(
+        string? sdk,
+        string? outputType,
+        IReadOnlyList<NuGetPackageReference> packageRefs,
+        string? packageId,
+        string? isPackable)
     {
         if (string.Equals(outputType, "Exe", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(outputType, "WinExe", StringComparison.OrdinalIgnoreCase))
@@ -94,6 +101,21 @@ public sealed class CsProjFileParser : ICsProjFileParser
         if (hasTestSdk)
             return ProjectType.Test;
 
-        return ProjectType.Package;
+        if (!string.IsNullOrWhiteSpace(sdk) && sdk.StartsWith("Microsoft.NET.Sdk.Web", StringComparison.OrdinalIgnoreCase))
+            return ProjectType.Service;
+
+        // Library: if packable or has PackageId then it's a Package, else Library
+        var isPackage = IsPackagedAsNuGet(packageId, isPackable);
+        return isPackage ? ProjectType.Package : ProjectType.Library;
+    }
+
+    /// <summary>True when the project is packable or has PackageId (NuGet package intent).</summary>
+    private static bool IsPackagedAsNuGet(string? packageId, string? isPackable)
+    {
+        if (!string.IsNullOrWhiteSpace(packageId))
+            return true;
+        if (string.Equals(isPackable, "true", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return false;
     }
 }

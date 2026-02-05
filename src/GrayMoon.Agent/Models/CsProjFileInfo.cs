@@ -6,7 +6,7 @@ public sealed class CsProjFileInfo
     /// <summary>Full path to the .csproj file (set when returned from FindAsync).</summary>
     public string? ProjectPath { get; init; }
 
-    /// <summary>Project type: Executable, Test, or Package (library).</summary>
+    /// <summary>Project type: Executable, Test, Service (Web SDK), Package (NuGet package), or Library.</summary>
     public required ProjectType ProjectType { get; init; }
 
     /// <summary>Target framework(s), e.g. "net8.0" or "net6.0;net8.0" for multi-targeting.</summary>
@@ -28,8 +28,14 @@ public enum ProjectType
     /// <summary>Test project (references a test SDK).</summary>
     Test,
 
-    /// <summary>Library or NuGet package project.</summary>
-    Package
+    /// <summary>Service / web app (Sdk=Microsoft.NET.Sdk.Web).</summary>
+    Service,
+
+    /// <summary>NuGet package project (class library with packaging intent).</summary>
+    Package,
+
+    /// <summary>Class library not packaged as NuGet.</summary>
+    Library
 }
 
 /// <summary>A NuGet package reference (name and version as declared in the project).</summary>
