@@ -1,11 +1,4 @@
-/* Align header and data rows: same table layout for thead and each tbody tr */
-.build-order-table thead,
-.build-order-table tbody tr {
-    display: table;
-    width: 100%;
-    table-layout: fixed;
-}
-
+/* Match Repositories / Workspaces: left-align all columns, status column (Dependencies) right-aligned via col-status-badge; use global resizable-columns padding for header spacing */
 .build-order-table th,
 .build-order-table td {
     white-space: nowrap;
@@ -13,8 +6,11 @@
     text-overflow: ellipsis;
 }
 
-.build-order-table th {
-    padding-left: 0;
+.build-order-table thead,
+.build-order-table tbody tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
 }
 
 /* Column widths (apply to both th and td via class) */
@@ -33,34 +29,6 @@
 .build-order-table .col-repository {
     width: auto;
     min-width: 0;
-}
-
-/* Header alignment */
-.build-order-table thead th.col-repository {
-    text-align: left;
-    padding-left: 8px;
-}
-
-.build-order-table thead th.col-sequence {
-    text-align: center;
-}
-
-.build-order-table thead th.col-dependencies {
-    text-align: right;
-}
-
-/* Data row alignment */
-.build-order-table tbody td.col-repository {
-    text-align: left;
-    padding-left: 8px;
-}
-
-.build-order-table tbody td.col-sequence {
-    text-align: center;
-}
-
-.build-order-table tbody td.col-dependencies {
-    text-align: right;
 }
 
 /* Dependencies column: badge (green = all match, orange = some mismatch, red = all mismatch) */
