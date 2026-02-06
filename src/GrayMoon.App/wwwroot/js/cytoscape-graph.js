@@ -75,10 +75,7 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
             cy.fit(20);
         }
     }
-
-    layout.promise().then(function () {
-        requestAnimationFrame(fitToContainer);
-    });
+    cy.once('layoutstop', function () { requestAnimationFrame(fitToContainer); });
 
     var resizeHandler = function () { requestAnimationFrame(fitToContainer); };
     window.addEventListener('resize', resizeHandler);
