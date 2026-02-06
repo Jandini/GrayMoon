@@ -201,8 +201,6 @@
     private string? errorMessage;
     private bool isLoading = true;
     private bool isRefreshing;
-    private bool isRerunning;
-    private bool isRunning;
 
     protected override async Task OnInitializedAsync()
     {
@@ -306,7 +304,6 @@
     {
         try
         {
-            isRerunning = true;
             errorMessage = null;
             row.RunError = null;
             row.RunInProgress = true;
@@ -326,7 +323,6 @@
         finally
         {
             row.RunInProgress = false;
-            isRerunning = false;
         }
     }
 
@@ -334,7 +330,6 @@
     {
         try
         {
-            isRunning = true;
             errorMessage = null;
             row.RunError = null;
             row.RunInProgress = true;
@@ -354,7 +349,6 @@
         finally
         {
             row.RunInProgress = false;
-            isRunning = false;
         }
     }
 

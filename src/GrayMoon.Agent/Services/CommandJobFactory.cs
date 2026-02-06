@@ -38,6 +38,10 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid GetRepositoryVersion args"),
             "GetWorkspaceExists" => JsonSerializer.Deserialize<GetWorkspaceExistsRequest>(json, options)
                 ?? throw new ArgumentException("Invalid GetWorkspaceExists args"),
+            "SyncRepositoryDependencies" => JsonSerializer.Deserialize<SyncRepositoryDependenciesRequest>(json, options)
+                ?? throw new ArgumentException("Invalid SyncRepositoryDependencies args"),
+            "RefreshRepositoryProjects" => JsonSerializer.Deserialize<RefreshRepositoryProjectsRequest>(json, options)
+                ?? throw new ArgumentException("Invalid RefreshRepositoryProjects args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

@@ -1,0 +1,40 @@
+/* Same as grid pages: body gets viewport-relative height so content can resize */
+.dependencies-page .grid-page-body {
+    min-height: min(380px, calc(200vh - 250px));
+}
+
+/* Match .grid-page-body .page-card: fill body and shrink on resize */
+.dependencies-page .dependencies-graph-container {
+    flex: 1 1 auto;
+    width: 100%;
+    position: relative;
+    background: #1a1a1a;
+    border-radius: var(--bs-border-radius, 0.25rem);
+    overflow: hidden;
+}
+
+/* Cytoscape div: fill container (Cytoscape needs explicit dimensions) */
+.dependencies-page .cytoscape-graph {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background: #1a1a1a;
+}
+
+.dependencies-page .cytoscape-graph-empty {
+    min-height: 200px;
+}
+
+.dependencies-page .dependencies-empty-message {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 1rem;
+}
+
+.dependencies-page .dependencies-filter {
+    display: flex;
+    align-items: center;
+}

@@ -1,0 +1,90 @@
+/* Align header and data rows: same table layout for thead and each tbody tr */
+.build-order-table thead,
+.build-order-table tbody tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
+.build-order-table th,
+.build-order-table td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.build-order-table th {
+    padding-left: 0;
+}
+
+/* Column widths (apply to both th and td via class) */
+.build-order-table .col-sequence {
+    width: 7rem;
+    min-width: 7rem;
+    max-width: 7rem;
+}
+
+.build-order-table .col-dependencies {
+    width: 8rem;
+    min-width: 8rem;
+    max-width: 8rem;
+}
+
+.build-order-table .col-repository {
+    width: auto;
+    min-width: 0;
+}
+
+/* Header alignment */
+.build-order-table thead th.col-repository {
+    text-align: left;
+    padding-left: 8px;
+}
+
+.build-order-table thead th.col-sequence {
+    text-align: center;
+}
+
+.build-order-table thead th.col-dependencies {
+    text-align: right;
+}
+
+/* Data row alignment */
+.build-order-table tbody td.col-repository {
+    text-align: left;
+    padding-left: 8px;
+}
+
+.build-order-table tbody td.col-sequence {
+    text-align: center;
+}
+
+.build-order-table tbody td.col-dependencies {
+    text-align: right;
+}
+
+/* Dependencies column: badge (green = all match, orange = some mismatch, red = all mismatch) */
+.build-dep-badge {
+    font-weight: 600;
+    min-width: 2.5rem;
+}
+
+.build-dep-badge-none {
+    background-color: var(--bs-secondary);
+    color: var(--bs-light);
+}
+
+.build-dep-badge-ok {
+    background-color: #198754;
+    color: #fff;
+}
+
+.build-dep-badge-partial {
+    background-color: #fd7e14;
+    color: #fff;
+}
+
+.build-dep-badge-mismatch {
+    background-color: #dc3545;
+    color: #fff;
+}
