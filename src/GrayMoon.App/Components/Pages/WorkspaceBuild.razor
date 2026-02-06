@@ -27,7 +27,7 @@
                 </p>
             </div>
             <div class="d-flex gap-2">
-                <button class="btn btn-primary"
+                <button class="btn @(hasMismatchedDependencies ? "btn-danger" : "btn-primary")"
                         @onclick="SyncAsync"
                         disabled="@(isSyncingDependencies || workspace == null)">
                     Sync
@@ -124,6 +124,8 @@
     private bool isSyncingDependencies = false;
     private string syncDependenciesProgressMessage = "Syncing dependencies...";
     private CancellationTokenSource? _syncDependenciesCts;
+
+    private bool hasMismatchedDependencies => rows.Any(r => r.UnmatchedDependencyCount > 0);
 
     public void Dispose()
     {
