@@ -62,3 +62,24 @@
 .build-order-table tbody td.col-dependencies {
     text-align: right;
 }
+
+/* Dependencies column: badge (green = all versions match, red = some mismatch) */
+.build-dep-badge {
+    font-weight: 600;
+    min-width: 2.5rem;
+}
+
+.build-dep-badge-none {
+    background-color: var(--bs-secondary);
+    color: var(--bs-light);
+}
+
+.build-dep-badge-ok {
+    background-color: #198754;
+    color: #fff;
+}
+
+.build-dep-badge-mismatch {
+    background-color: #dc3545;
+    color: #fff;
+}

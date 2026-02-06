@@ -71,7 +71,20 @@
                                             <td class="col-repository">@row.RepositoryName</td>
                                             <td class="col-version text-muted">@(row.Version ?? "-")</td>
                                             <td class="col-sequence">@row.Sequence</td>
-                                            <td class="col-dependencies">@row.DependencyCount</td>
+                                            <td class="col-dependencies">
+                                                @if (row.DependencyCount == 0)
+                                                {
+                                                    <span class="badge build-dep-badge build-dep-badge-none">0</span>
+                                                }
+                                                else if (row.UnmatchedDependencyCount == 0)
+                                                {
+                                                    <span class="badge build-dep-badge build-dep-badge-ok">@row.DependencyCount</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge build-dep-badge build-dep-badge-mismatch">@row.UnmatchedDependencyCount of @row.DependencyCount</span>
+                                                }
+                                            </td>
                                         </tr>
                                     }
                                 }

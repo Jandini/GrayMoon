@@ -5,4 +5,5 @@ public sealed record RepositoryBuildOrderRow(
     int Sequence,
     string RepositoryName,
     string? Version,
-    int DependencyCount);
+    int DependencyCount,
+    int UnmatchedDependencyCount);

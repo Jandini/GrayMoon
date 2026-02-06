@@ -299,9 +299,16 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
             .ToListAsync(cancellationToken);
         var versionByRepo = versionByRepoId.ToDictionary(x => x.LinkedRepositoryId, x => x.GitVersion, null);
 
-        var edges = await GetDependencyEdgesAsync(workspaceId, cancellationToken);
         var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
         var byProject = projects.ToDictionary(p => p.ProjectId);
+
+        var dependencyRows = await dbContext.ProjectDependencies
+            .AsNoTracking()
+            .Where(d => projectIds.Contains(d.DependentProjectId) && projectIds.Contains(d.ReferencedProjectId))
+            .Select(d => new { d.DependentProjectId, d.ReferencedProjectId, d.Version })
+            .ToListAsync(cancellationToken);
+
+        var edges = dependencyRows.Select(d => (d.DependentProjectId, d.ReferencedProjectId)).Distinct().ToList();
 
         var inDegree = projects.ToDictionary(p => p.ProjectId, _ => 0);
         var revEdges = projects.ToDictionary(p => p.ProjectId, _ => new List<int>());
@@ -338,10 +345,20 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
             return new List<RepositoryBuildOrderRow>();
 
         var depCountByRepo = projects.GroupBy(p => p.RepositoryId).ToDictionary(g => g.Key, _ => 0);
-        foreach (var (depId, _) in edges)
+        var unmatchedCountByRepo = projects.GroupBy(p => p.RepositoryId).ToDictionary(g => g.Key, _ => 0);
+
+        foreach (var d in dependencyRows)
         {
-            if (!byProject.TryGetValue(depId, out var p)) continue;
-            depCountByRepo[p.RepositoryId]++;
+            if (!byProject.TryGetValue(d.DependentProjectId, out var depProj)) continue;
+            if (!byProject.TryGetValue(d.ReferencedProjectId, out var refProj)) continue;
+            var depRepoId = depProj.RepositoryId;
+            depCountByRepo[depRepoId] = depCountByRepo.GetValueOrDefault(depRepoId, 0) + 1;
+
+            var refRepoVersion = versionByRepo.GetValueOrDefault(refProj.RepositoryId);
+            var depVersion = d.Version?.Trim() ?? "";
+            var refVersion = refRepoVersion?.Trim() ?? "";
+            if (depVersion != refVersion)
+                unmatchedCountByRepo[depRepoId] = unmatchedCountByRepo.GetValueOrDefault(depRepoId, 0) + 1;
         }
 
         var repoSequence = projects
@@ -355,7 +372,12 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
             .ToList();
 
         return repoSequence
-            .Select(t => new RepositoryBuildOrderRow(t.Sequence, t.RepositoryName, versionByRepo.GetValueOrDefault(t.RepositoryId), depCountByRepo.GetValueOrDefault(t.RepositoryId, 0)))
+            .Select(t => new RepositoryBuildOrderRow(
+                t.Sequence,
+                t.RepositoryName,
+                versionByRepo.GetValueOrDefault(t.RepositoryId),
+                depCountByRepo.GetValueOrDefault(t.RepositoryId, 0),
+                unmatchedCountByRepo.GetValueOrDefault(t.RepositoryId, 0)))
             .OrderBy(r => r.Sequence)
             .ThenBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase)
             .ToList();
