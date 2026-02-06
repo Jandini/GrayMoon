@@ -55,7 +55,7 @@
                                     <th class="col-repository">Repository</th>
                                     <th class="col-version">Version</th>
                                     <th class="col-sequence">Sequence</th>
-                                    <th class="col-dependencies">Dependencies</th>
+                                    <th class="col-dependencies col-status-badge">Dependencies</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -83,7 +83,7 @@
                                             <td class="col-repository">@row.RepositoryName</td>
                                             <td class="col-version text-muted">@(row.Version ?? "-")</td>
                                             <td class="col-sequence">@row.Sequence</td>
-                                            <td class="col-dependencies">
+                                            <td class="col-dependencies col-status-badge">
                                                 @if (row.DependencyCount == 0)
                                                 {
                                                     <span class="badge build-dep-badge build-dep-badge-none">0</span>

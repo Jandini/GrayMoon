@@ -70,7 +70,7 @@
                                 <th class="col-repo">Repository</th>
                                 <th class="col-owner">Owner</th>
                                 <th class="col-connector">Connector</th>
-                                <th class="col-visibility">Visibility</th>
+                                <th class="col-visibility col-status-badge">Visibility</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -106,7 +106,7 @@
                                         <td class="col-repo"><strong>@repository.RepositoryName</strong></td>
                                         <td class="col-owner">@(string.IsNullOrWhiteSpace(repository.OrgName) ? "-" : repository.OrgName)</td>
                                         <td class="col-connector">@repository.ConnectorName</td>
-                                        <td class="col-visibility">
+                                        <td class="col-visibility col-status-badge">
                                             <span class="badge @(repository.Visibility == "Private" ? "badge-private" : "badge-public")">
                                                 @repository.Visibility.ToLowerInvariant()
                                             </span>

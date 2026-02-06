@@ -1,15 +1,5 @@
-/* Match WorkspaceRepositories grid: same page layout and table rules */
-.projects-table thead th.col-name {
-    padding-left: 8px;
-}
-
-.projects-table th {
-    text-align: left;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding-left: 0;
-}
+/* Match Repositories / Workspaces: left-align all columns; use global resizable-columns padding for header spacing */
+.projects-table th,
 .projects-table td {
     white-space: nowrap;
     overflow: hidden;
@@ -64,12 +54,6 @@
 .col-file {
     width: auto;
     min-width: 0;
-}
-
-.projects-table thead th.col-type,
-.projects-table thead th.col-framework,
-.projects-table thead th.col-file {
-    text-align: left;
 }
 
 @media (max-width: 640.98px) {

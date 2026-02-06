@@ -1,3 +1,11 @@
+/* Match Repositories / Workspaces: left-align all columns, status column right-aligned via col-status-badge; use global resizable-columns padding for header spacing */
+.connectors-table th,
+.connectors-table td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .connectors-table {
     table-layout: fixed;
     width: 100%;
@@ -10,6 +18,12 @@
     table-layout: fixed;
 }
 
+/* Status column: exception – horizontally centered (header and badge) */
+.connectors-table th.status-col,
+.connectors-table td.status-col {
+    text-align: center;
+}
+
 .status-col {
     width: 140px;
 }
@@ -18,6 +32,11 @@
     display: inline-block;
     min-width: 70px;
     text-align: center;
+}
+
+/* Last column: actions (match Workspaces.razor) */
+.col-actions {
+    width: 30%;
 }
 
 /* Status badge colors from Bootstrap RGB (blue=testing, green=ok, red=error) */
@@ -35,19 +54,4 @@
 .status-badge-error {
     background-color: rgb(var(--bs-danger-rgb));
     color: #fff;
-}
-
-.actions-col {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-}
-
-@media (min-width: 992px) {
-    .actions-col {
-        flex-direction: row;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.15rem;
-    }
 }

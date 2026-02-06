@@ -1,15 +1,5 @@
-/* Same layout as WorkspaceProjects / WorkspaceRepositories */
-.packages-table thead th.col-packageid {
-    padding-left: 8px;
-}
-
-.packages-table th {
-    text-align: left;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding-left: 0;
-}
+/* Match Repositories / Workspaces: left-align all columns; use global resizable-columns padding for header spacing */
+.packages-table th,
 .packages-table td {
     white-space: nowrap;
     overflow: hidden;
@@ -53,8 +43,4 @@
 .col-framework {
     width: 110px;
     white-space: nowrap;
-}
-
-.packages-table thead th.col-framework {
-    text-align: left;
 }

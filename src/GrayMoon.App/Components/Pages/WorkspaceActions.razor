@@ -60,10 +60,10 @@
                                     <th class="col-repo">Repository</th>
                                     <th class="col-workflow">Workflow</th>
                                     <th class="col-event">Event</th>
-                                    <th class="col-status">Status</th>
-                                    <th class="col-result">Result</th>
+                                    <th class="col-status col-status-badge">Status</th>
+                                    <th class="col-result col-status-badge">Result</th>
                                     <th class="col-updated">Date & time</th>
-                                    <th class="col-action">Action</th>
+                                    <th class="col-actions">Action</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -123,18 +123,18 @@
                                                     }
                                                 </td>
                                                 <td class="col-event">@GetEventLabel(action.Event)</td>
-                                                <td class="col-status">
+                                                <td class="col-status col-status-badge">
                                                     <span class="badge @GetStatusBadgeClass(action.Status)">
                                                         @GetStatusLabel(action.Status)
                                                     </span>
                                                 </td>
-                                                <td class="col-result">
+                                                <td class="col-result col-status-badge">
                                                     <span class="badge @GetConclusionBadgeClass(action.Conclusion)">
                                                         @GetConclusionLabel(action.Conclusion)
                                                     </span>
                                                 </td>
                                                 <td class="col-updated">@(action.UpdatedAt?.ToLocalTime().ToString("g") ?? "-")</td>
-                                                <td class="col-action">
+                                                <td class="col-actions">
                                                     @if (IsFailed(action))
                                                     {
                                                         <button class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1"
