@@ -5,9 +5,11 @@
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
 @using GrayMoon.App.Components.Shared
+@using Microsoft.AspNetCore.SignalR.Client
 @inject WorkspaceRepository WorkspaceRepository
 @inject RepositoryProjectRepository RepositoryProjectRepository
 @inject WorkspaceGitService WorkspaceGitService
+@inject NavigationManager NavigationManager
 @inject ILogger<WorkspaceBuild> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
@@ -124,11 +126,14 @@
     private bool isSyncingDependencies = false;
     private string syncDependenciesProgressMessage = "Syncing dependencies...";
     private CancellationTokenSource? _syncDependenciesCts;
+    private HubConnection? _hubConnection;
 
     private bool hasMismatchedDependencies => rows.Any(r => r.UnmatchedDependencyCount > 0);
 
     public void Dispose()
     {
+        _ = _hubConnection?.StopAsync();
+        _hubConnection?.DisposeAsync();
         _syncDependenciesCts?.Cancel();
         _syncDependenciesCts?.Dispose();
     }
@@ -136,6 +141,31 @@
     protected override async Task OnInitializedAsync()
     {
         await LoadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && workspace != null && errorMessage == null)
+        {
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(NavigationManager.ToAbsoluteUri("/hubs/workspace-sync"))
+                .WithAutomaticReconnect()
+                .Build();
+            _hubConnection.On<int>("WorkspaceSynced", async (workspaceId) =>
+            {
+                if (workspaceId == WorkspaceId)
+                    await InvokeAsync(RefreshFromSync);
+            });
+            await _hubConnection.StartAsync();
+        }
+    }
+
+    private async Task RefreshFromSync()
+    {
+        if (isSyncingDependencies)
+            return;
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task LoadAsync()
