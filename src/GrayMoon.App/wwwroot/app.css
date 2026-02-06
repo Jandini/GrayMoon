@@ -707,3 +707,36 @@ input[list] {
     font-weight: 500;
     letter-spacing: -0.02em;
 }
+
+/* Resizable table columns */
+table.resizable-columns th .resize-handle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 1;
+}
+table.resizable-columns th:last-child .resize-handle {
+    display: none;
+}
+table.resizable-columns th .resize-handle:hover,
+table.resizable-columns th .resize-handle:active {
+    background: var(--accent-blue);
+    opacity: 0.4;
+}
+table.resizable-columns th .resize-handle::after {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 20%;
+    bottom: 20%;
+    width: 1px;
+    background: var(--border-light);
+    border-radius: 1px;
+}
+table.resizable-columns th:hover .resize-handle::after {
+    background: var(--border-hover);
+}
