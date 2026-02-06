@@ -17,12 +17,78 @@ public sealed class CsProjFileParser : ICsProjFileParser
         {
             var doc = XDocument.Load(csprojPath);
             var result = ParseCsProjDocument(doc, csprojPath);
-            return Task.FromResult<CsProjFileInfo?>(result);
+            return Task.FromResult(result);
         }
         catch
         {
             return Task.FromResult<CsProjFileInfo?>(null);
         }
+    }
+
+    public async Task<bool> UpdateAsync(string csprojPath, IReadOnlyDictionary<string, string> packageIdToNewVersion, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(csprojPath) || !File.Exists(csprojPath) || packageIdToNewVersion == null || packageIdToNewVersion.Count == 0)
+            return false;
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in packageIdToNewVersion)
+            lookup[kv.Key] = kv.Value;
+
+        XDocument doc;
+        try
+        {
+            doc = XDocument.Load(csprojPath, LoadOptions.PreserveWhitespace);
+        }
+        catch
+        {
+            return false;
+        }
+
+        var root = doc.Root;
+        if (root == null)
+            return false;
+
+        var modified = false;
+        foreach (var pr in root.Descendants().Where(e => string.Equals(e.Name.LocalName, "PackageReference", StringComparison.OrdinalIgnoreCase)))
+        {
+            var include = pr.Attribute("Include")?.Value?.Trim();
+            if (string.IsNullOrEmpty(include) || !lookup.TryGetValue(include, out var newVersion) || newVersion == null)
+                continue;
+
+            var versionAttr = pr.Attribute("Version");
+            var versionEl = pr.Elements().FirstOrDefault(e => string.Equals(e.Name.LocalName, "Version", StringComparison.OrdinalIgnoreCase));
+
+            if (versionAttr != null)
+            {
+                if (versionAttr.Value != newVersion)
+                {
+                    versionAttr.Value = newVersion;
+                    modified = true;
+                }
+            }
+            else if (versionEl != null)
+            {
+                if (versionEl.Value != newVersion)
+                {
+                    versionEl.Value = newVersion;
+                    modified = true;
+                }
+            }
+            else
+            {
+                pr.Add(new XAttribute("Version", newVersion));
+                modified = true;
+            }
+        }
+
+        if (modified)
+        {
+            doc.Save(csprojPath, SaveOptions.None);
+        }
+
+        return modified;
     }
 
     private static CsProjFileInfo? ParseCsProjDocument(XDocument doc, string csprojPath)

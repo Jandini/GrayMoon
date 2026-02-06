@@ -102,6 +102,30 @@ public sealed class CsProjFileService(ICsProjFileParser parser) : ICsProjFileSer
     public Task<CsProjFileInfo?> ParseAsync(string csprojPath, CancellationToken cancellationToken = default) =>
         parser.ParseAsync(csprojPath, cancellationToken);
 
+    public async Task<int> UpdatePackageVersionsAsync(string repoPath, IReadOnlyList<(string ProjectPath, IReadOnlyDictionary<string, string> PackageUpdates)> projectUpdates, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || projectUpdates == null || projectUpdates.Count == 0)
+            return 0;
+
+        var updatedCount = 0;
+        foreach (var (relativePath, packageUpdates) in projectUpdates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(relativePath) || packageUpdates == null || packageUpdates.Count == 0)
+                continue;
+
+            var fullPath = Path.Combine(repoPath, relativePath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (!File.Exists(fullPath))
+                continue;
+
+            var modified = await parser.UpdateAsync(fullPath, packageUpdates, cancellationToken);
+            if (modified)
+                updatedCount++;
+        }
+
+        return updatedCount;
+    }
+
     private static List<string> EnumerateCsprojInDirectory(string path, bool topLevelOnly)
     {
         try

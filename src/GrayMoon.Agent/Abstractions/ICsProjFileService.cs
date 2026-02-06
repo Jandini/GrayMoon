@@ -13,4 +13,10 @@ public interface ICsProjFileService
 
     /// <summary>Parses an SDK-style .csproj file and returns project type, target framework, name, and package references; returns null if the file is missing or invalid.</summary>
     Task<CsProjFileInfo?> ParseAsync(string csprojPath, CancellationToken cancellationToken = default);
+
+    /// <summary>Updates only the Version of PackageReference elements for the given package IDs in each project file. Does not change any other content in the .csproj files.</summary>
+    /// <param name="repoPath">Repository root path.</param>
+    /// <param name="projectUpdates">List of (project path relative to repo, package ID to new version).</param>
+    /// <returns>Number of project files that were modified.</returns>
+    Task<int> UpdatePackageVersionsAsync(string repoPath, IReadOnlyList<(string ProjectPath, IReadOnlyDictionary<string, string> PackageUpdates)> projectUpdates, CancellationToken cancellationToken = default);
 }

@@ -178,6 +178,154 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
             workspaceId, dependentProjectIds.Count, uniqueEdges.Count);
     }
 
+    /// <summary>Returns payload for syncing dependency versions: per repo, list of (project path, package ID to new version) for dependencies that do not match the referenced repo's GitVersion.</summary>
+    public async Task<List<SyncDependenciesRepoPayload>> GetSyncDependenciesPayloadAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var repoIds = await dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .Select(wr => wr.LinkedRepositoryId)
+            .ToListAsync(cancellationToken);
+        if (repoIds.Count == 0) return new List<SyncDependenciesRepoPayload>();
+
+        var versionByRepoId = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .Select(wr => new { wr.LinkedRepositoryId, wr.GitVersion })
+            .ToListAsync(cancellationToken);
+        var versionByRepo = versionByRepoId.ToDictionary(x => x.LinkedRepositoryId, x => x.GitVersion, null);
+
+        var projects = await dbContext.RepositoryProjects
+            .AsNoTracking()
+            .Include(p => p.Repository)
+            .Where(p => repoIds.Contains(p.RepositoryId))
+            .ToListAsync(cancellationToken);
+        var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
+        var byProject = projects.ToDictionary(p => p.ProjectId);
+
+        var dependencies = await dbContext.ProjectDependencies
+            .AsNoTracking()
+            .Where(d => projectIds.Contains(d.DependentProjectId) && projectIds.Contains(d.ReferencedProjectId))
+            .Select(d => new { d.DependentProjectId, d.ReferencedProjectId, d.Version })
+            .ToListAsync(cancellationToken);
+
+        var repoToProjectUpdates = new Dictionary<int, Dictionary<string, Dictionary<string, string>>>(repoIds.Count);
+        foreach (var repoId in repoIds)
+            repoToProjectUpdates[repoId] = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var d in dependencies)
+        {
+            if (!byProject.TryGetValue(d.DependentProjectId, out var depProj) || !byProject.TryGetValue(d.ReferencedProjectId, out var refProj))
+                continue;
+
+            var refVersion = versionByRepo.GetValueOrDefault(refProj.RepositoryId);
+            var depVersion = d.Version?.Trim() ?? "";
+            var refVersionNorm = refVersion?.Trim() ?? "";
+            if (depVersion == refVersionNorm || string.IsNullOrEmpty(refVersionNorm))
+                continue;
+
+            var packageId = !string.IsNullOrWhiteSpace(refProj.PackageId) ? refProj.PackageId!.Trim() : refProj.ProjectName.Trim();
+            if (string.IsNullOrEmpty(packageId))
+                continue;
+
+            var projectPath = depProj.ProjectFilePath?.Trim() ?? "";
+            if (string.IsNullOrEmpty(projectPath))
+                continue;
+
+            var repoUpdates = repoToProjectUpdates[depProj.RepositoryId];
+            if (!repoUpdates.TryGetValue(projectPath, out var packageDict))
+            {
+                packageDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                repoUpdates[projectPath] = packageDict;
+            }
+            packageDict[packageId] = refVersionNorm;
+        }
+
+        var result = new List<SyncDependenciesRepoPayload>();
+        foreach (var p in projects.GroupBy(p => p.RepositoryId).Select(g => g.First()))
+        {
+            var repoId = p.RepositoryId;
+            var repoName = p.Repository?.RepositoryName ?? "";
+            if (string.IsNullOrEmpty(repoName))
+                continue;
+            if (!repoToProjectUpdates.TryGetValue(repoId, out var projectUpdatesDict) || projectUpdatesDict.Count == 0)
+                continue;
+
+            var projectUpdates = projectUpdatesDict
+                .Select(kv => new SyncDependenciesProjectUpdate(kv.Key, kv.Value.Select(p => (p.Key, p.Value)).ToList()))
+                .ToList();
+            result.Add(new SyncDependenciesRepoPayload(repoId, repoName, projectUpdates));
+        }
+
+        return result.OrderBy(r => r.RepoName, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>Persists the new Version for ProjectDependencies that were updated by sync dependencies. Matches by (RepoId, ProjectPath) -> DependentProjectId and PackageId -> ReferencedProjectId.</summary>
+    public async Task UpdateProjectDependencyVersionsAsync(
+        int workspaceId,
+        IReadOnlyList<(int RepoId, string ProjectPath, string PackageId, string NewVersion)> updates,
+        CancellationToken cancellationToken = default)
+    {
+        if (updates == null || updates.Count == 0) return;
+
+        var repoIds = await dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .Select(wr => wr.LinkedRepositoryId)
+            .ToListAsync(cancellationToken);
+        if (repoIds.Count == 0) return;
+
+        var projects = await dbContext.RepositoryProjects
+            .Where(p => repoIds.Contains(p.RepositoryId))
+            .ToListAsync(cancellationToken);
+
+        var dependentKeyToProjectId = projects
+            .Where(p => !string.IsNullOrWhiteSpace(p.ProjectFilePath))
+            .GroupBy(p => (p.RepositoryId, ProjectPath: p.ProjectFilePath.Trim().ToLowerInvariant()))
+            .ToDictionary(g => g.Key, g => g.First().ProjectId);
+
+        var packageNameToProjectId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in projects)
+        {
+            var key = !string.IsNullOrWhiteSpace(p.PackageId) ? p.PackageId!.Trim() : p.ProjectName.Trim();
+            if (!string.IsNullOrEmpty(key) && !packageNameToProjectId.ContainsKey(key))
+                packageNameToProjectId[key] = p.ProjectId;
+        }
+
+        var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
+        var depRows = await dbContext.ProjectDependencies
+            .Where(d => projectIds.Contains(d.DependentProjectId) && projectIds.Contains(d.ReferencedProjectId))
+            .ToListAsync(cancellationToken);
+        var byDepRef = depRows.ToLookup(d => (d.DependentProjectId, d.ReferencedProjectId));
+
+        var updated = 0;
+        foreach (var (repoId, projectPath, packageId, newVersion) in updates)
+        {
+            if (string.IsNullOrWhiteSpace(projectPath) || string.IsNullOrWhiteSpace(packageId) || string.IsNullOrWhiteSpace(newVersion))
+                continue;
+
+            var pathNorm = projectPath.Trim();
+            var depKey = (repoId, pathNorm.ToLowerInvariant());
+            if (!dependentKeyToProjectId.TryGetValue(depKey, out var dependentProjectId))
+                continue;
+            if (!packageNameToProjectId.TryGetValue(packageId.Trim(), out var referencedProjectId))
+                continue;
+
+            var key = (dependentProjectId, referencedProjectId);
+            foreach (var row in byDepRef[key])
+            {
+                if (row.Version != newVersion)
+                {
+                    row.Version = newVersion;
+                    updated++;
+                }
+            }
+        }
+
+        if (updated > 0)
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+        logger.LogDebug("UpdateProjectDependencyVersions: WorkspaceId={WorkspaceId}, Updated={Count}", workspaceId, updated);
+    }
+
     /// <summary>Returns dependency edges (DependentProjectId, ReferencedProjectId) for the workspace. Suitable for Cytoscape: nodes = projects, edges = this list.</summary>
     public async Task<List<(int DependentProjectId, int ReferencedProjectId)>> GetDependencyEdgesAsync(int workspaceId, CancellationToken cancellationToken = default)
     {

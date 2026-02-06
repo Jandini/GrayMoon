@@ -95,6 +95,69 @@ public class WorkspaceGitService(
         return results.ToDictionary(r => r.RepositoryId, r => r.info);
     }
 
+    /// <summary>Syncs dependency versions in .csproj files to match the current version of each referenced package source. Only repos with at least one mismatched dependency are updated.</summary>
+    public async Task<int> SyncDependenciesAsync(
+        int workspaceId,
+        Action<int, int, int>? onProgress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_agentBridge.IsAgentConnected)
+            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to sync dependencies.");
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            throw new InvalidOperationException($"Workspace {workspaceId} not found.");
+
+        var payloads = await _repositoryProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, cancellationToken);
+        var toSync = payloads.Where(p => p.ProjectUpdates.Count > 0).ToList();
+        if (toSync.Count == 0)
+        {
+            _logger.LogInformation("Sync dependencies: no mismatched dependencies for workspace {WorkspaceName}", workspace.Name);
+            return 0;
+        }
+
+        _logger.LogInformation("Sync dependencies: Workspace={WorkspaceName}, RepoCount={RepoCount}", workspace.Name, toSync.Count);
+
+        var completedCount = 0;
+        var totalCount = toSync.Count;
+
+        foreach (var repo in toSync)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var projectUpdates = repo.ProjectUpdates
+                .Select(p => new
+                {
+                    projectPath = p.ProjectPath,
+                    packageUpdates = p.PackageUpdates.Select(u => new { packageId = u.PackageId, newVersion = u.NewVersion }).ToList()
+                })
+                .ToList();
+
+            var args = new
+            {
+                workspaceName = workspace.Name,
+                repositoryName = repo.RepoName,
+                projectUpdates
+            };
+
+            var response = await _agentBridge.SendCommandAsync("SyncRepositoryDependencies", args, cancellationToken);
+            if (!response.Success)
+                throw new InvalidOperationException(response.Error ?? "SyncRepositoryDependencies failed.");
+
+            var count = Interlocked.Increment(ref completedCount);
+            onProgress?.Invoke(count, totalCount, repo.RepoId);
+        }
+
+        var updatesToPersist = toSync
+            .SelectMany(r => r.ProjectUpdates.SelectMany(p => p.PackageUpdates.Select(u => (r.RepoId, p.ProjectPath, u.PackageId, u.NewVersion))))
+            .ToList();
+        if (updatesToPersist.Count > 0)
+            await _repositoryProjectRepository.UpdateProjectDependencyVersionsAsync(workspaceId, updatesToPersist, cancellationToken);
+
+        _logger.LogDebug("Sync dependencies completed for workspace {WorkspaceName}. Updated {RepoCount} repos, persisted {UpdateCount} versions", workspace.Name, toSync.Count, updatesToPersist.Count);
+        return toSync.Count;
+    }
+
     public async Task<bool> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
     {
         var repo = await _repositoryRepository.GetByIdAsync(repositoryId, cancellationToken);

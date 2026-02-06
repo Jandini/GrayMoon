@@ -1,10 +1,13 @@
 @page "/workspaces/{WorkspaceId:int}/build"
 @rendermode InteractiveServer
+@implements IDisposable
 @using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
+@using GrayMoon.App.Services
 @using GrayMoon.App.Components.Shared
 @inject WorkspaceRepository WorkspaceRepository
 @inject RepositoryProjectRepository RepositoryProjectRepository
+@inject WorkspaceGitService WorkspaceGitService
 @inject ILogger<WorkspaceBuild> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
@@ -12,7 +15,7 @@
 
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
-        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-4">
             <div>
                 <h2>@(workspace?.Name ?? "Workspace") Build</h2>
                 <p class="text-muted mb-0" style="min-height: 1.5rem;">
@@ -22,6 +25,13 @@
                     }
                     &nbsp;
                 </p>
+            </div>
+            <div class="d-flex gap-2">
+                <button class="btn btn-primary"
+                        @onclick="SyncDependenciesAsync"
+                        disabled="@(isSyncingDependencies || rows.Count == 0)">
+                    Sync
+                </button>
             </div>
         </div>
         @if (errorMessage != null)
@@ -102,6 +112,7 @@
 </div>
 
 <LoadingOverlay IsVisible="@isLoading" Message="Loading build order..." />
+<LoadingOverlay IsVisible="@isSyncingDependencies" Message="@syncDependenciesProgressMessage" OnAbort="AbortSyncDependenciesAsync" />
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
@@ -110,6 +121,15 @@
     private List<RepositoryBuildOrderRow> rows = new();
     private string? errorMessage;
     private bool isLoading = true;
+    private bool isSyncingDependencies = false;
+    private string syncDependenciesProgressMessage = "Syncing dependencies...";
+    private CancellationTokenSource? _syncDependenciesCts;
+
+    public void Dispose()
+    {
+        _syncDependenciesCts?.Cancel();
+        _syncDependenciesCts?.Dispose();
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -140,6 +160,55 @@
         finally
         {
             isLoading = false;
+        }
+    }
+
+    private void AbortSyncDependenciesAsync()
+    {
+        _syncDependenciesCts?.Cancel();
+    }
+
+    private async Task SyncDependenciesAsync()
+    {
+        if (workspace == null || rows.Count == 0 || isSyncingDependencies)
+            return;
+
+        _syncDependenciesCts?.Cancel();
+        _syncDependenciesCts?.Dispose();
+        _syncDependenciesCts = new CancellationTokenSource();
+
+        isSyncingDependencies = true;
+        syncDependenciesProgressMessage = "Syncing dependencies...";
+        errorMessage = null;
+        StateHasChanged();
+        await Task.Yield();
+
+        try
+        {
+            var updatedCount = await WorkspaceGitService.SyncDependenciesAsync(
+                WorkspaceId,
+                onProgress: (completed, total, _) =>
+                {
+                    syncDependenciesProgressMessage = $"Synced dependencies {completed} of {total}";
+                    InvokeAsync(StateHasChanged);
+                },
+                cancellationToken: _syncDependenciesCts.Token);
+
+            if (updatedCount > 0)
+                await LoadAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error syncing dependencies for workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+        }
+        finally
+        {
+            isSyncingDependencies = false;
         }
     }
 }
