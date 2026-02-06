@@ -125,7 +125,7 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
         }
 
         var dependentProjectIds = new HashSet<int>();
-        var edges = new List<(int DependentProjectId, int ReferencedProjectId)>();
+        var edges = new List<(int DependentProjectId, int ReferencedProjectId, string? Version)>();
 
         foreach (var (repoId, projectsDetail) in syncResults)
         {
@@ -146,7 +146,8 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
                     if (string.IsNullOrWhiteSpace(pr.Name)) continue;
                     if (!packageNameToProjectId.TryGetValue(pr.Name.Trim(), out var referencedProjectId)) continue;
                     if (referencedProjectId == dependentProjectId) continue;
-                    edges.Add((dependentProjectId, referencedProjectId));
+                    var version = string.IsNullOrWhiteSpace(pr.Version) ? null : pr.Version.Trim();
+                    edges.Add((dependentProjectId, referencedProjectId, version));
                 }
             }
         }
@@ -158,13 +159,17 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
             .ToListAsync(cancellationToken);
         dbContext.ProjectDependencies.RemoveRange(existing);
 
-        var uniqueEdges = edges.Distinct().ToHashSet();
-        foreach (var (depId, refId) in uniqueEdges)
+        var uniqueEdges = edges
+            .GroupBy(e => (e.DependentProjectId, e.ReferencedProjectId))
+            .Select(g => (g.Key.DependentProjectId, g.Key.ReferencedProjectId, g.First().Version))
+            .ToList();
+        foreach (var (depId, refId, version) in uniqueEdges)
         {
             dbContext.ProjectDependencies.Add(new ProjectDependency
             {
                 DependentProjectId = depId,
-                ReferencedProjectId = refId
+                ReferencedProjectId = refId,
+                Version = version
             });
         }
 

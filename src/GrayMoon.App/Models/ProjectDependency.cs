@@ -22,4 +22,8 @@ public class ProjectDependency
 
     [ForeignKey(nameof(ReferencedProjectId))]
     public RepositoryProject? ReferencedProject { get; set; }
+
+    /// <summary>Package version from the .csproj PackageReference (e.g. 1.2.3 or 1.0.0-*).</summary>
+    [MaxLength(100)]
+    public string? Version { get; set; }
 }

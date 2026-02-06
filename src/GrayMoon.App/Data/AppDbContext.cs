@@ -151,6 +151,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasIndex(d => new { d.DependentProjectId, d.ReferencedProjectId })
                 .IsUnique();
 
+            entity.Property(d => d.Version)
+                .HasMaxLength(100);
+
             entity.HasOne(d => d.DependentProject)
                 .WithMany(p => p.DependsOn)
                 .HasForeignKey(d => d.DependentProjectId)
