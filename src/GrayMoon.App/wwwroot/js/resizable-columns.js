@@ -50,9 +50,22 @@
                 th.style.minWidth = MIN_COL_WIDTH + 'px';
             });
         } else {
-            ths.forEach(th => {
-                th.style.minWidth = MIN_COL_WIDTH + 'px';
-            });
+            // On first load (no saved widths): capture the current header widths
+            // and freeze them as explicit percentages so thead and tbody stay aligned.
+            const tableRect = table.getBoundingClientRect();
+            const tableWidth = tableRect.width;
+            if (tableWidth > 0) {
+                ths.forEach(th => {
+                    const cellWidth = th.getBoundingClientRect().width;
+                    const pct = (cellWidth / tableWidth) * 100;
+                    th.style.width = pct + '%';
+                    th.style.minWidth = MIN_COL_WIDTH + 'px';
+                });
+            } else {
+                ths.forEach(th => {
+                    th.style.minWidth = MIN_COL_WIDTH + 'px';
+                });
+            }
         }
 
         ths.forEach((th, index) => {
@@ -143,18 +156,47 @@
     }
 
     const observer = new MutationObserver((mutations) => {
-        let shouldInit = false;
+        // Initialize any brand-new resizable tables that were added,
+        // but avoid re-initializing existing ones so column widths are not reset.
         for (const m of mutations) {
-            if (m.addedNodes.length) {
-                for (const node of m.addedNodes) {
-                    if (node.nodeType === 1) {
-                        if (node.classList && node.classList.contains('resizable-columns')) shouldInit = true;
-                        else if (node.querySelector && node.querySelector('table.resizable-columns')) shouldInit = true;
+            if (!m.addedNodes.length) continue;
+            for (const node of m.addedNodes) {
+                if (node.nodeType !== 1) continue;
+                const el = /** @type {HTMLElement} */ (node);
+
+                // Case 1: the added node itself is a resizable table
+                if (el.matches && el.matches('table.resizable-columns')) {
+                    if (el.dataset.resizableColumnsInit !== '1') {
+                        initTable(el);
                     }
+                    continue;
+                }
+
+                // Case 2: the added node contains one or more resizable tables (e.g. modal content)
+                if (el.querySelector) {
+                    const tables = el.querySelectorAll('table.resizable-columns');
+                    tables.forEach(tbl => {
+                        if (tbl.dataset.resizableColumnsInit !== '1') {
+                            initTable(tbl);
+                        }
+                    });
                 }
             }
         }
-        if (shouldInit) runInit();
+
+        // Always resync body column widths for already-initialized tables so that
+        // when a grid's rows are reloaded (e.g. statuses updated), the new rows
+        // inherit the existing header widths instead of drifting.
+        document.querySelectorAll('table.resizable-columns').forEach(tbl => {
+            if (tbl.dataset.resizableColumnsInit === '1') {
+                const thead = tbl.querySelector('thead');
+                const headerRow = thead && thead.querySelector('tr');
+                const ths = headerRow ? Array.from(headerRow.querySelectorAll('th')) : [];
+                if (ths.length) {
+                    syncBodyColumnWidths(tbl, ths);
+                }
+            }
+        });
     });
 
     observer.observe(document.body, { childList: true, subtree: true });

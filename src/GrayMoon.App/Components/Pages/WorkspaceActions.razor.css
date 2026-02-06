@@ -9,6 +9,14 @@
     text-decoration: underline;
 }
 
+/* Match Repositories / Workspaces: left-align all columns; Status and Result right-aligned via col-status-badge; last column (Action) matches Workspaces col-actions; use global resizable-columns padding for header spacing */
+.actions-table th,
+.actions-table td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .actions-table {
     table-layout: fixed;
     width: 100%;
@@ -19,13 +27,6 @@
     display: table;
     width: 100%;
     table-layout: fixed;
-}
-
-.actions-table th,
-.actions-table td {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .col-repo {
@@ -55,6 +56,14 @@
 /* Last column: actions (match Workspaces.razor) */
 .col-actions {
     width: 30%;
+}
+
+/* Status / Result: center header and body text (override global col-status-badge right alignment) */
+.actions-table th.col-status,
+.actions-table td.col-status,
+.actions-table th.col-result,
+.actions-table td.col-result {
+    text-align: center;
 }
 
 .actions-buttons {
