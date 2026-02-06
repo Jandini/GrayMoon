@@ -63,7 +63,7 @@
     text-align: right;
 }
 
-/* Dependencies column: badge (green = all versions match, red = some mismatch) */
+/* Dependencies column: badge (green = all match, orange = some mismatch, red = all mismatch) */
 .build-dep-badge {
     font-weight: 600;
     min-width: 2.5rem;
@@ -76,6 +76,11 @@
 
 .build-dep-badge-ok {
     background-color: #198754;
+    color: #fff;
+}
+
+.build-dep-badge-partial {
+    background-color: #fd7e14;
     color: #fff;
 }
 
