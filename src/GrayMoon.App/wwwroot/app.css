@@ -437,6 +437,12 @@ h1:focus {
     table-layout: fixed;
 }
 
+/* First column in grid data rows: normal weight (not bold) like other columns */
+.grid-page-body .table tbody td:first-child,
+.grid-page-body .table tbody td:first-child strong {
+    font-weight: normal;
+}
+
 .table tbody td a {
     color: var(--accent-blue) !important;
 }

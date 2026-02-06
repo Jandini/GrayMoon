@@ -281,11 +281,18 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
         return new RepositoryDependencyGraph(repoNodes, edgeList);
     }
 
-    /// <summary>Returns repositories in build order with sequence (same sequence = build in parallel) and dependency count per repo.</summary>
+    /// <summary>Returns repositories in build order with sequence (same sequence = build in parallel), version from persistence, and dependency count per repo.</summary>
     public async Task<List<RepositoryBuildOrderRow>> GetRepositoryBuildOrderAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         var projects = await GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         if (projects.Count == 0) return new List<RepositoryBuildOrderRow>();
+
+        var versionByRepoId = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .Select(wr => new { wr.LinkedRepositoryId, wr.GitVersion })
+            .ToListAsync(cancellationToken);
+        var versionByRepo = versionByRepoId.ToDictionary(x => x.LinkedRepositoryId, x => x.GitVersion, null);
 
         var edges = await GetDependencyEdgesAsync(workspaceId, cancellationToken);
         var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
@@ -343,7 +350,7 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
             .ToList();
 
         return repoSequence
-            .Select(t => new RepositoryBuildOrderRow(t.Sequence, t.RepositoryName, depCountByRepo.GetValueOrDefault(t.RepositoryId, 0)))
+            .Select(t => new RepositoryBuildOrderRow(t.Sequence, t.RepositoryName, versionByRepo.GetValueOrDefault(t.RepositoryId), depCountByRepo.GetValueOrDefault(t.RepositoryId, 0)))
             .OrderBy(r => r.Sequence)
             .ThenBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase)
             .ToList();

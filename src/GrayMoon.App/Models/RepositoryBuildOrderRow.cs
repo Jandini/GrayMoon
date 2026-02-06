@@ -4,4 +4,5 @@ namespace GrayMoon.App.Models;
 public sealed record RepositoryBuildOrderRow(
     int Sequence,
     string RepositoryName,
+    string? Version,
     int DependencyCount);

@@ -41,6 +41,7 @@
                             <thead class="table-dark">
                                 <tr>
                                     <th class="col-repository">Repository</th>
+                                    <th class="col-version">Version</th>
                                     <th class="col-sequence">Sequence</th>
                                     <th class="col-dependencies">Dependencies</th>
                                 </tr>
@@ -49,7 +50,7 @@
                                 @if (isLoading)
                                 {
                                     <tr>
-                                        <td colspan="3" class="text-center text-muted py-4">
+                                        <td colspan="4" class="text-center text-muted py-4">
                                             Loading build order...
                                         </td>
                                     </tr>
@@ -57,7 +58,7 @@
                                 else if (rows.Count == 0)
                                 {
                                     <tr>
-                                        <td colspan="3" class="text-center text-muted py-4">
+                                        <td colspan="4" class="text-center text-muted py-4">
                                             No repositories in build order. Sync repositories to discover projects and dependencies.
                                         </td>
                                     </tr>
@@ -67,7 +68,8 @@
                                     @foreach (var row in rows)
                                     {
                                         <tr>
-                                            <td class="col-repository"><strong>@row.RepositoryName</strong></td>
+                                            <td class="col-repository">@row.RepositoryName</td>
+                                            <td class="col-version text-muted">@(row.Version ?? "-")</td>
                                             <td class="col-sequence">@row.Sequence</td>
                                             <td class="col-dependencies">@row.DependencyCount</td>
                                         </tr>
