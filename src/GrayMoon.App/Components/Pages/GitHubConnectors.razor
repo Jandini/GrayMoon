@@ -47,7 +47,7 @@
                                 <th>API Base URL</th>
                                 <th>User Name</th>
                                 <th class="text-center">Active</th>
-                                <th class="status-col">Status</th>
+                                <th class="status-col col-status-badge">Status</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -90,7 +90,7 @@
                                                        @onchange="(args) => ToggleConnectorAsync(connector, args)" />
                                             </div>
                                         </td>
-                                        <td class="status-col">
+                                        <td class="status-col col-status-badge">
                                             <span class="badge @GetStatusBadgeClass(connector)"
                                                   title="@GetStatusTitle(connector)">
                                                 @GetStatusLabel(connector)

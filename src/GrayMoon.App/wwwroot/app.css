@@ -709,6 +709,31 @@ input[list] {
 }
 
 /* Resizable table columns */
+table.resizable-columns th,
+table.resizable-columns td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+table.resizable-columns th:not(.text-center),
+table.resizable-columns td:not(.text-center) {
+    text-align: left;
+}
+
+/* Consistent padding: space between header title and resize handle, aligned with data cells */
+table.resizable-columns thead th,
+table.resizable-columns tbody td {
+    padding: 0.5rem 0.75rem;
+}
+
+/* Status/badge columns (e.g. Visibility, Status, Result): right-aligned like Repositories Visibility */
+table.resizable-columns th.col-status-badge,
+table.resizable-columns td.col-status-badge {
+    text-align: right;
+    padding-right: 0.75rem;
+}
+
 table.resizable-columns th .resize-handle {
     position: absolute;
     top: 0;
