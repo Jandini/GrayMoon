@@ -95,6 +95,67 @@ public class WorkspaceGitService(
         return results.ToDictionary(r => r.RepositoryId, r => r.info);
     }
 
+    /// <summary>Refreshes project and package reference data from .csproj files on disk (no git). Merges into RepositoryProjects and ProjectDependencies.</summary>
+    public async Task RefreshWorkspaceProjectsAsync(
+        int workspaceId,
+        Action<int, int, int>? onProgress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_agentBridge.IsAgentConnected)
+            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to refresh projects.");
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            throw new InvalidOperationException($"Workspace {workspaceId} not found.");
+
+        var repos = workspace.Repositories
+            .Select(link => link.Repository)
+            .Where(r => r != null)
+            .Cast<Repository>()
+            .ToList();
+
+        if (repos.Count == 0)
+        {
+            _logger.LogInformation("RefreshWorkspaceProjects: no repositories for workspace {WorkspaceName}", workspace.Name);
+            return;
+        }
+
+        _logger.LogInformation("RefreshWorkspaceProjects: Workspace={WorkspaceName}, RepoCount={RepoCount}", workspace.Name, repos.Count);
+
+        var completedCount = 0;
+        var totalCount = repos.Count;
+        using var semaphore = new SemaphoreSlim(_maxConcurrent);
+
+        var syncResults = await Task.WhenAll(repos.Select(async repo =>
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName };
+                var response = await _agentBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
+                var projectsDetail = response.Success && response.Data != null ? GetProjectsDetail(response.Data) : null;
+                var count = Interlocked.Increment(ref completedCount);
+                onProgress?.Invoke(count, totalCount, repo.RepositoryId);
+                return (repo.RepositoryId, ProjectsDetail: projectsDetail);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        }));
+
+        foreach (var (repoId, projectsDetail) in syncResults)
+        {
+            if (projectsDetail is { Count: > 0 })
+                await _repositoryProjectRepository.MergeRepositoryProjectsAsync(repoId, projectsDetail, cancellationToken);
+        }
+
+        var resultsForDeps = syncResults.Select(r => (r.RepositoryId, r.ProjectsDetail)).ToList();
+        await _repositoryProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, resultsForDeps, cancellationToken);
+
+        _logger.LogDebug("RefreshWorkspaceProjects completed for workspace {WorkspaceName}", workspace.Name);
+    }
+
     /// <summary>Syncs dependency versions in .csproj files to match the current version of each referenced package source. Only repos with at least one mismatched dependency are updated.</summary>
     public async Task<int> SyncDependenciesAsync(
         int workspaceId,

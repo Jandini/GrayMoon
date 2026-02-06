@@ -28,8 +28,8 @@
             </div>
             <div class="d-flex gap-2">
                 <button class="btn btn-primary"
-                        @onclick="SyncDependenciesAsync"
-                        disabled="@(isSyncingDependencies || rows.Count == 0)">
+                        @onclick="SyncAsync"
+                        disabled="@(isSyncingDependencies || workspace == null)">
                     Sync
                 </button>
             </div>
@@ -168,9 +168,9 @@
         _syncDependenciesCts?.Cancel();
     }
 
-    private async Task SyncDependenciesAsync()
+    private async Task SyncAsync()
     {
-        if (workspace == null || rows.Count == 0 || isSyncingDependencies)
+        if (workspace == null || isSyncingDependencies)
             return;
 
         _syncDependenciesCts?.Cancel();
@@ -178,13 +178,25 @@
         _syncDependenciesCts = new CancellationTokenSource();
 
         isSyncingDependencies = true;
-        syncDependenciesProgressMessage = "Syncing dependencies...";
+        syncDependenciesProgressMessage = "Refreshing projects...";
         errorMessage = null;
         StateHasChanged();
         await Task.Yield();
 
         try
         {
+            await WorkspaceGitService.RefreshWorkspaceProjectsAsync(
+                WorkspaceId,
+                onProgress: (completed, total, _) =>
+                {
+                    syncDependenciesProgressMessage = $"Refreshing projects {completed} of {total}";
+                    InvokeAsync(StateHasChanged);
+                },
+                cancellationToken: _syncDependenciesCts.Token);
+
+            syncDependenciesProgressMessage = "Syncing dependencies...";
+            await InvokeAsync(StateHasChanged);
+
             var updatedCount = await WorkspaceGitService.SyncDependenciesAsync(
                 WorkspaceId,
                 onProgress: (completed, total, _) =>
@@ -194,8 +206,7 @@
                 },
                 cancellationToken: _syncDependenciesCts.Token);
 
-            if (updatedCount > 0)
-                await LoadAsync();
+            await LoadAsync();
         }
         catch (OperationCanceledException)
         {
@@ -203,7 +214,7 @@
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error syncing dependencies for workspace {WorkspaceId}", WorkspaceId);
+            Logger.LogError(ex, "Error syncing for workspace {WorkspaceId}", WorkspaceId);
             errorMessage = "Sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
         }
         finally
