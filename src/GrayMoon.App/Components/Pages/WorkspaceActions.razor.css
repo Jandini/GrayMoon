@@ -52,9 +52,9 @@
     width: 12%;
 }
 
-.col-action {
-    width: 8%;
-    text-align: right;
+/* Last column: actions (match Workspaces.razor) */
+.col-actions {
+    width: 30%;
 }
 
 .actions-buttons {

@@ -47,8 +47,8 @@
                                 <th>API Base URL</th>
                                 <th>User Name</th>
                                 <th class="text-center">Active</th>
-                                <th class="status-col col-status-badge">Status</th>
-                                <th>Actions</th>
+                                <th class="status-col text-center">Status</th>
+                                <th class="col-actions">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -90,13 +90,13 @@
                                                        @onchange="(args) => ToggleConnectorAsync(connector, args)" />
                                             </div>
                                         </td>
-                                        <td class="status-col col-status-badge">
+                                        <td class="status-col text-center">
                                             <span class="badge @GetStatusBadgeClass(connector)"
                                                   title="@GetStatusTitle(connector)">
                                                 @GetStatusLabel(connector)
                                             </span>
                                         </td>
-                                        <td class="actions-col">
+                                        <td class="col-actions">
                                             <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => ShowEditModal(connector)">Edit</button>
                                             <button class="btn btn-sm btn-outline-danger me-2" @onclick="() => ShowDeleteModal(connector)">Delete</button>
                                         </td>

@@ -63,7 +63,7 @@
                                     <th class="col-status col-status-badge">Status</th>
                                     <th class="col-result col-status-badge">Result</th>
                                     <th class="col-updated">Date & time</th>
-                                    <th class="col-action">Action</th>
+                                    <th class="col-actions">Action</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -134,7 +134,7 @@
                                                     </span>
                                                 </td>
                                                 <td class="col-updated">@(action.UpdatedAt?.ToLocalTime().ToString("g") ?? "-")</td>
-                                                <td class="col-action">
+                                                <td class="col-actions">
                                                     @if (IsFailed(action))
                                                     {
                                                         <button class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1"
