@@ -36,9 +36,14 @@
                         disabled="@(workspace == null)">
                     Repositories
                 </button>
+                <button class="btn @(hasUnmatchedDependencies ? "btn-danger" : "btn-secondary")"
+                        @onclick="UpdateDependenciesAsync"
+                        disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating)">
+                    Update
+                </button>
                 <button class="btn @(isOutOfSync == true ? "btn-danger" : "btn-primary")"
                         @onclick="SyncAsync"
-                        disabled="@(isSyncing || workspaceRepositories.Count == 0)">
+                        disabled="@(isSyncing || isUpdating || workspaceRepositories.Count == 0)">
                     Sync
                 </button>
             </div>
@@ -148,6 +153,7 @@
 
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
 <LoadingOverlay IsVisible="@isSyncing" Message="@syncProgressMessage" OnAbort="AbortSyncAsync" />
+<LoadingOverlay IsVisible="@isUpdating" Message="@updateProgressMessage" OnAbort="AbortUpdateAsync" />
 <LoadingOverlay IsVisible="@(showRepositoriesModal && isPersisting)" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}...")" OnAbort="AbortFetchRepositories" />
 
 @code {
@@ -160,7 +166,11 @@
     private bool isLoading = true;
     private bool isSyncing = false;
     private string syncProgressMessage = "Synchronizing...";
+    private bool isUpdating = false;
+    private string updateProgressMessage = "Updating dependencies...";
+    private CancellationTokenSource? _updateCts;
     private bool? isOutOfSync = null;
+    private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0);
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private CancellationTokenSource? _syncCts;
     private HubConnection? _hubConnection;
@@ -216,17 +226,51 @@
         _hubConnection?.DisposeAsync();
         _syncCts?.Cancel();
         _syncCts?.Dispose();
+        _updateCts?.Cancel();
+        _updateCts?.Dispose();
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
     }
 
+    private bool _backgroundRefreshInProgress;
+
     private async Task RefreshFromSync()
     {
-        if (isSyncing)
+        if (isSyncing || isUpdating || _backgroundRefreshInProgress)
             return;
-        await ReloadWorkspaceDataAsync();
-        ApplySyncStateFromWorkspace();
-        await InvokeAsync(StateHasChanged);
+        await RunBackgroundDependenciesRefreshAsync();
+    }
+
+    /// <summary>Refreshes project/dependency data from disk (read-only) and reloads the grid. No overlay, does not write .csproj files.</summary>
+    private async Task RunBackgroundDependenciesRefreshAsync()
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || isUpdating || isSyncing || _backgroundRefreshInProgress)
+            return;
+
+        _backgroundRefreshInProgress = true;
+        try
+        {
+            await WorkspaceGitService.RefreshWorkspaceProjectsAsync(WorkspaceId, onProgress: null, cancellationToken: default);
+            await ReloadWorkspaceDataAsync();
+            ApplySyncStateFromWorkspace();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Background dependencies refresh failed for workspace {WorkspaceId}", WorkspaceId);
+            try
+            {
+                await ReloadWorkspaceDataAsync();
+                ApplySyncStateFromWorkspace();
+                await InvokeAsync(StateHasChanged);
+            }
+            catch { /* best effort */ }
+        }
+        finally
+        {
+            _backgroundRefreshInProgress = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task LoadWorkspaceAsync()
@@ -313,6 +357,76 @@
     private void AbortSyncAsync()
     {
         _syncCts?.Cancel();
+    }
+
+    private void AbortUpdateAsync()
+    {
+        _updateCts?.Cancel();
+    }
+
+    /// <summary>User-triggered: refresh project/dependency data and write .csproj files to match referenced versions. Shows overlay.</summary>
+    private async Task UpdateDependenciesAsync()
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || isUpdating || isSyncing)
+            return;
+
+        _updateCts?.Cancel();
+        _updateCts?.Dispose();
+        _updateCts = new CancellationTokenSource();
+
+        isUpdating = true;
+        updateProgressMessage = "Refreshing projects...";
+        errorMessage = null;
+        try
+        {
+            StateHasChanged();
+            await Task.Yield();
+
+            await WorkspaceGitService.RefreshWorkspaceProjectsAsync(
+                WorkspaceId,
+                onProgress: (completed, total, _) =>
+                {
+                    updateProgressMessage = $"Refreshing projects {completed} of {total}";
+                    InvokeAsync(StateHasChanged);
+                },
+                cancellationToken: _updateCts.Token);
+
+            updateProgressMessage = "Syncing dependencies...";
+            await InvokeAsync(StateHasChanged);
+            await WorkspaceGitService.SyncDependenciesAsync(
+                WorkspaceId,
+                onProgress: (completed, total, _) =>
+                {
+                    updateProgressMessage = $"Synced dependencies {completed} of {total}";
+                    InvokeAsync(StateHasChanged);
+                },
+                cancellationToken: _updateCts.Token);
+
+            updateProgressMessage = "Refreshing...";
+            await InvokeAsync(StateHasChanged);
+            await WorkspaceGitService.RefreshWorkspaceProjectsAsync(
+                WorkspaceId,
+                onProgress: null,
+                cancellationToken: _updateCts.Token);
+
+            await ReloadWorkspaceDataAsync();
+            ApplySyncStateFromWorkspace();
+        }
+        catch (OperationCanceledException)
+        {
+            await ReloadWorkspaceDataAsync();
+            ApplySyncStateFromWorkspace();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating dependencies for workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Update failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+        }
+        finally
+        {
+            isUpdating = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task ShowRepositoriesModalAsync()
@@ -420,6 +534,7 @@
         }
     }
 
+    /// <summary>Sync repos only (git, version, branch, commit counts). Does not read or write .csproj; dependency mismatches are resolved only by Update.</summary>
     private async Task SyncAsync()
     {
         if (workspace == null || workspaceRepositories.Count == 0 || isSyncing)
@@ -433,11 +548,11 @@
         isSyncing = true;
         syncProgressMessage = "Synchronizing...";
         errorMessage = null;
-        StateHasChanged();
-        await Task.Yield();
-
         try
         {
+            StateHasChanged();
+            await Task.Yield();
+
             var results = await WorkspaceGitService.SyncAsync(
                 WorkspaceId,
                 onProgress: (completed, total, repoId, info) =>
@@ -462,28 +577,6 @@
                 cancellationToken: _syncCts.Token);
             repoGitInfos = results;
 
-            syncProgressMessage = "Refreshing projects...";
-            await InvokeAsync(StateHasChanged);
-            await WorkspaceGitService.RefreshWorkspaceProjectsAsync(
-                WorkspaceId,
-                onProgress: (completed, total, _) =>
-                {
-                    syncProgressMessage = $"Refreshing projects {completed} of {total}";
-                    InvokeAsync(StateHasChanged);
-                },
-                cancellationToken: _syncCts.Token);
-
-            syncProgressMessage = "Syncing dependencies...";
-            await InvokeAsync(StateHasChanged);
-            await WorkspaceGitService.SyncDependenciesAsync(
-                WorkspaceId,
-                onProgress: (completed, total, _) =>
-                {
-                    syncProgressMessage = $"Synced dependencies {completed} of {total}";
-                    InvokeAsync(StateHasChanged);
-                },
-                cancellationToken: _syncCts.Token);
-
             await ReloadWorkspaceDataAsync();
             ApplySyncStateFromWorkspace();
             isOutOfSync = repoSyncStatus.Values.Any(v => v != RepoSyncStatus.InSync);
@@ -502,6 +595,7 @@
         finally
         {
             isSyncing = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 }
