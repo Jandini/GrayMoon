@@ -24,9 +24,9 @@ public sealed class AgentHub(AgentConnectionTracker connectionTracker, SyncComma
         return Task.CompletedTask;
     }
 
-    /// <summary>Invoked by the agent when a hook fires: agent ran GitVersion and pushes result for app to persist.</summary>
-    public async Task SyncCommand(int workspaceId, int repositoryId, string version, string branch)
+    /// <summary>Invoked by the agent when a hook fires: agent ran GitVersion (and fetch/commit counts) and pushes result for app to persist.</summary>
+    public async Task SyncCommand(int workspaceId, int repositoryId, string version, string branch, int? outgoingCommits = null, int? incomingCommits = null)
     {
-        await syncCommandHandler.HandleAsync(workspaceId, repositoryId, version, branch);
+        await syncCommandHandler.HandleAsync(workspaceId, repositoryId, version, branch, outgoingCommits, incomingCommits);
     }
 }
