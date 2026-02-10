@@ -1,3 +1,4 @@
+using System.Xml;
 using System.Xml.Linq;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Models;
@@ -46,10 +47,8 @@ public sealed class CsProjFileParser : ICsProjFileParser
             return false;
         }
 
-        // Remember whether the file had an XML declaration so we don't add one when it wasn't present.
+        // XDocument.Save(path) adds an XML declaration by default. Only write one if the file had it on load.
         var hadXmlDeclaration = doc.Declaration != null;
-        if (!hadXmlDeclaration)
-            doc.Declaration = null; // ensure we never write <?xml ...?> when the original had none
 
         var root = doc.Root;
         if (root == null)
@@ -90,7 +89,21 @@ public sealed class CsProjFileParser : ICsProjFileParser
 
         if (modified)
         {
-            doc.Save(csprojPath, SaveOptions.None);
+            if (hadXmlDeclaration)
+            {
+                doc.Save(csprojPath, SaveOptions.None);
+            }
+            else
+            {
+                var settings = new XmlWriterSettings
+                {
+                    OmitXmlDeclaration = true,
+                    Indent = false,
+                    NewLineOnAttributes = false
+                };
+                using (var writer = XmlWriter.Create(csprojPath, settings))
+                    doc.Save(writer, SaveOptions.None);
+            }
         }
 
         return modified;
