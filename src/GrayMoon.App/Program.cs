@@ -257,6 +257,13 @@ static async Task MigrateWorkspaceRepositoriesSequenceAndDependenciesAsync(AppDb
                 cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN Dependencies INTEGER";
                 await cmd.ExecuteNonQueryAsync();
             }
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='UnmatchedDeps'";
+            count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN UnmatchedDeps INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+            }
         }
     }
     catch

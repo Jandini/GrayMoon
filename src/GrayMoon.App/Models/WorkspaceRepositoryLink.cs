@@ -44,4 +44,7 @@ public class WorkspaceRepositoryLink
 
     /// <summary>Number of workspace dependency edges where this repo is the dependent. Set when dependencies are merged.</summary>
     public int? Dependencies { get; set; }
+
+    /// <summary>Number of those dependencies whose version does not match the referenced repo's GitVersion. Set when dependencies are merged. Used for badge (same logic as build).</summary>
+    public int? UnmatchedDeps { get; set; }
 }
