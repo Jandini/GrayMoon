@@ -140,6 +140,7 @@
                ExistingRepositoryCount="@existingRepositoryCount"
                IsNameDisabled="false"
                IsSaving="@isSaving"
+               IsCheckingDirectory="@isLoadingDirectoryInfo"
                ErrorMessage="@editorErrorMessage"
                OnSave="@SaveWorkspaceAsync"
                OnCancel="@CloseEditorModal" />
@@ -213,6 +214,7 @@
     private bool directoryExists;
     private int existingRepositoryCount;
     private CancellationTokenSource? _directoryInfoCts;
+    private bool isLoadingDirectoryInfo;
 
     public void Dispose()
     {
@@ -528,6 +530,7 @@
         {
             directoryExists = false;
             existingRepositoryCount = 0;
+            isLoadingDirectoryInfo = false;
             StateHasChanged();
             return;
         }
@@ -538,6 +541,7 @@
 
         try
         {
+            isLoadingDirectoryInfo = true;
             var existsTask = WorkspaceService.DirectoryExistsAsync(workspaceName, ct);
             var countTask = WorkspaceService.GetRepositoryCountAsync(workspaceName, ct);
             directoryExists = await existsTask;
@@ -552,6 +556,7 @@
         }
         finally
         {
+            isLoadingDirectoryInfo = false;
             await InvokeAsync(StateHasChanged);
         }
     }

@@ -43,7 +43,7 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
-                    <button type="button" class="btn btn-primary" @onclick="OnSave" disabled="@IsSaving">
+                    <button type="button" class="btn btn-primary" @onclick="OnSave" disabled="@(IsSaving || IsCheckingDirectory)">
                         @if (IsSaving)
                         {
                             <span class="spinner-border spinner-border-sm me-2"></span>
@@ -68,6 +68,7 @@
     [Parameter] public int ExistingRepositoryCount { get; set; }
     [Parameter] public bool IsNameDisabled { get; set; }
     [Parameter] public bool IsSaving { get; set; }
+    [Parameter] public bool IsCheckingDirectory { get; set; }
     [Parameter] public string? ErrorMessage { get; set; }
     [Parameter] public EventCallback OnSave { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
@@ -93,7 +94,7 @@
         {
             await OnCancel.InvokeAsync();
         }
-        else if (e.Key == "Enter")
+        else if (e.Key == "Enter" && !IsSaving && !IsCheckingDirectory)
         {
             await OnSave.InvokeAsync();
         }

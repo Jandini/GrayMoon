@@ -82,6 +82,21 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
     }
 
+    public async Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return null;
+
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", "config --get remote.origin.url", repoPath, ct);
+        if (exitCode != 0)
+        {
+            logger.LogDebug("Failed to get remote origin url for repo {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, exitCode, stderr);
+            return null;
+        }
+
+        return (stdout ?? "").Trim();
+    }
+
     public void CreateDirectory(string path)
     {
         if (Directory.Exists(path))
