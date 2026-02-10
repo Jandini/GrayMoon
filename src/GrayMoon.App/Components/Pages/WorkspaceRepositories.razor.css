@@ -51,6 +51,11 @@
     max-width: 50px;
 }
 
+.col-commits {
+    width: auto;
+    max-width: 80px;
+}
+
 .col-version {
     width: auto;
     min-width: 0;

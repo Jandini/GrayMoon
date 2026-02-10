@@ -97,6 +97,33 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (stdout ?? "").Trim();
     }
 
+    public async Task FetchAsync(string repoPath, bool includeTags, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return;
+
+        var args = includeTags ? "fetch origin --tags" : "fetch origin";
+        var (exitCode, _, stderr) = await RunProcessAsync("git", args, repoPath, ct);
+        if (exitCode != 0)
+            logger.LogDebug("Git fetch failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, exitCode, stderr);
+    }
+
+    public async Task<(int? Outgoing, int? Incoming)> GetCommitCountsAsync(string repoPath, string branchName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
+            return (null, null);
+
+        var originBranch = "origin/" + branchName.Trim();
+        var (exitOut, stdoutOut, _) = await RunProcessAsync("git", $"rev-list --count {originBranch}..HEAD", repoPath, ct);
+        var (exitIn, stdoutIn, _) = await RunProcessAsync("git", $"rev-list --count HEAD..{originBranch}", repoPath, ct);
+        if (exitOut != 0 || exitIn != 0)
+            return (null, null);
+
+        var outVal = int.TryParse((stdoutOut ?? "").Trim(), out var o) ? o : (int?)null;
+        var inVal = int.TryParse((stdoutIn ?? "").Trim(), out var i) ? i : (int?)null;
+        return (outVal, inVal);
+    }
+
     public void CreateDirectory(string path)
     {
         if (Directory.Exists(path))

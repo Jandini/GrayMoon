@@ -85,6 +85,7 @@ using (var scope = app.Services.CreateScope())
     await MigrateConnectorUserNameAsync(dbContext);
     await MigrateWorkspaceRepositoriesSyncStatusAsync(dbContext);
     await MigrateWorkspaceRepositoriesProjectsAsync(dbContext);
+    await MigrateWorkspaceRepositoriesCommitsAsync(dbContext);
 }
 
 static string? GetDatabasePath(string connectionString)
@@ -199,6 +200,37 @@ static async Task MigrateWorkspaceRepositoriesProjectsAsync(AppDbContext dbConte
     }
 }
 
+static async Task MigrateWorkspaceRepositoriesCommitsAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='OutgoingCommits'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN OutgoingCommits INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+            }
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='IncomingCommits'";
+            count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN IncomingCommits INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

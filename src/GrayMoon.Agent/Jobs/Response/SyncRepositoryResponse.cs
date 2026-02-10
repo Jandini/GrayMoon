@@ -13,4 +13,10 @@ public sealed class SyncRepositoryResponse
 
     [JsonPropertyName("projects")]
     public IReadOnlyList<CsProjFileInfo>? Projects { get; set; }
+
+    [JsonPropertyName("outgoingCommits")]
+    public int? OutgoingCommits { get; set; }
+
+    [JsonPropertyName("incomingCommits")]
+    public int? IncomingCommits { get; set; }
 }

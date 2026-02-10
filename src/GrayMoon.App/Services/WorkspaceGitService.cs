@@ -301,7 +301,8 @@ public class WorkspaceGitService(
         var (version, branch) = GetVersionBranch(response.Data);
         var projectsCount = GetProjects(response.Data);
         var projectsDetail = GetProjectsDetail(response.Data);
-        return new RepoGitVersionInfo { Version = version, Branch = branch, Projects = projectsCount, ProjectsDetail = projectsDetail };
+        var (outgoingCommits, incomingCommits) = GetCommitCounts(response.Data);
+        return new RepoGitVersionInfo { Version = version, Branch = branch, Projects = projectsCount, ProjectsDetail = projectsDetail, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits };
     }
 
     private static RepoGitVersionInfo ParseRefreshRepositoryVersionResponse(AgentCommandResponse response)
@@ -335,6 +336,16 @@ public class WorkspaceGitService(
         if (p.ValueKind == JsonValueKind.Number && p.TryGetInt32(out var n))
             return n;
         return null;
+    }
+
+    private static (int? Outgoing, int? Incoming) GetCommitCounts(object data)
+    {
+        var json = data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(data);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        var outgoing = root.TryGetProperty("outgoingCommits", out var o) && o.TryGetInt32(out var outVal) ? outVal : (int?)null;
+        var incoming = root.TryGetProperty("incomingCommits", out var i) && i.TryGetInt32(out var inVal) ? inVal : (int?)null;
+        return (outgoing, incoming);
     }
 
     private static IReadOnlyList<SyncProjectInfo>? GetProjectsDetail(object data)
@@ -414,7 +425,9 @@ public class WorkspaceGitService(
             {
                 wr.GitVersion = info.Version == "-" ? null : info.Version;
                 wr.BranchName = info.Branch == "-" ? null : info.Branch;
-                wr.Projects = info.Projects;
+                if (info.Projects.HasValue) wr.Projects = info.Projects;
+                if (info.OutgoingCommits.HasValue) wr.OutgoingCommits = info.OutgoingCommits;
+                if (info.IncomingCommits.HasValue) wr.IncomingCommits = info.IncomingCommits;
                 wr.SyncStatus = (info.Version == "-" || info.Branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
             }
 
