@@ -160,6 +160,29 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
         await PersistRepositorySequenceAndDependenciesAsync(workspaceId, workspaceProjects, uniqueEdges, cancellationToken);
     }
 
+    /// <summary>Recomputes Sequence, Dependencies, and UnmatchedDeps from current DB state (workspace projects and project dependencies) and persists to WorkspaceRepositoryLink. Use after a repository version change (e.g. notify job) so the grid can refresh without re-reading .csproj files.</summary>
+    public async Task RecomputeAndPersistRepositoryDependencyStatsAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var workspaceProjects = await dbContext.WorkspaceProjects
+            .AsNoTracking()
+            .Where(p => p.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+        if (workspaceProjects.Count == 0) return;
+
+        var projectIds = workspaceProjects.Select(p => p.ProjectId).ToHashSet();
+        var depRows = await dbContext.ProjectDependencies
+            .AsNoTracking()
+            .Where(d => projectIds.Contains(d.DependentProjectId) && projectIds.Contains(d.ReferencedProjectId))
+            .Select(d => new { d.DependentProjectId, d.ReferencedProjectId, d.Version })
+            .ToListAsync(cancellationToken);
+        var uniqueEdges = depRows
+            .GroupBy(d => (d.DependentProjectId, d.ReferencedProjectId))
+            .Select(g => (g.Key.DependentProjectId, g.Key.ReferencedProjectId, g.First().Version))
+            .ToList();
+
+        await PersistRepositorySequenceAndDependenciesAsync(workspaceId, workspaceProjects, uniqueEdges, cancellationToken);
+    }
+
     /// <summary>Computes build sequence and dependency count per repo and persists them on WorkspaceRepositoryLink.</summary>
     private async Task PersistRepositorySequenceAndDependenciesAsync(
         int workspaceId,

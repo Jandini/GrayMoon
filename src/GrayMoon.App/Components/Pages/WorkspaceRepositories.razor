@@ -232,45 +232,14 @@
         _fetchRepositoriesCts?.Dispose();
     }
 
-    private bool _backgroundRefreshInProgress;
-
+    /// <summary>Called when WorkspaceSynced is received: server has already recomputed dependency stats (Sequence/Dependencies/UnmatchedDeps); just reload data so the grid reflects the update.</summary>
     private async Task RefreshFromSync()
     {
-        if (isSyncing || isUpdating || _backgroundRefreshInProgress)
+        if (isSyncing || isUpdating)
             return;
-        await RunBackgroundDependenciesRefreshAsync();
-    }
-
-    /// <summary>Refreshes project/dependency data from disk (read-only) and reloads the grid. No overlay, does not write .csproj files.</summary>
-    private async Task RunBackgroundDependenciesRefreshAsync()
-    {
-        if (workspace == null || workspaceRepositories.Count == 0 || isUpdating || isSyncing || _backgroundRefreshInProgress)
-            return;
-
-        _backgroundRefreshInProgress = true;
-        try
-        {
-            await WorkspaceGitService.RefreshWorkspaceProjectsAsync(WorkspaceId, onProgress: null, cancellationToken: default);
-            await ReloadWorkspaceDataAsync();
-            ApplySyncStateFromWorkspace();
-            await InvokeAsync(StateHasChanged);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Background dependencies refresh failed for workspace {WorkspaceId}", WorkspaceId);
-            try
-            {
-                await ReloadWorkspaceDataAsync();
-                ApplySyncStateFromWorkspace();
-                await InvokeAsync(StateHasChanged);
-            }
-            catch { /* best effort */ }
-        }
-        finally
-        {
-            _backgroundRefreshInProgress = false;
-            await InvokeAsync(StateHasChanged);
-        }
+        await ReloadWorkspaceDataAsync();
+        ApplySyncStateFromWorkspace();
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task LoadWorkspaceAsync()

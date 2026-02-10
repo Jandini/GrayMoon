@@ -252,6 +252,8 @@ public class WorkspaceGitService(
         var isInSync = allLinks.Count > 0 && allLinks.All(s => s == RepoSyncStatus.InSync);
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
 
+        await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
+
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
         return true;
