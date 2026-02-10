@@ -20,7 +20,7 @@ public static class SyncEndpoints
     private static async Task<IResult> PostSync(
         SyncRequest? body,
         IAgentBridge agentBridge,
-        RepositoryRepository repoRepository,
+        GitHubRepositoryRepository repoRepository,
         WorkspaceRepository workspaceRepository,
         AppDbContext dbContext,
         SyncBackgroundService syncQueue,

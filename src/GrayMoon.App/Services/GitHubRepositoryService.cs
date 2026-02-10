@@ -5,7 +5,7 @@ namespace GrayMoon.App.Services;
 
 public class GitHubRepositoryService(
     ConnectorRepository connectorRepository,
-    RepositoryRepository repositoryRepository,
+    GitHubRepositoryRepository repositoryRepository,
     GitHubService gitHubService,
     ILogger<GitHubRepositoryService> logger)
 {

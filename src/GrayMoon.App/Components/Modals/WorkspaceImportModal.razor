@@ -1,0 +1,35 @@
+@using GrayMoon.App.Models
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Import Repositories</h5>
+                    <button type="button" class="btn-close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body">
+                    <p>
+                        Found @MatchingCount @(MatchingCount == 1 ? "repository" : "repositories") in this workspace that match your existing repositories by URL.
+                    </p>
+                    <p>
+                        Do you want to import these matching repositories into this workspace?
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="OnCancel">No</button>
+                    <button type="button" class="btn btn-primary" @onclick="OnConfirm">Yes, import</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public int MatchingCount { get; set; }
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+}
+
