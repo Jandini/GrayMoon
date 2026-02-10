@@ -9,6 +9,7 @@
 @using Microsoft.AspNetCore.SignalR.Client
 @inject WorkspaceRepository WorkspaceRepository
 @inject WorkspaceGitService WorkspaceGitService
+@inject IServiceScopeFactory ServiceScopeFactory
 @inject ConnectorRepository ConnectorRepository
 @inject GitHubRepositoryService RepositoryService
 @inject NavigationManager NavigationManager
@@ -36,9 +37,14 @@
                         disabled="@(workspace == null)">
                     Repositories
                 </button>
+                <button class="btn @(hasUnmatchedDependencies ? "btn-danger" : "btn-secondary")"
+                        @onclick="UpdateDependenciesAsync"
+                        disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating)">
+                    Update
+                </button>
                 <button class="btn @(isOutOfSync == true ? "btn-danger" : "btn-primary")"
                         @onclick="SyncAsync"
-                        disabled="@(isSyncing || workspaceRepositories.Count == 0)">
+                        disabled="@(isSyncing || isUpdating || workspaceRepositories.Count == 0)">
                     Sync
                 </button>
             </div>
@@ -63,6 +69,7 @@
                                 <th class="col-version">Version</th>
                                 <th class="col-branch">Branch</th>
                                 <th class="col-projects">Projects</th>
+                                <th class="col-deps">Dependencies</th>
                                 <th class="col-commits">Commits</th>
                                 <th class="col-sync col-status-badge">Status</th>
                             </tr>
@@ -71,7 +78,7 @@
                             @if (isLoading)
                             {
                                 <tr>
-                                    <td colspan="6" class="text-center text-muted py-4">
+                                    <td colspan="7" class="text-center text-muted py-4">
                                         Loading workspace...
                                     </td>
                                 </tr>
@@ -79,7 +86,7 @@
                             else if (workspaceRepositories.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="6" class="text-center text-muted py-4">
+                                    <td colspan="7" class="text-center text-muted py-4">
                                         No repositories assigned to this workspace.
                                     </td>
                                 </tr>
@@ -96,6 +103,24 @@
                                             <td class="col-version text-muted">@(wr.GitVersion ?? "-")</td>
                                             <td class="col-branch text-muted">@(wr.BranchName ?? "-")</td>
                                             <td class="col-projects text-muted">@(wr.Projects?.ToString() ?? "-")</td>
+                                            <td class="col-deps col-status-badge">
+                                                @{
+                                                    var depCount = wr.Dependencies ?? 0;
+                                                    var unmatchedDeps = wr.UnmatchedDeps ?? 0;
+                                                }
+                                                @if (depCount == 0)
+                                                {
+                                                    <span class="badge build-dep-badge build-dep-badge-none">0</span>
+                                                }
+                                                else if (unmatchedDeps == 0)
+                                                {
+                                                    <span class="badge build-dep-badge build-dep-badge-ok">@depCount</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge build-dep-badge build-dep-badge-mismatch">@unmatchedDeps of @depCount</span>
+                                                }
+                                            </td>
                                             <td class="col-commits">@GetCommitsBadge(wr.OutgoingCommits, wr.IncomingCommits)</td>
                                             <td class="col-sync col-status-badge">@GetRepoSyncBadge(repo.RepositoryId)</td>
                                         </tr>
@@ -125,6 +150,7 @@
 
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
 <LoadingOverlay IsVisible="@isSyncing" Message="@syncProgressMessage" OnAbort="AbortSyncAsync" />
+<LoadingOverlay IsVisible="@isUpdating" Message="@updateProgressMessage" OnAbort="AbortUpdateAsync" />
 <LoadingOverlay IsVisible="@(showRepositoriesModal && isPersisting)" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}...")" OnAbort="AbortFetchRepositories" />
 
 @code {
@@ -137,7 +163,11 @@
     private bool isLoading = true;
     private bool isSyncing = false;
     private string syncProgressMessage = "Synchronizing...";
+    private bool isUpdating = false;
+    private string updateProgressMessage = "Updating dependencies...";
+    private CancellationTokenSource? _updateCts;
     private bool? isOutOfSync = null;
+    private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0);
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private CancellationTokenSource? _syncCts;
     private HubConnection? _hubConnection;
@@ -193,15 +223,18 @@
         _hubConnection?.DisposeAsync();
         _syncCts?.Cancel();
         _syncCts?.Dispose();
+        _updateCts?.Cancel();
+        _updateCts?.Dispose();
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
     }
 
+    /// <summary>Called when WorkspaceSynced is received (or after Update): reload from a fresh scope so the grid gets current DB values (no stale DbContext).</summary>
     private async Task RefreshFromSync()
     {
-        if (isSyncing)
+        if (isSyncing || isUpdating)
             return;
-        await ReloadWorkspaceDataAsync();
+        await ReloadWorkspaceDataFromFreshScopeAsync();
         ApplySyncStateFromWorkspace();
         await InvokeAsync(StateHasChanged);
     }
@@ -237,7 +270,27 @@
         }
 
         workspaceRepositories = workspace.Repositories
-            .OrderBy(wr => wr.Repository?.RepositoryName)
+            .OrderByDescending(wr => wr.Sequence ?? int.MinValue)
+            .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
+            .ToList();
+    }
+
+    /// <summary>Loads workspace using a new scope (fresh DbContext) so we get current DB values and avoid EF cache. Used by RefreshFromSync so the grid shows updated UnmatchedDeps after notify or Update.</summary>
+    private async Task ReloadWorkspaceDataFromFreshScopeAsync()
+    {
+        await using var scope = ServiceScopeFactory.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+        var w = await repo.GetByIdAsync(WorkspaceId);
+        if (w == null)
+        {
+            errorMessage = "Workspace not found.";
+            workspaceRepositories = new List<WorkspaceRepositoryLink>();
+            return;
+        }
+        workspace = w;
+        workspaceRepositories = workspace.Repositories
+            .OrderByDescending(wr => wr.Sequence ?? int.MinValue)
+            .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
     }
 
@@ -289,6 +342,77 @@
     private void AbortSyncAsync()
     {
         _syncCts?.Cancel();
+    }
+
+    private void AbortUpdateAsync()
+    {
+        _updateCts?.Cancel();
+    }
+
+    /// <summary>User-triggered: refresh project/dependency data and write .csproj files to match referenced versions. Runs in a fresh scope so the DB context sees current state (e.g. UnmatchedDeps from notify) and GetSyncDependenciesPayloadAsync returns correct payload.</summary>
+    private async Task UpdateDependenciesAsync()
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || isUpdating || isSyncing)
+            return;
+
+        _updateCts?.Cancel();
+        _updateCts?.Dispose();
+        _updateCts = new CancellationTokenSource();
+
+        isUpdating = true;
+        updateProgressMessage = "Refreshing projects...";
+        errorMessage = null;
+        try
+        {
+            StateHasChanged();
+            await Task.Yield();
+
+            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
+            {
+                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                await workspaceGitService.RefreshWorkspaceProjectsAsync(
+                    WorkspaceId,
+                    onProgress: (completed, total, _) =>
+                    {
+                        updateProgressMessage = $"Refreshing projects {completed} of {total}";
+                        InvokeAsync(StateHasChanged);
+                    },
+                    cancellationToken: _updateCts.Token);
+
+                updateProgressMessage = "Syncing dependencies...";
+                await InvokeAsync(StateHasChanged);
+                await workspaceGitService.SyncDependenciesAsync(
+                    WorkspaceId,
+                    onProgress: (completed, total, _) =>
+                    {
+                        updateProgressMessage = $"Synced dependencies {completed} of {total}";
+                        InvokeAsync(StateHasChanged);
+                    },
+                    cancellationToken: _updateCts.Token);
+
+                await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId, _updateCts.Token);
+            }
+
+            isUpdating = false;
+            await InvokeAsync(StateHasChanged);
+            await RefreshFromSync();
+        }
+        catch (OperationCanceledException)
+        {
+            isUpdating = false;
+            await ReloadWorkspaceDataAsync();
+            ApplySyncStateFromWorkspace();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating dependencies for workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Update failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+        }
+        finally
+        {
+            isUpdating = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task ShowRepositoriesModalAsync()
@@ -396,6 +520,7 @@
         }
     }
 
+    /// <summary>Sync repos only (git, version, branch, commit counts). Does not read or write .csproj; dependency mismatches are resolved only by Update. Runs in a fresh scope so DbContext is not stale and PersistVersionsAsync → dependency recompute sees current state.</summary>
     private async Task SyncAsync()
     {
         if (workspace == null || workspaceRepositories.Count == 0 || isSyncing)
@@ -409,35 +534,38 @@
         isSyncing = true;
         syncProgressMessage = "Synchronizing...";
         errorMessage = null;
-        StateHasChanged();
-        await Task.Yield();
-
         try
         {
-            var results = await WorkspaceGitService.SyncAsync(
-                WorkspaceId,
-                onProgress: (completed, total, repoId, info) =>
-                {
-                    syncProgressMessage = $"Synchronized {completed} of {total}";
-                    repoSyncStatus[repoId] = (info.Version == "-" && info.Branch == "-")
-                        ? RepoSyncStatus.Error
-                        : RepoSyncStatus.InSync;
+            StateHasChanged();
+            await Task.Yield();
 
-                    var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
-                    if (wr != null)
+            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
+            {
+                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                var results = await workspaceGitService.SyncAsync(
+                    WorkspaceId,
+                    onProgress: (completed, total, repoId, info) =>
                     {
-                        wr.GitVersion = info.Version == "-" ? null : info.Version;
-                        wr.BranchName = info.Branch == "-" ? null : info.Branch;
-                        wr.Projects = info.Projects;
-                        wr.OutgoingCommits = info.OutgoingCommits;
-                        wr.IncomingCommits = info.IncomingCommits;
-                    }
-
-                    InvokeAsync(StateHasChanged);
-                },
-                cancellationToken: _syncCts.Token);
-            repoGitInfos = results;
-
+                        syncProgressMessage = $"Synchronized {completed} of {total}";
+                        repoSyncStatus[repoId] = (info.Version == "-" && info.Branch == "-")
+                            ? RepoSyncStatus.Error
+                            : RepoSyncStatus.InSync;
+                        var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
+                        if (wr != null)
+                        {
+                            wr.GitVersion = info.Version == "-" ? null : info.Version;
+                            wr.BranchName = info.Branch == "-" ? null : info.Branch;
+                            wr.Projects = info.Projects;
+                            wr.OutgoingCommits = info.OutgoingCommits;
+                            wr.IncomingCommits = info.IncomingCommits;
+                        }
+                        InvokeAsync(StateHasChanged);
+                    },
+                    cancellationToken: _syncCts.Token);
+                repoGitInfos = results;
+            }
+            await ReloadWorkspaceDataAsync();
+            ApplySyncStateFromWorkspace();
             isOutOfSync = repoSyncStatus.Values.Any(v => v != RepoSyncStatus.InSync);
         }
         catch (OperationCanceledException)
@@ -454,6 +582,7 @@
         finally
         {
             isSyncing = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 }

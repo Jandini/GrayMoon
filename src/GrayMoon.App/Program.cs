@@ -86,6 +86,7 @@ using (var scope = app.Services.CreateScope())
     await MigrateWorkspaceRepositoriesSyncStatusAsync(dbContext);
     await MigrateWorkspaceRepositoriesProjectsAsync(dbContext);
     await MigrateWorkspaceRepositoriesCommitsAsync(dbContext);
+    await MigrateWorkspaceRepositoriesSequenceAndDependenciesAsync(dbContext);
 }
 
 static string? GetDatabasePath(string connectionString)
@@ -222,6 +223,45 @@ static async Task MigrateWorkspaceRepositoriesCommitsAsync(AppDbContext dbContex
             if (count == 0)
             {
                 cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN IncomingCommits INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateWorkspaceRepositoriesSequenceAndDependenciesAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='Sequence'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN Sequence INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+            }
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='Dependencies'";
+            count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN Dependencies INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+            }
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='UnmatchedDeps'";
+            count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN UnmatchedDeps INTEGER";
                 await cmd.ExecuteNonQueryAsync();
             }
         }

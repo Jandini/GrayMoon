@@ -1,12 +1,13 @@
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
+using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using GrayMoon.App.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services;
 
-/// <summary>Handles SyncCommand from the agent (hook flow): persist version/branch/commit counts and broadcast WorkspaceSynced.</summary>
+/// <summary>Handles SyncCommand from the agent (hook flow): persist version/branch/commit counts, recompute dependency stats for the workspace, then broadcast WorkspaceSynced so the grid can refresh.</summary>
 public sealed class SyncCommandHandler(
     IServiceScopeFactory scopeFactory,
     IHubContext<WorkspaceSyncHub> hubContext,
@@ -16,6 +17,7 @@ public sealed class SyncCommandHandler(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var workspaceProjectRepository = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
 
         var wr = await dbContext.WorkspaceRepositories
             .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId);
@@ -46,6 +48,8 @@ public sealed class SyncCommandHandler(
             workspace.IsInSync = isInSync;
             await dbContext.SaveChangesAsync();
         }
+
+        await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId);
 
         await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
         logger.LogDebug("SyncCommand persisted: workspace={WorkspaceId}, repo={RepositoryId}, version={Version}, branch={Branch}",

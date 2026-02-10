@@ -38,4 +38,13 @@ public class WorkspaceRepositoryLink
 
     /// <summary>Persisted sync status. New links default to <see cref="RepoSyncStatus.NeedsSync"/>.</summary>
     public RepoSyncStatus SyncStatus { get; set; } = RepoSyncStatus.NeedsSync;
+
+    /// <summary>Build order sequence (same value = build in parallel). Set when dependencies are merged.</summary>
+    public int? Sequence { get; set; }
+
+    /// <summary>Number of workspace dependency edges where this repo is the dependent. Set when dependencies are merged.</summary>
+    public int? Dependencies { get; set; }
+
+    /// <summary>Number of those dependencies whose version does not match the referenced repo's GitVersion. Set when dependencies are merged. Used for badge (same logic as build).</summary>
+    public int? UnmatchedDeps { get; set; }
 }

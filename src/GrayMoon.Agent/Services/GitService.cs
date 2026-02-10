@@ -40,10 +40,10 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             Directory.CreateDirectory(workingDir);
 
         var args = BuildCloneArguments(cloneUrl, bearerToken);
-        var (exitCode, _, stderr) = await RunProcessAsync("git", args, workingDir, ct);
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, workingDir, ct);
         if (exitCode != 0)
         {
-            logger.LogWarning("Git clone failed. ExitCode={ExitCode}, Stderr={Stderr}", exitCode, stderr);
+            logger.LogError("Git clone failed. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", exitCode, stdout, stderr);
             return false;
         }
         logger.LogInformation("Git clone completed: {Url} -> {Dir}", cloneUrl, workingDir);
@@ -57,7 +57,9 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         var fullPath = Path.GetFullPath(repoPath);
         var args = $"config --global --add safe.directory \"{fullPath.Replace("\"", "\\\"")}\"";
-        await RunProcessAsync("git", args, null, ct);
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, null, ct);
+        if (exitCode != 0)
+            logger.LogError("Git config safe.directory failed. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", exitCode, stdout, stderr);
     }
 
     public async Task<GitVersionResult?> GetVersionAsync(string repoPath, CancellationToken ct)
@@ -68,7 +70,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var (exitCode, stdout, stderr) = await RunProcessAsync("dotnet-gitversion", "", repoPath, ct);
         if (exitCode != 0)
         {
-            logger.LogWarning("dotnet-gitversion failed. ExitCode={ExitCode}, Stderr={Stderr}", exitCode, stderr);
+            logger.LogError("dotnet-gitversion failed. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", exitCode, stdout, stderr);
             return null;
         }
 
@@ -90,7 +92,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var (exitCode, stdout, stderr) = await RunProcessAsync("git", "config --get remote.origin.url", repoPath, ct);
         if (exitCode != 0)
         {
-            logger.LogDebug("Failed to get remote origin url for repo {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, exitCode, stderr);
+            logger.LogError("Git config remote.origin.url failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
             return null;
         }
 
@@ -116,9 +118,9 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             var fetchCmd = includeTags ? "fetch origin --tags" : "fetch origin";
             args = $"-c \"http.extraHeader={escaped}\" {fetchCmd}";
         }
-        var (exitCode, _, stderr) = await RunProcessAsync("git", args, repoPath, ct);
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);
         if (exitCode != 0)
-            logger.LogDebug("Git fetch failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, exitCode, stderr);
+            logger.LogError("Git fetch failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
     }
 
     public async Task<(int? Outgoing, int? Incoming)> GetCommitCountsAsync(string repoPath, string branchName, CancellationToken ct)
@@ -127,10 +129,18 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return (null, null);
 
         var originBranch = "origin/" + branchName.Trim();
-        var (exitOut, stdoutOut, _) = await RunProcessAsync("git", $"rev-list --count {originBranch}..HEAD", repoPath, ct);
-        var (exitIn, stdoutIn, _) = await RunProcessAsync("git", $"rev-list --count HEAD..{originBranch}", repoPath, ct);
-        if (exitOut != 0 || exitIn != 0)
+        var (exitOut, stdoutOut, stderrOut) = await RunProcessAsync("git", $"rev-list --count {originBranch}..HEAD", repoPath, ct);
+        var (exitIn, stdoutIn, stderrIn) = await RunProcessAsync("git", $"rev-list --count HEAD..{originBranch}", repoPath, ct);
+        if (exitOut != 0)
+        {
+            logger.LogError("Git rev-list (outgoing) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitOut, stdoutOut, stderrOut);
             return (null, null);
+        }
+        if (exitIn != 0)
+        {
+            logger.LogError("Git rev-list (incoming) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitIn, stdoutIn, stderrIn);
+            return (null, null);
+        }
 
         var outVal = int.TryParse((stdoutOut ?? "").Trim(), out var o) ? o : (int?)null;
         var inVal = int.TryParse((stdoutIn ?? "").Trim(), out var i) ? i : (int?)null;

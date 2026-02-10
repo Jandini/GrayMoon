@@ -51,6 +51,33 @@
     max-width: 50px;
 }
 
+.col-deps {
+    width: 8rem;
+    min-width: 8rem;
+    max-width: 8rem;
+}
+
+/* Dependencies column: same badge logic as build (green = all match, red = any unmatched) */
+.repositories-table .build-dep-badge {
+    font-weight: 400;
+    min-width: 2.5rem;
+}
+
+.repositories-table .build-dep-badge-none {
+    background-color: var(--bs-secondary);
+    color: var(--bs-light);
+}
+
+.repositories-table .build-dep-badge-ok {
+    background-color: #198754;
+    color: #fff;
+}
+
+.repositories-table .build-dep-badge-mismatch {
+    background-color: #dc3545;
+    color: #fff;
+}
+
 .col-commits {
     width: auto;
     max-width: 80px;
