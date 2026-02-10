@@ -30,6 +30,12 @@ public class WorkspaceRepositoryLink
     /// <summary>Number of .csproj projects in the repository (excludes .git). Set during sync.</summary>
     public int? Projects { get; set; }
 
+    /// <summary>Outgoing commits (ahead of remote). Set during sync after fetch.</summary>
+    public int? OutgoingCommits { get; set; }
+
+    /// <summary>Incoming commits (behind remote). Set during sync after fetch.</summary>
+    public int? IncomingCommits { get; set; }
+
     /// <summary>Persisted sync status. New links default to <see cref="RepoSyncStatus.NeedsSync"/>.</summary>
     public RepoSyncStatus SyncStatus { get; set; } = RepoSyncStatus.NeedsSync;
 }

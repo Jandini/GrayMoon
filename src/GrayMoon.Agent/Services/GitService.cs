@@ -97,6 +97,46 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (stdout ?? "").Trim();
     }
 
+    public async Task FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return;
+
+        string args;
+        if (string.IsNullOrWhiteSpace(bearerToken))
+        {
+            args = includeTags ? "fetch origin --tags" : "fetch origin";
+        }
+        else
+        {
+            var credentials = "x-access-token:" + bearerToken;
+            var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
+            var headerValue = "Authorization: Basic " + base64;
+            var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            var fetchCmd = includeTags ? "fetch origin --tags" : "fetch origin";
+            args = $"-c \"http.extraHeader={escaped}\" {fetchCmd}";
+        }
+        var (exitCode, _, stderr) = await RunProcessAsync("git", args, repoPath, ct);
+        if (exitCode != 0)
+            logger.LogDebug("Git fetch failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, exitCode, stderr);
+    }
+
+    public async Task<(int? Outgoing, int? Incoming)> GetCommitCountsAsync(string repoPath, string branchName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
+            return (null, null);
+
+        var originBranch = "origin/" + branchName.Trim();
+        var (exitOut, stdoutOut, _) = await RunProcessAsync("git", $"rev-list --count {originBranch}..HEAD", repoPath, ct);
+        var (exitIn, stdoutIn, _) = await RunProcessAsync("git", $"rev-list --count HEAD..{originBranch}", repoPath, ct);
+        if (exitOut != 0 || exitIn != 0)
+            return (null, null);
+
+        var outVal = int.TryParse((stdoutOut ?? "").Trim(), out var o) ? o : (int?)null;
+        var inVal = int.TryParse((stdoutIn ?? "").Trim(), out var i) ? i : (int?)null;
+        return (outVal, inVal);
+    }
+
     public void CreateDirectory(string path)
     {
         if (Directory.Exists(path))

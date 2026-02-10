@@ -31,6 +31,8 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
         var version = "-";
         var branch = "-";
         IReadOnlyList<CsProjFileInfo>? projects = null;
+        int? outgoingCommits = null;
+        int? incomingCommits = null;
         if (git.DirectoryExists(repoPath))
         {
             var vr = await git.GetVersionAsync(repoPath, cancellationToken);
@@ -41,9 +43,16 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 if (version != "-" && branch != "-")
                     git.WriteSyncHooks(repoPath, workspaceId, repositoryId);
             }
+            await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
+            if (branch != "-")
+            {
+                var (outgoing, incoming) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
+                outgoingCommits = outgoing;
+                incomingCommits = incoming;
+            }
             projects = await csProjFileService.FindAsync(repoPath, cancellationToken);
         }
 
-        return new SyncRepositoryResponse { Version = version, Branch = branch, Projects = projects };
+        return new SyncRepositoryResponse { Version = version, Branch = branch, Projects = projects, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits };
     }
 }

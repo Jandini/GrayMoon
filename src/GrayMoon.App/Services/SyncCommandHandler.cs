@@ -6,13 +6,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services;
 
-/// <summary>Handles SyncCommand from the agent (hook flow): persist version/branch and broadcast WorkspaceSynced.</summary>
+/// <summary>Handles SyncCommand from the agent (hook flow): persist version/branch/commit counts and broadcast WorkspaceSynced.</summary>
 public sealed class SyncCommandHandler(
     IServiceScopeFactory scopeFactory,
     IHubContext<WorkspaceSyncHub> hubContext,
     ILogger<SyncCommandHandler> logger)
 {
-    public async Task HandleAsync(int workspaceId, int repositoryId, string version, string branch)
+    public async Task HandleAsync(int workspaceId, int repositoryId, string version, string branch, int? outgoingCommits = null, int? incomingCommits = null)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -27,6 +27,8 @@ public sealed class SyncCommandHandler(
 
         wr.GitVersion = version == "-" ? null : version;
         wr.BranchName = branch == "-" ? null : branch;
+        if (outgoingCommits.HasValue) wr.OutgoingCommits = outgoingCommits;
+        if (incomingCommits.HasValue) wr.IncomingCommits = incomingCommits;
         wr.SyncStatus = (version == "-" || branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
 
         await dbContext.SaveChangesAsync();

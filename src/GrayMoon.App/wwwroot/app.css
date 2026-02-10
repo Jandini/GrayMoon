@@ -462,6 +462,7 @@ h1:focus {
 /* Badges */
 .badge {
     color: var(--bg-primary);
+    font-weight: 400; /* normal weight (not bold) for all badges */
 }
 
 .bg-success {
