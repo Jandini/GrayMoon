@@ -102,7 +102,7 @@ public sealed class CsProjFileParser : ICsProjFileParser
                     NewLineOnAttributes = false
                 };
                 using (var writer = XmlWriter.Create(csprojPath, settings))
-                    doc.Save(writer, SaveOptions.None);
+                    doc.Save(writer);
             }
         }
 
