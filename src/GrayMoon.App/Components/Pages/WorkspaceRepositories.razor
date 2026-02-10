@@ -9,6 +9,7 @@
 @using Microsoft.AspNetCore.SignalR.Client
 @inject WorkspaceRepository WorkspaceRepository
 @inject WorkspaceGitService WorkspaceGitService
+@inject IServiceScopeFactory ServiceScopeFactory
 @inject ConnectorRepository ConnectorRepository
 @inject GitHubRepositoryService RepositoryService
 @inject NavigationManager NavigationManager
@@ -232,12 +233,12 @@
         _fetchRepositoriesCts?.Dispose();
     }
 
-    /// <summary>Called when WorkspaceSynced is received: server has already recomputed dependency stats (Sequence/Dependencies/UnmatchedDeps); just reload data so the grid reflects the update.</summary>
+    /// <summary>Called when WorkspaceSynced is received (or after Update): reload from a fresh scope so the grid gets current DB values (no stale DbContext).</summary>
     private async Task RefreshFromSync()
     {
         if (isSyncing || isUpdating)
             return;
-        await ReloadWorkspaceDataAsync();
+        await ReloadWorkspaceDataFromFreshScopeAsync();
         ApplySyncStateFromWorkspace();
         await InvokeAsync(StateHasChanged);
     }
@@ -272,6 +273,25 @@
             return;
         }
 
+        workspaceRepositories = workspace.Repositories
+            .OrderByDescending(wr => wr.Sequence ?? int.MinValue)
+            .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
+            .ToList();
+    }
+
+    /// <summary>Loads workspace using a new scope (fresh DbContext) so we get current DB values and avoid EF cache. Used by RefreshFromSync so the grid shows updated UnmatchedDeps after notify or Update.</summary>
+    private async Task ReloadWorkspaceDataFromFreshScopeAsync()
+    {
+        await using var scope = ServiceScopeFactory.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+        var w = await repo.GetByIdAsync(WorkspaceId);
+        if (w == null)
+        {
+            errorMessage = "Workspace not found.";
+            workspaceRepositories = new List<WorkspaceRepositoryLink>();
+            return;
+        }
+        workspace = w;
         workspaceRepositories = workspace.Repositories
             .OrderByDescending(wr => wr.Sequence ?? int.MinValue)
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
@@ -333,7 +353,7 @@
         _updateCts?.Cancel();
     }
 
-    /// <summary>User-triggered: refresh project/dependency data and write .csproj files to match referenced versions. Shows overlay.</summary>
+    /// <summary>User-triggered: refresh project/dependency data and write .csproj files to match referenced versions. Runs in a fresh scope so the DB context sees current state (e.g. UnmatchedDeps from notify) and GetSyncDependenciesPayloadAsync returns correct payload.</summary>
     private async Task UpdateDependenciesAsync()
     {
         if (workspace == null || workspaceRepositories.Count == 0 || isUpdating || isSyncing)
@@ -351,38 +371,39 @@
             StateHasChanged();
             await Task.Yield();
 
-            await WorkspaceGitService.RefreshWorkspaceProjectsAsync(
-                WorkspaceId,
-                onProgress: (completed, total, _) =>
-                {
-                    updateProgressMessage = $"Refreshing projects {completed} of {total}";
-                    InvokeAsync(StateHasChanged);
-                },
-                cancellationToken: _updateCts.Token);
+            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
+            {
+                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                await workspaceGitService.RefreshWorkspaceProjectsAsync(
+                    WorkspaceId,
+                    onProgress: (completed, total, _) =>
+                    {
+                        updateProgressMessage = $"Refreshing projects {completed} of {total}";
+                        InvokeAsync(StateHasChanged);
+                    },
+                    cancellationToken: _updateCts.Token);
 
-            updateProgressMessage = "Syncing dependencies...";
+                updateProgressMessage = "Syncing dependencies...";
+                await InvokeAsync(StateHasChanged);
+                await workspaceGitService.SyncDependenciesAsync(
+                    WorkspaceId,
+                    onProgress: (completed, total, _) =>
+                    {
+                        updateProgressMessage = $"Synced dependencies {completed} of {total}";
+                        InvokeAsync(StateHasChanged);
+                    },
+                    cancellationToken: _updateCts.Token);
+
+                await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId, _updateCts.Token);
+            }
+
+            isUpdating = false;
             await InvokeAsync(StateHasChanged);
-            await WorkspaceGitService.SyncDependenciesAsync(
-                WorkspaceId,
-                onProgress: (completed, total, _) =>
-                {
-                    updateProgressMessage = $"Synced dependencies {completed} of {total}";
-                    InvokeAsync(StateHasChanged);
-                },
-                cancellationToken: _updateCts.Token);
-
-            updateProgressMessage = "Refreshing...";
-            await InvokeAsync(StateHasChanged);
-            await WorkspaceGitService.RefreshWorkspaceProjectsAsync(
-                WorkspaceId,
-                onProgress: null,
-                cancellationToken: _updateCts.Token);
-
-            await ReloadWorkspaceDataAsync();
-            ApplySyncStateFromWorkspace();
+            await RefreshFromSync();
         }
         catch (OperationCanceledException)
         {
+            isUpdating = false;
             await ReloadWorkspaceDataAsync();
             ApplySyncStateFromWorkspace();
         }
