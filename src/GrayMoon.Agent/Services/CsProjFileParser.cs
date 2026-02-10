@@ -46,9 +46,10 @@ public sealed class CsProjFileParser : ICsProjFileParser
             return false;
         }
 
-        // Never emit an XML declaration when writing .csproj files; keep them lean and diff-friendly.
-        // This also prevents adding '<?xml version="1.0" encoding="utf-8\"?>' to projects that didn't have it.
-        doc.Declaration = null;
+        // Remember whether the file had an XML declaration so we don't add one when it wasn't present.
+        var hadXmlDeclaration = doc.Declaration != null;
+        if (!hadXmlDeclaration)
+            doc.Declaration = null; // ensure we never write <?xml ...?> when the original had none
 
         var root = doc.Root;
         if (root == null)
