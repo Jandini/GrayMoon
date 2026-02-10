@@ -9,6 +9,7 @@
 @using Microsoft.AspNetCore.SignalR.Client
 @inject WorkspaceRepository WorkspaceRepository
 @inject WorkspaceGitService WorkspaceGitService
+@inject BranchBuildStatusService BranchBuildStatusService
 @inject IServiceScopeFactory ServiceScopeFactory
 @inject ConnectorRepository ConnectorRepository
 @inject GitHubRepositoryService RepositoryService
@@ -68,7 +69,7 @@
                                 <th class="col-repo">Repository</th>
                                 <th class="col-version">Version</th>
                                 <th class="col-branch">Branch</th>
-                                <th class="col-projects">Projects</th>
+                                <th class="col-build col-status-badge">Build</th>
                                 <th class="col-deps">Dependencies</th>
                                 <th class="col-commits">Commits</th>
                                 <th class="col-sync col-status-badge">Status</th>
@@ -102,7 +103,7 @@
                                             <td class="col-repo"><strong>@repo.RepositoryName</strong></td>
                                             <td class="col-version text-muted">@(wr.GitVersion ?? "-")</td>
                                             <td class="col-branch text-muted">@(wr.BranchName ?? "-")</td>
-                                            <td class="col-projects text-muted">@(wr.Projects?.ToString() ?? "-")</td>
+                                            <td class="col-build col-status-badge">@GetBuildStatusIcon(repo.RepositoryId)</td>
                                             <td class="col-deps col-status-badge">
                                                 @{
                                                     var depCount = wr.Dependencies ?? 0;
@@ -180,6 +181,7 @@
     private HashSet<int> selectedRepositoryIds = new();
     private int? fetchedRepositoryCount;
     private CancellationTokenSource? _fetchRepositoriesCts;
+    private Dictionary<int, (BuildStatus Status, string? Tooltip)> buildStatusByRepoId = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -266,6 +268,7 @@
         {
             errorMessage = "Workspace not found.";
             workspaceRepositories = new List<WorkspaceRepositoryLink>();
+            buildStatusByRepoId = new Dictionary<int, (BuildStatus, string?)>();
             return;
         }
 
@@ -273,6 +276,7 @@
             .OrderByDescending(wr => wr.Sequence ?? int.MinValue)
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
+        await LoadBuildStatusesAsync();
     }
 
     /// <summary>Loads workspace using a new scope (fresh DbContext) so we get current DB values and avoid EF cache. Used by RefreshFromSync so the grid shows updated UnmatchedDeps after notify or Update.</summary>
@@ -285,6 +289,7 @@
         {
             errorMessage = "Workspace not found.";
             workspaceRepositories = new List<WorkspaceRepositoryLink>();
+            buildStatusByRepoId = new Dictionary<int, (BuildStatus, string?)>();
             return;
         }
         workspace = w;
@@ -292,6 +297,7 @@
             .OrderByDescending(wr => wr.Sequence ?? int.MinValue)
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
+        await LoadBuildStatusesAsync();
     }
 
     private RenderFragment GetCommitsBadge(int? outgoing, int? incoming) => builder =>
@@ -337,6 +343,53 @@
             builder.AddContent(3, text);
             builder.CloseElement();
         }
+    };
+
+    private async Task LoadBuildStatusesAsync()
+    {
+        buildStatusByRepoId = new Dictionary<int, (BuildStatus, string?)>();
+        if (workspaceRepositories.Count == 0)
+            return;
+        var results = await Task.WhenAll(workspaceRepositories
+            .Where(wr => wr.Repository?.Connector != null && !string.IsNullOrWhiteSpace(wr.Repository.OrgName) && !string.IsNullOrWhiteSpace(wr.Repository.RepositoryName) && !string.IsNullOrWhiteSpace(wr.BranchName))
+            .Select(async wr =>
+            {
+                var repo = wr.Repository!;
+                var (status, tooltip) = await BranchBuildStatusService.GetBuildStatusAsync(repo.Connector!, repo.OrgName!, repo.RepositoryName, wr.BranchName!);
+                return (repo.RepositoryId, status, tooltip);
+            }));
+        foreach (var (repoId, status, tooltip) in results)
+            buildStatusByRepoId[repoId] = (status, tooltip);
+    }
+
+    private RenderFragment GetBuildStatusIcon(int repositoryId) => builder =>
+    {
+        if (!buildStatusByRepoId.TryGetValue(repositoryId, out var t))
+        {
+            builder.AddContent(0, "—");
+            return;
+        }
+        var (status, tooltip) = t;
+        var (iconClass, ariaLabel, colorClass) = status switch
+        {
+            BuildStatus.Success => ("bi-check-circle-fill", "Build passing", "build-status-success"),
+            BuildStatus.Failure => ("bi-x-circle-fill", "Build failed", "build-status-failure"),
+            BuildStatus.Pending => ("bi-circle-fill", "Build in progress", "build-status-pending"),
+            _ => ("", "No CI status", "build-status-none")
+        };
+        if (string.IsNullOrEmpty(iconClass))
+        {
+            builder.AddContent(0, "—");
+            return;
+        }
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"build-status-icon {colorClass}");
+        builder.AddAttribute(2, "title", tooltip ?? ariaLabel);
+        builder.AddAttribute(3, "aria-label", ariaLabel);
+        builder.OpenElement(4, "i");
+        builder.AddAttribute(5, "class", $"bi {iconClass}");
+        builder.CloseElement();
+        builder.CloseElement();
     };
 
     private void AbortSyncAsync()

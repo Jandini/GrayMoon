@@ -160,6 +160,30 @@ public class GitHubService
         return (organizations.Count, repositories.Count);
     }
 
+    /// <summary>Gets the combined commit status for a ref (branch/SHA). GET /repos/{owner}/{repo}/commits/{ref}/status.</summary>
+    public async Task<GitHubCombinedStatusResponse?> GetCombinedCommitStatusAsync(Connector connector, string owner, string repo, string @ref, CancellationToken cancellationToken = default)
+    {
+        EnsureConnectorConfigured(connector);
+        if (string.IsNullOrWhiteSpace(owner)) throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo)) throw new ArgumentException("Repository is required.", nameof(repo));
+        if (string.IsNullOrWhiteSpace(@ref)) throw new ArgumentException("Ref is required.", nameof(@ref));
+
+        var encodedRef = Uri.EscapeDataString(@ref);
+        return await GetAsync<GitHubCombinedStatusResponse>(connector, $"repos/{owner}/{repo}/commits/{encodedRef}/status", cancellationToken);
+    }
+
+    /// <summary>Gets check runs for a ref (branch/SHA). GET /repos/{owner}/{repo}/commits/{ref}/check-runs.</summary>
+    public async Task<GitHubCheckRunsResponse?> GetCheckRunsAsync(Connector connector, string owner, string repo, string @ref, CancellationToken cancellationToken = default)
+    {
+        EnsureConnectorConfigured(connector);
+        if (string.IsNullOrWhiteSpace(owner)) throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo)) throw new ArgumentException("Repository is required.", nameof(repo));
+        if (string.IsNullOrWhiteSpace(@ref)) throw new ArgumentException("Ref is required.", nameof(@ref));
+
+        var encodedRef = Uri.EscapeDataString(@ref);
+        return await GetAsync<GitHubCheckRunsResponse>(connector, $"repos/{owner}/{repo}/commits/{encodedRef}/check-runs", cancellationToken);
+    }
+
     private void EnsureConfigured()
     {
         if (string.IsNullOrWhiteSpace(_options.PersonalAccessToken))

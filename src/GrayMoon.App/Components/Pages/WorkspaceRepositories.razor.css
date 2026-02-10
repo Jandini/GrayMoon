@@ -46,9 +46,29 @@
     max-width: 100px;
 }
 
-.col-projects {
+.col-build {
     width: auto;
-    max-width: 50px;
+    max-width: 3rem;
+    min-width: 2rem;
+}
+
+/* GitHub-style CI build status icons */
+.repositories-table .build-status-icon {
+    display: inline-flex;
+    align-items: center;
+    font-size: 1rem;
+}
+
+.repositories-table .build-status-success {
+    color: #1a7f37;
+}
+
+.repositories-table .build-status-failure {
+    color: #cf222e;
+}
+
+.repositories-table .build-status-pending {
+    color: #d4a72c;
 }
 
 .col-deps {

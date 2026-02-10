@@ -91,3 +91,59 @@ public class GitHubWorkflowRunsResponse
     [JsonPropertyName("workflow_runs")]
     public List<GitHubWorkflowRunDto> WorkflowRuns { get; set; } = new();
 }
+
+/// <summary>Response from GET /repos/{owner}/{repo}/commits/{ref}/status (combined commit status).</summary>
+public class GitHubCombinedStatusResponse
+{
+    [JsonPropertyName("state")]
+    public string State { get; set; } = string.Empty;
+
+    [JsonPropertyName("statuses")]
+    public List<GitHubCommitStatusDto> Statuses { get; set; } = new();
+
+    [JsonPropertyName("sha")]
+    public string? Sha { get; set; }
+}
+
+public class GitHubCommitStatusDto
+{
+    [JsonPropertyName("state")]
+    public string State { get; set; } = string.Empty;
+
+    [JsonPropertyName("context")]
+    public string? Context { get; set; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("target_url")]
+    public string? TargetUrl { get; set; }
+}
+
+/// <summary>Response from GET /repos/{owner}/{repo}/commits/{ref}/check-runs.</summary>
+public class GitHubCheckRunsResponse
+{
+    [JsonPropertyName("total_count")]
+    public int TotalCount { get; set; }
+
+    [JsonPropertyName("check_runs")]
+    public List<GitHubCheckRunDto> CheckRuns { get; set; } = new();
+}
+
+public class GitHubCheckRunDto
+{
+    [JsonPropertyName("id")]
+    public long Id { get; set; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+
+    [JsonPropertyName("conclusion")]
+    public string? Conclusion { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("html_url")]
+    public string? HtmlUrl { get; set; }
+}
