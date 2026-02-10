@@ -57,7 +57,7 @@
     max-width: 8rem;
 }
 
-/* Dependencies column: same badge logic as build (green = all match, orange = some mismatch, red = all mismatch) */
+/* Dependencies column: same badge logic as build (green = all match, red = any unmatched) */
 .repositories-table .build-dep-badge {
     font-weight: 400;
     min-width: 2.5rem;
@@ -70,11 +70,6 @@
 
 .repositories-table .build-dep-badge-ok {
     background-color: #198754;
-    color: #fff;
-}
-
-.repositories-table .build-dep-badge-partial {
-    background-color: #fd7e14;
     color: #fff;
 }
 

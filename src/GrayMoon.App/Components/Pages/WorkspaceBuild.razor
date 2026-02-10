@@ -92,10 +92,6 @@
                                                 {
                                                     <span class="badge build-dep-badge build-dep-badge-ok">@row.DependencyCount</span>
                                                 }
-                                                else if (row.UnmatchedDependencyCount < row.DependencyCount)
-                                                {
-                                                    <span class="badge build-dep-badge build-dep-badge-partial">@row.UnmatchedDependencyCount of @row.DependencyCount</span>
-                                                }
                                                 else
                                                 {
                                                     <span class="badge build-dep-badge build-dep-badge-mismatch">@row.UnmatchedDependencyCount of @row.DependencyCount</span>

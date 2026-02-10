@@ -31,7 +31,7 @@
     min-width: 0;
 }
 
-/* Dependencies column: badge (green = all match, orange = some mismatch, red = all mismatch) */
+/* Dependencies column: badge (green = all match, red = any unmatched) */
 .build-dep-badge {
     font-weight: 400;
     min-width: 2.5rem;
@@ -44,11 +44,6 @@
 
 .build-dep-badge-ok {
     background-color: #198754;
-    color: #fff;
-}
-
-.build-dep-badge-partial {
-    background-color: #fd7e14;
     color: #fff;
 }
 
