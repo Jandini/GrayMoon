@@ -43,7 +43,7 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 if (version != "-" && branch != "-")
                     git.WriteSyncHooks(repoPath, workspaceId, repositoryId);
             }
-            await git.FetchAsync(repoPath, includeTags: true, cancellationToken);
+            await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
             if (branch != "-")
             {
                 var (outgoing, incoming) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);

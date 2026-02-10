@@ -96,7 +96,7 @@
                                             <td class="col-version text-muted">@(wr.GitVersion ?? "-")</td>
                                             <td class="col-branch text-muted">@(wr.BranchName ?? "-")</td>
                                             <td class="col-projects text-muted">@(wr.Projects?.ToString() ?? "-")</td>
-                                            <td class="col-commits text-muted">@GetCommitsCell(wr.OutgoingCommits, wr.IncomingCommits)</td>
+                                            <td class="col-commits">@GetCommitsBadge(wr.OutgoingCommits, wr.IncomingCommits)</td>
                                             <td class="col-sync col-status-badge">@GetRepoSyncBadge(repo.RepositoryId)</td>
                                         </tr>
                                     }
@@ -241,14 +241,29 @@
             .ToList();
     }
 
-    private static string GetCommitsCell(int? outgoing, int? incoming)
+    private RenderFragment GetCommitsBadge(int? outgoing, int? incoming) => builder =>
     {
         var x = outgoing ?? 0;
         var y = incoming ?? 0;
         if (!outgoing.HasValue && !incoming.HasValue)
-            return "—";
-        return $"↑{x} ↓{y}";
-    }
+        {
+            builder.AddContent(0, "-");
+            return;
+        }
+        var text = $"↑{x} ↓{y}";
+        string bgColor;
+        if (y > 0)
+            bgColor = "#dc3545";   // red: need to pull
+        else if (x > 0)
+            bgColor = "#fd7e14";   // orange: need to push
+        else
+            bgColor = "#198754";   // green: in sync (0,0)
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", "badge");
+        builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: #fff;");
+        builder.AddContent(3, text);
+        builder.CloseElement();
+    };
 
     private RenderFragment GetRepoSyncBadge(int repositoryId) => builder =>
     {

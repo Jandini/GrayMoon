@@ -97,12 +97,25 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (stdout ?? "").Trim();
     }
 
-    public async Task FetchAsync(string repoPath, bool includeTags, CancellationToken ct)
+    public async Task FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return;
 
-        var args = includeTags ? "fetch origin --tags" : "fetch origin";
+        string args;
+        if (string.IsNullOrWhiteSpace(bearerToken))
+        {
+            args = includeTags ? "fetch origin --tags" : "fetch origin";
+        }
+        else
+        {
+            var credentials = "x-access-token:" + bearerToken;
+            var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
+            var headerValue = "Authorization: Basic " + base64;
+            var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            var fetchCmd = includeTags ? "fetch origin --tags" : "fetch origin";
+            args = $"-c \"http.extraHeader={escaped}\" {fetchCmd}";
+        }
         var (exitCode, _, stderr) = await RunProcessAsync("git", args, repoPath, ct);
         if (exitCode != 0)
             logger.LogDebug("Git fetch failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, exitCode, stderr);
