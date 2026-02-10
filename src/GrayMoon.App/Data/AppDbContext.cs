@@ -9,7 +9,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Repository> Repositories => Set<Repository>();
     public DbSet<Workspace> Workspaces => Set<Workspace>();
     public DbSet<WorkspaceRepositoryLink> WorkspaceRepositories => Set<WorkspaceRepositoryLink>();
-    public DbSet<RepositoryProject> RepositoryProjects => Set<RepositoryProject>();
+    public DbSet<WorkspaceProject> WorkspaceProjects => Set<WorkspaceProject>();
     public DbSet<ProjectDependency> ProjectDependencies => Set<ProjectDependency>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -118,10 +118,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<RepositoryProject>(entity =>
+        modelBuilder.Entity<WorkspaceProject>(entity =>
         {
             entity.HasKey(p => p.ProjectId);
-            entity.HasIndex(p => new { p.RepositoryId, p.ProjectName })
+            entity.HasIndex(p => new { p.WorkspaceId, p.RepositoryId, p.ProjectName })
                 .IsUnique();
 
             entity.Property(p => p.ProjectName)
@@ -138,6 +138,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             entity.Property(p => p.PackageId)
                 .HasMaxLength(200);
+
+            entity.HasOne(p => p.Workspace)
+                .WithMany()
+                .HasForeignKey(p => p.WorkspaceId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasOne(p => p.Repository)
                 .WithMany()

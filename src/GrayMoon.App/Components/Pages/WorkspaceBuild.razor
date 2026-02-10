@@ -7,7 +7,7 @@
 @using GrayMoon.App.Components.Shared
 @using Microsoft.AspNetCore.SignalR.Client
 @inject WorkspaceRepository WorkspaceRepository
-@inject RepositoryProjectRepository RepositoryProjectRepository
+@inject WorkspaceProjectRepository WorkspaceProjectRepository
 @inject WorkspaceGitService WorkspaceGitService
 @inject NavigationManager NavigationManager
 @inject ILogger<WorkspaceBuild> Logger
@@ -181,7 +181,7 @@
                 rows = new List<RepositoryBuildOrderRow>();
                 return;
             }
-            rows = await RepositoryProjectRepository.GetRepositoryBuildOrderAsync(WorkspaceId);
+            rows = await WorkspaceProjectRepository.GetRepositoryBuildOrderAsync(WorkspaceId);
         }
         catch (Exception ex)
         {

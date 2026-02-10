@@ -36,7 +36,7 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connectionString));
 builder.Services.AddScoped<ConnectorRepository>();
 builder.Services.AddScoped<RepositoryRepository>();
-builder.Services.AddScoped<RepositoryProjectRepository>();
+builder.Services.AddScoped<WorkspaceProjectRepository>();
 builder.Services.AddScoped<WorkspaceRepository>();
 builder.Services.AddSingleton<AgentConnectionTracker>();
 builder.Services.AddScoped<SyncCommandHandler>();
@@ -85,7 +85,6 @@ using (var scope = app.Services.CreateScope())
     await MigrateConnectorUserNameAsync(dbContext);
     await MigrateWorkspaceRepositoriesSyncStatusAsync(dbContext);
     await MigrateWorkspaceRepositoriesProjectsAsync(dbContext);
-    await MigrateRepositoriesProjectCountAsync(dbContext);
 }
 
 static string? GetDatabasePath(string connectionString)
@@ -200,30 +199,6 @@ static async Task MigrateWorkspaceRepositoriesProjectsAsync(AppDbContext dbConte
     }
 }
 
-static async Task MigrateRepositoriesProjectCountAsync(AppDbContext dbContext)
-{
-    try
-    {
-        var conn = dbContext.Database.GetDbConnection();
-        if (conn.State != System.Data.ConnectionState.Open)
-            await conn.OpenAsync();
-
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Repositories') WHERE name='ProjectCount'";
-            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
-            if (count == 0)
-            {
-                cmd.CommandText = "ALTER TABLE Repositories ADD COLUMN ProjectCount INTEGER";
-                await cmd.ExecuteNonQueryAsync();
-            }
-        }
-    }
-    catch
-    {
-        // Migration may already be applied or table doesn't exist yet
-    }
-}
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

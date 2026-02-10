@@ -14,14 +14,14 @@ public class ProjectDependency
     public int DependentProjectId { get; set; }
 
     [ForeignKey(nameof(DependentProjectId))]
-    public RepositoryProject? DependentProject { get; set; }
+    public WorkspaceProject? DependentProject { get; set; }
 
     /// <summary>Workspace project that produces the package (referenced by).</summary>
     [Required]
     public int ReferencedProjectId { get; set; }
 
     [ForeignKey(nameof(ReferencedProjectId))]
-    public RepositoryProject? ReferencedProject { get; set; }
+    public WorkspaceProject? ReferencedProject { get; set; }
 
     /// <summary>Package version from the .csproj PackageReference (e.g. 1.2.3 or 1.0.0-*).</summary>
     [MaxLength(100)]

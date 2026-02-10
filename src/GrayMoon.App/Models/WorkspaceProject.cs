@@ -3,11 +3,17 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace GrayMoon.App.Models;
 
-/// <summary>Persisted .csproj project within a repository. Merge key: RepositoryId + ProjectName.</summary>
-[Table("RepositoryProjects")]
-public class RepositoryProject
+/// <summary>Persisted .csproj project within a repository for a specific workspace. Merge key: WorkspaceId + RepositoryId + ProjectName.</summary>
+[Table("WorkspaceProjects")]
+public class WorkspaceProject
 {
     public int ProjectId { get; set; }
+
+    [Required]
+    public int WorkspaceId { get; set; }
+
+    [ForeignKey(nameof(WorkspaceId))]
+    public Workspace? Workspace { get; set; }
 
     [Required]
     public int RepositoryId { get; set; }
