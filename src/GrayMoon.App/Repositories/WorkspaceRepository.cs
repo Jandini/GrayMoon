@@ -158,6 +158,35 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
         _logger.LogInformation("Persistence: saved Workspace. Action=ToggleDefault (set), WorkspaceId={WorkspaceId}, Name={Name}", workspaceId, workspace.Name);
     }
 
+    public async Task AddRepositoriesAsync(int workspaceId, IReadOnlyCollection<int> repositoryIds, CancellationToken cancellationToken = default)
+    {
+        var workspace = await _dbContext.Workspaces
+            .Include(w => w.Repositories)
+            .FirstOrDefaultAsync(w => w.WorkspaceId == workspaceId, cancellationToken);
+
+        if (workspace == null)
+            throw new InvalidOperationException("Workspace not found.");
+
+        var existingRepoIds = workspace.Repositories.Select(wr => wr.RepositoryId).ToHashSet();
+        var toAdd = repositoryIds.Distinct().Where(id => !existingRepoIds.Contains(id)).ToList();
+        if (toAdd.Count == 0)
+            return;
+
+        foreach (var repositoryId in toAdd)
+        {
+            _dbContext.WorkspaceRepositories.Add(new WorkspaceRepositoryLink
+            {
+                WorkspaceId = workspaceId,
+                RepositoryId = repositoryId,
+                SyncStatus = RepoSyncStatus.NeedsSync
+            });
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Persistence: saved WorkspaceRepository links. Action=AddRepositories, WorkspaceId={WorkspaceId}, Added={AddedCount}, RepositoryIds=[{RepositoryIds}]",
+            workspaceId, toAdd.Count, string.Join(", ", toAdd));
+    }
+
     private async Task ReplaceRepositoriesAsync(int workspaceId, IReadOnlyCollection<int> repositoryIds)
     {
         await using var transaction = await _dbContext.Database.BeginTransactionAsync();

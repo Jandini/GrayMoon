@@ -45,6 +45,36 @@ public class WorkspaceService(IOptions<WorkspaceOptions> options, IAgentBridge a
         return repos?.Length ?? 0;
     }
 
+    public async Task<IReadOnlyList<(string Name, string? OriginUrl)>> GetWorkspaceRepositoryInfosAsync(
+        string workspaceName,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceName))
+            return Array.Empty<(string, string?)>();
+
+        var response = await agentBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName }, cancellationToken);
+        if (!response.Success || response.Data == null)
+            return Array.Empty<(string, string?)>();
+
+        var json = response.Data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(response.Data);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (!root.TryGetProperty("repositoryInfos", out var infosEl) || infosEl.ValueKind != JsonValueKind.Array)
+            return Array.Empty<(string, string?)>();
+
+        var list = new List<(string Name, string? OriginUrl)>();
+        foreach (var el in infosEl.EnumerateArray())
+        {
+            var name = el.TryGetProperty("name", out var n) ? n.GetString() ?? string.Empty : string.Empty;
+            if (string.IsNullOrWhiteSpace(name))
+                continue;
+            var origin = el.TryGetProperty("originUrl", out var o) ? o.GetString() : null;
+            list.Add((name, origin));
+        }
+
+        return list;
+    }
+
     public async Task CreateDirectoryAsync(string workspaceName, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workspaceName))

@@ -10,6 +10,7 @@
 @inject WorkspaceRepository WorkspaceRepository
 @inject ConnectorRepository ConnectorRepository
 @inject GitHubRepositoryService RepositoryService
+@inject GitHubRepositoryRepository GitHubRepositoryRepository
 @inject WorkspaceService WorkspaceService
 @inject ILogger<Workspaces> Logger
 
@@ -145,6 +146,11 @@
                OnSave="@SaveWorkspaceAsync"
                OnCancel="@CloseEditorModal" />
 
+<WorkspaceImportModal IsVisible="@showImportModal"
+                      MatchingCount="@importMatchingCount"
+                      OnConfirm="@ConfirmImportAsync"
+                      OnCancel="@CancelImportAsync" />
+
 <WorkspaceRepositoriesModal IsVisible="@showRepositoriesModal"
                             Title="@($"Select repositories for {repositoriesModalWorkspaceName}")"
                             Repositories="@repositories"
@@ -214,7 +220,12 @@
     private bool directoryExists;
     private int existingRepositoryCount;
     private CancellationTokenSource? _directoryInfoCts;
+    private CancellationTokenSource? _directoryInfoDebounceCts;
     private bool isLoadingDirectoryInfo;
+    private bool isDirectoryInfoDirty;
+    private bool showImportModal;
+    private int importMatchingCount;
+    private List<int> importRepositoryIds = new();
 
     public void Dispose()
     {
@@ -332,22 +343,41 @@
 
         try
         {
+            // Ensure directory info is up to date before saving
+            if (isDirectoryInfoDirty || isLoadingDirectoryInfo)
+            {
+                // Cancel any pending debounce and force an immediate refresh
+                _directoryInfoDebounceCts?.Cancel();
+                await LoadDirectoryInfoAsync();
+            }
+
             isSaving = true;
             editorErrorMessage = null;
 
             if (editingWorkspaceId == null)
             {
                 Logger.LogInformation("User created workspace {WorkspaceName}", workspaceName);
-                await WorkspaceRepository.AddAsync(workspaceName, []);
+                var workspace = await WorkspaceRepository.AddAsync(workspaceName, []);
+                editingWorkspaceId = workspace.WorkspaceId;
+
+                // If there are repositories on disk, attempt to match and prompt for import
+                if (existingRepositoryCount > 0)
+                    await TrySuggestImportsAsync(workspace.WorkspaceId, workspace.Name);
             }
             else
             {
                 Logger.LogInformation("User edited workspace {WorkspaceName}", workspaceName);
                 await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, workspaceName, editingWorkspaceRepositoryIds);
+
+                if (existingRepositoryCount > 0)
+                    await TrySuggestImportsAsync(editingWorkspaceId.Value, workspaceName);
             }
 
-            CloseEditorModal();
-            await LoadWorkspacesAsync();
+            if (!showImportModal)
+            {
+                CloseEditorModal();
+                await LoadWorkspacesAsync();
+            }
         }
         catch (Exception ex)
         {
@@ -521,7 +551,22 @@
     private async Task OnWorkspaceNameChangedAsync(string value)
     {
         workspaceName = value;
-        await LoadDirectoryInfoAsync();
+        isDirectoryInfoDirty = true;
+
+        _directoryInfoDebounceCts?.Cancel();
+        _directoryInfoDebounceCts = new CancellationTokenSource();
+        var ct = _directoryInfoDebounceCts.Token;
+
+        try
+        {
+            await Task.Delay(200, ct);
+            // If not cancelled, run the actual check
+            await LoadDirectoryInfoAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            // Swallow – a new name change will schedule a new check
+        }
     }
 
     private async Task LoadDirectoryInfoAsync()
@@ -531,6 +576,7 @@
             directoryExists = false;
             existingRepositoryCount = 0;
             isLoadingDirectoryInfo = false;
+            isDirectoryInfoDirty = false;
             StateHasChanged();
             return;
         }
@@ -557,7 +603,86 @@
         finally
         {
             isLoadingDirectoryInfo = false;
+            isDirectoryInfoDirty = false;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    private async Task TrySuggestImportsAsync(int workspaceId, string workspaceName)
+    {
+        try
+        {
+            var infos = await WorkspaceService.GetWorkspaceRepositoryInfosAsync(workspaceName);
+            if (infos.Count == 0)
+                return;
+
+            var urls = infos
+                .Select(i => i.OriginUrl)
+                .Where(u => !string.IsNullOrWhiteSpace(u))
+                .Select(u => u!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (urls.Count == 0)
+                return;
+
+            var allRepos = await GitHubRepositoryRepository.GetAllEntriesAsync();
+            var byUrl = allRepos
+                .Where(r => !string.IsNullOrWhiteSpace(r.CloneUrl))
+                .ToDictionary(r => r.CloneUrl.Trim(), r => r.RepositoryId, StringComparer.OrdinalIgnoreCase);
+
+            var matchedIds = new HashSet<int>();
+            foreach (var url in urls)
+            {
+                if (byUrl.TryGetValue(url, out var repoId))
+                    matchedIds.Add(repoId);
+            }
+
+            if (matchedIds.Count == 0)
+                return;
+
+            importRepositoryIds = matchedIds.ToList();
+            importMatchingCount = importRepositoryIds.Count;
+            showImportModal = true;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to suggest imports for workspace {WorkspaceName}", workspaceName);
+        }
+    }
+
+    private async Task ConfirmImportAsync()
+    {
+        if (editingWorkspaceId is null || importRepositoryIds.Count == 0)
+        {
+            showImportModal = false;
+            CloseEditorModal();
+            await LoadWorkspacesAsync();
+            return;
+        }
+
+        try
+        {
+            await WorkspaceRepository.AddRepositoriesAsync(editingWorkspaceId.Value, importRepositoryIds);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to import repositories into workspace {WorkspaceId}", editingWorkspaceId);
+        }
+        finally
+        {
+            showImportModal = false;
+            CloseEditorModal();
+            await LoadWorkspacesAsync();
+        }
+    }
+
+    private async Task CancelImportAsync()
+    {
+        showImportModal = false;
+        CloseEditorModal();
+        await LoadWorkspacesAsync();
+        await InvokeAsync(StateHasChanged);
     }
 }

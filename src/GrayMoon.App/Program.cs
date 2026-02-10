@@ -35,7 +35,7 @@ builder.Services.AddRazorComponents()
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=db/graymoon.db";
 builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connectionString));
 builder.Services.AddScoped<ConnectorRepository>();
-builder.Services.AddScoped<RepositoryRepository>();
+builder.Services.AddScoped<GitHubRepositoryRepository>();
 builder.Services.AddScoped<WorkspaceProjectRepository>();
 builder.Services.AddScoped<WorkspaceRepository>();
 builder.Services.AddSingleton<AgentConnectionTracker>();

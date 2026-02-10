@@ -12,7 +12,7 @@ public class WorkspaceGitService(
     IAgentBridge agentBridge,
     WorkspaceService workspaceService,
     WorkspaceRepository workspaceRepository,
-    RepositoryRepository repositoryRepository,
+    GitHubRepositoryRepository repositoryRepository,
     WorkspaceProjectRepository workspaceProjectRepository,
     AppDbContext dbContext,
     Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions,
@@ -22,7 +22,7 @@ public class WorkspaceGitService(
     private readonly IAgentBridge _agentBridge = agentBridge ?? throw new ArgumentNullException(nameof(agentBridge));
     private readonly WorkspaceService _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
     private readonly WorkspaceRepository _workspaceRepository = workspaceRepository ?? throw new ArgumentNullException(nameof(workspaceRepository));
-    private readonly RepositoryRepository _repositoryRepository = repositoryRepository ?? throw new ArgumentNullException(nameof(repositoryRepository));
+    private readonly GitHubRepositoryRepository _repositoryRepository = repositoryRepository ?? throw new ArgumentNullException(nameof(repositoryRepository));
     private readonly WorkspaceProjectRepository _workspaceProjectRepository = workspaceProjectRepository ?? throw new ArgumentNullException(nameof(workspaceProjectRepository));
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly ILogger<WorkspaceGitService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
