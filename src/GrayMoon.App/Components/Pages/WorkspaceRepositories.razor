@@ -276,7 +276,7 @@
             .OrderByDescending(wr => wr.Sequence ?? int.MinValue)
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
-        await LoadBuildStatusesAsync();
+        _ = LoadBuildStatusesAsync();
     }
 
     /// <summary>Loads workspace using a new scope (fresh DbContext) so we get current DB values and avoid EF cache. Used by RefreshFromSync so the grid shows updated UnmatchedDeps after notify or Update.</summary>
@@ -297,7 +297,7 @@
             .OrderByDescending(wr => wr.Sequence ?? int.MinValue)
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
-        await LoadBuildStatusesAsync();
+        _ = LoadBuildStatusesAsync();
     }
 
     private RenderFragment GetCommitsBadge(int? outgoing, int? incoming) => builder =>
@@ -350,44 +350,58 @@
         buildStatusByRepoId = new Dictionary<int, (BuildStatus, string?)>();
         if (workspaceRepositories.Count == 0)
             return;
-        var results = await Task.WhenAll(workspaceRepositories
+        var items = workspaceRepositories
             .Where(wr => wr.Repository?.Connector != null && !string.IsNullOrWhiteSpace(wr.Repository.OrgName) && !string.IsNullOrWhiteSpace(wr.Repository.RepositoryName) && !string.IsNullOrWhiteSpace(wr.BranchName))
-            .Select(async wr =>
-            {
-                var repo = wr.Repository!;
-                var (status, tooltip) = await BranchBuildStatusService.GetBuildStatusAsync(repo.Connector!, repo.OrgName!, repo.RepositoryName, wr.BranchName!);
-                return (repo.RepositoryId, status, tooltip);
-            }));
-        foreach (var (repoId, status, tooltip) in results)
+            .Select(wr => (RepoId: wr.Repository!.RepositoryId, Connector: wr.Repository.Connector!, Owner: wr.Repository.OrgName!, Repo: wr.Repository.RepositoryName!, Ref: wr.BranchName!))
+            .ToList();
+        await InvokeAsync(StateHasChanged);
+        foreach (var (repoId, connector, owner, repo, @ref) in items)
+            _ = FetchOneBuildStatusAndUpdateAsync(repoId, connector, owner, repo, @ref);
+    }
+
+    private async Task FetchOneBuildStatusAndUpdateAsync(int repoId, Connector connector, string owner, string repo, string @ref)
+    {
+        var (status, tooltip) = await BranchBuildStatusService.GetBuildStatusAsync(connector, owner, repo, @ref);
+        await InvokeAsync(() =>
+        {
             buildStatusByRepoId[repoId] = (status, tooltip);
+            StateHasChanged();
+            return Task.CompletedTask;
+        });
     }
 
     private RenderFragment GetBuildStatusIcon(int repositoryId) => builder =>
     {
         if (!buildStatusByRepoId.TryGetValue(repositoryId, out var t))
-        {
-            builder.AddContent(0, "—");
             return;
-        }
         var (status, tooltip) = t;
-        var (iconClass, ariaLabel, colorClass) = status switch
+        var (fill, ariaLabel) = status switch
         {
-            BuildStatus.Success => ("bi-check-circle-fill", "Build passing", "build-status-success"),
-            BuildStatus.Failure => ("bi-x-circle-fill", "Build failed", "build-status-failure"),
-            BuildStatus.Pending => ("bi-circle-fill", "Build in progress", "build-status-pending"),
-            _ => ("", "No CI status", "build-status-none")
+            BuildStatus.Success => ("#1a7f37", "Build passing"),
+            BuildStatus.Failure => ("#cf222e", "Build failed"),
+            BuildStatus.Pending => ("#d4a72c", "Build in progress"),
+            _ => ("", "")
         };
-        if (string.IsNullOrEmpty(iconClass))
-        {
-            builder.AddContent(0, "—");
+        if (string.IsNullOrEmpty(fill))
             return;
-        }
         builder.OpenElement(0, "span");
-        builder.AddAttribute(1, "class", $"build-status-icon {colorClass}");
+        builder.AddAttribute(1, "class", "build-status-icon");
         builder.AddAttribute(2, "title", tooltip ?? ariaLabel);
         builder.AddAttribute(3, "aria-label", ariaLabel);
-        builder.OpenElement(4, "i");
-        builder.AddAttribute(5, "class", $"bi {iconClass}");
+        builder.OpenElement(4, "svg");
+        builder.AddAttribute(5, "xmlns", "http://www.w3.org/2000/svg");
+        builder.AddAttribute(6, "width", "16");
+        builder.AddAttribute(7, "height", "16");
+        builder.AddAttribute(8, "viewBox", "0 0 16 16");
+        builder.AddAttribute(9, "fill", fill);
+        builder.AddAttribute(10, "role", "img");
+        builder.AddMarkupContent(11, status switch
+        {
+            BuildStatus.Success => "<path d=\"M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.267.267 0 0 1 .02-.022z\"/>",
+            BuildStatus.Failure => "<path d=\"M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z\"/>",
+            BuildStatus.Pending => "<circle cx=\"8\" cy=\"8\" r=\"6\"/>",
+            _ => ""
+        });
         builder.CloseElement();
         builder.CloseElement();
     };

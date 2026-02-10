@@ -160,7 +160,7 @@ public class GitHubService
         return (organizations.Count, repositories.Count);
     }
 
-    /// <summary>Gets the combined commit status for a ref (branch/SHA). GET /repos/{owner}/{repo}/commits/{ref}/status.</summary>
+    /// <summary>Gets the combined commit status for a ref (branch/SHA). GET /repos/{owner}/{repo}/commits/{ref}/status. CI-agnostic: external CI (Jenkins, etc.) posts here.</summary>
     public async Task<GitHubCombinedStatusResponse?> GetCombinedCommitStatusAsync(Connector connector, string owner, string repo, string @ref, CancellationToken cancellationToken = default)
     {
         EnsureConnectorConfigured(connector);
@@ -169,11 +169,11 @@ public class GitHubService
         if (string.IsNullOrWhiteSpace(@ref)) throw new ArgumentException("Ref is required.", nameof(@ref));
 
         var encodedRef = Uri.EscapeDataString(@ref);
-        return await GetAsync<GitHubCombinedStatusResponse>(connector, $"repos/{owner}/{repo}/commits/{encodedRef}/status", cancellationToken);
+        return await GetOrDefaultAsync<GitHubCombinedStatusResponse>(connector, $"repos/{owner}/{repo}/commits/{encodedRef}/status", cancellationToken);
     }
 
-    /// <summary>Gets check runs for a ref (branch/SHA). GET /repos/{owner}/{repo}/commits/{ref}/check-runs.</summary>
-    public async Task<GitHubCheckRunsResponse?> GetCheckRunsAsync(Connector connector, string owner, string repo, string @ref, CancellationToken cancellationToken = default)
+    /// <summary>Gets check suites for a ref (branch/SHA). GET /repos/{owner}/{repo}/commits/{ref}/check-suites. CI-agnostic: GitHub Actions and other Apps report here.</summary>
+    public async Task<GitHubCheckSuitesResponse?> GetCheckSuitesAsync(Connector connector, string owner, string repo, string @ref, CancellationToken cancellationToken = default)
     {
         EnsureConnectorConfigured(connector);
         if (string.IsNullOrWhiteSpace(owner)) throw new ArgumentException("Owner is required.", nameof(owner));
@@ -181,7 +181,17 @@ public class GitHubService
         if (string.IsNullOrWhiteSpace(@ref)) throw new ArgumentException("Ref is required.", nameof(@ref));
 
         var encodedRef = Uri.EscapeDataString(@ref);
-        return await GetAsync<GitHubCheckRunsResponse>(connector, $"repos/{owner}/{repo}/commits/{encodedRef}/check-runs", cancellationToken);
+        return await GetOrDefaultAsync<GitHubCheckSuitesResponse>(connector, $"repos/{owner}/{repo}/commits/{encodedRef}/check-suites", cancellationToken);
+    }
+
+    /// <summary>Gets check runs for a check suite. GET /repos/{owner}/{repo}/check-suites/{checkSuiteId}/check-runs.</summary>
+    public async Task<GitHubCheckRunsResponse?> GetCheckRunsForSuiteAsync(Connector connector, string owner, string repo, long checkSuiteId, CancellationToken cancellationToken = default)
+    {
+        EnsureConnectorConfigured(connector);
+        if (string.IsNullOrWhiteSpace(owner)) throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo)) throw new ArgumentException("Repository is required.", nameof(repo));
+
+        return await GetOrDefaultAsync<GitHubCheckRunsResponse>(connector, $"repos/{owner}/{repo}/check-suites/{checkSuiteId}/check-runs", cancellationToken);
     }
 
     private void EnsureConfigured()
@@ -229,6 +239,38 @@ public class GitHubService
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", connector.UserToken);
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            _logger.LogError("GitHub API call failed. Status: {StatusCode}, URL: {Url}, Response: {Response}",
+                response.StatusCode,
+                new Uri(new Uri(baseUrl), requestUri),
+                errorContent);
+            response.EnsureSuccessStatusCode();
+        }
+
+        return await response.Content.ReadFromJsonAsync<T>(_jsonOptions);
+    }
+
+    /// <summary>GET that returns null on 404 (e.g. ref not found, no check suites). Used for CI status so we can show None instead of failing.</summary>
+    private async Task<T?> GetOrDefaultAsync<T>(Connector connector, string requestUri, CancellationToken cancellationToken = default)
+    {
+        var baseUrl = string.IsNullOrWhiteSpace(connector.ApiBaseUrl)
+            ? "https://api.github.com/"
+            : connector.ApiBaseUrl.TrimEnd('/') + "/";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(new Uri(baseUrl), requestUri));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        request.Headers.UserAgent.ParseAdd("GrayMoon");
+        request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", connector.UserToken);
+
+        var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogDebug("GitHub API 404 (ref or resource not found): {Url}", new Uri(new Uri(baseUrl), requestUri));
+            return default;
+        }
         if (!response.IsSuccessStatusCode)
         {
             var errorContent = await response.Content.ReadAsStringAsync();

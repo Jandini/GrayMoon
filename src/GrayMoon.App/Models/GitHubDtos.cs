@@ -120,7 +120,29 @@ public class GitHubCommitStatusDto
     public string? TargetUrl { get; set; }
 }
 
-/// <summary>Response from GET /repos/{owner}/{repo}/commits/{ref}/check-runs.</summary>
+/// <summary>Response from GET /repos/{owner}/{repo}/commits/{ref}/check-suites.</summary>
+public class GitHubCheckSuitesResponse
+{
+    [JsonPropertyName("total_count")]
+    public int TotalCount { get; set; }
+
+    [JsonPropertyName("check_suites")]
+    public List<GitHubCheckSuiteDto> CheckSuites { get; set; } = new();
+}
+
+public class GitHubCheckSuiteDto
+{
+    [JsonPropertyName("id")]
+    public long Id { get; set; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+
+    [JsonPropertyName("conclusion")]
+    public string? Conclusion { get; set; }
+}
+
+/// <summary>Response from GET /repos/{owner}/{repo}/commits/{ref}/check-runs or .../check-suites/{id}/check-runs.</summary>
 public class GitHubCheckRunsResponse
 {
     [JsonPropertyName("total_count")]

@@ -47,28 +47,24 @@
 }
 
 .col-build {
-    width: auto;
-    max-width: 3rem;
-    min-width: 2rem;
+    width: 1.5rem;
+    min-width: 1.5rem;
+    max-width: 1.5rem;
 }
 
-/* GitHub-style CI build status icons */
+.repositories-table tbody td.col-build {
+    text-align: center;
+}
+
+/* Build status column: inline SVG icons (tick / X / circle) with explicit fill colors */
 .repositories-table .build-status-icon {
     display: inline-flex;
     align-items: center;
-    font-size: 1rem;
+    justify-content: center;
 }
 
-.repositories-table .build-status-success {
-    color: #1a7f37;
-}
-
-.repositories-table .build-status-failure {
-    color: #cf222e;
-}
-
-.repositories-table .build-status-pending {
-    color: #d4a72c;
+.repositories-table .build-status-icon svg {
+    flex-shrink: 0;
 }
 
 .col-deps {
