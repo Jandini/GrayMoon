@@ -18,7 +18,7 @@ public sealed class SyncCommandHandler(
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         var wr = await dbContext.WorkspaceRepositories
-            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.LinkedRepositoryId == repositoryId);
+            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId);
         if (wr == null)
         {
             logger.LogWarning("SyncCommand: workspace {WorkspaceId} repo {RepositoryId} not found", workspaceId, repositoryId);

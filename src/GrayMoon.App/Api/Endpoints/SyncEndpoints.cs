@@ -48,7 +48,7 @@ public static class SyncEndpoints
 
         // Only sync repos that are linked to this workspace; reject others
         var isInWorkspace = await dbContext.WorkspaceRepositories
-            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.LinkedRepositoryId == repo.RepositoryId);
+            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repo.RepositoryId);
         if (!isInWorkspace)
         {
             logger.LogWarning("Sync rejected: repository {RepositoryId} is not linked to workspace {WorkspaceId}", repositoryId, workspaceId);

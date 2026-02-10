@@ -13,7 +13,7 @@ public class WorkspaceGitService(
     WorkspaceService workspaceService,
     WorkspaceRepository workspaceRepository,
     RepositoryRepository repositoryRepository,
-    RepositoryProjectRepository repositoryProjectRepository,
+    WorkspaceProjectRepository workspaceProjectRepository,
     AppDbContext dbContext,
     Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<WorkspaceGitService> logger,
@@ -23,7 +23,7 @@ public class WorkspaceGitService(
     private readonly WorkspaceService _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
     private readonly WorkspaceRepository _workspaceRepository = workspaceRepository ?? throw new ArgumentNullException(nameof(workspaceRepository));
     private readonly RepositoryRepository _repositoryRepository = repositoryRepository ?? throw new ArgumentNullException(nameof(repositoryRepository));
-    private readonly RepositoryProjectRepository _repositoryProjectRepository = repositoryProjectRepository ?? throw new ArgumentNullException(nameof(repositoryProjectRepository));
+    private readonly WorkspaceProjectRepository _workspaceProjectRepository = workspaceProjectRepository ?? throw new ArgumentNullException(nameof(workspaceProjectRepository));
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly ILogger<WorkspaceGitService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxConcurrentGitOperations ?? 8);
@@ -95,7 +95,7 @@ public class WorkspaceGitService(
         return results.ToDictionary(r => r.RepositoryId, r => r.info);
     }
 
-    /// <summary>Refreshes project and package reference data from .csproj files on disk (no git). Merges into RepositoryProjects and ProjectDependencies.</summary>
+    /// <summary>Refreshes project and package reference data from .csproj files on disk (no git). Merges into WorkspaceProjects and ProjectDependencies.</summary>
     public async Task RefreshWorkspaceProjectsAsync(
         int workspaceId,
         Action<int, int, int>? onProgress = null,
@@ -147,11 +147,11 @@ public class WorkspaceGitService(
         foreach (var (repoId, projectsDetail) in syncResults)
         {
             if (projectsDetail is { Count: > 0 })
-                await _repositoryProjectRepository.MergeRepositoryProjectsAsync(repoId, projectsDetail, cancellationToken);
+                await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repoId, projectsDetail, cancellationToken);
         }
 
         var resultsForDeps = syncResults.Select(r => (r.RepositoryId, r.ProjectsDetail)).ToList();
-        await _repositoryProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, resultsForDeps, cancellationToken);
+        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, resultsForDeps, cancellationToken);
 
         _logger.LogDebug("RefreshWorkspaceProjects completed for workspace {WorkspaceName}", workspace.Name);
     }
@@ -169,7 +169,7 @@ public class WorkspaceGitService(
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var payloads = await _repositoryProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, cancellationToken);
+        var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, cancellationToken);
         var toSync = payloads.Where(p => p.ProjectUpdates.Count > 0).ToList();
         if (toSync.Count == 0)
         {
@@ -213,7 +213,7 @@ public class WorkspaceGitService(
             .SelectMany(r => r.ProjectUpdates.SelectMany(p => p.PackageUpdates.Select(u => (r.RepoId, p.ProjectPath, u.PackageId, u.NewVersion))))
             .ToList();
         if (updatesToPersist.Count > 0)
-            await _repositoryProjectRepository.UpdateProjectDependencyVersionsAsync(workspaceId, updatesToPersist, cancellationToken);
+            await _workspaceProjectRepository.UpdateProjectDependencyVersionsAsync(workspaceId, updatesToPersist, cancellationToken);
 
         _logger.LogDebug("Sync dependencies completed for workspace {WorkspaceName}. Updated {RepoCount} repos, persisted {UpdateCount} versions", workspace.Name, toSync.Count, updatesToPersist.Count);
         return toSync.Count;
@@ -229,7 +229,7 @@ public class WorkspaceGitService(
         }
 
         var isInWorkspace = await _dbContext.WorkspaceRepositories
-            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.LinkedRepositoryId == repo.RepositoryId, cancellationToken);
+            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repo.RepositoryId, cancellationToken);
         if (!isInWorkspace)
         {
             _logger.LogWarning("Sync skipped: repository {RepositoryName} (id {RepositoryId}) is not linked to workspace {WorkspaceId}", repo.RepositoryName, repositoryId, workspaceId);
@@ -404,16 +404,12 @@ public class WorkspaceGitService(
 
         var repoIds = resultList.Select(r => r.RepoId).ToList();
         var workspaceReposToUpdate = await _dbContext.WorkspaceRepositories
-            .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.LinkedRepositoryId))
-            .ToListAsync(cancellationToken);
-
-        var reposToUpdate = await _dbContext.Repositories
-            .Where(r => repoIds.Contains(r.RepositoryId))
+            .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.RepositoryId))
             .ToListAsync(cancellationToken);
 
         foreach (var (repoId, info) in resultList)
         {
-            var wr = workspaceReposToUpdate.FirstOrDefault(w => w.LinkedRepositoryId == repoId);
+            var wr = workspaceReposToUpdate.FirstOrDefault(w => w.RepositoryId == repoId);
             if (wr != null)
             {
                 wr.GitVersion = info.Version == "-" ? null : info.Version;
@@ -422,18 +418,14 @@ public class WorkspaceGitService(
                 wr.SyncStatus = (info.Version == "-" || info.Branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
             }
 
-            var repo = reposToUpdate.FirstOrDefault(r => r.RepositoryId == repoId);
-            if (repo != null)
-                repo.ProjectCount = info.Projects;
-
             if (info.ProjectsDetail is { Count: > 0 })
-                await _repositoryProjectRepository.MergeRepositoryProjectsAsync(repoId, info.ProjectsDetail, cancellationToken);
+                await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repoId, info.ProjectsDetail, cancellationToken);
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         var syncResults = resultList.Select(r => (r.RepoId, r.info.ProjectsDetail)).ToList();
-        await _repositoryProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, syncResults, cancellationToken);
+        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, syncResults, cancellationToken);
 
         _logger.LogInformation("Persistence: saved WorkspaceRepository link versions. WorkspaceId={WorkspaceId}, RepoCount={RepoCount}",
             workspaceId, resultList.Count);

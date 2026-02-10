@@ -4,50 +4,34 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
 
-/// <summary>Merge persistence of RepositoryProjects by ProjectName: remove non-matching, add new, update existing.</summary>
-public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<RepositoryProjectRepository> logger)
+/// <summary>Merge persistence of WorkspaceProjects by ProjectName: remove non-matching, add new, update existing.</summary>
+public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<WorkspaceProjectRepository> logger)
 {
     /// <summary>Gets projects that have a PackageId (NuGet packages) for repositories linked to the given workspace.</summary>
-    public async Task<List<RepositoryProject>> GetPackagesByWorkspaceIdAsync(int workspaceId, CancellationToken cancellationToken = default)
+    public async Task<List<WorkspaceProject>> GetPackagesByWorkspaceIdAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
-        var repoIds = await dbContext.WorkspaceRepositories
-            .Where(wr => wr.WorkspaceId == workspaceId)
-            .Select(wr => wr.LinkedRepositoryId)
-            .ToListAsync(cancellationToken);
-
-        if (repoIds.Count == 0)
-            return new List<RepositoryProject>();
-
-        return await dbContext.RepositoryProjects
+        return await dbContext.WorkspaceProjects
             .AsNoTracking()
-            .Where(p => repoIds.Contains(p.RepositoryId) && p.PackageId != null && p.PackageId != "")
+            .Where(p => p.WorkspaceId == workspaceId && p.PackageId != null && p.PackageId != "")
             .OrderBy(p => p.PackageId)
             .ThenBy(p => p.TargetFramework)
             .ToListAsync(cancellationToken);
     }
 
     /// <summary>Gets all projects for repositories linked to the given workspace.</summary>
-    public async Task<List<RepositoryProject>> GetByWorkspaceIdAsync(int workspaceId, CancellationToken cancellationToken = default)
+    public async Task<List<WorkspaceProject>> GetByWorkspaceIdAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
-        var repoIds = await dbContext.WorkspaceRepositories
-            .Where(wr => wr.WorkspaceId == workspaceId)
-            .Select(wr => wr.LinkedRepositoryId)
-            .ToListAsync(cancellationToken);
-
-        if (repoIds.Count == 0)
-            return new List<RepositoryProject>();
-
-        return await dbContext.RepositoryProjects
+        return await dbContext.WorkspaceProjects
             .AsNoTracking()
             .Include(p => p.Repository)
-            .Where(p => repoIds.Contains(p.RepositoryId))
+            .Where(p => p.WorkspaceId == workspaceId)
             .OrderBy(p => p.ProjectType == ProjectType.Service ? 0 : p.ProjectType == ProjectType.Library ? 1 : p.ProjectType == ProjectType.Package ? 2 : p.ProjectType == ProjectType.Test ? 3 : 4)
             .ThenBy(p => p.ProjectName)
             .ToListAsync(cancellationToken);
     }
 
-    /// <summary>Merges projects for a repository by ProjectName. Removes persisted projects not in <paramref name="projects"/>; adds new; updates existing.</summary>
-    public async Task MergeRepositoryProjectsAsync(int repositoryId, IReadOnlyList<SyncProjectInfo> projects, CancellationToken cancellationToken = default)
+    /// <summary>Merges projects for a repository in a workspace by ProjectName. Removes persisted projects not in <paramref name="projects"/>; adds new; updates existing.</summary>
+    public async Task MergeWorkspaceProjectsAsync(int workspaceId, int repositoryId, IReadOnlyList<SyncProjectInfo> projects, CancellationToken cancellationToken = default)
     {
         var byName = projects
             .Where(p => !string.IsNullOrWhiteSpace(p.ProjectName))
@@ -56,15 +40,15 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
 
         var incomingNames = new HashSet<string>(byName.Keys, StringComparer.OrdinalIgnoreCase);
 
-        var existing = await dbContext.RepositoryProjects
-            .Where(p => p.RepositoryId == repositoryId)
+        var existing = await dbContext.WorkspaceProjects
+            .Where(p => p.WorkspaceId == workspaceId && p.RepositoryId == repositoryId)
             .ToListAsync(cancellationToken);
 
         var toRemove = existing.Where(p => !incomingNames.Contains(p.ProjectName)).ToList();
         if (toRemove.Count > 0)
         {
-            dbContext.RepositoryProjects.RemoveRange(toRemove);
-            logger.LogDebug("RepositoryProjects merge: RepositoryId={RepositoryId}, removed {Count} by name", repositoryId, toRemove.Count);
+            dbContext.WorkspaceProjects.RemoveRange(toRemove);
+            logger.LogDebug("WorkspaceProjects merge: WorkspaceId={WorkspaceId}, RepositoryId={RepositoryId}, removed {Count} by name", workspaceId, repositoryId, toRemove.Count);
         }
 
         foreach (var p in existing.Where(p => incomingNames.Contains(p.ProjectName)))
@@ -83,8 +67,9 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
         {
             if (existingNames.Contains(name))
                 continue;
-            dbContext.RepositoryProjects.Add(new RepositoryProject
+            dbContext.WorkspaceProjects.Add(new WorkspaceProject
             {
+                WorkspaceId = workspaceId,
                 RepositoryId = repositoryId,
                 ProjectName = name,
                 ProjectType = info.ProjectType,
@@ -95,8 +80,8 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        logger.LogInformation("Persistence: RepositoryProjects. Action=Merge, RepositoryId={RepositoryId}, Removed={Removed}, AddedOrUpdated={Count}",
-            repositoryId, toRemove.Count, byName.Count);
+        logger.LogInformation("Persistence: WorkspaceProjects. Action=Merge, WorkspaceId={WorkspaceId}, RepositoryId={RepositoryId}, Removed={Removed}, AddedOrUpdated={Count}",
+            workspaceId, repositoryId, toRemove.Count, byName.Count);
     }
 
     /// <summary>Replaces project dependencies for workspace projects from sync results. Only dependencies where the referenced package is a workspace project are persisted.</summary>
@@ -105,16 +90,11 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
         IReadOnlyList<(int RepoId, IReadOnlyList<SyncProjectInfo>? ProjectsDetail)> syncResults,
         CancellationToken cancellationToken = default)
     {
-        var repoIds = await dbContext.WorkspaceRepositories
-            .Where(wr => wr.WorkspaceId == workspaceId)
-            .Select(wr => wr.LinkedRepositoryId)
-            .ToListAsync(cancellationToken);
-        if (repoIds.Count == 0) return;
-
-        var workspaceProjects = await dbContext.RepositoryProjects
+        var workspaceProjects = await dbContext.WorkspaceProjects
             .AsNoTracking()
-            .Where(p => repoIds.Contains(p.RepositoryId))
+            .Where(p => p.WorkspaceId == workspaceId)
             .ToListAsync(cancellationToken);
+        if (workspaceProjects.Count == 0) return;
 
         var packageNameToProjectId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var p in workspaceProjects)
@@ -131,7 +111,7 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
         {
             if (projectsDetail == null || projectsDetail.Count == 0) continue;
 
-            var repoProjects = workspaceProjects.Where(p => p.RepositoryId == repoId).ToDictionary(p => p.ProjectName.Trim(), p => p.ProjectId, StringComparer.OrdinalIgnoreCase);
+            var repoProjects = workspaceProjects.Where(p => p.WorkspaceId == workspaceId && p.RepositoryId == repoId).ToDictionary(p => p.ProjectName.Trim(), p => p.ProjectId, StringComparer.OrdinalIgnoreCase);
 
             foreach (var info in projectsDetail)
             {
@@ -181,24 +161,19 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
     /// <summary>Returns payload for syncing dependency versions: per repo, list of (project path, package ID to new version) for dependencies that do not match the referenced repo's GitVersion.</summary>
     public async Task<List<SyncDependenciesRepoPayload>> GetSyncDependenciesPayloadAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
-        var repoIds = await dbContext.WorkspaceRepositories
-            .Where(wr => wr.WorkspaceId == workspaceId)
-            .Select(wr => wr.LinkedRepositoryId)
-            .ToListAsync(cancellationToken);
-        if (repoIds.Count == 0) return new List<SyncDependenciesRepoPayload>();
-
         var versionByRepoId = await dbContext.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId)
-            .Select(wr => new { wr.LinkedRepositoryId, wr.GitVersion })
+            .Select(wr => new { wr.RepositoryId, wr.GitVersion })
             .ToListAsync(cancellationToken);
-        var versionByRepo = versionByRepoId.ToDictionary(x => x.LinkedRepositoryId, x => x.GitVersion, null);
+        var versionByRepo = versionByRepoId.ToDictionary(x => x.RepositoryId, x => x.GitVersion, null);
 
-        var projects = await dbContext.RepositoryProjects
+        var projects = await dbContext.WorkspaceProjects
             .AsNoTracking()
             .Include(p => p.Repository)
-            .Where(p => repoIds.Contains(p.RepositoryId))
+            .Where(p => p.WorkspaceId == workspaceId)
             .ToListAsync(cancellationToken);
+        if (projects.Count == 0) return new List<SyncDependenciesRepoPayload>();
         var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
         var byProject = projects.ToDictionary(p => p.ProjectId);
 
@@ -208,6 +183,7 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
             .Select(d => new { d.DependentProjectId, d.ReferencedProjectId, d.Version })
             .ToListAsync(cancellationToken);
 
+        var repoIds = projects.Select(p => p.RepositoryId).Distinct().ToList();
         var repoToProjectUpdates = new Dictionary<int, Dictionary<string, Dictionary<string, string>>>(repoIds.Count);
         foreach (var repoId in repoIds)
             repoToProjectUpdates[repoId] = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
@@ -267,15 +243,10 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
     {
         if (updates == null || updates.Count == 0) return;
 
-        var repoIds = await dbContext.WorkspaceRepositories
-            .Where(wr => wr.WorkspaceId == workspaceId)
-            .Select(wr => wr.LinkedRepositoryId)
+        var projects = await dbContext.WorkspaceProjects
+            .Where(p => p.WorkspaceId == workspaceId)
             .ToListAsync(cancellationToken);
-        if (repoIds.Count == 0) return;
-
-        var projects = await dbContext.RepositoryProjects
-            .Where(p => repoIds.Contains(p.RepositoryId))
-            .ToListAsync(cancellationToken);
+        if (projects.Count == 0) return;
 
         var dependentKeyToProjectId = projects
             .Where(p => !string.IsNullOrWhiteSpace(p.ProjectFilePath))
@@ -329,14 +300,8 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
     /// <summary>Returns dependency edges (DependentProjectId, ReferencedProjectId) for the workspace. Suitable for Cytoscape: nodes = projects, edges = this list.</summary>
     public async Task<List<(int DependentProjectId, int ReferencedProjectId)>> GetDependencyEdgesAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
-        var repoIds = await dbContext.WorkspaceRepositories
-            .Where(wr => wr.WorkspaceId == workspaceId)
-            .Select(wr => wr.LinkedRepositoryId)
-            .ToListAsync(cancellationToken);
-        if (repoIds.Count == 0) return new List<(int, int)>();
-
-        var workspaceProjectIds = await dbContext.RepositoryProjects
-            .Where(p => repoIds.Contains(p.RepositoryId))
+        var workspaceProjectIds = await dbContext.WorkspaceProjects
+            .Where(p => p.WorkspaceId == workspaceId)
             .Select(p => p.ProjectId)
             .ToListAsync(cancellationToken);
         if (workspaceProjectIds.Count == 0) return new List<(int, int)>();
@@ -351,7 +316,7 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
     }
 
     /// <summary>Returns workspace projects in build order (dependencies first). Uses topological sort; returns empty list if cycle detected.</summary>
-    public async Task<List<RepositoryProject>> GetBuildOrderAsync(int workspaceId, CancellationToken cancellationToken = default)
+    public async Task<List<WorkspaceProject>> GetBuildOrderAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         var projects = await GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         if (projects.Count == 0) return projects;
@@ -384,7 +349,7 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
         }
 
         if (order.Count != projects.Count)
-            return new List<RepositoryProject>();
+            return new List<WorkspaceProject>();
 
         return order.Select(id => byProject[id]).ToList();
     }
@@ -443,9 +408,9 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
         var versionByRepoId = await dbContext.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId)
-            .Select(wr => new { wr.LinkedRepositoryId, wr.GitVersion })
+            .Select(wr => new { wr.RepositoryId, wr.GitVersion })
             .ToListAsync(cancellationToken);
-        var versionByRepo = versionByRepoId.ToDictionary(x => x.LinkedRepositoryId, x => x.GitVersion, null);
+        var versionByRepo = versionByRepoId.ToDictionary(x => x.RepositoryId, x => x.GitVersion, null);
 
         var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
         var byProject = projects.ToDictionary(p => p.ProjectId);
@@ -509,8 +474,15 @@ public sealed class RepositoryProjectRepository(AppDbContext dbContext, ILogger<
                 unmatchedCountByRepo[depRepoId] = unmatchedCountByRepo.GetValueOrDefault(depRepoId, 0) + 1;
         }
 
+        var repoIds = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .Select(wr => wr.RepositoryId)
+            .ToListAsync(cancellationToken);
+
         var repoSequence = projects
             .GroupBy(p => p.RepositoryId)
+            .Where(g => repoIds.Contains(g.Key))
             .Select(g => (
                 RepositoryId: g.Key,
                 Sequence: g.Max(p => levelByProject.GetValueOrDefault(p.ProjectId, currentLevel)),

@@ -4,7 +4,7 @@
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Components.Shared
 @inject WorkspaceRepository WorkspaceRepository
-@inject RepositoryProjectRepository RepositoryProjectRepository
+@inject WorkspaceProjectRepository WorkspaceProjectRepository
 @inject ILogger<WorkspacePackages> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
@@ -86,7 +86,7 @@
     [Parameter] public int WorkspaceId { get; set; }
 
     private WorkspaceModel? workspace;
-    private List<RepositoryProject> packages = new();
+    private List<WorkspaceProject> packages = new();
     private string? errorMessage;
     private bool isLoading = true;
 
@@ -105,16 +105,16 @@
             if (workspace == null)
             {
                 errorMessage = "Workspace not found.";
-                packages = new List<RepositoryProject>();
+                packages = new List<WorkspaceProject>();
                 return;
             }
-            packages = await RepositoryProjectRepository.GetPackagesByWorkspaceIdAsync(WorkspaceId);
+            packages = await WorkspaceProjectRepository.GetPackagesByWorkspaceIdAsync(WorkspaceId);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error loading packages for workspace {WorkspaceId}", WorkspaceId);
             errorMessage = "Failed to load packages. Please try again later.";
-            packages = new List<RepositoryProject>();
+            packages = new List<WorkspaceProject>();
         }
         finally
         {

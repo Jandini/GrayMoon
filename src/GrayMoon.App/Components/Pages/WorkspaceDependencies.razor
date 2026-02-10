@@ -4,7 +4,7 @@
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Components.Shared
 @inject WorkspaceRepository WorkspaceRepository
-@inject RepositoryProjectRepository RepositoryProjectRepository
+@inject WorkspaceProjectRepository WorkspaceProjectRepository
 @inject IJSRuntime JSRuntime
 @inject ILogger<WorkspaceDependencies> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
@@ -147,7 +147,7 @@
                 graph = null;
                 return;
             }
-            graph = await RepositoryProjectRepository.GetRepositoryDependencyGraphAsync(WorkspaceId);
+            graph = await WorkspaceProjectRepository.GetRepositoryDependencyGraphAsync(WorkspaceId);
         }
         catch (Exception ex)
         {

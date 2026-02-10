@@ -9,7 +9,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Repository> Repositories => Set<Repository>();
     public DbSet<Workspace> Workspaces => Set<Workspace>();
     public DbSet<WorkspaceRepositoryLink> WorkspaceRepositories => Set<WorkspaceRepositoryLink>();
-    public DbSet<RepositoryProject> RepositoryProjects => Set<RepositoryProject>();
+    public DbSet<WorkspaceProject> WorkspaceProjects => Set<WorkspaceProject>();
     public DbSet<ProjectDependency> ProjectDependencies => Set<ProjectDependency>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -91,10 +91,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<WorkspaceRepositoryLink>(entity =>
         {
             entity.ToTable("WorkspaceRepositories");
-            entity.HasKey(wr => wr.RepositoryId);
-            entity.Property(wr => wr.RepositoryId).ValueGeneratedOnAdd();
+            entity.HasKey(wr => wr.WorkspaceRepositoryId);
+            entity.Property(wr => wr.WorkspaceRepositoryId).ValueGeneratedOnAdd();
 
-            entity.HasIndex(wr => new { wr.WorkspaceId, wr.LinkedRepositoryId })
+            entity.HasIndex(wr => new { wr.WorkspaceId, wr.RepositoryId })
                 .IsUnique();
 
             entity.Property(wr => wr.GitVersion)
@@ -114,14 +114,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             entity.HasOne(wr => wr.Repository)
                 .WithMany()
-                .HasForeignKey(wr => wr.LinkedRepositoryId)
+                .HasForeignKey(wr => wr.RepositoryId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<RepositoryProject>(entity =>
+        modelBuilder.Entity<WorkspaceProject>(entity =>
         {
             entity.HasKey(p => p.ProjectId);
-            entity.HasIndex(p => new { p.RepositoryId, p.ProjectName })
+            entity.HasIndex(p => new { p.WorkspaceId, p.RepositoryId, p.ProjectName })
                 .IsUnique();
 
             entity.Property(p => p.ProjectName)
@@ -138,6 +138,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             entity.Property(p => p.PackageId)
                 .HasMaxLength(200);
+
+            entity.HasOne(p => p.Workspace)
+                .WithMany()
+                .HasForeignKey(p => p.WorkspaceId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasOne(p => p.Repository)
                 .WithMany()
