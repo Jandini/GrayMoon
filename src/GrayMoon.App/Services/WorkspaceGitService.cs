@@ -229,7 +229,7 @@ public class WorkspaceGitService(
         }
 
         var isInWorkspace = await _dbContext.WorkspaceRepositories
-            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.LinkedRepositoryId == repo.RepositoryId, cancellationToken);
+            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repo.RepositoryId, cancellationToken);
         if (!isInWorkspace)
         {
             _logger.LogWarning("Sync skipped: repository {RepositoryName} (id {RepositoryId}) is not linked to workspace {WorkspaceId}", repo.RepositoryName, repositoryId, workspaceId);
@@ -404,12 +404,12 @@ public class WorkspaceGitService(
 
         var repoIds = resultList.Select(r => r.RepoId).ToList();
         var workspaceReposToUpdate = await _dbContext.WorkspaceRepositories
-            .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.LinkedRepositoryId))
+            .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.RepositoryId))
             .ToListAsync(cancellationToken);
 
         foreach (var (repoId, info) in resultList)
         {
-            var wr = workspaceReposToUpdate.FirstOrDefault(w => w.LinkedRepositoryId == repoId);
+            var wr = workspaceReposToUpdate.FirstOrDefault(w => w.RepositoryId == repoId);
             if (wr != null)
             {
                 wr.GitVersion = info.Version == "-" ? null : info.Version;

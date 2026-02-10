@@ -180,7 +180,7 @@
         }
         repoSyncStatus = workspaceRepositories
             .Where(wr => wr.Repository != null)
-            .ToDictionary(wr => wr.LinkedRepositoryId, wr => wr.SyncStatus);
+            .ToDictionary(wr => wr.RepositoryId, wr => wr.SyncStatus);
         isOutOfSync = repoSyncStatus.Values.Any(s => s != RepoSyncStatus.InSync);
         StateHasChanged();
     }
@@ -273,7 +273,7 @@
         }
         repositoriesModalErrorMessage = null;
         selectedRepositoryIds = workspace.Repositories
-            .Select(link => link.LinkedRepositoryId)
+            .Select(link => link.RepositoryId)
             .ToHashSet();
         await EnsureRepositoriesForModalAsync();
         showRepositoriesModal = true;
@@ -397,7 +397,7 @@
                         ? RepoSyncStatus.Error
                         : RepoSyncStatus.InSync;
 
-                    var wr = workspaceRepositories.FirstOrDefault(w => w.LinkedRepositoryId == repoId);
+                    var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
                     if (wr != null)
                     {
                         wr.GitVersion = info.Version == "-" ? null : info.Version;

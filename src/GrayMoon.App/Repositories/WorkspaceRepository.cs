@@ -166,10 +166,10 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
             .Where(wr => wr.WorkspaceId == workspaceId)
             .ToListAsync();
 
-        var existingRepoIds = existing.Select(wr => wr.LinkedRepositoryId).ToHashSet();
+        var existingRepoIds = existing.Select(wr => wr.RepositoryId).ToHashSet();
         var newRepoIds = repositoryIds.Distinct().ToHashSet();
 
-        var toRemove = existing.Where(wr => !newRepoIds.Contains(wr.LinkedRepositoryId)).ToList();
+        var toRemove = existing.Where(wr => !newRepoIds.Contains(wr.RepositoryId)).ToList();
         var toAdd = newRepoIds.Except(existingRepoIds).ToList();
 
         foreach (var wr in toRemove)
@@ -182,7 +182,7 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
             _dbContext.WorkspaceRepositories.Add(new WorkspaceRepositoryLink
             {
                 WorkspaceId = workspaceId,
-                LinkedRepositoryId = repositoryId,
+                RepositoryId = repositoryId,
                 SyncStatus = RepoSyncStatus.NeedsSync
             });
         }

@@ -164,9 +164,9 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
         var versionByRepoId = await dbContext.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId)
-            .Select(wr => new { wr.LinkedRepositoryId, wr.GitVersion })
+            .Select(wr => new { wr.RepositoryId, wr.GitVersion })
             .ToListAsync(cancellationToken);
-        var versionByRepo = versionByRepoId.ToDictionary(x => x.LinkedRepositoryId, x => x.GitVersion, null);
+        var versionByRepo = versionByRepoId.ToDictionary(x => x.RepositoryId, x => x.GitVersion, null);
 
         var projects = await dbContext.WorkspaceProjects
             .AsNoTracking()
@@ -408,9 +408,9 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
         var versionByRepoId = await dbContext.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId)
-            .Select(wr => new { wr.LinkedRepositoryId, wr.GitVersion })
+            .Select(wr => new { wr.RepositoryId, wr.GitVersion })
             .ToListAsync(cancellationToken);
-        var versionByRepo = versionByRepoId.ToDictionary(x => x.LinkedRepositoryId, x => x.GitVersion, null);
+        var versionByRepo = versionByRepoId.ToDictionary(x => x.RepositoryId, x => x.GitVersion, null);
 
         var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
         var byProject = projects.ToDictionary(p => p.ProjectId);
@@ -477,7 +477,7 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
         var repoIds = await dbContext.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId)
-            .Select(wr => wr.LinkedRepositoryId)
+            .Select(wr => wr.RepositoryId)
             .ToListAsync(cancellationToken);
 
         var repoSequence = projects

@@ -91,10 +91,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<WorkspaceRepositoryLink>(entity =>
         {
             entity.ToTable("WorkspaceRepositories");
-            entity.HasKey(wr => wr.RepositoryId);
-            entity.Property(wr => wr.RepositoryId).ValueGeneratedOnAdd();
+            entity.HasKey(wr => wr.WorkspaceRepositoryId);
+            entity.Property(wr => wr.WorkspaceRepositoryId).ValueGeneratedOnAdd();
 
-            entity.HasIndex(wr => new { wr.WorkspaceId, wr.LinkedRepositoryId })
+            entity.HasIndex(wr => new { wr.WorkspaceId, wr.RepositoryId })
                 .IsUnique();
 
             entity.Property(wr => wr.GitVersion)
@@ -114,7 +114,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             entity.HasOne(wr => wr.Repository)
                 .WithMany()
-                .HasForeignKey(wr => wr.LinkedRepositoryId)
+                .HasForeignKey(wr => wr.RepositoryId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

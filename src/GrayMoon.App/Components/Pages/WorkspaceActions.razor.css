@@ -30,11 +30,11 @@
 }
 
 .col-repo {
-    width: 33%;
+    width: 30%;
 }
 
 .col-workflow {
-    width: 10%;
+    width: 20%;
 }
 
 .col-event {
@@ -42,11 +42,7 @@
 }
 
 .col-status {
-    width: 11%;
-}
-
-.col-result {
-    width: 8%;
+    width: 18%;
 }
 
 .col-updated {
@@ -55,14 +51,12 @@
 
 /* Last column: actions (match Workspaces.razor) */
 .col-actions {
-    width: 30%;
+    width: 10%;
 }
 
 /* Status / Result: center header and body text (override global col-status-badge right alignment) */
 .actions-table th.col-status,
-.actions-table td.col-status,
-.actions-table th.col-result,
-.actions-table td.col-result {
+.actions-table td.col-status {
     text-align: center;
 }
 
@@ -92,4 +86,13 @@
 .page-card .table-responsive {
     flex: 1 1 auto;
     min-height: 0;
+}
+
+.actions-table tbody tr.actions-error-row,
+.actions-table tbody tr.actions-error-row:hover {
+    background-color: #f8d7da;
+}
+
+.actions-table tbody tr.actions-error-row td {
+    color: #842029;
 }

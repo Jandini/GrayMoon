@@ -284,7 +284,7 @@
         workspaceName = workspace.Name;
         editorErrorMessage = null;
         editingWorkspaceRepositoryIds = workspace.Repositories
-            .Select(link => link.LinkedRepositoryId)
+            .Select(link => link.RepositoryId)
             .ToHashSet();
         showEditorModal = true;
         await LoadDirectoryInfoAsync();
@@ -302,7 +302,7 @@
         repositoriesModalWorkspaceName = workspace.Name;
         repositoriesModalErrorMessage = null;
         selectedRepositoryIds = workspace.Repositories
-            .Select(link => link.LinkedRepositoryId)
+            .Select(link => link.RepositoryId)
             .ToHashSet();
         await EnsureRepositoriesAsync();
         showRepositoriesModal = true;
