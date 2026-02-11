@@ -1,0 +1,30 @@
+---
+description: Use Windows EOL (CRLF) and Windows-compatible shell syntax
+globs: 
+alwaysApply: true
+---
+
+# Windows environment: EOL and shell
+
+This project is developed on **Windows**. Follow these rules for all generated code and terminal commands.
+
+## Line endings (EOL)
+
+- **Use Windows line endings (CRLF)** when creating or editing any file.
+- Do **not** use Unix line endings (LF only) in generated code or scripts.
+- In terminal commands that create or modify files, ensure output uses CRLF if the result is source code (e.g. when writing to a file from a script).
+
+## Terminal / shell
+
+- **Shell:** The default shell is **PowerShell** on Windows.
+- **Command chaining:** In PowerShell, do **not** use `&&` to chain commands. Use one of:
+  - Semicolon: `;` (e.g. `cd path; dotnet build`)
+  - Separate commands in separate invocations
+  - Or run in cmd: `cmd /c "cd path && dotnet build"`
+- **Paths:** Prefer Windows-style paths in commands when needed; paths with spaces must be quoted (e.g. `"path with spaces"`).
+- **Examples:**
+  - Wrong: `cd "c:\project" && dotnet build`
+  - Right: `cd "c:\project"; dotnet build`
+  - Right: `Set-Location "c:\project"; dotnet build`
+
+Applying these rules avoids `InvalidEndOfLine` and similar Windows shell errors when running generated commands.
