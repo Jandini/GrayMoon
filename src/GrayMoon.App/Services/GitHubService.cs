@@ -4,7 +4,7 @@ using GrayMoon.App.Models;
 
 namespace GrayMoon.App.Services;
 
-public class GitHubService
+public class GitHubService : IConnectorService
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<GitHubService> _logger;
@@ -13,6 +13,8 @@ public class GitHubService
     {
         PropertyNameCaseInsensitive = true
     };
+
+    public ConnectorType ConnectorType => ConnectorType.GitHub;
 
     public GitHubService(HttpClient httpClient, IConfiguration configuration, ILogger<GitHubService> logger)
     {
@@ -149,7 +151,25 @@ public class GitHubService
         await PostAsync(connector, $"repos/{owner}/{repo}/actions/workflows/{workflowId}/dispatches", payload);
     }
 
-    public async Task<(int OrganizationCount, int RepositoryCount)> TestConnectionAsync(Connector connector)
+    public async Task<bool> TestConnectionAsync(Connector connector)
+    {
+        EnsureConnectorConfigured(connector);
+
+        try
+        {
+            var organizations = await GetAsync<List<GitHubOrganizationDto>>(connector, "user/orgs")
+                ?? new List<GitHubOrganizationDto>();
+            var repositories = await GetRepositoriesAsync(connector);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to test GitHub connector connection.");
+            return false;
+        }
+    }
+
+    public async Task<(int OrganizationCount, int RepositoryCount)> TestConnectionDetailedAsync(Connector connector)
     {
         EnsureConnectorConfigured(connector);
 
@@ -170,6 +190,11 @@ public class GitHubService
 
     private static void EnsureConnectorConfigured(Connector connector)
     {
+        if (connector.ConnectorType != ConnectorType.GitHub)
+        {
+            throw new InvalidOperationException($"Connector type {connector.ConnectorType} is not supported by GitHubService.");
+        }
+
         if (string.IsNullOrWhiteSpace(connector.UserToken))
         {
             throw new InvalidOperationException("Connector token is not configured.");

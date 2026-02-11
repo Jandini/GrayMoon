@@ -50,8 +50,10 @@ builder.Services.AddScoped<GitHubActionsService>();
 builder.Services.AddSingleton<SyncBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SyncBackgroundService>());
 
-// GitHub API service
+// Connector services
 builder.Services.AddHttpClient<GitHubService>();
+builder.Services.AddHttpClient<NuGetService>();
+builder.Services.AddScoped<ConnectorServiceFactory>();
 
 // Persist Data Protection keys to db volume so antiforgery and other protected data survive container restarts
 var keyRingDir = Path.Combine(Path.GetDirectoryName(GetDatabasePath(connectionString) ?? "db") ?? "db", "DataProtection-Keys");
@@ -83,6 +85,7 @@ using (var scope = app.Services.CreateScope())
     dbContext.Database.EnsureCreated();
     await MigrateWorkspaceSyncMetadataAsync(dbContext);
     await MigrateConnectorUserNameAsync(dbContext);
+    await MigrateConnectorTypeAndTokenAsync(dbContext);
     await MigrateWorkspaceRepositoriesSyncStatusAsync(dbContext);
     await MigrateWorkspaceRepositoriesProjectsAsync(dbContext);
     await MigrateWorkspaceRepositoriesCommitsAsync(dbContext);
@@ -140,6 +143,47 @@ static async Task MigrateConnectorUserNameAsync(AppDbContext dbContext)
             if (count == 0)
             {
                 cmd.CommandText = "ALTER TABLE Connectors ADD COLUMN UserName TEXT";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateConnectorTypeAndTokenAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            // Add ConnectorType column if it doesn't exist
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Connectors') WHERE name='ConnectorType'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                // Add ConnectorType column with default value of 1 (GitHub)
+                cmd.CommandText = "ALTER TABLE Connectors ADD COLUMN ConnectorType INTEGER NOT NULL DEFAULT 1";
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            // Make UserToken nullable (SQLite doesn't support ALTER COLUMN, so we need to recreate)
+            // Check if UserToken is currently NOT NULL
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Connectors') WHERE name='UserToken' AND \"notnull\"=1";
+            count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count > 0)
+            {
+                // SQLite doesn't support ALTER COLUMN to change nullability
+                // We'll handle this at the application level - the column will remain NOT NULL in DB
+                // but EF Core will treat it as nullable based on the model
+                // For existing data, we ensure all rows have a value
+                cmd.CommandText = "UPDATE Connectors SET UserToken = '' WHERE UserToken IS NULL";
                 await cmd.ExecuteNonQueryAsync();
             }
         }

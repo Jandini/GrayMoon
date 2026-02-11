@@ -70,6 +70,7 @@ public class ConnectorRepository(AppDbContext dbContext, ILogger<ConnectorReposi
         }
 
         existing.ConnectorName = connector.ConnectorName;
+        existing.ConnectorType = connector.ConnectorType;
         existing.ApiBaseUrl = connector.ApiBaseUrl;
         existing.UserName = connector.UserName;
         existing.UserToken = connector.UserToken;

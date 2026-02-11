@@ -26,6 +26,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .IsRequired()
                 .HasMaxLength(100);
 
+            entity.Property(connector => connector.ConnectorType)
+                .IsRequired()
+                .HasConversion<int>()
+                .HasDefaultValue(ConnectorType.GitHub)
+                .HasSentinel((ConnectorType)0);
+
             entity.Property(connector => connector.ApiBaseUrl)
                 .IsRequired()
                 .HasMaxLength(300);
@@ -34,7 +40,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasMaxLength(100);
 
             entity.Property(connector => connector.UserToken)
-                .IsRequired()
                 .HasMaxLength(500);
 
             entity.Property(connector => connector.Status)

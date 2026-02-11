@@ -44,17 +44,34 @@
     width: 100px;
     min-width: 100px;
     max-width: 100px;
+    text-align: center;
 }
 
-.col-projects {
-    width: auto;
-    max-width: 50px;
+.repositories-table th.col-sync,
+.repositories-table td.col-sync {
+    text-align: center;
+}
+
+.repositories-table td.col-sync {
+    overflow: visible;
+    text-overflow: clip;
 }
 
 .col-deps {
     width: 8rem;
     min-width: 8rem;
     max-width: 8rem;
+    text-align: center;
+}
+
+.repositories-table th.col-deps,
+.repositories-table td.col-deps {
+    text-align: center;
+}
+
+.repositories-table td.col-deps {
+    overflow: visible;
+    text-overflow: clip;
 }
 
 /* Dependencies column: same badge logic as build (green = all match, red = any unmatched) */
@@ -81,6 +98,17 @@
 .col-commits {
     width: auto;
     max-width: 80px;
+    text-align: center;
+}
+
+.repositories-table th.col-commits,
+.repositories-table td.col-commits {
+    text-align: center;
+}
+
+.repositories-table td.col-commits {
+    overflow: visible;
+    text-overflow: clip;
 }
 
 .col-version {
