@@ -12,10 +12,37 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
     {
         return await dbContext.WorkspaceProjects
             .AsNoTracking()
+            .Include(p => p.MatchedConnector)
             .Where(p => p.WorkspaceId == workspaceId && p.PackageId != null && p.PackageId != "")
             .OrderBy(p => p.PackageId)
             .ThenBy(p => p.TargetFramework)
             .ToListAsync(cancellationToken);
+    }
+
+    /// <summary>Updates MatchedConnectorId for workspace packages. Keys are ProjectId, values are ConnectorId (or null to clear).</summary>
+    public async Task SetPackagesMatchedConnectorsAsync(int workspaceId, IReadOnlyDictionary<int, int?> projectIdToConnectorId, CancellationToken cancellationToken = default)
+    {
+        if (projectIdToConnectorId.Count == 0)
+        {
+            logger.LogTrace("SetPackagesMatchedConnectors: workspace {WorkspaceId}, no updates (empty map).", workspaceId);
+            return;
+        }
+        var projectIds = projectIdToConnectorId.Keys.ToList();
+        var projects = await dbContext.WorkspaceProjects
+            .Where(p => p.WorkspaceId == workspaceId && projectIds.Contains(p.ProjectId))
+            .ToListAsync(cancellationToken);
+        logger.LogTrace("SetPackagesMatchedConnectors: workspace {WorkspaceId}, loaded {Loaded} projects for {Requested} requested.", workspaceId, projects.Count, projectIds.Count);
+        foreach (var p in projects)
+        {
+            if (projectIdToConnectorId.TryGetValue(p.ProjectId, out var connectorId))
+            {
+                var previous = p.MatchedConnectorId;
+                p.MatchedConnectorId = connectorId;
+                logger.LogTrace("SetPackagesMatchedConnectors: ProjectId={ProjectId} MatchedConnectorId {Previous} -> {ConnectorId}.", p.ProjectId, previous ?? -1, connectorId ?? -1);
+            }
+        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+        logger.LogTrace("SetPackagesMatchedConnectors: persisted {Count} package(s) for workspace {WorkspaceId}.", projects.Count, workspaceId);
     }
 
     /// <summary>Gets all projects for repositories linked to the given workspace.</summary>

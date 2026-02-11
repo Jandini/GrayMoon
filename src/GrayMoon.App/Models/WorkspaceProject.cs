@@ -38,6 +38,12 @@ public class WorkspaceProject
     [MaxLength(200)]
     public string? PackageId { get; set; }
 
+    /// <summary>NuGet connector (registry) where this package was found, if any.</summary>
+    public int? MatchedConnectorId { get; set; }
+
+    [ForeignKey(nameof(MatchedConnectorId))]
+    public Connector? MatchedConnector { get; set; }
+
     /// <summary>Outgoing dependencies (projects this one references).</summary>
     [InverseProperty(nameof(ProjectDependency.DependentProject))]
     public ICollection<ProjectDependency> DependsOn { get; set; } = new List<ProjectDependency>();
