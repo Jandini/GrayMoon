@@ -140,6 +140,9 @@ public class GitHubCheckSuiteDto
 
     [JsonPropertyName("conclusion")]
     public string? Conclusion { get; set; }
+
+    [JsonPropertyName("head_branch")]
+    public string? HeadBranch { get; set; }
 }
 
 /// <summary>Response from GET /repos/{owner}/{repo}/commits/{ref}/check-runs or .../check-suites/{id}/check-runs.</summary>
@@ -168,4 +171,11 @@ public class GitHubCheckRunDto
 
     [JsonPropertyName("html_url")]
     public string? HtmlUrl { get; set; }
+}
+
+/// <summary>Response from GET /repos/{owner}/{repo}/commits/{ref}.</summary>
+public class GitHubCommitDto
+{
+    [JsonPropertyName("sha")]
+    public string Sha { get; set; } = string.Empty;
 }

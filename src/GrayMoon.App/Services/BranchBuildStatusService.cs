@@ -2,11 +2,11 @@ using GrayMoon.App.Models;
 
 namespace GrayMoon.App.Services;
 
-/// <summary>Fetches CI branch build status from GitHub (commit statuses + check runs) and returns a merged result.</summary>
+/// <summary>Fetches CI branch build status from GitHub check suites and returns the result for the current branch.</summary>
 public class BranchBuildStatusService(GitHubService gitHubService, ILogger<BranchBuildStatusService> logger)
 {
-    /// <summary>Gets the combined build status for a branch ref. Returns None if no CI is reported or on API error (e.g. 404).</summary>
-    public async Task<(BuildStatus Status, string? Tooltip)> GetBuildStatusAsync(
+    /// <summary>Gets the combined build status for a branch ref using check suites. Returns None if no CI is reported or on API error (e.g. 404). Only uses suites for the current branch (head_branch).</summary>
+    public async Task<(BuildStatus Status, string StatusText, string? Conclusion, string? Tooltip)> GetBuildStatusAsync(
         Connector connector,
         string owner,
         string repo,
@@ -14,156 +14,134 @@ public class BranchBuildStatusService(GitHubService gitHubService, ILogger<Branc
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(owner) || string.IsNullOrWhiteSpace(repo) || string.IsNullOrWhiteSpace(@ref))
-            return (BuildStatus.None, null);
+            return (BuildStatus.None, string.Empty, null, null);
 
         try
         {
-            var statusTask = gitHubService.GetCombinedCommitStatusAsync(connector, owner, repo, @ref, cancellationToken);
-            var checksTask = GetCheckRunsAndSuiteStateForRefAsync(connector, owner, repo, @ref, cancellationToken);
-            await Task.WhenAll(statusTask, checksTask).ConfigureAwait(false);
+            // Resolve branch name to SHA if needed (ref might be a branch name)
+            var refToUse = @ref;
+            if (!IsSha(@ref))
+            {
+                var sha = await gitHubService.GetCommitShaAsync(connector, owner, repo, @ref, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(sha))
+                {
+                    refToUse = sha;
+                    logger.LogDebug("Resolved branch {Branch} to SHA {Sha} for {Owner}/{Repo}", @ref, sha, owner, repo);
+                }
+            }
 
-            var combinedStatus = await statusTask;
-            var (checkRuns, suiteState) = await checksTask;
+            // Get check suites for the ref
+            var suites = await gitHubService.GetCheckSuitesAsync(connector, owner, repo, refToUse, cancellationToken);
+            if (suites == null || suites.CheckSuites.Count == 0)
+                return (BuildStatus.None, string.Empty, null, "No CI status reported to GitHub for this branch");
 
-            var fromStatus = GetStateFromCombinedStatus(combinedStatus);
-            var fromChecks = GetStateFromCheckRuns(checkRuns);
-            var fromSuites = suiteState ?? BuildStatus.None;
+            // Filter suites to only those matching the current branch (head_branch)
+            var branchSuites = suites.CheckSuites
+                .Where(s => string.Equals(s.HeadBranch, @ref, StringComparison.OrdinalIgnoreCase))
+                .ToList();
 
-            var merged = MergeBuildState(MergeBuildState(fromStatus, fromChecks), fromSuites);
-            var tooltip = BuildTooltip(merged, combinedStatus, checkRuns);
-            return (merged, tooltip);
+            if (branchSuites.Count == 0)
+                return (BuildStatus.None, string.Empty, null, "No CI status reported to GitHub for this branch");
+
+            // Get status from suites using status/conclusion combination like actions page
+            var (finalStatus, statusText, conclusion) = GetStateFromCheckSuitesForBranch(branchSuites);
+            var tooltip = BuildTooltip(finalStatus);
+            return (finalStatus, statusText, conclusion, tooltip);
         }
         catch (HttpRequestException ex)
         {
             logger.LogDebug(ex, "GitHub API error fetching build status for {Owner}/{Repo}@{Ref}", owner, repo, @ref);
-            return (BuildStatus.None, "CI status unavailable");
+            return (BuildStatus.None, string.Empty, null, "CI status unavailable");
         }
         catch (Exception ex)
         {
             logger.LogDebug(ex, "Error fetching build status for {Owner}/{Repo}@{Ref}", owner, repo, @ref);
-            return (BuildStatus.None, "CI status unavailable");
+            return (BuildStatus.None, string.Empty, null, "CI status unavailable");
         }
     }
 
-    /// <summary>GitHub returns combined state (success/failure/pending). Prefer top-level state; if empty, derive from statuses so we don't show yellow when all are success.</summary>
-    private static BuildStatus GetStateFromCombinedStatus(GitHubCombinedStatusResponse? response)
+    /// <summary>Checks if a string looks like a SHA hash (40 hex characters).</summary>
+    private static bool IsSha(string value)
     {
-        if (response == null)
-            return BuildStatus.None;
+        if (string.IsNullOrWhiteSpace(value) || value.Length != 40)
+            return false;
+        
+        return value.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
+    }
 
-        var state = response.State?.Trim().ToLowerInvariant();
-        if (!string.IsNullOrEmpty(state))
+    /// <summary>Gets build status from check suites for a branch. If multiple suites exist, always prefer the one with a conclusion. Uses conclusion when available (completed/interrupted/etc.), otherwise uses status. Same logic as actions page.</summary>
+    private static (BuildStatus Status, string StatusText, string? Conclusion) GetStateFromCheckSuitesForBranch(List<GitHubCheckSuiteDto> suites)
+    {
+        if (suites.Count == 0)
+            return (BuildStatus.None, string.Empty, null);
+
+        // If only one suite, use it as-is
+        if (suites.Count == 1)
         {
-            return state switch
+            var suite = suites[0];
+            var status = suite.Status?.Trim() ?? string.Empty;
+            var conclusion = suite.Conclusion?.Trim();
+            return GetStatusFromSuite(status, conclusion);
+        }
+
+        // Multiple suites: prefer ones with conclusions
+        var suitesWithConclusion = suites
+            .Where(s => !string.IsNullOrWhiteSpace(s.Conclusion))
+            .ToList();
+
+        if (suitesWithConclusion.Count > 0)
+        {
+            // If multiple suites have conclusions, prefer the worst one (failure > success)
+            var failureSuite = suitesWithConclusion.FirstOrDefault(s =>
             {
-                "failure" or "error" => BuildStatus.Failure,
-                "pending" => BuildStatus.Pending,
-                "success" => BuildStatus.Success,
-                _ => BuildStatus.None
+                var conclusionLower = s.Conclusion?.Trim().ToLowerInvariant();
+                return conclusionLower is "failure" or "cancelled" or "timed_out" or "action_required";
+            });
+            if (failureSuite != null)
+            {
+                var status = failureSuite.Status?.Trim() ?? string.Empty;
+                var conclusion = failureSuite.Conclusion?.Trim();
+                return GetStatusFromSuite(status, conclusion);
+            }
+
+            // Otherwise use the first suite with conclusion (likely success)
+            var suiteWithConclusion = suitesWithConclusion[0];
+            var statusText = suiteWithConclusion.Status?.Trim() ?? string.Empty;
+            var conclusionText = suiteWithConclusion.Conclusion?.Trim();
+            return GetStatusFromSuite(statusText, conclusionText);
+        }
+
+        // No suites with conclusions, use the first suite's status
+        var firstSuite = suites[0];
+        var firstStatus = firstSuite.Status?.Trim() ?? string.Empty;
+        return GetStatusFromSuite(firstStatus, null);
+    }
+
+    /// <summary>Converts suite status and conclusion to BuildStatus enum and returns the appropriate values.</summary>
+    private static (BuildStatus Status, string StatusText, string? Conclusion) GetStatusFromSuite(string status, string? conclusion)
+    {
+        // Use conclusion if available (completed/interrupted/etc.)
+        if (!string.IsNullOrWhiteSpace(conclusion))
+        {
+            var conclusionLower = conclusion.Trim().ToLowerInvariant();
+            return conclusionLower switch
+            {
+                "success" => (BuildStatus.Success, status, conclusion),
+                "failure" or "cancelled" or "timed_out" or "action_required" => (BuildStatus.Failure, status, conclusion),
+                _ => (BuildStatus.None, status, conclusion)
             };
         }
 
-        if (response.Statuses.Count == 0)
-            return BuildStatus.None;
-
-        var statuses = response.Statuses;
-        var anyPending = statuses.Any(s => string.Equals(s.State, "pending", StringComparison.OrdinalIgnoreCase));
-        if (anyPending)
-            return BuildStatus.Pending;
-        var anyFailure = statuses.Any(s => string.Equals(s.State, "failure", StringComparison.OrdinalIgnoreCase) || string.Equals(s.State, "error", StringComparison.OrdinalIgnoreCase));
-        if (anyFailure)
-            return BuildStatus.Failure;
-        var anySuccess = statuses.Any(s => string.Equals(s.State, "success", StringComparison.OrdinalIgnoreCase));
-        return anySuccess ? BuildStatus.Success : BuildStatus.None;
-    }
-
-    private static BuildStatus GetStateFromCheckRuns(GitHubCheckRunsResponse? response)
-    {
-        if (response == null || response.CheckRuns.Count == 0)
-            return BuildStatus.None;
-
-        var runs = response.CheckRuns;
-        var anyPending = runs.Any(r => IsCheckRunPending(r.Status));
-        if (anyPending)
-            return BuildStatus.Pending;
-
-        var anyFailure = runs.Any(r => IsConclusionFailure(r.Conclusion));
-        if (anyFailure)
-            return BuildStatus.Failure;
-
-        var anySuccess = runs.Any(r => string.Equals(r.Conclusion, "success", StringComparison.OrdinalIgnoreCase));
-        if (anySuccess || runs.Count > 0)
-            return BuildStatus.Success;
-
-        return BuildStatus.None;
-    }
-
-    /// <summary>Only runs that are actually running count as pending. "requested"/"waiting" = not started; GitHub shows green when completed checks passed.</summary>
-    private static bool IsCheckRunPending(string? status)
-    {
-        var s = status?.Trim().ToLowerInvariant();
-        return s is "queued" or "in_progress";
-    }
-
-    private static bool IsConclusionFailure(string? conclusion)
-    {
-        var c = conclusion?.Trim().ToLowerInvariant();
-        return c is "failure" or "cancelled" or "timed_out" or "action_required";
-    }
-
-    private static BuildStatus MergeBuildState(BuildStatus fromStatus, BuildStatus fromChecks)
-    {
-        if (fromStatus == BuildStatus.Pending || fromChecks == BuildStatus.Pending)
-            return BuildStatus.Pending;
-        if (fromStatus == BuildStatus.Failure || fromChecks == BuildStatus.Failure)
-            return BuildStatus.Failure;
-        if (fromStatus == BuildStatus.Success || fromChecks == BuildStatus.Success)
-            return BuildStatus.Success;
-        return BuildStatus.None;
-    }
-
-    /// <summary>Fetches all check runs for ref via check-suites (official CI-agnostic path: list suites for ref, then list runs per suite). Also returns suite-level state when suites exist but have no runs yet.</summary>
-    private async Task<(GitHubCheckRunsResponse? Runs, BuildStatus? SuiteState)> GetCheckRunsAndSuiteStateForRefAsync(Connector connector, string owner, string repo, string @ref, CancellationToken cancellationToken)
-    {
-        var suites = await gitHubService.GetCheckSuitesAsync(connector, owner, repo, @ref, cancellationToken).ConfigureAwait(false);
-        if (suites == null || suites.CheckSuites.Count == 0)
-            return (null, null);
-
-        var suiteState = GetStateFromCheckSuites(suites);
-        var allRuns = new List<GitHubCheckRunDto>();
-        foreach (var suite in suites.CheckSuites)
+        // Otherwise use status
+        var statusLower = status.ToLowerInvariant();
+        return statusLower switch
         {
-            var runs = await gitHubService.GetCheckRunsForSuiteAsync(connector, owner, repo, suite.Id, cancellationToken).ConfigureAwait(false);
-            if (runs?.CheckRuns.Count > 0)
-                allRuns.AddRange(runs.CheckRuns);
-        }
-
-        var runsResponse = allRuns.Count == 0 ? null : new GitHubCheckRunsResponse { TotalCount = allRuns.Count, CheckRuns = allRuns };
-        return (runsResponse, suiteState);
+            "queued" or "in_progress" => (BuildStatus.Pending, status, null),
+            _ => (BuildStatus.None, status, null)
+        };
     }
 
-    /// <summary>Only "in_progress" and "queued" mean actually running. "requested"/"waiting" mean not started yet - GitHub still shows green if completed checks passed.</summary>
-    private static BuildStatus? GetStateFromCheckSuites(GitHubCheckSuitesResponse suites)
-    {
-        foreach (var suite in suites.CheckSuites)
-        {
-            var status = suite.Status?.Trim().ToLowerInvariant();
-            if (status is "queued" or "in_progress")
-                return BuildStatus.Pending;
-            var conclusion = suite.Conclusion?.Trim().ToLowerInvariant();
-            if (conclusion is "failure" or "cancelled" or "timed_out" or "action_required")
-                return BuildStatus.Failure;
-        }
-        foreach (var suite in suites.CheckSuites)
-        {
-            var conclusion = suite.Conclusion?.Trim().ToLowerInvariant();
-            if (conclusion == "success")
-                return BuildStatus.Success;
-        }
-        return suites.CheckSuites.Count > 0 ? BuildStatus.None : null;
-    }
-
-    private static string? BuildTooltip(BuildStatus status, GitHubCombinedStatusResponse? combinedStatus, GitHubCheckRunsResponse? checkRuns)
+    private static string? BuildTooltip(BuildStatus status)
     {
         return status switch
         {

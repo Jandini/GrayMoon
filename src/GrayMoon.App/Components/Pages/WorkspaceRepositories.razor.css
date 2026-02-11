@@ -47,24 +47,19 @@
 }
 
 .col-build {
-    width: 1.5rem;
-    min-width: 1.5rem;
-    max-width: 1.5rem;
+    width: auto;
+    min-width: 80px;
+    max-width: 120px;
 }
 
 .repositories-table tbody td.col-build {
     text-align: center;
 }
 
-/* Build status column: inline SVG icons (tick / X / circle) with explicit fill colors */
-.repositories-table .build-status-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.repositories-table .build-status-icon svg {
-    flex-shrink: 0;
+/* Build status column: badges matching actions page style */
+.repositories-table .col-build .badge {
+    font-weight: 400;
+    min-width: 60px;
 }
 
 .col-deps {

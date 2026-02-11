@@ -194,6 +194,19 @@ public class GitHubService
         return await GetOrDefaultAsync<GitHubCheckRunsResponse>(connector, $"repos/{owner}/{repo}/check-suites/{checkSuiteId}/check-runs", cancellationToken);
     }
 
+    /// <summary>Gets commit information for a ref (branch/SHA). GET /repos/{owner}/{repo}/commits/{ref}. Returns the SHA of the commit.</summary>
+    public async Task<string?> GetCommitShaAsync(Connector connector, string owner, string repo, string @ref, CancellationToken cancellationToken = default)
+    {
+        EnsureConnectorConfigured(connector);
+        if (string.IsNullOrWhiteSpace(owner)) throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo)) throw new ArgumentException("Repository is required.", nameof(repo));
+        if (string.IsNullOrWhiteSpace(@ref)) throw new ArgumentException("Ref is required.", nameof(@ref));
+
+        var encodedRef = Uri.EscapeDataString(@ref);
+        var commit = await GetOrDefaultAsync<GitHubCommitDto>(connector, $"repos/{owner}/{repo}/commits/{encodedRef}", cancellationToken);
+        return commit?.Sha;
+    }
+
     private void EnsureConfigured()
     {
         if (string.IsNullOrWhiteSpace(_options.PersonalAccessToken))

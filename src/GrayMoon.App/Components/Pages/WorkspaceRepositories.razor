@@ -103,7 +103,7 @@
                                             <td class="col-repo"><strong>@repo.RepositoryName</strong></td>
                                             <td class="col-version text-muted">@(wr.GitVersion ?? "-")</td>
                                             <td class="col-branch text-muted">@(wr.BranchName ?? "-")</td>
-                                            <td class="col-build col-status-badge">@GetBuildStatusIcon(repo.RepositoryId)</td>
+                                            <td class="col-build col-status-badge">@GetBuildStatusBadge(repo.RepositoryId)</td>
                                             <td class="col-deps col-status-badge">
                                                 @{
                                                     var depCount = wr.Dependencies ?? 0;
@@ -181,7 +181,7 @@
     private HashSet<int> selectedRepositoryIds = new();
     private int? fetchedRepositoryCount;
     private CancellationTokenSource? _fetchRepositoriesCts;
-    private Dictionary<int, (BuildStatus Status, string? Tooltip)> buildStatusByRepoId = new();
+    private Dictionary<int, (BuildStatus Status, string StatusText, string? Conclusion, string? Tooltip)> buildStatusByRepoId = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -268,7 +268,7 @@
         {
             errorMessage = "Workspace not found.";
             workspaceRepositories = new List<WorkspaceRepositoryLink>();
-            buildStatusByRepoId = new Dictionary<int, (BuildStatus, string?)>();
+            buildStatusByRepoId = new Dictionary<int, (BuildStatus, string, string?, string?)>();
             return;
         }
 
@@ -289,7 +289,7 @@
         {
             errorMessage = "Workspace not found.";
             workspaceRepositories = new List<WorkspaceRepositoryLink>();
-            buildStatusByRepoId = new Dictionary<int, (BuildStatus, string?)>();
+            buildStatusByRepoId = new Dictionary<int, (BuildStatus, string, string?, string?)>();
             return;
         }
         workspace = w;
@@ -347,7 +347,7 @@
 
     private async Task LoadBuildStatusesAsync()
     {
-        buildStatusByRepoId = new Dictionary<int, (BuildStatus, string?)>();
+        buildStatusByRepoId = new Dictionary<int, (BuildStatus, string, string?, string?)>();
         if (workspaceRepositories.Count == 0)
             return;
         var items = workspaceRepositories
@@ -361,50 +361,116 @@
 
     private async Task FetchOneBuildStatusAndUpdateAsync(int repoId, Connector connector, string owner, string repo, string @ref)
     {
-        var (status, tooltip) = await BranchBuildStatusService.GetBuildStatusAsync(connector, owner, repo, @ref);
+        var (status, statusText, conclusion, tooltip) = await BranchBuildStatusService.GetBuildStatusAsync(connector, owner, repo, @ref);
         await InvokeAsync(() =>
         {
-            buildStatusByRepoId[repoId] = (status, tooltip);
+            buildStatusByRepoId[repoId] = (status, statusText, conclusion, tooltip);
             StateHasChanged();
             return Task.CompletedTask;
         });
     }
 
-    private RenderFragment GetBuildStatusIcon(int repositoryId) => builder =>
+    private RenderFragment GetBuildStatusBadge(int repositoryId) => builder =>
     {
         if (!buildStatusByRepoId.TryGetValue(repositoryId, out var t))
             return;
-        var (status, tooltip) = t;
-        var (fill, ariaLabel) = status switch
-        {
-            BuildStatus.Success => ("#1a7f37", "Build passing"),
-            BuildStatus.Failure => ("#cf222e", "Build failed"),
-            BuildStatus.Pending => ("#d4a72c", "Build in progress"),
-            _ => ("", "")
-        };
-        if (string.IsNullOrEmpty(fill))
+        var (status, statusText, conclusion, tooltip) = t;
+        
+        if (status == BuildStatus.None && string.IsNullOrWhiteSpace(statusText))
             return;
+
+        var badgeClass = GetCombinedStatusBadgeClass(statusText, conclusion);
+        var badgeLabel = GetCombinedStatusLabel(statusText, conclusion);
+
         builder.OpenElement(0, "span");
-        builder.AddAttribute(1, "class", "build-status-icon");
-        builder.AddAttribute(2, "title", tooltip ?? ariaLabel);
-        builder.AddAttribute(3, "aria-label", ariaLabel);
-        builder.OpenElement(4, "svg");
-        builder.AddAttribute(5, "xmlns", "http://www.w3.org/2000/svg");
-        builder.AddAttribute(6, "width", "16");
-        builder.AddAttribute(7, "height", "16");
-        builder.AddAttribute(8, "viewBox", "0 0 16 16");
-        builder.AddAttribute(9, "fill", fill);
-        builder.AddAttribute(10, "role", "img");
-        builder.AddMarkupContent(11, status switch
-        {
-            BuildStatus.Success => "<path d=\"M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.267.267 0 0 1 .02-.022z\"/>",
-            BuildStatus.Failure => "<path d=\"M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z\"/>",
-            BuildStatus.Pending => "<circle cx=\"8\" cy=\"8\" r=\"6\"/>",
-            _ => ""
-        });
-        builder.CloseElement();
+        builder.AddAttribute(1, "class", $"badge {badgeClass}");
+        if (!string.IsNullOrWhiteSpace(tooltip))
+            builder.AddAttribute(2, "title", tooltip);
+        builder.AddContent(3, badgeLabel);
         builder.CloseElement();
     };
+
+    private static string GetCombinedStatusBadgeClass(string status, string? conclusion)
+    {
+        if (!string.IsNullOrWhiteSpace(conclusion))
+        {
+            return GetConclusionBadgeClass(conclusion);
+        }
+
+        return GetStatusBadgeClass(status);
+    }
+
+    private static string GetCombinedStatusLabel(string status, string? conclusion)
+    {
+        if (!string.IsNullOrWhiteSpace(conclusion))
+        {
+            return GetConclusionLabel(conclusion);
+        }
+
+        return GetStatusLabel(status);
+    }
+
+    private static string GetStatusBadgeClass(string status)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "completed" => "bg-success",
+            "in_progress" => "bg-warning",
+            "queued" => "bg-secondary",
+            "waiting" => "bg-secondary",
+            "requested" => "bg-secondary",
+            "pending" => "bg-warning",
+            "skipped" => "bg-secondary",
+            _ => "bg-secondary"
+        };
+    }
+
+    private static string GetConclusionBadgeClass(string? conclusion)
+    {
+        return conclusion?.ToLowerInvariant() switch
+        {
+            "success" => "bg-success",
+            "failure" => "bg-danger",
+            "timed_out" => "bg-danger",
+            "cancelled" => "bg-secondary",
+            "skipped" => "bg-secondary",
+            "neutral" => "bg-secondary",
+            "action_required" => "bg-warning",
+            "stale" => "bg-secondary",
+            _ => "bg-secondary"
+        };
+    }
+
+    private static string GetStatusLabel(string status)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "in_progress" => "in progress",
+            "completed" => "completed",
+            "queued" => "queued",
+            "waiting" => "waiting",
+            "requested" => "requested",
+            "pending" => "pending",
+            "skipped" => "skipped",
+            _ => status
+        };
+    }
+
+    private static string GetConclusionLabel(string? conclusion)
+    {
+        return conclusion?.ToLowerInvariant() switch
+        {
+            "action_required" => "action required",
+            "timed_out" => "timed out",
+            "stale" => "stale",
+            "cancelled" => "cancelled",
+            "success" => "success",
+            "failure" => "failure",
+            "neutral" => "neutral",
+            "skipped" => "skipped",
+            _ => "unknown"
+        };
+    }
 
     private void AbortSyncAsync()
     {
