@@ -1,0 +1,216 @@
+@using GrayMoon.App.Models
+@inject IJSRuntime JSRuntime
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDown">
+        <div class="modal-dialog @(Mode == ConnectorModalMode.Delete ? "" : "modal-lg")">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@Title</h5>
+                    <button type="button" class="btn-close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body" id="connector-modal-body">
+                    @if (Mode == ConnectorModalMode.Create || Mode == ConnectorModalMode.Edit)
+                    {
+                        <EditForm Model="@Model" OnValidSubmit="@(_ => OnSubmit.InvokeAsync())">
+                            <DataAnnotationsValidator />
+
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Connector Name <span class="text-danger">*</span></label>
+                                    <InputText class="form-control" @bind-Value="Model!.ConnectorName" />
+                                    <ValidationMessage For="@(() => Model!.ConnectorName)" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Connector Type <span class="text-danger">*</span></label>
+                                    <InputSelect class="form-select" @bind-Value="Model!.ConnectorType" @onchange="OnConnectorTypeChanged">
+                                        <option value="@ConnectorType.GitHub">GitHub</option>
+                                        <option value="@ConnectorType.NuGet">NuGet</option>
+                                    </InputSelect>
+                                    <ValidationMessage For="@(() => Model!.ConnectorType)" />
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">API Base URL <span class="text-danger">*</span></label>
+                                <input type="text"
+                                       class="form-control"
+                                       list="connector-api-base-url-list"
+                                       @bind="Model!.ApiBaseUrl"
+                                       @bind:event="oninput"
+                                       placeholder="Select or type URL" />
+                                <datalist id="connector-api-base-url-list">
+                                    @foreach (var hint in GetApiBaseUrlHintsForType())
+                                    {
+                                        <option value="@hint"></option>
+                                    }
+                                </datalist>
+                                <ValidationMessage For="@(() => Model!.ApiBaseUrl)" />
+                            </div>
+
+                            @if (ShouldShowUserNameField() || ShouldShowTokenField())
+                            {
+                                <div class="row mb-3">
+                                    @if (ShouldShowUserNameField())
+                                    {
+                                        <div class="col-md-6">
+                                            <label class="form-label">User Name</label>
+                                            <InputText class="form-control" @bind-Value="Model!.UserName" />
+                                            <ValidationMessage For="@(() => Model!.UserName)" />
+                                        </div>
+                                    }
+                                    @if (ShouldShowTokenField())
+                                    {
+                                        <div class="@(ShouldShowUserNameField() ? "col-md-6" : "col-12")">
+                                            <label class="form-label">
+                                                User Token
+                                                @if (IsTokenRequired())
+                                                {
+                                                    <span class="text-danger">*</span>
+                                                }
+                                            </label>
+                                            <InputText class="form-control" type="password" @bind-Value="Model!.UserToken" />
+                                            <ValidationMessage For="@(() => Model!.UserToken)" />
+                                        </div>
+                                    }
+                                </div>
+                            }
+
+                            @if (ErrorMessage != null)
+                            {
+                                <div class="alert alert-danger">@ErrorMessage</div>
+                            }
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
+                                <button type="submit" class="btn btn-primary" disabled="@IsSubmitting">
+                                    @if (IsSubmitting)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-2"></span>
+                                    }
+                                    @(IsSubmitting ? (Mode == ConnectorModalMode.Edit ? "Updating..." : "Adding...") : SubmitButtonText)
+                                </button>
+                            </div>
+                        </EditForm>
+                    }
+                    else if (Mode == ConnectorModalMode.Delete)
+                    {
+                        <p>Are you sure you want to delete <strong>@ConnectorName</strong>?</p>
+                        @if (ErrorMessage != null)
+                        {
+                            <div class="alert alert-danger">@ErrorMessage</div>
+                        }
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
+                            <button type="button" class="btn btn-danger" @onclick="() => OnDelete.InvokeAsync()" disabled="@IsSubmitting">
+                                @if (IsSubmitting)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2"></span>
+                                }
+                                Delete
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public ConnectorModalMode Mode { get; set; }
+    [Parameter] public string Title { get; set; } = string.Empty;
+    [Parameter] public ConnectorForm? Model { get; set; }
+    [Parameter] public string? ConnectorName { get; set; }
+    [Parameter] public IReadOnlyList<string>? ApiBaseUrlHints { get; set; }
+    [Parameter] public bool IsSubmitting { get; set; }
+    [Parameter] public string? ErrorMessage { get; set; }
+    [Parameter] public EventCallback OnSubmit { get; set; }
+    [Parameter] public EventCallback OnDelete { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private string SubmitButtonText => Mode == ConnectorModalMode.Edit ? "Update" : "Add";
+    private bool _wasVisible;
+
+    private bool ShouldShowUserNameField()
+    {
+        if (Model == null) return true;
+        return ConnectorHelpers.ShouldShowUserNameField(Model.ConnectorType, Model.ApiBaseUrl ?? string.Empty);
+    }
+
+    private bool ShouldShowTokenField()
+    {
+        if (Model == null) return true;
+        return ConnectorHelpers.ShouldShowTokenField(Model.ConnectorType, Model.ApiBaseUrl ?? string.Empty);
+    }
+
+    private bool IsTokenRequired()
+    {
+        if (Model == null) return true;
+        return ConnectorHelpers.RequiresToken(Model.ConnectorType, Model.ApiBaseUrl ?? string.Empty);
+    }
+
+    private IEnumerable<string> GetApiBaseUrlHintsForType()
+    {
+        var typeHints = Model?.ConnectorType switch
+        {
+            ConnectorType.GitHub => new[] { "https://api.github.com/" },
+            ConnectorType.NuGet => new[] { "https://api.nuget.org/v3/index.json", "https://nuget.pkg.github.com/" },
+            _ => Array.Empty<string>()
+        };
+        var combined = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var h in typeHints)
+            combined.Add(h);
+        if (ApiBaseUrlHints != null)
+        {
+            foreach (var h in ApiBaseUrlHints)
+            {
+                if (!string.IsNullOrWhiteSpace(h))
+                    combined.Add(h.Trim());
+            }
+        }
+        return combined.OrderBy(s => s);
+    }
+
+    private void OnConnectorTypeChanged(ChangeEventArgs e)
+    {
+        if (Model != null && e.Value is ConnectorType connectorType)
+        {
+            Model.ConnectorType = connectorType;
+            Model.ApiBaseUrl = ConnectorHelpers.GetDefaultUrl(connectorType);
+            if (ConnectorHelpers.IsNuGetOrg(Model.ApiBaseUrl))
+                Model.UserToken = null;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible && !_wasVisible && (Mode == ConnectorModalMode.Create || Mode == ConnectorModalMode.Edit))
+        {
+            _wasVisible = true;
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("focusFirstModalInput", "connector-modal-body");
+            }
+            catch { /* JS not yet loaded or DOM not ready */ }
+        }
+        else if (!IsVisible)
+        {
+            _wasVisible = false;
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            await OnCancel.InvokeAsync();
+        }
+        else if (e.Key == "Enter" && Mode == ConnectorModalMode.Delete)
+        {
+            await OnDelete.InvokeAsync();
+        }
+    }
+}

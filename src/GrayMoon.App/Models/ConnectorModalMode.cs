@@ -1,6 +1,6 @@
 namespace GrayMoon.App.Models;
 
-public enum GitHubConnectorModalMode
+public enum ConnectorModalMode
 {
     Create,
     Edit,

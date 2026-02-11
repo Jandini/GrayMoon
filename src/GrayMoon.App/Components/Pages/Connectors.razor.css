@@ -1,0 +1,72 @@
+/* Match Repositories / Workspaces: left-align all columns; use global resizable-columns padding for header spacing */
+.connectors-table th,
+.connectors-table td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.connectors-table {
+    table-layout: fixed;
+    width: 100%;
+}
+
+.connectors-table thead,
+.connectors-table tbody tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
+/* Active column: fit toggle only – fixed width so it stays visible */
+.connectors-table th.col-active,
+.connectors-table td.col-active {
+    text-align: center;
+    width: 70px;
+    min-width: 70px;
+    overflow: visible;
+    box-sizing: content-box;
+}
+
+/* Status column: fit badge only – fixed width so it stays visible */
+.connectors-table th.status-col,
+.connectors-table td.status-col {
+    text-align: center;
+    width: 100px;
+    min-width: 100px;
+    overflow: visible;
+    box-sizing: content-box;
+}
+
+.status-col .badge {
+    display: inline-block;
+    min-width: 70px;
+    text-align: center;
+}
+
+/* Actions column: fit both buttons only – fixed width so it stays visible */
+.connectors-table th.col-actions,
+.connectors-table td.col-actions {
+    width: 140px;
+    min-width: 140px;
+    overflow: visible;
+    white-space: nowrap;
+    box-sizing: content-box;
+}
+
+/* Status badge colors from Bootstrap RGB (blue=testing, green=ok, red=error) */
+.status-badge-testing,
+.status-badge-unknown {
+    background-color: rgb(var(--bs-primary-rgb));
+    color: #fff;
+}
+
+.status-badge-ok {
+    background-color: rgb(var(--bs-success-rgb));
+    color: #fff;
+}
+
+.status-badge-error {
+    background-color: rgb(var(--bs-danger-rgb));
+    color: #fff;
+}

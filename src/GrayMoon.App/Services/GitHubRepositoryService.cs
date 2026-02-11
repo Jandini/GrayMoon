@@ -33,7 +33,7 @@ public class GitHubRepositoryService(
         var connectorErrors = new List<ConnectorFetchError>();
         var uniqueCloneUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var connectors = await connectorRepository.GetAllAsync();
-        var activeConnectors = connectors.Where(connector => connector.IsActive).ToList();
+        var activeConnectors = connectors.Where(connector => connector.IsActive && connector.ConnectorType == ConnectorType.GitHub).ToList();
 
         progress?.Report(0);
 

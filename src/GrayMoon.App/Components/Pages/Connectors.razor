@@ -5,8 +5,8 @@
 @using GrayMoon.App.Services
 @inject IConfiguration Configuration
 @inject ConnectorRepository ConnectorRepository
-@inject GitHubService GitHubService
-@inject ILogger<GitHubConnectors> Logger
+@inject ConnectorServiceFactory ConnectorServiceFactory
+@inject ILogger<Connectors> Logger
 
 <PageTitle>Connectors - GrayMoon</PageTitle>
 
@@ -46,7 +46,7 @@
                                 <th>Name</th>
                                 <th>API Base URL</th>
                                 <th>User Name</th>
-                                <th class="text-center">Active</th>
+                                <th class="col-active text-center">Active</th>
                                 <th class="status-col text-center">Status</th>
                                 <th class="col-actions">Actions</th>
                             </tr>
@@ -67,7 +67,7 @@
                             {
                                 <tr>
                                     <td colspan="6" class="text-center text-muted py-4">
-                                        No connectors found. Add your first GitHub connector to get started.
+                                        No connectors found. Add your first connector to get started.
                                     </td>
                                 </tr>
                             }
@@ -76,10 +76,13 @@
                                 @foreach (var connector in connectors)
                                 {
                                     <tr>
-                                        <td><strong>@connector.ConnectorName</strong></td>
+                                        <td>
+                                            <i class="bi me-2 @GetConnectorTypeIconClass(connector.ConnectorType)" aria-hidden="true"></i>
+                                            <strong>@connector.ConnectorName</strong>
+                                        </td>
                                         <td>@connector.ApiBaseUrl</td>
                                         <td>@connector.UserName</td>
-                                        <td class="text-center">
+                                        <td class="col-active text-center">
                                             <div class="form-check form-switch d-inline-flex align-items-center m-0">
                                                 <input class="form-check-input"
                                                        type="checkbox"
@@ -112,32 +115,34 @@
     }
 </div>
 
-<GitHubConnectorModal IsVisible="@showCreateModal"
-                     Mode="GitHubConnectorModalMode.Create"
-                     Title="Add GitHub Connector"
-                     Model="@createModel"
-                     IsSubmitting="@isCreating"
-                     ErrorMessage="@createErrorMessage"
-                     OnSubmit="HandleCreateConnector"
-                     OnCancel="CloseCreateModal" />
+<ConnectorModal IsVisible="@showCreateModal"
+             Mode="ConnectorModalMode.Create"
+             Title="Add Connector"
+             Model="@createModel"
+             ApiBaseUrlHints="@apiBaseUrlHints"
+             IsSubmitting="@isCreating"
+             ErrorMessage="@createErrorMessage"
+             OnSubmit="HandleCreateConnector"
+             OnCancel="CloseCreateModal" />
 
-<GitHubConnectorModal IsVisible="@showEditModal"
-                     Mode="GitHubConnectorModalMode.Edit"
-                     Title="Edit GitHub Connector"
-                     Model="@editModel"
-                     IsSubmitting="@isUpdating"
-                     ErrorMessage="@editErrorMessage"
-                     OnSubmit="HandleUpdateConnector"
-                     OnCancel="CloseEditModal" />
+<ConnectorModal IsVisible="@showEditModal"
+             Mode="ConnectorModalMode.Edit"
+             Title="Edit Connector"
+             Model="@editModel"
+             ApiBaseUrlHints="@apiBaseUrlHints"
+             IsSubmitting="@isUpdating"
+             ErrorMessage="@editErrorMessage"
+             OnSubmit="HandleUpdateConnector"
+             OnCancel="CloseEditModal" />
 
-<GitHubConnectorModal IsVisible="@(showDeleteModal && selectedConnector != null)"
-                     Mode="GitHubConnectorModalMode.Delete"
-                     Title="Delete GitHub Connector"
-                     ConnectorName="@(selectedConnector?.ConnectorName ?? string.Empty)"
-                     IsSubmitting="@isDeleting"
-                     ErrorMessage="@deleteErrorMessage"
-                     OnDelete="HandleDeleteConnector"
-                     OnCancel="CloseDeleteModal" />
+<ConnectorModal IsVisible="@(showDeleteModal && selectedConnector != null)"
+             Mode="ConnectorModalMode.Delete"
+             Title="Delete Connector"
+             ConnectorName="@(selectedConnector?.ConnectorName ?? string.Empty)"
+             IsSubmitting="@isDeleting"
+             ErrorMessage="@deleteErrorMessage"
+             OnDelete="HandleDeleteConnector"
+             OnCancel="CloseDeleteModal" />
 
 @code {
     private List<Connector>? connectors;
@@ -146,8 +151,8 @@
     private bool showEditModal;
     private bool showDeleteModal;
 
-    private GitHubConnectorForm createModel = new();
-    private GitHubConnectorForm editModel = new();
+    private ConnectorForm createModel = new();
+    private ConnectorForm editModel = new();
     private int editConnectorId;
     private Connector? selectedConnector;
     private int? testingConnectorId;
@@ -161,6 +166,7 @@
     private string? editErrorMessage;
     private string? deleteErrorMessage;
     private string defaultUserToken = string.Empty;
+    private IReadOnlyList<string> apiBaseUrlHints = Array.Empty<string>();
 
     protected override async Task OnInitializedAsync()
     {
@@ -177,18 +183,41 @@
         {
             errorMessage = null;
             connectors = await ConnectorRepository.GetAllAsync();
+            UpdateApiBaseUrlHints();
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error loading GitHub connectors.");
+            Logger.LogError(ex, "Error loading connectors.");
             errorMessage = $"Failed to load connectors: {ex.Message}";
         }
     }
 
+    private void UpdateApiBaseUrlHints()
+    {
+        var predefined = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "https://api.github.com/",
+            "https://api.nuget.org/v3/index.json",
+            "https://nuget.pkg.github.com/"
+        };
+        if (connectors != null)
+        {
+            foreach (var c in connectors)
+            {
+                if (!string.IsNullOrWhiteSpace(c.ApiBaseUrl))
+                    predefined.Add(c.ApiBaseUrl.Trim());
+            }
+        }
+        apiBaseUrlHints = predefined.OrderBy(s => s).ToList();
+    }
+
     private void ShowCreateModal()
     {
-        createModel = new GitHubConnectorForm
+        createModel = new ConnectorForm
         {
+            ConnectorType = ConnectorType.GitHub,
+            ConnectorName = "GitHub",
+            ApiBaseUrl = ConnectorHelpers.GetDefaultUrl(ConnectorType.GitHub),
             UserToken = defaultUserToken
         };
         createErrorMessage = null;
@@ -208,12 +237,21 @@
             isCreating = true;
             createErrorMessage = null;
 
+            // Validate token requirement
+            if (ConnectorHelpers.RequiresToken(createModel.ConnectorType, createModel.ApiBaseUrl) &&
+                string.IsNullOrWhiteSpace(createModel.UserToken))
+            {
+                createErrorMessage = "User token is required for this connector type and registry.";
+                return;
+            }
+
             var connector = new Connector
             {
                 ConnectorName = createModel.ConnectorName.Trim(),
+                ConnectorType = createModel.ConnectorType,
                 ApiBaseUrl = createModel.ApiBaseUrl.Trim(),
                 UserName = string.IsNullOrWhiteSpace(createModel.UserName) ? null : createModel.UserName.Trim(),
-                UserToken = createModel.UserToken.Trim(),
+                UserToken = string.IsNullOrWhiteSpace(createModel.UserToken) ? null : createModel.UserToken.Trim(),
                 IsActive = true,
                 Status = "Testing",
                 LastError = null
@@ -228,7 +266,7 @@
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error creating GitHub connector.");
+            Logger.LogError(ex, "Error creating connector.");
             createErrorMessage = ex.Message;
         }
         finally
@@ -241,8 +279,9 @@
     {
         selectedConnector = connector;
         editConnectorId = connector.ConnectorId;
-        editModel = new GitHubConnectorForm
+        editModel = new ConnectorForm
         {
+            ConnectorType = connector.ConnectorType,
             ConnectorName = connector.ConnectorName,
             ApiBaseUrl = connector.ApiBaseUrl,
             UserName = connector.UserName,
@@ -268,13 +307,22 @@
             isUpdating = true;
             editErrorMessage = null;
 
+            // Validate token requirement
+            if (ConnectorHelpers.RequiresToken(editModel.ConnectorType, editModel.ApiBaseUrl) &&
+                string.IsNullOrWhiteSpace(editModel.UserToken))
+            {
+                editErrorMessage = "User token is required for this connector type and registry.";
+                return;
+            }
+
             var connector = new Connector
             {
                 ConnectorId = editConnectorId,
                 ConnectorName = editModel.ConnectorName.Trim(),
+                ConnectorType = editModel.ConnectorType,
                 ApiBaseUrl = editModel.ApiBaseUrl.Trim(),
                 UserName = string.IsNullOrWhiteSpace(editModel.UserName) ? null : editModel.UserName.Trim(),
-                UserToken = editModel.UserToken.Trim(),
+                UserToken = string.IsNullOrWhiteSpace(editModel.UserToken) ? null : editModel.UserToken.Trim(),
                 IsActive = selectedConnector?.IsActive ?? true,
                 Status = "Testing",
                 LastError = null
@@ -289,7 +337,7 @@
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error updating GitHub connector.");
+            Logger.LogError(ex, "Error updating connector.");
             editErrorMessage = ex.Message;
         }
         finally
@@ -328,7 +376,7 @@
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error deleting GitHub connector.");
+            Logger.LogError(ex, "Error deleting connector.");
             deleteErrorMessage = ex.Message;
         }
         finally
@@ -346,15 +394,26 @@
             await LoadConnectorsAsync();
             StateHasChanged();
 
-            await GitHubService.TestConnectionAsync(connector);
-            await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Ok", null);
-            return true;
+            var service = ConnectorServiceFactory.GetService(connector.ConnectorType);
+            var success = await service.TestConnectionAsync(connector);
+            
+            if (success)
+            {
+                await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Ok", null);
+            }
+            else
+            {
+                await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Error", "Connection test failed.");
+                await ConnectorRepository.UpdateIsActiveAsync(connector.ConnectorId, false);
+            }
+            
+            return success;
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error testing GitHub connector.");
+            Logger.LogError(ex, "Error testing connector.");
             await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Error", ex.Message);
-                await ConnectorRepository.UpdateIsActiveAsync(connector.ConnectorId, false);
+            await ConnectorRepository.UpdateIsActiveAsync(connector.ConnectorId, false);
             return false;
         }
         finally
@@ -388,7 +447,7 @@
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error toggling GitHub connector active state.");
+            Logger.LogError(ex, "Error toggling connector active state.");
             errorMessage = $"Failed to update connector status: {ex.Message}";
         }
         finally
@@ -427,6 +486,16 @@
             "Error" => string.IsNullOrWhiteSpace(connector.LastError) ? "Connection failed." : connector.LastError,
             "Ok" => "Connection OK.",
             _ => "Not tested yet."
+        };
+    }
+
+    private static string GetConnectorTypeIconClass(ConnectorType connectorType)
+    {
+        return connectorType switch
+        {
+            ConnectorType.GitHub => "bi-github",
+            ConnectorType.NuGet => "bi-box-seam",
+            _ => "bi-link-45deg"
         };
     }
 }
