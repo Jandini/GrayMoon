@@ -2,9 +2,11 @@
 @rendermode InteractiveServer
 @using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
+@using GrayMoon.App.Services
 @using GrayMoon.App.Components.Shared
 @inject WorkspaceRepository WorkspaceRepository
 @inject WorkspaceProjectRepository WorkspaceProjectRepository
+@inject PackageRegistrySyncService PackageRegistrySyncService
 @inject ILogger<WorkspacePackages> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
@@ -23,6 +25,15 @@
                     &nbsp;
                 </p>
             </div>
+            <button class="btn btn-outline-primary"
+                    @onclick="SyncRegistriesAsync"
+                    disabled="@(isSyncingRegistries || packages.Count == 0)">
+                @if (isSyncingRegistries)
+                {
+                    <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                }
+                Sync registries
+            </button>
         </div>
         @if (errorMessage != null)
         {
@@ -42,13 +53,14 @@
                                 <tr>
                                     <th class="col-packageid">Package Id</th>
                                     <th class="col-framework">Framework</th>
+                                    <th class="col-registry">Registry</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 @if (isLoading)
                                 {
                                     <tr>
-                                        <td colspan="2" class="text-center text-muted py-4">
+                                        <td colspan="3" class="text-center text-muted py-4">
                                             Loading packages...
                                         </td>
                                     </tr>
@@ -56,7 +68,7 @@
                                 else if (packages.Count == 0)
                                 {
                                     <tr>
-                                        <td colspan="2" class="text-center text-muted py-4">
+                                        <td colspan="3" class="text-center text-muted py-4">
                                             No NuGet packages in this workspace. Sync repositories to discover package projects.
                                         </td>
                                     </tr>
@@ -68,6 +80,7 @@
                                         <tr>
                                             <td class="col-packageid"><strong>@(p.PackageId ?? "-")</strong></td>
                                             <td class="col-framework text-muted">@p.TargetFramework</td>
+                                            <td class="col-registry text-muted">@(p.MatchedConnector?.ConnectorName ?? "-")</td>
                                         </tr>
                                     }
                                 }
@@ -89,6 +102,7 @@
     private List<WorkspaceProject> packages = new();
     private string? errorMessage;
     private bool isLoading = true;
+    private bool isSyncingRegistries = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -119,6 +133,29 @@
         finally
         {
             isLoading = false;
+        }
+    }
+
+    private async Task SyncRegistriesAsync()
+    {
+        if (workspace == null || isSyncingRegistries || packages.Count == 0) return;
+        try
+        {
+            isSyncingRegistries = true;
+            errorMessage = null;
+            await InvokeAsync(StateHasChanged);
+            await PackageRegistrySyncService.SyncWorkspacePackageRegistriesAsync(WorkspaceId, cancellationToken: default);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error syncing package registries for workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Failed to sync registries. Please try again.";
+        }
+        finally
+        {
+            isSyncingRegistries = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 }

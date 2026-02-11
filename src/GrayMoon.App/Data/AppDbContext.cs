@@ -144,6 +144,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.Property(p => p.PackageId)
                 .HasMaxLength(200);
 
+            entity.HasOne(p => p.MatchedConnector)
+                .WithMany()
+                .HasForeignKey(p => p.MatchedConnectorId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasOne(p => p.Workspace)
                 .WithMany()
                 .HasForeignKey(p => p.WorkspaceId)

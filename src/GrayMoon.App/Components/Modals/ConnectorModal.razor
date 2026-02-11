@@ -12,7 +12,7 @@
                     <button type="button" class="btn-close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body" id="connector-modal-body">
-                    @if (Mode == ConnectorModalMode.Create || Mode == ConnectorModalMode.Edit)
+                    @if ((Mode == ConnectorModalMode.Create || Mode == ConnectorModalMode.Edit) && Model != null)
                     {
                         <EditForm Model="@Model" OnValidSubmit="@(_ => OnSubmit.InvokeAsync())">
                             <DataAnnotationsValidator />
@@ -20,16 +20,16 @@
                             <div class="row mb-3">
                                 <div class="col-md-6">
                                     <label class="form-label">Connector Name <span class="text-danger">*</span></label>
-                                    <InputText class="form-control" @bind-Value="Model!.ConnectorName" />
-                                    <ValidationMessage For="@(() => Model!.ConnectorName)" />
+                                    <InputText class="form-control" @bind-Value="Model.ConnectorName" />
+                                    <ValidationMessage For="@(() => Model.ConnectorName)" />
                                 </div>
                                 <div class="col-md-6">
                                     <label class="form-label">Connector Type <span class="text-danger">*</span></label>
-                                    <InputSelect class="form-select" @bind-Value="Model!.ConnectorType" @onchange="OnConnectorTypeChanged">
+                                    <InputSelect class="form-select" @bind-Value="Model.ConnectorType" @onchange="OnConnectorTypeChanged">
                                         <option value="@ConnectorType.GitHub">GitHub</option>
                                         <option value="@ConnectorType.NuGet">NuGet</option>
                                     </InputSelect>
-                                    <ValidationMessage For="@(() => Model!.ConnectorType)" />
+                                    <ValidationMessage For="@(() => Model.ConnectorType)" />
                                 </div>
                             </div>
 
@@ -38,16 +38,21 @@
                                 <input type="text"
                                        class="form-control"
                                        list="connector-api-base-url-list"
-                                       @bind="Model!.ApiBaseUrl"
+                                       @bind="Model.ApiBaseUrl"
                                        @bind:event="oninput"
-                                       placeholder="Select or type URL" />
+                                       placeholder="e.g. https://api.github.com/ or https://nuget.pkg.github.com/" />
                                 <datalist id="connector-api-base-url-list">
-                                    @foreach (var hint in GetApiBaseUrlHintsForType())
+                                    <option value="@GitHubApiUrl"></option>
+                                    <option value="@NuGetGitHubPackagesUrl"></option>
+                                    @if (ApiBaseUrlHints != null)
                                     {
-                                        <option value="@hint"></option>
+                                        @foreach (var h in ApiBaseUrlHints.Where(x => !string.IsNullOrWhiteSpace(x)))
+                                        {
+                                            <option value="@h!.Trim()"></option>
+                                        }
                                     }
                                 </datalist>
-                                <ValidationMessage For="@(() => Model!.ApiBaseUrl)" />
+                                <ValidationMessage For="@(() => Model.ApiBaseUrl)" />
                             </div>
 
                             @if (ShouldShowUserNameField() || ShouldShowTokenField())
@@ -57,8 +62,8 @@
                                     {
                                         <div class="col-md-6">
                                             <label class="form-label">User Name</label>
-                                            <InputText class="form-control" @bind-Value="Model!.UserName" />
-                                            <ValidationMessage For="@(() => Model!.UserName)" />
+                                            <InputText class="form-control" @bind-Value="Model.UserName" />
+                                            <ValidationMessage For="@(() => Model.UserName)" />
                                         </div>
                                     }
                                     @if (ShouldShowTokenField())
@@ -71,8 +76,8 @@
                                                     <span class="text-danger">*</span>
                                                 }
                                             </label>
-                                            <InputText class="form-control" type="password" @bind-Value="Model!.UserToken" />
-                                            <ValidationMessage For="@(() => Model!.UserToken)" />
+                                            <InputText class="form-control" type="password" @bind-Value="Model.UserToken" />
+                                            <ValidationMessage For="@(() => Model.UserToken)" />
                                         </div>
                                     }
                                 </div>
@@ -119,6 +124,9 @@
 }
 
 @code {
+    private const string GitHubApiUrl = "https://api.github.com/";
+    private const string NuGetGitHubPackagesUrl = "https://nuget.pkg.github.com/";
+
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public ConnectorModalMode Mode { get; set; }
     [Parameter] public string Title { get; set; } = string.Empty;
@@ -152,35 +160,18 @@
         return ConnectorHelpers.RequiresToken(Model.ConnectorType, Model.ApiBaseUrl ?? string.Empty);
     }
 
-    private IEnumerable<string> GetApiBaseUrlHintsForType()
-    {
-        var typeHints = Model?.ConnectorType switch
-        {
-            ConnectorType.GitHub => new[] { "https://api.github.com/" },
-            ConnectorType.NuGet => new[] { "https://api.nuget.org/v3/index.json", "https://nuget.pkg.github.com/" },
-            _ => Array.Empty<string>()
-        };
-        var combined = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var h in typeHints)
-            combined.Add(h);
-        if (ApiBaseUrlHints != null)
-        {
-            foreach (var h in ApiBaseUrlHints)
-            {
-                if (!string.IsNullOrWhiteSpace(h))
-                    combined.Add(h.Trim());
-            }
-        }
-        return combined.OrderBy(s => s);
-    }
-
     private void OnConnectorTypeChanged(ChangeEventArgs e)
     {
         if (Model != null && e.Value is ConnectorType connectorType)
         {
+            var previousType = Model.ConnectorType;
+            var previousDefaultUrl = previousType == ConnectorType.NuGet ? NuGetGitHubPackagesUrl : GitHubApiUrl;
+            var urlUnmodified = string.Equals(Model.ApiBaseUrl?.Trim(), previousDefaultUrl?.Trim(), StringComparison.OrdinalIgnoreCase);
+
             Model.ConnectorType = connectorType;
-            Model.ApiBaseUrl = ConnectorHelpers.GetDefaultUrl(connectorType);
-            if (ConnectorHelpers.IsNuGetOrg(Model.ApiBaseUrl))
+            if (urlUnmodified)
+                Model.ApiBaseUrl = connectorType == ConnectorType.NuGet ? NuGetGitHubPackagesUrl : GitHubApiUrl;
+            if (ConnectorHelpers.IsNuGetOrg(Model.ApiBaseUrl ?? string.Empty))
                 Model.UserToken = null;
         }
     }

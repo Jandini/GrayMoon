@@ -45,6 +45,7 @@ builder.Services.AddScoped<WorkspaceService>();
 builder.Services.AddScoped<WorkspaceGitService>();
 builder.Services.AddScoped<GitHubRepositoryService>();
 builder.Services.AddScoped<GitHubActionsService>();
+builder.Services.AddScoped<PackageRegistrySyncService>();
 
 // Background sync service with controlled parallelism
 builder.Services.AddSingleton<SyncBackgroundService>();
@@ -90,6 +91,32 @@ using (var scope = app.Services.CreateScope())
     await MigrateWorkspaceRepositoriesProjectsAsync(dbContext);
     await MigrateWorkspaceRepositoriesCommitsAsync(dbContext);
     await MigrateWorkspaceRepositoriesSequenceAndDependenciesAsync(dbContext);
+    await MigrateWorkspaceProjectsMatchedConnectorAsync(dbContext);
+}
+
+static async Task MigrateWorkspaceProjectsMatchedConnectorAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceProjects') WHERE name='MatchedConnectorId'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE WorkspaceProjects ADD COLUMN MatchedConnectorId INTEGER REFERENCES Connectors(ConnectorId)";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
 }
 
 static string? GetDatabasePath(string connectionString)
