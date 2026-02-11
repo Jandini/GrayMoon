@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 
@@ -10,7 +11,9 @@ public sealed class PackageRegistrySyncService(
     NuGetService nuGetService,
     ILogger<PackageRegistrySyncService> logger)
 {
-    /// <summary>For each package in the workspace, checks active NuGet connectors and sets MatchedConnectorId to the first registry that contains the package.</summary>
+    private const int MaxParallelPackageLookups = 8;
+
+    /// <summary>For each package in the workspace, checks active NuGet connectors and sets MatchedConnectorId to the first registry that contains the package. Up to 8 packages are checked in parallel.</summary>
     public async Task SyncWorkspacePackageRegistriesAsync(
         int workspaceId,
         IProgress<(int completed, int total)>? progress = null,
@@ -37,21 +40,26 @@ public sealed class PackageRegistrySyncService(
             return;
         }
 
-        var projectIdToConnectorId = new Dictionary<int, int?>();
+        var projectIdToConnectorId = new ConcurrentDictionary<int, int?>();
         var total = packages.Count;
         var completed = 0;
 
-        foreach (var p in packages)
+        var options = new ParallelOptions
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            MaxDegreeOfParallelism = MaxParallelPackageLookups,
+            CancellationToken = cancellationToken
+        };
+
+        await Parallel.ForEachAsync(packages, options, async (p, ct) =>
+        {
             var packageId = (p.PackageId ?? p.ProjectName).Trim();
             if (string.IsNullOrEmpty(packageId))
             {
                 logger.LogTrace("Package ProjectId={ProjectId}: empty PackageId, skipping.", p.ProjectId);
                 projectIdToConnectorId[p.ProjectId] = null;
-                completed++;
-                progress?.Report((completed, total));
-                continue;
+                var c = Interlocked.Increment(ref completed);
+                progress?.Report((c, total));
+                return;
             }
 
             int? matchedConnectorId = null;
@@ -60,7 +68,7 @@ public sealed class PackageRegistrySyncService(
                 try
                 {
                     logger.LogTrace("Registry lookup: PackageId={PackageId}, trying connector {ConnectorName} (Id={ConnectorId}).", packageId, connector.ConnectorName, connector.ConnectorId);
-                    if (await nuGetService.PackageExistsAsync(connector, packageId, cancellationToken))
+                    if (await nuGetService.PackageExistsAsync(connector, packageId, ct))
                     {
                         logger.LogTrace("Registry match: PackageId={PackageId} found in connector {ConnectorName} (Id={ConnectorId}).", packageId, connector.ConnectorName, connector.ConnectorId);
                         matchedConnectorId = connector.ConnectorId;
@@ -77,12 +85,12 @@ public sealed class PackageRegistrySyncService(
             if (matchedConnectorId == null)
                 logger.LogTrace("Registry lookup: PackageId={PackageId} matched no connector.", packageId);
             projectIdToConnectorId[p.ProjectId] = matchedConnectorId;
-            completed++;
-            progress?.Report((completed, total));
-        }
+            var done = Interlocked.Increment(ref completed);
+            progress?.Report((done, total));
+        });
 
         logger.LogTrace("Persisting {Count} package registry matches for workspace {WorkspaceId}.", projectIdToConnectorId.Count, workspaceId);
-        await workspaceProjectRepository.SetPackagesMatchedConnectorsAsync(workspaceId, projectIdToConnectorId, cancellationToken);
+        await workspaceProjectRepository.SetPackagesMatchedConnectorsAsync(workspaceId, new Dictionary<int, int?>(projectIdToConnectorId), cancellationToken);
         logger.LogTrace("Synced package registries for workspace {WorkspaceId}: {PackageCount} packages, {ConnectorCount} NuGet connectors.", workspaceId, packages.Count, connectors.Count);
     }
 }
