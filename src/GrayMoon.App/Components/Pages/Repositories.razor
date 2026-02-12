@@ -106,7 +106,15 @@
                                     <tr>
                                         <td class="col-repo"><strong>@repository.RepositoryName</strong></td>
                                         <td class="col-owner">@(string.IsNullOrWhiteSpace(repository.OrgName) ? "-" : repository.OrgName)</td>
-                                        <td class="col-topics">@(string.IsNullOrWhiteSpace(repository.Topics) ? "-" : repository.Topics)</td>
+                                        <td class="col-topics">
+                                            @if (!string.IsNullOrWhiteSpace(repository.Topics))
+                                            {
+                                                @foreach (var topic in repository.Topics.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                                                {
+                                                    <span class="badge badge-topic">@topic</span>
+                                                }
+                                            }
+                                        </td>
                                         <td class="col-connector">@repository.ConnectorName</td>
                                         <td class="col-visibility col-status-badge">
                                             <span class="badge @(repository.Visibility == "Private" ? "badge-private" : "badge-public")">
