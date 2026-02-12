@@ -34,7 +34,7 @@
                     </button>
                 </div>
                 <small class="form-text text-muted mb-2">
-                    Search by repository name, owner, or connector; multiple words all must match.
+                    Search by repository name, owner, topics, or connector; multiple words all must match.
                 </small>
             </div>
         </div>
@@ -69,6 +69,7 @@
                             <tr>
                                 <th class="col-repo">Repository</th>
                                 <th class="col-owner">Owner</th>
+                                <th class="col-topics">Topics</th>
                                 <th class="col-connector">Connector</th>
                                 <th class="col-visibility col-status-badge">Visibility</th>
                             </tr>
@@ -77,7 +78,7 @@
                             @if (repositories == null)
                             {
                                 <tr>
-                                    <td colspan="4" class="text-center text-muted py-4">
+                                    <td colspan="5" class="text-center text-muted py-4">
                                         Loading repositories...
                                     </td>
                                 </tr>
@@ -85,7 +86,7 @@
                             else if (repositories.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="4" class="text-center text-muted py-4">
+                                    <td colspan="5" class="text-center text-muted py-4">
                                         No repositories found. Configure GitHub connectors to fetch repositories.
                                     </td>
                                 </tr>
@@ -93,7 +94,7 @@
                             else if (GetFilteredRepositories()?.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="4" class="text-center text-muted py-4">
+                                    <td colspan="5" class="text-center text-muted py-4">
                                         No repositories match your search.
                                     </td>
                                 </tr>
@@ -105,6 +106,7 @@
                                     <tr>
                                         <td class="col-repo"><strong>@repository.RepositoryName</strong></td>
                                         <td class="col-owner">@(string.IsNullOrWhiteSpace(repository.OrgName) ? "-" : repository.OrgName)</td>
+                                        <td class="col-topics">@(string.IsNullOrWhiteSpace(repository.Topics) ? "-" : repository.Topics)</td>
                                         <td class="col-connector">@repository.ConnectorName</td>
                                         <td class="col-visibility col-status-badge">
                                             <span class="badge @(repository.Visibility == "Private" ? "badge-private" : "badge-public")">
@@ -239,11 +241,13 @@
         {
             var repoName = repository.RepositoryName ?? string.Empty;
             var ownerName = repository.OrgName ?? string.Empty;
+            var topics = repository.Topics ?? string.Empty;
             var connectorName = repository.ConnectorName ?? string.Empty;
 
             return words.All(word =>
                 repoName.Contains(word, StringComparison.OrdinalIgnoreCase) ||
                 ownerName.Contains(word, StringComparison.OrdinalIgnoreCase) ||
+                topics.Contains(word, StringComparison.OrdinalIgnoreCase) ||
                 connectorName.Contains(word, StringComparison.OrdinalIgnoreCase));
         }).ToList();
     }

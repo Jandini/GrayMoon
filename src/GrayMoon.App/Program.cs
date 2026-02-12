@@ -84,6 +84,7 @@ using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     dbContext.Database.EnsureCreated();
+    await MigrateRepositoriesTopicsAsync(dbContext);
     await MigrateWorkspaceSyncMetadataAsync(dbContext);
     await MigrateConnectorUserNameAsync(dbContext);
     await MigrateConnectorTypeAndTokenAsync(dbContext);
@@ -126,6 +127,31 @@ static string? GetDatabasePath(string connectionString)
     if (idx < 0) return null;
     var path = connectionString[(idx + prefix.Length)..].Trim();
     return string.IsNullOrEmpty(path) ? null : path;
+}
+
+static async Task MigrateRepositoriesTopicsAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Repositories') WHERE name='Topics'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Repositories ADD COLUMN Topics TEXT";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
 }
 
 static async Task MigrateWorkspaceSyncMetadataAsync(AppDbContext dbContext)

@@ -28,4 +28,8 @@ public class Repository
     [Required]
     [MaxLength(500)]
     public string CloneUrl { get; set; } = string.Empty;
+
+    /// <summary>Comma-separated repository topics from GitHub.</summary>
+    [MaxLength(2000)]
+    public string? Topics { get; set; }
 }
