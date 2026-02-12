@@ -22,7 +22,8 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
                 OrgName = repository.OrgName,
                 RepositoryName = repository.RepositoryName,
                 Visibility = repository.Visibility,
-                CloneUrl = repository.CloneUrl
+                CloneUrl = repository.CloneUrl,
+                Topics = repository.Topics
             })
             .ToListAsync();
     }
@@ -58,7 +59,8 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
                 OrgName = repository.OrgName,
                 RepositoryName = repository.RepositoryName,
                 Visibility = repository.Visibility,
-                CloneUrl = repository.CloneUrl
+                CloneUrl = repository.CloneUrl,
+                Topics = repository.Topics
             })
             .ToListAsync();
     }
@@ -77,7 +79,8 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
                 OrgName = r.OrgName,
                 RepositoryName = r.RepositoryName,
                 Visibility = r.Visibility,
-                CloneUrl = (r.CloneUrl ?? string.Empty).Trim()
+                CloneUrl = (r.CloneUrl ?? string.Empty).Trim(),
+                Topics = r.Topics
             })
             .Where(r => !string.IsNullOrWhiteSpace(r.CloneUrl))
             .GroupBy(r => r.CloneUrl, StringComparer.OrdinalIgnoreCase)
@@ -111,6 +114,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
                 existingRepo.RepositoryName = repo.RepositoryName;
                 existingRepo.Visibility = repo.Visibility;
                 existingRepo.CloneUrl = repo.CloneUrl;
+                existingRepo.Topics = repo.Topics;
             }
             else
             {

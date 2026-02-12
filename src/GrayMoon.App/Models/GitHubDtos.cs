@@ -33,6 +33,9 @@ public class GitHubRepositoryDto
 
     [JsonPropertyName("owner")]
     public GitHubRepositoryOwnerDto Owner { get; set; } = new();
+
+    [JsonPropertyName("topics")]
+    public List<string> Topics { get; set; } = new();
 }
 
 public class GitHubWorkflowDto

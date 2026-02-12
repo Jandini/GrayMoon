@@ -60,7 +60,10 @@ public class GitHubRepositoryService(
                     OrgName = repo.Owner?.Login,
                     RepositoryName = repo.Name,
                     Visibility = repo.Private ? "Private" : "Public",
-                    CloneUrl = (repo.CloneUrl ?? string.Empty).Trim()
+                    CloneUrl = (repo.CloneUrl ?? string.Empty).Trim(),
+                    Topics = repo.Topics != null && repo.Topics.Count > 0
+                        ? string.Join(",", repo.Topics.Where(t => !string.IsNullOrWhiteSpace(t)))
+                        : null
                 }).ToList();
                 allFetched.AddRange(persisted);
                 foreach (var r in persisted)

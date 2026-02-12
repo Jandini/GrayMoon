@@ -37,6 +37,8 @@ public sealed class SignalRConnectionHostedService(
 
         _connection.On<string, string, JsonElement?>("RequestCommand", async (requestId, command, args) =>
         {
+            logger.LogInformation("RequestCommand {RequestId} received: {Command}", requestId, command);
+            logger.LogTrace("RequestCommand {RequestId} request content: {Args}", requestId, args.HasValue ? args.Value.GetRawText() : "null");
             var envelope = commandJobFactory.CreateCommandJob(requestId, command, args);
             await jobQueue.EnqueueAsync(envelope, cancellationToken);
         });

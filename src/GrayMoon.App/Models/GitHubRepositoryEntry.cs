@@ -8,4 +8,5 @@ public class GitHubRepositoryEntry
     public string RepositoryName { get; set; } = string.Empty;
     public string Visibility { get; set; } = "Public";
     public string CloneUrl { get; set; } = string.Empty;
+    public string? Topics { get; set; }
 }

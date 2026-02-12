@@ -74,6 +74,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .IsRequired()
                 .HasMaxLength(500);
 
+            entity.Property(repository => repository.Topics)
+                .HasMaxLength(2000);
+
             entity.HasOne(repository => repository.Connector)
                 .WithMany()
                 .HasForeignKey(repository => repository.ConnectorId)

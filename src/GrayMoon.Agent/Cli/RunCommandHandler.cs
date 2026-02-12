@@ -48,8 +48,11 @@ internal static class RunCommandHandler
 
         builder.Logging.ClearProviders();
         builder.Logging.AddSerilog(new LoggerConfiguration()
+            .MinimumLevel.Verbose()
             .Enrich.WithMachineName()
-            .WriteTo.Console(theme: AnsiConsoleTheme.Code)
+            .WriteTo.Console(
+                theme: AnsiConsoleTheme.Code,
+                outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
             .CreateLogger(), dispose: true);
 
         builder.Services.AddSingleton<IHubConnectionProvider, HubConnectionProvider>();

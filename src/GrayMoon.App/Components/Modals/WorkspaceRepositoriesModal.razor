@@ -30,7 +30,7 @@
                             </button>
                         </div>
                         <small class="form-text text-muted mb-3 d-block">
-                            Search by repository name, owner, or connector; multiple words all must match.
+                            Search by repository name, owner, topics, or connector; multiple words all must match.
                         </small>
                         <div class="repository-list border rounded">
                             @if (Repositories == null)
@@ -59,6 +59,7 @@
                                             </th>
                                             <th>Repository</th>
                                             <th>Owner</th>
+                                            <th>Topics</th>
                                             <th>Connector</th>
                                         </tr>
                                     </thead>
@@ -66,7 +67,7 @@
                                         @if (filtered.Count == 0)
                                         {
                                             <tr>
-                                                <td colspan="4" class="text-muted p-2">No repositories match your search.</td>
+                                                <td colspan="5" class="text-muted p-2">No repositories match your search.</td>
                                             </tr>
                                         }
                                         else
@@ -89,6 +90,15 @@
                                                         <span class="repo-name-cell" title="@(repository.OrgName ?? "-")">
                                                             @(repository.OrgName ?? "-")
                                                         </span>
+                                                    </td>
+                                                    <td class="col-topics">
+                                                        @if (!string.IsNullOrWhiteSpace(repository.Topics))
+                                                        {
+                                                            @foreach (var topic in repository.Topics.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                                                            {
+                                                                <span class="badge badge-topic">@topic</span>
+                                                            }
+                                                        }
                                                     </td>
                                                     <td>
                                                         <span class="repo-name-cell" title="@repository.ConnectorName">
@@ -189,11 +199,13 @@
         {
             var repoName = repository.RepositoryName ?? string.Empty;
             var ownerName = repository.OrgName ?? string.Empty;
+            var topics = repository.Topics ?? string.Empty;
             var connectorName = repository.ConnectorName ?? string.Empty;
 
             return words.All(word =>
                 repoName.Contains(word, StringComparison.OrdinalIgnoreCase) ||
                 ownerName.Contains(word, StringComparison.OrdinalIgnoreCase) ||
+                topics.Contains(word, StringComparison.OrdinalIgnoreCase) ||
                 connectorName.Contains(word, StringComparison.OrdinalIgnoreCase));
         }).ToList();
     }

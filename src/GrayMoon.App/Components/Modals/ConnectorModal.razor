@@ -25,7 +25,9 @@
                                 </div>
                                 <div class="col-md-6">
                                     <label class="form-label">Connector Type <span class="text-danger">*</span></label>
-                                    <InputSelect class="form-select" @bind-Value="Model.ConnectorType" @onchange="OnConnectorTypeChanged">
+                                    <InputSelect class="form-select"
+                                                 @bind-Value="Model.ConnectorType"
+                                                 @bind-Value:after="@(OnConnectorTypeChangedAsync)">
                                         <option value="@ConnectorType.GitHub">GitHub</option>
                                         <option value="@ConnectorType.NuGet">NuGet</option>
                                     </InputSelect>
@@ -160,20 +162,20 @@
         return ConnectorHelpers.RequiresToken(Model.ConnectorType, Model.ApiBaseUrl ?? string.Empty);
     }
 
-    private void OnConnectorTypeChanged(ChangeEventArgs e)
+    private Task OnConnectorTypeChangedAsync()
     {
-        if (Model != null && e.Value is ConnectorType connectorType)
-        {
-            var previousType = Model.ConnectorType;
-            var previousDefaultUrl = previousType == ConnectorType.NuGet ? NuGetGitHubPackagesUrl : GitHubApiUrl;
-            var urlUnmodified = string.Equals(Model.ApiBaseUrl?.Trim(), previousDefaultUrl?.Trim(), StringComparison.OrdinalIgnoreCase);
+        if (Model == null)
+            return Task.CompletedTask;
+        // Runs after @bind-Value has updated Model.ConnectorType
 
-            Model.ConnectorType = connectorType;
-            if (urlUnmodified)
-                Model.ApiBaseUrl = connectorType == ConnectorType.NuGet ? NuGetGitHubPackagesUrl : GitHubApiUrl;
-            if (ConnectorHelpers.IsNuGetOrg(Model.ApiBaseUrl ?? string.Empty))
-                Model.UserToken = null;
-        }
+        if (Model.ConnectorType == ConnectorType.NuGet)
+            Model.ApiBaseUrl = NuGetGitHubPackagesUrl;
+        else if (Model.ConnectorType == ConnectorType.GitHub)
+            Model.ApiBaseUrl = GitHubApiUrl;
+        
+        if (ConnectorHelpers.IsNuGetOrg(Model.ApiBaseUrl ?? string.Empty))
+            Model.UserToken = null;
+        return Task.CompletedTask;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
