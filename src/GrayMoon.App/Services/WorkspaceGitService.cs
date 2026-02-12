@@ -355,8 +355,15 @@ public class WorkspaceGitService(
         var json = data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(data);
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
-        var outgoing = root.TryGetProperty("outgoingCommits", out var o) && o.TryGetInt32(out var outVal) ? outVal : (int?)null;
-        var incoming = root.TryGetProperty("incomingCommits", out var i) && i.TryGetInt32(out var inVal) ? inVal : (int?)null;
+        int? outgoing = null;
+        int? incoming = null;
+        
+        if (root.TryGetProperty("outgoingCommits", out var o) && o.ValueKind != JsonValueKind.Null && o.TryGetInt32(out var outVal))
+            outgoing = outVal;
+        
+        if (root.TryGetProperty("incomingCommits", out var i) && i.ValueKind != JsonValueKind.Null && i.TryGetInt32(out var inVal))
+            incoming = inVal;
+        
         return (outgoing, incoming);
     }
 

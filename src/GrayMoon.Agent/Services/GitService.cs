@@ -129,16 +129,29 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return (null, null);
 
         var originBranch = "origin/" + branchName.Trim();
+        
+        // Check if the remote branch exists locally (after fetch) before trying to count commits
+        // This is faster than ls-remote and works since we fetch before calling this method
+        var (exitCheck, _, _) = await RunProcessAsync("git", $"rev-parse --verify {originBranch}", repoPath, ct);
+        if (exitCheck != 0)
+        {
+            // Branch doesn't exist upstream yet - this is normal for new branches
+            logger.LogDebug("Remote branch {OriginBranch} does not exist upstream for {RepoPath}, skipping commit counts", originBranch, repoPath);
+            return (null, null);
+        }
+
         var (exitOut, stdoutOut, stderrOut) = await RunProcessAsync("git", $"rev-list --count {originBranch}..HEAD", repoPath, ct);
         var (exitIn, stdoutIn, stderrIn) = await RunProcessAsync("git", $"rev-list --count HEAD..{originBranch}", repoPath, ct);
+        
+        // If either command fails, return null values gracefully (don't break sync)
         if (exitOut != 0)
         {
-            logger.LogError("Git rev-list (outgoing) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitOut, stdoutOut, stderrOut);
+            logger.LogWarning("Git rev-list (outgoing) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitOut, stdoutOut, stderrOut);
             return (null, null);
         }
         if (exitIn != 0)
         {
-            logger.LogError("Git rev-list (incoming) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitIn, stdoutIn, stderrIn);
+            logger.LogWarning("Git rev-list (incoming) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitIn, stdoutIn, stderrIn);
             return (null, null);
         }
 
