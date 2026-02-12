@@ -129,22 +129,84 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return (null, null);
 
         var originBranch = "origin/" + branchName.Trim();
+        
+        // Check if the remote branch exists locally (after fetch) before trying to count commits
+        // This is faster than ls-remote and works since we fetch before calling this method
+        var (exitCheck, _, _) = await RunProcessAsync("git", $"rev-parse --verify {originBranch}", repoPath, ct);
+        if (exitCheck != 0)
+        {
+            // Branch doesn't exist upstream yet - count commits ahead of the default branch instead
+            var defaultBranch = await GetDefaultBranchAsync(repoPath, ct);
+            if (defaultBranch == null)
+            {
+                logger.LogDebug("Remote branch {OriginBranch} does not exist upstream and no default branch found for {RepoPath}, skipping commit counts", originBranch, repoPath);
+                return (null, null);
+            }
+
+            // Count commits ahead of the default branch
+            var (exitDefault, stdoutDefault, stderrDefault) = await RunProcessAsync("git", $"rev-list --count {defaultBranch}..HEAD", repoPath, ct);
+            if (exitDefault != 0)
+            {
+                logger.LogWarning("Git rev-list (outgoing vs default branch) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitDefault, stdoutDefault, stderrDefault);
+                return (null, null);
+            }
+
+            var aheadCount = int.TryParse((stdoutDefault ?? "").Trim(), out var ahead) ? ahead : (int?)null;
+            // No incoming commits for a branch that doesn't exist upstream
+            return (aheadCount, null);
+        }
+
+        // Branch exists upstream - use standard comparison
         var (exitOut, stdoutOut, stderrOut) = await RunProcessAsync("git", $"rev-list --count {originBranch}..HEAD", repoPath, ct);
         var (exitIn, stdoutIn, stderrIn) = await RunProcessAsync("git", $"rev-list --count HEAD..{originBranch}", repoPath, ct);
+        
+        // If either command fails, return null values gracefully (don't break sync)
         if (exitOut != 0)
         {
-            logger.LogError("Git rev-list (outgoing) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitOut, stdoutOut, stderrOut);
+            logger.LogWarning("Git rev-list (outgoing) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitOut, stdoutOut, stderrOut);
             return (null, null);
         }
         if (exitIn != 0)
         {
-            logger.LogError("Git rev-list (incoming) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitIn, stdoutIn, stderrIn);
+            logger.LogWarning("Git rev-list (incoming) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitIn, stdoutIn, stderrIn);
             return (null, null);
         }
 
         var outVal = int.TryParse((stdoutOut ?? "").Trim(), out var o) ? o : (int?)null;
         var inVal = int.TryParse((stdoutIn ?? "").Trim(), out var i) ? i : (int?)null;
         return (outVal, inVal);
+    }
+
+    /// <summary>
+    /// Finds the default branch (main or master) on origin. Returns null if neither exists.
+    /// </summary>
+    private async Task<string?> GetDefaultBranchAsync(string repoPath, CancellationToken ct)
+    {
+        // Try main first (most common modern default)
+        var (exitMain, _, _) = await RunProcessAsync("git", "rev-parse --verify origin/main", repoPath, ct);
+        if (exitMain == 0)
+            return "origin/main";
+
+        // Fall back to master
+        var (exitMaster, _, _) = await RunProcessAsync("git", "rev-parse --verify origin/master", repoPath, ct);
+        if (exitMaster == 0)
+            return "origin/master";
+
+        // Try to get the default branch from remote HEAD
+        var (exitHead, stdoutHead, _) = await RunProcessAsync("git", "symbolic-ref refs/remotes/origin/HEAD", repoPath, ct);
+        if (exitHead == 0 && !string.IsNullOrWhiteSpace(stdoutHead))
+        {
+            var refName = stdoutHead.Trim();
+            if (refName.StartsWith("refs/remotes/origin/"))
+            {
+                var branch = refName.Substring("refs/remotes/origin/".Length);
+                var (exitVerify, _, _) = await RunProcessAsync("git", $"rev-parse --verify origin/{branch}", repoPath, ct);
+                if (exitVerify == 0)
+                    return $"origin/{branch}";
+            }
+        }
+
+        return null;
     }
 
     public void CreateDirectory(string path)
