@@ -124,14 +124,33 @@
 
 .repository-grid th:nth-child(2),
 .repository-grid td:nth-child(2) {
-    width: 55%;
+    width: 40%;
 }
 
 .repository-grid th:nth-child(3),
-.repository-grid td:nth-child(3),
+.repository-grid td:nth-child(3) {
+    width: 15%;
+}
+
 .repository-grid th:nth-child(4),
 .repository-grid td:nth-child(4) {
     width: 20%;
+}
+
+.repository-grid td.col-topics {
+    white-space: normal;
+}
+
+.repository-grid .badge-topic {
+    background-color: #4493F8;
+    color: #fff;
+    font-weight: 500;
+    margin: 0.1rem 0.2rem 0.1rem 0;
+}
+
+.repository-grid th:nth-child(5),
+.repository-grid td:nth-child(5) {
+    width: 15%;
 }
 
 .repo-name-cell {
