@@ -167,10 +167,12 @@
         if (Model == null)
             return Task.CompletedTask;
         // Runs after @bind-Value has updated Model.ConnectorType
+
         if (Model.ConnectorType == ConnectorType.NuGet)
             Model.ApiBaseUrl = NuGetGitHubPackagesUrl;
-        else if (string.Equals(Model.ApiBaseUrl?.Trim(), NuGetGitHubPackagesUrl.Trim(), StringComparison.OrdinalIgnoreCase))
+        else if (Model.ConnectorType == ConnectorType.GitHub)
             Model.ApiBaseUrl = GitHubApiUrl;
+        
         if (ConnectorHelpers.IsNuGetOrg(Model.ApiBaseUrl ?? string.Empty))
             Model.UserToken = null;
         return Task.CompletedTask;
