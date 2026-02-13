@@ -11,7 +11,6 @@ Write-Host ''
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
     Write-Host 'ERROR: This script must be run as Administrator' -ForegroundColor Red
-    Read-Host -Prompt 'Press Enter to close this window'
     return 1
 }
 
@@ -55,27 +54,25 @@ try {
     Write-Host 'Download completed.' -ForegroundColor Green
 } catch {
     Write-Host "ERROR: Failed to download agent: $_" -ForegroundColor Red
-    Read-Host -Prompt 'Press Enter to close this window'
-    exit 1
+    return 1
 }
 
 # Install as Windows service
 Write-Host 'Installing as Windows service...' -ForegroundColor Yellow
 try {
-    $serviceArgs = @{
-        Name = $serviceName
-        BinaryPathName = "`"$agentExe`" run"
-        DisplayName = $serviceDisplayName
-        Description = $serviceDescription
-        StartType = 'Automatic'
+    $binPath = "`"$agentExe`" run"
+    $result = sc.exe create $serviceName binPath= $binPath start= auto DisplayName= "$serviceDisplayName"
+    if ($LASTEXITCODE -ne 0) {
+        throw "sc.exe create failed with exit code ${LASTEXITCODE}: $result"
     }
     
-    New-Service @serviceArgs -ErrorAction Stop | Out-Null
+    # Set description using sc.exe
+    sc.exe description $serviceName "$serviceDescription" | Out-Null
+    
     Write-Host 'Service installed successfully.' -ForegroundColor Green
 } catch {
     Write-Host "ERROR: Failed to install service: $_" -ForegroundColor Red
-    Read-Host -Prompt 'Press Enter to close this window'
-    exit 1
+    return 1
 }
 
 # Start service
@@ -93,4 +90,3 @@ Write-Host 'Installation completed!' -ForegroundColor Green
 Write-Host 'Service Name: GrayMoonAgent' -ForegroundColor Cyan
 Write-Host 'Service Path: ' $agentExe -ForegroundColor Cyan
 Write-Host ''
-Read-Host -Prompt 'Press Enter to close this window'

@@ -11,6 +11,7 @@ public static class AgentEndpoints
     {
         routes.MapGet("/api/agent/download", DownloadAgent);
         routes.MapGet("/api/agent/install", InstallAgent);
+        routes.MapGet("/api/agent/uninstall", UninstallAgent);
         return routes;
     }
 
@@ -63,6 +64,34 @@ public static class AgentEndpoints
         {
             logger.LogError(ex, "Failed to load installation script");
             return Results.Problem("Failed to load installation script");
+        }
+    }
+
+    private static IResult UninstallAgent(IWebHostEnvironment env, ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.Agent");
+        
+        try
+        {
+            var assembly = Assembly.GetExecutingAssembly();
+            var resourceName = "GrayMoon.App.Resources.uninstall-agent.ps1";
+            
+            using var stream = assembly.GetManifestResourceStream(resourceName);
+            if (stream == null)
+            {
+                logger.LogError("Embedded resource {ResourceName} not found", resourceName);
+                return Results.NotFound("Uninstallation script not found");
+            }
+            
+            using var reader = new StreamReader(stream);
+            var script = reader.ReadToEnd();
+            
+            return Results.Content(script, "text/plain; charset=utf-8");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to load uninstallation script");
+            return Results.Problem("Failed to load uninstallation script");
         }
     }
 }

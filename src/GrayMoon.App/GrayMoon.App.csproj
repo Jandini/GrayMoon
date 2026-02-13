@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Resources\install-agent.ps1" />
+    <EmbeddedResource Include="Resources\uninstall-agent.ps1" />
   </ItemGroup>
 
   <ItemGroup>
