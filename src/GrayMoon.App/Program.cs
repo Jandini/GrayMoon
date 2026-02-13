@@ -385,7 +385,6 @@ if ((app.Configuration["ASPNETCORE_URLS"] ?? "").Contains("https", StringCompari
 
 app.UseStaticFiles();
 app.UseAntiforgery();
-app.UseWebSockets();
 
 app.MapApiEndpoints();
 app.MapHub<WorkspaceSyncHub>("/hubs/workspace-sync");
