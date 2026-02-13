@@ -89,9 +89,10 @@ public sealed class SignalRConnectionHostedService(
 
         _connection.Closed += async error =>
         {
+            if (cancellationToken.IsCancellationRequested) return;
             logger.LogWarning(error, "Connection closed. Will attempt to reconnect in 5 seconds...");
             // Start a background task to reconnect if automatic reconnect didn't work
-            _ = Task.Run(async () => await ReconnectLoopAsync(cancellationToken), cancellationToken);
+            _ = Task.Run(async () => await ReconnectLoopAsync(cancellationToken), CancellationToken.None);
             await Task.CompletedTask;
         };
 
@@ -137,7 +138,17 @@ public sealed class SignalRConnectionHostedService(
             {
                 if (_connection == null) break;
 
-                var state = _connection.State;
+                HubConnectionState state;
+                try
+                {
+                    state = _connection.State;
+                }
+                catch (ObjectDisposedException)
+                {
+                    logger.LogDebug("Connection was disposed. Exiting reconnect loop.");
+                    return;
+                }
+
                 if (state == HubConnectionState.Connected)
                 {
                     logger.LogInformation("Connection restored. Stopping reconnect loop.");
@@ -156,10 +167,26 @@ public sealed class SignalRConnectionHostedService(
                 // If we're in Connecting or Reconnecting state, wait a bit
                 await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
             }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (ObjectDisposedException)
+            {
+                logger.LogDebug("Connection was disposed. Exiting reconnect loop.");
+                return;
+            }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Reconnection attempt failed. Will retry in 5 seconds...");
-                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
             }
         }
     }

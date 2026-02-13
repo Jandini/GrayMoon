@@ -12,6 +12,8 @@
 @inject GitHubRepositoryService RepositoryService
 @inject GitHubRepositoryRepository GitHubRepositoryRepository
 @inject WorkspaceService WorkspaceService
+@inject IAgentBridge AgentBridge
+@inject AgentConnectionTracker AgentConnectionTracker
 @inject ILogger<Workspaces> Logger
 
 <PageTitle>Workspaces - GrayMoon</PageTitle>
@@ -143,6 +145,7 @@
                IsSaving="@isSaving"
                IsCheckingDirectory="@isLoadingDirectoryInfo"
                ErrorMessage="@editorErrorMessage"
+               SaveDisabled="@(editingWorkspaceId == null && !AgentBridge.IsAgentConnected)"
                OnSave="@SaveWorkspaceAsync"
                OnCancel="@CloseEditorModal" />
 
@@ -226,9 +229,28 @@
     private bool showImportModal;
     private int importMatchingCount;
     private List<int> importRepositoryIds = new();
+    private bool _disposed;
+
+    protected override void OnInitialized()
+    {
+        AgentConnectionTracker.OnStateChanged(OnAgentConnectionStateChanged);
+    }
+
+    private void OnAgentConnectionStateChanged(AgentConnectionState state)
+    {
+        if (_disposed) return;
+        if (state is AgentConnectionState.Online or AgentConnectionState.VersionMismatch)
+            _ = InvokeAsync(async () =>
+            {
+                await WorkspaceService.GetRootPathAsync();
+                if (!_disposed)
+                    StateHasChanged();
+            });
+    }
 
     public void Dispose()
     {
+        _disposed = true;
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
         _directoryInfoCts?.Cancel();
@@ -238,6 +260,8 @@
     protected override async Task OnInitializedAsync()
     {
         await LoadWorkspacesAsync();
+        if (AgentBridge.IsAgentConnected)
+            await WorkspaceService.GetRootPathAsync();
     }
 
     private async Task LoadWorkspacesAsync()
@@ -279,7 +303,9 @@
         workspaceName = string.Empty;
         directoryExists = false;
         existingRepositoryCount = 0;
-        editorErrorMessage = null;
+        editorErrorMessage = !AgentBridge.IsAgentConnected
+            ? "Agent is not available. Please start the GrayMoon Agent to add workspaces."
+            : null;
         showEditorModal = true;
         return Task.CompletedTask;
     }
@@ -338,6 +364,12 @@
         if (string.IsNullOrWhiteSpace(workspaceName))
         {
             editorErrorMessage = "Workspace name is required.";
+            return;
+        }
+
+        if (editingWorkspaceId == null && !AgentBridge.IsAgentConnected)
+        {
+            editorErrorMessage = "Agent is not available. Please start the GrayMoon Agent to add workspaces.";
             return;
         }
 
@@ -544,7 +576,7 @@
     private string GetWorkspacePath()
     {
         if (string.IsNullOrWhiteSpace(workspaceName))
-            return WorkspaceService.RootPath;
+            return WorkspaceService.RootPath ?? string.Empty;
         return WorkspaceService.GetWorkspacePath(workspaceName);
     }
 
