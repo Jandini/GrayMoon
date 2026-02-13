@@ -14,6 +14,18 @@ using Microsoft.Extensions.Options;
 
 namespace GrayMoon.Agent.Hosted;
 
+/// <summary>Custom retry policy that retries every 5 seconds indefinitely.</summary>
+internal sealed class FiveSecondRetryPolicy : IRetryPolicy
+{
+    public TimeSpan? NextRetryDelay(RetryContext retryContext)
+    {
+        // First retry immediately, then every 5 seconds
+        return retryContext.PreviousRetryCount == 0 
+            ? TimeSpan.Zero 
+            : TimeSpan.FromSeconds(5);
+    }
+}
+
 public sealed class SignalRConnectionHostedService(
     IHubConnectionProvider hubProvider,
     IJobQueue jobQueue,
@@ -47,7 +59,7 @@ public sealed class SignalRConnectionHostedService(
     {
         _connection = new HubConnectionBuilder()
             .WithUrl(_options.AppHubUrl)
-            .WithAutomaticReconnect()
+            .WithAutomaticReconnect(new FiveSecondRetryPolicy())
             .AddJsonProtocol(options =>
             {
                 options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
@@ -63,10 +75,24 @@ public sealed class SignalRConnectionHostedService(
             await jobQueue.EnqueueAsync(envelope, cancellationToken);
         });
 
-        _connection.Reconnected += async _ =>
+        _connection.Reconnecting += error =>
         {
-            logger.LogInformation("Reconnected to hub at {Url}", _options.AppHubUrl);
+            logger.LogWarning(error, "Connection lost. Reconnecting to hub at {Url}...", _options.AppHubUrl);
+            return Task.CompletedTask;
+        };
+
+        _connection.Reconnected += async connectionId =>
+        {
+            logger.LogInformation("Reconnected to hub at {Url} (ConnectionId: {ConnectionId})", _options.AppHubUrl, connectionId);
             await ReportSemVerAsync(CancellationToken.None);
+        };
+
+        _connection.Closed += async error =>
+        {
+            logger.LogWarning(error, "Connection closed. Will attempt to reconnect in 5 seconds...");
+            // Start a background task to reconnect if automatic reconnect didn't work
+            _ = Task.Run(async () => await ReconnectLoopAsync(cancellationToken), cancellationToken);
+            await Task.CompletedTask;
         };
 
         ((HubConnectionProvider)hubProvider).Connection = _connection;
@@ -80,7 +106,17 @@ public sealed class SignalRConnectionHostedService(
         {
             try
             {
-                await _connection!.StartAsync(cancellationToken);
+                if (_connection == null) break;
+                
+                var state = _connection.State;
+                if (state == HubConnectionState.Connected)
+                {
+                    logger.LogInformation("Already connected to hub at {Url}", _options.AppHubUrl);
+                    await ReportSemVerAsync(cancellationToken);
+                    return;
+                }
+
+                await _connection.StartAsync(cancellationToken);
                 logger.LogInformation("Connected to hub at {Url}", _options.AppHubUrl);
                 await ReportSemVerAsync(cancellationToken);
                 return;
@@ -88,6 +124,41 @@ public sealed class SignalRConnectionHostedService(
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Failed to connect to hub. Retrying in 5s...");
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            }
+        }
+    }
+
+    private async Task ReconnectLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (_connection == null) break;
+
+                var state = _connection.State;
+                if (state == HubConnectionState.Connected)
+                {
+                    logger.LogInformation("Connection restored. Stopping reconnect loop.");
+                    return;
+                }
+
+                if (state == HubConnectionState.Disconnected)
+                {
+                    logger.LogInformation("Attempting to reconnect to hub at {Url}...", _options.AppHubUrl);
+                    await _connection.StartAsync(cancellationToken);
+                    logger.LogInformation("Successfully reconnected to hub at {Url}", _options.AppHubUrl);
+                    await ReportSemVerAsync(cancellationToken);
+                    return;
+                }
+
+                // If we're in Connecting or Reconnecting state, wait a bit
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Reconnection attempt failed. Will retry in 5 seconds...");
                 await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
             }
         }
