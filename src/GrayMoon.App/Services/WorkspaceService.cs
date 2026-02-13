@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace GrayMoon.App.Services;
 
-public class WorkspaceService(IAgentBridge agentBridge, AgentConnectionTracker connectionTracker, ILogger<WorkspaceService> logger)
+public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService> logger)
 {
     private string? _cachedRootPath;
     private readonly SemaphoreSlim _cacheLock = new(1, 1);

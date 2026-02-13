@@ -1,5 +1,6 @@
 @using GrayMoon.App.Services
 @inject AgentConnectionTracker AgentConnectionTracker
+@rendermode @(new InteractiveServerRenderMode(prerender: true))
 
 <a href="/agent" class="@BadgeClassFull" 
    title="@TitleText" 
@@ -8,20 +9,15 @@
 </a>
 
 @code {
-    private AgentConnectionState _state = AgentConnectionState.Offline;
-    private string? _agentSemVer;
+    private AgentConnectionState State => AgentConnectionTracker.State;
+    private string? AgentSemVer => AgentConnectionTracker.AgentSemVer;
 
     protected override void OnInitialized()
     {
-        AgentConnectionTracker.OnStateChanged(s =>
-        {
-            _state = s;
-            _agentSemVer = AgentConnectionTracker.AgentSemVer;
-            _ = InvokeAsync(StateHasChanged);
-        });
+        AgentConnectionTracker.OnStateChanged((state) => { _ = InvokeAsync(StateHasChanged); });
     }
 
-    private string BadgeClass => _state switch
+    private string BadgeClass => State switch
     {
         AgentConnectionState.Online => "bg-success",
         AgentConnectionState.Offline => "bg-danger",
@@ -32,7 +28,7 @@
 
     private string BadgeClassFull => $"badge {BadgeClass} text-decoration-none ms-2";
 
-    private string StateLabel => _state switch
+    private string StateLabel => State switch
     {
         AgentConnectionState.Online => "online",
         AgentConnectionState.Offline => "offline",
@@ -41,9 +37,9 @@
         _ => "offline"
     };
 
-    private string TitleText => _state switch
+    private string TitleText => State switch
     {
-        AgentConnectionState.VersionMismatch => $"Agent version mismatch. Agent version: {_agentSemVer ?? "unknown"}. Click to update.",
+        AgentConnectionState.VersionMismatch => $"Agent version mismatch. Agent version: {AgentSemVer ?? "unknown"}. Click to update.",
         AgentConnectionState.Online => "Agent connection status: online",
         AgentConnectionState.Offline => "Agent connection status: offline",
         AgentConnectionState.Connecting => "Agent connection status: connecting",
