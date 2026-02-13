@@ -4,7 +4,7 @@ public class AgentOptions
 {
     public const string SectionName = "GrayMoon";
 
-    public string AppHubUrl { get; set; } = "http://host.docker.internal:8384/agent";
+    public string AppHubUrl { get; set; } = "http://host.docker.internal:8384/hub/agent";
     public int ListenPort { get; set; } = 9191;
     public string WorkspaceRoot { get; set; } = "C:\\Workspace";
     public int MaxConcurrentCommands { get; set; } = 8;

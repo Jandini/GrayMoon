@@ -1,0 +1,57 @@
+@page "/agent"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Agent - GrayMoon</PageTitle>
+
+<div class="container-fluid page-container">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h2>Agent</h2>
+            <p class="text-muted">Install the GrayMoon Agent Service</p>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Install</h5>
+                </div>
+                <div class="card-body">
+                    <p class="mb-3">Run this PowerShell command as Administrator to install the GrayMoon Agent as a Windows service:</p>
+                    <div class="input-group">
+                        <input type="text" class="form-control font-monospace bg-dark" id="installCommand" readonly 
+                               value="@installCommand" />
+                        <button class="btn btn-primary" type="button" @onclick="CopyInstallCommand">Copy</button>
+                    </div>
+                    <small class="text-muted mt-2 d-block">
+                        The script will download, install, and start the agent service automatically.
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string installCommand = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+        var installUrl = $"{baseUrl}/api/agent/install";
+        installCommand = $"Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('{installUrl}'))";
+    }
+
+    private async Task CopyInstallCommand()
+    {
+        await CopyToClipboard(installCommand);
+    }
+
+    private async Task CopyToClipboard(string text)
+    {
+        await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+    }
+}

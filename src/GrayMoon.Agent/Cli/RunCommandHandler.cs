@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
+using Serilog.Sinks.File;
 using Serilog.Sinks.SystemConsole.Themes;
 
 namespace GrayMoon.Agent.Cli;
@@ -46,6 +47,11 @@ internal static class RunCommandHandler
 
         builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection(AgentOptions.SectionName));
 
+        // Determine log file path
+        var logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GrayMoon", "logs");
+        Directory.CreateDirectory(logDirectory);
+        var logFilePath = Path.Combine(logDirectory, "graymoon-agent-.log");
+
         builder.Logging.ClearProviders();
         builder.Logging.AddSerilog(new LoggerConfiguration()
             .MinimumLevel.Verbose()
@@ -53,6 +59,11 @@ internal static class RunCommandHandler
             .WriteTo.Console(
                 theme: AnsiConsoleTheme.Code,
                 outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+            .WriteTo.File(
+                path: logFilePath,
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 30,
+                outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} {Level:u3}] [{MachineName}] {Message:lj}{NewLine}{Exception}")
             .CreateLogger(), dispose: true);
 
         builder.Services.AddSingleton<IHubConnectionProvider, HubConnectionProvider>();

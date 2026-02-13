@@ -388,7 +388,7 @@ app.UseAntiforgery();
 
 app.MapApiEndpoints();
 app.MapHub<WorkspaceSyncHub>("/hubs/workspace-sync");
-app.MapHub<AgentHub>("/agent");
+app.MapHub<AgentHub>("/hub/agent");
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
