@@ -1,9 +1,11 @@
 @page "/"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using GrayMoon.App.Repositories
+@using GrayMoon.App.Services
 @inject WorkspaceRepository WorkspaceRepository
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
+@inject AgentConnectionTracker AgentConnectionTracker
 <PageTitle>Home - GrayMoon</PageTitle>
 
 @if (!showHome)
@@ -56,9 +58,7 @@ else
                     <p class="card-text">
                         Install, update, or uninstall the GrayMoon Agent service.
                     </p>
-                    <a class="btn btn-primary" href="/agent">
-                        Manage Agent
-                    </a>
+                    <a class="btn @AgentButtonClass" href="/agent">@AgentButtonText</a>
                 </div>
             </div>
         </div>
@@ -101,6 +101,21 @@ else
 @code {
     private const string DefaultWorkspaceRedirectKey = "defaultWorkspaceRedirected";
     private bool showHome;
+
+    private string AgentButtonText => AgentConnectionTracker.State switch
+    {
+        AgentConnectionState.Online => "Manage Agent",
+        AgentConnectionState.VersionMismatch => "Upgrade Agent",
+        _ => "Install Agent"
+    };
+
+    private string AgentButtonClass => AgentConnectionTracker.State == AgentConnectionState.Online ? "btn-primary" : "btn-danger";
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            AgentConnectionTracker.OnStateChanged(_ => InvokeAsync(StateHasChanged));
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
