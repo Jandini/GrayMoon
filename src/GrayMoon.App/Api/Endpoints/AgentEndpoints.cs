@@ -38,6 +38,7 @@ public static class AgentEndpoints
         var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.Agent");
         var baseUrl = $"{httpContext.Request.Scheme}://{httpContext.Request.Host}";
         var downloadUrl = $"{baseUrl}/api/agent/download?platform=windows";
+        var hubUrl = $"{baseUrl}/hub/agent";
         
         try
         {
@@ -57,6 +58,7 @@ public static class AgentEndpoints
             // Replace placeholders
             script = script.Replace("{DOWNLOAD_URL}", downloadUrl);
             script = script.Replace("{BASE_URL}", baseUrl);
+            script = script.Replace("{HUB_URL}", hubUrl);
             
             return Results.Content(script, "text/plain; charset=utf-8");
         }

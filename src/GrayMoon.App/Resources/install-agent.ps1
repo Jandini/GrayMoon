@@ -28,14 +28,14 @@ $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if ($existingService) {
     Write-Host 'Found existing service. Stopping...' -ForegroundColor Yellow
     if ($existingService.Status -eq 'Running') {
-        Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
+        Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue | Out-Null
         Start-Sleep -Seconds 2
     }
     
     # Remove existing service
-    $service = Get-WmiObject -Class Win32_Service -Filter "name='$serviceName'"
+    $service = Get-WmiObject -Class Win32_Service -Filter "name='$serviceName'" -ErrorAction SilentlyContinue
     if ($service) {
-        $service.Delete()
+        $service.Delete() | Out-Null
         Write-Host 'Removed existing service.' -ForegroundColor Green
     }
 }
@@ -60,7 +60,8 @@ try {
 # Install as Windows service
 Write-Host 'Installing as Windows service...' -ForegroundColor Yellow
 try {
-    $binPath = "`"$agentExe`" run"
+    $hubUrl = '{HUB_URL}'
+    $binPath = "`"$agentExe`" run -u `"$hubUrl`""
     $result = sc.exe create $serviceName binPath= $binPath start= auto DisplayName= "$serviceDisplayName"
     if ($LASTEXITCODE -ne 0) {
         throw "sc.exe create failed with exit code ${LASTEXITCODE}: $result"
@@ -78,7 +79,7 @@ try {
 # Start service
 Write-Host 'Starting service...' -ForegroundColor Yellow
 try {
-    Start-Service -Name $serviceName -ErrorAction Stop
+    Start-Service -Name $serviceName -ErrorAction Stop | Out-Null
     Write-Host 'Service started successfully.' -ForegroundColor Green
 } catch {
     Write-Host "WARNING: Failed to start service: $_" -ForegroundColor Yellow
