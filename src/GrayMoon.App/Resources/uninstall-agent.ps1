@@ -4,8 +4,6 @@
 $ErrorActionPreference = 'Stop'
 
 Write-Host 'GrayMoon Agent Uninstallation' -ForegroundColor Cyan
-Write-Host '================================' -ForegroundColor Cyan
-Write-Host ''
 
 # Check if running as Administrator
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
