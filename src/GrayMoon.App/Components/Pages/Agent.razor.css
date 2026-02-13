@@ -1,0 +1,34 @@
+/* Agent page card tabs: theme with app colors */
+.card-header-tabs {
+    border-bottom-color: var(--border-color);
+}
+
+.card-header-tabs .nav-link {
+    color: var(--text-secondary);
+    border-color: transparent;
+    background: transparent;
+}
+
+.card-header-tabs .nav-link:hover {
+    color: var(--text-primary);
+    border-color: transparent;
+    background: var(--bg-hover);
+}
+
+.card-header-tabs .nav-link.active {
+    color: var(--accent-blue);
+    border-color: var(--border-color) var(--border-color) var(--bg-card);
+    background: var(--bg-card);
+}
+
+.card-header-tabs .nav-link.active:hover {
+    color: var(--accent-blue-hover);
+}
+
+.card-header-tabs .nav-link:focus {
+    box-shadow: none;
+}
+
+.card-header-tabs .nav-link:focus-visible {
+    box-shadow: 0 0 0 0.1rem var(--bg-primary), 0 0 0 0.25rem var(--accent-blue);
+}

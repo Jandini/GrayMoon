@@ -1,7 +1,9 @@
 @page "/agent"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using GrayMoon.App.Services
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JSRuntime
+@inject AgentConnectionTracker AgentConnectionTracker
 
 <PageTitle>Agent - GrayMoon</PageTitle>
 
@@ -9,7 +11,7 @@
     <div class="row mb-4">
         <div class="col-12">
             <h2>Agent</h2>
-            <p class="text-muted">Install the GrayMoon Agent Service</p>
+            <p class="text-muted">Install or uninstall the GrayMoon Agent Service</p>
         </div>
     </div>
 
@@ -17,18 +19,40 @@
         <div class="col-md-6 mb-4">
             <div class="card">
                 <div class="card-header">
-                    <h5 class="mb-0">Install</h5>
+                    <ul class="nav nav-tabs card-header-tabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link @(ActiveTab == "install" ? "active" : "")" type="button" role="tab" @onclick='() => SetActiveTab("install")'>Install</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link @(ActiveTab == "uninstall" ? "active" : "")" type="button" role="tab" @onclick='() => SetActiveTab("uninstall")'>Uninstall</button>
+                        </li>
+                    </ul>
                 </div>
                 <div class="card-body">
-                    <p class="mb-3">Run this PowerShell command as Administrator to install the GrayMoon Agent as a Windows service:</p>
-                    <div class="input-group">
-                        <input type="text" class="form-control font-monospace bg-dark" id="installCommand" readonly 
-                               value="@installCommand" />
-                        <button class="btn btn-primary" type="button" @onclick="CopyInstallCommand">Copy</button>
+                    <div class="tab-content">
+                        <div class="tab-pane @(ActiveTab == "install" ? "show active" : "")" role="tabpanel">
+                            <p class="mb-3">Run this PowerShell command as Administrator to install the GrayMoon Agent as a Windows service:</p>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace bg-dark" id="installCommand" readonly
+                                       value="@installCommand" />
+                                <button class="btn btn-primary" type="button" @onclick="CopyInstallCommand">Copy</button>
+                            </div>
+                            <small class="text-muted mt-2 d-block">
+                                The script will download, install, and start the agent service automatically.
+                            </small>
+                        </div>
+                        <div class="tab-pane @(ActiveTab == "uninstall" ? "show active" : "")" role="tabpanel">
+                            <p class="mb-3">Run this PowerShell command as Administrator to uninstall the GrayMoon Agent Windows service:</p>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace bg-dark" id="uninstallCommand" readonly
+                                       value="@uninstallCommand" />
+                                <button class="btn btn-outline-danger" type="button" @onclick="CopyUninstallCommand">Copy</button>
+                            </div>
+                            <small class="text-muted mt-2 d-block">
+                                The script will stop and remove the agent service.
+                            </small>
+                        </div>
                     </div>
-                    <small class="text-muted mt-2 d-block">
-                        The script will download, install, and start the agent service automatically.
-                    </small>
                 </div>
             </div>
         </div>
@@ -37,17 +61,38 @@
 
 @code {
     private string installCommand = string.Empty;
+    private string uninstallCommand = string.Empty;
+    private string ActiveTab = "install";
 
     protected override void OnInitialized()
     {
         var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
         var installUrl = $"{baseUrl}/api/agent/install";
         installCommand = $"Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('{installUrl}'))";
+        var uninstallUrl = $"{baseUrl}/api/agent/uninstall";
+        uninstallCommand = $"Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('{uninstallUrl}'))";
+        SetDefaultTab();
+    }
+
+    private void SetDefaultTab()
+    {
+        var state = AgentConnectionTracker.State;
+        ActiveTab = (state == AgentConnectionState.Online) ? "uninstall" : "install";
+    }
+
+    private void SetActiveTab(string tab)
+    {
+        ActiveTab = tab;
     }
 
     private async Task CopyInstallCommand()
     {
         await CopyToClipboard(installCommand);
+    }
+
+    private async Task CopyUninstallCommand()
+    {
+        await CopyToClipboard(uninstallCommand);
     }
 
     private async Task CopyToClipboard(string text)
