@@ -24,21 +24,7 @@ $downloadUrl = '{DOWNLOAD_URL}'
 
 Write-Host 'Checking for existing service...' -ForegroundColor Yellow
 $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-
-if ($existingService) {
-    Write-Host 'Found existing service. Stopping...' -ForegroundColor Yellow
-    if ($existingService.Status -eq 'Running') {
-        Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue | Out-Null
-        Start-Sleep -Seconds 2
-    }
-    
-    # Remove existing service
-    $service = Get-WmiObject -Class Win32_Service -Filter "name='$serviceName'" -ErrorAction SilentlyContinue
-    if ($service) {
-        $service.Delete() | Out-Null
-        Write-Host 'Removed existing service.' -ForegroundColor Green
-    }
-}
+$serviceExists = $null -ne $existingService
 
 # Create directory
 Write-Host 'Creating installation directory...' -ForegroundColor Yellow
@@ -46,7 +32,7 @@ if (-not (Test-Path $agentPath)) {
     New-Item -ItemType Directory -Path $agentPath -Force | Out-Null
 }
 
-# Download agent
+# Download agent (replace existing file if present)
 Write-Host "Downloading agent from {BASE_URL}..." -ForegroundColor Yellow
 try {
     $webClient = New-Object System.Net.WebClient
@@ -57,23 +43,51 @@ try {
     return 1
 }
 
-# Install as Windows service
-Write-Host 'Installing as Windows service...' -ForegroundColor Yellow
-try {
-    $hubUrl = '{HUB_URL}'
-    $binPath = "`"$agentExe`" run -u `"$hubUrl`""
-    $result = sc.exe create $serviceName binPath= $binPath start= auto DisplayName= "$serviceDisplayName"
-    if ($LASTEXITCODE -ne 0) {
-        throw "sc.exe create failed with exit code ${LASTEXITCODE}: $result"
+if ($serviceExists) {
+    # Service exists: stop it, file already replaced, then start it
+    Write-Host 'Found existing service. Stopping...' -ForegroundColor Yellow
+    if ($existingService.Status -eq 'Running') {
+        Stop-Service -Name $serviceName -Force -ErrorAction Stop | Out-Null
+        Start-Sleep -Seconds 2
     }
-    
-    # Set description using sc.exe
-    sc.exe description $serviceName "$serviceDescription" | Out-Null
-    
-    Write-Host 'Service installed successfully.' -ForegroundColor Green
-} catch {
-    Write-Host "ERROR: Failed to install service: $_" -ForegroundColor Red
-    return 1
+    Write-Host 'Service stopped. File updated.' -ForegroundColor Green
+} else {
+    # Service doesn't exist: create it
+    Write-Host 'Installing as Windows service...' -ForegroundColor Yellow
+    try {
+        $hubUrl = '{HUB_URL}'
+        $binPath = "`"$agentExe`" run -u `"$hubUrl`""
+        
+        # Install service to run as current user (required for git credentials, dotnet tools, and user environment)
+        $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        Write-Host "Service will run as: $currentUser" -ForegroundColor Cyan
+        Write-Host "Enter password for $currentUser (required for service to access git credentials and dotnet tools):" -ForegroundColor Yellow
+        $password = Read-Host -Prompt "Password" -AsSecureString
+        $passwordPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($password))
+        
+        # Clear the secure string from memory
+        $password.Dispose()
+        
+        # Use sc.exe to create service with custom user account (New-Service doesn't support this)
+        # Note: sc.exe is still needed for setting custom user credentials
+        $result = & sc.exe create $serviceName binPath= $binPath start= auto DisplayName= "$serviceDisplayName" obj= "$currentUser" password= "$passwordPlain" 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $errorMsg = if ($result -is [System.Array]) { ($result | Out-String).Trim() } else { $result.ToString() }
+            throw "sc.exe create failed with exit code ${LASTEXITCODE}: $errorMsg"
+        }
+        
+        # Clear password from memory immediately
+        $passwordPlain = $null
+        [System.GC]::Collect()
+        
+        # Set description using sc.exe
+        & sc.exe description $serviceName "$serviceDescription" | Out-Null
+        
+        Write-Host 'Service installed successfully.' -ForegroundColor Green
+    } catch {
+        Write-Host "ERROR: Failed to install service: $_" -ForegroundColor Red
+        return 1
+    }
 }
 
 # Start service
@@ -89,5 +103,5 @@ try {
 Write-Host ''
 Write-Host 'Installation completed!' -ForegroundColor Green
 Write-Host 'Service Name: GrayMoonAgent' -ForegroundColor Cyan
-Write-Host 'Service Path: ' $agentExe -ForegroundColor Cyan
+Write-Host 'Service Path:' $agentExe -ForegroundColor Cyan
 Write-Host ''

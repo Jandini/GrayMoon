@@ -24,17 +24,15 @@ $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if ($existingService) {
     Write-Host 'Found service. Stopping...' -ForegroundColor Yellow
     if ($existingService.Status -eq 'Running') {
-        Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
+        Stop-Service -Name $serviceName -Force -ErrorAction Stop | Out-Null
         Start-Sleep -Seconds 2
     }
     
-    # Remove service
+    # Remove service using PowerShell native cmdlet
     Write-Host 'Removing service...' -ForegroundColor Yellow
     try {
-        $result = sc.exe delete $serviceName
-        if (${LASTEXITCODE} -ne 0) {
-            throw "sc.exe delete failed with exit code ${LASTEXITCODE}: $result"
-        }
+        $service = Get-CimInstance -ClassName Win32_Service -Filter "name='$serviceName'" -ErrorAction Stop
+        Remove-CimInstance -InputObject $service -ErrorAction Stop | Out-Null
         Write-Host 'Service removed successfully.' -ForegroundColor Green
     } catch {
         Write-Host "ERROR: Failed to remove service: $_" -ForegroundColor Red
