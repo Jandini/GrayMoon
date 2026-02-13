@@ -21,7 +21,7 @@
                 <div class="card-header">
                     <ul class="nav nav-tabs card-header-tabs" role="tablist">
                         <li class="nav-item" role="presentation">
-                            <button class="nav-link @(ActiveTab == "install" ? "active" : "")" type="button" role="tab" @onclick='() => SetActiveTab("install")'>Install</button>
+                            <button class="nav-link @(ActiveTab == "install" ? "active" : "")" type="button" role="tab" @onclick='() => SetActiveTab("install")'>@InstallTabLabel</button>
                         </li>
                         <li class="nav-item" role="presentation">
                             <button class="nav-link @(ActiveTab == "uninstall" ? "active" : "")" type="button" role="tab" @onclick='() => SetActiveTab("uninstall")'>Uninstall</button>
@@ -31,6 +31,10 @@
                 <div class="card-body">
                     <div class="tab-content">
                         <div class="tab-pane @(ActiveTab == "install" ? "show active" : "")" role="tabpanel">
+                            @if (AgentConnectionTracker.State == AgentConnectionState.VersionMismatch)
+                            {
+                                <p class="mb-3 small text-muted">The agent is running version <strong class="text-muted">@(AgentConnectionTracker.AgentSemVer ?? "unknown")</strong>, which is not compatible with this application. Run the command below to update.</p>
+                            }
                             <p class="mb-3">Run this PowerShell command as Administrator to install the GrayMoon Agent as a Windows service:</p>
                             <div class="input-group">
                                 <input type="text" class="form-control font-monospace bg-dark" id="installCommand" readonly
@@ -54,6 +58,13 @@
                         </div>
                     </div>
                 </div>
+                @if (ActiveTab == "install")
+                {
+                    <div class="card-footer card-footer-agent d-flex justify-content-between align-items-center">
+                        <small class="text-muted">Download the agent executable to this device.</small>
+                        <button type="button" class="btn btn-secondary" @onclick="DownloadAgent">Download</button>
+                    </div>
+                }
             </div>
         </div>
     </div>
@@ -74,6 +85,14 @@
         SetDefaultTab();
     }
 
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            AgentConnectionTracker.OnStateChanged(_ => InvokeAsync(StateHasChanged));
+    }
+
+    private string InstallTabLabel => AgentConnectionTracker.State == AgentConnectionState.VersionMismatch ? "Update" : "Install";
+
     private void SetDefaultTab()
     {
         var state = AgentConnectionTracker.State;
@@ -83,6 +102,11 @@
     private void SetActiveTab(string tab)
     {
         ActiveTab = tab;
+    }
+
+    private async Task DownloadAgent()
+    {
+        await JSRuntime.InvokeVoidAsync("graymoonDownloadAgent");
     }
 
     private async Task CopyInstallCommand()

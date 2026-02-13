@@ -16,13 +16,13 @@
 }
 
 .card-header-tabs .nav-link.active {
-    color: var(--accent-blue);
+    color: #fff;
     border-color: var(--border-color) var(--border-color) var(--bg-card);
     background: var(--bg-card);
 }
 
 .card-header-tabs .nav-link.active:hover {
-    color: var(--accent-blue-hover);
+    color: #fff;
 }
 
 .card-header-tabs .nav-link:focus {
@@ -31,4 +31,8 @@
 
 .card-header-tabs .nav-link:focus-visible {
     box-shadow: 0 0 0 0.1rem var(--bg-primary), 0 0 0 0.25rem var(--accent-blue);
+}
+
+.card-footer-agent {
+    padding-inline-end: 0.75rem;
 }
