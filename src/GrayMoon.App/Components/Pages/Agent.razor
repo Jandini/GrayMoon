@@ -1,9 +1,11 @@
 @page "/agent"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Text.Json
 @using GrayMoon.App.Services
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JSRuntime
 @inject AgentConnectionTracker AgentConnectionTracker
+@inject IAgentBridge AgentBridge
 
 <PageTitle>Agent - GrayMoon</PageTitle>
 
@@ -67,13 +69,53 @@
                 }
             </div>
         </div>
+
+        @if (AgentConnectionTracker.State == AgentConnectionState.Online || AgentConnectionTracker.State == AgentConnectionState.VersionMismatch)
+        {
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <div class="card-header card-header-host">
+                        <h5 class="mb-0">Host</h5>
+                    </div>
+                    <div class="card-body">
+                        @if (hostInfo == null && hostInfoLoadError == null)
+                        {
+                            <p class="text-muted mb-0">Loading…</p>
+                        }
+                        else if (hostInfoLoadError != null)
+                        {
+                            <p class="text-muted mb-0">@hostInfoLoadError</p>
+                        }
+                        else if (hostInfo != null)
+                        {
+                            <div class="host-info-grid small">
+                                <span class="text-muted">Agent</span>
+                                <span>@VersionBadge(AgentConnectionTracker.AgentSemVer)</span>
+                                <span class="text-muted">Workspace Root</span>
+                                <span class="font-monospace">@hostInfo.WorkspaceRoot</span>
+                                <span class="text-muted">Dotnet</span>
+                                <span>@VersionBadge(hostInfo.DotnetVersion)</span>
+                                <span class="text-muted">Git</span>
+                                <span>@VersionBadge(hostInfo.GitVersion)</span>
+                                <span class="text-muted">GitVersion</span>
+                                <span>@VersionBadge(hostInfo.GitVersionToolVersion)</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
     </div>
 </div>
 
 @code {
+    private sealed record HostInfoDto(string WorkspaceRoot, string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion);
+
     private string installCommand = string.Empty;
     private string uninstallCommand = string.Empty;
     private string ActiveTab = "install";
+    private HostInfoDto? hostInfo;
+    private string? hostInfoLoadError;
 
     protected override void OnInitialized()
     {
@@ -85,11 +127,64 @@
         SetDefaultTab();
     }
 
-    protected override void OnAfterRender(bool firstRender)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
-            AgentConnectionTracker.OnStateChanged(_ => InvokeAsync(StateHasChanged));
+        {
+            AgentConnectionTracker.OnStateChanged(state =>
+            {
+                if (state is AgentConnectionState.Online or AgentConnectionState.VersionMismatch)
+                    _ = InvokeAsync(LoadHostInfoAsync);
+                _ = InvokeAsync(StateHasChanged);
+            });
+            await LoadHostInfoAsync();
+        }
     }
+
+    private async Task LoadHostInfoAsync()
+    {
+        if (!AgentBridge.IsAgentConnected)
+        {
+            hostInfo = null;
+            hostInfoLoadError = null;
+            return;
+        }
+        hostInfoLoadError = null;
+        var response = await AgentBridge.SendCommandAsync("GetHostInfo", new { }, CancellationToken.None);
+        if (!response.Success || response.Data == null)
+        {
+            hostInfoLoadError = response.Error ?? "Failed to load host info.";
+            hostInfo = null;
+            return;
+        }
+        try
+        {
+            var json = response.Data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(response.Data);
+            var dto = JsonSerializer.Deserialize<HostInfoDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            hostInfo = dto ?? new HostInfoDto(string.Empty, null, null, null);
+        }
+        catch
+        {
+            hostInfoLoadError = "Failed to parse host info.";
+            hostInfo = null;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static RenderFragment VersionBadge(string? version) => builder =>
+    {
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            builder.OpenElement(0, "span");
+            builder.AddAttribute(1, "class", "badge bg-secondary");
+            builder.AddContent(2, "not installed");
+            builder.CloseElement();
+        }
+        else
+        {
+            builder.AddContent(0, version);
+        }
+    };
 
     private string InstallTabLabel => AgentConnectionTracker.State == AgentConnectionState.VersionMismatch ? "Update" : "Install";
 

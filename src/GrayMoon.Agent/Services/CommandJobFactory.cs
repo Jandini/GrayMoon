@@ -19,7 +19,11 @@ public sealed class CommandJobFactory
     private static object DeserializeRequest(string command, JsonElement? args)
     {
         if (args == null || args.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            if (command == "GetHostInfo")
+                return new GetHostInfoRequest();
             throw new ArgumentException($"Args required for {command}");
+        }
 
         var json = args.Value.GetRawText();
         var options = AgentJsonOptions.SerializerOptions;
@@ -40,6 +44,7 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid GetWorkspaceExists args"),
             "GetWorkspaceRoot" => JsonSerializer.Deserialize<GetWorkspaceRootRequest>(json, options)
                 ?? throw new ArgumentException("Invalid GetWorkspaceRoot args"),
+            "GetHostInfo" => JsonSerializer.Deserialize<GetHostInfoRequest>(json, options) ?? new GetHostInfoRequest(),
             "SyncRepositoryDependencies" => JsonSerializer.Deserialize<SyncRepositoryDependenciesRequest>(json, options)
                 ?? throw new ArgumentException("Invalid SyncRepositoryDependencies args"),
             "RefreshRepositoryProjects" => JsonSerializer.Deserialize<RefreshRepositoryProjectsRequest>(json, options)

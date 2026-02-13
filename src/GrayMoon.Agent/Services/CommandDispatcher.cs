@@ -12,6 +12,7 @@ public sealed class CommandDispatcher(
     ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResponse> getRepositoryVersionCommand,
     ICommandHandler<GetWorkspaceExistsRequest, GetWorkspaceExistsResponse> getWorkspaceExistsCommand,
     ICommandHandler<GetWorkspaceRootRequest, GetWorkspaceRootResponse> getWorkspaceRootCommand,
+    ICommandHandler<GetHostInfoRequest, GetHostInfoResponse> getHostInfoCommand,
     ICommandHandler<SyncRepositoryDependenciesRequest, SyncRepositoryDependenciesResponse> syncRepositoryDependenciesCommand,
     ICommandHandler<RefreshRepositoryProjectsRequest, RefreshRepositoryProjectsResponse> refreshRepositoryProjectsCommand) : ICommandDispatcher
 {
@@ -25,6 +26,7 @@ public sealed class CommandDispatcher(
         ["GetRepositoryVersion"] = async (req, ct) => await getRepositoryVersionCommand.ExecuteAsync((GetRepositoryVersionRequest)req, ct),
         ["GetWorkspaceExists"] = async (req, ct) => await getWorkspaceExistsCommand.ExecuteAsync((GetWorkspaceExistsRequest)req, ct),
         ["GetWorkspaceRoot"] = async (req, ct) => await getWorkspaceRootCommand.ExecuteAsync((GetWorkspaceRootRequest)req, ct),
+        ["GetHostInfo"] = async (req, ct) => await getHostInfoCommand.ExecuteAsync((GetHostInfoRequest)req, ct),
         ["SyncRepositoryDependencies"] = async (req, ct) => await syncRepositoryDependenciesCommand.ExecuteAsync((SyncRepositoryDependenciesRequest)req, ct),
     };
 
