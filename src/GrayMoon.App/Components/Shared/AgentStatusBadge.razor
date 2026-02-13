@@ -1,20 +1,11 @@
 @using GrayMoon.App.Services
 @inject AgentConnectionTracker AgentConnectionTracker
-@inject NavigationManager NavigationManager
 
-@if (_state == AgentConnectionState.VersionMismatch)
-{
-    <span class="badge @BadgeClass" 
-          title="@TitleText" 
-          style="cursor: pointer;" 
-          @onclick="NavigateToAgentPage">
-        @StateLabel
-    </span>
-}
-else
-{
-    <span class="badge @BadgeClass" title="@TitleText">@StateLabel</span>
-}
+<a href="/agent" class="@BadgeClassFull" 
+   title="@TitleText" 
+   style="cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle;">
+    @StateLabel
+</a>
 
 @code {
     private AgentConnectionState _state = AgentConnectionState.Offline;
@@ -39,6 +30,8 @@ else
         _ => "bg-secondary"
     };
 
+    private string BadgeClassFull => $"badge {BadgeClass} text-decoration-none ms-2";
+
     private string StateLabel => _state switch
     {
         AgentConnectionState.Online => "online",
@@ -56,9 +49,4 @@ else
         AgentConnectionState.Connecting => "Agent connection status: connecting",
         _ => "Agent connection status: unknown"
     };
-
-    private void NavigateToAgentPage()
-    {
-        NavigationManager.NavigateTo("/agent");
-    }
 }

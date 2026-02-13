@@ -23,6 +23,21 @@ $downloadUrl = '{DOWNLOAD_URL}'
 Write-Host 'Checking for existing service...' -ForegroundColor Yellow
 $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 $serviceExists = $null -ne $existingService
+$wasRunning = $false
+
+# Stop service if it's running (needed to unlock the executable file)
+if ($serviceExists -and $existingService.Status -eq 'Running') {
+    Write-Host 'Found running service. Stopping to allow file update...' -ForegroundColor Yellow
+    try {
+        Stop-Service -Name $serviceName -Force -ErrorAction Stop | Out-Null
+        Start-Sleep -Seconds 2
+        $wasRunning = $true
+        Write-Host 'Service stopped.' -ForegroundColor Green
+    } catch {
+        Write-Host "WARNING: Failed to stop service: $_" -ForegroundColor Yellow
+        Write-Host "Attempting to download anyway..." -ForegroundColor Yellow
+    }
+}
 
 # Create directory
 Write-Host 'Creating installation directory...' -ForegroundColor Yellow
@@ -38,17 +53,19 @@ try {
     Write-Host 'Download completed.' -ForegroundColor Green
 } catch {
     Write-Host "ERROR: Failed to download agent: $_" -ForegroundColor Red
+    if ($wasRunning) {
+        Write-Host "Attempting to restart the service..." -ForegroundColor Yellow
+        try {
+            Start-Service -Name $serviceName -ErrorAction SilentlyContinue
+        } catch {
+            Write-Host "Could not restart service. Please restart manually." -ForegroundColor Yellow
+        }
+    }
     return 1
 }
 
 if ($serviceExists) {
-    # Service exists: stop it, file already replaced, then start it
-    Write-Host 'Found existing service. Stopping...' -ForegroundColor Yellow
-    if ($existingService.Status -eq 'Running') {
-        Stop-Service -Name $serviceName -Force -ErrorAction Stop | Out-Null
-        Start-Sleep -Seconds 2
-    }
-    Write-Host 'Service stopped. File updated.' -ForegroundColor Green
+    Write-Host 'File updated successfully.' -ForegroundColor Green
 } else {
     # Service doesn't exist: create it
     Write-Host 'Installing as Windows service...' -ForegroundColor Yellow
