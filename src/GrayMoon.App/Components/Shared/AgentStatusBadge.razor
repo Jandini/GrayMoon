@@ -1,16 +1,31 @@
 @using GrayMoon.App.Services
 @inject AgentConnectionTracker AgentConnectionTracker
+@inject NavigationManager NavigationManager
 
-<span class="badge @BadgeClass" title="Agent connection status">@StateLabel</span>
+@if (_state == AgentConnectionState.VersionMismatch)
+{
+    <span class="badge @BadgeClass" 
+          title="@TitleText" 
+          style="cursor: pointer;" 
+          @onclick="NavigateToAgentPage">
+        @StateLabel
+    </span>
+}
+else
+{
+    <span class="badge @BadgeClass" title="@TitleText">@StateLabel</span>
+}
 
 @code {
     private AgentConnectionState _state = AgentConnectionState.Offline;
+    private string? _agentSemVer;
 
     protected override void OnInitialized()
     {
         AgentConnectionTracker.OnStateChanged(s =>
         {
             _state = s;
+            _agentSemVer = AgentConnectionTracker.AgentSemVer;
             _ = InvokeAsync(StateHasChanged);
         });
     }
@@ -20,6 +35,7 @@
         AgentConnectionState.Online => "bg-success",
         AgentConnectionState.Offline => "bg-danger",
         AgentConnectionState.Connecting => "bg-secondary",
+        AgentConnectionState.VersionMismatch => "bg-danger",
         _ => "bg-secondary"
     };
 
@@ -28,6 +44,21 @@
         AgentConnectionState.Online => "online",
         AgentConnectionState.Offline => "offline",
         AgentConnectionState.Connecting => "connecting",
+        AgentConnectionState.VersionMismatch => "update",
         _ => "offline"
     };
+
+    private string TitleText => _state switch
+    {
+        AgentConnectionState.VersionMismatch => $"Agent version mismatch. Agent version: {_agentSemVer ?? "unknown"}. Click to update.",
+        AgentConnectionState.Online => "Agent connection status: online",
+        AgentConnectionState.Offline => "Agent connection status: offline",
+        AgentConnectionState.Connecting => "Agent connection status: connecting",
+        _ => "Agent connection status: unknown"
+    };
+
+    private void NavigateToAgentPage()
+    {
+        NavigationManager.NavigateTo("/agent");
+    }
 }

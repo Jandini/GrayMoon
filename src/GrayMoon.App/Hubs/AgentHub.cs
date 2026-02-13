@@ -29,4 +29,11 @@ public sealed class AgentHub(AgentConnectionTracker connectionTracker, SyncComma
     {
         await syncCommandHandler.HandleAsync(workspaceId, repositoryId, version, branch, outgoingCommits, incomingCommits);
     }
+
+    /// <summary>Invoked by the agent when it connects to report its SemVer version.</summary>
+    public Task ReportSemVer(string semVer)
+    {
+        connectionTracker.ReportAgentSemVer(Context.ConnectionId, semVer);
+        return Task.CompletedTask;
+    }
 }

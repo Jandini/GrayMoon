@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using GrayMoon.Agent.Abstractions;
@@ -23,6 +24,25 @@ public sealed class SignalRConnectionHostedService(
     private readonly AgentOptions _options = options.Value;
     private HubConnection? _connection;
 
+    private async Task ReportSemVerAsync(CancellationToken cancellationToken)
+    {
+        if (_connection == null) return;
+
+        var agentSemVer = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion ?? "0.0.0";
+
+        try
+        {
+            await _connection.InvokeAsync("ReportSemVer", agentSemVer, cancellationToken);
+            logger.LogInformation("Reported agent SemVer: {SemVer}", agentSemVer);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to report SemVer to hub");
+        }
+    }
+
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         _connection = new HubConnectionBuilder()
@@ -43,6 +63,12 @@ public sealed class SignalRConnectionHostedService(
             await jobQueue.EnqueueAsync(envelope, cancellationToken);
         });
 
+        _connection.Reconnected += async _ =>
+        {
+            logger.LogInformation("Reconnected to hub at {Url}", _options.AppHubUrl);
+            await ReportSemVerAsync(CancellationToken.None);
+        };
+
         ((HubConnectionProvider)hubProvider).Connection = _connection;
 
         await ConnectWithRetryAsync(cancellationToken);
@@ -56,6 +82,7 @@ public sealed class SignalRConnectionHostedService(
             {
                 await _connection!.StartAsync(cancellationToken);
                 logger.LogInformation("Connected to hub at {Url}", _options.AppHubUrl);
+                await ReportSemVerAsync(cancellationToken);
                 return;
             }
             catch (Exception ex)
