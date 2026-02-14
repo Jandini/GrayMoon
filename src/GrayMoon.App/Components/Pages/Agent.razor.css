@@ -59,6 +59,23 @@
     padding-inline-end: 0.75rem;
 }
 
+/* Keep install/uninstall command input group inside panel when resized */
+.page-card .card-body {
+    min-width: 0;
+    overflow-x: auto;
+}
+
+.page-card .card-body .input-group {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.page-card .card-body .input-group .form-control {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .host-info-grid {
     display: grid;
     grid-template-columns: auto 1fr;
