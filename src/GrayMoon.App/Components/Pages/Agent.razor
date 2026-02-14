@@ -86,6 +86,7 @@
                                         <span class="text-muted">GitVersion</span>
                                         <span>@GitVersionToolCell(hostInfo.GitVersionToolVersion)</span>
                                     </div>
+                                    <p class="small text-muted mt-3 mb-0">@HostPrerequisitesNote(hostInfo)</p>
                                 }
                             </div>
                         }
@@ -247,6 +248,14 @@
         builder.CloseElement();
         builder.CloseElement();
     };
+
+    private static string HostPrerequisitesNote(HostInfoDto hostInfo)
+    {
+        var allInstalled = !string.IsNullOrWhiteSpace(hostInfo.DotnetVersion)
+            && !string.IsNullOrWhiteSpace(hostInfo.GitVersion)
+            && !string.IsNullOrWhiteSpace(hostInfo.GitVersionToolVersion);
+        return allInstalled ? "All prerequisites are installed." : "Install the missing prerequisites above.";
+    }
 
     private string InstallTabLabel => AgentConnectionTracker.State == AgentConnectionState.VersionMismatch ? "Update" : "Install";
 
