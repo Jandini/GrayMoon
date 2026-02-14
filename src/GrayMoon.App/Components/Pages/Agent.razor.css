@@ -1,0 +1,96 @@
+/* Agent page card tabs: theme with app colors */
+.card-header-tabs {
+    border-bottom-color: var(--border-color);
+}
+
+.card-header-tabs .nav-link {
+    color: var(--text-secondary);
+    border-color: transparent;
+    background: transparent;
+}
+
+.card-header-tabs .nav-link:hover {
+    color: var(--text-primary);
+    border-color: transparent;
+    background: var(--bg-hover);
+}
+
+.card-header-tabs .nav-link.active {
+    color: #fff;
+    border-color: var(--border-color) var(--border-color) var(--bg-card);
+    background: var(--bg-card);
+}
+
+.card-header-tabs .nav-link.active:hover {
+    color: #fff;
+}
+
+.card-header-tabs .nav-link:focus {
+    box-shadow: none;
+}
+
+.card-header-tabs .nav-link:focus-visible {
+    box-shadow: 0 0 0 0.1rem var(--bg-primary), 0 0 0 0.25rem var(--accent-blue);
+}
+
+.card-header-tabs .nav-link.host-tab-missing,
+.card-header-tabs .nav-link.install-tab-update {
+    color: var(--bs-danger);
+}
+
+.card-header-tabs .nav-link.host-tab-missing:hover,
+.card-header-tabs .nav-link.install-tab-update:hover {
+    color: var(--bs-danger);
+    background: var(--bg-hover);
+}
+
+.card-header-tabs .nav-link.host-tab-missing.active,
+.card-header-tabs .nav-link.install-tab-update.active {
+    color: #fff;
+    background: var(--bs-danger);
+}
+
+.card-header-tabs .nav-link.host-tab-missing.active:hover,
+.card-header-tabs .nav-link.install-tab-update.active:hover {
+    color: #fff;
+}
+
+.card-footer-agent {
+    padding-inline-end: 0.75rem;
+}
+
+/* Keep install/uninstall command input group inside panel when resized */
+.page-card .card-body {
+    min-width: 0;
+    overflow-x: auto;
+}
+
+.page-card .card-body .input-group {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.page-card .card-body .input-group .form-control {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.host-info-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 1.5rem;
+    row-gap: 0.35rem;
+    align-items: baseline;
+}
+
+.host-info-grid > *:nth-child(odd) {
+    min-width: 4.5rem;
+}
+
+.host-info-grid > *:nth-child(even) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

@@ -1,6 +1,8 @@
 @inherits LayoutComponentBase
 @using System.Reflection
 @using GrayMoon.App.Components.Shared
+@using GrayMoon.App.Services
+@inject AgentConnectionTracker AgentConnectionTracker
 
 <div class="page">
     <div class="sidebar" id="sidebar">
@@ -12,8 +14,8 @@
             @if (!string.IsNullOrEmpty(version))
             {
                 <span class="header-version"><span class="text-muted">ver</span> @version</span>
-                <span class="ms-2"><AgentStatusBadge /></span>
             }
+            <AgentStatusBadge />
         </div>
 
         <article class="content px-4">
@@ -40,5 +42,7 @@
         version = string.IsNullOrWhiteSpace(informationalVersion)
             ? typeof(Program).Assembly.GetName().Version?.ToString()
             : informationalVersion;
+
+        AgentConnectionTracker.OnStateChanged((sync) => { _ = InvokeAsync(StateHasChanged); });
     }
 }

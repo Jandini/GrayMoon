@@ -1,10 +1,13 @@
+using System.Reflection;
+
 namespace GrayMoon.App.Services;
 
 public enum AgentConnectionState
 {
     Connecting,
     Online,
-    Offline
+    Offline,
+    VersionMismatch
 }
 
 /// <summary>Tracks agent SignalR connection for the UI badge.</summary>
@@ -12,8 +15,15 @@ public sealed class AgentConnectionTracker
 {
     private readonly object _lock = new();
     private readonly List<string> _connectionIds = [];
+    private readonly Dictionary<string, string> _agentVersions = new();
     private AgentConnectionState _state = AgentConnectionState.Offline;
+    private string? _appSemVer;
     private event Action<AgentConnectionState>? _onStateChanged;
+
+    public AgentConnectionTracker()
+    {
+        _appSemVer = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+    }
 
     public AgentConnectionState State
     {
@@ -23,6 +33,15 @@ public sealed class AgentConnectionTracker
             if (_state == value) return;
             _state = value;
             _onStateChanged?.Invoke(value);
+        }
+    }
+
+    public string? AgentSemVer
+    {
+        get
+        {
+            lock (_lock)
+                return _agentVersions.Values.FirstOrDefault();
         }
     }
 
@@ -41,7 +60,7 @@ public sealed class AgentConnectionTracker
         {
             if (!_connectionIds.Contains(connectionId))
                 _connectionIds.Add(connectionId);
-            State = AgentConnectionState.Online;
+            UpdateState();
         }
     }
 
@@ -50,7 +69,36 @@ public sealed class AgentConnectionTracker
         lock (_lock)
         {
             _connectionIds.Remove(connectionId);
-            State = _connectionIds.Count > 0 ? AgentConnectionState.Online : AgentConnectionState.Offline;
+            _agentVersions.Remove(connectionId);
+            UpdateState();
+        }
+    }
+
+    public void ReportAgentSemVer(string connectionId, string agentSemVer)
+    {
+        lock (_lock)
+        {
+            _agentVersions[connectionId] = agentSemVer;
+            UpdateState();
+        }
+    }
+
+    private void UpdateState()
+    {
+        if (_connectionIds.Count == 0)
+        {
+            State = AgentConnectionState.Offline;
+            return;
+        }
+
+        var agentVersion = _agentVersions.Values.FirstOrDefault();
+        if (agentVersion != null && !string.IsNullOrEmpty(_appSemVer) && agentVersion != _appSemVer)
+        {
+            State = AgentConnectionState.VersionMismatch;
+        }
+        else
+        {
+            State = AgentConnectionState.Online;
         }
     }
 

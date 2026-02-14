@@ -1,33 +1,48 @@
 @using GrayMoon.App.Services
 @inject AgentConnectionTracker AgentConnectionTracker
+@rendermode @(new InteractiveServerRenderMode(prerender: true))
 
-<span class="badge @BadgeClass" title="Agent connection status">@StateLabel</span>
+<a href="/agent" class="@BadgeClassFull" 
+   title="@TitleText" 
+   style="cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle;">
+    @StateLabel
+</a>
 
 @code {
-    private AgentConnectionState _state = AgentConnectionState.Offline;
+    private AgentConnectionState State => AgentConnectionTracker.State;
+    private string? AgentSemVer => AgentConnectionTracker.AgentSemVer;
 
     protected override void OnInitialized()
     {
-        AgentConnectionTracker.OnStateChanged(s =>
-        {
-            _state = s;
-            _ = InvokeAsync(StateHasChanged);
-        });
+        AgentConnectionTracker.OnStateChanged((state) => { _ = InvokeAsync(StateHasChanged); });
     }
 
-    private string BadgeClass => _state switch
+    private string BadgeClass => State switch
     {
         AgentConnectionState.Online => "bg-success",
         AgentConnectionState.Offline => "bg-danger",
         AgentConnectionState.Connecting => "bg-secondary",
+        AgentConnectionState.VersionMismatch => "bg-danger",
         _ => "bg-secondary"
     };
 
-    private string StateLabel => _state switch
+    private string BadgeClassFull => $"badge {BadgeClass} text-decoration-none ms-2";
+
+    private string StateLabel => State switch
     {
         AgentConnectionState.Online => "online",
         AgentConnectionState.Offline => "offline",
         AgentConnectionState.Connecting => "connecting",
+        AgentConnectionState.VersionMismatch => "update",
         _ => "offline"
+    };
+
+    private string TitleText => State switch
+    {
+        AgentConnectionState.VersionMismatch => $"Agent version mismatch. Agent version: {AgentSemVer ?? "unknown"}. Click to update.",
+        AgentConnectionState.Online => "Agent connection status: online",
+        AgentConnectionState.Offline => "Agent connection status: offline",
+        AgentConnectionState.Connecting => "Agent connection status: connecting",
+        _ => "Agent connection status: unknown"
     };
 }

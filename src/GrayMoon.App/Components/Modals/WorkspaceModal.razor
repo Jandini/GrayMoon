@@ -43,7 +43,7 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
-                    <button type="button" class="btn btn-primary" @onclick="OnSave" disabled="@(IsSaving || IsCheckingDirectory)">
+                    <button type="button" class="btn btn-primary" @onclick="OnSave" disabled="@(IsSaving || IsCheckingDirectory || SaveDisabled)">
                         @if (IsSaving)
                         {
                             <span class="spinner-border spinner-border-sm me-2"></span>
@@ -69,6 +69,7 @@
     [Parameter] public bool IsNameDisabled { get; set; }
     [Parameter] public bool IsSaving { get; set; }
     [Parameter] public bool IsCheckingDirectory { get; set; }
+    [Parameter] public bool SaveDisabled { get; set; }
     [Parameter] public string? ErrorMessage { get; set; }
     [Parameter] public EventCallback OnSave { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
@@ -94,7 +95,7 @@
         {
             await OnCancel.InvokeAsync();
         }
-        else if (e.Key == "Enter" && !IsSaving && !IsCheckingDirectory)
+        else if (e.Key == "Enter" && !IsSaving && !IsCheckingDirectory && !SaveDisabled)
         {
             await OnSave.InvokeAsync();
         }

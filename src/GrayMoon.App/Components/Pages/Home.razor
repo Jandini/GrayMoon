@@ -1,9 +1,11 @@
 @page "/"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using GrayMoon.App.Repositories
+@using GrayMoon.App.Services
 @inject WorkspaceRepository WorkspaceRepository
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
+@inject AgentConnectionTracker AgentConnectionTracker
 <PageTitle>Home - GrayMoon</PageTitle>
 
 @if (!showHome)
@@ -15,19 +17,32 @@
 else
 {
 <div class="container-fluid page-container">
-    <div class="row">
-        <div class="col-12">
-            <div class="jumbotron banner-card-style rounded p-4 mb-4 border">
-                <div class="d-flex align-items-center">
-                    <img src="moon.svg" alt="GrayMoon" class="me-4" style="height: 80px; width: auto; flex-shrink: 0;" />
-                    <div>
-                        <h1 class="display-5 mb-0 banner-title">
-                            GrayMoon
-                        </h1>
-                        <p class="lead fs-6 mb-0 banner-subtitle">
-                            .NET dependency orchestrator.
-                        </p>
-                    </div>
+    <div class="row mb-4 align-items-stretch">
+        <div class="col-md-8 col-lg-8 d-flex mb-4 mb-md-0">
+            <div class="jumbotron banner-card-style rounded p-4 border flex-grow-1 d-flex align-items-center">
+                <img src="moon.svg" alt="GrayMoon" class="me-4" style="height: 80px; width: auto; flex-shrink: 0;" />
+                <div>
+                    <h1 class="display-5 mb-0 banner-title">
+                        GrayMoon
+                    </h1>
+                    <p class="lead fs-6 mb-0 banner-subtitle">
+                        .NET dependency orchestrator.
+                    </p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 col-lg-4 mb-4 mb-md-0">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="bi bi-grid"></i> Workspaces
+                    </h5>
+                    <p class="card-text">
+                        Group repositories into workspaces for quick access.
+                    </p>
+                    <a class="btn btn-primary" href="/workspaces">
+                        Manage Workspaces
+                    </a>
                 </div>
             </div>
         </div>
@@ -41,27 +56,9 @@ else
                         <i class="bi bi-cpu"></i> Agent
                     </h5>
                     <p class="card-text">
-                        Host-side agent for git and repo operations.
+                        Install, update, or uninstall the GrayMoon Agent service.
                     </p>
-                    <button type="button" class="btn btn-primary" onclick="window.graymoonDownloadAgent()">
-                        Download Agent
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-md-6 col-lg-4 mb-4">
-            <div class="card h-100">
-                <div class="card-body">
-                    <h5 class="card-title">
-                        <i class="bi bi-grid"></i> Workspaces
-                    </h5>
-                    <p class="card-text">
-                        Group repositories into workspaces for quick access.
-                    </p>
-                    <a class="btn btn-primary" href="/workspaces">
-                        Manage Workspaces
-                    </a>
+                    <a class="btn @AgentButtonClass" href="/agent">@AgentButtonText</a>
                 </div>
             </div>
         </div>
@@ -97,7 +94,6 @@ else
                 </div>
             </div>
         </div>
-
     </div>
 </div>
 }
@@ -105,6 +101,21 @@ else
 @code {
     private const string DefaultWorkspaceRedirectKey = "defaultWorkspaceRedirected";
     private bool showHome;
+
+    private string AgentButtonText => AgentConnectionTracker.State switch
+    {
+        AgentConnectionState.Online => "Manage Agent",
+        AgentConnectionState.VersionMismatch => "Upgrade Agent",
+        _ => "Install Agent"
+    };
+
+    private string AgentButtonClass => AgentConnectionTracker.State == AgentConnectionState.Online ? "btn-primary" : "btn-danger";
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            AgentConnectionTracker.OnStateChanged(_ => InvokeAsync(StateHasChanged));
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

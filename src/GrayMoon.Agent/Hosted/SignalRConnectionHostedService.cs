@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using GrayMoon.Agent.Abstractions;
@@ -13,6 +14,18 @@ using Microsoft.Extensions.Options;
 
 namespace GrayMoon.Agent.Hosted;
 
+/// <summary>Custom retry policy that retries every 5 seconds indefinitely.</summary>
+internal sealed class FiveSecondRetryPolicy : IRetryPolicy
+{
+    public TimeSpan? NextRetryDelay(RetryContext retryContext)
+    {
+        // First retry immediately, then every 5 seconds
+        return retryContext.PreviousRetryCount == 0 
+            ? TimeSpan.Zero 
+            : TimeSpan.FromSeconds(5);
+    }
+}
+
 public sealed class SignalRConnectionHostedService(
     IHubConnectionProvider hubProvider,
     IJobQueue jobQueue,
@@ -23,11 +36,30 @@ public sealed class SignalRConnectionHostedService(
     private readonly AgentOptions _options = options.Value;
     private HubConnection? _connection;
 
+    private async Task ReportSemVerAsync(CancellationToken cancellationToken)
+    {
+        if (_connection == null) return;
+
+        var agentSemVer = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion ?? "0.0.0";
+
+        try
+        {
+            await _connection.InvokeAsync("ReportSemVer", agentSemVer, cancellationToken);
+            logger.LogInformation("Reported agent SemVer: {SemVer}", agentSemVer);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to report SemVer to hub");
+        }
+    }
+
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         _connection = new HubConnectionBuilder()
             .WithUrl(_options.AppHubUrl)
-            .WithAutomaticReconnect()
+            .WithAutomaticReconnect(new FiveSecondRetryPolicy())
             .AddJsonProtocol(options =>
             {
                 options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
@@ -43,6 +75,27 @@ public sealed class SignalRConnectionHostedService(
             await jobQueue.EnqueueAsync(envelope, cancellationToken);
         });
 
+        _connection.Reconnecting += error =>
+        {
+            logger.LogWarning(error, "Connection lost. Reconnecting to hub at {Url}...", _options.AppHubUrl);
+            return Task.CompletedTask;
+        };
+
+        _connection.Reconnected += async connectionId =>
+        {
+            logger.LogInformation("Reconnected to hub at {Url} (ConnectionId: {ConnectionId})", _options.AppHubUrl, connectionId);
+            await ReportSemVerAsync(CancellationToken.None);
+        };
+
+        _connection.Closed += async error =>
+        {
+            if (cancellationToken.IsCancellationRequested) return;
+            logger.LogWarning(error, "Connection closed. Will attempt to reconnect in 5 seconds...");
+            // Start a background task to reconnect if automatic reconnect didn't work
+            _ = Task.Run(async () => await ReconnectLoopAsync(cancellationToken), CancellationToken.None);
+            await Task.CompletedTask;
+        };
+
         ((HubConnectionProvider)hubProvider).Connection = _connection;
 
         await ConnectWithRetryAsync(cancellationToken);
@@ -54,14 +107,86 @@ public sealed class SignalRConnectionHostedService(
         {
             try
             {
-                await _connection!.StartAsync(cancellationToken);
+                if (_connection == null) break;
+                
+                var state = _connection.State;
+                if (state == HubConnectionState.Connected)
+                {
+                    logger.LogInformation("Already connected to hub at {Url}", _options.AppHubUrl);
+                    await ReportSemVerAsync(cancellationToken);
+                    return;
+                }
+
+                await _connection.StartAsync(cancellationToken);
                 logger.LogInformation("Connected to hub at {Url}", _options.AppHubUrl);
+                await ReportSemVerAsync(cancellationToken);
                 return;
             }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Failed to connect to hub. Retrying in 5s...");
                 await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            }
+        }
+    }
+
+    private async Task ReconnectLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (_connection == null) break;
+
+                HubConnectionState state;
+                try
+                {
+                    state = _connection.State;
+                }
+                catch (ObjectDisposedException)
+                {
+                    logger.LogDebug("Connection was disposed. Exiting reconnect loop.");
+                    return;
+                }
+
+                if (state == HubConnectionState.Connected)
+                {
+                    logger.LogInformation("Connection restored. Stopping reconnect loop.");
+                    return;
+                }
+
+                if (state == HubConnectionState.Disconnected)
+                {
+                    logger.LogInformation("Attempting to reconnect to hub at {Url}...", _options.AppHubUrl);
+                    await _connection.StartAsync(cancellationToken);
+                    logger.LogInformation("Successfully reconnected to hub at {Url}", _options.AppHubUrl);
+                    await ReportSemVerAsync(cancellationToken);
+                    return;
+                }
+
+                // If we're in Connecting or Reconnecting state, wait a bit
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (ObjectDisposedException)
+            {
+                logger.LogDebug("Connection was disposed. Exiting reconnect loop.");
+                return;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Reconnection attempt failed. Will retry in 5 seconds...");
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
             }
         }
     }

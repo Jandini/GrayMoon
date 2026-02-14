@@ -1,53 +1,295 @@
 @page "/agent"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Text.Json
+@using GrayMoon.App.Services
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JSRuntime
+@inject AgentConnectionTracker AgentConnectionTracker
+@inject IAgentBridge AgentBridge
 
 <PageTitle>Agent - GrayMoon</PageTitle>
 
-<div class="container-fluid page-container">
-    <div class="row mb-4">
-        <div class="col-12">
-            <h2>Agent</h2>
-            <p class="text-muted">Install the GrayMoon Agent Service</p>
-        </div>
+<div class="container-fluid page-container grid-page">
+    <div class="grid-page-header">
+        <h2>Agent</h2>
+        <p class="text-muted">Install or uninstall the GrayMoon Agent Service</p>
     </div>
 
-    <div class="row">
-        <div class="col-md-6 mb-4">
-            <div class="card">
+    <div class="grid-page-body">
+        <div class="card page-card mb-4">
                 <div class="card-header">
-                    <h5 class="mb-0">Install</h5>
+                    <ul class="nav nav-tabs card-header-tabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link @(ActiveTab == "install" ? "active" : "") @(InstallTabIsRed ? "install-tab-update" : "")" type="button" role="tab" @onclick='() => SetActiveTab("install")'>@InstallTabLabel</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link @(ActiveTab == "uninstall" ? "active" : "")" type="button" role="tab" @onclick='() => SetActiveTab("uninstall")'>Uninstall</button>
+                        </li>
+                        @if (AgentConnectionTracker.State == AgentConnectionState.Online || AgentConnectionTracker.State == AgentConnectionState.VersionMismatch)
+                        {
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link @(ActiveTab == "host" ? "active" : "") @(HostTabMissingPrerequisites ? "host-tab-missing" : "")" type="button" role="tab" @onclick='() => SetActiveTab("host")'>Host</button>
+                            </li>
+                        }
+                    </ul>
                 </div>
                 <div class="card-body">
-                    <p class="mb-3">Run this PowerShell command as Administrator to install the GrayMoon Agent as a Windows service:</p>
-                    <div class="input-group">
-                        <input type="text" class="form-control font-monospace bg-dark" id="installCommand" readonly 
-                               value="@installCommand" />
-                        <button class="btn btn-primary" type="button" @onclick="CopyInstallCommand">Copy</button>
+                    <div class="tab-content">
+                        <div class="tab-pane @(ActiveTab == "install" ? "show active" : "")" role="tabpanel">
+                            @if (AgentConnectionTracker.State == AgentConnectionState.VersionMismatch)
+                            {
+                                <p class="mb-3 small text-muted">The agent is running version <strong class="text-muted">@(AgentConnectionTracker.AgentSemVer ?? "unknown")</strong>, which is not compatible with this application. Run the command below to update.</p>
+                            }
+                            <p class="mb-3">Run this PowerShell command as Administrator to install the GrayMoon Agent as a Windows service:</p>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace bg-dark" id="installCommand" readonly
+                                       value="@installCommand" />
+                                <button class="btn btn-primary" type="button" @onclick="CopyInstallCommand">Copy</button>
+                            </div>
+                            <small class="text-muted mt-2 d-block">
+                                The script will download, install, and start the agent service automatically.
+                            </small>
+                        </div>
+                        <div class="tab-pane @(ActiveTab == "uninstall" ? "show active" : "")" role="tabpanel">
+                            <p class="mb-3">Run this PowerShell command as Administrator to uninstall the GrayMoon Agent Windows service:</p>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace bg-dark" id="uninstallCommand" readonly
+                                       value="@uninstallCommand" />
+                                <button class="btn btn-outline-danger" type="button" @onclick="CopyUninstallCommand">Copy</button>
+                            </div>
+                            <small class="text-muted mt-2 d-block">
+                                The script will stop and remove the agent service.
+                            </small>
+                        </div>
+                        @if (AgentConnectionTracker.State == AgentConnectionState.Online || AgentConnectionTracker.State == AgentConnectionState.VersionMismatch)
+                        {
+                            <div class="tab-pane @(ActiveTab == "host" ? "show active" : "")" role="tabpanel">
+                                @if (hostInfo == null && hostInfoLoadError == null)
+                                {
+                                    <p class="text-muted mb-0">Loading…</p>
+                                }
+                                else if (hostInfoLoadError != null)
+                                {
+                                    <p class="text-muted mb-0">@hostInfoLoadError</p>
+                                }
+                                else if (hostInfo != null)
+                                {
+                                    <div class="host-info-grid small">
+                                        <span class="text-muted">Agent</span>
+                                        <span>@VersionBadge(AgentConnectionTracker.AgentSemVer)</span>
+                                        <span class="text-muted">Workspace</span>
+                                        <span class="font-monospace">@hostInfo.WorkspaceRoot</span>
+                                        <span class="text-muted">Dotnet</span>
+                                        <span>@DotnetCell(hostInfo.DotnetVersion)</span>
+                                        <span class="text-muted">Git</span>
+                                        <span>@GitCell(hostInfo.GitVersion)</span>
+                                        <span class="text-muted">GitVersion</span>
+                                        <span>@GitVersionToolCell(hostInfo.GitVersionToolVersion)</span>
+                                    </div>
+                                    <p class="small text-muted mt-3 mb-0">@HostPrerequisitesNote(hostInfo)</p>
+                                }
+                            </div>
+                        }
                     </div>
-                    <small class="text-muted mt-2 d-block">
-                        The script will download, install, and start the agent service automatically.
-                    </small>
                 </div>
+                @if (ActiveTab == "install")
+                {
+                    <div class="card-footer card-footer-agent d-flex justify-content-between align-items-center">
+                        <small class="text-muted">You can download and run the agent executable manually.</small>
+                        <button type="button" class="btn btn-outline-secondary" @onclick="DownloadAgent">Download</button>
+                    </div>
+                }
             </div>
         </div>
     </div>
-</div>
-
 @code {
+    private sealed record HostInfoDto(string WorkspaceRoot, string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion);
+
     private string installCommand = string.Empty;
+    private string uninstallCommand = string.Empty;
+    private string ActiveTab = "install";
+    private HostInfoDto? hostInfo;
+    private string? hostInfoLoadError;
 
     protected override void OnInitialized()
     {
         var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
         var installUrl = $"{baseUrl}/api/agent/install";
         installCommand = $"Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('{installUrl}'))";
+        var uninstallUrl = $"{baseUrl}/api/agent/uninstall";
+        uninstallCommand = $"Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('{uninstallUrl}'))";
+        SetDefaultTab();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            AgentConnectionTracker.OnStateChanged(state =>
+            {
+                if (state is AgentConnectionState.Online or AgentConnectionState.VersionMismatch)
+                    _ = InvokeAsync(LoadHostInfoAsync);
+                _ = InvokeAsync(() =>
+                {
+                    if (state is not AgentConnectionState.Online and not AgentConnectionState.VersionMismatch && ActiveTab == "host")
+                        ActiveTab = "install";
+                    StateHasChanged();
+                });
+            });
+            await LoadHostInfoAsync();
+        }
+    }
+
+    private async Task LoadHostInfoAsync()
+    {
+        if (!AgentBridge.IsAgentConnected)
+        {
+            hostInfo = null;
+            hostInfoLoadError = null;
+            return;
+        }
+        hostInfoLoadError = null;
+        var response = await AgentBridge.SendCommandAsync("GetHostInfo", new { }, CancellationToken.None);
+        if (!response.Success || response.Data == null)
+        {
+            hostInfoLoadError = response.Error ?? "Failed to load host info.";
+            hostInfo = null;
+            return;
+        }
+        try
+        {
+            var json = response.Data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(response.Data);
+            var dto = JsonSerializer.Deserialize<HostInfoDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            hostInfo = dto ?? new HostInfoDto(string.Empty, null, null, null);
+        }
+        catch
+        {
+            hostInfoLoadError = "Failed to parse host info.";
+            hostInfo = null;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private const string GitInstallCommand = "winget install --id Git.Git -e --source winget";
+    private const string GitVersionToolInstallCommand = "dotnet tool install --global GitVersion.Tool --version 5.*";
+
+    private static RenderFragment VersionBadge(string? version) => builder =>
+    {
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            builder.OpenElement(0, "span");
+            builder.AddAttribute(1, "class", "badge bg-secondary");
+            builder.AddContent(2, "not installed");
+            builder.CloseElement();
+        }
+        else
+        {
+            builder.AddContent(0, version);
+        }
+    };
+
+    private RenderFragment DotnetCell(string? version) => builder =>
+    {
+        if (!string.IsNullOrWhiteSpace(version))
+        {
+            builder.AddContent(0, version);
+            return;
+        }
+        builder.OpenElement(0, "a");
+        builder.AddAttribute(1, "href", "https://dotnet.microsoft.com/en-us/download");
+        builder.AddAttribute(2, "target", "_blank");
+        builder.AddAttribute(3, "rel", "noopener noreferrer");
+        builder.AddContent(4, "Download .NET");
+        builder.CloseElement();
+    };
+
+    private RenderFragment GitCell(string? version) => builder =>
+    {
+        if (!string.IsNullOrWhiteSpace(version))
+        {
+            builder.AddContent(0, version);
+            return;
+        }
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", "d-inline-flex align-items-center gap-2");
+        builder.OpenElement(2, "span");
+        builder.AddAttribute(3, "class", "badge bg-secondary");
+        builder.AddContent(4, "not installed");
+        builder.CloseElement();
+        builder.OpenElement(5, "button");
+        builder.AddAttribute(6, "type", "button");
+        builder.AddAttribute(7, "class", "btn btn-outline-secondary btn-sm");
+        builder.AddAttribute(8, "onclick", EventCallback.Factory.Create(this, async () => await CopyToClipboard(GitInstallCommand)));
+        builder.AddContent(9, "Copy");
+        builder.CloseElement();
+        builder.CloseElement();
+    };
+
+    private RenderFragment GitVersionToolCell(string? version) => builder =>
+    {
+        if (!string.IsNullOrWhiteSpace(version))
+        {
+            builder.AddContent(0, version);
+            return;
+        }
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "input-group input-group-sm");
+        builder.OpenElement(2, "input");
+        builder.AddAttribute(3, "type", "text");
+        builder.AddAttribute(4, "class", "form-control font-monospace bg-dark");
+        builder.AddAttribute(5, "readonly", true);
+        builder.AddAttribute(6, "value", GitVersionToolInstallCommand);
+        builder.CloseElement();
+        builder.OpenElement(7, "button");
+        builder.AddAttribute(8, "type", "button");
+        builder.AddAttribute(9, "class", "btn btn-outline-secondary");
+        builder.AddAttribute(10, "onclick", EventCallback.Factory.Create(this, async () => await CopyToClipboard(GitVersionToolInstallCommand)));
+        builder.AddContent(11, "Copy");
+        builder.CloseElement();
+        builder.CloseElement();
+    };
+
+    private bool HostTabMissingPrerequisites => hostInfo != null && (
+        string.IsNullOrWhiteSpace(hostInfo.DotnetVersion) ||
+        string.IsNullOrWhiteSpace(hostInfo.GitVersion) ||
+        string.IsNullOrWhiteSpace(hostInfo.GitVersionToolVersion));
+
+    private static string HostPrerequisitesNote(HostInfoDto hostInfo)
+    {
+        var allInstalled = !string.IsNullOrWhiteSpace(hostInfo.DotnetVersion)
+            && !string.IsNullOrWhiteSpace(hostInfo.GitVersion)
+            && !string.IsNullOrWhiteSpace(hostInfo.GitVersionToolVersion);
+        return allInstalled ? "All prerequisites are installed." : "Install the missing prerequisites above.";
+    }
+
+    private bool InstallTabIsRed => AgentConnectionTracker.State == AgentConnectionState.Offline || AgentConnectionTracker.State == AgentConnectionState.VersionMismatch;
+
+    private string InstallTabLabel => AgentConnectionTracker.State == AgentConnectionState.VersionMismatch ? "Update" : "Install";
+
+    private void SetDefaultTab()
+    {
+        var state = AgentConnectionTracker.State;
+        ActiveTab = state == AgentConnectionState.VersionMismatch ? "install" : (state == AgentConnectionState.Online ? "host" : "install");
+    }
+
+    private void SetActiveTab(string tab)
+    {
+        ActiveTab = tab;
+    }
+
+    private async Task DownloadAgent()
+    {
+        await JSRuntime.InvokeVoidAsync("graymoonDownloadAgent");
     }
 
     private async Task CopyInstallCommand()
     {
         await CopyToClipboard(installCommand);
+    }
+
+    private async Task CopyUninstallCommand()
+    {
+        await CopyToClipboard(uninstallCommand);
     }
 
     private async Task CopyToClipboard(string text)
