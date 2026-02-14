@@ -269,7 +269,7 @@
     private void SetDefaultTab()
     {
         var state = AgentConnectionTracker.State;
-        ActiveTab = (state == AgentConnectionState.Online) ? "uninstall" : "install";
+        ActiveTab = state == AgentConnectionState.VersionMismatch ? "install" : (state == AgentConnectionState.Online ? "host" : "install");
     }
 
     private void SetActiveTab(string tab)
