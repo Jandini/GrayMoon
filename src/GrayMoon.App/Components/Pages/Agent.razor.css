@@ -38,7 +38,7 @@
 }
 
 .card-header-host {
-    padding-block: calc(0.5rem + 8px);
+    padding-block: calc(0.8rem);
 }
 
 .host-info-grid {
@@ -50,5 +50,12 @@
 }
 
 .host-info-grid > *:nth-child(odd) {
-    min-width: 7rem;
+    min-width: 4.5rem;
+}
+
+.host-info-grid > *:nth-child(even) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
