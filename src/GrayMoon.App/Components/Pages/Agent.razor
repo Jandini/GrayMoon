@@ -20,7 +20,7 @@
                 <div class="card-header">
                     <ul class="nav nav-tabs card-header-tabs" role="tablist">
                         <li class="nav-item" role="presentation">
-                            <button class="nav-link @(ActiveTab == "install" ? "active" : "")" type="button" role="tab" @onclick='() => SetActiveTab("install")'>@InstallTabLabel</button>
+                            <button class="nav-link @(ActiveTab == "install" ? "active" : "") @(InstallTabIsRed ? "install-tab-update" : "")" type="button" role="tab" @onclick='() => SetActiveTab("install")'>@InstallTabLabel</button>
                         </li>
                         <li class="nav-item" role="presentation">
                             <button class="nav-link @(ActiveTab == "uninstall" ? "active" : "")" type="button" role="tab" @onclick='() => SetActiveTab("uninstall")'>Uninstall</button>
@@ -28,7 +28,7 @@
                         @if (AgentConnectionTracker.State == AgentConnectionState.Online || AgentConnectionTracker.State == AgentConnectionState.VersionMismatch)
                         {
                             <li class="nav-item" role="presentation">
-                                <button class="nav-link @(ActiveTab == "host" ? "active" : "")" type="button" role="tab" @onclick='() => SetActiveTab("host")'>Host</button>
+                                <button class="nav-link @(ActiveTab == "host" ? "active" : "") @(HostTabMissingPrerequisites ? "host-tab-missing" : "")" type="button" role="tab" @onclick='() => SetActiveTab("host")'>Host</button>
                             </li>
                         }
                     </ul>
@@ -249,6 +249,11 @@
         builder.CloseElement();
     };
 
+    private bool HostTabMissingPrerequisites => hostInfo != null && (
+        string.IsNullOrWhiteSpace(hostInfo.DotnetVersion) ||
+        string.IsNullOrWhiteSpace(hostInfo.GitVersion) ||
+        string.IsNullOrWhiteSpace(hostInfo.GitVersionToolVersion));
+
     private static string HostPrerequisitesNote(HostInfoDto hostInfo)
     {
         var allInstalled = !string.IsNullOrWhiteSpace(hostInfo.DotnetVersion)
@@ -256,6 +261,8 @@
             && !string.IsNullOrWhiteSpace(hostInfo.GitVersionToolVersion);
         return allInstalled ? "All prerequisites are installed." : "Install the missing prerequisites above.";
     }
+
+    private bool InstallTabIsRed => AgentConnectionTracker.State == AgentConnectionState.Offline || AgentConnectionTracker.State == AgentConnectionState.VersionMismatch;
 
     private string InstallTabLabel => AgentConnectionTracker.State == AgentConnectionState.VersionMismatch ? "Update" : "Install";
 

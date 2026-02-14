@@ -33,6 +33,28 @@
     box-shadow: 0 0 0 0.1rem var(--bg-primary), 0 0 0 0.25rem var(--accent-blue);
 }
 
+.card-header-tabs .nav-link.host-tab-missing,
+.card-header-tabs .nav-link.install-tab-update {
+    color: var(--bs-danger);
+}
+
+.card-header-tabs .nav-link.host-tab-missing:hover,
+.card-header-tabs .nav-link.install-tab-update:hover {
+    color: var(--bs-danger);
+    background: var(--bg-hover);
+}
+
+.card-header-tabs .nav-link.host-tab-missing.active,
+.card-header-tabs .nav-link.install-tab-update.active {
+    color: #fff;
+    background: var(--bs-danger);
+}
+
+.card-header-tabs .nav-link.host-tab-missing.active:hover,
+.card-header-tabs .nav-link.install-tab-update.active:hover {
+    color: #fff;
+}
+
 .card-footer-agent {
     padding-inline-end: 0.75rem;
 }
