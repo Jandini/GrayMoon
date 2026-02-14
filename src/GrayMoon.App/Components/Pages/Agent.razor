@@ -9,17 +9,14 @@
 
 <PageTitle>Agent - GrayMoon</PageTitle>
 
-<div class="container-fluid page-container">
-    <div class="row mb-4">
-        <div class="col-12">
-            <h2>Agent</h2>
-            <p class="text-muted">Install or uninstall the GrayMoon Agent Service</p>
-        </div>
+<div class="container-fluid page-container grid-page">
+    <div class="grid-page-header">
+        <h2>Agent</h2>
+        <p class="text-muted">Install or uninstall the GrayMoon Agent Service</p>
     </div>
 
-    <div class="row">
-        <div class="col-md-6 mb-4">
-            <div class="card">
+    <div class="grid-page-body">
+        <div class="card page-card mb-4">
                 <div class="card-header">
                     <ul class="nav nav-tabs card-header-tabs" role="tablist">
                         <li class="nav-item" role="presentation">
@@ -103,10 +100,7 @@
                 }
             </div>
         </div>
-
     </div>
-</div>
-
 @code {
     private sealed record HostInfoDto(string WorkspaceRoot, string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion);
 
