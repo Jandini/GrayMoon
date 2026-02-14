@@ -37,10 +37,6 @@
     padding-inline-end: 0.75rem;
 }
 
-.card-header-host {
-    padding-block: calc(0.8rem);
-}
-
 .host-info-grid {
     display: grid;
     grid-template-columns: auto 1fr;

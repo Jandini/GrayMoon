@@ -28,6 +28,12 @@
                         <li class="nav-item" role="presentation">
                             <button class="nav-link @(ActiveTab == "uninstall" ? "active" : "")" type="button" role="tab" @onclick='() => SetActiveTab("uninstall")'>Uninstall</button>
                         </li>
+                        @if (AgentConnectionTracker.State == AgentConnectionState.Online || AgentConnectionTracker.State == AgentConnectionState.VersionMismatch)
+                        {
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link @(ActiveTab == "host" ? "active" : "")" type="button" role="tab" @onclick='() => SetActiveTab("host")'>Host</button>
+                            </li>
+                        }
                     </ul>
                 </div>
                 <div class="card-body">
@@ -58,6 +64,34 @@
                                 The script will stop and remove the agent service.
                             </small>
                         </div>
+                        @if (AgentConnectionTracker.State == AgentConnectionState.Online || AgentConnectionTracker.State == AgentConnectionState.VersionMismatch)
+                        {
+                            <div class="tab-pane @(ActiveTab == "host" ? "show active" : "")" role="tabpanel">
+                                @if (hostInfo == null && hostInfoLoadError == null)
+                                {
+                                    <p class="text-muted mb-0">Loading…</p>
+                                }
+                                else if (hostInfoLoadError != null)
+                                {
+                                    <p class="text-muted mb-0">@hostInfoLoadError</p>
+                                }
+                                else if (hostInfo != null)
+                                {
+                                    <div class="host-info-grid small">
+                                        <span class="text-muted">Agent</span>
+                                        <span>@VersionBadge(AgentConnectionTracker.AgentSemVer)</span>
+                                        <span class="text-muted">Workspace</span>
+                                        <span class="font-monospace">@hostInfo.WorkspaceRoot</span>
+                                        <span class="text-muted">Dotnet</span>
+                                        <span>@DotnetCell(hostInfo.DotnetVersion)</span>
+                                        <span class="text-muted">Git</span>
+                                        <span>@GitCell(hostInfo.GitVersion)</span>
+                                        <span class="text-muted">GitVersion</span>
+                                        <span>@GitVersionToolCell(hostInfo.GitVersionToolVersion)</span>
+                                    </div>
+                                }
+                            </div>
+                        }
                     </div>
                 </div>
                 @if (ActiveTab == "install")
@@ -70,41 +104,6 @@
             </div>
         </div>
 
-        @if (AgentConnectionTracker.State == AgentConnectionState.Online || AgentConnectionTracker.State == AgentConnectionState.VersionMismatch)
-        {
-            <div class="col-md-6 mb-4">
-                <div class="card">
-                    <div class="card-header card-header-host">
-                        <h5 class="mb-0">Host</h5>
-                    </div>
-                    <div class="card-body">
-                        @if (hostInfo == null && hostInfoLoadError == null)
-                        {
-                            <p class="text-muted mb-0">Loading…</p>
-                        }
-                        else if (hostInfoLoadError != null)
-                        {
-                            <p class="text-muted mb-0">@hostInfoLoadError</p>
-                        }
-                        else if (hostInfo != null)
-                        {
-                            <div class="host-info-grid small">
-                                <span class="text-muted">Agent</span>
-                                <span>@VersionBadge(AgentConnectionTracker.AgentSemVer)</span>
-                                <span class="text-muted">Workspace</span>
-                                <span class="font-monospace">@hostInfo.WorkspaceRoot</span>
-                                <span class="text-muted">Dotnet</span>
-                                <span>@VersionBadge(hostInfo.DotnetVersion)</span>
-                                <span class="text-muted">Git</span>
-                                <span>@VersionBadge(hostInfo.GitVersion)</span>
-                                <span class="text-muted">GitVersion</span>
-                                <span>@VersionBadge(hostInfo.GitVersionToolVersion)</span>
-                            </div>
-                        }
-                    </div>
-                </div>
-            </div>
-        }
     </div>
 </div>
 
@@ -135,7 +134,12 @@
             {
                 if (state is AgentConnectionState.Online or AgentConnectionState.VersionMismatch)
                     _ = InvokeAsync(LoadHostInfoAsync);
-                _ = InvokeAsync(StateHasChanged);
+                _ = InvokeAsync(() =>
+                {
+                    if (state is not AgentConnectionState.Online and not AgentConnectionState.VersionMismatch && ActiveTab == "host")
+                        ActiveTab = "install";
+                    StateHasChanged();
+                });
             });
             await LoadHostInfoAsync();
         }
@@ -171,6 +175,9 @@
         await InvokeAsync(StateHasChanged);
     }
 
+    private const string GitInstallCommand = "winget install --id Git.Git -e --source winget";
+    private const string GitVersionToolInstallCommand = "dotnet tool install --global GitVersion.Tool --version 5.*";
+
     private static RenderFragment VersionBadge(string? version) => builder =>
     {
         if (string.IsNullOrWhiteSpace(version))
@@ -184,6 +191,65 @@
         {
             builder.AddContent(0, version);
         }
+    };
+
+    private RenderFragment DotnetCell(string? version) => builder =>
+    {
+        if (!string.IsNullOrWhiteSpace(version))
+        {
+            builder.AddContent(0, version);
+            return;
+        }
+        builder.OpenElement(0, "a");
+        builder.AddAttribute(1, "href", "https://dotnet.microsoft.com/en-us/download");
+        builder.AddAttribute(2, "target", "_blank");
+        builder.AddAttribute(3, "rel", "noopener noreferrer");
+        builder.AddContent(4, "Download .NET");
+        builder.CloseElement();
+    };
+
+    private RenderFragment GitCell(string? version) => builder =>
+    {
+        if (!string.IsNullOrWhiteSpace(version))
+        {
+            builder.AddContent(0, version);
+            return;
+        }
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", "d-inline-flex align-items-center gap-2");
+        builder.OpenElement(2, "span");
+        builder.AddAttribute(3, "class", "badge bg-secondary");
+        builder.AddContent(4, "not installed");
+        builder.CloseElement();
+        builder.OpenElement(5, "button");
+        builder.AddAttribute(6, "type", "button");
+        builder.AddAttribute(7, "class", "btn btn-outline-secondary btn-sm");
+        builder.AddAttribute(8, "onclick", EventCallback.Factory.Create(this, async () => await CopyToClipboard(GitInstallCommand)));
+        builder.AddContent(9, "Copy");
+        builder.CloseElement();
+        builder.CloseElement();
+    };
+
+    private RenderFragment GitVersionToolCell(string? version) => builder =>
+    {
+        if (!string.IsNullOrWhiteSpace(version))
+        {
+            builder.AddContent(0, version);
+            return;
+        }
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", "d-inline-flex align-items-center gap-2");
+        builder.OpenElement(2, "span");
+        builder.AddAttribute(3, "class", "badge bg-secondary");
+        builder.AddContent(4, "not installed");
+        builder.CloseElement();
+        builder.OpenElement(5, "button");
+        builder.AddAttribute(6, "type", "button");
+        builder.AddAttribute(7, "class", "btn btn-outline-secondary btn-sm");
+        builder.AddAttribute(8, "onclick", EventCallback.Factory.Create(this, async () => await CopyToClipboard(GitVersionToolInstallCommand)));
+        builder.AddContent(9, "Copy");
+        builder.CloseElement();
+        builder.CloseElement();
     };
 
     private string InstallTabLabel => AgentConnectionTracker.State == AgentConnectionState.VersionMismatch ? "Update" : "Install";
