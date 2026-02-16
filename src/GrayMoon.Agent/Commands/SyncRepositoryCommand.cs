@@ -35,22 +35,30 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
         int? incomingCommits = null;
         if (git.DirectoryExists(repoPath))
         {
+            // FindAsync only reads .csproj files; safe to run in parallel with git operations.
+            var findProjectsTask = csProjFileService.FindAsync(repoPath, cancellationToken);
+
             var vr = await git.GetVersionAsync(repoPath, cancellationToken);
             if (vr != null)
             {
                 version = vr.SemVer ?? vr.FullSemVer ?? "-";
                 branch = vr.BranchName ?? vr.EscapedBranchName ?? "-";
-                if (version != "-" && branch != "-")
-                    git.WriteSyncHooks(repoPath, workspaceId, repositoryId);
             }
-            await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
+
+            // Fetch and WriteSyncHooks touch different .git subdirs (refs/objects vs hooks); safe in parallel.
+            var fetchTask = git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
+            if (version != "-" && branch != "-")
+                git.WriteSyncHooks(repoPath, workspaceId, repositoryId);
+            await fetchTask;
+
             if (branch != "-")
             {
                 var (outgoing, incoming) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
                 outgoingCommits = outgoing;
                 incomingCommits = incoming;
             }
-            projects = await csProjFileService.FindAsync(repoPath, cancellationToken);
+
+            projects = await findProjectsTask;
         }
 
         return new SyncRepositoryResponse { Version = version, Branch = branch, Projects = projects, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits };
