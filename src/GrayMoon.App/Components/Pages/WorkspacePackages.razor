@@ -79,7 +79,7 @@
                                     {
                                         <tr>
                                             <td class="col-packageid"><strong>@(p.PackageId ?? "-")</strong></td>
-                                            <td class="col-framework text-muted">@p.TargetFramework</td>
+                                            <td class="col-framework"><span class="badge bg-secondary">@(p.TargetFramework ?? "-")</span></td>
                                             <td class="col-registry text-muted">@(p.MatchedConnector?.ConnectorName ?? "-")</td>
                                         </tr>
                                     }
