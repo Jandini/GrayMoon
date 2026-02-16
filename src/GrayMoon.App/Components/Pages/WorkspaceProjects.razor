@@ -70,7 +70,7 @@
                                         <tr>
                                             <td class="col-name"><strong>@p.ProjectName</strong></td>
                                             <td class="col-type text-muted">@p.ProjectType</td>
-                                            <td class="col-framework text-muted">@p.TargetFramework</td>
+                                            <td class="col-framework"><span class="badge bg-secondary">@(p.TargetFramework ?? "-")</span></td>
                                             <td class="col-file text-muted" title="@p.ProjectFilePath">@GetFileName(p.ProjectFilePath)</td>
                                         </tr>
                                     }
