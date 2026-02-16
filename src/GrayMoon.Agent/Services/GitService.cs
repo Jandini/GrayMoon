@@ -240,6 +240,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         WriteHookFile(Path.Combine(hooksDir, "post-commit"), "#!/bin/sh\n" + comment + curlLine + "\n", utf8);
         WriteHookFile(Path.Combine(hooksDir, "post-checkout"), "#!/bin/sh\n" + comment + "[ \"$3\" = \"1\" ] && " + curlLine.TrimEnd() + "\n", utf8);
+        WriteHookFile(Path.Combine(hooksDir, "post-merge"), "#!/bin/sh\n" + comment + curlLine + "\n", utf8);
         WriteHookFile(Path.Combine(hooksDir, "post-update"), "#!/bin/sh\n" + comment + curlLine + "\n", utf8);
         logger.LogDebug("Sync hooks written for repo {RepoId} in workspace {WorkspaceId}", repositoryId, workspaceId);
     }
