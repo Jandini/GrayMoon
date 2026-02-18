@@ -147,10 +147,12 @@ public static class BranchEndpoints
             };
             var response = await agentBridge.SendCommandAsync("CheckoutBranch", args, CancellationToken.None);
 
+            // Agent always sends success=true when command completes without throwing; actual success is in response.Data
             var checkoutResponse = response.Data != null ? ParseCheckoutBranchResponse(response.Data) : null;
+            var commandSuccess = checkoutResponse?.Success ?? response.Success;
             var errorMessage = checkoutResponse?.ErrorMessage ?? response.Error ?? "Failed to checkout branch";
 
-            if (!response.Success)
+            if (!commandSuccess)
                 return Results.Ok(new { success = false, errorMessage });
 
             // Broadcast update to refresh UI
@@ -173,12 +175,15 @@ public static class BranchEndpoints
             using var doc = System.Text.Json.JsonDocument.Parse(json);
             var root = doc.RootElement;
             var response = new CheckoutBranchApiResponse();
-            if (root.TryGetProperty("success", out var success))
+            // Agent returns PascalCase (Success, CurrentBranch, ErrorMessage)
+            if (root.TryGetProperty("success", out var success) || root.TryGetProperty("Success", out success))
                 response.Success = success.GetBoolean();
-            if (root.TryGetProperty("currentBranch", out var currentBranch) && currentBranch.ValueKind != System.Text.Json.JsonValueKind.Null)
-                response.CurrentBranch = currentBranch.GetString();
-            if (root.TryGetProperty("errorMessage", out var error) && error.ValueKind != System.Text.Json.JsonValueKind.Null)
-                response.ErrorMessage = error.GetString();
+            if (root.TryGetProperty("currentBranch", out var currentBranch) || root.TryGetProperty("CurrentBranch", out currentBranch))
+                if (currentBranch.ValueKind != System.Text.Json.JsonValueKind.Null && currentBranch.ValueKind != System.Text.Json.JsonValueKind.Undefined)
+                    response.CurrentBranch = currentBranch.GetString();
+            if (root.TryGetProperty("errorMessage", out var error) || root.TryGetProperty("ErrorMessage", out error))
+                if (error.ValueKind != System.Text.Json.JsonValueKind.Null && error.ValueKind != System.Text.Json.JsonValueKind.Undefined)
+                    response.ErrorMessage = error.GetString();
             return response;
         }
         catch

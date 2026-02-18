@@ -834,32 +834,33 @@
             
             var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
             var response = await httpClient.PostAsync($"{baseUrl}/api/branches/checkout", content, _checkoutCts.Token);
-            var responseContent = await response.Content.ReadAsStringAsync(_checkoutCts.Token);
-
+            
             if (response.IsSuccessStatusCode)
             {
-                var success = true;
-                var errorMsg = (string?)null;
-                try
-                {
-                    var doc = System.Text.Json.JsonDocument.Parse(responseContent);
-                    var root = doc.RootElement;
-                    if (root.TryGetProperty("success", out var successProp))
-                        success = successProp.GetBoolean();
-                    if (root.TryGetProperty("errorMessage", out var errProp) && errProp.ValueKind != System.Text.Json.JsonValueKind.Null)
-                        errorMsg = errProp.GetString();
-                }
-                catch { /* use defaults */ }
+                var responseContent = await response.Content.ReadAsStringAsync(_checkoutCts.Token);
+                var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(responseContent);
+                
+                // Parse success (camelCase from API) and errorMessage (same pattern as PullPushAsync)
+                var success = false;
+                if (result.TryGetProperty("success", out var successProp))
+                    success = successProp.GetBoolean();
+                var errorText = (string?)null;
+                if (result.TryGetProperty("errorMessage", out var errorMsg) && errorMsg.ValueKind != System.Text.Json.JsonValueKind.Null)
+                    errorText = errorMsg.GetString();
 
-                if (success)
+                if (!success)
                 {
-                    // Refresh workspace data to show updated branch
-                    await RefreshFromSync();
+                    // Checkout failed: show error in repo row
+                    repositoryErrors[repositoryId] = !string.IsNullOrWhiteSpace(errorText) ? errorText : "Failed to checkout branch.";
+                    checkoutProgressMessage = "Checkout completed with errors.";
+                    await Task.Delay(2000, _checkoutCts.Token);
                 }
                 else
                 {
-                    // Store error for this repository
-                    repositoryErrors[repositoryId] = errorMsg ?? "Failed to checkout branch.";
+                    // Success: clear any previous error for this repo
+                    repositoryErrors.Remove(repositoryId);
+                    checkoutProgressMessage = "Checkout completed successfully.";
+                    await Task.Delay(1000, _checkoutCts.Token);
                 }
             }
             else
@@ -868,6 +869,9 @@
                 repositoryErrors[repositoryId] = $"Failed to checkout branch: {response.StatusCode}";
                 Logger.LogError("Checkout failed: {StatusCode}, {Error}", response.StatusCode, errorText);
             }
+
+            // Refresh workspace data to show updated branch (same as PullPushAsync)
+            await RefreshFromSync();
         }
         catch (OperationCanceledException)
         {
