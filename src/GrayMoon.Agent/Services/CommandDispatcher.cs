@@ -14,7 +14,8 @@ public sealed class CommandDispatcher(
     ICommandHandler<GetWorkspaceRootRequest, GetWorkspaceRootResponse> getWorkspaceRootCommand,
     ICommandHandler<GetHostInfoRequest, GetHostInfoResponse> getHostInfoCommand,
     ICommandHandler<SyncRepositoryDependenciesRequest, SyncRepositoryDependenciesResponse> syncRepositoryDependenciesCommand,
-    ICommandHandler<RefreshRepositoryProjectsRequest, RefreshRepositoryProjectsResponse> refreshRepositoryProjectsCommand) : ICommandDispatcher
+    ICommandHandler<RefreshRepositoryProjectsRequest, RefreshRepositoryProjectsResponse> refreshRepositoryProjectsCommand,
+    ICommandHandler<PullPushRepositoryRequest, PullPushRepositoryResponse> pullPushRepositoryCommand) : ICommandDispatcher
 {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
@@ -28,6 +29,7 @@ public sealed class CommandDispatcher(
         ["GetWorkspaceRoot"] = async (req, ct) => await getWorkspaceRootCommand.ExecuteAsync((GetWorkspaceRootRequest)req, ct),
         ["GetHostInfo"] = async (req, ct) => await getHostInfoCommand.ExecuteAsync((GetHostInfoRequest)req, ct),
         ["SyncRepositoryDependencies"] = async (req, ct) => await syncRepositoryDependenciesCommand.ExecuteAsync((SyncRepositoryDependenciesRequest)req, ct),
+        ["PullPushRepository"] = async (req, ct) => await pullPushRepositoryCommand.ExecuteAsync((PullPushRepositoryRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

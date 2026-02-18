@@ -177,6 +177,95 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (outVal, inVal);
     }
 
+    public async Task<(bool Success, bool MergeConflict)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
+            return (false, false);
+
+        string args;
+        if (string.IsNullOrWhiteSpace(bearerToken))
+        {
+            args = $"pull origin {branchName}";
+        }
+        else
+        {
+            var credentials = "x-access-token:" + bearerToken;
+            var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
+            var headerValue = "Authorization: Basic " + base64;
+            var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            args = $"-c \"http.extraHeader={escaped}\" pull origin {branchName}";
+        }
+
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);
+        
+        if (exitCode != 0)
+        {
+            // Check if it's a merge conflict
+            var output = (stdout ?? "") + (stderr ?? "");
+            var isMergeConflict = output.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase) ||
+                                  output.Contains("merge conflict", StringComparison.OrdinalIgnoreCase) ||
+                                  output.Contains("Automatic merge failed", StringComparison.OrdinalIgnoreCase);
+            
+            if (isMergeConflict)
+            {
+                logger.LogWarning("Git pull merge conflict detected for {RepoPath}. Branch={Branch}", repoPath, branchName);
+                return (false, true);
+            }
+            
+            logger.LogError("Git pull failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return (false, false);
+        }
+
+        logger.LogInformation("Git pull completed for {RepoPath}. Branch={Branch}", repoPath, branchName);
+        return (true, false);
+    }
+
+    public async Task<bool> PushAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
+            return false;
+
+        string args;
+        if (string.IsNullOrWhiteSpace(bearerToken))
+        {
+            args = $"push origin {branchName}";
+        }
+        else
+        {
+            var credentials = "x-access-token:" + bearerToken;
+            var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
+            var headerValue = "Authorization: Basic " + base64;
+            var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            args = $"-c \"http.extraHeader={escaped}\" push origin {branchName}";
+        }
+
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);
+        if (exitCode != 0)
+        {
+            logger.LogError("Git push failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return false;
+        }
+
+        logger.LogInformation("Git push completed for {RepoPath}. Branch={Branch}", repoPath, branchName);
+        return true;
+    }
+
+    public async Task AbortMergeAsync(string repoPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return;
+
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", "merge --abort", repoPath, ct);
+        if (exitCode != 0)
+        {
+            logger.LogWarning("Git merge --abort failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+        }
+        else
+        {
+            logger.LogInformation("Git merge aborted for {RepoPath}", repoPath);
+        }
+    }
+
     /// <summary>
     /// Finds the default branch (main or master) on origin. Returns null if neither exists.
     /// </summary>
