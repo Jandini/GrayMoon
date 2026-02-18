@@ -15,7 +15,10 @@ public sealed class CommandDispatcher(
     ICommandHandler<GetHostInfoRequest, GetHostInfoResponse> getHostInfoCommand,
     ICommandHandler<SyncRepositoryDependenciesRequest, SyncRepositoryDependenciesResponse> syncRepositoryDependenciesCommand,
     ICommandHandler<RefreshRepositoryProjectsRequest, RefreshRepositoryProjectsResponse> refreshRepositoryProjectsCommand,
-    ICommandHandler<PullPushRepositoryRequest, PullPushRepositoryResponse> pullPushRepositoryCommand) : ICommandDispatcher
+    ICommandHandler<PullPushRepositoryRequest, PullPushRepositoryResponse> pullPushRepositoryCommand,
+    ICommandHandler<GetBranchesRequest, GetBranchesResponse> getBranchesCommand,
+    ICommandHandler<CheckoutBranchRequest, CheckoutBranchResponse> checkoutBranchCommand,
+    ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse> syncToDefaultBranchCommand) : ICommandDispatcher
 {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
@@ -30,6 +33,9 @@ public sealed class CommandDispatcher(
         ["GetHostInfo"] = async (req, ct) => await getHostInfoCommand.ExecuteAsync((GetHostInfoRequest)req, ct),
         ["SyncRepositoryDependencies"] = async (req, ct) => await syncRepositoryDependenciesCommand.ExecuteAsync((SyncRepositoryDependenciesRequest)req, ct),
         ["PullPushRepository"] = async (req, ct) => await pullPushRepositoryCommand.ExecuteAsync((PullPushRepositoryRequest)req, ct),
+        ["GetBranches"] = async (req, ct) => await getBranchesCommand.ExecuteAsync((GetBranchesRequest)req, ct),
+        ["CheckoutBranch"] = async (req, ct) => await checkoutBranchCommand.ExecuteAsync((CheckoutBranchRequest)req, ct),
+        ["SyncToDefaultBranch"] = async (req, ct) => await syncToDefaultBranchCommand.ExecuteAsync((SyncToDefaultBranchRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

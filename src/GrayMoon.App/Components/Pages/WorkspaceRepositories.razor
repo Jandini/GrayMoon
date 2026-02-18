@@ -7,6 +7,7 @@
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Components.Modals
 @using Microsoft.AspNetCore.SignalR.Client
+@using System.Text.Json
 @inject WorkspaceRepository WorkspaceRepository
 @inject WorkspaceGitService WorkspaceGitService
 @inject IServiceScopeFactory ServiceScopeFactory
@@ -121,14 +122,12 @@
                                             </td>
                                             <td class="col-version text-muted">@(wr.GitVersion ?? "-")</td>
                                             <td class="col-branch">
-                                                @if (!string.IsNullOrEmpty(branchUrl))
-                                                {
-                                                    <a href="@branchUrl" target="_blank" rel="noopener noreferrer" class="branch-link">@(wr.BranchName ?? "-")</a>
-                                                }
-                                                else
-                                                {
-                                                    <span class="branch-text">@(wr.BranchName ?? "-")</span>
-                                                }
+                                                <span class="branch-text branch-clickable" 
+                                                      style="cursor: pointer;"
+                                                      @onclick='() => ShowSwitchBranchModal(repo.RepositoryId, wr.BranchName, repo.CloneUrl)'
+                                                      title="Click to switch branch">
+                                                    @(wr.BranchName ?? "-")
+                                                </span>
                                             </td>
                                             <td class="col-deps col-status-badge">
                                                 @{
@@ -175,6 +174,15 @@
                             OnCancel="@CloseRepositoriesModal"
                             OnFetchRepositories="@FetchRepositoriesAsync" />
 
+<SwitchBranchModal IsVisible="@showSwitchBranchModal"
+                   WorkspaceId="@WorkspaceId"
+                   RepositoryId="@switchBranchRepositoryId"
+                   RepositoryName="@switchBranchRepositoryName"
+                   CurrentBranch="@switchBranchCurrentBranch"
+                   RepositoryUrl="@switchBranchRepositoryUrl"
+                   OnCancel="@CloseSwitchBranchModal"
+                   OnBranchChanged="@OnBranchChangedAsync" />
+
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
 <LoadingOverlay IsVisible="@isSyncing" Message="@syncProgressMessage" OnAbort="AbortSyncAsync" />
 <LoadingOverlay IsVisible="@isUpdating" Message="@updateProgressMessage" OnAbort="AbortUpdateAsync" />
@@ -211,6 +219,11 @@
     private HashSet<int> selectedRepositoryIds = new();
     private int? fetchedRepositoryCount;
     private CancellationTokenSource? _fetchRepositoriesCts;
+    private bool showSwitchBranchModal = false;
+    private int switchBranchRepositoryId;
+    private string? switchBranchRepositoryName;
+    private string? switchBranchCurrentBranch;
+    private string? switchBranchRepositoryUrl;
 
     protected override async Task OnInitializedAsync()
     {
@@ -702,6 +715,38 @@
             isPullPushing = false;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    private void ShowSwitchBranchModal(int repositoryId, string? currentBranch, string? cloneUrl)
+    {
+        var wr = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId);
+        var repo = wr?.Repository;
+        
+        if (repo == null)
+            return;
+
+        switchBranchRepositoryId = repositoryId;
+        switchBranchRepositoryName = repo.RepositoryName;
+        switchBranchCurrentBranch = currentBranch;
+        // Use cloneUrl if provided, otherwise try to get from repo
+        switchBranchRepositoryUrl = cloneUrl ?? repo.CloneUrl;
+        showSwitchBranchModal = true;
+        StateHasChanged();
+    }
+
+    private void CloseSwitchBranchModal()
+    {
+        showSwitchBranchModal = false;
+        switchBranchRepositoryId = 0;
+        switchBranchRepositoryName = null;
+        switchBranchCurrentBranch = null;
+        switchBranchRepositoryUrl = null;
+    }
+
+    private async Task OnBranchChangedAsync()
+    {
+        // Refresh workspace data to show updated branch
+        await RefreshFromSync();
     }
 
     private string? GetRepositoryUrl(Repository repo)

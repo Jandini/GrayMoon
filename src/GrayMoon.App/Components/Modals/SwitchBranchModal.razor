@@ -1,0 +1,418 @@
+@using System.Text.Json
+@using GrayMoon.App.Models
+@inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager NavigationManager
+@inject ILogger<SwitchBranchModal> Logger
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDown">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Switch Branch - @RepositoryName</h5>
+                    <button type="button" class="btn-close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body">
+                    @if (isLoading)
+                    {
+                        <div class="text-center py-4">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Loading branches...</span>
+                            </div>
+                            <p class="mt-2 text-muted">Loading branches...</p>
+                        </div>
+                    }
+                    else if (errorMessage != null)
+                    {
+                        <div class="alert alert-danger">@errorMessage</div>
+                    }
+                    else
+                    {
+                        <div class="mb-3">
+                            <ul class="nav nav-tabs switch-branch-tabs" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link @(activeTab == "local" ? "active" : "")" 
+                                            type="button" 
+                                            role="tab"
+                                            @onclick='() => SetActiveTab("local")'>
+                                        Local Branches (@localBranches.Count)
+                                    </button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link @(activeTab == "remote" ? "active" : "")" 
+                                            type="button" 
+                                            role="tab"
+                                            @onclick='() => SetActiveTab("remote")'>
+                                        Remote Branches (@remoteBranches.Count)
+                                    </button>
+                                </li>
+                            </ul>
+                        </div>
+
+                        <div class="branch-list border rounded" style="max-height: 400px; overflow-y: auto;">
+                            @if (activeTab == "local")
+                            {
+                                @if (localBranches.Count == 0)
+                                {
+                                    <div class="text-muted p-3">No local branches found.</div>
+                                }
+                                else
+                                {
+                                    @foreach (var branch in localBranches)
+                                    {
+                                        <div class="branch-item p-2 @(selectedBranch == branch ? "bg-light" : "")" 
+                                             style="cursor: pointer;"
+                                             @onclick='() => SelectBranch(branch)'>
+                                            <div class="d-flex align-items-center">
+                                                <input type="radio" 
+                                                       name="branchSelection" 
+                                                       checked="@(selectedBranch == branch)"
+                                                       @onchange='() => SelectBranch(branch)' />
+                                                <span class="ms-2 @(branch == currentBranchLocal ? "fw-bold" : "")">
+                                                    @branch
+                                                    @if (branch == currentBranchLocal)
+                                                    {
+                                                        <span class="badge bg-primary ms-2">Current</span>
+                                                    }
+                                                </span>
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                @if (remoteBranches.Count == 0)
+                                {
+                                    <div class="text-muted p-3">No remote branches found.</div>
+                                }
+                                else
+                                {
+                                    @foreach (var branch in remoteBranches)
+                                    {
+                                        <div class="branch-item p-2 @(selectedBranch == branch ? "bg-light" : "")" 
+                                             style="cursor: pointer;"
+                                             @onclick='() => SelectBranch(branch)'>
+                                            <div class="d-flex align-items-center">
+                                                <input type="radio" 
+                                                       name="branchSelection" 
+                                                       checked="@(selectedBranch == branch)"
+                                                       @onchange='() => SelectBranch(branch)' />
+                                                <span class="ms-2">
+                                                    @branch
+                                                    @if (branch == defaultBranch)
+                                                    {
+                                                        <span class="badge bg-success ms-2">Default</span>
+                                                    }
+                                                </span>
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            }
+                        </div>
+
+                        @if (showSyncToDefaultButton)
+                        {
+                            <div class="alert alert-info mt-3">
+                                <i class="bi bi-info-circle"></i> Current branch "@currentBranchLocal" does not exist in origin.
+                            </div>
+                        }
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
+                    @if (showSyncToDefaultButton && !string.IsNullOrWhiteSpace(defaultBranch))
+                    {
+                        <button type="button" 
+                                class="btn btn-warning" 
+                                @onclick="SyncToDefaultAsync"
+                                disabled="@isProcessing">
+                            @if (isProcessing)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                            }
+                            Sync to @defaultBranch
+                        </button>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(selectedBranch) && selectedBranch != currentBranchLocal)
+                    {
+                        <button type="button" 
+                                class="btn btn-primary" 
+                                @onclick="CheckoutAsync"
+                                disabled="@isProcessing">
+                            @if (isProcessing)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                            }
+                            Checkout
+                        </button>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(RepositoryUrl) && !string.IsNullOrWhiteSpace(defaultBranch))
+                    {
+                        <a href="@GetPullRequestUrl()" 
+                           target="_blank" 
+                           rel="noopener noreferrer"
+                           class="btn btn-outline-primary">
+                            Pull Request
+                        </a>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public int WorkspaceId { get; set; }
+    [Parameter] public int RepositoryId { get; set; }
+    [Parameter] public string? RepositoryName { get; set; }
+    [Parameter] public string? CurrentBranch { get; set; }
+    [Parameter] public string? RepositoryUrl { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback OnBranchChanged { get; set; }
+
+    private string activeTab = "local";
+    private List<string> localBranches = new();
+    private List<string> remoteBranches = new();
+    private string? selectedBranch;
+    private string? currentBranchLocal;
+    private string? defaultBranch;
+    private bool isLoading = false;
+    private bool isProcessing = false;
+    private string? errorMessage;
+    private bool showSyncToDefaultButton = false;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (IsVisible)
+        {
+            currentBranchLocal = CurrentBranch;
+            await LoadBranchesAsync();
+        }
+    }
+
+    private async Task LoadBranchesAsync()
+    {
+        isLoading = true;
+        errorMessage = null;
+        showSyncToDefaultButton = false;
+        StateHasChanged();
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            var request = new
+            {
+                workspaceId = WorkspaceId,
+                repositoryId = RepositoryId
+            };
+            var json = JsonSerializer.Serialize(request);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/get", content);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                var doc = JsonDocument.Parse(responseContent);
+                var root = doc.RootElement;
+
+                if (root.TryGetProperty("localBranches", out var local))
+                {
+                    localBranches = local.EnumerateArray()
+                        .Select(b => b.GetString() ?? string.Empty)
+                        .Where(b => !string.IsNullOrEmpty(b))
+                        .ToList();
+                }
+
+                if (root.TryGetProperty("remoteBranches", out var remote))
+                {
+                    remoteBranches = remote.EnumerateArray()
+                        .Select(b => b.GetString() ?? string.Empty)
+                        .Where(b => !string.IsNullOrEmpty(b))
+                        .ToList();
+                }
+
+                if (root.TryGetProperty("currentBranch", out var curr) && curr.ValueKind != JsonValueKind.Null)
+                {
+                    currentBranchLocal = curr.GetString();
+                }
+
+                if (root.TryGetProperty("defaultBranch", out var def) && def.ValueKind != JsonValueKind.Null)
+                {
+                    defaultBranch = def.GetString();
+                }
+
+                // Set selected branch to current branch by default
+                selectedBranch = currentBranchLocal;
+
+                // Show sync button if current branch doesn't exist in remote
+                if (!string.IsNullOrWhiteSpace(currentBranchLocal) && !remoteBranches.Contains(currentBranchLocal))
+                {
+                    showSyncToDefaultButton = true;
+                }
+            }
+            else
+            {
+                var errorText = await response.Content.ReadAsStringAsync();
+                errorMessage = $"Failed to load branches: {response.StatusCode}";
+                Logger.LogError("Failed to load branches: {StatusCode}, {Error}", response.StatusCode, errorText);
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "An error occurred while loading branches.";
+            Logger.LogError(ex, "Error loading branches");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void SetActiveTab(string tab)
+    {
+        activeTab = tab;
+        StateHasChanged();
+    }
+
+    private void SelectBranch(string branch)
+    {
+        selectedBranch = branch;
+        StateHasChanged();
+    }
+
+    private async Task CheckoutAsync()
+    {
+        if (string.IsNullOrWhiteSpace(selectedBranch))
+            return;
+
+        isProcessing = true;
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            var request = new
+            {
+                workspaceId = WorkspaceId,
+                repositoryId = RepositoryId,
+                branchName = selectedBranch
+            };
+            var json = JsonSerializer.Serialize(request);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/checkout", content);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                await OnBranchChanged.InvokeAsync();
+                await OnCancel.InvokeAsync();
+            }
+            else
+            {
+                var errorText = await response.Content.ReadAsStringAsync();
+                errorMessage = $"Failed to checkout branch: {response.StatusCode}";
+                Logger.LogError("Failed to checkout branch: {StatusCode}, {Error}", response.StatusCode, errorText);
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "An error occurred while checking out branch.";
+            Logger.LogError(ex, "Error checking out branch");
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SyncToDefaultAsync()
+    {
+        if (string.IsNullOrWhiteSpace(currentBranchLocal) || string.IsNullOrWhiteSpace(defaultBranch))
+            return;
+
+        isProcessing = true;
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            var request = new
+            {
+                workspaceId = WorkspaceId,
+                repositoryId = RepositoryId,
+                currentBranchName = currentBranchLocal
+            };
+            var json = JsonSerializer.Serialize(request);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/sync-to-default", content);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                await OnBranchChanged.InvokeAsync();
+                await OnCancel.InvokeAsync();
+            }
+            else
+            {
+                var errorText = await response.Content.ReadAsStringAsync();
+                errorMessage = $"Failed to sync to default branch: {response.StatusCode}";
+                Logger.LogError("Failed to sync to default branch: {StatusCode}, {Error}", response.StatusCode, errorText);
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "An error occurred while syncing to default branch.";
+            Logger.LogError(ex, "Error syncing to default branch");
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private string GetPullRequestUrl()
+    {
+        if (string.IsNullOrWhiteSpace(RepositoryUrl) || string.IsNullOrWhiteSpace(defaultBranch))
+            return "#";
+
+        // Use current branch or selected branch for comparison
+        var compareBranch = selectedBranch ?? currentBranchLocal ?? defaultBranch;
+        
+        // Convert git clone URL to GitHub web URL
+        var url = RepositoryUrl.Trim();
+        if (url.StartsWith("git@github.com:", StringComparison.OrdinalIgnoreCase))
+        {
+            url = url.Replace("git@github.com:", "https://github.com/", StringComparison.OrdinalIgnoreCase);
+        }
+        
+        if (url.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
+        {
+            url = url.Substring(0, url.Length - 4);
+        }
+
+        // Create pull request URL: compare defaultBranch...compareBranch
+        return $"{url}/compare/{Uri.EscapeDataString(defaultBranch)}...{Uri.EscapeDataString(compareBranch)}";
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            await OnCancel.InvokeAsync();
+        }
+    }
+}

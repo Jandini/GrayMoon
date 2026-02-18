@@ -127,27 +127,25 @@
     min-width: 0;
 }
 
-/* Repository and Branch links: white text, white underline on hover only */
+/* Repository links: white text, white underline on hover only */
 .repositories-table td .repo-link,
-.repositories-table td .branch-link,
-.repositories-table td a.repo-link,
-.repositories-table td a.branch-link {
+.repositories-table td a.repo-link {
     text-decoration: none !important;
-    color: #fff !important;
+    color: inherit !important;
 }
 
 .repositories-table td .repo-link:hover,
-.repositories-table td .branch-link:hover,
-.repositories-table td a.repo-link:hover,
-.repositories-table td a.branch-link:hover {
+.repositories-table td a.repo-link:hover {
     text-decoration: underline !important;
-    text-decoration-color: #fff !important;
-    color: #fff !important;
 }
 
-/* Branch text (non-link) should also be whiteish */
+/* Branch text - clickable, inherits color */
 .repositories-table .branch-text {
-    color: #fff;
+    color: inherit;
+}
+
+.repositories-table .branch-clickable:hover {
+    text-decoration: underline;
 }
 
 /* Clickable repositories count under page title */
