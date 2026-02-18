@@ -146,19 +146,44 @@ public static class BranchEndpoints
                 branchName
             };
             var response = await agentBridge.SendCommandAsync("CheckoutBranch", args, CancellationToken.None);
-            
+
+            var checkoutResponse = response.Data != null ? ParseCheckoutBranchResponse(response.Data) : null;
+            var errorMessage = checkoutResponse?.ErrorMessage ?? response.Error ?? "Failed to checkout branch";
+
             if (!response.Success)
-                return Results.Problem(response.Error ?? "Failed to checkout branch", statusCode: 500);
+                return Results.Ok(new { success = false, errorMessage });
 
             // Broadcast update to refresh UI
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
 
-            return Results.Ok(response.Data);
+            return Results.Ok(new { success = true, currentBranch = checkoutResponse?.CurrentBranch });
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error checking out branch for repository {RepositoryId}", repositoryId);
             return Results.Problem("An error occurred while checking out branch", statusCode: 500);
+        }
+    }
+
+    private static CheckoutBranchApiResponse? ParseCheckoutBranchResponse(object data)
+    {
+        try
+        {
+            var json = data is System.Text.Json.JsonElement je ? je.GetRawText() : System.Text.Json.JsonSerializer.Serialize(data);
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            var response = new CheckoutBranchApiResponse();
+            if (root.TryGetProperty("success", out var success))
+                response.Success = success.GetBoolean();
+            if (root.TryGetProperty("currentBranch", out var currentBranch) && currentBranch.ValueKind != System.Text.Json.JsonValueKind.Null)
+                response.CurrentBranch = currentBranch.GetString();
+            if (root.TryGetProperty("errorMessage", out var error) && error.ValueKind != System.Text.Json.JsonValueKind.Null)
+                response.ErrorMessage = error.GetString();
+            return response;
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -338,6 +363,13 @@ public sealed class CheckoutBranchApiRequest
     public int WorkspaceId { get; set; }
     public int RepositoryId { get; set; }
     public string? BranchName { get; set; }
+}
+
+internal sealed class CheckoutBranchApiResponse
+{
+    public bool Success { get; set; }
+    public string? CurrentBranch { get; set; }
+    public string? ErrorMessage { get; set; }
 }
 
 public sealed class SyncToDefaultBranchApiRequest

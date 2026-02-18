@@ -179,10 +179,10 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (outVal, inVal);
     }
 
-    public async Task<(bool Success, bool MergeConflict)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct)
+    public async Task<(bool Success, bool MergeConflict, string? ErrorMessage)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
-            return (false, false);
+            return (false, false, "Invalid repository path or branch name");
 
         string args;
         if (string.IsNullOrWhiteSpace(bearerToken))
@@ -202,30 +202,36 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         
         if (exitCode != 0)
         {
+            // Combine stdout and stderr for error message
+            var output = (stdout ?? "").Trim();
+            var errorOutput = (stderr ?? "").Trim();
+            var combinedOutput = string.IsNullOrWhiteSpace(output) ? errorOutput : 
+                                 string.IsNullOrWhiteSpace(errorOutput) ? output : 
+                                 $"{output}\n{errorOutput}";
+            
             // Check if it's a merge conflict
-            var output = (stdout ?? "") + (stderr ?? "");
-            var isMergeConflict = output.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase) ||
-                                  output.Contains("merge conflict", StringComparison.OrdinalIgnoreCase) ||
-                                  output.Contains("Automatic merge failed", StringComparison.OrdinalIgnoreCase);
+            var isMergeConflict = combinedOutput.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase) ||
+                                  combinedOutput.Contains("merge conflict", StringComparison.OrdinalIgnoreCase) ||
+                                  combinedOutput.Contains("Automatic merge failed", StringComparison.OrdinalIgnoreCase);
             
             if (isMergeConflict)
             {
                 logger.LogWarning("Git pull merge conflict detected for {RepoPath}. Branch={Branch}", repoPath, branchName);
-                return (false, true);
+                return (false, true, combinedOutput);
             }
             
             logger.LogError("Git pull failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
-            return (false, false);
+            return (false, false, combinedOutput);
         }
 
         logger.LogInformation("Git pull completed for {RepoPath}. Branch={Branch}", repoPath, branchName);
-        return (true, false);
+        return (true, false, null);
     }
 
-    public async Task<bool> PushAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct)
+    public async Task<(bool Success, string? ErrorMessage)> PushAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
-            return false;
+            return (false, "Invalid repository path or branch name");
 
         string args;
         if (string.IsNullOrWhiteSpace(bearerToken))
@@ -244,12 +250,19 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);
         if (exitCode != 0)
         {
+            // Combine stdout and stderr for error message
+            var output = (stdout ?? "").Trim();
+            var errorOutput = (stderr ?? "").Trim();
+            var combinedOutput = string.IsNullOrWhiteSpace(output) ? errorOutput : 
+                                 string.IsNullOrWhiteSpace(errorOutput) ? output : 
+                                 $"{output}\n{errorOutput}";
+            
             logger.LogError("Git push failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
-            return false;
+            return (false, combinedOutput);
         }
 
         logger.LogInformation("Git push completed for {RepoPath}. Branch={Branch}", repoPath, branchName);
-        return true;
+        return (true, null);
     }
 
     public async Task AbortMergeAsync(string repoPath, CancellationToken ct)
@@ -323,10 +336,19 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return branches!;
     }
 
-    public async Task<bool> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct)
+    public async Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
-            return false;
+            return (false, "Invalid repository path or branch name");
+
+        static string CombineOutput(string? stdout, string? stderr)
+        {
+            var outStr = (stdout ?? "").Trim();
+            var errStr = (stderr ?? "").Trim();
+            return string.IsNullOrWhiteSpace(outStr) ? errStr
+                 : string.IsNullOrWhiteSpace(errStr) ? outStr
+                 : $"{outStr}\n{errStr}";
+        }
 
         // First check if it's a remote branch that needs to be tracked locally
         var (exitCheckRemote, _, _) = await RunProcessAsync("git", $"rev-parse --verify origin/{branchName}", repoPath, ct);
@@ -342,8 +364,9 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
             if (exitCode != 0)
             {
+                var combined = CombineOutput(stdout, stderr);
                 logger.LogError("Git checkout failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, branchName, exitCode, stdout, stderr);
-                return false;
+                return (false, combined);
             }
         }
         else
@@ -352,13 +375,14 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"checkout {branchName}", repoPath, ct);
             if (exitCode != 0)
             {
+                var combined = CombineOutput(stdout, stderr);
                 logger.LogError("Git checkout failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, branchName, exitCode, stdout, stderr);
-                return false;
+                return (false, combined);
             }
         }
 
         logger.LogInformation("Git checkout completed for {RepoPath}. Branch={Branch}", repoPath, branchName);
-        return true;
+        return (true, null);
     }
 
     public async Task<bool> DeleteLocalBranchAsync(string repoPath, string branchName, bool force, CancellationToken ct)

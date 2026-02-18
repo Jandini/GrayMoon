@@ -25,13 +25,13 @@ public sealed class CheckoutBranchCommand(IGitService git) : ICommandHandler<Che
             };
         }
 
-        var success = await git.CheckoutBranchAsync(repoPath, branchName, cancellationToken);
+        var (success, errorMessage) = await git.CheckoutBranchAsync(repoPath, branchName, cancellationToken);
         if (!success)
         {
             return new CheckoutBranchResponse
             {
                 Success = false,
-                ErrorMessage = "Failed to checkout branch"
+                ErrorMessage = errorMessage ?? "Failed to checkout branch"
             };
         }
 

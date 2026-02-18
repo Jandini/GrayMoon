@@ -150,6 +150,24 @@
                                             <td class="col-commits">@GetCommitsBadge(repo.RepositoryId, wr.OutgoingCommits, wr.IncomingCommits)</td>
                                             <td class="col-sync col-status-badge">@GetRepoSyncBadge(repo.RepositoryId)</td>
                                         </tr>
+                                        @if (repositoryErrors.TryGetValue(repo.RepositoryId, out var repoError))
+                                        {
+                                            <tr class="repo-error-row">
+                                                <td colspan="6" class="p-0">
+                                                    <div class="alert alert-danger alert-dismissible mb-0 rounded-0" role="alert">
+                                                        <div class="d-flex align-items-start">
+                                                            <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">
+                                                                <strong>Error:</strong> @repoError
+                                                            </div>
+                                                            <button type="button" 
+                                                                    class="btn-close ms-2" 
+                                                                    aria-label="Close"
+                                                                    @onclick='() => DismissRepositoryError(repo.RepositoryId)'></button>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
                                     }
                                 }
                             }
@@ -181,12 +199,14 @@
                    CurrentBranch="@switchBranchCurrentBranch"
                    RepositoryUrl="@switchBranchRepositoryUrl"
                    OnCancel="@CloseSwitchBranchModal"
-                   OnBranchChanged="@OnBranchChangedAsync" />
+                   OnBranchChanged="@OnBranchChangedAsync"
+                   OnCheckoutBranch="@CheckoutBranchAsync" />
 
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
 <LoadingOverlay IsVisible="@isSyncing" Message="@syncProgressMessage" OnAbort="AbortSyncAsync" />
 <LoadingOverlay IsVisible="@isUpdating" Message="@updateProgressMessage" OnAbort="AbortUpdateAsync" />
 <LoadingOverlay IsVisible="@isPullPushing" Message="@pullPushProgressMessage" OnAbort="AbortPullPushAsync" />
+<LoadingOverlay IsVisible="@isCheckingOut" Message="@checkoutProgressMessage" OnAbort="AbortCheckoutAsync" />
 <LoadingOverlay IsVisible="@(showRepositoriesModal && isPersisting)" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}...")" OnAbort="AbortFetchRepositories" />
 
 @code {
@@ -209,6 +229,10 @@
     private bool isPullPushing = false;
     private string pullPushProgressMessage = "Synchronizing commits...";
     private CancellationTokenSource? _pullPushCts;
+    private bool isCheckingOut = false;
+    private string checkoutProgressMessage = "Checking out branch...";
+    private CancellationTokenSource? _checkoutCts;
+    private Dictionary<int, string> repositoryErrors = new(); // repositoryId -> error message
     private HubConnection? _hubConnection;
     private bool showRepositoriesModal;
     private bool isSavingRepositories;
@@ -625,6 +649,9 @@
             await ReloadWorkspaceDataAsync();
             ApplySyncStateFromWorkspace();
             isOutOfSync = repoSyncStatus.Values.Any(v => v != RepoSyncStatus.InSync);
+            
+            // Clear errors on sync (new errors will be shown if they occur)
+            repositoryErrors.Clear();
         }
         catch (OperationCanceledException)
         {
@@ -678,13 +705,33 @@
                 var responseContent = await response.Content.ReadAsStringAsync(_pullPushCts.Token);
                 var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(responseContent);
                 
-                if (result.TryGetProperty("mergeConflict", out var mergeConflict) && mergeConflict.GetBoolean())
+                // Check for error message in response
+                if (result.TryGetProperty("errorMessage", out var errorMsg) && errorMsg.ValueKind != System.Text.Json.JsonValueKind.Null)
+                {
+                    var errorText = errorMsg.GetString();
+                    if (!string.IsNullOrWhiteSpace(errorText))
+                    {
+                        repositoryErrors[repositoryId] = errorText;
+                        pullPushProgressMessage = "Pull/Push completed with errors.";
+                        await Task.Delay(2000, _pullPushCts.Token);
+                    }
+                    else
+                    {
+                        // Clear error if operation succeeded
+                        repositoryErrors.Remove(repositoryId);
+                        pullPushProgressMessage = "Pull/Push completed successfully.";
+                        await Task.Delay(1000, _pullPushCts.Token);
+                    }
+                }
+                else if (result.TryGetProperty("mergeConflict", out var mergeConflict) && mergeConflict.GetBoolean())
                 {
                     pullPushProgressMessage = "Merge conflict detected. Merge aborted.";
                     await Task.Delay(2000, _pullPushCts.Token);
                 }
                 else
                 {
+                    // Clear error if operation succeeded
+                    repositoryErrors.Remove(repositoryId);
                     pullPushProgressMessage = "Pull/Push completed successfully.";
                     await Task.Delay(1000, _pullPushCts.Token);
                 }
@@ -692,6 +739,7 @@
             else
             {
                 var errorText = await response.Content.ReadAsStringAsync(_pullPushCts.Token);
+                repositoryErrors[repositoryId] = $"Pull/Push failed: {response.StatusCode}";
                 errorMessage = $"Pull/Push failed: {response.StatusCode}";
                 Logger.LogError("PullPush failed: {StatusCode}, {Error}", response.StatusCode, errorText);
             }
@@ -708,7 +756,9 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error pulling/pushing repository {RepositoryId}", repositoryId);
-            errorMessage = "Pull/Push failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+            var errorMsg = "Pull/Push failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+            repositoryErrors[repositoryId] = errorMsg;
+            errorMessage = errorMsg;
         }
         finally
         {
@@ -747,6 +797,105 @@
     {
         // Refresh workspace data to show updated branch
         await RefreshFromSync();
+    }
+
+    private async Task CheckoutBranchAsync((int RepositoryId, string BranchName) request)
+    {
+        var (repositoryId, branchName) = request;
+        if (workspace == null || isCheckingOut || isSyncing || isUpdating || isPullPushing)
+            return;
+
+        _checkoutCts?.Cancel();
+        _checkoutCts?.Dispose();
+        _checkoutCts = new CancellationTokenSource();
+
+        isCheckingOut = true;
+        
+        // Get repository name for display
+        var repo = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.Repository;
+        var repoName = repo?.RepositoryName ?? "repository";
+        checkoutProgressMessage = $"Checking out {branchName} for {repoName}...";
+        
+        errorMessage = null;
+        try
+        {
+            StateHasChanged();
+            await Task.Yield();
+
+            var httpClient = HttpClientFactory.CreateClient();
+            var apiRequest = new
+            {
+                repositoryId,
+                workspaceId = WorkspaceId,
+                branchName
+            };
+            var json = System.Text.Json.JsonSerializer.Serialize(apiRequest);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/checkout", content, _checkoutCts.Token);
+            var responseContent = await response.Content.ReadAsStringAsync(_checkoutCts.Token);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var success = true;
+                var errorMsg = (string?)null;
+                try
+                {
+                    var doc = System.Text.Json.JsonDocument.Parse(responseContent);
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("success", out var successProp))
+                        success = successProp.GetBoolean();
+                    if (root.TryGetProperty("errorMessage", out var errProp) && errProp.ValueKind != System.Text.Json.JsonValueKind.Null)
+                        errorMsg = errProp.GetString();
+                }
+                catch { /* use defaults */ }
+
+                if (success)
+                {
+                    // Refresh workspace data to show updated branch
+                    await RefreshFromSync();
+                }
+                else
+                {
+                    // Store error for this repository
+                    repositoryErrors[repositoryId] = errorMsg ?? "Failed to checkout branch.";
+                }
+            }
+            else
+            {
+                var errorText = await response.Content.ReadAsStringAsync(_checkoutCts.Token);
+                repositoryErrors[repositoryId] = $"Failed to checkout branch: {response.StatusCode}";
+                Logger.LogError("Checkout failed: {StatusCode}, {Error}", response.StatusCode, errorText);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Operation was cancelled
+            await ReloadWorkspaceDataAsync();
+            ApplySyncStateFromWorkspace();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error checking out branch for repository {RepositoryId}", repositoryId);
+            repositoryErrors[repositoryId] = "Failed to checkout branch. The GrayMoon Agent may be offline. Start the Agent and try again.";
+        }
+        finally
+        {
+            isCheckingOut = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void AbortCheckoutAsync()
+    {
+        _checkoutCts?.Cancel();
+    }
+
+    private void DismissRepositoryError(int repositoryId)
+    {
+        repositoryErrors.Remove(repositoryId);
+        StateHasChanged();
     }
 
     private string? GetRepositoryUrl(Repository repo)

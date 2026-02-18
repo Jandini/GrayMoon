@@ -27,7 +27,10 @@
                     }
                     else if (errorMessage != null)
                     {
-                        <div class="alert alert-danger">@errorMessage</div>
+                        <div class="alert alert-danger alert-dismissible d-flex align-items-start" role="alert">
+                            <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">@errorMessage</div>
+                            <button type="button" class="btn-close ms-2" aria-label="Close" @onclick='() => { errorMessage = null; StateHasChanged(); }'></button>
+                        </div>
                     }
                     else
                     {
@@ -187,6 +190,7 @@
     [Parameter] public string? RepositoryUrl { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback OnBranchChanged { get; set; }
+    [Parameter] public EventCallback<(int RepositoryId, string BranchName)> OnCheckoutBranch { get; set; }
 
     private string activeTab = "local";
     private List<string> localBranches = new();
@@ -344,47 +348,9 @@
         if (string.IsNullOrWhiteSpace(selectedBranch))
             return;
 
-        isProcessing = true;
-        errorMessage = null;
-        StateHasChanged();
-
-        try
-        {
-            var httpClient = HttpClientFactory.CreateClient();
-            var request = new
-            {
-                workspaceId = WorkspaceId,
-                repositoryId = RepositoryId,
-                branchName = selectedBranch
-            };
-            var json = JsonSerializer.Serialize(request);
-            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            
-            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
-            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/checkout", content);
-            
-            if (response.IsSuccessStatusCode)
-            {
-                await OnBranchChanged.InvokeAsync();
-                await OnCancel.InvokeAsync();
-            }
-            else
-            {
-                var errorText = await response.Content.ReadAsStringAsync();
-                errorMessage = $"Failed to checkout branch: {response.StatusCode}";
-                Logger.LogError("Failed to checkout branch: {StatusCode}, {Error}", response.StatusCode, errorText);
-            }
-        }
-        catch (Exception ex)
-        {
-            errorMessage = "An error occurred while checking out branch.";
-            Logger.LogError(ex, "Error checking out branch");
-        }
-        finally
-        {
-            isProcessing = false;
-            StateHasChanged();
-        }
+        // Close modal immediately and trigger checkout from parent
+        await OnCancel.InvokeAsync();
+        await OnCheckoutBranch.InvokeAsync((RepositoryId, selectedBranch));
     }
 
     private async Task SyncToDefaultAsync()

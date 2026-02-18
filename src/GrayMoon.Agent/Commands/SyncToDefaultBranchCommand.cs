@@ -36,13 +36,13 @@ public sealed class SyncToDefaultBranchCommand(IGitService git) : ICommandHandle
         }
 
         // Checkout default branch
-        var checkoutSuccess = await git.CheckoutBranchAsync(repoPath, defaultBranch, cancellationToken);
+        var (checkoutSuccess, checkoutError) = await git.CheckoutBranchAsync(repoPath, defaultBranch, cancellationToken);
         if (!checkoutSuccess)
         {
             return new SyncToDefaultBranchResponse
             {
                 Success = false,
-                ErrorMessage = "Failed to checkout default branch"
+                ErrorMessage = checkoutError ?? "Failed to checkout default branch"
             };
         }
 

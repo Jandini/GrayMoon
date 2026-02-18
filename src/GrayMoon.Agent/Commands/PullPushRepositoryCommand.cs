@@ -60,7 +60,7 @@ public sealed class PullPushRepositoryCommand(IGitService git) : ICommandHandler
         // Pull if there are incoming commits
         if (incoming.HasValue && incoming.Value > 0)
         {
-            var (success, conflict) = await git.PullAsync(repoPath, branch, bearerToken, cancellationToken);
+            var (success, conflict, pullError) = await git.PullAsync(repoPath, branch, bearerToken, cancellationToken);
             pullSuccess = success;
             mergeConflict = conflict;
 
@@ -81,7 +81,7 @@ public sealed class PullPushRepositoryCommand(IGitService git) : ICommandHandler
                     Branch = branch,
                     OutgoingCommits = outgoing,
                     IncomingCommits = incoming,
-                    ErrorMessage = "Merge conflict detected. Merge aborted."
+                    ErrorMessage = pullError ?? "Merge conflict detected. Merge aborted."
                 };
             }
 
@@ -94,7 +94,7 @@ public sealed class PullPushRepositoryCommand(IGitService git) : ICommandHandler
                     Branch = branch,
                     OutgoingCommits = outgoing,
                     IncomingCommits = incoming,
-                    ErrorMessage = "Pull failed"
+                    ErrorMessage = pullError ?? "Pull failed"
                 };
             }
 
@@ -107,7 +107,8 @@ public sealed class PullPushRepositoryCommand(IGitService git) : ICommandHandler
         bool pushSuccess = true;
         if (outgoing.HasValue && outgoing.Value > 0)
         {
-            pushSuccess = await git.PushAsync(repoPath, branch, bearerToken, cancellationToken);
+            var (success, pushError) = await git.PushAsync(repoPath, branch, bearerToken, cancellationToken);
+            pushSuccess = success;
             
             if (!pushSuccess)
             {
@@ -118,7 +119,7 @@ public sealed class PullPushRepositoryCommand(IGitService git) : ICommandHandler
                     Branch = branch,
                     OutgoingCommits = outgoing,
                     IncomingCommits = incoming,
-                    ErrorMessage = "Push failed"
+                    ErrorMessage = pushError ?? "Push failed"
                 };
             }
 

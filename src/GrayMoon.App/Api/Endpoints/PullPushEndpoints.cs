@@ -83,9 +83,10 @@ public static class PullPushEndpoints
             }
 
             // Parse response and update database
+            PullPushResponse? pullPushResponse = null;
             if (response.Data != null)
             {
-                var pullPushResponse = ParsePullPushResponse(response.Data);
+                pullPushResponse = ParsePullPushResponse(response.Data);
                 
                 // Update workspace repository link with new commit counts
                 var wr = await dbContext.WorkspaceRepositories
@@ -107,8 +108,14 @@ public static class PullPushEndpoints
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
             }
 
-            var mergeConflict = response.Data != null && ParsePullPushResponse(response.Data).MergeConflict;
-            return Results.Ok(new { success = true, mergeConflict });
+            var mergeConflict = pullPushResponse?.MergeConflict ?? false;
+            var errorMessage = pullPushResponse?.ErrorMessage;
+            
+            return Results.Ok(new { 
+                success = pullPushResponse?.Success ?? false, 
+                mergeConflict,
+                errorMessage
+            });
         }
         catch (Exception ex)
         {
