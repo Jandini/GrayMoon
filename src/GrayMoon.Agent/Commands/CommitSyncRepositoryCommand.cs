@@ -5,9 +5,9 @@ using GrayMoon.Agent.Models;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class PullPushRepositoryCommand(IGitService git) : ICommandHandler<PullPushRepositoryRequest, PullPushRepositoryResponse>
+public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandler<CommitSyncRepositoryRequest, CommitSyncRepositoryResponse>
 {
-    public async Task<PullPushRepositoryResponse> ExecuteAsync(PullPushRepositoryRequest request, CancellationToken cancellationToken = default)
+    public async Task<CommitSyncRepositoryResponse> ExecuteAsync(CommitSyncRepositoryRequest request, CancellationToken cancellationToken = default)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
@@ -18,7 +18,7 @@ public sealed class PullPushRepositoryCommand(IGitService git) : ICommandHandler
 
         if (!git.DirectoryExists(repoPath))
         {
-            return new PullPushRepositoryResponse
+            return new CommitSyncRepositoryResponse
             {
                 Success = false,
                 ErrorMessage = "Repository not found"
@@ -29,7 +29,7 @@ public sealed class PullPushRepositoryCommand(IGitService git) : ICommandHandler
         var versionResult = await git.GetVersionAsync(repoPath, cancellationToken);
         if (versionResult == null)
         {
-            return new PullPushRepositoryResponse
+            return new CommitSyncRepositoryResponse
             {
                 Success = false,
                 ErrorMessage = "Could not determine repository version"
@@ -39,7 +39,7 @@ public sealed class PullPushRepositoryCommand(IGitService git) : ICommandHandler
         var branch = versionResult.BranchName ?? versionResult.EscapedBranchName;
         if (string.IsNullOrWhiteSpace(branch))
         {
-            return new PullPushRepositoryResponse
+            return new CommitSyncRepositoryResponse
             {
                 Success = false,
                 ErrorMessage = "Could not determine branch name"
@@ -73,7 +73,7 @@ public sealed class PullPushRepositoryCommand(IGitService git) : ICommandHandler
                 await git.FetchAsync(repoPath, includeTags: false, bearerToken, cancellationToken);
                 (outgoing, incoming) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
 
-                return new PullPushRepositoryResponse
+                return new CommitSyncRepositoryResponse
                 {
                     Success = false,
                     MergeConflict = true,
@@ -87,7 +87,7 @@ public sealed class PullPushRepositoryCommand(IGitService git) : ICommandHandler
 
             if (!pullSuccess)
             {
-                return new PullPushRepositoryResponse
+                return new CommitSyncRepositoryResponse
                 {
                     Success = false,
                     Version = version,
@@ -112,7 +112,7 @@ public sealed class PullPushRepositoryCommand(IGitService git) : ICommandHandler
             
             if (!pushSuccess)
             {
-                return new PullPushRepositoryResponse
+                return new CommitSyncRepositoryResponse
                 {
                     Success = false,
                     Version = version,
@@ -128,7 +128,7 @@ public sealed class PullPushRepositoryCommand(IGitService git) : ICommandHandler
             (outgoing, incoming) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
         }
 
-        return new PullPushRepositoryResponse
+        return new CommitSyncRepositoryResponse
         {
             Success = true,
             Version = version,

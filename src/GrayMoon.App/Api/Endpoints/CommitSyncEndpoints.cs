@@ -11,17 +11,17 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Api.Endpoints;
 
-public static class PullPushEndpoints
+public static class CommitSyncEndpoints
 {
-    public static IEndpointRouteBuilder MapPullPushEndpoints(this IEndpointRouteBuilder routes)
+    public static IEndpointRouteBuilder MapCommitSyncEndpoints(this IEndpointRouteBuilder routes)
     {
-        routes.MapPost("/api/pullpush", PostPullPush);
+        routes.MapPost("/api/commitsync", PostCommitSync);
         return routes;
     }
 
     /// <summary>Only repositories that are linked to the given workspace (WorkspaceRepositories) are accepted; others return 404.</summary>
-    private static async Task<IResult> PostPullPush(
-        PullPushRequest? body,
+    private static async Task<IResult> PostCommitSync(
+        CommitSyncRequest? body,
         IAgentBridge agentBridge,
         GitHubRepositoryRepository repoRepository,
         WorkspaceRepository workspaceRepository,
@@ -29,8 +29,8 @@ public static class PullPushEndpoints
         IHubContext<WorkspaceSyncHub> hubContext,
         ILoggerFactory loggerFactory)
     {
-        var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.PullPush");
-        logger.LogInformation("POST /api/pullpush called");
+        var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.CommitSync");
+        logger.LogInformation("POST /api/commitsync called");
         if (body == null)
             return Results.BadRequest("Request body is required.");
         var repositoryId = body.RepositoryId;
@@ -48,22 +48,22 @@ public static class PullPushEndpoints
         if (repo == null)
             return Results.NotFound("Repository not found for the given repositoryId.");
 
-        // Only pull/push repos that are linked to this workspace; reject others
+        // Only sync repos that are linked to this workspace; reject others
         var isInWorkspace = await dbContext.WorkspaceRepositories
             .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repo.RepositoryId);
         if (!isInWorkspace)
         {
-            logger.LogWarning("PullPush rejected: repository {RepositoryId} is not linked to workspace {WorkspaceId}", repositoryId, workspaceId);
+            logger.LogWarning("CommitSync rejected: repository {RepositoryId} is not linked to workspace {WorkspaceId}", repositoryId, workspaceId);
             return Results.NotFound("Repository is not in the given workspace.");
         }
 
         if (!agentBridge.IsAgentConnected)
         {
-            logger.LogWarning("PullPush rejected: agent not connected");
-            return Results.Problem("Agent not connected. Start GrayMoon.Agent to pull/push repositories.", statusCode: 503);
+            logger.LogWarning("CommitSync rejected: agent not connected");
+            return Results.Problem("Agent not connected. Start GrayMoon.Agent to sync repositories.", statusCode: 503);
         }
 
-        logger.LogInformation("PullPush requested. repositoryId={RepositoryId}, workspaceId={WorkspaceId}", repositoryId, workspaceId);
+        logger.LogInformation("CommitSync requested. repositoryId={RepositoryId}, workspaceId={WorkspaceId}", repositoryId, workspaceId);
 
         try
         {
@@ -75,32 +75,31 @@ public static class PullPushEndpoints
                 bearerToken = repo.Connector?.UserToken,
                 workspaceId
             };
-            var response = await agentBridge.SendCommandAsync("PullPushRepository", args, CancellationToken.None);
-            
+            var response = await agentBridge.SendCommandAsync("CommitSyncRepository", args, CancellationToken.None);
+
             if (!response.Success)
             {
-                logger.LogWarning("PullPush failed for repository {RepositoryId}: {Error}", repositoryId, response.Error);
-                return Results.Problem(response.Error ?? "PullPush failed", statusCode: 500);
+                logger.LogWarning("CommitSync failed for repository {RepositoryId}: {Error}", repositoryId, response.Error);
+                return Results.Problem(response.Error ?? "CommitSync failed", statusCode: 500);
             }
 
             // Parse response and update database
-            var pullPushResponse = AgentResponseJson.DeserializeAgentResponse<PullPushResponse>(response.Data);
-            if (pullPushResponse != null)
+            var commitSyncResponse = AgentResponseJson.DeserializeAgentResponse<CommitSyncResponse>(response.Data);
+            if (commitSyncResponse != null)
             {
-                
                 // Update workspace repository link with new commit counts
                 var wr = await dbContext.WorkspaceRepositories
                     .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId);
-                
+
                 if (wr != null)
                 {
-                    wr.OutgoingCommits = pullPushResponse.OutgoingCommits;
-                    wr.IncomingCommits = pullPushResponse.IncomingCommits;
-                    if (pullPushResponse.Version != null && pullPushResponse.Version != "-")
-                        wr.GitVersion = pullPushResponse.Version;
-                    if (pullPushResponse.Branch != null && pullPushResponse.Branch != "-")
-                        wr.BranchName = pullPushResponse.Branch;
-                    wr.SyncStatus = pullPushResponse.MergeConflict ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
+                    wr.OutgoingCommits = commitSyncResponse.OutgoingCommits;
+                    wr.IncomingCommits = commitSyncResponse.IncomingCommits;
+                    if (commitSyncResponse.Version != null && commitSyncResponse.Version != "-")
+                        wr.GitVersion = commitSyncResponse.Version;
+                    if (commitSyncResponse.Branch != null && commitSyncResponse.Branch != "-")
+                        wr.BranchName = commitSyncResponse.Branch;
+                    wr.SyncStatus = commitSyncResponse.MergeConflict ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
                     await dbContext.SaveChangesAsync();
                 }
 
@@ -108,19 +107,19 @@ public static class PullPushEndpoints
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
             }
 
-            var mergeConflict = pullPushResponse?.MergeConflict ?? false;
-            var errorMessage = pullPushResponse?.ErrorMessage;
-            
-            return Results.Ok(new { 
-                success = pullPushResponse?.Success ?? false, 
+            var mergeConflict = commitSyncResponse?.MergeConflict ?? false;
+            var errorMessage = commitSyncResponse?.ErrorMessage;
+
+            return Results.Ok(new {
+                success = commitSyncResponse?.Success ?? false,
                 mergeConflict,
                 errorMessage
             });
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error executing PullPush for repository {RepositoryId}", repositoryId);
-            return Results.Problem("An error occurred while executing PullPush", statusCode: 500);
+            logger.LogError(ex, "Error executing CommitSync for repository {RepositoryId}", repositoryId);
+            return Results.Problem("An error occurred while executing CommitSync", statusCode: 500);
         }
     }
 }

@@ -206,7 +206,7 @@
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
 <LoadingOverlay IsVisible="@isSyncing" Message="@syncProgressMessage" OnAbort="AbortSyncAsync" />
 <LoadingOverlay IsVisible="@isUpdating" Message="@updateProgressMessage" OnAbort="AbortUpdateAsync" />
-<LoadingOverlay IsVisible="@isPullPushing" Message="@pullPushProgressMessage" OnAbort="AbortPullPushAsync" />
+<LoadingOverlay IsVisible="@isCommitSyncing" Message="@commitSyncProgressMessage" OnAbort="AbortCommitSyncAsync" />
 <LoadingOverlay IsVisible="@isCheckingOut" Message="@checkoutProgressMessage" OnAbort="AbortCheckoutAsync" />
 <LoadingOverlay IsVisible="@(showRepositoriesModal && isPersisting)" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}...")" OnAbort="AbortFetchRepositories" />
 
@@ -227,9 +227,9 @@
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0);
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private CancellationTokenSource? _syncCts;
-    private bool isPullPushing = false;
-    private string pullPushProgressMessage = "Synchronizing commits...";
-    private CancellationTokenSource? _pullPushCts;
+    private bool isCommitSyncing = false;
+    private string commitSyncProgressMessage = "Synchronizing commits...";
+    private CancellationTokenSource? _commitSyncCts;
     private bool isCheckingOut = false;
     private string checkoutProgressMessage = "Checking out branch...";
     private CancellationTokenSource? _checkoutCts;
@@ -294,8 +294,8 @@
         _syncCts?.Dispose();
         _updateCts?.Cancel();
         _updateCts?.Dispose();
-        _pullPushCts?.Cancel();
-        _pullPushCts?.Dispose();
+        _commitSyncCts?.Cancel();
+        _commitSyncCts?.Dispose();
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
     }
@@ -389,8 +389,8 @@
         builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: #fff;{(hasCommits ? " cursor: pointer;" : "")}");
         if (hasCommits)
         {
-            builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => PullPushAsync(repositoryId)));
-            builder.AddAttribute(4, "title", "Click to pull/push");
+            builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => CommitSyncAsync(repositoryId)));
+            builder.AddAttribute(4, "title", "Click to sync commits");
         }
         builder.AddContent(5, text);
         builder.CloseElement();
@@ -427,9 +427,9 @@
         _updateCts?.Cancel();
     }
 
-    private void AbortPullPushAsync()
+    private void AbortCommitSyncAsync()
     {
-        _pullPushCts?.Cancel();
+        _commitSyncCts?.Cancel();
     }
 
     /// <summary>User-triggered: refresh project/dependency data and write .csproj files to match referenced versions. Runs in a fresh scope so the DB context sees current state (e.g. UnmatchedDeps from notify) and GetSyncDependenciesPayloadAsync returns correct payload.</summary>
@@ -661,7 +661,7 @@
             ApplySyncStateFromWorkspace();
             isOutOfSync = repoSyncStatus.Values.Any(v => v != RepoSyncStatus.InSync);
 
-            // Set per-repo errors from sync results (same pattern as pull/push and checkout)
+            // Set per-repo errors from sync results (same pattern as commit sync and checkout)
             foreach (var (repoId, info) in repoGitInfos)
             {
                 if (!string.IsNullOrWhiteSpace(info.ErrorMessage))
@@ -688,17 +688,17 @@
         }
     }
 
-    private async Task PullPushAsync(int repositoryId)
+    private async Task CommitSyncAsync(int repositoryId)
     {
-        if (workspace == null || isPullPushing || isSyncing || isUpdating)
+        if (workspace == null || isCommitSyncing || isSyncing || isUpdating)
             return;
 
-        _pullPushCts?.Cancel();
-        _pullPushCts?.Dispose();
-        _pullPushCts = new CancellationTokenSource();
+        _commitSyncCts?.Cancel();
+        _commitSyncCts?.Dispose();
+        _commitSyncCts = new CancellationTokenSource();
 
-        isPullPushing = true;
-        pullPushProgressMessage = "Synchronizing commits...";
+        isCommitSyncing = true;
+        commitSyncProgressMessage = "Synchronizing commits...";
         errorMessage = null;
         try
         {
@@ -715,37 +715,37 @@
             var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
             
             var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
-            var response = await httpClient.PostAsync($"{baseUrl}/api/pullpush", content, _pullPushCts.Token);
-            
+            var response = await httpClient.PostAsync($"{baseUrl}/api/commitsync", content, _commitSyncCts.Token);
+
             if (response.IsSuccessStatusCode)
             {
-                var responseContent = await response.Content.ReadAsStringAsync(_pullPushCts.Token);
-                var result = System.Text.Json.JsonSerializer.Deserialize<PullPushResponse>(responseContent, AgentResponseJson.Options);
-                
+                var responseContent = await response.Content.ReadAsStringAsync(_commitSyncCts.Token);
+                var result = System.Text.Json.JsonSerializer.Deserialize<CommitSyncResponse>(responseContent, AgentResponseJson.Options);
+
                 if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
                 {
                     repositoryErrors[repositoryId] = result.ErrorMessage;
-                    pullPushProgressMessage = result.MergeConflict ? "Merge conflict detected. Merge aborted." : "Pull/Push completed with errors.";
-                    await Task.Delay(2000, _pullPushCts.Token);
+                    commitSyncProgressMessage = result.MergeConflict ? "Merge conflict detected. Merge aborted." : "Commit sync completed with errors.";
+                    await Task.Delay(2000, _commitSyncCts.Token);
                 }
                 else if (result != null && result.MergeConflict)
                 {
-                    pullPushProgressMessage = "Merge conflict detected. Merge aborted.";
-                    await Task.Delay(2000, _pullPushCts.Token);
+                    commitSyncProgressMessage = "Merge conflict detected. Merge aborted.";
+                    await Task.Delay(2000, _commitSyncCts.Token);
                 }
                 else
                 {
                     repositoryErrors.Remove(repositoryId);
-                    pullPushProgressMessage = "Pull/Push completed successfully.";
-                    await Task.Delay(1000, _pullPushCts.Token);
+                    commitSyncProgressMessage = "Commit sync completed successfully.";
+                    await Task.Delay(1000, _commitSyncCts.Token);
                 }
             }
             else
             {
-                var errorText = await response.Content.ReadAsStringAsync(_pullPushCts.Token);
-                repositoryErrors[repositoryId] = $"Pull/Push failed: {response.StatusCode}";
-                errorMessage = $"Pull/Push failed: {response.StatusCode}";
-                Logger.LogError("PullPush failed: {StatusCode}, {Error}", response.StatusCode, errorText);
+                var errorText = await response.Content.ReadAsStringAsync(_commitSyncCts.Token);
+                repositoryErrors[repositoryId] = $"Commit sync failed: {response.StatusCode}";
+                errorMessage = $"Commit sync failed: {response.StatusCode}";
+                Logger.LogError("CommitSync failed: {StatusCode}, {Error}", response.StatusCode, errorText);
             }
 
             // Refresh workspace data to show updated commit counts
@@ -759,14 +759,14 @@
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error pulling/pushing repository {RepositoryId}", repositoryId);
-            var errorMsg = "Pull/Push failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+            Logger.LogError(ex, "Error syncing commits for repository {RepositoryId}", repositoryId);
+            var errorMsg = "Commit sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
             repositoryErrors[repositoryId] = errorMsg;
             errorMessage = errorMsg;
         }
         finally
         {
-            isPullPushing = false;
+            isCommitSyncing = false;
             await InvokeAsync(StateHasChanged);
         }
     }
@@ -806,7 +806,7 @@
     private async Task CheckoutBranchAsync((int RepositoryId, string BranchName) request)
     {
         var (repositoryId, branchName) = request;
-        if (workspace == null || isCheckingOut || isSyncing || isUpdating || isPullPushing)
+        if (workspace == null || isCheckingOut || isSyncing || isUpdating || isCommitSyncing)
             return;
 
         _checkoutCts?.Cancel();
@@ -864,7 +864,7 @@
                 Logger.LogError("Checkout failed: {StatusCode}, {Error}", response.StatusCode, errorText);
             }
 
-            // Refresh workspace data to show updated branch (same as PullPushAsync)
+            // Refresh workspace data to show updated branch (same as CommitSyncAsync)
             await RefreshFromSync();
         }
         catch (OperationCanceledException)

@@ -84,7 +84,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<GetHostInfoRequest, GetHostInfoResponse>, GetHostInfoCommand>();
         builder.Services.AddSingleton<ICommandHandler<SyncRepositoryDependenciesRequest, SyncRepositoryDependenciesResponse>, SyncRepositoryDependenciesCommand>();
         builder.Services.AddSingleton<ICommandHandler<RefreshRepositoryProjectsRequest, RefreshRepositoryProjectsResponse>, RefreshRepositoryProjectsCommand>();
-        builder.Services.AddSingleton<ICommandHandler<PullPushRepositoryRequest, PullPushRepositoryResponse>, PullPushRepositoryCommand>();
+        builder.Services.AddSingleton<ICommandHandler<CommitSyncRepositoryRequest, CommitSyncRepositoryResponse>, CommitSyncRepositoryCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetBranchesRequest, GetBranchesResponse>, GetBranchesCommand>();
         builder.Services.AddSingleton<ICommandHandler<CheckoutBranchRequest, CheckoutBranchResponse>, CheckoutBranchCommand>();
         builder.Services.AddSingleton<ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse>, SyncToDefaultBranchCommand>();

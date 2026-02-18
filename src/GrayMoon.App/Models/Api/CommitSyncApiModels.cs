@@ -2,8 +2,8 @@ using System.Text.Json.Serialization;
 
 namespace GrayMoon.App.Models.Api;
 
-/// <summary>Response from POST /api/pullpush. Agent may send PascalCase; use case-insensitive deserialization.</summary>
-public sealed class PullPushResponse
+/// <summary>Response from POST /api/commitsync. Agent may send PascalCase; use case-insensitive deserialization.</summary>
+public sealed class CommitSyncResponse
 {
     [JsonPropertyName("success")]
     public bool Success { get; set; }
