@@ -207,7 +207,7 @@
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private CancellationTokenSource? _syncCts;
     private bool isPullPushing = false;
-    private string pullPushProgressMessage = "Pulling/Pushing...";
+    private string pullPushProgressMessage = "Synchronizing commits...";
     private CancellationTokenSource? _pullPushCts;
     private HubConnection? _hubConnection;
     private bool showRepositoriesModal;
@@ -654,7 +654,7 @@
         _pullPushCts = new CancellationTokenSource();
 
         isPullPushing = true;
-        pullPushProgressMessage = "Pulling/Pushing...";
+        pullPushProgressMessage = "Synchronizing commits...";
         errorMessage = null;
         try
         {

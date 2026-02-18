@@ -7,7 +7,8 @@
 @if (IsVisible)
 {
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
-         @onkeydown="HandleKeyDown">
+         @onkeydown="HandleKeyDown"
+         @ref="modalElement">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
@@ -199,6 +200,8 @@
     private string loadingMessage = "Loading branches...";
     private string? errorMessage;
     private bool showSyncToDefaultButton = false;
+    private ElementReference modalElement;
+    private bool _wasVisible;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -206,6 +209,26 @@
         {
             currentBranchLocal = CurrentBranch;
             await LoadBranchesAsync();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible && !_wasVisible)
+        {
+            _wasVisible = true;
+            try
+            {
+                await modalElement.FocusAsync();
+            }
+            catch
+            {
+                // Focus may fail if element is not yet rendered, ignore
+            }
+        }
+        else if (!IsVisible)
+        {
+            _wasVisible = false;
         }
     }
 
@@ -541,7 +564,7 @@
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Escape")
+        if (e.Key == "Escape" || e.Code == "Escape")
         {
             await OnCancel.InvokeAsync();
         }

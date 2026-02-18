@@ -107,7 +107,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         string args;
         if (string.IsNullOrWhiteSpace(bearerToken))
         {
-            args = includeTags ? "fetch origin --tags" : "fetch origin";
+            // Use --prune to remove stale remote-tracking branches
+            args = includeTags ? "fetch origin --prune --tags" : "fetch origin --prune";
         }
         else
         {
@@ -115,7 +116,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
             var headerValue = "Authorization: Basic " + base64;
             var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
-            var fetchCmd = includeTags ? "fetch origin --tags" : "fetch origin";
+            // Use --prune to remove stale remote-tracking branches
+            var fetchCmd = includeTags ? "fetch origin --prune --tags" : "fetch origin --prune";
             args = $"-c \"http.extraHeader={escaped}\" {fetchCmd}";
         }
         var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);
@@ -292,21 +294,33 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return Array.Empty<string>();
 
-        var (exitCode, stdout, stderr) = await RunProcessAsync("git", "branch -r --format=%(refname:short)", repoPath, ct);
+        // Use ls-remote to query the actual remote branches (not local remote-tracking refs)
+        // This ensures we only see branches that actually exist on origin, not stale local references
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", "ls-remote --heads origin", repoPath, ct);
         if (exitCode != 0)
         {
-            logger.LogWarning("Git branch -r list failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            logger.LogWarning("Git ls-remote failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
             return Array.Empty<string>();
         }
 
+        // ls-remote output format: <commit-hash>    refs/heads/branch-name
         var branches = (stdout ?? "")
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(b => !string.IsNullOrWhiteSpace(b) && b.StartsWith("origin/") && !b.Contains("HEAD"))
-            .Select(b => b.Substring("origin/".Length))
-            .OrderBy(b => b)
+            .Where(line => !string.IsNullOrWhiteSpace(line) && line.Contains("refs/heads/"))
+            .Select(line =>
+            {
+                var parts = line.Split(new[] { '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2 && parts[1].StartsWith("refs/heads/"))
+                {
+                    return parts[1].Substring("refs/heads/".Length);
+                }
+                return null;
+            })
+            .Where(b => !string.IsNullOrWhiteSpace(b))
+            .OrderBy(b => b!)
             .ToList();
 
-        return branches;
+        return branches!;
     }
 
     public async Task<bool> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct)
