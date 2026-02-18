@@ -19,9 +19,9 @@
                     {
                         <div class="text-center py-4">
                             <div class="spinner-border" role="status">
-                                <span class="visually-hidden">Loading branches...</span>
+                                <span class="visually-hidden">@loadingMessage</span>
                             </div>
-                            <p class="mt-2 text-muted">Loading branches...</p>
+                            <p class="mt-2 text-muted">@loadingMessage</p>
                         </div>
                     }
                     else if (errorMessage != null)
@@ -196,6 +196,7 @@
     private bool isLoading = false;
     private bool isProcessing = false;
     private bool isRefreshing = false;
+    private string loadingMessage = "Loading branches...";
     private string? errorMessage;
     private bool showSyncToDefaultButton = false;
 
@@ -264,10 +265,23 @@
                 // Set selected branch to current branch by default
                 selectedBranch = currentBranchLocal;
 
-                // Show sync button if current branch doesn't exist in remote
-                if (!string.IsNullOrWhiteSpace(currentBranchLocal) && !remoteBranches.Contains(currentBranchLocal))
+                // Show sync button only when we have synced/fetched remote data (not when lists are empty from no sync yet)
+                if (remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !remoteBranches.Contains(currentBranchLocal))
                 {
                     showSyncToDefaultButton = true;
+                }
+                else
+                {
+                    showSyncToDefaultButton = false;
+                }
+
+                // If no branches were persisted, automatically fetch them (keep loading state)
+                if (localBranches.Count == 0 && remoteBranches.Count == 0)
+                {
+                    loadingMessage = "Fetching branches...";
+                    StateHasChanged();
+                    await RefreshBranchesAsync();
+                    return;
                 }
             }
             else
@@ -285,6 +299,7 @@
         finally
         {
             isLoading = false;
+            loadingMessage = "Loading branches...";
             StateHasChanged();
         }
     }
@@ -423,10 +438,16 @@
 
     private async Task RefreshBranchesAsync()
     {
-        if (isRefreshing || isLoading)
+        // Allow refresh even if loading (called from LoadBranchesAsync when no branches found)
+        if (isRefreshing)
             return;
 
-        isRefreshing = true;
+        // If already loading (from LoadBranchesAsync), keep isLoading true instead of isRefreshing
+        var wasLoading = isLoading;
+        if (!wasLoading)
+        {
+            isRefreshing = true;
+        }
         errorMessage = null;
         StateHasChanged();
 
@@ -506,7 +527,14 @@
         }
         finally
         {
-            isRefreshing = false;
+            if (wasLoading)
+            {
+                isLoading = false;
+            }
+            else
+            {
+                isRefreshing = false;
+            }
             StateHasChanged();
         }
     }
