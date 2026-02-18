@@ -14,6 +14,7 @@
 @inject GitHubRepositoryService RepositoryService
 @inject NavigationManager NavigationManager
 @inject ILogger<WorkspaceRepositories> Logger
+@inject IHttpClientFactory HttpClientFactory
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
 <PageTitle>@(workspace?.Name ?? "Workspace")</PageTitle>
@@ -147,7 +148,7 @@
                                                     <span class="badge build-dep-badge build-dep-badge-mismatch">@unmatchedDeps of @depCount</span>
                                                 }
                                             </td>
-                                            <td class="col-commits">@GetCommitsBadge(wr.OutgoingCommits, wr.IncomingCommits)</td>
+                                            <td class="col-commits">@GetCommitsBadge(repo.RepositoryId, wr.OutgoingCommits, wr.IncomingCommits)</td>
                                             <td class="col-sync col-status-badge">@GetRepoSyncBadge(repo.RepositoryId)</td>
                                         </tr>
                                     }
@@ -177,6 +178,7 @@
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
 <LoadingOverlay IsVisible="@isSyncing" Message="@syncProgressMessage" OnAbort="AbortSyncAsync" />
 <LoadingOverlay IsVisible="@isUpdating" Message="@updateProgressMessage" OnAbort="AbortUpdateAsync" />
+<LoadingOverlay IsVisible="@isPullPushing" Message="@pullPushProgressMessage" OnAbort="AbortPullPushAsync" />
 <LoadingOverlay IsVisible="@(showRepositoriesModal && isPersisting)" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}...")" OnAbort="AbortFetchRepositories" />
 
 @code {
@@ -196,6 +198,9 @@
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0);
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private CancellationTokenSource? _syncCts;
+    private bool isPullPushing = false;
+    private string pullPushProgressMessage = "Pulling/Pushing...";
+    private CancellationTokenSource? _pullPushCts;
     private HubConnection? _hubConnection;
     private bool showRepositoriesModal;
     private bool isSavingRepositories;
@@ -251,6 +256,8 @@
         _syncCts?.Dispose();
         _updateCts?.Cancel();
         _updateCts?.Dispose();
+        _pullPushCts?.Cancel();
+        _pullPushCts?.Dispose();
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
     }
@@ -320,7 +327,7 @@
             .ToList();
     }
 
-    private RenderFragment GetCommitsBadge(int? outgoing, int? incoming) => builder =>
+    private RenderFragment GetCommitsBadge(int repositoryId, int? outgoing, int? incoming) => builder =>
     {
         var x = outgoing ?? 0;
         var y = incoming ?? 0;
@@ -331,16 +338,23 @@
         }
         var text = $"↑{x} ↓{y}";
         string bgColor;
+        bool hasCommits = (y > 0) || (x > 0);
         if (y > 0)
             bgColor = "#dc3545";   // red: need to pull
         else if (x > 0)
             bgColor = "#fd7e14";   // orange: need to push
         else
             bgColor = "#198754";   // green: in sync (0,0)
+        
         builder.OpenElement(0, "span");
         builder.AddAttribute(1, "class", "badge");
-        builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: #fff;");
-        builder.AddContent(3, text);
+        builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: #fff;{(hasCommits ? " cursor: pointer;" : "")}");
+        if (hasCommits)
+        {
+            builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => PullPushAsync(repositoryId)));
+            builder.AddAttribute(4, "title", "Click to pull/push");
+        }
+        builder.AddContent(5, text);
         builder.CloseElement();
     };
 
@@ -373,6 +387,11 @@
     private void AbortUpdateAsync()
     {
         _updateCts?.Cancel();
+    }
+
+    private void AbortPullPushAsync()
+    {
+        _pullPushCts?.Cancel();
     }
 
     /// <summary>User-triggered: refresh project/dependency data and write .csproj files to match referenced versions. Runs in a fresh scope so the DB context sees current state (e.g. UnmatchedDeps from notify) and GetSyncDependenciesPayloadAsync returns correct payload.</summary>
@@ -608,6 +627,79 @@
         finally
         {
             isSyncing = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task PullPushAsync(int repositoryId)
+    {
+        if (workspace == null || isPullPushing || isSyncing || isUpdating)
+            return;
+
+        _pullPushCts?.Cancel();
+        _pullPushCts?.Dispose();
+        _pullPushCts = new CancellationTokenSource();
+
+        isPullPushing = true;
+        pullPushProgressMessage = "Pulling/Pushing...";
+        errorMessage = null;
+        try
+        {
+            StateHasChanged();
+            await Task.Yield();
+
+            var httpClient = HttpClientFactory.CreateClient();
+            var request = new
+            {
+                repositoryId,
+                workspaceId = WorkspaceId
+            };
+            var json = System.Text.Json.JsonSerializer.Serialize(request);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var response = await httpClient.PostAsync($"{baseUrl}/api/pullpush", content, _pullPushCts.Token);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var responseContent = await response.Content.ReadAsStringAsync(_pullPushCts.Token);
+                var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(responseContent);
+                
+                if (result.TryGetProperty("mergeConflict", out var mergeConflict) && mergeConflict.GetBoolean())
+                {
+                    pullPushProgressMessage = "Merge conflict detected. Merge aborted.";
+                    await Task.Delay(2000, _pullPushCts.Token);
+                }
+                else
+                {
+                    pullPushProgressMessage = "Pull/Push completed successfully.";
+                    await Task.Delay(1000, _pullPushCts.Token);
+                }
+            }
+            else
+            {
+                var errorText = await response.Content.ReadAsStringAsync(_pullPushCts.Token);
+                errorMessage = $"Pull/Push failed: {response.StatusCode}";
+                Logger.LogError("PullPush failed: {StatusCode}, {Error}", response.StatusCode, errorText);
+            }
+
+            // Refresh workspace data to show updated commit counts
+            await RefreshFromSync();
+        }
+        catch (OperationCanceledException)
+        {
+            // Operation was cancelled
+            await ReloadWorkspaceDataAsync();
+            ApplySyncStateFromWorkspace();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error pulling/pushing repository {RepositoryId}", repositoryId);
+            errorMessage = "Pull/Push failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+        }
+        finally
+        {
+            isPullPushing = false;
             await InvokeAsync(StateHasChanged);
         }
     }

@@ -84,6 +84,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<GetHostInfoRequest, GetHostInfoResponse>, GetHostInfoCommand>();
         builder.Services.AddSingleton<ICommandHandler<SyncRepositoryDependenciesRequest, SyncRepositoryDependenciesResponse>, SyncRepositoryDependenciesCommand>();
         builder.Services.AddSingleton<ICommandHandler<RefreshRepositoryProjectsRequest, RefreshRepositoryProjectsResponse>, RefreshRepositoryProjectsCommand>();
+        builder.Services.AddSingleton<ICommandHandler<PullPushRepositoryRequest, PullPushRepositoryResponse>, PullPushRepositoryCommand>();
         builder.Services.AddSingleton<INotifySyncHandler, NotifySyncCommand>();
 
         builder.Services.AddHostedService<SignalRConnectionHostedService>();
