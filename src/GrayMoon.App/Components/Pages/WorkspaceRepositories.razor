@@ -26,17 +26,21 @@
                 <p class="text-muted mb-0" style="min-height: 1.5rem;">
                     @if (workspaceRepositories.Count > 0)
                     {
-                        @($"{workspaceRepositories.Count} {(workspaceRepositories.Count == 1 ? "repository" : "repositories")}")
+                        <span class="repositories-count-link" @onclick="ShowRepositoriesModalAsync" @onclick:preventDefault>
+                            @($"{workspaceRepositories.Count} {(workspaceRepositories.Count == 1 ? "repository" : "repositories")}")
+                        </span>
                     }
-                    &nbsp;
+                    else if (workspace != null)
+                    {
+                        <span class="repositories-count-link" @onclick="ShowRepositoriesModalAsync" @onclick:preventDefault>0 repositories</span>
+                    }
+                    else
+                    {
+                        <span>&nbsp;</span>
+                    }
                 </p>
             </div>
             <div class="d-flex gap-2">
-                <button class="btn btn-secondary"
-                        @onclick="ShowRepositoriesModalAsync"
-                        disabled="@(workspace == null)">
-                    Repositories
-                </button>
                 <button class="btn @(hasUnmatchedDependencies ? "btn-danger" : "btn-secondary")"
                         @onclick="UpdateDependenciesAsync"
                         disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating)">
@@ -97,10 +101,34 @@
                                     var repo = wr.Repository;
                                     @if (repo != null)
                                     {
+                                        var repoUrl = GetRepositoryUrl(repo);
+                                        var branchUrl = !string.IsNullOrEmpty(repoUrl) && !string.IsNullOrEmpty(wr.BranchName)
+                                            ? $"{repoUrl}/compare/main...{Uri.EscapeDataString(wr.BranchName)}"
+                                            : null;
                                         <tr>
-                                            <td class="col-repo"><strong>@repo.RepositoryName</strong></td>
+                                            <td class="col-repo">
+                                                @if (!string.IsNullOrEmpty(repoUrl))
+                                                {
+                                                    <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link">
+                                                        <strong>@repo.RepositoryName</strong>
+                                                    </a>
+                                                }
+                                                else
+                                                {
+                                                    <strong>@repo.RepositoryName</strong>
+                                                }
+                                            </td>
                                             <td class="col-version text-muted">@(wr.GitVersion ?? "-")</td>
-                                            <td class="col-branch text-muted">@(wr.BranchName ?? "-")</td>
+                                            <td class="col-branch">
+                                                @if (!string.IsNullOrEmpty(branchUrl))
+                                                {
+                                                    <a href="@branchUrl" target="_blank" rel="noopener noreferrer" class="branch-link">@(wr.BranchName ?? "-")</a>
+                                                }
+                                                else
+                                                {
+                                                    <span class="branch-text">@(wr.BranchName ?? "-")</span>
+                                                }
+                                            </td>
                                             <td class="col-deps col-status-badge">
                                                 @{
                                                     var depCount = wr.Dependencies ?? 0;
@@ -582,5 +610,44 @@
             isSyncing = false;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    private string? GetRepositoryUrl(Repository repo)
+    {
+        if (string.IsNullOrEmpty(repo.CloneUrl))
+            return null;
+
+        // Convert git clone URL to GitHub web URL
+        // Examples:
+        // https://github.com/org/repo.git -> https://github.com/org/repo
+        // git@github.com:org/repo.git -> https://github.com/org/repo
+        // https://github.com/org/repo -> https://github.com/org/repo (already correct)
+        
+        var url = repo.CloneUrl.Trim();
+        
+        // Handle SSH format: git@github.com:org/repo.git
+        if (url.StartsWith("git@github.com:", StringComparison.OrdinalIgnoreCase))
+        {
+            url = url.Replace("git@github.com:", "https://github.com/", StringComparison.OrdinalIgnoreCase);
+        }
+        // Handle HTTPS format: https://github.com/org/repo.git
+        else if (url.StartsWith("https://github.com/", StringComparison.OrdinalIgnoreCase) || 
+                 url.StartsWith("http://github.com/", StringComparison.OrdinalIgnoreCase))
+        {
+            // Already HTTPS/HTTP, just need to remove .git if present
+        }
+        else
+        {
+            // Unknown format, return null
+            return null;
+        }
+        
+        // Remove .git suffix if present
+        if (url.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
+        {
+            url = url.Substring(0, url.Length - 4);
+        }
+        
+        return url;
     }
 }
