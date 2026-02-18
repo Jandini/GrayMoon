@@ -20,6 +20,16 @@ public interface IGitService
     Task<bool> PushAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct);
     /// <summary>Aborts a merge in progress.</summary>
     Task AbortMergeAsync(string repoPath, CancellationToken ct);
+    /// <summary>Gets all local branch names (without 'origin/' prefix).</summary>
+    Task<IReadOnlyList<string>> GetLocalBranchesAsync(string repoPath, CancellationToken ct);
+    /// <summary>Gets all remote branch names (without 'origin/' prefix).</summary>
+    Task<IReadOnlyList<string>> GetRemoteBranchesAsync(string repoPath, CancellationToken ct);
+    /// <summary>Checks out the specified branch. Returns true if successful.</summary>
+    Task<bool> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct);
+    /// <summary>Deletes a local branch. Returns true if successful. Only deletes if branch is not current and is merged or force flag is set.</summary>
+    Task<bool> DeleteLocalBranchAsync(string repoPath, string branchName, bool force, CancellationToken ct);
+    /// <summary>Gets the default branch name (e.g., "main" or "master") without "origin/" prefix.</summary>
+    Task<string?> GetDefaultBranchNameAsync(string repoPath, CancellationToken ct);
     void CreateDirectory(string path);
     bool DirectoryExists(string path);
     string[] GetDirectories(string path);

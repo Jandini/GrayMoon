@@ -266,6 +266,133 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
     }
 
+    public async Task<IReadOnlyList<string>> GetLocalBranchesAsync(string repoPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return Array.Empty<string>();
+
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", "branch --format=%(refname:short)", repoPath, ct);
+        if (exitCode != 0)
+        {
+            logger.LogWarning("Git branch list failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return Array.Empty<string>();
+        }
+
+        var branches = (stdout ?? "")
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(b => !string.IsNullOrWhiteSpace(b))
+            .OrderBy(b => b)
+            .ToList();
+
+        return branches;
+    }
+
+    public async Task<IReadOnlyList<string>> GetRemoteBranchesAsync(string repoPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return Array.Empty<string>();
+
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", "branch -r --format=%(refname:short)", repoPath, ct);
+        if (exitCode != 0)
+        {
+            logger.LogWarning("Git branch -r list failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return Array.Empty<string>();
+        }
+
+        var branches = (stdout ?? "")
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(b => !string.IsNullOrWhiteSpace(b) && b.StartsWith("origin/") && !b.Contains("HEAD"))
+            .Select(b => b.Substring("origin/".Length))
+            .OrderBy(b => b)
+            .ToList();
+
+        return branches;
+    }
+
+    public async Task<bool> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
+            return false;
+
+        // First check if it's a remote branch that needs to be tracked locally
+        var (exitCheckRemote, _, _) = await RunProcessAsync("git", $"rev-parse --verify origin/{branchName}", repoPath, ct);
+        if (exitCheckRemote == 0)
+        {
+            // Remote branch exists, checkout with tracking
+            var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"checkout -b {branchName} origin/{branchName}", repoPath, ct);
+            if (exitCode != 0)
+            {
+                // Try regular checkout in case branch already exists locally
+                (exitCode, stdout, stderr) = await RunProcessAsync("git", $"checkout {branchName}", repoPath, ct);
+            }
+
+            if (exitCode != 0)
+            {
+                logger.LogError("Git checkout failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, branchName, exitCode, stdout, stderr);
+                return false;
+            }
+        }
+        else
+        {
+            // Local branch only
+            var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"checkout {branchName}", repoPath, ct);
+            if (exitCode != 0)
+            {
+                logger.LogError("Git checkout failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, branchName, exitCode, stdout, stderr);
+                return false;
+            }
+        }
+
+        logger.LogInformation("Git checkout completed for {RepoPath}. Branch={Branch}", repoPath, branchName);
+        return true;
+    }
+
+    public async Task<bool> DeleteLocalBranchAsync(string repoPath, string branchName, bool force, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
+            return false;
+
+        // Check if branch exists
+        var (exitCheck, _, _) = await RunProcessAsync("git", $"rev-parse --verify {branchName}", repoPath, ct);
+        if (exitCheck != 0)
+        {
+            logger.LogWarning("Branch {Branch} does not exist in {RepoPath}", branchName, repoPath);
+            return false;
+        }
+
+        // Check if it's the current branch
+        var (exitCurrent, stdoutCurrent, _) = await RunProcessAsync("git", "branch --show-current", repoPath, ct);
+        if (exitCurrent == 0 && (stdoutCurrent ?? "").Trim() == branchName)
+        {
+            logger.LogWarning("Cannot delete current branch {Branch} in {RepoPath}", branchName, repoPath);
+            return false;
+        }
+
+        string args = force ? $"branch -D {branchName}" : $"branch -d {branchName}";
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);
+        if (exitCode != 0)
+        {
+            logger.LogWarning("Git branch delete failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, branchName, exitCode, stdout, stderr);
+            return false;
+        }
+
+        logger.LogInformation("Git branch deleted for {RepoPath}. Branch={Branch}", repoPath, branchName);
+        return true;
+    }
+
+    public async Task<string?> GetDefaultBranchNameAsync(string repoPath, CancellationToken ct)
+    {
+        var defaultBranch = await GetDefaultBranchAsync(repoPath, ct);
+        if (defaultBranch == null)
+            return null;
+
+        // Remove "origin/" prefix
+        if (defaultBranch.StartsWith("origin/"))
+            return defaultBranch.Substring("origin/".Length);
+
+        return defaultBranch;
+    }
+
     /// <summary>
     /// Finds the default branch (main or master) on origin. Returns null if neither exists.
     /// </summary>

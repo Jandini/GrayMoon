@@ -90,7 +90,7 @@ public class NuGetService : IConnectorService
         if (!indexUrl.EndsWith("/index.json", StringComparison.OrdinalIgnoreCase))
         {
             // GitHub Packages uses .../index.json (no v3 in path); NuGet.org and others use .../v3/index.json
-            if (ConnectorHelpers.IsGitHubPackages(connector.ApiBaseUrl))
+            if (connector.ApiBaseUrl != null && ConnectorHelpers.IsGitHubPackages(connector.ApiBaseUrl))
                 indexUrl = indexUrl + "/index.json";
             else
                 indexUrl = indexUrl.EndsWith("/v3", StringComparison.OrdinalIgnoreCase) ? indexUrl + "/index.json" : indexUrl + "/v3/index.json";
