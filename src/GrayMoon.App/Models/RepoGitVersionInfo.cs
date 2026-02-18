@@ -11,4 +11,8 @@ public class RepoGitVersionInfo
     public int? IncomingCommits { get; init; }
     /// <summary>Full project list from sync (for merge persistence).</summary>
     public IReadOnlyList<SyncProjectInfo>? ProjectsDetail { get; init; }
+    /// <summary>Local branches fetched during sync.</summary>
+    public IReadOnlyList<string>? LocalBranches { get; init; }
+    /// <summary>Remote branches fetched during sync.</summary>
+    public IReadOnlyList<string>? RemoteBranches { get; init; }
 }

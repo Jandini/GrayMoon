@@ -314,7 +314,18 @@ public class WorkspaceGitService(
         var projectsCount = GetProjects(response.Data);
         var projectsDetail = GetProjectsDetail(response.Data);
         var (outgoingCommits, incomingCommits) = GetCommitCounts(response.Data);
-        return new RepoGitVersionInfo { Version = version, Branch = branch, Projects = projectsCount, ProjectsDetail = projectsDetail, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits };
+        var (localBranches, remoteBranches) = GetBranches(response.Data);
+        return new RepoGitVersionInfo 
+        { 
+            Version = version, 
+            Branch = branch, 
+            Projects = projectsCount, 
+            ProjectsDetail = projectsDetail, 
+            OutgoingCommits = outgoingCommits, 
+            IncomingCommits = incomingCommits,
+            LocalBranches = localBranches,
+            RemoteBranches = remoteBranches
+        };
     }
 
     private static RepoGitVersionInfo ParseRefreshRepositoryVersionResponse(AgentCommandResponse response)
@@ -365,6 +376,34 @@ public class WorkspaceGitService(
             incoming = inVal;
         
         return (outgoing, incoming);
+    }
+
+    private static (IReadOnlyList<string>? LocalBranches, IReadOnlyList<string>? RemoteBranches) GetBranches(object data)
+    {
+        var json = data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(data);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        
+        IReadOnlyList<string>? localBranches = null;
+        IReadOnlyList<string>? remoteBranches = null;
+        
+        if (root.TryGetProperty("localBranches", out var local) && local.ValueKind == JsonValueKind.Array)
+        {
+            localBranches = local.EnumerateArray()
+                .Select(b => b.GetString() ?? string.Empty)
+                .Where(b => !string.IsNullOrEmpty(b))
+                .ToList();
+        }
+        
+        if (root.TryGetProperty("remoteBranches", out var remote) && remote.ValueKind == JsonValueKind.Array)
+        {
+            remoteBranches = remote.EnumerateArray()
+                .Select(b => b.GetString() ?? string.Empty)
+                .Where(b => !string.IsNullOrEmpty(b))
+                .ToList();
+        }
+        
+        return (localBranches, remoteBranches);
     }
 
     private static IReadOnlyList<SyncProjectInfo>? GetProjectsDetail(object data)
@@ -452,6 +491,12 @@ public class WorkspaceGitService(
 
             if (info.ProjectsDetail is { Count: > 0 })
                 await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repoId, info.ProjectsDetail, cancellationToken);
+
+            // Persist branches if available
+            if ((info.LocalBranches != null || info.RemoteBranches != null) && wr != null)
+            {
+                await PersistBranchesAsync(wr.WorkspaceRepositoryId, info.LocalBranches, info.RemoteBranches, cancellationToken);
+            }
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -461,5 +506,63 @@ public class WorkspaceGitService(
 
         _logger.LogInformation("Persistence: saved WorkspaceRepository link versions. WorkspaceId={WorkspaceId}, RepoCount={RepoCount}",
             workspaceId, resultList.Count);
+    }
+
+    /// <summary>Persists branches for a workspace repository. Removes branches not in the fetched list, adds new ones, updates LastSeenAt for existing ones.</summary>
+    public async Task PersistBranchesAsync(
+        int workspaceRepositoryId,
+        IReadOnlyList<string>? localBranches,
+        IReadOnlyList<string>? remoteBranches,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var existingBranches = await _dbContext.RepositoryBranches
+            .Where(rb => rb.WorkspaceRepositoryId == workspaceRepositoryId)
+            .ToListAsync(cancellationToken);
+
+        var fetchedBranches = new HashSet<(string Name, bool IsRemote)>();
+        if (localBranches != null)
+        {
+            foreach (var branch in localBranches)
+            {
+                fetchedBranches.Add((branch, false));
+            }
+        }
+        if (remoteBranches != null)
+        {
+            foreach (var branch in remoteBranches)
+            {
+                fetchedBranches.Add((branch, true));
+            }
+        }
+
+        // Update existing branches or add new ones
+        foreach (var (name, isRemote) in fetchedBranches)
+        {
+            var existing = existingBranches.FirstOrDefault(b => b.BranchName == name && b.IsRemote == isRemote);
+            if (existing != null)
+            {
+                existing.LastSeenAt = now;
+            }
+            else
+            {
+                _dbContext.RepositoryBranches.Add(new RepositoryBranch
+                {
+                    WorkspaceRepositoryId = workspaceRepositoryId,
+                    BranchName = name,
+                    IsRemote = isRemote,
+                    LastSeenAt = now
+                });
+            }
+        }
+
+        // Remove branches that were not fetched (no longer exist)
+        var toRemove = existingBranches.Where(b => !fetchedBranches.Contains((b.BranchName, b.IsRemote))).ToList();
+        if (toRemove.Count > 0)
+        {
+            _dbContext.RepositoryBranches.RemoveRange(toRemove);
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
     }
 }

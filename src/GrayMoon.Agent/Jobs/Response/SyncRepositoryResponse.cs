@@ -19,4 +19,10 @@ public sealed class SyncRepositoryResponse
 
     [JsonPropertyName("incomingCommits")]
     public int? IncomingCommits { get; set; }
+
+    [JsonPropertyName("localBranches")]
+    public IReadOnlyList<string>? LocalBranches { get; set; }
+
+    [JsonPropertyName("remoteBranches")]
+    public IReadOnlyList<string>? RemoteBranches { get; set; }
 }

@@ -88,6 +88,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<GetBranchesRequest, GetBranchesResponse>, GetBranchesCommand>();
         builder.Services.AddSingleton<ICommandHandler<CheckoutBranchRequest, CheckoutBranchResponse>, CheckoutBranchCommand>();
         builder.Services.AddSingleton<ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse>, SyncToDefaultBranchCommand>();
+        builder.Services.AddSingleton<ICommandHandler<RefreshBranchesRequest, RefreshBranchesResponse>, RefreshBranchesCommand>();
         builder.Services.AddSingleton<INotifySyncHandler, NotifySyncCommand>();
 
         builder.Services.AddHostedService<SignalRConnectionHostedService>();

@@ -93,6 +93,7 @@ using (var scope = app.Services.CreateScope())
     await MigrateWorkspaceRepositoriesCommitsAsync(dbContext);
     await MigrateWorkspaceRepositoriesSequenceAndDependenciesAsync(dbContext);
     await MigrateWorkspaceProjectsMatchedConnectorAsync(dbContext);
+    await MigrateRepositoryBranchesAsync(dbContext);
 }
 
 static async Task MigrateWorkspaceProjectsMatchedConnectorAsync(AppDbContext dbContext)
@@ -359,6 +360,44 @@ static async Task MigrateWorkspaceRepositoriesSequenceAndDependenciesAsync(AppDb
             if (count == 0)
             {
                 cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN UnmatchedDeps INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateRepositoryBranchesAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='RepositoryBranches'";
+            var tableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+            
+            if (!tableExists)
+            {
+                cmd.CommandText = @"
+                    CREATE TABLE RepositoryBranches (
+                        RepositoryBranchId INTEGER PRIMARY KEY AUTOINCREMENT,
+                        WorkspaceRepositoryId INTEGER NOT NULL,
+                        BranchName TEXT NOT NULL,
+                        IsRemote INTEGER NOT NULL,
+                        LastSeenAt TEXT NOT NULL,
+                        FOREIGN KEY (WorkspaceRepositoryId) REFERENCES WorkspaceRepositories(WorkspaceRepositoryId) ON DELETE CASCADE,
+                        UNIQUE(WorkspaceRepositoryId, BranchName, IsRemote)
+                    )";
+                await cmd.ExecuteNonQueryAsync();
+                
+                cmd.CommandText = "CREATE INDEX IX_RepositoryBranches_WorkspaceRepositoryId ON RepositoryBranches(WorkspaceRepositoryId)";
                 await cmd.ExecuteNonQueryAsync();
             }
         }

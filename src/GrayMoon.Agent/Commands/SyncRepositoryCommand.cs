@@ -58,7 +58,33 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 incomingCommits = incoming;
             }
 
+            // Fetch branches after fetch completes (branches are now up to date)
+            IReadOnlyList<string>? localBranches = null;
+            IReadOnlyList<string>? remoteBranches = null;
+            try
+            {
+                var localBranchesTask = git.GetLocalBranchesAsync(repoPath, cancellationToken);
+                var remoteBranchesTask = git.GetRemoteBranchesAsync(repoPath, cancellationToken);
+                localBranches = await localBranchesTask;
+                remoteBranches = await remoteBranchesTask;
+            }
+            catch
+            {
+                // If branch fetching fails, continue without branches (non-critical)
+            }
+
             projects = await findProjectsTask;
+
+            return new SyncRepositoryResponse 
+            { 
+                Version = version, 
+                Branch = branch, 
+                Projects = projects, 
+                OutgoingCommits = outgoingCommits, 
+                IncomingCommits = incomingCommits,
+                LocalBranches = localBranches,
+                RemoteBranches = remoteBranches
+            };
         }
 
         return new SyncRepositoryResponse { Version = version, Branch = branch, Projects = projects, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits };

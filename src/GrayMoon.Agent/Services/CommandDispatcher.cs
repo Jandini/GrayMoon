@@ -18,7 +18,8 @@ public sealed class CommandDispatcher(
     ICommandHandler<PullPushRepositoryRequest, PullPushRepositoryResponse> pullPushRepositoryCommand,
     ICommandHandler<GetBranchesRequest, GetBranchesResponse> getBranchesCommand,
     ICommandHandler<CheckoutBranchRequest, CheckoutBranchResponse> checkoutBranchCommand,
-    ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse> syncToDefaultBranchCommand) : ICommandDispatcher
+    ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse> syncToDefaultBranchCommand,
+    ICommandHandler<RefreshBranchesRequest, RefreshBranchesResponse> refreshBranchesCommand) : ICommandDispatcher
 {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
@@ -36,6 +37,7 @@ public sealed class CommandDispatcher(
         ["GetBranches"] = async (req, ct) => await getBranchesCommand.ExecuteAsync((GetBranchesRequest)req, ct),
         ["CheckoutBranch"] = async (req, ct) => await checkoutBranchCommand.ExecuteAsync((CheckoutBranchRequest)req, ct),
         ["SyncToDefaultBranch"] = async (req, ct) => await syncToDefaultBranchCommand.ExecuteAsync((SyncToDefaultBranchRequest)req, ct),
+        ["RefreshBranches"] = async (req, ct) => await refreshBranchesCommand.ExecuteAsync((RefreshBranchesRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

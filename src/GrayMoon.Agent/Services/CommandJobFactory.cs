@@ -57,6 +57,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid CheckoutBranch args"),
             "SyncToDefaultBranch" => JsonSerializer.Deserialize<SyncToDefaultBranchRequest>(json, options)
                 ?? throw new ArgumentException("Invalid SyncToDefaultBranch args"),
+            "RefreshBranches" => JsonSerializer.Deserialize<RefreshBranchesRequest>(json, options)
+                ?? throw new ArgumentException("Invalid RefreshBranches args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

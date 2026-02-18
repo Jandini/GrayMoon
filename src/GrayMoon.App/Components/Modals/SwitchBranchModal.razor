@@ -31,24 +31,36 @@
                     else
                     {
                         <div class="mb-3">
-                            <ul class="nav nav-tabs switch-branch-tabs" role="tablist">
-                                <li class="nav-item" role="presentation">
-                                    <button class="nav-link @(activeTab == "local" ? "active" : "")" 
-                                            type="button" 
-                                            role="tab"
-                                            @onclick='() => SetActiveTab("local")'>
-                                        Local Branches (@localBranches.Count)
-                                    </button>
-                                </li>
-                                <li class="nav-item" role="presentation">
-                                    <button class="nav-link @(activeTab == "remote" ? "active" : "")" 
-                                            type="button" 
-                                            role="tab"
-                                            @onclick='() => SetActiveTab("remote")'>
-                                        Remote Branches (@remoteBranches.Count)
-                                    </button>
-                                </li>
-                            </ul>
+                            <div class="d-flex align-items-center justify-content-between">
+                                <ul class="nav nav-tabs switch-branch-tabs" role="tablist">
+                                    <li class="nav-item" role="presentation">
+                                        <button class="nav-link @(activeTab == "local" ? "active" : "")" 
+                                                type="button" 
+                                                role="tab"
+                                                @onclick='() => SetActiveTab("local")'>
+                                            Local Branches (@localBranches.Count)
+                                        </button>
+                                    </li>
+                                    <li class="nav-item" role="presentation">
+                                        <button class="nav-link @(activeTab == "remote" ? "active" : "")" 
+                                                type="button" 
+                                                role="tab"
+                                                @onclick='() => SetActiveTab("remote")'>
+                                            Remote Branches (@remoteBranches.Count)
+                                        </button>
+                                    </li>
+                                </ul>
+                                <button type="button" 
+                                        class="btn btn-outline-secondary btn-sm"
+                                        @onclick="RefreshBranchesAsync"
+                                        disabled="@isRefreshing">
+                                    @if (isRefreshing)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                    }
+                                    Fetch
+                                </button>
+                            </div>
                         </div>
 
                         <div class="branch-list border rounded" style="max-height: 400px; overflow-y: auto;">
@@ -183,6 +195,7 @@
     private string? defaultBranch;
     private bool isLoading = false;
     private bool isProcessing = false;
+    private bool isRefreshing = false;
     private string? errorMessage;
     private bool showSyncToDefaultButton = false;
 
@@ -406,6 +419,96 @@
 
         // Create pull request URL: compare defaultBranch...compareBranch
         return $"{url}/compare/{Uri.EscapeDataString(defaultBranch)}...{Uri.EscapeDataString(compareBranch)}";
+    }
+
+    private async Task RefreshBranchesAsync()
+    {
+        if (isRefreshing || isLoading)
+            return;
+
+        isRefreshing = true;
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            var request = new
+            {
+                workspaceId = WorkspaceId,
+                repositoryId = RepositoryId
+            };
+            var json = JsonSerializer.Serialize(request);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/refresh", content);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                var doc = JsonDocument.Parse(responseContent);
+                var root = doc.RootElement;
+
+                if (root.TryGetProperty("localBranches", out var local))
+                {
+                    localBranches = local.EnumerateArray()
+                        .Select(b => b.GetString() ?? string.Empty)
+                        .Where(b => !string.IsNullOrEmpty(b))
+                        .ToList();
+                }
+
+                if (root.TryGetProperty("remoteBranches", out var remote))
+                {
+                    remoteBranches = remote.EnumerateArray()
+                        .Select(b => b.GetString() ?? string.Empty)
+                        .Where(b => !string.IsNullOrEmpty(b))
+                        .ToList();
+                }
+
+                if (root.TryGetProperty("currentBranch", out var curr) && curr.ValueKind != JsonValueKind.Null)
+                {
+                    currentBranchLocal = curr.GetString();
+                }
+
+                if (root.TryGetProperty("defaultBranch", out var def) && def.ValueKind != JsonValueKind.Null)
+                {
+                    defaultBranch = def.GetString();
+                }
+
+                // Set selected branch to current branch by default
+                selectedBranch = currentBranchLocal;
+
+                // Show sync button if current branch doesn't exist in remote
+                if (!string.IsNullOrWhiteSpace(currentBranchLocal) && !remoteBranches.Contains(currentBranchLocal))
+                {
+                    showSyncToDefaultButton = true;
+                }
+                else
+                {
+                    showSyncToDefaultButton = false;
+                }
+
+                // Refresh workspace data
+                await OnBranchChanged.InvokeAsync();
+            }
+            else
+            {
+                var errorText = await response.Content.ReadAsStringAsync();
+                errorMessage = $"Failed to refresh branches: {response.StatusCode}";
+                Logger.LogError("Failed to refresh branches: {StatusCode}, {Error}", response.StatusCode, errorText);
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "An error occurred while refreshing branches.";
+            Logger.LogError(ex, "Error refreshing branches");
+        }
+        finally
+        {
+            isRefreshing = false;
+            StateHasChanged();
+        }
     }
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
