@@ -1,5 +1,7 @@
 @using System.Text.Json
 @using GrayMoon.App.Models
+@using GrayMoon.App.Models.Api
+@using GrayMoon.App.Services
 @inject IHttpClientFactory HttpClientFactory
 @inject NavigationManager NavigationManager
 @inject ILogger<SwitchBranchModal> Logger
@@ -260,33 +262,13 @@
             if (response.IsSuccessStatusCode)
             {
                 var responseContent = await response.Content.ReadAsStringAsync();
-                var doc = JsonDocument.Parse(responseContent);
-                var root = doc.RootElement;
-
-                if (root.TryGetProperty("localBranches", out var local))
+                var data = JsonSerializer.Deserialize<BranchesResponse>(responseContent, AgentResponseJson.Options);
+                if (data != null)
                 {
-                    localBranches = local.EnumerateArray()
-                        .Select(b => b.GetString() ?? string.Empty)
-                        .Where(b => !string.IsNullOrEmpty(b))
-                        .ToList();
-                }
-
-                if (root.TryGetProperty("remoteBranches", out var remote))
-                {
-                    remoteBranches = remote.EnumerateArray()
-                        .Select(b => b.GetString() ?? string.Empty)
-                        .Where(b => !string.IsNullOrEmpty(b))
-                        .ToList();
-                }
-
-                if (root.TryGetProperty("currentBranch", out var curr) && curr.ValueKind != JsonValueKind.Null)
-                {
-                    currentBranchLocal = curr.GetString();
-                }
-
-                if (root.TryGetProperty("defaultBranch", out var def) && def.ValueKind != JsonValueKind.Null)
-                {
-                    defaultBranch = def.GetString();
+                    localBranches = data.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    remoteBranches = data.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    currentBranchLocal = data.CurrentBranch;
+                    defaultBranch = data.DefaultBranch;
                 }
 
                 // Set selected branch to current branch by default
@@ -457,33 +439,13 @@
             if (response.IsSuccessStatusCode)
             {
                 var responseContent = await response.Content.ReadAsStringAsync();
-                var doc = JsonDocument.Parse(responseContent);
-                var root = doc.RootElement;
-
-                if (root.TryGetProperty("localBranches", out var local))
+                var data = JsonSerializer.Deserialize<BranchesResponse>(responseContent, AgentResponseJson.Options);
+                if (data != null)
                 {
-                    localBranches = local.EnumerateArray()
-                        .Select(b => b.GetString() ?? string.Empty)
-                        .Where(b => !string.IsNullOrEmpty(b))
-                        .ToList();
-                }
-
-                if (root.TryGetProperty("remoteBranches", out var remote))
-                {
-                    remoteBranches = remote.EnumerateArray()
-                        .Select(b => b.GetString() ?? string.Empty)
-                        .Where(b => !string.IsNullOrEmpty(b))
-                        .ToList();
-                }
-
-                if (root.TryGetProperty("currentBranch", out var curr) && curr.ValueKind != JsonValueKind.Null)
-                {
-                    currentBranchLocal = curr.GetString();
-                }
-
-                if (root.TryGetProperty("defaultBranch", out var def) && def.ValueKind != JsonValueKind.Null)
-                {
-                    defaultBranch = def.GetString();
+                    localBranches = data.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    remoteBranches = data.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    currentBranchLocal = data.CurrentBranch;
+                    defaultBranch = data.DefaultBranch;
                 }
 
                 // Set selected branch to current branch by default

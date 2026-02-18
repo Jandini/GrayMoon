@@ -1,6 +1,7 @@
 using GrayMoon.App.Api;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
+using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
 using Microsoft.AspNetCore.Routing;
@@ -148,47 +149,22 @@ public static class BranchEndpoints
             var response = await agentBridge.SendCommandAsync("CheckoutBranch", args, CancellationToken.None);
 
             // Agent always sends success=true when command completes without throwing; actual success is in response.Data
-            var checkoutResponse = response.Data != null ? ParseCheckoutBranchResponse(response.Data) : null;
+            var checkoutResponse = AgentResponseJson.DeserializeAgentResponse<CheckoutBranchResponse>(response.Data);
             var commandSuccess = checkoutResponse?.Success ?? response.Success;
             var errorMessage = checkoutResponse?.ErrorMessage ?? response.Error ?? "Failed to checkout branch";
 
             if (!commandSuccess)
-                return Results.Ok(new { success = false, errorMessage });
+                return Results.Ok(new CheckoutBranchApiResult(false, errorMessage));
 
             // Broadcast update to refresh UI
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
 
-            return Results.Ok(new { success = true, currentBranch = checkoutResponse?.CurrentBranch });
+            return Results.Ok(new CheckoutBranchApiResult(true, null) { CurrentBranch = checkoutResponse?.CurrentBranch });
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error checking out branch for repository {RepositoryId}", repositoryId);
             return Results.Problem("An error occurred while checking out branch", statusCode: 500);
-        }
-    }
-
-    private static CheckoutBranchApiResponse? ParseCheckoutBranchResponse(object data)
-    {
-        try
-        {
-            var json = data is System.Text.Json.JsonElement je ? je.GetRawText() : System.Text.Json.JsonSerializer.Serialize(data);
-            using var doc = System.Text.Json.JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            var response = new CheckoutBranchApiResponse();
-            // Agent returns PascalCase (Success, CurrentBranch, ErrorMessage)
-            if (root.TryGetProperty("success", out var success) || root.TryGetProperty("Success", out success))
-                response.Success = success.GetBoolean();
-            if (root.TryGetProperty("currentBranch", out var currentBranch) || root.TryGetProperty("CurrentBranch", out currentBranch))
-                if (currentBranch.ValueKind != System.Text.Json.JsonValueKind.Null && currentBranch.ValueKind != System.Text.Json.JsonValueKind.Undefined)
-                    response.CurrentBranch = currentBranch.GetString();
-            if (root.TryGetProperty("errorMessage", out var error) || root.TryGetProperty("ErrorMessage", out error))
-                if (error.ValueKind != System.Text.Json.JsonValueKind.Null && error.ValueKind != System.Text.Json.JsonValueKind.Undefined)
-                    response.ErrorMessage = error.GetString();
-            return response;
-        }
-        catch
-        {
-            return null;
         }
     }
 
@@ -302,42 +278,12 @@ public static class BranchEndpoints
                 return Results.Problem(response.Error ?? "Failed to refresh branches", statusCode: 500);
 
             // Parse response and persist branches
-            if (response.Data != null)
+            var refreshResponse = AgentResponseJson.DeserializeAgentResponse<BranchesResponse>(response.Data);
+            if (refreshResponse != null)
             {
-                var json = response.Data is System.Text.Json.JsonElement je ? je.GetRawText() : System.Text.Json.JsonSerializer.Serialize(response.Data);
-                using var doc = System.Text.Json.JsonDocument.Parse(json);
-                var root = doc.RootElement;
-
-                IReadOnlyList<string>? localBranches = null;
-                IReadOnlyList<string>? remoteBranches = null;
-
-                if (root.TryGetProperty("localBranches", out var local) && local.ValueKind == System.Text.Json.JsonValueKind.Array)
-                {
-                    localBranches = local.EnumerateArray()
-                        .Select(b => b.GetString() ?? string.Empty)
-                        .Where(b => !string.IsNullOrEmpty(b))
-                        .ToList();
-                }
-
-                if (root.TryGetProperty("remoteBranches", out var remote) && remote.ValueKind == System.Text.Json.JsonValueKind.Array)
-                {
-                    remoteBranches = remote.EnumerateArray()
-                        .Select(b => b.GetString() ?? string.Empty)
-                        .Where(b => !string.IsNullOrEmpty(b))
-                        .ToList();
-                }
-
-                // Persist branches using WorkspaceGitService method
+                var localBranches = refreshResponse.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                var remoteBranches = refreshResponse.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
                 await workspaceGitService.PersistBranchesAsync(wr.WorkspaceRepositoryId, localBranches, remoteBranches, CancellationToken.None);
-
-                // Update default branch if provided in response
-                if (root.TryGetProperty("defaultBranch", out var defBranch) && defBranch.ValueKind != System.Text.Json.JsonValueKind.Null)
-                {
-                    var defaultBranchName = defBranch.GetString();
-                    // Store default branch info if needed (could add to WorkspaceRepositoryLink if needed)
-                }
-
-                // Broadcast update to refresh UI
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
             }
 
@@ -370,11 +316,18 @@ public sealed class CheckoutBranchApiRequest
     public string? BranchName { get; set; }
 }
 
-internal sealed class CheckoutBranchApiResponse
+/// <summary>API response for POST /api/branches/checkout (serialized to camelCase).</summary>
+public sealed class CheckoutBranchApiResult
 {
     public bool Success { get; set; }
     public string? CurrentBranch { get; set; }
     public string? ErrorMessage { get; set; }
+
+    public CheckoutBranchApiResult(bool success, string? errorMessage)
+    {
+        Success = success;
+        ErrorMessage = errorMessage;
+    }
 }
 
 public sealed class SyncToDefaultBranchApiRequest

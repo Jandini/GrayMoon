@@ -2,6 +2,7 @@ using GrayMoon.App.Api;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
+using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
 using Microsoft.AspNetCore.Routing;
@@ -83,10 +84,9 @@ public static class PullPushEndpoints
             }
 
             // Parse response and update database
-            PullPushResponse? pullPushResponse = null;
-            if (response.Data != null)
+            var pullPushResponse = AgentResponseJson.DeserializeAgentResponse<PullPushResponse>(response.Data);
+            if (pullPushResponse != null)
             {
-                pullPushResponse = ParsePullPushResponse(response.Data);
                 
                 // Update workspace repository link with new commit counts
                 var wr = await dbContext.WorkspaceRepositories
@@ -122,41 +122,5 @@ public static class PullPushEndpoints
             logger.LogError(ex, "Error executing PullPush for repository {RepositoryId}", repositoryId);
             return Results.Problem("An error occurred while executing PullPush", statusCode: 500);
         }
-    }
-
-    private static PullPushResponse ParsePullPushResponse(object data)
-    {
-        var json = data is System.Text.Json.JsonElement je ? je.GetRawText() : System.Text.Json.JsonSerializer.Serialize(data);
-        using var doc = System.Text.Json.JsonDocument.Parse(json);
-        var root = doc.RootElement;
-        
-        var response = new PullPushResponse();
-        if (root.TryGetProperty("success", out var success))
-            response.Success = success.GetBoolean();
-        if (root.TryGetProperty("mergeConflict", out var mergeConflict))
-            response.MergeConflict = mergeConflict.GetBoolean();
-        if (root.TryGetProperty("version", out var version) && version.ValueKind != System.Text.Json.JsonValueKind.Null)
-            response.Version = version.GetString();
-        if (root.TryGetProperty("branch", out var branch) && branch.ValueKind != System.Text.Json.JsonValueKind.Null)
-            response.Branch = branch.GetString();
-        if (root.TryGetProperty("outgoingCommits", out var outgoing) && outgoing.ValueKind != System.Text.Json.JsonValueKind.Null && outgoing.TryGetInt32(out var outVal))
-            response.OutgoingCommits = outVal;
-        if (root.TryGetProperty("incomingCommits", out var incoming) && incoming.ValueKind != System.Text.Json.JsonValueKind.Null && incoming.TryGetInt32(out var inVal))
-            response.IncomingCommits = inVal;
-        if (root.TryGetProperty("errorMessage", out var error) && error.ValueKind != System.Text.Json.JsonValueKind.Null)
-            response.ErrorMessage = error.GetString();
-        
-        return response;
-    }
-
-    private sealed class PullPushResponse
-    {
-        public bool Success { get; set; }
-        public bool MergeConflict { get; set; }
-        public string? Version { get; set; }
-        public string? Branch { get; set; }
-        public int? OutgoingCommits { get; set; }
-        public int? IncomingCommits { get; set; }
-        public string? ErrorMessage { get; set; }
     }
 }

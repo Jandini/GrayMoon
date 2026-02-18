@@ -2,6 +2,7 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @implements IDisposable
 @using GrayMoon.App.Models
+@using GrayMoon.App.Models.Api
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
 @using GrayMoon.App.Components.Shared
@@ -459,6 +460,11 @@
                         updateProgressMessage = $"Refreshing projects {completed} of {total}";
                         InvokeAsync(StateHasChanged);
                     },
+                    onRepoError: (repoId, msg) =>
+                    {
+                        repositoryErrors[repoId] = msg;
+                        InvokeAsync(StateHasChanged);
+                    },
                     cancellationToken: _updateCts.Token);
 
                 updateProgressMessage = "Syncing dependencies...";
@@ -468,6 +474,11 @@
                     onProgress: (completed, total, _) =>
                     {
                         updateProgressMessage = $"Synced dependencies {completed} of {total}";
+                        InvokeAsync(StateHasChanged);
+                    },
+                    onRepoError: (repoId, msg) =>
+                    {
+                        repositoryErrors[repoId] = msg;
                         InvokeAsync(StateHasChanged);
                     },
                     cancellationToken: _updateCts.Token);
@@ -649,9 +660,15 @@
             await ReloadWorkspaceDataAsync();
             ApplySyncStateFromWorkspace();
             isOutOfSync = repoSyncStatus.Values.Any(v => v != RepoSyncStatus.InSync);
-            
-            // Clear errors on sync (new errors will be shown if they occur)
-            repositoryErrors.Clear();
+
+            // Set per-repo errors from sync results (same pattern as pull/push and checkout)
+            foreach (var (repoId, info) in repoGitInfos)
+            {
+                if (!string.IsNullOrWhiteSpace(info.ErrorMessage))
+                    repositoryErrors[repoId] = info.ErrorMessage;
+                else
+                    repositoryErrors.Remove(repoId);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -703,34 +720,21 @@
             if (response.IsSuccessStatusCode)
             {
                 var responseContent = await response.Content.ReadAsStringAsync(_pullPushCts.Token);
-                var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(responseContent);
+                var result = System.Text.Json.JsonSerializer.Deserialize<PullPushResponse>(responseContent, AgentResponseJson.Options);
                 
-                // Check for error message in response
-                if (result.TryGetProperty("errorMessage", out var errorMsg) && errorMsg.ValueKind != System.Text.Json.JsonValueKind.Null)
+                if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
                 {
-                    var errorText = errorMsg.GetString();
-                    if (!string.IsNullOrWhiteSpace(errorText))
-                    {
-                        repositoryErrors[repositoryId] = errorText;
-                        pullPushProgressMessage = "Pull/Push completed with errors.";
-                        await Task.Delay(2000, _pullPushCts.Token);
-                    }
-                    else
-                    {
-                        // Clear error if operation succeeded
-                        repositoryErrors.Remove(repositoryId);
-                        pullPushProgressMessage = "Pull/Push completed successfully.";
-                        await Task.Delay(1000, _pullPushCts.Token);
-                    }
+                    repositoryErrors[repositoryId] = result.ErrorMessage;
+                    pullPushProgressMessage = result.MergeConflict ? "Merge conflict detected. Merge aborted." : "Pull/Push completed with errors.";
+                    await Task.Delay(2000, _pullPushCts.Token);
                 }
-                else if (result.TryGetProperty("mergeConflict", out var mergeConflict) && mergeConflict.GetBoolean())
+                else if (result != null && result.MergeConflict)
                 {
                     pullPushProgressMessage = "Merge conflict detected. Merge aborted.";
                     await Task.Delay(2000, _pullPushCts.Token);
                 }
                 else
                 {
-                    // Clear error if operation succeeded
                     repositoryErrors.Remove(repositoryId);
                     pullPushProgressMessage = "Pull/Push completed successfully.";
                     await Task.Delay(1000, _pullPushCts.Token);
@@ -838,26 +842,16 @@
             if (response.IsSuccessStatusCode)
             {
                 var responseContent = await response.Content.ReadAsStringAsync(_checkoutCts.Token);
-                var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(responseContent);
-                
-                // Parse success (camelCase from API) and errorMessage (same pattern as PullPushAsync)
-                var success = false;
-                if (result.TryGetProperty("success", out var successProp))
-                    success = successProp.GetBoolean();
-                var errorText = (string?)null;
-                if (result.TryGetProperty("errorMessage", out var errorMsg) && errorMsg.ValueKind != System.Text.Json.JsonValueKind.Null)
-                    errorText = errorMsg.GetString();
+                var result = System.Text.Json.JsonSerializer.Deserialize<CheckoutBranchResponse>(responseContent, AgentResponseJson.Options);
 
-                if (!success)
+                if (result != null && !result.Success)
                 {
-                    // Checkout failed: show error in repo row
-                    repositoryErrors[repositoryId] = !string.IsNullOrWhiteSpace(errorText) ? errorText : "Failed to checkout branch.";
+                    repositoryErrors[repositoryId] = !string.IsNullOrWhiteSpace(result.ErrorMessage) ? result.ErrorMessage : "Failed to checkout branch.";
                     checkoutProgressMessage = "Checkout completed with errors.";
                     await Task.Delay(2000, _checkoutCts.Token);
                 }
                 else
                 {
-                    // Success: clear any previous error for this repo
                     repositoryErrors.Remove(repositoryId);
                     checkoutProgressMessage = "Checkout completed successfully.";
                     await Task.Delay(1000, _checkoutCts.Token);

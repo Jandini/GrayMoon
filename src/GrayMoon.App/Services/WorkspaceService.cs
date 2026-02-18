@@ -1,4 +1,5 @@
 using System.Text.Json;
+using GrayMoon.App.Models.Api;
 
 namespace GrayMoon.App.Services;
 
@@ -29,7 +30,8 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
             var response = await agentBridge.SendCommandAsync("GetWorkspaceRoot", new { }, cancellationToken);
             if (response.Success && response.Data != null)
             {
-                var root = GetProperty<string>(response.Data, "workspaceRoot");
+                var data = AgentResponseJson.DeserializeAgentResponse<AgentWorkspaceRootResponse>(response.Data);
+                var root = data?.WorkspaceRoot;
                 if (!string.IsNullOrWhiteSpace(root))
                 {
                     _cachedRootPath = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -79,7 +81,8 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
         if (!response.Success || response.Data == null)
             return false;
 
-        return GetProperty<bool>(response.Data, "exists");
+        var data = AgentResponseJson.DeserializeAgentResponse<AgentWorkspaceExistsResponse>(response.Data);
+        return data?.Exists ?? false;
     }
 
     public async Task<int> GetRepositoryCountAsync(string workspaceName, CancellationToken cancellationToken = default)
@@ -91,8 +94,8 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
         if (!response.Success || response.Data == null)
             return 0;
 
-        var repos = GetProperty<string[]>(response.Data, "repositories");
-        return repos?.Length ?? 0;
+        var data = AgentResponseJson.DeserializeAgentResponse<AgentRepositoriesListResponse>(response.Data);
+        return data?.Repositories?.Count ?? 0;
     }
 
     public async Task<IReadOnlyList<(string Name, string? OriginUrl)>> GetWorkspaceRepositoryInfosAsync(
@@ -106,22 +109,17 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
         if (!response.Success || response.Data == null)
             return Array.Empty<(string, string?)>();
 
-        var json = response.Data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(response.Data);
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-        if (!root.TryGetProperty("repositoryInfos", out var infosEl) || infosEl.ValueKind != JsonValueKind.Array)
+        var data = AgentResponseJson.DeserializeAgentResponse<AgentWorkspaceRepositoriesResponse>(response.Data);
+        var infos = data?.RepositoryInfos;
+        if (infos == null)
             return Array.Empty<(string, string?)>();
 
         var list = new List<(string Name, string? OriginUrl)>();
-        foreach (var el in infosEl.EnumerateArray())
+        foreach (var el in infos)
         {
-            var name = el.TryGetProperty("name", out var n) ? n.GetString() ?? string.Empty : string.Empty;
-            if (string.IsNullOrWhiteSpace(name))
-                continue;
-            var origin = el.TryGetProperty("originUrl", out var o) ? o.GetString() : null;
-            list.Add((name, origin));
+            if (string.IsNullOrWhiteSpace(el.Name)) continue;
+            list.Add((el.Name, el.OriginUrl));
         }
-
         return list;
     }
 
@@ -149,7 +147,8 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
             var response = await agentBridge.SendCommandAsync("GetWorkspaceRoot", new { }, cancellationToken);
             if (response.Success && response.Data != null)
             {
-                var root = GetProperty<string>(response.Data, "workspaceRoot");
+                var data = AgentResponseJson.DeserializeAgentResponse<AgentWorkspaceRootResponse>(response.Data);
+                var root = data?.WorkspaceRoot;
                 if (!string.IsNullOrWhiteSpace(root))
                 {
                     _cachedRootPath = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -182,21 +181,6 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
         _cachedRootPath = null;
     }
 
-    private static T? GetProperty<T>(object data, string name)
-    {
-        if (data == null) return default;
-        var json = data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(data);
-        using var doc = JsonDocument.Parse(json);
-        if (!doc.RootElement.TryGetProperty(name, out var prop))
-            return default;
-        if (typeof(T) == typeof(bool))
-            return (T)(object)prop.GetBoolean();
-        if (typeof(T) == typeof(string[]))
-            return (T)(object)prop.EnumerateArray().Select(e => e.GetString() ?? "").ToArray();
-        if (typeof(T) == typeof(int))
-            return (T)(object)prop.GetInt32();
-        return (T)Convert.ChangeType(prop.GetString() ?? "", typeof(T))!;
-    }
 
     private static string SanitizeDirectoryName(string name)
     {
