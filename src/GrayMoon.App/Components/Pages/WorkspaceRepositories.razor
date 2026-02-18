@@ -26,17 +26,21 @@
                 <p class="text-muted mb-0" style="min-height: 1.5rem;">
                     @if (workspaceRepositories.Count > 0)
                     {
-                        @($"{workspaceRepositories.Count} {(workspaceRepositories.Count == 1 ? "repository" : "repositories")}")
+                        <span class="repositories-count-link" @onclick="ShowRepositoriesModalAsync" @onclick:preventDefault>
+                            @($"{workspaceRepositories.Count} {(workspaceRepositories.Count == 1 ? "repository" : "repositories")}")
+                        </span>
                     }
-                    &nbsp;
+                    else if (workspace != null)
+                    {
+                        <span class="repositories-count-link" @onclick="ShowRepositoriesModalAsync" @onclick:preventDefault>0 repositories</span>
+                    }
+                    else
+                    {
+                        <span>&nbsp;</span>
+                    }
                 </p>
             </div>
             <div class="d-flex gap-2">
-                <button class="btn btn-secondary"
-                        @onclick="ShowRepositoriesModalAsync"
-                        disabled="@(workspace == null)">
-                    Repositories
-                </button>
                 <button class="btn @(hasUnmatchedDependencies ? "btn-danger" : "btn-secondary")"
                         @onclick="UpdateDependenciesAsync"
                         disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating)">

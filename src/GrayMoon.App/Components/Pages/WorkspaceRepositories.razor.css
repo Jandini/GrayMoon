@@ -149,3 +149,13 @@
 .repositories-table .branch-text {
     color: #fff;
 }
+
+/* Clickable repositories count under page title */
+.repositories-count-link {
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.repositories-count-link:hover {
+    text-decoration: underline;
+}
