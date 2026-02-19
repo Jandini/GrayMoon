@@ -130,12 +130,12 @@
                                             <td class="col-version">
                                                 @if (!string.IsNullOrEmpty(wr.GitVersion))
                                                 {
-                                                    <span class="version-text version-clickable" 
-                                                          style="cursor: pointer;"
-                                                          @onclick='() => CopyVersionToClipboard(wr.GitVersion)'
-                                                          title="Click to copy version">
-                                                        <span class="text-muted">@wr.GitVersion</span>
-                                                    </span>
+                                                    <div class="version-container">
+                                                        <span class="version-display text-muted">@wr.GitVersion</span>
+                                                        <span class="version-code" 
+                                                              @onclick='() => CopyVersionToClipboard(wr.GitVersion)'
+                                                              title="Click to copy version">@wr.GitVersion</span>
+                                                    </div>
                                                 }
                                                 else
                                                 {
