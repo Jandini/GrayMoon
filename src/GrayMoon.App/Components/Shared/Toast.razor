@@ -1,0 +1,60 @@
+@implements IDisposable
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@inject IToastService ToastService
+
+@{
+    var message = ToastService.Message;
+    var isVisible = ToastService.IsVisible;
+}
+
+@if (isVisible && !string.IsNullOrEmpty(message))
+{
+    <div class="toast-bubble" role="status" aria-live="polite">
+        <span class="toast-bubble-text">@message</span>
+    </div>
+}
+
+@code {
+    private Timer? _hideTimer;
+    private string? _lastMessage;
+
+    protected override void OnInitialized()
+    {
+        ToastService.OnShow += NotifyStateChanged;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        // Start timer only when toast becomes visible with a new message
+        if (ToastService.IsVisible && 
+            !string.IsNullOrEmpty(ToastService.Message) && 
+            ToastService.Message != _lastMessage)
+        {
+            _lastMessage = ToastService.Message;
+            _hideTimer?.Dispose();
+            _hideTimer = new Timer(_ =>
+            {
+                _hideTimer?.Dispose();
+                _hideTimer = null;
+                ToastService.Hide();
+                _lastMessage = null;
+                InvokeAsync(StateHasChanged);
+            }, null, 2_500, Timeout.Infinite);
+        }
+        else if (!ToastService.IsVisible)
+        {
+            _lastMessage = null;
+        }
+    }
+
+    private void NotifyStateChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        ToastService.OnShow -= NotifyStateChanged;
+        _hideTimer?.Dispose();
+    }
+}

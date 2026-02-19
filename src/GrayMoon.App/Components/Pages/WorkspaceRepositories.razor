@@ -17,6 +17,8 @@
 @inject NavigationManager NavigationManager
 @inject ILogger<WorkspaceRepositories> Logger
 @inject IHttpClientFactory HttpClientFactory
+@inject IJSRuntime JSRuntime
+@inject IToastService ToastService
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
 <PageTitle>@(workspace?.Name ?? "Workspace")</PageTitle>
@@ -126,14 +128,36 @@
                                                     <strong>@repo.RepositoryName</strong>
                                                 }
                                             </td>
-                                            <td class="col-version text-muted">@(wr.GitVersion ?? "-")</td>
+                                            <td class="col-version">
+                                                @if (!string.IsNullOrEmpty(wr.GitVersion))
+                                                {
+                                                    <div class="version-container @(clickedVersions.Contains(wr.GitVersion) ? "version-clicked" : "")"
+                                                         @onmouseleave='() => OnVersionMouseLeave(wr.GitVersion)'>
+                                                        <span class="version-display text-muted">@wr.GitVersion</span>
+                                                        <span class="version-code" 
+                                                              @onclick='() => CopyVersionToClipboard(wr.GitVersion)'
+                                                              title="Click to copy version">@wr.GitVersion</span>
+                                                    </div>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">-</span>
+                                                }
+                                            </td>
                                             <td class="col-branch">
-                                                <span class="branch-text branch-clickable" 
-                                                      style="cursor: pointer;"
-                                                      @onclick='() => ShowSwitchBranchModal(repo.RepositoryId, wr.BranchName, repo.CloneUrl)'
-                                                      title="Click to switch branch">
-                                                    @(wr.BranchName ?? "-")
-                                                </span>
+                                                @if (!string.IsNullOrEmpty(wr.BranchName))
+                                                {
+                                                    <div class="branch-container">
+                                                        <span class="branch-display">@wr.BranchName</span>
+                                                        <span class="branch-code" 
+                                                              @onclick='() => ShowSwitchBranchModal(repo.RepositoryId, wr.BranchName, repo.CloneUrl)'
+                                                              title="Click to switch branch">@wr.BranchName</span>
+                                                    </div>
+                                                }
+                                                else
+                                                {
+                                                    <span>-</span>
+                                                }
                                             </td>
                                             <td class="col-deps col-status-badge">
                                                 @{
@@ -248,6 +272,7 @@
     private string checkoutProgressMessage = "Checking out branch...";
     private CancellationTokenSource? _checkoutCts;
     private Dictionary<int, string> repositoryErrors = new(); // repositoryId -> error message
+    private HashSet<string> clickedVersions = new(); // Track clicked versions to hide hover until mouse leaves
     private HubConnection? _hubConnection;
     private bool showRepositoriesModal;
     private bool isSavingRepositories;
@@ -1043,5 +1068,28 @@
         }
         
         return url;
+    }
+
+    private async Task CopyVersionToClipboard(string version)
+    {
+        if (!string.IsNullOrEmpty(version))
+        {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", version);
+            ToastService.Show($"{version} copied to the clipboard");
+            
+            // Hide highlight after click (like a button)
+            clickedVersions.Add(version);
+            StateHasChanged();
+        }
+    }
+
+    private void OnVersionMouseLeave(string? version)
+    {
+        if (!string.IsNullOrEmpty(version))
+        {
+            // Clear clicked state when mouse leaves, allowing hover to work again
+            clickedVersions.Remove(version);
+            StateHasChanged();
+        }
     }
 }
