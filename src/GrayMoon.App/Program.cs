@@ -94,6 +94,7 @@ using (var scope = app.Services.CreateScope())
     await MigrateWorkspaceRepositoriesSequenceAndDependenciesAsync(dbContext);
     await MigrateWorkspaceProjectsMatchedConnectorAsync(dbContext);
     await MigrateRepositoryBranchesAsync(dbContext);
+    await MigrateRepositoryBranchesIsDefaultAsync(dbContext);
 }
 
 static async Task MigrateWorkspaceProjectsMatchedConnectorAsync(AppDbContext dbContext)
@@ -398,6 +399,31 @@ static async Task MigrateRepositoryBranchesAsync(AppDbContext dbContext)
                 await cmd.ExecuteNonQueryAsync();
                 
                 cmd.CommandText = "CREATE INDEX IX_RepositoryBranches_WorkspaceRepositoryId ON RepositoryBranches(WorkspaceRepositoryId)";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateRepositoryBranchesIsDefaultAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('RepositoryBranches') WHERE name='IsDefault'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE RepositoryBranches ADD COLUMN IsDefault INTEGER NOT NULL DEFAULT 0";
                 await cmd.ExecuteNonQueryAsync();
             }
         }

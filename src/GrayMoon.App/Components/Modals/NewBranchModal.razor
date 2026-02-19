@@ -1,0 +1,131 @@
+@using System.Text.Json
+@inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager NavigationManager
+@inject ILogger<NewBranchModal> Logger
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDown"
+         @ref="modalElement">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">New Branch</h5>
+                    <button type="button" class="btn-close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body">
+                    @if (errorMessage != null)
+                    {
+                        <div class="alert alert-danger alert-dismissible d-flex align-items-start" role="alert">
+                            <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">@errorMessage</div>
+                            <button type="button" class="btn-close ms-2" aria-label="Close" @onclick='() => { errorMessage = null; StateHasChanged(); }'></button>
+                        </div>
+                    }
+                    <div class="mb-3">
+                        <label class="form-label" for="new-branch-name">Branch name</label>
+                        <input id="new-branch-name"
+                               type="text"
+                               class="form-control"
+                               placeholder="e.g. feature/my-feature"
+                               @bind="newBranchName"
+                               @bind:event="oninput" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="based-on">Based on</label>
+                        <select id="based-on"
+                                class="form-select"
+                                @bind="selectedBaseBranch">
+                            @* First option: common default branch (e.g. main [default]) or multiple [default]; then all other branches common across all repos *@
+                            <option value="__default__">@DefaultDisplayText [default]</option>
+                            @foreach (var branch in CommonBranchNames)
+                            {
+                                <option value="@branch">@branch</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" @onclick="CreateAsync" disabled="@(string.IsNullOrWhiteSpace(newBranchName) || isCreating)">
+                        @if (isCreating)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Create
+                    </button>
+                    <button type="button" class="btn btn-secondary" @onclick="OnCancel" disabled="@isCreating">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public int WorkspaceId { get; set; }
+    [Parameter] public IReadOnlyList<string> CommonBranchNames { get; set; } = Array.Empty<string>();
+    /// <summary>Display text for the default option: e.g. "main" when all repos same default, or "multiple" when different.</summary>
+    [Parameter] public string DefaultDisplayText { get; set; } = "multiple";
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback<(string NewBranchName, string BaseBranch)> OnCreateBranch { get; set; }
+
+    private string newBranchName = "";
+    private string selectedBaseBranch = "__default__";
+    private bool isCreating = false;
+    private string? errorMessage;
+    private ElementReference modalElement;
+    private bool _wasVisible;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible && !_wasVisible)
+        {
+            _wasVisible = true;
+            newBranchName = "";
+            selectedBaseBranch = "__default__";
+            errorMessage = null;
+            try
+            {
+                await modalElement.FocusAsync();
+            }
+            catch { }
+        }
+        else if (!IsVisible)
+        {
+            _wasVisible = false;
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        var name = newBranchName?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            errorMessage = "Enter a branch name.";
+            return;
+        }
+        var baseBranch = selectedBaseBranch ?? "__default__";
+
+        isCreating = true;
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            await OnCreateBranch.InvokeAsync((name, baseBranch));
+        }
+        finally
+        {
+            isCreating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" || e.Code == "Escape")
+        {
+            await OnCancel.InvokeAsync();
+        }
+    }
+}

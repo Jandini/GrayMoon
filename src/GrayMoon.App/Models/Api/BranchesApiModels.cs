@@ -30,3 +30,27 @@ public sealed class CheckoutBranchResponse
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
 }
+
+/// <summary>Agent CreateBranch response (camelCase).</summary>
+public sealed class CreateBranchResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("currentBranch")]
+    public string? CurrentBranch { get; set; }
+
+    [JsonPropertyName("errorMessage")]
+    public string? ErrorMessage { get; set; }
+}
+
+/// <summary>Response from POST /api/branches/common (camelCase).</summary>
+public sealed class CommonBranchesApiResult
+{
+    [JsonPropertyName("commonBranchNames")]
+    public List<string>? CommonBranchNames { get; set; }
+
+    /// <summary>Display text for the default option: branch name when all repos share same default (e.g. "main"), or "multiple" when they differ.</summary>
+    [JsonPropertyName("defaultDisplayText")]
+    public string? DefaultDisplayText { get; set; }
+}

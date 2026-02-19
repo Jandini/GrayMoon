@@ -26,4 +26,7 @@ public class RepositoryBranch
     /// <summary>Timestamp when this branch was last seen/fetched.</summary>
     [Required]
     public DateTime LastSeenAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>True if this is the repository's default branch (e.g. main or master). Set when branches are refreshed from agent.</summary>
+    public bool IsDefault { get; set; }
 }
