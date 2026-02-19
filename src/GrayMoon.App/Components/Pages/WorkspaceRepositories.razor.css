@@ -95,6 +95,16 @@
     color: #fff;
 }
 
+/* Clickable dependency badge: link to Graph page with repo filter */
+.repositories-table .dependency-badge-link {
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.repositories-table .dependency-badge-link:hover .build-dep-badge {
+    filter: brightness(1.1);
+}
+
 .col-commits {
     width: auto;
     max-width: 80px;
