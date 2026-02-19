@@ -33,16 +33,42 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label" for="based-on">Based on</label>
-                        <select id="based-on"
-                                class="form-select"
-                                @bind="selectedBaseBranch">
-                            @* First option: common default branch (e.g. main [default]) or multiple [default]; then all other branches common across all repos *@
-                            <option value="__default__">@DefaultDisplayText [default]</option>
-                            @foreach (var branch in CommonBranchNames)
+                        <div class="position-relative">
+                            <button type="button"
+                                    id="based-on"
+                                    class="new-branch-based-on-trigger border rounded w-100 d-flex align-items-center gap-2 text-start"
+                                    style="cursor: pointer; padding: 0.375rem 0.75rem;"
+                                    @onclick="ToggleBasedOnDropdown">
+                                <span class="d-flex align-items-center gap-2 flex-grow-1 min-w-0">
+                                    <span class="text-truncate">@GetSelectedBaseDisplayText()</span>
+                                    @if (selectedBaseBranch == "__default__")
+                                    {
+                                        <span class="badge bg-success flex-shrink-0">Default</span>
+                                    }
+                                </span>
+                                <i class="bi bi-chevron-down flex-shrink-0 text-secondary"></i>
+                            </button>
+                            @if (showBasedOnDropdown)
                             {
-                                <option value="@branch">@branch</option>
+                                <ul class="list-unstyled border rounded mt-1 mb-0 py-1 new-branch-based-on-list position-absolute start-0 end-0 shadow"
+                                    style="z-index: 1050; max-height: 280px; overflow-y: auto; font-size: 1rem;">
+                                    <li class="new-branch-based-on-item px-3 py-2 @(selectedBaseBranch == "__default__" ? "selected" : "")"
+                                        style="cursor: pointer;"
+                                        @onclick='() => SelectBaseBranch("__default__")'>
+                                        <span>@DefaultDisplayText</span>
+                                        <span class="badge bg-success ms-2">Default</span>
+                                    </li>
+                                    @foreach (var branch in CommonBranchNames)
+                                    {
+                                        <li class="new-branch-based-on-item px-3 py-2 @(selectedBaseBranch == branch ? "selected" : "")"
+                                            style="cursor: pointer;"
+                                            @onclick='() => SelectBaseBranch(branch)'>
+                                            @branch
+                                        </li>
+                                    }
+                                </ul>
                             }
-                        </select>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -73,8 +99,27 @@
     private string selectedBaseBranch = "__default__";
     private bool isCreating = false;
     private string? errorMessage;
+    private bool showBasedOnDropdown = false;
     private ElementReference modalElement;
     private bool _wasVisible;
+
+    private string GetSelectedBaseDisplayText()
+    {
+        if (selectedBaseBranch == "__default__")
+            return DefaultDisplayText;
+        return selectedBaseBranch;
+    }
+
+    private void ToggleBasedOnDropdown()
+    {
+        showBasedOnDropdown = !showBasedOnDropdown;
+    }
+
+    private void SelectBaseBranch(string value)
+    {
+        selectedBaseBranch = value;
+        showBasedOnDropdown = false;
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -93,6 +138,7 @@
         else if (!IsVisible)
         {
             _wasVisible = false;
+            showBasedOnDropdown = false;
         }
     }
 

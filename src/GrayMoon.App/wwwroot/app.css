@@ -18,6 +18,7 @@
     --border-color: #3e3e42;
     --border-hover: #4e4e52;
     --border-light: #5a5a5a;
+    --border-input: #2d2d30; /* dark gray frame for inputs and dropdowns */
     
     --accent-blue: #0e639c;
     --accent-blue-hover: #1177bb;
@@ -181,16 +182,23 @@ h1:focus {
     outline: none;
 }
 
-/* Form Controls */
+/* Form Controls – dark gray frame (global; !important so Bootstrap cannot override) */
+.form-control,
+.form-select,
+.new-branch-based-on-trigger,
+.new-branch-based-on-list {
+    border: 1px solid var(--border-input) !important;
+    box-shadow: none !important;
+}
+
 .form-control, .form-select {
     background-color: var(--bg-input);
-    border-color: var(--border-color);
     color: var(--text-primary);
 }
 
 .form-control:focus, .form-select:focus {
     background-color: var(--bg-input);
-    border-color: var(--accent-blue);
+    border-color: var(--accent-blue) !important;
     color: var(--text-primary);
 }
 

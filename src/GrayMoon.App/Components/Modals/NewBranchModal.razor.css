@@ -1,0 +1,33 @@
+/* Trigger: same look and height as form-control; dark gray frame (!important so it is not overridden) */
+.new-branch-based-on-trigger {
+    height: calc(1.5em + 0.75rem + 2px);
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+    border: 1px solid var(--border-input) !important;
+    box-shadow: none !important;
+}
+
+.new-branch-based-on-trigger .text-truncate {
+    color: var(--text-primary);
+}
+
+/* Dropdown list: identical background; dark gray frame (!important so it is not overridden) */
+.new-branch-based-on-list {
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+    border: 1px solid var(--border-input) !important;
+    box-shadow: none !important;
+}
+
+.new-branch-based-on-item {
+    color: var(--text-primary);
+}
+
+/* Highlight row on hover */
+.new-branch-based-on-item:hover {
+    background-color: var(--bg-hover);
+}
+
+.new-branch-based-on-item.selected {
+    background-color: var(--bg-active);
+}
