@@ -143,12 +143,19 @@
                                                 }
                                             </td>
                                             <td class="col-branch">
-                                                <span class="branch-text branch-clickable" 
-                                                      style="cursor: pointer;"
-                                                      @onclick='() => ShowSwitchBranchModal(repo.RepositoryId, wr.BranchName, repo.CloneUrl)'
-                                                      title="Click to switch branch">
-                                                    @(wr.BranchName ?? "-")
-                                                </span>
+                                                @if (!string.IsNullOrEmpty(wr.BranchName))
+                                                {
+                                                    <div class="branch-container">
+                                                        <span class="branch-display">@wr.BranchName</span>
+                                                        <span class="branch-code" 
+                                                              @onclick='() => ShowSwitchBranchModal(repo.RepositoryId, wr.BranchName, repo.CloneUrl)'
+                                                              title="Click to switch branch">@wr.BranchName</span>
+                                                    </div>
+                                                }
+                                                else
+                                                {
+                                                    <span>-</span>
+                                                }
                                             </td>
                                             <td class="col-deps col-status-badge">
                                                 @{
