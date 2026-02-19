@@ -163,18 +163,25 @@
                                                 @{
                                                     var depCount = wr.Dependencies ?? 0;
                                                     var unmatchedDeps = wr.UnmatchedDeps ?? 0;
+                                                    var graphUrl = GetDependencyGraphUrl(repo.RepositoryId);
                                                 }
                                                 @if (depCount == 0)
                                                 {
-                                                    <span class="badge build-dep-badge build-dep-badge-none">0</span>
+                                                    <a href="@graphUrl" class="dependency-badge-link" title="View dependency graph for this repository">
+                                                        <span class="badge build-dep-badge build-dep-badge-none">0</span>
+                                                    </a>
                                                 }
                                                 else if (unmatchedDeps == 0)
                                                 {
-                                                    <span class="badge build-dep-badge build-dep-badge-ok">@depCount</span>
+                                                    <a href="@graphUrl" class="dependency-badge-link" title="View dependency graph for this repository">
+                                                        <span class="badge build-dep-badge build-dep-badge-ok">@depCount</span>
+                                                    </a>
                                                 }
                                                 else
                                                 {
-                                                    <span class="badge build-dep-badge build-dep-badge-mismatch">@unmatchedDeps of @depCount</span>
+                                                    <a href="@graphUrl" class="dependency-badge-link" title="View dependency graph for this repository">
+                                                        <span class="badge build-dep-badge build-dep-badge-mismatch">@unmatchedDeps of @depCount</span>
+                                                    </a>
                                                 }
                                             </td>
                                             <td class="col-commits">@GetCommitsBadge(repo.RepositoryId, wr.OutgoingCommits, wr.IncomingCommits)</td>
@@ -1091,5 +1098,10 @@
             clickedVersions.Remove(version);
             StateHasChanged();
         }
+    }
+
+    private string GetDependencyGraphUrl(int repositoryId)
+    {
+        return $"/workspaces/{WorkspaceId}/dependencies?repo={repositoryId}";
     }
 }
