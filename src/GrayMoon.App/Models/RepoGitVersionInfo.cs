@@ -15,6 +15,8 @@ public class RepoGitVersionInfo
     public IReadOnlyList<string>? LocalBranches { get; init; }
     /// <summary>Remote branches fetched during sync.</summary>
     public IReadOnlyList<string>? RemoteBranches { get; init; }
+    /// <summary>Default branch name (e.g. main or master) from sync; used to persist IsDefault.</summary>
+    public string? DefaultBranch { get; init; }
     /// <summary>Error message when sync failed for this repo.</summary>
     public string? ErrorMessage { get; init; }
 }

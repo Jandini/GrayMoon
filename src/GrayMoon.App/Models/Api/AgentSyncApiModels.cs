@@ -35,7 +35,7 @@ public sealed class AgentCommitCountsResponse
     public int? IncomingCommits { get; set; }
 }
 
-/// <summary>Agent response with localBranches and remoteBranches arrays.</summary>
+/// <summary>Agent response with localBranches, remoteBranches, and defaultBranch (e.g. from SyncRepository or RefreshBranches).</summary>
 public sealed class AgentBranchesResponse
 {
     [JsonPropertyName("localBranches")]
@@ -43,6 +43,9 @@ public sealed class AgentBranchesResponse
 
     [JsonPropertyName("remoteBranches")]
     public List<string>? RemoteBranches { get; set; }
+
+    [JsonPropertyName("defaultBranch")]
+    public string? DefaultBranch { get; set; }
 }
 
 /// <summary>Project element in agent sync response (CsProjFileInfo shape).</summary>

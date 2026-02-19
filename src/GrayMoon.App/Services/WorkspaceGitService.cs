@@ -332,7 +332,7 @@ public class WorkspaceGitService(
         var projectsCount = GetProjects(response.Data);
         var projectsDetail = GetProjectsDetail(response.Data);
         var (outgoingCommits, incomingCommits) = GetCommitCounts(response.Data);
-        var (localBranches, remoteBranches) = GetBranches(response.Data);
+        var (localBranches, remoteBranches, defaultBranch) = GetBranches(response.Data);
         return new RepoGitVersionInfo
         {
             Version = version,
@@ -343,6 +343,7 @@ public class WorkspaceGitService(
             IncomingCommits = incomingCommits,
             LocalBranches = localBranches,
             RemoteBranches = remoteBranches,
+            DefaultBranch = defaultBranch,
             ErrorMessage = null
         };
     }
@@ -376,12 +377,13 @@ public class WorkspaceGitService(
         return (r?.OutgoingCommits, r?.IncomingCommits);
     }
 
-    private static (IReadOnlyList<string>? LocalBranches, IReadOnlyList<string>? RemoteBranches) GetBranches(object data)
+    private static (IReadOnlyList<string>? LocalBranches, IReadOnlyList<string>? RemoteBranches, string? DefaultBranch) GetBranches(object data)
     {
         var r = AgentResponseJson.DeserializeAgentResponse<AgentBranchesResponse>(data);
         var local = r?.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
         var remote = r?.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
-        return (local, remote);
+        var defaultBranch = !string.IsNullOrWhiteSpace(r?.DefaultBranch) ? r.DefaultBranch : null;
+        return (local, remote, defaultBranch);
     }
 
     private static IReadOnlyList<SyncProjectInfo>? GetProjectsDetail(object data)
@@ -448,10 +450,10 @@ public class WorkspaceGitService(
             if (info.ProjectsDetail is { Count: > 0 })
                 await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repoId, info.ProjectsDetail, cancellationToken);
 
-            // Persist branches if available
+            // Persist branches if available (include default branch so IsDefault is set)
             if ((info.LocalBranches != null || info.RemoteBranches != null) && wr != null)
             {
-                await PersistBranchesAsync(wr.WorkspaceRepositoryId, info.LocalBranches, info.RemoteBranches, defaultBranchName: null, cancellationToken);
+                await PersistBranchesAsync(wr.WorkspaceRepositoryId, info.LocalBranches, info.RemoteBranches, info.DefaultBranch, cancellationToken);
             }
         }
 
