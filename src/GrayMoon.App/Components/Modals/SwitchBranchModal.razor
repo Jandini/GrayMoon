@@ -1,5 +1,7 @@
 @using System.Text.Json
 @using GrayMoon.App.Models
+@using GrayMoon.App.Models.Api
+@using GrayMoon.App.Services
 @inject IHttpClientFactory HttpClientFactory
 @inject NavigationManager NavigationManager
 @inject ILogger<SwitchBranchModal> Logger
@@ -7,7 +9,8 @@
 @if (IsVisible)
 {
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
-         @onkeydown="HandleKeyDown">
+         @onkeydown="HandleKeyDown"
+         @ref="modalElement">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
@@ -19,36 +22,51 @@
                     {
                         <div class="text-center py-4">
                             <div class="spinner-border" role="status">
-                                <span class="visually-hidden">Loading branches...</span>
+                                <span class="visually-hidden">@loadingMessage</span>
                             </div>
-                            <p class="mt-2 text-muted">Loading branches...</p>
+                            <p class="mt-2 text-muted">@loadingMessage</p>
                         </div>
                     }
                     else if (errorMessage != null)
                     {
-                        <div class="alert alert-danger">@errorMessage</div>
+                        <div class="alert alert-danger alert-dismissible d-flex align-items-start" role="alert">
+                            <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">@errorMessage</div>
+                            <button type="button" class="btn-close ms-2" aria-label="Close" @onclick='() => { errorMessage = null; StateHasChanged(); }'></button>
+                        </div>
                     }
                     else
                     {
                         <div class="mb-3">
-                            <ul class="nav nav-tabs switch-branch-tabs" role="tablist">
-                                <li class="nav-item" role="presentation">
-                                    <button class="nav-link @(activeTab == "local" ? "active" : "")" 
-                                            type="button" 
-                                            role="tab"
-                                            @onclick='() => SetActiveTab("local")'>
-                                        Local Branches (@localBranches.Count)
-                                    </button>
-                                </li>
-                                <li class="nav-item" role="presentation">
-                                    <button class="nav-link @(activeTab == "remote" ? "active" : "")" 
-                                            type="button" 
-                                            role="tab"
-                                            @onclick='() => SetActiveTab("remote")'>
-                                        Remote Branches (@remoteBranches.Count)
-                                    </button>
-                                </li>
-                            </ul>
+                            <div class="d-flex align-items-center justify-content-between">
+                                <ul class="nav nav-tabs switch-branch-tabs" role="tablist">
+                                    <li class="nav-item" role="presentation">
+                                        <button class="nav-link @(activeTab == "local" ? "active" : "")" 
+                                                type="button" 
+                                                role="tab"
+                                                @onclick='() => SetActiveTab("local")'>
+                                            Local Branches (@localBranches.Count)
+                                        </button>
+                                    </li>
+                                    <li class="nav-item" role="presentation">
+                                        <button class="nav-link @(activeTab == "remote" ? "active" : "")" 
+                                                type="button" 
+                                                role="tab"
+                                                @onclick='() => SetActiveTab("remote")'>
+                                            Remote Branches (@remoteBranches.Count)
+                                        </button>
+                                    </li>
+                                </ul>
+                                <button type="button" 
+                                        class="btn btn-outline-secondary btn-sm"
+                                        @onclick="RefreshBranchesAsync"
+                                        disabled="@isRefreshing">
+                                    @if (isRefreshing)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                    }
+                                    Fetch
+                                </button>
+                            </div>
                         </div>
 
                         <div class="branch-list border rounded" style="max-height: 400px; overflow-y: auto;">
@@ -122,43 +140,45 @@
                         }
                     }
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
-                    @if (showSyncToDefaultButton && !string.IsNullOrWhiteSpace(defaultBranch))
-                    {
-                        <button type="button" 
-                                class="btn btn-warning" 
-                                @onclick="SyncToDefaultAsync"
-                                disabled="@isProcessing">
-                            @if (isProcessing)
-                            {
-                                <span class="spinner-border spinner-border-sm me-2"></span>
-                            }
-                            Sync to @defaultBranch
-                        </button>
-                    }
-                    @if (!string.IsNullOrWhiteSpace(selectedBranch) && selectedBranch != currentBranchLocal)
-                    {
-                        <button type="button" 
-                                class="btn btn-primary" 
-                                @onclick="CheckoutAsync"
-                                disabled="@isProcessing">
-                            @if (isProcessing)
-                            {
-                                <span class="spinner-border spinner-border-sm me-2"></span>
-                            }
-                            Checkout
-                        </button>
-                    }
-                    @if (!string.IsNullOrWhiteSpace(RepositoryUrl) && !string.IsNullOrWhiteSpace(defaultBranch))
-                    {
-                        <a href="@GetPullRequestUrl()" 
-                           target="_blank" 
-                           rel="noopener noreferrer"
-                           class="btn btn-outline-primary">
-                            Pull Request
-                        </a>
-                    }
+                <div class="modal-footer d-flex justify-content-between flex-row">
+                    <div class="d-flex gap-2">
+                        @if (showSyncToDefaultButton && !string.IsNullOrWhiteSpace(defaultBranch))
+                        {
+                            <button type="button" 
+                                    class="btn btn-warning" 
+                                    @onclick="SyncToDefaultAsync"
+                                    disabled="@isProcessing">
+                                @if (isProcessing)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2"></span>
+                                }
+                                Sync to @defaultBranch
+                            </button>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(selectedBranch) && selectedBranch != currentBranchLocal)
+                        {
+                            <button type="button" 
+                                    class="btn btn-primary" 
+                                    @onclick="CheckoutAsync"
+                                    disabled="@isProcessing">
+                                @if (isProcessing)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2"></span>
+                                }
+                                Checkout
+                            </button>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(RepositoryUrl) && !string.IsNullOrWhiteSpace(defaultBranch))
+                        {
+                            <a href="@GetPullRequestUrl()" 
+                               target="_blank" 
+                               rel="noopener noreferrer"
+                               class="btn btn-outline-primary">
+                                Pull Request
+                            </a>
+                        }
+                    </div>
+                    <button type="button" class="btn btn-secondary ms-auto" @onclick="OnCancel">Cancel</button>
                 </div>
             </div>
         </div>
@@ -174,6 +194,7 @@
     [Parameter] public string? RepositoryUrl { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback OnBranchChanged { get; set; }
+    [Parameter] public EventCallback<(int RepositoryId, string BranchName)> OnCheckoutBranch { get; set; }
 
     private string activeTab = "local";
     private List<string> localBranches = new();
@@ -183,8 +204,12 @@
     private string? defaultBranch;
     private bool isLoading = false;
     private bool isProcessing = false;
+    private bool isRefreshing = false;
+    private string loadingMessage = "Loading branches...";
     private string? errorMessage;
     private bool showSyncToDefaultButton = false;
+    private ElementReference modalElement;
+    private bool _wasVisible;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -192,6 +217,26 @@
         {
             currentBranchLocal = CurrentBranch;
             await LoadBranchesAsync();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible && !_wasVisible)
+        {
+            _wasVisible = true;
+            try
+            {
+                await modalElement.FocusAsync();
+            }
+            catch
+            {
+                // Focus may fail if element is not yet rendered, ignore
+            }
+        }
+        else if (!IsVisible)
+        {
+            _wasVisible = false;
         }
     }
 
@@ -219,42 +264,35 @@
             if (response.IsSuccessStatusCode)
             {
                 var responseContent = await response.Content.ReadAsStringAsync();
-                var doc = JsonDocument.Parse(responseContent);
-                var root = doc.RootElement;
-
-                if (root.TryGetProperty("localBranches", out var local))
+                var data = JsonSerializer.Deserialize<BranchesResponse>(responseContent, AgentResponseJson.Options);
+                if (data != null)
                 {
-                    localBranches = local.EnumerateArray()
-                        .Select(b => b.GetString() ?? string.Empty)
-                        .Where(b => !string.IsNullOrEmpty(b))
-                        .ToList();
-                }
-
-                if (root.TryGetProperty("remoteBranches", out var remote))
-                {
-                    remoteBranches = remote.EnumerateArray()
-                        .Select(b => b.GetString() ?? string.Empty)
-                        .Where(b => !string.IsNullOrEmpty(b))
-                        .ToList();
-                }
-
-                if (root.TryGetProperty("currentBranch", out var curr) && curr.ValueKind != JsonValueKind.Null)
-                {
-                    currentBranchLocal = curr.GetString();
-                }
-
-                if (root.TryGetProperty("defaultBranch", out var def) && def.ValueKind != JsonValueKind.Null)
-                {
-                    defaultBranch = def.GetString();
+                    localBranches = data.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    remoteBranches = data.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    currentBranchLocal = data.CurrentBranch;
+                    defaultBranch = data.DefaultBranch;
                 }
 
                 // Set selected branch to current branch by default
                 selectedBranch = currentBranchLocal;
 
-                // Show sync button if current branch doesn't exist in remote
-                if (!string.IsNullOrWhiteSpace(currentBranchLocal) && !remoteBranches.Contains(currentBranchLocal))
+                // Show sync button only when we have synced/fetched remote data (not when lists are empty from no sync yet)
+                if (remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !remoteBranches.Contains(currentBranchLocal))
                 {
                     showSyncToDefaultButton = true;
+                }
+                else
+                {
+                    showSyncToDefaultButton = false;
+                }
+
+                // If no branches were persisted, automatically fetch them (keep loading state)
+                if (localBranches.Count == 0 && remoteBranches.Count == 0)
+                {
+                    loadingMessage = "Fetching branches...";
+                    StateHasChanged();
+                    await RefreshBranchesAsync();
+                    return;
                 }
             }
             else
@@ -272,6 +310,7 @@
         finally
         {
             isLoading = false;
+            loadingMessage = "Loading branches...";
             StateHasChanged();
         }
     }
@@ -293,47 +332,9 @@
         if (string.IsNullOrWhiteSpace(selectedBranch))
             return;
 
-        isProcessing = true;
-        errorMessage = null;
-        StateHasChanged();
-
-        try
-        {
-            var httpClient = HttpClientFactory.CreateClient();
-            var request = new
-            {
-                workspaceId = WorkspaceId,
-                repositoryId = RepositoryId,
-                branchName = selectedBranch
-            };
-            var json = JsonSerializer.Serialize(request);
-            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            
-            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
-            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/checkout", content);
-            
-            if (response.IsSuccessStatusCode)
-            {
-                await OnBranchChanged.InvokeAsync();
-                await OnCancel.InvokeAsync();
-            }
-            else
-            {
-                var errorText = await response.Content.ReadAsStringAsync();
-                errorMessage = $"Failed to checkout branch: {response.StatusCode}";
-                Logger.LogError("Failed to checkout branch: {StatusCode}, {Error}", response.StatusCode, errorText);
-            }
-        }
-        catch (Exception ex)
-        {
-            errorMessage = "An error occurred while checking out branch.";
-            Logger.LogError(ex, "Error checking out branch");
-        }
-        finally
-        {
-            isProcessing = false;
-            StateHasChanged();
-        }
+        // Close modal immediately and trigger checkout from parent
+        await OnCancel.InvokeAsync();
+        await OnCheckoutBranch.InvokeAsync((RepositoryId, selectedBranch));
     }
 
     private async Task SyncToDefaultAsync()
@@ -408,9 +409,92 @@
         return $"{url}/compare/{Uri.EscapeDataString(defaultBranch)}...{Uri.EscapeDataString(compareBranch)}";
     }
 
+    private async Task RefreshBranchesAsync()
+    {
+        // Allow refresh even if loading (called from LoadBranchesAsync when no branches found)
+        if (isRefreshing)
+            return;
+
+        // If already loading (from LoadBranchesAsync), keep isLoading true instead of isRefreshing
+        var wasLoading = isLoading;
+        if (!wasLoading)
+        {
+            isRefreshing = true;
+        }
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            var request = new
+            {
+                workspaceId = WorkspaceId,
+                repositoryId = RepositoryId
+            };
+            var json = JsonSerializer.Serialize(request);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/refresh", content);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                var data = JsonSerializer.Deserialize<BranchesResponse>(responseContent, AgentResponseJson.Options);
+                if (data != null)
+                {
+                    localBranches = data.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    remoteBranches = data.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    currentBranchLocal = data.CurrentBranch;
+                    defaultBranch = data.DefaultBranch;
+                }
+
+                // Set selected branch to current branch by default
+                selectedBranch = currentBranchLocal;
+
+                // Show sync button if current branch doesn't exist in remote
+                if (!string.IsNullOrWhiteSpace(currentBranchLocal) && !remoteBranches.Contains(currentBranchLocal))
+                {
+                    showSyncToDefaultButton = true;
+                }
+                else
+                {
+                    showSyncToDefaultButton = false;
+                }
+
+                // Refresh workspace data
+                await OnBranchChanged.InvokeAsync();
+            }
+            else
+            {
+                var errorText = await response.Content.ReadAsStringAsync();
+                errorMessage = $"Failed to refresh branches: {response.StatusCode}";
+                Logger.LogError("Failed to refresh branches: {StatusCode}, {Error}", response.StatusCode, errorText);
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "An error occurred while refreshing branches.";
+            Logger.LogError(ex, "Error refreshing branches");
+        }
+        finally
+        {
+            if (wasLoading)
+            {
+                isLoading = false;
+            }
+            else
+            {
+                isRefreshing = false;
+            }
+            StateHasChanged();
+        }
+    }
+
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Escape")
+        if (e.Key == "Escape" || e.Code == "Escape")
         {
             await OnCancel.InvokeAsync();
         }

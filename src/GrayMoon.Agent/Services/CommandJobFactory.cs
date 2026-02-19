@@ -49,14 +49,16 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid SyncRepositoryDependencies args"),
             "RefreshRepositoryProjects" => JsonSerializer.Deserialize<RefreshRepositoryProjectsRequest>(json, options)
                 ?? throw new ArgumentException("Invalid RefreshRepositoryProjects args"),
-            "PullPushRepository" => JsonSerializer.Deserialize<PullPushRepositoryRequest>(json, options)
-                ?? throw new ArgumentException("Invalid PullPushRepository args"),
+            "CommitSyncRepository" => JsonSerializer.Deserialize<CommitSyncRepositoryRequest>(json, options)
+                ?? throw new ArgumentException("Invalid CommitSyncRepository args"),
             "GetBranches" => JsonSerializer.Deserialize<GetBranchesRequest>(json, options)
                 ?? throw new ArgumentException("Invalid GetBranches args"),
             "CheckoutBranch" => JsonSerializer.Deserialize<CheckoutBranchRequest>(json, options)
                 ?? throw new ArgumentException("Invalid CheckoutBranch args"),
             "SyncToDefaultBranch" => JsonSerializer.Deserialize<SyncToDefaultBranchRequest>(json, options)
                 ?? throw new ArgumentException("Invalid SyncToDefaultBranch args"),
+            "RefreshBranches" => JsonSerializer.Deserialize<RefreshBranchesRequest>(json, options)
+                ?? throw new ArgumentException("Invalid RefreshBranches args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

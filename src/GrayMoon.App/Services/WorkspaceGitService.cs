@@ -3,6 +3,7 @@ using GrayMoon.App.Data;
 using Microsoft.AspNetCore.SignalR;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
+using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using Microsoft.EntityFrameworkCore;
 
@@ -99,6 +100,7 @@ public class WorkspaceGitService(
     public async Task RefreshWorkspaceProjectsAsync(
         int workspaceId,
         Action<int, int, int>? onProgress = null,
+        Action<int, string>? onRepoError = null,
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
@@ -133,9 +135,16 @@ public class WorkspaceGitService(
             {
                 var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName };
                 var response = await _agentBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
-                var projectsDetail = response.Success && response.Data != null ? GetProjectsDetail(response.Data) : null;
-                var count = Interlocked.Increment(ref completedCount);
-                onProgress?.Invoke(count, totalCount, repo.RepositoryId);
+                if (!response.Success)
+                {
+                    onRepoError?.Invoke(repo.RepositoryId, response.Error ?? "Refresh projects failed");
+                    var c = Interlocked.Increment(ref completedCount);
+                    onProgress?.Invoke(c, totalCount, repo.RepositoryId);
+                    return (repo.RepositoryId, ProjectsDetail: (IReadOnlyList<SyncProjectInfo>?)null);
+                }
+                var projectsDetail = response.Data != null ? GetProjectsDetail(response.Data) : null;
+                var c2 = Interlocked.Increment(ref completedCount);
+                onProgress?.Invoke(c2, totalCount, repo.RepositoryId);
                 return (repo.RepositoryId, ProjectsDetail: projectsDetail);
             }
             finally
@@ -144,10 +153,10 @@ public class WorkspaceGitService(
             }
         }));
 
-        foreach (var (repoId, projectsDetail) in syncResults)
+        foreach (var r in syncResults)
         {
-            if (projectsDetail is { Count: > 0 })
-                await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repoId, projectsDetail, cancellationToken);
+            if (r.ProjectsDetail is { Count: > 0 })
+                await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, r.RepositoryId, r.ProjectsDetail, cancellationToken);
         }
 
         var resultsForDeps = syncResults.Select(r => (r.RepositoryId, r.ProjectsDetail)).ToList();
@@ -160,6 +169,7 @@ public class WorkspaceGitService(
     public async Task<int> SyncDependenciesAsync(
         int workspaceId,
         Action<int, int, int>? onProgress = null,
+        Action<int, string>? onRepoError = null,
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
@@ -181,6 +191,7 @@ public class WorkspaceGitService(
 
         var completedCount = 0;
         var totalCount = toSync.Count;
+        var failedRepoIds = new HashSet<int>();
 
         foreach (var repo in toSync)
         {
@@ -203,13 +214,20 @@ public class WorkspaceGitService(
 
             var response = await _agentBridge.SendCommandAsync("SyncRepositoryDependencies", args, cancellationToken);
             if (!response.Success)
-                throw new InvalidOperationException(response.Error ?? "SyncRepositoryDependencies failed.");
+            {
+                failedRepoIds.Add(repo.RepoId);
+                onRepoError?.Invoke(repo.RepoId, response.Error ?? "Sync dependencies failed");
+                var c = Interlocked.Increment(ref completedCount);
+                onProgress?.Invoke(c, totalCount, repo.RepoId);
+                continue;
+            }
 
-            var count = Interlocked.Increment(ref completedCount);
-            onProgress?.Invoke(count, totalCount, repo.RepoId);
+            var c2 = Interlocked.Increment(ref completedCount);
+            onProgress?.Invoke(c2, totalCount, repo.RepoId);
         }
 
         var updatesToPersist = toSync
+            .Where(r => !failedRepoIds.Contains(r.RepoId))
             .SelectMany(r => r.ProjectUpdates.SelectMany(p => p.PackageUpdates.Select(u => (r.RepoId, p.ProjectPath, u.PackageId, u.NewVersion))))
             .ToList();
         if (updatesToPersist.Count > 0)
@@ -308,13 +326,25 @@ public class WorkspaceGitService(
     private static RepoGitVersionInfo ParseSyncRepositoryResponse(AgentCommandResponse response)
     {
         if (!response.Success || response.Data == null)
-            return new RepoGitVersionInfo { Version = "-", Branch = "-" };
+            return new RepoGitVersionInfo { Version = "-", Branch = "-", ErrorMessage = response.Error ?? "Sync failed" };
 
         var (version, branch) = GetVersionBranch(response.Data);
         var projectsCount = GetProjects(response.Data);
         var projectsDetail = GetProjectsDetail(response.Data);
         var (outgoingCommits, incomingCommits) = GetCommitCounts(response.Data);
-        return new RepoGitVersionInfo { Version = version, Branch = branch, Projects = projectsCount, ProjectsDetail = projectsDetail, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits };
+        var (localBranches, remoteBranches) = GetBranches(response.Data);
+        return new RepoGitVersionInfo
+        {
+            Version = version,
+            Branch = branch,
+            Projects = projectsCount,
+            ProjectsDetail = projectsDetail,
+            OutgoingCommits = outgoingCommits,
+            IncomingCommits = incomingCommits,
+            LocalBranches = localBranches,
+            RemoteBranches = remoteBranches,
+            ErrorMessage = null
+        };
     }
 
     private static RepoGitVersionInfo ParseRefreshRepositoryVersionResponse(AgentCommandResponse response)
@@ -328,100 +358,65 @@ public class WorkspaceGitService(
 
     private static (string version, string branch) GetVersionBranch(object data)
     {
-        var json = data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(data);
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-        var version = root.TryGetProperty("version", out var v) ? v.GetString() ?? "-" : "-";
-        var branch = root.TryGetProperty("branch", out var b) ? b.GetString() ?? "-" : "-";
-        return (version, branch);
+        var r = AgentResponseJson.DeserializeAgentResponse<AgentVersionBranchResponse>(data);
+        return (r?.Version ?? "-", r?.Branch ?? "-");
     }
 
     private static int? GetProjects(object data)
     {
-        var json = data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(data);
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-        if (!root.TryGetProperty("projects", out var p))
-            return null;
-        if (p.ValueKind == JsonValueKind.Array)
-            return p.GetArrayLength();
-        if (p.ValueKind == JsonValueKind.Number && p.TryGetInt32(out var n))
-            return n;
-        return null;
+        var r = AgentResponseJson.DeserializeAgentResponse<AgentSyncProjectsResponse>(data);
+        var projects = r?.Projects;
+        if (projects == null) return null;
+        return projects.Count > 0 ? projects.Count : null;
     }
 
     private static (int? Outgoing, int? Incoming) GetCommitCounts(object data)
     {
-        var json = data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(data);
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-        int? outgoing = null;
-        int? incoming = null;
-        
-        if (root.TryGetProperty("outgoingCommits", out var o) && o.ValueKind != JsonValueKind.Null && o.TryGetInt32(out var outVal))
-            outgoing = outVal;
-        
-        if (root.TryGetProperty("incomingCommits", out var i) && i.ValueKind != JsonValueKind.Null && i.TryGetInt32(out var inVal))
-            incoming = inVal;
-        
-        return (outgoing, incoming);
+        var r = AgentResponseJson.DeserializeAgentResponse<AgentCommitCountsResponse>(data);
+        return (r?.OutgoingCommits, r?.IncomingCommits);
+    }
+
+    private static (IReadOnlyList<string>? LocalBranches, IReadOnlyList<string>? RemoteBranches) GetBranches(object data)
+    {
+        var r = AgentResponseJson.DeserializeAgentResponse<AgentBranchesResponse>(data);
+        var local = r?.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
+        var remote = r?.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
+        return (local, remote);
     }
 
     private static IReadOnlyList<SyncProjectInfo>? GetProjectsDetail(object data)
     {
-        var json = data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(data);
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-        if (!root.TryGetProperty("projects", out var p) || p.ValueKind != JsonValueKind.Array)
-            return null;
+        var r = AgentResponseJson.DeserializeAgentResponse<AgentSyncProjectsResponse>(data);
+        var projects = r?.Projects;
+        if (projects == null || projects.Count == 0) return null;
         var list = new List<SyncProjectInfo>();
-        foreach (var el in p.EnumerateArray())
+        foreach (var p in projects)
         {
-            var name = el.TryGetProperty("name", out var n) ? n.GetString() : null;
-            if (string.IsNullOrWhiteSpace(name))
-                continue;
-            var projectType = ProjectType.Library;
-            if (el.TryGetProperty("projectType", out var pt) && pt.TryGetInt32(out var ptVal) && ptVal >= 0 && ptVal <= 4)
-                projectType = (ProjectType)ptVal;
-            var projectPath = el.TryGetProperty("projectPath", out var pp) ? pp.GetString() ?? "" : "";
-            var targetFramework = el.TryGetProperty("targetFramework", out var tf) ? tf.GetString() ?? "" : "";
-            var packageId = el.TryGetProperty("packageId", out var pi) ? pi.GetString() : null;
-            var packageRefs = ParsePackageReferences(el);
-            list.Add(new SyncProjectInfo(name, projectType, projectPath, targetFramework, packageId, packageRefs));
+            if (string.IsNullOrWhiteSpace(p.Name)) continue;
+            var projectType = p.ProjectType >= 0 && p.ProjectType <= 4 ? (ProjectType)p.ProjectType : ProjectType.Library;
+            var packageRefs = (p.PackageReferences ?? new List<AgentPackageRefDto>())
+                .Where(pr => !string.IsNullOrWhiteSpace(pr.Name))
+                .Select(pr => new SyncPackageReference(pr.Name!.Trim(), pr.Version ?? ""))
+                .ToList();
+            list.Add(new SyncProjectInfo(
+                p.Name,
+                projectType,
+                p.ProjectPath ?? "",
+                p.TargetFramework ?? "",
+                p.PackageId,
+                packageRefs));
         }
         return list.Count > 0 ? list : null;
     }
 
-    private static IReadOnlyList<SyncPackageReference> ParsePackageReferences(JsonElement projectEl)
-    {
-        if (!projectEl.TryGetProperty("packageReferences", out var arr) || arr.ValueKind != JsonValueKind.Array)
-            return Array.Empty<SyncPackageReference>();
-        var list = new List<SyncPackageReference>();
-        foreach (var refEl in arr.EnumerateArray())
-        {
-            var refName = refEl.TryGetProperty("name", out var n) ? n.GetString() : null;
-            if (string.IsNullOrWhiteSpace(refName)) continue;
-            var version = refEl.TryGetProperty("version", out var v) ? v.GetString() ?? "" : "";
-            list.Add(new SyncPackageReference(refName.Trim(), version));
-        }
-        return list;
-    }
-
     private static RepoSyncStatus ParseGetRepositoryVersionToStatus(object data, string? persistedVersion, string? persistedBranch)
     {
-        var json = data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(data);
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-        var exists = root.TryGetProperty("exists", out var e) && e.GetBoolean();
-        if (!exists)
+        var r = AgentResponseJson.DeserializeAgentResponse<AgentGetRepositoryVersionResponse>(data);
+        if (r == null || !r.Exists)
             return RepoSyncStatus.NotCloned;
-
-        var version = root.TryGetProperty("version", out var v) ? v.GetString() : null;
-        var branch = root.TryGetProperty("branch", out var b) ? b.GetString() : null;
-        if (version == null || branch == null)
+        if (string.IsNullOrEmpty(r.Version) || string.IsNullOrEmpty(r.Branch))
             return RepoSyncStatus.VersionMismatch;
-
-        return (version == persistedVersion && branch == persistedBranch) ? RepoSyncStatus.InSync : RepoSyncStatus.VersionMismatch;
+        return (r.Version == persistedVersion && r.Branch == persistedBranch) ? RepoSyncStatus.InSync : RepoSyncStatus.VersionMismatch;
     }
 
     private async Task PersistVersionsAsync(
@@ -452,6 +447,12 @@ public class WorkspaceGitService(
 
             if (info.ProjectsDetail is { Count: > 0 })
                 await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repoId, info.ProjectsDetail, cancellationToken);
+
+            // Persist branches if available
+            if ((info.LocalBranches != null || info.RemoteBranches != null) && wr != null)
+            {
+                await PersistBranchesAsync(wr.WorkspaceRepositoryId, info.LocalBranches, info.RemoteBranches, cancellationToken);
+            }
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -461,5 +462,63 @@ public class WorkspaceGitService(
 
         _logger.LogInformation("Persistence: saved WorkspaceRepository link versions. WorkspaceId={WorkspaceId}, RepoCount={RepoCount}",
             workspaceId, resultList.Count);
+    }
+
+    /// <summary>Persists branches for a workspace repository. Removes branches not in the fetched list, adds new ones, updates LastSeenAt for existing ones.</summary>
+    public async Task PersistBranchesAsync(
+        int workspaceRepositoryId,
+        IReadOnlyList<string>? localBranches,
+        IReadOnlyList<string>? remoteBranches,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var existingBranches = await _dbContext.RepositoryBranches
+            .Where(rb => rb.WorkspaceRepositoryId == workspaceRepositoryId)
+            .ToListAsync(cancellationToken);
+
+        var fetchedBranches = new HashSet<(string Name, bool IsRemote)>();
+        if (localBranches != null)
+        {
+            foreach (var branch in localBranches)
+            {
+                fetchedBranches.Add((branch, false));
+            }
+        }
+        if (remoteBranches != null)
+        {
+            foreach (var branch in remoteBranches)
+            {
+                fetchedBranches.Add((branch, true));
+            }
+        }
+
+        // Update existing branches or add new ones
+        foreach (var (name, isRemote) in fetchedBranches)
+        {
+            var existing = existingBranches.FirstOrDefault(b => b.BranchName == name && b.IsRemote == isRemote);
+            if (existing != null)
+            {
+                existing.LastSeenAt = now;
+            }
+            else
+            {
+                _dbContext.RepositoryBranches.Add(new RepositoryBranch
+                {
+                    WorkspaceRepositoryId = workspaceRepositoryId,
+                    BranchName = name,
+                    IsRemote = isRemote,
+                    LastSeenAt = now
+                });
+            }
+        }
+
+        // Remove branches that were not fetched (no longer exist)
+        var toRemove = existingBranches.Where(b => !fetchedBranches.Contains((b.BranchName, b.IsRemote))).ToList();
+        if (toRemove.Count > 0)
+        {
+            _dbContext.RepositoryBranches.RemoveRange(toRemove);
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
     }
 }

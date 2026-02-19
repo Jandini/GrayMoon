@@ -5,37 +5,33 @@ using GrayMoon.Agent.Models;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class CheckoutBranchCommand(IGitService git) : ICommandHandler<CheckoutBranchRequest, CheckoutBranchResponse>
+public sealed class RefreshBranchesCommand(IGitService git) : ICommandHandler<RefreshBranchesRequest, RefreshBranchesResponse>
 {
-    public async Task<CheckoutBranchResponse> ExecuteAsync(CheckoutBranchRequest request, CancellationToken cancellationToken = default)
+    public async Task<RefreshBranchesResponse> ExecuteAsync(RefreshBranchesRequest request, CancellationToken cancellationToken = default)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
-        var branchName = request.BranchName ?? throw new ArgumentException("branchName required");
 
         var workspacePath = git.GetWorkspacePath(workspaceName);
         var repoPath = Path.Combine(workspacePath, repositoryName);
 
         if (!git.DirectoryExists(repoPath))
         {
-            return new CheckoutBranchResponse
+            return new RefreshBranchesResponse
             {
                 Success = false,
                 ErrorMessage = "Repository not found"
             };
         }
 
-        var (success, errorMessage) = await git.CheckoutBranchAsync(repoPath, branchName, cancellationToken);
-        if (!success)
-        {
-            return new CheckoutBranchResponse
-            {
-                Success = false,
-                ErrorMessage = errorMessage ?? "Failed to checkout branch"
-            };
-        }
+        // Fetch to ensure remote branches are up to date
+        await git.FetchAsync(repoPath, includeTags: false, bearerToken: null, cancellationToken);
 
-        // Get current branch after checkout
+        var localBranches = await git.GetLocalBranchesAsync(repoPath, cancellationToken);
+        var remoteBranches = await git.GetRemoteBranchesAsync(repoPath, cancellationToken);
+        var defaultBranch = await git.GetDefaultBranchNameAsync(repoPath, cancellationToken);
+
+        // Get current branch
         string? currentBranch = null;
         var versionResult = await git.GetVersionAsync(repoPath, cancellationToken);
         if (versionResult != null)
@@ -43,10 +39,13 @@ public sealed class CheckoutBranchCommand(IGitService git) : ICommandHandler<Che
             currentBranch = versionResult.BranchName ?? versionResult.EscapedBranchName;
         }
 
-        return new CheckoutBranchResponse
+        return new RefreshBranchesResponse
         {
             Success = true,
-            CurrentBranch = currentBranch
+            LocalBranches = localBranches,
+            RemoteBranches = remoteBranches,
+            CurrentBranch = currentBranch,
+            DefaultBranch = defaultBranch
         };
     }
 }

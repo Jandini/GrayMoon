@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace GrayMoon.Agent.Jobs.Response;
 
-public sealed class PullPushRepositoryResponse
+public sealed class CommitSyncRepositoryResponse
 {
     [JsonPropertyName("success")]
     public bool Success { get; set; }

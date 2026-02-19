@@ -15,10 +15,11 @@ public sealed class CommandDispatcher(
     ICommandHandler<GetHostInfoRequest, GetHostInfoResponse> getHostInfoCommand,
     ICommandHandler<SyncRepositoryDependenciesRequest, SyncRepositoryDependenciesResponse> syncRepositoryDependenciesCommand,
     ICommandHandler<RefreshRepositoryProjectsRequest, RefreshRepositoryProjectsResponse> refreshRepositoryProjectsCommand,
-    ICommandHandler<PullPushRepositoryRequest, PullPushRepositoryResponse> pullPushRepositoryCommand,
+    ICommandHandler<CommitSyncRepositoryRequest, CommitSyncRepositoryResponse> commitSyncRepositoryCommand,
     ICommandHandler<GetBranchesRequest, GetBranchesResponse> getBranchesCommand,
     ICommandHandler<CheckoutBranchRequest, CheckoutBranchResponse> checkoutBranchCommand,
-    ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse> syncToDefaultBranchCommand) : ICommandDispatcher
+    ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse> syncToDefaultBranchCommand,
+    ICommandHandler<RefreshBranchesRequest, RefreshBranchesResponse> refreshBranchesCommand) : ICommandDispatcher
 {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
@@ -32,10 +33,11 @@ public sealed class CommandDispatcher(
         ["GetWorkspaceRoot"] = async (req, ct) => await getWorkspaceRootCommand.ExecuteAsync((GetWorkspaceRootRequest)req, ct),
         ["GetHostInfo"] = async (req, ct) => await getHostInfoCommand.ExecuteAsync((GetHostInfoRequest)req, ct),
         ["SyncRepositoryDependencies"] = async (req, ct) => await syncRepositoryDependenciesCommand.ExecuteAsync((SyncRepositoryDependenciesRequest)req, ct),
-        ["PullPushRepository"] = async (req, ct) => await pullPushRepositoryCommand.ExecuteAsync((PullPushRepositoryRequest)req, ct),
+        ["CommitSyncRepository"] = async (req, ct) => await commitSyncRepositoryCommand.ExecuteAsync((CommitSyncRepositoryRequest)req, ct),
         ["GetBranches"] = async (req, ct) => await getBranchesCommand.ExecuteAsync((GetBranchesRequest)req, ct),
         ["CheckoutBranch"] = async (req, ct) => await checkoutBranchCommand.ExecuteAsync((CheckoutBranchRequest)req, ct),
         ["SyncToDefaultBranch"] = async (req, ct) => await syncToDefaultBranchCommand.ExecuteAsync((SyncToDefaultBranchRequest)req, ct),
+        ["RefreshBranches"] = async (req, ct) => await refreshBranchesCommand.ExecuteAsync((RefreshBranchesRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

@@ -11,6 +11,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<WorkspaceRepositoryLink> WorkspaceRepositories => Set<WorkspaceRepositoryLink>();
     public DbSet<WorkspaceProject> WorkspaceProjects => Set<WorkspaceProject>();
     public DbSet<ProjectDependency> ProjectDependencies => Set<ProjectDependency>();
+    public DbSet<RepositoryBranch> RepositoryBranches => Set<RepositoryBranch>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -180,6 +181,31 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasOne(d => d.ReferencedProject)
                 .WithMany(p => p.ReferencedBy)
                 .HasForeignKey(d => d.ReferencedProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RepositoryBranch>(entity =>
+        {
+            entity.ToTable("RepositoryBranches");
+            entity.HasKey(rb => rb.RepositoryBranchId);
+            entity.Property(rb => rb.RepositoryBranchId).ValueGeneratedOnAdd();
+
+            entity.HasIndex(rb => new { rb.WorkspaceRepositoryId, rb.BranchName, rb.IsRemote })
+                .IsUnique();
+
+            entity.Property(rb => rb.BranchName)
+                .IsRequired()
+                .HasMaxLength(200);
+
+            entity.Property(rb => rb.IsRemote)
+                .IsRequired();
+
+            entity.Property(rb => rb.LastSeenAt)
+                .IsRequired();
+
+            entity.HasOne(rb => rb.WorkspaceRepository)
+                .WithMany()
+                .HasForeignKey(rb => rb.WorkspaceRepositoryId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }
