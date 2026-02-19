@@ -45,9 +45,9 @@
             </div>
             <div class="d-flex gap-2">
                 <button class="btn btn-outline-primary"
-                        @onclick="ShowNewBranchModalAsync"
+                        @onclick="ShowBranchModalAsync"
                         disabled="@(isSyncing || isUpdating || workspaceRepositories.Count == 0)">
-                    New Branch
+                    Branch
                 </button>
                 <button class="btn @(hasUnmatchedDependencies ? "btn-danger" : "btn-secondary")"
                         @onclick="UpdateDependenciesAsync"
@@ -198,11 +198,12 @@
                             OnCancel="@CloseRepositoriesModal"
                             OnFetchRepositories="@FetchRepositoriesAsync" />
 
-<NewBranchModal IsVisible="@showNewBranchModal"
+<BranchModal IsVisible="@showBranchModal"
+                   WorkspaceName="@(workspace?.Name)"
                    WorkspaceId="@WorkspaceId"
-                   CommonBranchNames="@newBranchCommonBranches"
-                   DefaultDisplayText="@newBranchDefaultDisplayText"
-                   OnCancel="@CloseNewBranchModal"
+                   CommonBranchNames="@branchModalCommonBranches"
+                   DefaultDisplayText="@branchModalDefaultDisplayText"
+                   OnCancel="@CloseBranchModal"
                    OnCreateBranch="@CreateBranchesAsync" />
 
 <SwitchBranchModal IsVisible="@showSwitchBranchModal"
@@ -262,9 +263,9 @@
     private string? switchBranchRepositoryName;
     private string? switchBranchCurrentBranch;
     private string? switchBranchRepositoryUrl;
-    private bool showNewBranchModal = false;
-    private IReadOnlyList<string> newBranchCommonBranches = Array.Empty<string>();
-    private string newBranchDefaultDisplayText = "multiple";
+    private bool showBranchModal = false;
+    private IReadOnlyList<string> branchModalCommonBranches = Array.Empty<string>();
+    private string branchModalDefaultDisplayText = "multiple";
     private bool isCreatingBranches = false;
     private string createBranchesProgressMessage = "Creating branches...";
     private CancellationTokenSource? _createBranchesCts;
@@ -818,7 +819,7 @@
         switchBranchRepositoryUrl = null;
     }
 
-    private async Task ShowNewBranchModalAsync()
+    private async Task ShowBranchModalAsync()
     {
         if (workspace == null || workspaceRepositories.Count == 0)
             return;
@@ -836,22 +837,22 @@
                 var data = JsonSerializer.Deserialize<CommonBranchesApiResult>(responseContent, AgentResponseJson.Options);
                 if (data != null)
                 {
-                    newBranchCommonBranches = data.CommonBranchNames ?? new List<string>();
-                    newBranchDefaultDisplayText = data.DefaultDisplayText ?? "multiple";
+                    branchModalCommonBranches = data.CommonBranchNames ?? new List<string>();
+                    branchModalDefaultDisplayText = data.DefaultDisplayText ?? "multiple";
                 }
             }
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Could not load common branches for new branch modal");
+            Logger.LogWarning(ex, "Could not load common branches for branch modal");
         }
-        showNewBranchModal = true;
+        showBranchModal = true;
         StateHasChanged();
     }
 
-    private void CloseNewBranchModal()
+    private void CloseBranchModal()
     {
-        showNewBranchModal = false;
+        showBranchModal = false;
     }
 
     private async Task CreateBranchesAsync((string NewBranchName, string BaseBranch) args)
@@ -860,7 +861,7 @@
         if (workspace == null || string.IsNullOrWhiteSpace(newBranchName) || isCreatingBranches || isSyncing || isUpdating)
             return;
 
-        CloseNewBranchModal();
+        CloseBranchModal();
         _createBranchesCts?.Cancel();
         _createBranchesCts?.Dispose();
         _createBranchesCts = new CancellationTokenSource();
