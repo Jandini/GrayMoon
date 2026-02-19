@@ -148,6 +148,15 @@
     text-decoration: underline;
 }
 
+/* Version text - clickable, inherits color */
+.repositories-table .version-text {
+    color: inherit;
+}
+
+.repositories-table .version-clickable:hover {
+    text-decoration: underline;
+}
+
 /* Clickable repositories count under page title */
 .repositories-count-link {
     cursor: pointer;
