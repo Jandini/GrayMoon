@@ -130,7 +130,7 @@
                                             <td class="col-version">
                                                 @if (!string.IsNullOrEmpty(wr.GitVersion))
                                                 {
-                                                    <div class="version-container">
+                                                    <div class="version-container @(clickedVersions.Contains(wr.GitVersion) ? "version-clicked" : "")">
                                                         <span class="version-display text-muted">@wr.GitVersion</span>
                                                         <span class="version-code" 
                                                               @onclick='() => CopyVersionToClipboard(wr.GitVersion)'
@@ -270,6 +270,7 @@
     private string checkoutProgressMessage = "Checking out branch...";
     private CancellationTokenSource? _checkoutCts;
     private Dictionary<int, string> repositoryErrors = new(); // repositoryId -> error message
+    private HashSet<string> clickedVersions = new(); // Track clicked versions to hide hover temporarily
     private HubConnection? _hubConnection;
     private bool showRepositoriesModal;
     private bool isSavingRepositories;
@@ -1072,6 +1073,15 @@
         if (!string.IsNullOrEmpty(version))
         {
             await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", version);
+            
+            // Temporarily hide hover effect by adding to clicked set
+            clickedVersions.Add(version);
+            StateHasChanged();
+            
+            // Remove after a short delay so hover can work again
+            await Task.Delay(300);
+            clickedVersions.Remove(version);
+            StateHasChanged();
         }
     }
 }

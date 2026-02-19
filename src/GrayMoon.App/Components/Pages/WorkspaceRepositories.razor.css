@@ -237,6 +237,15 @@
     display: inline-flex;
 }
 
+/* Prevent hover effect when just clicked */
+.repositories-table .version-container.version-clicked:hover .version-display {
+    display: inline-block;
+}
+
+.repositories-table .version-container.version-clicked:hover .version-code {
+    display: none;
+}
+
 .repositories-table .version-code:hover {
     background-color: #2c3136;
     border-color: #5a6268;
