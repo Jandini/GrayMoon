@@ -23,11 +23,11 @@
     color: var(--text-primary);
 }
 
-/* Highlight row on hover */
-.new-branch-based-on-item:hover {
-    background-color: var(--bg-hover);
-}
-
 .new-branch-based-on-item.selected {
     background-color: var(--bg-active);
+}
+
+/* Highlight row on hover (all items including selected) */
+.new-branch-based-on-item:hover {
+    background-color: var(--bg-hover);
 }

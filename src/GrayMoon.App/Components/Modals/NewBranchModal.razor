@@ -29,7 +29,8 @@
                                class="form-control"
                                placeholder="e.g. feature/my-feature"
                                @bind="newBranchName"
-                               @bind:event="oninput" />
+                               @bind:event="oninput"
+                               @ref="newBranchNameInput" />
                     </div>
                     <div class="mb-3">
                         <label class="form-label" for="based-on">Based on</label>
@@ -101,6 +102,7 @@
     private string? errorMessage;
     private bool showBasedOnDropdown = false;
     private ElementReference modalElement;
+    private ElementReference newBranchNameInput;
     private bool _wasVisible;
 
     private string GetSelectedBaseDisplayText()
@@ -131,7 +133,7 @@
             errorMessage = null;
             try
             {
-                await modalElement.FocusAsync();
+                await newBranchNameInput.FocusAsync();
             }
             catch { }
         }
