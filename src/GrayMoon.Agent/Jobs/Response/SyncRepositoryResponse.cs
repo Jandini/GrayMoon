@@ -25,4 +25,7 @@ public sealed class SyncRepositoryResponse
 
     [JsonPropertyName("remoteBranches")]
     public IReadOnlyList<string>? RemoteBranches { get; set; }
+
+    [JsonPropertyName("defaultBranch")]
+    public string? DefaultBranch { get; set; }
 }

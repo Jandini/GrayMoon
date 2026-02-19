@@ -44,6 +44,11 @@
                 </p>
             </div>
             <div class="d-flex gap-2">
+                <button class="btn btn-outline-primary"
+                        @onclick="ShowBranchModalAsync"
+                        disabled="@(isSyncing || isUpdating || workspaceRepositories.Count == 0)">
+                    Branch
+                </button>
                 <button class="btn @(hasUnmatchedDependencies ? "btn-danger" : "btn-secondary")"
                         @onclick="UpdateDependenciesAsync"
                         disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating)">
@@ -193,6 +198,14 @@
                             OnCancel="@CloseRepositoriesModal"
                             OnFetchRepositories="@FetchRepositoriesAsync" />
 
+<BranchModal IsVisible="@showBranchModal"
+                   WorkspaceName="@(workspace?.Name)"
+                   WorkspaceId="@WorkspaceId"
+                   CommonBranchNames="@branchModalCommonBranches"
+                   DefaultDisplayText="@branchModalDefaultDisplayText"
+                   OnCancel="@CloseBranchModal"
+                   OnCreateBranch="@CreateBranchesAsync" />
+
 <SwitchBranchModal IsVisible="@showSwitchBranchModal"
                    WorkspaceId="@WorkspaceId"
                    RepositoryId="@switchBranchRepositoryId"
@@ -209,6 +222,7 @@
 <LoadingOverlay IsVisible="@isCommitSyncing" Message="@commitSyncProgressMessage" OnAbort="AbortCommitSyncAsync" />
 <LoadingOverlay IsVisible="@isCheckingOut" Message="@checkoutProgressMessage" OnAbort="AbortCheckoutAsync" />
 <LoadingOverlay IsVisible="@(showRepositoriesModal && isPersisting)" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}...")" OnAbort="AbortFetchRepositories" />
+<LoadingOverlay IsVisible="@isCreatingBranches" Message="@createBranchesProgressMessage" />
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
@@ -249,6 +263,12 @@
     private string? switchBranchRepositoryName;
     private string? switchBranchCurrentBranch;
     private string? switchBranchRepositoryUrl;
+    private bool showBranchModal = false;
+    private IReadOnlyList<string> branchModalCommonBranches = Array.Empty<string>();
+    private string branchModalDefaultDisplayText = "multiple";
+    private bool isCreatingBranches = false;
+    private string createBranchesProgressMessage = "Creating branches...";
+    private CancellationTokenSource? _createBranchesCts;
 
     protected override async Task OnInitializedAsync()
     {
@@ -298,6 +318,8 @@
         _commitSyncCts?.Dispose();
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
+        _createBranchesCts?.Cancel();
+        _createBranchesCts?.Dispose();
     }
 
     /// <summary>Called when WorkspaceSynced is received (or after Update): reload from a fresh scope so the grid gets current DB values (no stale DbContext).</summary>
@@ -795,6 +817,94 @@
         switchBranchRepositoryName = null;
         switchBranchCurrentBranch = null;
         switchBranchRepositoryUrl = null;
+    }
+
+    private async Task ShowBranchModalAsync()
+    {
+        if (workspace == null || workspaceRepositories.Count == 0)
+            return;
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            var request = new { workspaceId = WorkspaceId };
+            var json = JsonSerializer.Serialize(request);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/common", content);
+            if (response.IsSuccessStatusCode)
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                var data = JsonSerializer.Deserialize<CommonBranchesApiResult>(responseContent, AgentResponseJson.Options);
+                if (data != null)
+                {
+                    branchModalCommonBranches = data.CommonBranchNames ?? new List<string>();
+                    branchModalDefaultDisplayText = data.DefaultDisplayText ?? "multiple";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not load common branches for branch modal");
+        }
+        showBranchModal = true;
+        StateHasChanged();
+    }
+
+    private void CloseBranchModal()
+    {
+        showBranchModal = false;
+    }
+
+    private async Task CreateBranchesAsync((string NewBranchName, string BaseBranch) args)
+    {
+        var (newBranchName, baseBranch) = args;
+        if (workspace == null || string.IsNullOrWhiteSpace(newBranchName) || isCreatingBranches || isSyncing || isUpdating)
+            return;
+
+        CloseBranchModal();
+        _createBranchesCts?.Cancel();
+        _createBranchesCts?.Dispose();
+        _createBranchesCts = new CancellationTokenSource();
+
+        isCreatingBranches = true;
+        createBranchesProgressMessage = "Creating branches...";
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            await Task.Yield();
+            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
+            {
+                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                await workspaceGitService.CreateBranchesAsync(
+                    WorkspaceId,
+                    newBranchName,
+                    baseBranch,
+                    onProgress: (completed, total) =>
+                    {
+                        createBranchesProgressMessage = $"Creating branches {completed} of {total}";
+                        InvokeAsync(StateHasChanged);
+                    },
+                    cancellationToken: _createBranchesCts.Token);
+            }
+            await RefreshFromSync();
+        }
+        catch (OperationCanceledException)
+        {
+            await ReloadWorkspaceDataAsync();
+            ApplySyncStateFromWorkspace();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error creating branches for workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Create branches failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+        }
+        finally
+        {
+            isCreatingBranches = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task OnBranchChangedAsync()

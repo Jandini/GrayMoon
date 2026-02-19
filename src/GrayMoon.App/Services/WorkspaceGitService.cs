@@ -332,7 +332,7 @@ public class WorkspaceGitService(
         var projectsCount = GetProjects(response.Data);
         var projectsDetail = GetProjectsDetail(response.Data);
         var (outgoingCommits, incomingCommits) = GetCommitCounts(response.Data);
-        var (localBranches, remoteBranches) = GetBranches(response.Data);
+        var (localBranches, remoteBranches, defaultBranch) = GetBranches(response.Data);
         return new RepoGitVersionInfo
         {
             Version = version,
@@ -343,6 +343,7 @@ public class WorkspaceGitService(
             IncomingCommits = incomingCommits,
             LocalBranches = localBranches,
             RemoteBranches = remoteBranches,
+            DefaultBranch = defaultBranch,
             ErrorMessage = null
         };
     }
@@ -376,12 +377,13 @@ public class WorkspaceGitService(
         return (r?.OutgoingCommits, r?.IncomingCommits);
     }
 
-    private static (IReadOnlyList<string>? LocalBranches, IReadOnlyList<string>? RemoteBranches) GetBranches(object data)
+    private static (IReadOnlyList<string>? LocalBranches, IReadOnlyList<string>? RemoteBranches, string? DefaultBranch) GetBranches(object data)
     {
         var r = AgentResponseJson.DeserializeAgentResponse<AgentBranchesResponse>(data);
         var local = r?.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
         var remote = r?.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
-        return (local, remote);
+        var defaultBranch = !string.IsNullOrWhiteSpace(r?.DefaultBranch) ? r.DefaultBranch : null;
+        return (local, remote, defaultBranch);
     }
 
     private static IReadOnlyList<SyncProjectInfo>? GetProjectsDetail(object data)
@@ -448,10 +450,10 @@ public class WorkspaceGitService(
             if (info.ProjectsDetail is { Count: > 0 })
                 await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repoId, info.ProjectsDetail, cancellationToken);
 
-            // Persist branches if available
+            // Persist branches if available (include default branch so IsDefault is set)
             if ((info.LocalBranches != null || info.RemoteBranches != null) && wr != null)
             {
-                await PersistBranchesAsync(wr.WorkspaceRepositoryId, info.LocalBranches, info.RemoteBranches, cancellationToken);
+                await PersistBranchesAsync(wr.WorkspaceRepositoryId, info.LocalBranches, info.RemoteBranches, info.DefaultBranch, cancellationToken);
             }
         }
 
@@ -464,12 +466,13 @@ public class WorkspaceGitService(
             workspaceId, resultList.Count);
     }
 
-    /// <summary>Persists branches for a workspace repository. Removes branches not in the fetched list, adds new ones, updates LastSeenAt for existing ones.</summary>
+    /// <summary>Persists branches for a workspace repository. Removes branches not in the fetched list, adds new ones, updates LastSeenAt for existing ones. Optionally marks the default branch (e.g. main or master).</summary>
     public async Task PersistBranchesAsync(
         int workspaceRepositoryId,
         IReadOnlyList<string>? localBranches,
         IReadOnlyList<string>? remoteBranches,
-        CancellationToken cancellationToken)
+        string? defaultBranchName = null,
+        CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
         var existingBranches = await _dbContext.RepositoryBranches
@@ -492,13 +495,19 @@ public class WorkspaceGitService(
             }
         }
 
+        // Clear IsDefault for all existing; we will set it for the default branch below
+        foreach (var b in existingBranches)
+            b.IsDefault = false;
+
         // Update existing branches or add new ones
         foreach (var (name, isRemote) in fetchedBranches)
         {
+            var isDefault = !string.IsNullOrWhiteSpace(defaultBranchName) && string.Equals(name, defaultBranchName, StringComparison.OrdinalIgnoreCase);
             var existing = existingBranches.FirstOrDefault(b => b.BranchName == name && b.IsRemote == isRemote);
             if (existing != null)
             {
                 existing.LastSeenAt = now;
+                existing.IsDefault = isDefault;
             }
             else
             {
@@ -507,7 +516,8 @@ public class WorkspaceGitService(
                     WorkspaceRepositoryId = workspaceRepositoryId,
                     BranchName = name,
                     IsRemote = isRemote,
-                    LastSeenAt = now
+                    LastSeenAt = now,
+                    IsDefault = isDefault
                 });
             }
         }
@@ -520,5 +530,83 @@ public class WorkspaceGitService(
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>Creates a new branch in all workspace repos (in parallel), then checks it out. baseBranch is "__default__" to use each repo's default, or a branch name. Calls onProgress(completed, total).</summary>
+    public async Task CreateBranchesAsync(
+        int workspaceId,
+        string newBranchName,
+        string baseBranch,
+        Action<int, int>? onProgress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_agentBridge.IsAgentConnected)
+            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to create branches.");
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            throw new InvalidOperationException($"Workspace {workspaceId} not found.");
+
+        var links = await _dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .Include(wr => wr.Repository)
+            .ToListAsync(cancellationToken);
+
+        if (links.Count == 0)
+            return;
+
+        var useDefaultBase = string.Equals(baseBranch, "__default__", StringComparison.OrdinalIgnoreCase);
+        var completedCount = 0;
+        var totalCount = links.Count;
+        using var semaphore = new SemaphoreSlim(_maxConcurrent);
+
+        async Task ProcessOne(WorkspaceRepositoryLink wr)
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                var repo = wr.Repository;
+                if (repo == null)
+                    return;
+
+                string baseBranchName;
+                if (useDefaultBase)
+                {
+                    var defaultRow = await _dbContext.RepositoryBranches
+                        .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsDefault)
+                        .Select(rb => rb.BranchName)
+                        .FirstOrDefaultAsync(cancellationToken);
+                    baseBranchName = defaultRow ?? "main";
+                }
+                else
+                {
+                    baseBranchName = baseBranch;
+                }
+
+                var args = new
+                {
+                    workspaceName = workspace.Name,
+                    repositoryName = repo.RepositoryName,
+                    newBranchName,
+                    baseBranchName
+                };
+                var response = await _agentBridge.SendCommandAsync("CreateBranch", args, cancellationToken);
+                var createResponse = AgentResponseJson.DeserializeAgentResponse<CreateBranchResponse>(response.Data);
+                var success = createResponse?.Success ?? response.Success;
+
+                if (success)
+                    wr.BranchName = newBranchName;
+            }
+            finally
+            {
+                var count = Interlocked.Increment(ref completedCount);
+                onProgress?.Invoke(count, totalCount);
+                semaphore.Release();
+            }
+        }
+
+        await Task.WhenAll(links.Select(ProcessOne));
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        _hubContext?.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
     }
 }

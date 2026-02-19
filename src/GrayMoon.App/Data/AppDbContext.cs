@@ -203,6 +203,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.Property(rb => rb.LastSeenAt)
                 .IsRequired();
 
+            entity.Property(rb => rb.IsDefault)
+                .IsRequired();
+
             entity.HasOne(rb => rb.WorkspaceRepository)
                 .WithMany()
                 .HasForeignKey(rb => rb.WorkspaceRepositoryId)

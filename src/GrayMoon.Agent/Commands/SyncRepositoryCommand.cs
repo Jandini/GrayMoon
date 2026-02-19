@@ -61,12 +61,15 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
             // Fetch branches after fetch completes (branches are now up to date)
             IReadOnlyList<string>? localBranches = null;
             IReadOnlyList<string>? remoteBranches = null;
+            string? defaultBranch = null;
             try
             {
                 var localBranchesTask = git.GetLocalBranchesAsync(repoPath, cancellationToken);
                 var remoteBranchesTask = git.GetRemoteBranchesAsync(repoPath, cancellationToken);
+                var defaultBranchTask = git.GetDefaultBranchNameAsync(repoPath, cancellationToken);
                 localBranches = await localBranchesTask;
                 remoteBranches = await remoteBranchesTask;
+                defaultBranch = await defaultBranchTask;
             }
             catch
             {
@@ -75,15 +78,16 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
 
             projects = await findProjectsTask;
 
-            return new SyncRepositoryResponse 
-            { 
-                Version = version, 
-                Branch = branch, 
-                Projects = projects, 
-                OutgoingCommits = outgoingCommits, 
+            return new SyncRepositoryResponse
+            {
+                Version = version,
+                Branch = branch,
+                Projects = projects,
+                OutgoingCommits = outgoingCommits,
                 IncomingCommits = incomingCommits,
                 LocalBranches = localBranches,
-                RemoteBranches = remoteBranches
+                RemoteBranches = remoteBranches,
+                DefaultBranch = defaultBranch
             };
         }
 

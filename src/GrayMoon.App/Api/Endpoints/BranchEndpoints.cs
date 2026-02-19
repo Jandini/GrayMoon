@@ -19,6 +19,7 @@ public static class BranchEndpoints
         routes.MapPost("/api/branches/refresh", RefreshBranches);
         routes.MapPost("/api/branches/checkout", CheckoutBranch);
         routes.MapPost("/api/branches/sync-to-default", SyncToDefaultBranch);
+        routes.MapPost("/api/branches/common", GetCommonBranches);
         return routes;
     }
 
@@ -73,18 +74,16 @@ public static class BranchEndpoints
 
             // Get current branch from workspace repository link
             var currentBranch = wr.BranchName;
-            
-            // Try to determine default branch from remote branches (heuristic)
-            // Actual default branch will be fetched when RefreshBranches is called
-            string? defaultBranch = null;
-            if (remoteBranches.Contains("main"))
-                defaultBranch = "main";
-            else if (remoteBranches.Contains("master"))
-                defaultBranch = "master";
-            else if (remoteBranches.Count > 0)
+
+            // Default branch from persisted IsDefault (set when RefreshBranches is called)
+            var defaultBranchRow = branches.FirstOrDefault(b => b.IsDefault);
+            var defaultBranch = defaultBranchRow?.BranchName;
+            if (defaultBranch == null && remoteBranches.Count > 0)
             {
-                // Fallback: use first alphabetically
-                defaultBranch = remoteBranches.FirstOrDefault();
+                // Fallback heuristic when never refreshed
+                if (remoteBranches.Contains("main")) defaultBranch = "main";
+                else if (remoteBranches.Contains("master")) defaultBranch = "master";
+                else defaultBranch = remoteBranches.FirstOrDefault();
             }
 
             return Results.Ok(new
@@ -283,7 +282,7 @@ public static class BranchEndpoints
             {
                 var localBranches = refreshResponse.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
                 var remoteBranches = refreshResponse.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
-                await workspaceGitService.PersistBranchesAsync(wr.WorkspaceRepositoryId, localBranches, remoteBranches, CancellationToken.None);
+                await workspaceGitService.PersistBranchesAsync(wr.WorkspaceRepositoryId, localBranches, remoteBranches, refreshResponse.DefaultBranch, CancellationToken.None);
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
             }
 
@@ -294,6 +293,77 @@ public static class BranchEndpoints
             logger.LogError(ex, "Error refreshing branches for repository {RepositoryId}", repositoryId);
             return Results.Problem("An error occurred while refreshing branches", statusCode: 500);
         }
+    }
+
+    private static async Task<IResult> GetCommonBranches(
+        CommonBranchesApiRequest? body,
+        WorkspaceRepository workspaceRepository,
+        AppDbContext dbContext,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.Branches");
+        if (body == null)
+            return Results.BadRequest("Request body is required.");
+
+        var workspaceId = body.WorkspaceId;
+        if (workspaceId <= 0)
+            return Results.BadRequest("workspaceId is required.");
+
+        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            return Results.NotFound("Workspace not found.");
+
+        var links = await dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .Include(wr => wr.Repository)
+            .ToListAsync();
+
+        if (links.Count == 0)
+        {
+            return Results.Ok(new
+            {
+                commonBranchNames = Array.Empty<string>(),
+                defaultDisplayText = "multiple"
+            });
+        }
+
+        // Local branch names per repo (so we can intersect for "common")
+        var branchSets = new List<HashSet<string>>();
+        var defaultBranchNames = new List<string>();
+        foreach (var wr in links)
+        {
+            var branches = await dbContext.RepositoryBranches
+                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && !rb.IsRemote)
+                .Select(rb => rb.BranchName)
+                .ToListAsync();
+            branchSets.Add(branches.ToHashSet(StringComparer.OrdinalIgnoreCase));
+            var defaultRow = await dbContext.RepositoryBranches
+                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsDefault)
+                .Select(rb => rb.BranchName)
+                .FirstOrDefaultAsync();
+            defaultBranchNames.Add(defaultRow ?? "");
+        }
+
+        var common = branchSets[0];
+        for (var i = 1; i < branchSets.Count; i++)
+        {
+            common.IntersectWith(branchSets[i]);
+        }
+
+        // Default option: one common default (e.g. main [default]) or "multiple [default]" when repos have different defaults
+        var distinctDefaults = defaultBranchNames.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var defaultDisplayText = distinctDefaults.Count == 1 ? distinctDefaults[0] : "multiple";
+
+        // All other branches common across every repo go in the list; exclude the single default so it appears only as the first option
+        if (distinctDefaults.Count == 1)
+            common.Remove(distinctDefaults[0]);
+        var commonBranchNames = common.OrderBy(b => b, StringComparer.OrdinalIgnoreCase).ToList();
+
+        return Results.Ok(new
+        {
+            commonBranchNames,
+            defaultDisplayText
+        });
     }
 }
 
@@ -336,3 +406,9 @@ public sealed class SyncToDefaultBranchApiRequest
     public int RepositoryId { get; set; }
     public string? CurrentBranchName { get; set; }
 }
+
+public sealed class CommonBranchesApiRequest
+{
+    public int WorkspaceId { get; set; }
+}
+

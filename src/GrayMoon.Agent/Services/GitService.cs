@@ -385,6 +385,38 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, null);
     }
 
+    public async Task<(bool Success, string? ErrorMessage)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(newBranchName) || string.IsNullOrWhiteSpace(baseBranchName))
+            return (false, "Invalid repository path or branch name");
+
+        static string CombineOutput(string? stdout, string? stderr)
+        {
+            var outStr = (stdout ?? "").Trim();
+            var errStr = (stderr ?? "").Trim();
+            return string.IsNullOrWhiteSpace(outStr) ? errStr
+                 : string.IsNullOrWhiteSpace(errStr) ? outStr
+                 : $"{outStr}\n{errStr}";
+        }
+
+        // Ensure we're on the base branch (checkout base first)
+        var (checkoutSuccess, checkoutError) = await CheckoutBranchAsync(repoPath, baseBranchName, ct);
+        if (!checkoutSuccess)
+            return (false, checkoutError ?? "Failed to checkout base branch");
+
+        // Create and checkout new branch from current HEAD
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"checkout -b {newBranchName}", repoPath, ct);
+        if (exitCode != 0)
+        {
+            var combined = CombineOutput(stdout, stderr);
+            logger.LogError("Git create branch failed for {RepoPath}. NewBranch={NewBranch}, BaseBranch={BaseBranch}, ExitCode={ExitCode}", repoPath, newBranchName, baseBranchName, exitCode);
+            return (false, combined);
+        }
+
+        logger.LogInformation("Git branch created for {RepoPath}. NewBranch={NewBranch}, BaseBranch={BaseBranch}", repoPath, newBranchName, baseBranchName);
+        return (true, null);
+    }
+
     public async Task<bool> DeleteLocalBranchAsync(string repoPath, string branchName, bool force, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
