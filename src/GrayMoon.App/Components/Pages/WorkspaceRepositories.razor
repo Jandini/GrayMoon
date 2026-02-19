@@ -131,7 +131,8 @@
                                             <td class="col-version">
                                                 @if (!string.IsNullOrEmpty(wr.GitVersion))
                                                 {
-                                                    <div class="version-container @(clickedVersions.Contains(wr.GitVersion) ? "version-clicked" : "")">
+                                                    <div class="version-container @(clickedVersions.Contains(wr.GitVersion) ? "version-clicked" : "")"
+                                                         @onmouseleave='() => OnVersionMouseLeave(wr.GitVersion)'>
                                                         <span class="version-display text-muted">@wr.GitVersion</span>
                                                         <span class="version-code" 
                                                               @onclick='() => CopyVersionToClipboard(wr.GitVersion)'
@@ -271,7 +272,7 @@
     private string checkoutProgressMessage = "Checking out branch...";
     private CancellationTokenSource? _checkoutCts;
     private Dictionary<int, string> repositoryErrors = new(); // repositoryId -> error message
-    private HashSet<string> clickedVersions = new(); // Track clicked versions to hide hover temporarily
+    private HashSet<string> clickedVersions = new(); // Track clicked versions to hide hover until mouse leaves
     private HubConnection? _hubConnection;
     private bool showRepositoriesModal;
     private bool isSavingRepositories;
@@ -1075,13 +1076,18 @@
         {
             await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", version);
             ToastService.Show($"{version} copied to the clipboard");
-
-            // Temporarily hide hover effect by adding to clicked set
+            
+            // Hide highlight after click (like a button)
             clickedVersions.Add(version);
             StateHasChanged();
+        }
+    }
 
-            // Remove after a short delay so hover can work again
-            await Task.Delay(300);
+    private void OnVersionMouseLeave(string? version)
+    {
+        if (!string.IsNullOrEmpty(version))
+        {
+            // Clear clicked state when mouse leaves, allowing hover to work again
             clickedVersions.Remove(version);
             StateHasChanged();
         }

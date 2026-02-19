@@ -237,7 +237,7 @@
     display: inline-flex;
 }
 
-/* Prevent hover effect when just clicked */
+/* Prevent hover effect when just clicked (until mouse leaves) */
 .repositories-table .version-container.version-clicked:hover .version-display {
     display: inline-block;
 }

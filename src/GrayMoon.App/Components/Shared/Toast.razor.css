@@ -1,7 +1,7 @@
 /* Toast bubble – matches app dark theme, non-intrusive */
 .toast-bubble {
     position: fixed;
-    bottom: 1.5rem;
+    top: calc(3.5rem + 1rem); /* Below top-row (3.5rem) + spacing (1rem) */
     left: 50%;
     transform: translateX(-50%);
     z-index: 9999;
@@ -25,7 +25,7 @@
 @keyframes toast-in {
     from {
         opacity: 0;
-        transform: translateX(-50%) translateY(0.5rem);
+        transform: translateX(-50%) translateY(-0.5rem);
     }
     to {
         opacity: 1;
