@@ -30,6 +30,15 @@
     font-weight: 400;
 }
 
+.repositories-table .dependency-level-header .dependency-level-count-link {
+    cursor: pointer;
+}
+
+.repositories-table .dependency-level-header .dependency-level-count-link:hover {
+    color: var(--accent-blue);
+    text-decoration: underline;
+}
+
 .repositories-table thead,
 .repositories-table tbody tr {
     display: table;

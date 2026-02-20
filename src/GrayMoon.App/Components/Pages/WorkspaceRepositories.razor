@@ -108,10 +108,14 @@
                             {
                                 @foreach (var group in LevelGroups)
                                 {
+                                    var levelUrls = group.Select(wr => wr.Repository).Where(r => r != null).Select(r => GetRepositoryUrl(r!)).Where(u => !string.IsNullOrEmpty(u)).ToList();
+                                    var levelUrlsJson = System.Text.Json.JsonSerializer.Serialize(levelUrls);
                                     <tr class="dependency-level-header">
                                         <td colspan="6" class="dependency-level-header-cell">
                                             <span class="dependency-level-title">Level @(group.Key?.ToString() ?? "—")</span>
-                                            <span class="dependency-level-count">@group.Count() @(group.Count() == 1 ? "repository" : "repositories")</span>
+                                            <span class="dependency-level-count dependency-level-count-link"
+                                                  title="Open in GitHub..."
+                                                  data-open-urls="@levelUrlsJson">@group.Count() @(group.Count() == 1 ? "repository" : "repositories")</span>
                                         </td>
                                     </tr>
                                     @foreach (var wr in group)
