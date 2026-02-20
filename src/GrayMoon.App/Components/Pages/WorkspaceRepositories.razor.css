@@ -16,7 +16,7 @@
     font-weight: 600;
     font-size: 0.875rem;
     vertical-align: middle;
-    padding: 0.35rem 1rem;
+    padding: 0.5rem 0.6rem;
     border: none;
     border-bottom: 1px solid var(--border-color);
 }
@@ -30,10 +30,10 @@
     font-weight: 400;
 }
 
-/* Fixed-width number so "1" vs "11" doesn't shift the icons; number right-aligned in its box */
+/* Fixed-width number (left-pad): number right-aligned so "1" and "11" line up */
 .repositories-table .dependency-level-header .dependency-level-count-num {
     display: inline-block;
-    min-width: 2.5ch;
+    min-width: 3ch;
     text-align: right;
 }
 
@@ -43,23 +43,24 @@
 
 .repositories-table .dependency-level-header .dependency-level-count-link:hover {
     color: var(--text-muted);
-    text-decoration: underline;
 }
 
+/* Fixed total width so icons stay in same column; count at end of header; 100 repositories can shift */
 .repositories-table .dependency-level-header .dependency-level-links {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 0.75rem;
-    min-width: 8rem;
+    justify-content: space-between;
+    min-width: 9.5rem;
+    
+    flex-shrink: 0;
 }
 
-/* Fixed-width icon group; icons on left of count, vertically aligned across rows */
+/* Icons at start of fixed-width block so they align vertically across rows */
 .repositories-table .dependency-level-header .dependency-level-icons {
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
-    width: 3.25rem;
+    width: 1rem;
     flex-shrink: 0;
 }
 
