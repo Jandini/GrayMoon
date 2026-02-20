@@ -29,12 +29,14 @@
 
     /// <summary>Matrix rain: character size in px.</summary>
     [Parameter] public int FontSize { get; set; } = 16;
-    /// <summary>Matrix rain: frame interval in ms (~30 FPS = 33).</summary>
-    [Parameter] public int FrameIntervalMs { get; set; } = 33;
+    /// <summary>Matrix rain: frame interval in ms (~20 FPS = 50).</summary>
+    [Parameter] public int FrameIntervalMs { get; set; } = 50;
     /// <summary>Matrix rain: trail length (e.g. 0.08).</summary>
     [Parameter] public double FadeAlpha { get; set; } = 0.08;
     /// <summary>Matrix rain: character opacity (e.g. 0.65).</summary>
     [Parameter] public double CharacterOpacity { get; set; } = 0.65;
+    /// <summary>Matrix rain: fall speed (0.1–2, default 0.6 = slower).</summary>
+    [Parameter] public double DropSpeed { get; set; } = 0.6;
 
     private readonly string _canvasId = "matrixOverlay_" + Guid.NewGuid().ToString("N");
     private bool _wasVisible;
@@ -50,7 +52,8 @@
                 fontSize = FontSize,
                 frameIntervalMs = FrameIntervalMs,
                 fadeAlpha = FadeAlpha,
-                characterOpacity = CharacterOpacity
+                characterOpacity = CharacterOpacity,
+                dropSpeed = DropSpeed
             });
         }
         else if (!IsVisible && _wasVisible)

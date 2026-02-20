@@ -34,9 +34,10 @@
     if (!ctx) return;
 
     const fontSize = Math.max(10, (options?.fontSize ?? 16) | 0);
-    const frameIntervalMs = Math.max(16, (options?.frameIntervalMs ?? 33) | 0);
+    const frameIntervalMs = Math.max(16, (options?.frameIntervalMs ?? 50) | 0);
     const fadeAlpha = Math.min(1, Math.max(0, options?.fadeAlpha ?? 0.08)); // trail length
     const characterOpacity = Math.min(1, Math.max(0, options?.characterOpacity ?? 0.65));
+    const dropSpeed = Math.min(2, Math.max(0.1, options?.dropSpeed ?? 0.6)); // fall speed (lower = slower)
 
     let { w, h } = resize(canvas, ctx);
 
@@ -94,7 +95,7 @@
 
         // reset occasionally for randomness
         if (y > h && Math.random() > 0.975) drops[i] = 0;
-        else drops[i] += 1;
+        else drops[i] += dropSpeed;
       }
     }, frameIntervalMs);
 
