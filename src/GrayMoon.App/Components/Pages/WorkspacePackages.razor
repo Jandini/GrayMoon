@@ -28,10 +28,6 @@
             <button class="btn btn-outline-primary"
                     @onclick="SyncRegistriesAsync"
                     disabled="@(isSyncingRegistries || packages.Count == 0)">
-                @if (isSyncingRegistries)
-                {
-                    <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
-                }
                 Sync registries
             </button>
         </div>
@@ -94,6 +90,7 @@
 </div>
 
 <LoadingOverlay IsVisible="@isLoading" Message="Loading packages..." />
+<LoadingOverlay IsVisible="@isSyncingRegistries" Message="Syncing registries..." />
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
