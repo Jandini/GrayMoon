@@ -43,6 +43,7 @@
                                    placeholder="e.g. feature/my-feature"
                                    @bind="newBranchName"
                                    @bind:event="oninput"
+                                   @onkeydown="HandleBranchNameKeyDown"
                                    @ref="newBranchNameInput" />
                         </div>
                         <div class="mb-3">
@@ -147,15 +148,23 @@
         showBasedOnDropdown = false;
     }
 
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !_wasVisible)
+        {
+            newBranchName = "";
+            selectedBaseBranch = "__default__";
+            errorMessage = null;
+            activeTab = "newbranch";
+        }
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (IsVisible && !_wasVisible)
         {
             _wasVisible = true;
-            activeTab = "newbranch";
-            newBranchName = "";
-            selectedBaseBranch = "__default__";
-            errorMessage = null;
+            StateHasChanged();
             try
             {
                 await newBranchNameInput.FocusAsync();
@@ -199,6 +208,19 @@
         if (e.Key == "Escape" || e.Code == "Escape")
         {
             await OnCancel.InvokeAsync();
+            return;
+        }
+        if (e.Key == "Enter" && activeTab == "newbranch" && !string.IsNullOrWhiteSpace(newBranchName?.Trim()) && !isCreating)
+        {
+            await CreateAsync();
+        }
+    }
+
+    private async Task HandleBranchNameKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(newBranchName?.Trim()) && !isCreating)
+        {
+            await CreateAsync();
         }
     }
 }
