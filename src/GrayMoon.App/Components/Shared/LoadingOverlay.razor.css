@@ -1,9 +1,9 @@
-/* Spinner: blue for simple (classic), gray for matrix */
+/* Spinner: gray for both simple (default) and matrix */
 .loading-overlay--simple .spinner-border {
     width: 3rem !important;
     height: 3rem !important;
     border-width: 0.3rem !important;
-    border-color: #0e639c !important;
+    border-color: #858585 !important;
     border-right-color: transparent !important;
 }
 

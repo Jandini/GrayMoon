@@ -6,12 +6,12 @@
     text-overflow: ellipsis;
 }
 
-/* Dependency level section header: black background, reduced height, bottom border only */
+/* Dependency level section header: near-black background, reduced height, bottom border only */
 .repositories-table .dependency-level-header td.dependency-level-header-cell {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background-color: #000;
+    background-color: #0d0d0d;
     color: var(--text-secondary);
     font-weight: 600;
     font-size: 0.875rem;
@@ -22,7 +22,7 @@
 }
 
 .repositories-table .dependency-level-header:hover td.dependency-level-header-cell {
-    background-color: #000;
+    background-color: #0d0d0d;
 }
 
 .repositories-table .dependency-level-header .dependency-level-count {
