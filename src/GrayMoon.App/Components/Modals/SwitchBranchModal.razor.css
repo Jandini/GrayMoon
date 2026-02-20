@@ -41,10 +41,32 @@
     box-shadow: 0 0 0 0.1rem var(--bg-primary), 0 0 0 0.25rem var(--accent-blue);
 }
 
-/* Branch list: subtle gray that fits modal background */
+/* Branch list: show up to 4 branches then scroll; same gray scrollbar as grids */
 .branch-list {
     background-color: var(--bg-card);
     border-color: var(--border-color) !important;
+    max-height: 10rem;  /* ~4 branch rows (p-2 + one line each) */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a var(--bg-card, #252526);
+}
+
+.branch-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+.branch-list::-webkit-scrollbar-track {
+    background: var(--bg-card, #252526);
+}
+
+.branch-list::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.branch-list::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
 }
 
 .branch-item {

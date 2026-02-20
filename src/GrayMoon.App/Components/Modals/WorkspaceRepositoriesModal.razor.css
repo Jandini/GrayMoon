@@ -70,7 +70,7 @@
 }
 
 .repository-grid tbody {
-    scrollbar-width: thin;
+    scrollbar-width: auto;
     scrollbar-color: #5a5a5a var(--bg-card, #252526);
 }
 
