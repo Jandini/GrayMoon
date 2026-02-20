@@ -184,10 +184,10 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
         logger.LogInformation("Persistence: ProjectDependencies. WorkspaceId={WorkspaceId}, DependentCount={Count}, EdgeCount={Edges}",
             workspaceId, dependentProjectIds.Count, uniqueEdges.Count);
 
-        await PersistRepositorySequenceAndDependenciesAsync(workspaceId, workspaceProjects, uniqueEdges, cancellationToken);
+        await PersistRepositoryDependencyLevelAndDependenciesAsync(workspaceId, workspaceProjects, uniqueEdges, cancellationToken);
     }
 
-    /// <summary>Recomputes Sequence, Dependencies, and UnmatchedDeps from current DB state (workspace projects and project dependencies) and persists to WorkspaceRepositoryLink. Use after a repository version change (e.g. notify job) so the grid can refresh without re-reading .csproj files.</summary>
+    /// <summary>Recomputes DependencyLevel, Dependencies, and UnmatchedDeps from current DB state (workspace projects and project dependencies) and persists to WorkspaceRepositoryLink. Use after a repository version change (e.g. notify job) so the grid can refresh without re-reading .csproj files.</summary>
     public async Task RecomputeAndPersistRepositoryDependencyStatsAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         var workspaceProjects = await dbContext.WorkspaceProjects
@@ -207,11 +207,11 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
             .Select(g => (g.Key.DependentProjectId, g.Key.ReferencedProjectId, g.First().Version))
             .ToList();
 
-        await PersistRepositorySequenceAndDependenciesAsync(workspaceId, workspaceProjects, uniqueEdges, cancellationToken);
+        await PersistRepositoryDependencyLevelAndDependenciesAsync(workspaceId, workspaceProjects, uniqueEdges, cancellationToken);
     }
 
-    /// <summary>Computes build sequence and dependency count per repo and persists them on WorkspaceRepositoryLink.</summary>
-    private async Task PersistRepositorySequenceAndDependenciesAsync(
+    /// <summary>Computes dependency level and dependency count per repo and persists them on WorkspaceRepositoryLink.</summary>
+    private async Task PersistRepositoryDependencyLevelAndDependenciesAsync(
         int workspaceId,
         List<WorkspaceProject> workspaceProjects,
         List<(int DependentProjectId, int ReferencedProjectId, string? Version)> uniqueEdges,
@@ -276,7 +276,7 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
                 unmatchedCountByRepo[depProj.RepositoryId] = unmatchedCountByRepo.GetValueOrDefault(depProj.RepositoryId, 0) + 1;
         }
 
-        int? sequenceForRepo(int repoId)
+        int? dependencyLevelForRepo(int repoId)
         {
             if (remaining != 0) return null;
             var repoProjects = workspaceProjects.Where(p => p.RepositoryId == repoId).ToList();
@@ -286,12 +286,12 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
 
         foreach (var link in links)
         {
-            link.Sequence = sequenceForRepo(link.RepositoryId);
+            link.DependencyLevel = dependencyLevelForRepo(link.RepositoryId);
             link.Dependencies = depCountByRepo.GetValueOrDefault(link.RepositoryId, 0);
             link.UnmatchedDeps = unmatchedCountByRepo.GetValueOrDefault(link.RepositoryId, 0);
         }
         await dbContext.SaveChangesAsync(cancellationToken);
-        logger.LogDebug("Persistence: WorkspaceRepositories Sequence/Dependencies. WorkspaceId={WorkspaceId}, LinkCount={Count}", workspaceId, links.Count);
+        logger.LogDebug("Persistence: WorkspaceRepositories DependencyLevel/Dependencies. WorkspaceId={WorkspaceId}, LinkCount={Count}", workspaceId, links.Count);
     }
 
     /// <summary>Returns payload for syncing dependency versions: per repo, list of (project path, package ID to new version) for dependencies that do not match the referenced repo's GitVersion.</summary>
@@ -451,45 +451,6 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
         return rows.Select(r => (r.DependentProjectId, r.ReferencedProjectId)).ToList();
     }
 
-    /// <summary>Returns workspace projects in build order (dependencies first). Uses topological sort; returns empty list if cycle detected.</summary>
-    public async Task<List<WorkspaceProject>> GetBuildOrderAsync(int workspaceId, CancellationToken cancellationToken = default)
-    {
-        var projects = await GetByWorkspaceIdAsync(workspaceId, cancellationToken);
-        if (projects.Count == 0) return projects;
-
-        var edges = await GetDependencyEdgesAsync(workspaceId, cancellationToken);
-        var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
-        var byProject = projects.ToDictionary(p => p.ProjectId);
-
-        var inDegree = projects.ToDictionary(p => p.ProjectId, _ => 0);
-        var revEdges = projects.ToDictionary(p => p.ProjectId, _ => new List<int>());
-        foreach (var (depId, refId) in edges)
-        {
-            if (!projectIds.Contains(depId) || !projectIds.Contains(refId)) continue;
-            inDegree[depId]++;
-            revEdges[refId].Add(depId);
-        }
-
-        var queue = new Queue<int>(projects.Where(p => inDegree[p.ProjectId] == 0).Select(p => p.ProjectId));
-        var order = new List<int>();
-        while (queue.Count > 0)
-        {
-            var n = queue.Dequeue();
-            order.Add(n);
-            foreach (var depId in revEdges[n])
-            {
-                inDegree[depId]--;
-                if (inDegree[depId] == 0)
-                    queue.Enqueue(depId);
-            }
-        }
-
-        if (order.Count != projects.Count)
-            return new List<WorkspaceProject>();
-
-        return order.Select(id => byProject[id]).ToList();
-    }
-
     /// <summary>Returns the dependency graph for the workspace: nodes (projects with labels) and edges. Suitable for Cytoscape (nodes + edges).</summary>
     public async Task<ProjectDependencyGraph> GetDependencyGraphAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
@@ -535,101 +496,4 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
         return new RepositoryDependencyGraph(repoNodes, edgeList);
     }
 
-    /// <summary>Returns repositories in build order with sequence (same sequence = build in parallel), version from persistence, and dependency count per repo. Uses persisted Sequence and Dependencies from WorkspaceRepositories when set.</summary>
-    public async Task<List<RepositoryBuildOrderRow>> GetRepositoryBuildOrderAsync(int workspaceId, CancellationToken cancellationToken = default)
-    {
-        var projects = await GetByWorkspaceIdAsync(workspaceId, cancellationToken);
-        if (projects.Count == 0) return new List<RepositoryBuildOrderRow>();
-
-        var links = await dbContext.WorkspaceRepositories
-            .AsNoTracking()
-            .Include(wr => wr.Repository)
-            .Where(wr => wr.WorkspaceId == workspaceId)
-            .ToListAsync(cancellationToken);
-        var versionByRepo = links.ToDictionary(x => x.RepositoryId, x => x.GitVersion, null);
-        var sequenceByRepo = links.Where(wr => wr.Sequence != null).ToDictionary(x => x.RepositoryId, x => x.Sequence!.Value);
-        var dependenciesByRepo = links.Where(wr => wr.Dependencies != null).ToDictionary(x => x.RepositoryId, x => x.Dependencies!.Value);
-        var unmatchedDepsByRepo = links.Where(wr => wr.UnmatchedDeps != null).ToDictionary(x => x.RepositoryId, x => x.UnmatchedDeps!.Value);
-
-        var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
-        var byProject = projects.ToDictionary(p => p.ProjectId);
-
-        var dependencyRows = await dbContext.ProjectDependencies
-            .AsNoTracking()
-            .Where(d => projectIds.Contains(d.DependentProjectId) && projectIds.Contains(d.ReferencedProjectId))
-            .Select(d => new { d.DependentProjectId, d.ReferencedProjectId, d.Version })
-            .ToListAsync(cancellationToken);
-
-        var edges = dependencyRows.Select(d => (d.DependentProjectId, d.ReferencedProjectId)).Distinct().ToList();
-
-        var inDegree = projects.ToDictionary(p => p.ProjectId, _ => 0);
-        var revEdges = projects.ToDictionary(p => p.ProjectId, _ => new List<int>());
-        foreach (var (depId, refId) in edges)
-        {
-            if (!projectIds.Contains(depId) || !projectIds.Contains(refId)) continue;
-            inDegree[depId]++;
-            revEdges[refId].Add(depId);
-        }
-
-        var levelByProject = new Dictionary<int, int>();
-        var queue = new Queue<int>(projects.Where(p => inDegree[p.ProjectId] == 0).Select(p => p.ProjectId));
-        var currentLevel = 1;
-        var remaining = projects.Count;
-        while (queue.Count > 0)
-        {
-            var levelSize = queue.Count;
-            for (var i = 0; i < levelSize; i++)
-            {
-                var n = queue.Dequeue();
-                levelByProject[n] = currentLevel;
-                remaining--;
-                foreach (var depId in revEdges[n])
-                {
-                    inDegree[depId]--;
-                    if (inDegree[depId] == 0)
-                        queue.Enqueue(depId);
-                }
-            }
-            currentLevel++;
-        }
-
-        var depCountByRepo = projects.GroupBy(p => p.RepositoryId).ToDictionary(g => g.Key, _ => 0);
-        var unmatchedCountByRepo = projects.GroupBy(p => p.RepositoryId).ToDictionary(g => g.Key, _ => 0);
-
-        foreach (var d in dependencyRows)
-        {
-            if (!byProject.TryGetValue(d.DependentProjectId, out var depProj)) continue;
-            if (!byProject.TryGetValue(d.ReferencedProjectId, out var refProj)) continue;
-            var depRepoId = depProj.RepositoryId;
-            depCountByRepo[depRepoId] = depCountByRepo.GetValueOrDefault(depRepoId, 0) + 1;
-
-            var refRepoVersion = versionByRepo.GetValueOrDefault(refProj.RepositoryId);
-            var depVersion = d.Version?.Trim() ?? "";
-            var refVersion = refRepoVersion?.Trim() ?? "";
-            if (depVersion != refVersion)
-                unmatchedCountByRepo[depRepoId] = unmatchedCountByRepo.GetValueOrDefault(depRepoId, 0) + 1;
-        }
-
-        if (remaining != 0 && sequenceByRepo.Count == 0)
-            return new List<RepositoryBuildOrderRow>();
-
-        var repoIds = links.Select(wr => wr.RepositoryId).ToList();
-        var computedSeqByRepo = projects
-            .GroupBy(p => p.RepositoryId)
-            .Where(g => repoIds.Contains(g.Key))
-            .ToDictionary(g => g.Key, g => remaining != 0 ? (int?)null : g.Max(p => levelByProject.GetValueOrDefault(p.ProjectId, currentLevel)));
-
-        return links
-            .Where(wr => wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
-            .Select(wr => new RepositoryBuildOrderRow(
-                sequenceByRepo.TryGetValue(wr.RepositoryId, out var seq) ? seq : computedSeqByRepo.GetValueOrDefault(wr.RepositoryId) ?? 0,
-                wr.Repository!.RepositoryName!,
-                versionByRepo.GetValueOrDefault(wr.RepositoryId),
-                dependenciesByRepo.TryGetValue(wr.RepositoryId, out var deps) ? deps : depCountByRepo.GetValueOrDefault(wr.RepositoryId, 0),
-                unmatchedDepsByRepo.TryGetValue(wr.RepositoryId, out var unmatched) ? unmatched : unmatchedCountByRepo.GetValueOrDefault(wr.RepositoryId, 0)))
-            .OrderBy(r => r.Sequence)
-            .ThenBy(r => r.DependencyCount)
-            .ThenBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
 }

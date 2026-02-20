@@ -92,7 +92,7 @@ using (var scope = app.Services.CreateScope())
     await MigrateWorkspaceRepositoriesSyncStatusAsync(dbContext);
     await MigrateWorkspaceRepositoriesProjectsAsync(dbContext);
     await MigrateWorkspaceRepositoriesCommitsAsync(dbContext);
-    await MigrateWorkspaceRepositoriesSequenceAndDependenciesAsync(dbContext);
+    await MigrateWorkspaceRepositoriesDependencyLevelAndDependenciesAsync(dbContext);
     await MigrateWorkspaceProjectsMatchedConnectorAsync(dbContext);
     await MigrateRepositoryBranchesAsync(dbContext);
     await MigrateRepositoryBranchesIsDefaultAsync(dbContext);
@@ -333,7 +333,7 @@ static async Task MigrateWorkspaceRepositoriesCommitsAsync(AppDbContext dbContex
     }
 }
 
-static async Task MigrateWorkspaceRepositoriesSequenceAndDependenciesAsync(AppDbContext dbContext)
+static async Task MigrateWorkspaceRepositoriesDependencyLevelAndDependenciesAsync(AppDbContext dbContext)
 {
     try
     {
@@ -343,15 +343,47 @@ static async Task MigrateWorkspaceRepositoriesSequenceAndDependenciesAsync(AppDb
 
         await using (var cmd = conn.CreateCommand())
         {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='DependencyLevel'";
+            var hasDependencyLevel = Convert.ToInt32(await cmd.ExecuteScalarAsync()) != 0;
             cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='Sequence'";
-            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
-            if (count == 0)
+            var hasSequence = Convert.ToInt32(await cmd.ExecuteScalarAsync()) != 0;
+
+            if (!hasDependencyLevel)
             {
-                cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN Sequence INTEGER";
+                cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN DependencyLevel INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+                if (hasSequence)
+                {
+                    cmd.CommandText = "UPDATE WorkspaceRepositories SET DependencyLevel = Sequence";
+                    await cmd.ExecuteNonQueryAsync();
+                    cmd.CommandText = "CREATE TABLE WorkspaceRepositories_new(WorkspaceRepositoryId INTEGER PRIMARY KEY AUTOINCREMENT, WorkspaceId INTEGER NOT NULL, RepositoryId INTEGER NOT NULL, GitVersion TEXT, BranchName TEXT, Projects INTEGER, OutgoingCommits INTEGER, IncomingCommits INTEGER, SyncStatus INTEGER NOT NULL, DependencyLevel INTEGER, Dependencies INTEGER, UnmatchedDeps INTEGER)";
+                    await cmd.ExecuteNonQueryAsync();
+                    cmd.CommandText = "INSERT INTO WorkspaceRepositories_new SELECT WorkspaceRepositoryId, WorkspaceId, RepositoryId, GitVersion, BranchName, Projects, OutgoingCommits, IncomingCommits, SyncStatus, DependencyLevel, Dependencies, UnmatchedDeps FROM WorkspaceRepositories";
+                    await cmd.ExecuteNonQueryAsync();
+                    cmd.CommandText = "DROP TABLE WorkspaceRepositories";
+                    await cmd.ExecuteNonQueryAsync();
+                    cmd.CommandText = "ALTER TABLE WorkspaceRepositories_new RENAME TO WorkspaceRepositories";
+                    await cmd.ExecuteNonQueryAsync();
+                    cmd.CommandText = "CREATE UNIQUE INDEX IX_WorkspaceRepositories_WorkspaceId_RepositoryId ON WorkspaceRepositories(WorkspaceId, RepositoryId)";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+            else if (hasSequence)
+            {
+                cmd.CommandText = "CREATE TABLE WorkspaceRepositories_new(WorkspaceRepositoryId INTEGER PRIMARY KEY AUTOINCREMENT, WorkspaceId INTEGER NOT NULL, RepositoryId INTEGER NOT NULL, GitVersion TEXT, BranchName TEXT, Projects INTEGER, OutgoingCommits INTEGER, IncomingCommits INTEGER, SyncStatus INTEGER NOT NULL, DependencyLevel INTEGER, Dependencies INTEGER, UnmatchedDeps INTEGER)";
+                await cmd.ExecuteNonQueryAsync();
+                cmd.CommandText = "INSERT INTO WorkspaceRepositories_new SELECT WorkspaceRepositoryId, WorkspaceId, RepositoryId, GitVersion, BranchName, Projects, OutgoingCommits, IncomingCommits, SyncStatus, DependencyLevel, Dependencies, UnmatchedDeps FROM WorkspaceRepositories";
+                await cmd.ExecuteNonQueryAsync();
+                cmd.CommandText = "DROP TABLE WorkspaceRepositories";
+                await cmd.ExecuteNonQueryAsync();
+                cmd.CommandText = "ALTER TABLE WorkspaceRepositories_new RENAME TO WorkspaceRepositories";
+                await cmd.ExecuteNonQueryAsync();
+                cmd.CommandText = "CREATE UNIQUE INDEX IX_WorkspaceRepositories_WorkspaceId_RepositoryId ON WorkspaceRepositories(WorkspaceId, RepositoryId)";
                 await cmd.ExecuteNonQueryAsync();
             }
+
             cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='Dependencies'";
-            count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
             if (count == 0)
             {
                 cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN Dependencies INTEGER";

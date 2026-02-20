@@ -39,8 +39,8 @@ public class WorkspaceRepositoryLink
     /// <summary>Persisted sync status. New links default to <see cref="RepoSyncStatus.NeedsSync"/>.</summary>
     public RepoSyncStatus SyncStatus { get; set; } = RepoSyncStatus.NeedsSync;
 
-    /// <summary>Build order sequence (same value = build in parallel). Set when dependencies are merged.</summary>
-    public int? Sequence { get; set; }
+    /// <summary>Dependency level (same value = same level / can be built in parallel). Set when dependencies are merged.</summary>
+    public int? DependencyLevel { get; set; }
 
     /// <summary>Number of workspace dependency edges where this repo is the dependent. Set when dependencies are merged.</summary>
     public int? Dependencies { get; set; }

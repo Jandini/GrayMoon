@@ -393,7 +393,7 @@
         }
 
         workspaceRepositories = workspace.Repositories
-            .OrderByDescending(wr => wr.Sequence ?? int.MinValue)
+            .OrderByDescending(wr => wr.DependencyLevel ?? int.MinValue)
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
     }
@@ -412,7 +412,7 @@
         }
         workspace = w;
         workspaceRepositories = workspace.Repositories
-            .OrderByDescending(wr => wr.Sequence ?? int.MinValue)
+            .OrderByDescending(wr => wr.DependencyLevel ?? int.MinValue)
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
     }
