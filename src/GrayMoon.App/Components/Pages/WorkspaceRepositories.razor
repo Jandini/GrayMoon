@@ -106,16 +106,24 @@
                             }
                             else
                             {
-                                @foreach (var wr in workspaceRepositories)
+                                @foreach (var group in LevelGroups)
                                 {
-                                    var repo = wr.Repository;
-                                    @if (repo != null)
+                                    <tr class="dependency-level-header">
+                                        <td colspan="6" class="dependency-level-header-cell">
+                                            <span class="dependency-level-title">Level @(group.Key?.ToString() ?? "—")</span>
+                                            <span class="dependency-level-count">@group.Count() @(group.Count() == 1 ? "repository" : "repositories")</span>
+                                        </td>
+                                    </tr>
+                                    @foreach (var wr in group)
                                     {
-                                        var repoUrl = GetRepositoryUrl(repo);
-                                        var branchUrl = !string.IsNullOrEmpty(repoUrl) && !string.IsNullOrEmpty(wr.BranchName)
-                                            ? $"{repoUrl}/compare/main...{Uri.EscapeDataString(wr.BranchName)}"
-                                            : null;
-                                        <tr>
+                                        var repo = wr.Repository;
+                                        @if (repo != null)
+                                        {
+                                            var repoUrl = GetRepositoryUrl(repo);
+                                            var branchUrl = !string.IsNullOrEmpty(repoUrl) && !string.IsNullOrEmpty(wr.BranchName)
+                                                ? $"{repoUrl}/compare/main...{Uri.EscapeDataString(wr.BranchName)}"
+                                                : null;
+                                            <tr>
                                             <td class="col-repo">
                                                 @if (!string.IsNullOrEmpty(repoUrl))
                                                 {
@@ -185,23 +193,24 @@
                                             <td class="col-commits">@GetCommitsBadge(repo.RepositoryId, wr.OutgoingCommits, wr.IncomingCommits)</td>
                                             <td class="col-sync col-status-badge">@GetRepoSyncBadge(repo.RepositoryId)</td>
                                         </tr>
-                                        @if (repositoryErrors.TryGetValue(repo.RepositoryId, out var repoError))
-                                        {
-                                            <tr class="repo-error-row">
-                                                <td colspan="6" class="p-0">
-                                                    <div class="alert alert-danger alert-dismissible mb-0 rounded-0" role="alert">
-                                                        <div class="d-flex align-items-start">
-                                                            <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">
-                                                                <strong>Error:</strong> @repoError
+                                            @if (repositoryErrors.TryGetValue(repo.RepositoryId, out var repoError))
+                                            {
+                                                <tr class="repo-error-row">
+                                                    <td colspan="6" class="p-0">
+                                                        <div class="alert alert-danger alert-dismissible mb-0 rounded-0" role="alert">
+                                                            <div class="d-flex align-items-start">
+                                                                <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">
+                                                                    <strong>Error:</strong> @repoError
+                                                                </div>
+                                                                <button type="button" 
+                                                                        class="btn-close ms-2" 
+                                                                        aria-label="Close"
+                                                                        @onclick='() => DismissRepositoryError(repo.RepositoryId)'></button>
                                                             </div>
-                                                            <button type="button" 
-                                                                    class="btn-close ms-2" 
-                                                                    aria-label="Close"
-                                                                    @onclick='() => DismissRepositoryError(repo.RepositoryId)'></button>
                                                         </div>
-                                                    </div>
-                                                </td>
-                                            </tr>
+                                                    </td>
+                                                </tr>
+                                            }
                                         }
                                     }
                                 }
@@ -268,6 +277,10 @@
     private CancellationTokenSource? _updateCts;
     private bool? isOutOfSync = null;
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0);
+    private IEnumerable<IGrouping<int?, WorkspaceRepositoryLink>> LevelGroups =>
+        workspaceRepositories
+            .GroupBy(wr => wr.DependencyLevel)
+            .OrderByDescending(g => g.Key ?? int.MinValue);
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private CancellationTokenSource? _syncCts;
     private bool isCommitSyncing = false;

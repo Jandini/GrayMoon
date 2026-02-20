@@ -6,6 +6,30 @@
     text-overflow: ellipsis;
 }
 
+/* Dependency level section header: black background, reduced height, bottom border only */
+.repositories-table .dependency-level-header td.dependency-level-header-cell {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #000;
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 0.875rem;
+    vertical-align: middle;
+    padding: 0.35rem 1rem;
+    border: none;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.repositories-table .dependency-level-header:hover td.dependency-level-header-cell {
+    background-color: #000;
+}
+
+.repositories-table .dependency-level-header .dependency-level-count {
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
 .repositories-table thead,
 .repositories-table tbody tr {
     display: table;
