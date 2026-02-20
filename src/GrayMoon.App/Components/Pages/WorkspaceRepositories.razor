@@ -133,8 +133,7 @@
                                                 {
                                                     <div class="version-container @(clickedVersions.Contains(wr.GitVersion) ? "version-clicked" : "")"
                                                          @onmouseleave='() => OnVersionMouseLeave(wr.GitVersion)'>
-                                                        <span class="version-display text-muted">@wr.GitVersion</span>
-                                                        <span class="version-code" 
+                                                        <span class="version-inner text-muted"
                                                               @onclick='() => CopyVersionToClipboard(wr.GitVersion)'
                                                               title="Click to copy version">@wr.GitVersion</span>
                                                     </div>
@@ -148,8 +147,7 @@
                                                 @if (!string.IsNullOrEmpty(wr.BranchName))
                                                 {
                                                     <div class="branch-container">
-                                                        <span class="branch-display">@wr.BranchName</span>
-                                                        <span class="branch-code" 
+                                                        <span class="branch-inner"
                                                               @onclick='() => ShowSwitchBranchModal(repo.RepositoryId, wr.BranchName, repo.CloneUrl)'
                                                               title="Click to switch branch">@wr.BranchName</span>
                                                     </div>

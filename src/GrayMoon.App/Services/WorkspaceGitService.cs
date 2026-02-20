@@ -607,6 +607,31 @@ public class WorkspaceGitService(
 
         await Task.WhenAll(links.Select(ProcessOne));
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        // Persist the new branch for each repo where creation succeeded (so it appears in branch lists without a manual refresh)
+        foreach (var wr in links.Where(wr => wr.BranchName == newBranchName))
+        {
+            await EnsureLocalBranchPersistedAsync(wr.WorkspaceRepositoryId, newBranchName, cancellationToken);
+        }
+
         _hubContext?.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
+    }
+
+    /// <summary>Ensures a local branch is present in RepositoryBranches for the given workspace repository. Adds it if missing; does not remove other branches.</summary>
+    private async Task EnsureLocalBranchPersistedAsync(int workspaceRepositoryId, string branchName, CancellationToken cancellationToken)
+    {
+        var exists = await _dbContext.RepositoryBranches
+            .AnyAsync(rb => rb.WorkspaceRepositoryId == workspaceRepositoryId && rb.BranchName == branchName && !rb.IsRemote, cancellationToken);
+        if (exists)
+            return;
+        _dbContext.RepositoryBranches.Add(new RepositoryBranch
+        {
+            WorkspaceRepositoryId = workspaceRepositoryId,
+            BranchName = branchName,
+            IsRemote = false,
+            LastSeenAt = DateTime.UtcNow,
+            IsDefault = false
+        });
+        await _dbContext.SaveChangesAsync(cancellationToken);
     }
 }

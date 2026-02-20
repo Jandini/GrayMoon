@@ -35,6 +35,28 @@
                                 <button type="button" class="btn-close ms-2" aria-label="Close" @onclick='() => { errorMessage = null; StateHasChanged(); }'></button>
                             </div>
                         }
+                        @if (showBranchExistsConfirmation)
+                        {
+                            <div class="alert alert-warning d-flex flex-column align-items-start mb-3" role="alert">
+                                <div class="d-flex align-items-start w-100">
+                                    <i class="bi bi-exclamation-triangle-fill me-2 flex-shrink-0"></i>
+                                    <div class="flex-grow-1">
+                                        <p class="mb-1">@branchExistsConfirmMessage</p>
+                                        <p class="mb-0">Those repositories will have the existing branch checked out.</p>
+                                    </div>
+                                </div>
+                                <div class="d-flex gap-2 mt-2">
+                                    <button type="button" class="btn btn-warning" @onclick="ProceedWithCreateAsync" disabled="@isCreating">
+                                        @if (isCreating)
+                                        {
+                                            <span class="spinner-border spinner-border-sm me-2"></span>
+                                        }
+                                        Proceed
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary" @onclick="DismissBranchExistsConfirmation" disabled="@isCreating">Cancel</button>
+                                </div>
+                            </div>
+                        }
                         <div class="mb-3">
                             <label class="form-label" for="new-branch-name">Branch name</label>
                             <input id="new-branch-name"
@@ -43,6 +65,7 @@
                                    placeholder="e.g. feature/my-feature"
                                    @bind="newBranchName"
                                    @bind:event="oninput"
+                                   @onkeydown="HandleBranchNameKeyDown"
                                    @ref="newBranchNameInput" />
                         </div>
                         <div class="mb-3">
@@ -87,7 +110,7 @@
                     }
                 </div>
                 <div class="modal-footer">
-                    @if (activeTab == "newbranch")
+                    @if (activeTab == "newbranch" && !showBranchExistsConfirmation)
                     {
                         <button type="button" class="btn btn-primary" @onclick="CreateAsync" disabled="@(string.IsNullOrWhiteSpace(newBranchName) || isCreating)">
                             @if (isCreating)
@@ -119,6 +142,10 @@
     private string selectedBaseBranch = "__default__";
     private bool isCreating = false;
     private string? errorMessage;
+    private bool showBranchExistsConfirmation = false;
+    private string branchExistsConfirmMessage = "";
+    private string? _pendingCreateName;
+    private string? _pendingCreateBaseBranch;
     private bool showBasedOnDropdown = false;
     private ElementReference modalElement;
     private ElementReference newBranchNameInput;
@@ -147,15 +174,24 @@
         showBasedOnDropdown = false;
     }
 
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !_wasVisible)
+        {
+            newBranchName = "";
+            selectedBaseBranch = "__default__";
+            errorMessage = null;
+            showBranchExistsConfirmation = false;
+            activeTab = "newbranch";
+        }
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (IsVisible && !_wasVisible)
         {
             _wasVisible = true;
-            activeTab = "newbranch";
-            newBranchName = "";
-            selectedBaseBranch = "__default__";
-            errorMessage = null;
+            StateHasChanged();
             try
             {
                 await newBranchNameInput.FocusAsync();
@@ -179,12 +215,27 @@
         }
         var baseBranch = selectedBaseBranch ?? "__default__";
 
+        showBranchExistsConfirmation = false;
         isCreating = true;
         errorMessage = null;
         StateHasChanged();
 
         try
         {
+            var count = await GetRepositoryCountWhereBranchExistsAsync(name);
+            if (count > 0)
+            {
+                branchExistsConfirmMessage = count == 1
+                    ? "The branch already exists in 1 repository."
+                    : $"The branch already exists in {count} repositories.";
+                _pendingCreateName = name;
+                _pendingCreateBaseBranch = baseBranch;
+                showBranchExistsConfirmation = true;
+                isCreating = false;
+                StateHasChanged();
+                return;
+            }
+
             await OnCreateBranch.InvokeAsync((name, baseBranch));
         }
         finally
@@ -194,11 +245,90 @@
         }
     }
 
+    private void DismissBranchExistsConfirmation()
+    {
+        showBranchExistsConfirmation = false;
+        branchExistsConfirmMessage = "";
+        _pendingCreateName = null;
+        _pendingCreateBaseBranch = null;
+        StateHasChanged();
+    }
+
+    private async Task ProceedWithCreateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_pendingCreateName) || string.IsNullOrWhiteSpace(_pendingCreateBaseBranch))
+            return;
+
+        isCreating = true;
+        StateHasChanged();
+
+        try
+        {
+            await OnCreateBranch.InvokeAsync((_pendingCreateName, _pendingCreateBaseBranch));
+            DismissBranchExistsConfirmation();
+        }
+        finally
+        {
+            isCreating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task<int> GetRepositoryCountWhereBranchExistsAsync(string branchName)
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            var request = new { workspaceId = WorkspaceId, branchName };
+            var json = JsonSerializer.Serialize(request);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/exists-in-workspace", content);
+            if (!response.IsSuccessStatusCode)
+                return 0;
+            var responseContent = await response.Content.ReadAsStringAsync();
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var data = JsonSerializer.Deserialize<BranchExistsInWorkspaceResponse>(responseContent, options);
+            return data?.Count ?? 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Escape" || e.Code == "Escape")
         {
-            await OnCancel.InvokeAsync();
+            if (showBranchExistsConfirmation)
+                DismissBranchExistsConfirmation();
+            else
+                await OnCancel.InvokeAsync();
+            return;
         }
+        if (e.Key == "Enter" && activeTab == "newbranch" && !isCreating)
+        {
+            if (showBranchExistsConfirmation)
+                await ProceedWithCreateAsync();
+            else if (!string.IsNullOrWhiteSpace(newBranchName?.Trim()))
+                await CreateAsync();
+        }
+    }
+
+    private async Task HandleBranchNameKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !isCreating)
+        {
+            if (showBranchExistsConfirmation)
+                await ProceedWithCreateAsync();
+            else if (!string.IsNullOrWhiteSpace(newBranchName?.Trim()))
+                await CreateAsync();
+        }
+    }
+
+    private sealed class BranchExistsInWorkspaceResponse
+    {
+        public int Count { get; set; }
     }
 }

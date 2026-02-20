@@ -408,9 +408,23 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"checkout -b {newBranchName}", repoPath, ct);
         if (exitCode != 0)
         {
-            var combined = CombineOutput(stdout, stderr);
+            // Branch may already exist (e.g. persistence out of date); try checkout existing
+            var (verifyExit, _, _) = await RunProcessAsync("git", $"rev-parse --verify refs/heads/{newBranchName}", repoPath, ct);
+            if (verifyExit == 0)
+            {
+                logger.LogWarning("Branch {Branch} already exists in {RepoPath}; checking out existing branch.", newBranchName, repoPath);
+                var (coExit, coOut, coErr) = await RunProcessAsync("git", $"checkout {newBranchName}", repoPath, ct);
+                if (coExit != 0)
+                {
+                    var combined = CombineOutput(coOut, coErr);
+                    logger.LogError("Git checkout of existing branch failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}", repoPath, newBranchName, coExit);
+                    return (false, combined);
+                }
+                return (true, null);
+            }
+            var combinedErr = CombineOutput(stdout, stderr);
             logger.LogError("Git create branch failed for {RepoPath}. NewBranch={NewBranch}, BaseBranch={BaseBranch}, ExitCode={ExitCode}", repoPath, newBranchName, baseBranchName, exitCode);
-            return (false, combined);
+            return (false, combinedErr);
         }
 
         logger.LogInformation("Git branch created for {RepoPath}. NewBranch={NewBranch}, BaseBranch={BaseBranch}", repoPath, newBranchName, baseBranchName);
