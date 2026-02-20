@@ -162,6 +162,7 @@
     display: inline-block;
     transition: opacity 0.15s ease;
     line-height: calc(1.5rem + 4px); /* Match container height */
+    padding-left: calc(1px + 0.5rem); /* Align with text inside highlight (border + padding) */
 }
 
 .repositories-table .branch-code {
@@ -209,6 +210,7 @@
     display: inline-block;
     transition: opacity 0.15s ease;
     line-height: calc(1.5rem + 4px); /* Match container height */
+    padding-left: calc(1px + 0.5rem); /* Align with text inside highlight (border + padding) */
 }
 
 .repositories-table .version-code {
