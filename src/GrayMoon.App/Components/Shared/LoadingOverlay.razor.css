@@ -1,5 +1,13 @@
-/* Content and spinner sit above matrix canvas/veil (structure in loading-overlay.css) */
-.loading-overlay .spinner-border {
+/* Spinner: blue for simple (classic), gray for matrix */
+.loading-overlay--simple .spinner-border {
+    width: 3rem !important;
+    height: 3rem !important;
+    border-width: 0.3rem !important;
+    border-color: #0e639c !important;
+    border-right-color: transparent !important;
+}
+
+.loading-overlay--matrix .spinner-border {
     width: 3rem !important;
     height: 3rem !important;
     border-width: 0.3rem !important;

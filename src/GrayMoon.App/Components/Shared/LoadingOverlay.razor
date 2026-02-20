@@ -1,9 +1,14 @@
 @inject IJSRuntime JS
+@inject MatrixOverlayPreferenceService MatrixPreference
 @implements IAsyncDisposable
+@implements IDisposable
 
-<div class="loading-overlay @(IsVisible ? "show" : "")" aria-hidden="@(!IsVisible)">
-    <canvas id="@_canvasId" class="matrix-canvas"></canvas>
-    <div class="loading-overlay__veil"></div>
+<div class="loading-overlay @(IsVisible ? "show" : "") @(MatrixPreference.UseMatrixEffect ? "loading-overlay--matrix" : "loading-overlay--simple")" aria-hidden="@(!IsVisible)">
+    @if (MatrixPreference.UseMatrixEffect)
+    {
+        <canvas id="@_canvasId" class="matrix-canvas"></canvas>
+        <div class="loading-overlay__veil"></div>
+    }
     <div class="loading-overlay-content">
         <div class="spinner-border" role="status">
             <span class="visually-hidden">Loading...</span>
@@ -24,7 +29,7 @@
     [Parameter] public string? Message { get; set; }
     [Parameter] public EventCallback OnAbort { get; set; }
 
-    /// <summary>Dim strength 0..100 (45 = default).</summary>
+    /// <summary>Dim strength 0..100 (matrix mode only).</summary>
     [Parameter] public int DimOpacityPercent { get; set; } = 45;
 
     /// <summary>Matrix rain: character size in px.</summary>
@@ -40,37 +45,65 @@
 
     private readonly string _canvasId = "matrixOverlay_" + Guid.NewGuid().ToString("N");
     private bool _wasVisible;
+    private bool _wasMatrixEffect;
+
+    protected override void OnInitialized()
+    {
+        MatrixPreference.UseMatrixEffectChanged += OnMatrixPreferenceChanged;
+    }
+
+    private void OnMatrixPreferenceChanged(object? sender, EventArgs e)
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        await JS.InvokeVoidAsync("matrixOverlay.setDim", _canvasId, DimOpacityPercent / 100.0);
+        var useMatrix = MatrixPreference.UseMatrixEffect;
 
-        if (IsVisible && !_wasVisible)
+        if (useMatrix)
         {
-            await JS.InvokeVoidAsync("matrixOverlay.start", _canvasId, new
-            {
-                fontSize = FontSize,
-                frameIntervalMs = FrameIntervalMs,
-                fadeAlpha = FadeAlpha,
-                characterOpacity = CharacterOpacity,
-                dropSpeed = DropSpeed
-            });
+            await JS.InvokeVoidAsync("matrixOverlay.setDim", _canvasId, DimOpacityPercent / 100.0);
         }
-        else if (!IsVisible && _wasVisible)
+
+        if (useMatrix && IsVisible)
+        {
+            if (!_wasVisible || !_wasMatrixEffect)
+            {
+                await JS.InvokeVoidAsync("matrixOverlay.start", _canvasId, new
+                {
+                    fontSize = FontSize,
+                    frameIntervalMs = FrameIntervalMs,
+                    fadeAlpha = FadeAlpha,
+                    characterOpacity = CharacterOpacity,
+                    dropSpeed = DropSpeed
+                });
+            }
+        }
+        else if (_wasMatrixEffect && (!useMatrix || !IsVisible))
         {
             await JS.InvokeVoidAsync("matrixOverlay.stop", _canvasId);
         }
 
         _wasVisible = IsVisible;
+        _wasMatrixEffect = useMatrix;
     }
 
     private async Task AbortClicked() => await OnAbort.InvokeAsync();
+
+    public void Dispose()
+    {
+        MatrixPreference.UseMatrixEffectChanged -= OnMatrixPreferenceChanged;
+    }
 
     public async ValueTask DisposeAsync()
     {
         try
         {
-            await JS.InvokeVoidAsync("matrixOverlay.stop", _canvasId);
+            if (MatrixPreference.UseMatrixEffect)
+            {
+                await JS.InvokeVoidAsync("matrixOverlay.stop", _canvasId);
+            }
         }
         catch (Exception)
         {
