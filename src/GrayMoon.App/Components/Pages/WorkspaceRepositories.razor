@@ -124,16 +124,26 @@
                                         <td colspan="6" class="dependency-level-header-cell">
                                             <span class="dependency-level-title @(group.Key == null ? "dependency-level-no-projects" : "")">@(group.Key == null ? "No projects found" : $"Level {group.Key}")</span>
                                             <span class="dependency-level-links">
-                                                <span class="dependency-level-pr-link"
-                                                      title="Open Pull Request (current branch to main)..."
-                                                      data-open-urls="@levelPrUrlsJson">Pull Request</span>
-                                                <span class="dependency-level-sync-commits-link"
-                                                      title="Sync commits for all repositories in this level..."
-                                                      @onclick="() => CommitSyncLevelAsync(group.Select(wr => wr.RepositoryId).ToList())"
-                                                      @onclick:preventDefault="true">Sync Commits</span>
+                                                <span class="dependency-level-icons">
+                                                    <span class="dependency-level-pr-link"
+                                                          title="Open Pull Request (current branch to main)..."
+                                                          data-open-urls="@levelPrUrlsJson"
+                                                          aria-label="Open Pull Request">
+                                                        <i class="bi bi-git" aria-hidden="true"></i>
+                                                    </span>
+                                                    <span class="dependency-level-sync-commits-link"
+                                                          title="Sync commits for all repositories in this level..."
+                                                          @onclick="() => CommitSyncLevelAsync(group.Select(wr => wr.RepositoryId).ToList())"
+                                                          @onclick:preventDefault="true"
+                                                          aria-label="Sync commits">
+                                                        <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
+                                                    </span>
+                                                </span>
                                                 <span class="dependency-level-count dependency-level-count-link"
                                                       title="Open in GitHub..."
-                                                      data-open-urls="@levelUrlsJson">@group.Count() @(group.Count() == 1 ? "repository" : "repositories")</span>
+                                                      data-open-urls="@levelUrlsJson">
+                                                    <span class="dependency-level-count-num">@group.Count()</span> @(group.Count() == 1 ? "repository" : "repositories")
+                                                </span>
                                             </span>
                                         </td>
                                     </tr>
