@@ -34,6 +34,41 @@
   background: rgba(0, 0, 0, var(--overlay-dim, 0.45));
 }
 
+/* Brand at top-left of overlay – same position and font as sidebar header */
+.loading-overlay__brand {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 3.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: 0.75rem;
+  z-index: 1;
+  color: var(--text-primary, #cccccc);
+  pointer-events: none;
+}
+
+.loading-overlay__brand .navbar-brand-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.loading-overlay__brand .navbar-brand-title {
+  font-family: "Cinzel", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  letter-spacing: 0.02em;
+  text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000;
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.loading-overlay__brand .navbar-brand-icon {
+  height: 20px;
+  width: 20px;
+  display: block;
+}
+
 /* Content (spinner, message, abort) above canvas and veil – no panel, transparent */
 .loading-overlay-content {
   position: absolute;
