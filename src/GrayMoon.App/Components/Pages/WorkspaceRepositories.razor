@@ -29,6 +29,7 @@
             <div>
                 <h2>@(workspace?.Name ?? "Workspace")</h2>
                 <p class="text-muted mb-0" style="min-height: 1.5rem;">
+                    <NavLink href="workspaces" class="workspaces-breadcrumb-link" style="color: var(--text-muted) !important;">Workspaces</NavLink><span> | </span>
                     @if (workspaceRepositories.Count > 0)
                     {
                         <span class="repositories-count-link" @onclick="ShowRepositoriesModalAsync" @onclick:preventDefault>
@@ -112,7 +113,7 @@
                                     var levelUrlsJson = System.Text.Json.JsonSerializer.Serialize(levelUrls);
                                     <tr class="dependency-level-header">
                                         <td colspan="6" class="dependency-level-header-cell">
-                                            <span class="dependency-level-title">Level @(group.Key?.ToString() ?? "—")</span>
+                                            <span class="dependency-level-title">Level @(group.Key?.ToString() ?? "-")</span>
                                             <span class="dependency-level-count dependency-level-count-link"
                                                   title="Open in GitHub..."
                                                   data-open-urls="@levelUrlsJson">@group.Count() @(group.Count() == 1 ? "repository" : "repositories")</span>

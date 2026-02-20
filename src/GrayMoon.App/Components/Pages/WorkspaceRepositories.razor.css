@@ -253,6 +253,20 @@
     border-color: #5a6268;
 }
 
+/* Workspaces breadcrumb link – same gray as "X repositories", override global a color */
+.grid-page-header .text-muted a.workspaces-breadcrumb-link,
+.grid-page-header .text-muted a.workspaces-breadcrumb-link:hover,
+.grid-page-header .text-muted a.workspaces-breadcrumb-link:visited,
+.grid-page-header .text-muted a.workspaces-breadcrumb-link:focus,
+.grid-page-header .text-muted a.workspaces-breadcrumb-link:active {
+    color: var(--text-muted) !important;
+    text-decoration: none;
+}
+
+.grid-page-header .text-muted a.workspaces-breadcrumb-link:hover {
+    text-decoration: underline;
+}
+
 /* Clickable repositories count under page title */
 .repositories-count-link {
     cursor: pointer;

@@ -48,6 +48,19 @@ a:hover, .btn-link:hover {
     text-decoration: underline;
 }
 
+/* Workspaces breadcrumb (same gray as repositories count) */
+a.workspaces-breadcrumb-link,
+a.workspaces-breadcrumb-link:hover,
+a.workspaces-breadcrumb-link:visited,
+a.workspaces-breadcrumb-link:focus,
+a.workspaces-breadcrumb-link:active {
+    color: var(--text-muted) !important;
+    text-decoration: none;
+}
+a.workspaces-breadcrumb-link:hover {
+    text-decoration: underline;
+}
+
 /* Buttons */
 .btn-primary,
 .btn-primary:link,
