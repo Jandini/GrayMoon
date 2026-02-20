@@ -9,7 +9,7 @@
 }
 
 .loading-overlay.show {
-  opacity: 1;
+  opacity: 0.85;
   pointer-events: all; /* blocks clicks while loading */
 }
 
