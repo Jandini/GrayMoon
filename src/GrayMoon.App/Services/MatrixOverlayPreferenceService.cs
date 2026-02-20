@@ -6,7 +6,7 @@ namespace GrayMoon.App.Services;
 /// </summary>
 public sealed class MatrixOverlayPreferenceService
 {
-    private bool _useMatrixEffect;
+    private bool _useMatrixEffect = true;
 
     /// <summary>When true, loading overlay shows Matrix rain; when false, classic overlay with blue spinner.</summary>
     public bool UseMatrixEffect
