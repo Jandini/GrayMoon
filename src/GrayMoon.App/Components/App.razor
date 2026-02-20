@@ -50,6 +50,23 @@
             a.click();
             document.body.removeChild(a);
         };
+        window.graymoonOpenUrls = (urls) => {
+            if (Array.isArray(urls))
+                urls.forEach(url => window.open(url, '_blank', 'noopener,noreferrer'));
+        };
+        document.body.addEventListener('click', (e) => {
+            const el = e.target.closest('.dependency-level-count-link') || e.target.closest('.dependency-level-pr-link');
+            if (!el) return;
+            const raw = el.getAttribute('data-open-urls');
+            if (!raw) return;
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+                const urls = JSON.parse(raw);
+                if (Array.isArray(urls) && urls.length > 0)
+                    urls.forEach(url => window.open(url, '_blank', 'noopener,noreferrer'));
+            } catch (_) { /* ignore */ }
+        }, true);
     </script>
 </body>
 

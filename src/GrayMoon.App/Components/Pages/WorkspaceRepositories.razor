@@ -29,6 +29,7 @@
             <div>
                 <h2>@(workspace?.Name ?? "Workspace")</h2>
                 <p class="text-muted mb-0" style="min-height: 1.5rem;">
+                    <NavLink href="workspaces" class="workspaces-breadcrumb-link" style="color: var(--text-muted) !important;">Workspaces</NavLink><span> | </span>
                     @if (workspaceRepositories.Count > 0)
                     {
                         <span class="repositories-count-link" @onclick="ShowRepositoriesModalAsync" @onclick:preventDefault>
@@ -106,16 +107,42 @@
                             }
                             else
                             {
-                                @foreach (var wr in workspaceRepositories)
+                                @foreach (var group in LevelGroups)
                                 {
-                                    var repo = wr.Repository;
-                                    @if (repo != null)
+                                    var levelUrls = group.Select(wr => wr.Repository).Where(r => r != null).Select(r => GetRepositoryUrl(r!)).Where(u => !string.IsNullOrEmpty(u)).ToList();
+                                    var levelUrlsJson = System.Text.Json.JsonSerializer.Serialize(levelUrls);
+                                    var levelPrUrls = new List<string>();
+                                    foreach (var wr in group)
                                     {
-                                        var repoUrl = GetRepositoryUrl(repo);
-                                        var branchUrl = !string.IsNullOrEmpty(repoUrl) && !string.IsNullOrEmpty(wr.BranchName)
-                                            ? $"{repoUrl}/compare/main...{Uri.EscapeDataString(wr.BranchName)}"
-                                            : null;
-                                        <tr>
+                                        if (wr.Repository == null || string.IsNullOrWhiteSpace(wr.BranchName)) continue;
+                                        var repoUrl = GetRepositoryUrl(wr.Repository);
+                                        if (string.IsNullOrEmpty(repoUrl)) continue;
+                                        levelPrUrls.Add($"{repoUrl}/compare/main...{Uri.EscapeDataString(wr.BranchName)}");
+                                    }
+                                    var levelPrUrlsJson = System.Text.Json.JsonSerializer.Serialize(levelPrUrls);
+                                    <tr class="dependency-level-header">
+                                        <td colspan="6" class="dependency-level-header-cell">
+                                            <span class="dependency-level-title">Level @(group.Key?.ToString() ?? "-")</span>
+                                            <span class="dependency-level-links">
+                                                <span class="dependency-level-pr-link"
+                                                      title="Open Pull Request (current branch to main)..."
+                                                      data-open-urls="@levelPrUrlsJson">Pull Request</span>
+                                                <span class="dependency-level-count dependency-level-count-link"
+                                                      title="Open in GitHub..."
+                                                      data-open-urls="@levelUrlsJson">@group.Count() @(group.Count() == 1 ? "repository" : "repositories")</span>
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    @foreach (var wr in group)
+                                    {
+                                        var repo = wr.Repository;
+                                        @if (repo != null)
+                                        {
+                                            var repoUrl = GetRepositoryUrl(repo);
+                                            var branchUrl = !string.IsNullOrEmpty(repoUrl) && !string.IsNullOrEmpty(wr.BranchName)
+                                                ? $"{repoUrl}/compare/main...{Uri.EscapeDataString(wr.BranchName)}"
+                                                : null;
+                                            <tr>
                                             <td class="col-repo">
                                                 @if (!string.IsNullOrEmpty(repoUrl))
                                                 {
@@ -185,23 +212,24 @@
                                             <td class="col-commits">@GetCommitsBadge(repo.RepositoryId, wr.OutgoingCommits, wr.IncomingCommits)</td>
                                             <td class="col-sync col-status-badge">@GetRepoSyncBadge(repo.RepositoryId)</td>
                                         </tr>
-                                        @if (repositoryErrors.TryGetValue(repo.RepositoryId, out var repoError))
-                                        {
-                                            <tr class="repo-error-row">
-                                                <td colspan="6" class="p-0">
-                                                    <div class="alert alert-danger alert-dismissible mb-0 rounded-0" role="alert">
-                                                        <div class="d-flex align-items-start">
-                                                            <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">
-                                                                <strong>Error:</strong> @repoError
+                                            @if (repositoryErrors.TryGetValue(repo.RepositoryId, out var repoError))
+                                            {
+                                                <tr class="repo-error-row">
+                                                    <td colspan="6" class="p-0">
+                                                        <div class="alert alert-danger alert-dismissible mb-0 rounded-0" role="alert">
+                                                            <div class="d-flex align-items-start">
+                                                                <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">
+                                                                    <strong>Error:</strong> @repoError
+                                                                </div>
+                                                                <button type="button" 
+                                                                        class="btn-close ms-2" 
+                                                                        aria-label="Close"
+                                                                        @onclick='() => DismissRepositoryError(repo.RepositoryId)'></button>
                                                             </div>
-                                                            <button type="button" 
-                                                                    class="btn-close ms-2" 
-                                                                    aria-label="Close"
-                                                                    @onclick='() => DismissRepositoryError(repo.RepositoryId)'></button>
                                                         </div>
-                                                    </div>
-                                                </td>
-                                            </tr>
+                                                    </td>
+                                                </tr>
+                                            }
                                         }
                                     }
                                 }
@@ -268,6 +296,10 @@
     private CancellationTokenSource? _updateCts;
     private bool? isOutOfSync = null;
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0);
+    private IEnumerable<IGrouping<int?, WorkspaceRepositoryLink>> LevelGroups =>
+        workspaceRepositories
+            .GroupBy(wr => wr.DependencyLevel)
+            .OrderByDescending(g => g.Key ?? int.MinValue);
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private CancellationTokenSource? _syncCts;
     private bool isCommitSyncing = false;
@@ -393,7 +425,7 @@
         }
 
         workspaceRepositories = workspace.Repositories
-            .OrderByDescending(wr => wr.Sequence ?? int.MinValue)
+            .OrderByDescending(wr => wr.DependencyLevel ?? int.MinValue)
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
     }
@@ -412,7 +444,7 @@
         }
         workspace = w;
         workspaceRepositories = workspace.Repositories
-            .OrderByDescending(wr => wr.Sequence ?? int.MinValue)
+            .OrderByDescending(wr => wr.DependencyLevel ?? int.MinValue)
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
     }

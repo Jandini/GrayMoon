@@ -6,6 +6,57 @@
     text-overflow: ellipsis;
 }
 
+/* Dependency level section header: black background, reduced height, bottom border only */
+.repositories-table .dependency-level-header td.dependency-level-header-cell {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #000;
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 0.875rem;
+    vertical-align: middle;
+    padding: 0.35rem 1rem;
+    border: none;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.repositories-table .dependency-level-header:hover td.dependency-level-header-cell {
+    background-color: #000;
+}
+
+.repositories-table .dependency-level-header .dependency-level-count {
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.repositories-table .dependency-level-header .dependency-level-count-link {
+    cursor: pointer;
+}
+
+.repositories-table .dependency-level-header .dependency-level-count-link:hover {
+    color: var(--text-muted);
+    text-decoration: underline;
+}
+
+.repositories-table .dependency-level-header .dependency-level-links {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+/* Pull Request link: own gray style, not inherited from header */
+.repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-pr-link {
+    color: #6a6a6a !important;
+    cursor: pointer;
+    font-weight: 400;
+}
+
+.repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-pr-link:hover {
+    color: #6a6a6a !important;
+    text-decoration: underline;
+}
+
 .repositories-table thead,
 .repositories-table tbody tr {
     display: table;
@@ -218,6 +269,20 @@
 .repositories-table .version-inner:hover {
     background-color: #2c3136;
     border-color: #5a6268;
+}
+
+/* Workspaces breadcrumb link – same gray as "X repositories", override global a color */
+.grid-page-header .text-muted a.workspaces-breadcrumb-link,
+.grid-page-header .text-muted a.workspaces-breadcrumb-link:hover,
+.grid-page-header .text-muted a.workspaces-breadcrumb-link:visited,
+.grid-page-header .text-muted a.workspaces-breadcrumb-link:focus,
+.grid-page-header .text-muted a.workspaces-breadcrumb-link:active {
+    color: var(--text-muted) !important;
+    text-decoration: none;
+}
+
+.grid-page-header .text-muted a.workspaces-breadcrumb-link:hover {
+    text-decoration: underline;
 }
 
 /* Clickable repositories count under page title */
