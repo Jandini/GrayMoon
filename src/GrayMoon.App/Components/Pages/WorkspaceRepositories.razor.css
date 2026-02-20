@@ -45,6 +45,12 @@
     gap: 0.75rem;
 }
 
+/* No projects found: gray, not bold */
+.repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-title.dependency-level-no-projects {
+    color: #6a6a6a !important;
+    font-weight: 400;
+}
+
 /* Pull Request link: own gray style, not inherited from header */
 .repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-pr-link {
     color: #6a6a6a !important;

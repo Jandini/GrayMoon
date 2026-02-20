@@ -122,7 +122,7 @@
                                     var levelPrUrlsJson = System.Text.Json.JsonSerializer.Serialize(levelPrUrls);
                                     <tr class="dependency-level-header">
                                         <td colspan="6" class="dependency-level-header-cell">
-                                            <span class="dependency-level-title">Level @(group.Key?.ToString() ?? "-")</span>
+                                            <span class="dependency-level-title @(group.Key == null ? "dependency-level-no-projects" : "")">@(group.Key == null ? "No projects found" : $"Level {group.Key}")</span>
                                             <span class="dependency-level-links">
                                                 <span class="dependency-level-pr-link"
                                                       title="Open Pull Request (current branch to main)..."
