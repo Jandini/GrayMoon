@@ -35,6 +35,13 @@
                                 <button type="button" class="btn-close ms-2" aria-label="Close" @onclick='() => { errorMessage = null; StateHasChanged(); }'></button>
                             </div>
                         }
+                        @if (branchExistsWarning != null)
+                        {
+                            <div class="alert alert-warning d-flex align-items-start" role="alert">
+                                <i class="bi bi-exclamation-triangle-fill me-2 flex-shrink-0"></i>
+                                <div class="flex-grow-1">@branchExistsWarning</div>
+                            </div>
+                        }
                         <div class="mb-3">
                             <label class="form-label" for="new-branch-name">Branch name</label>
                             <input id="new-branch-name"
@@ -120,6 +127,7 @@
     private string selectedBaseBranch = "__default__";
     private bool isCreating = false;
     private string? errorMessage;
+    private string? branchExistsWarning;
     private bool showBasedOnDropdown = false;
     private ElementReference modalElement;
     private ElementReference newBranchNameInput;
@@ -155,6 +163,7 @@
             newBranchName = "";
             selectedBaseBranch = "__default__";
             errorMessage = null;
+            branchExistsWarning = null;
             activeTab = "newbranch";
         }
     }
@@ -188,18 +197,50 @@
         }
         var baseBranch = selectedBaseBranch ?? "__default__";
 
+        branchExistsWarning = null;
         isCreating = true;
         errorMessage = null;
         StateHasChanged();
 
         try
         {
+            var count = await GetRepositoryCountWhereBranchExistsAsync(name);
+            if (count > 0)
+            {
+                branchExistsWarning = count == 1
+                    ? "The branch already exists in 1 repository. It will be checked out."
+                    : $"The branch already exists in {count} repositories. It will be checked out.";
+                StateHasChanged();
+            }
+
             await OnCreateBranch.InvokeAsync((name, baseBranch));
         }
         finally
         {
             isCreating = false;
             StateHasChanged();
+        }
+    }
+
+    private async Task<int> GetRepositoryCountWhereBranchExistsAsync(string branchName)
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            var request = new { workspaceId = WorkspaceId, branchName };
+            var json = JsonSerializer.Serialize(request);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/exists-in-workspace", content);
+            if (!response.IsSuccessStatusCode)
+                return 0;
+            var responseContent = await response.Content.ReadAsStringAsync();
+            var data = JsonSerializer.Deserialize<BranchExistsInWorkspaceResponse>(responseContent);
+            return data?.Count ?? 0;
+        }
+        catch
+        {
+            return 0;
         }
     }
 
@@ -222,5 +263,10 @@
         {
             await CreateAsync();
         }
+    }
+
+    private sealed class BranchExistsInWorkspaceResponse
+    {
+        public int Count { get; set; }
     }
 }

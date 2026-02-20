@@ -20,7 +20,38 @@ public static class BranchEndpoints
         routes.MapPost("/api/branches/checkout", CheckoutBranch);
         routes.MapPost("/api/branches/sync-to-default", SyncToDefaultBranch);
         routes.MapPost("/api/branches/common", GetCommonBranches);
+        routes.MapPost("/api/branches/exists-in-workspace", BranchExistsInWorkspace);
         return routes;
+    }
+
+    private static async Task<IResult> BranchExistsInWorkspace(
+        BranchExistsInWorkspaceApiRequest? body,
+        WorkspaceRepository workspaceRepository,
+        AppDbContext dbContext,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.Branches");
+        if (body == null)
+            return Results.BadRequest("Request body is required.");
+
+        var workspaceId = body.WorkspaceId;
+        var branchName = body.BranchName?.Trim();
+        if (workspaceId <= 0 || string.IsNullOrWhiteSpace(branchName))
+            return Results.BadRequest("workspaceId and branchName are required.");
+
+        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            return Results.NotFound("Workspace not found.");
+
+        var count = await dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .Where(wr => dbContext.RepositoryBranches
+                .Any(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId
+                    && !rb.IsRemote
+                    && rb.BranchName == branchName))
+            .CountAsync();
+
+        return Results.Ok(new { count });
     }
 
     private static async Task<IResult> GetBranches(
@@ -410,5 +441,11 @@ public sealed class SyncToDefaultBranchApiRequest
 public sealed class CommonBranchesApiRequest
 {
     public int WorkspaceId { get; set; }
+}
+
+public sealed class BranchExistsInWorkspaceApiRequest
+{
+    public int WorkspaceId { get; set; }
+    public string? BranchName { get; set; }
 }
 
