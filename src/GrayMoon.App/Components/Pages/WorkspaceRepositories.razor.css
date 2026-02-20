@@ -35,7 +35,25 @@
 }
 
 .repositories-table .dependency-level-header .dependency-level-count-link:hover {
-    color: var(--accent-blue);
+    color: var(--text-muted);
+    text-decoration: underline;
+}
+
+.repositories-table .dependency-level-header .dependency-level-links {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+/* Pull Request link: own gray style, not inherited from header */
+.repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-pr-link {
+    color: #6a6a6a !important;
+    cursor: pointer;
+    font-weight: 400;
+}
+
+.repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-pr-link:hover {
+    color: #6a6a6a !important;
     text-decoration: underline;
 }
 

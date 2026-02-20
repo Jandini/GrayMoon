@@ -111,12 +111,26 @@
                                 {
                                     var levelUrls = group.Select(wr => wr.Repository).Where(r => r != null).Select(r => GetRepositoryUrl(r!)).Where(u => !string.IsNullOrEmpty(u)).ToList();
                                     var levelUrlsJson = System.Text.Json.JsonSerializer.Serialize(levelUrls);
+                                    var levelPrUrls = new List<string>();
+                                    foreach (var wr in group)
+                                    {
+                                        if (wr.Repository == null || string.IsNullOrWhiteSpace(wr.BranchName)) continue;
+                                        var repoUrl = GetRepositoryUrl(wr.Repository);
+                                        if (string.IsNullOrEmpty(repoUrl)) continue;
+                                        levelPrUrls.Add($"{repoUrl}/compare/main...{Uri.EscapeDataString(wr.BranchName)}");
+                                    }
+                                    var levelPrUrlsJson = System.Text.Json.JsonSerializer.Serialize(levelPrUrls);
                                     <tr class="dependency-level-header">
                                         <td colspan="6" class="dependency-level-header-cell">
                                             <span class="dependency-level-title">Level @(group.Key?.ToString() ?? "-")</span>
-                                            <span class="dependency-level-count dependency-level-count-link"
-                                                  title="Open in GitHub..."
-                                                  data-open-urls="@levelUrlsJson">@group.Count() @(group.Count() == 1 ? "repository" : "repositories")</span>
+                                            <span class="dependency-level-links">
+                                                <span class="dependency-level-pr-link"
+                                                      title="Open Pull Request (current branch to main)..."
+                                                      data-open-urls="@levelPrUrlsJson">Pull Request</span>
+                                                <span class="dependency-level-count dependency-level-count-link"
+                                                      title="Open in GitHub..."
+                                                      data-open-urls="@levelUrlsJson">@group.Count() @(group.Count() == 1 ? "repository" : "repositories")</span>
+                                            </span>
                                         </td>
                                     </tr>
                                     @foreach (var wr in group)

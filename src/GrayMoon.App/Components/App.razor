@@ -55,7 +55,7 @@
                 urls.forEach(url => window.open(url, '_blank', 'noopener,noreferrer'));
         };
         document.body.addEventListener('click', (e) => {
-            const el = e.target.closest('.dependency-level-count-link');
+            const el = e.target.closest('.dependency-level-count-link') || e.target.closest('.dependency-level-pr-link');
             if (!el) return;
             const raw = el.getAttribute('data-open-urls');
             if (!raw) return;
