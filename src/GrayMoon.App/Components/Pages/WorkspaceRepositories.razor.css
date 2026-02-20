@@ -157,12 +157,19 @@
     height: calc(1.5rem + 4px);
     line-height: calc(1.5rem + 4px);
     padding: 0 0.5rem;
-    padding-left: calc(1px + 0.5rem); /* Indent to match highlight box */
     border: 1px solid transparent;
     border-radius: 0.25rem;
     white-space: nowrap;
     cursor: pointer;
     transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.repositories-table .version-inner {
+    padding-left: calc(1px + 0.3rem);
+}
+
+.repositories-table .branch-inner {
+    padding-left: calc(1px + 0.5rem);
 }
 
 /* Branch container */
