@@ -1,0 +1,94 @@
+/* Full-page loading overlay with optional Matrix rain canvas */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.loading-overlay.show {
+  opacity: 1;
+  pointer-events: all; /* blocks clicks while loading */
+}
+
+/* Simple (classic) overlay: solid dark background, no canvas */
+.loading-overlay--simple {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.7);
+}
+
+.matrix-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.loading-overlay__veil {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, var(--overlay-dim, 0.45));
+}
+
+/* Brand at top-left of overlay – same position and font as sidebar header */
+.loading-overlay__brand {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 3.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: 0.75rem;
+  z-index: 1;
+  color: var(--text-primary, #cccccc);
+  pointer-events: none;
+}
+
+.loading-overlay__brand .navbar-brand-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.loading-overlay__brand .navbar-brand-title {
+  font-family: "Cinzel", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  letter-spacing: 0.02em;
+  text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000;
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.loading-overlay__brand .navbar-brand-icon {
+  height: 20px;
+  width: 20px;
+  display: block;
+}
+
+/* Content (spinner, message, abort) above canvas and veil – no panel, transparent */
+.loading-overlay-content {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: transparent;
+  user-select: none;
+}
+
+.loading-overlay__message {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 14px;
+  letter-spacing: 0.2px;
+  margin: 0;
+}

@@ -44,6 +44,27 @@ main {
 
 .header-version {
     font-weight: 300;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.header-github-link,
+.header-github-link i {
+    color: #858585 !important;
+    text-decoration: none;
+}
+
+.header-github-link {
+    display: inline-flex;
+    align-items: center;
+    font-size: 1.25rem;
+}
+
+.header-github-link:hover,
+.header-github-link:hover i {
+    color: #fff !important;
+    text-decoration: none;
 }
 
 @media (max-width: 640.98px) {

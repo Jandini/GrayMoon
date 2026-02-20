@@ -1,29 +1,17 @@
-.loading-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.7);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 9999;
-}
-
-.loading-overlay-content {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 1rem;
-}
-
-.loading-overlay .spinner-border {
+/* Spinner: gray for both simple (default) and matrix */
+.loading-overlay--simple .spinner-border {
     width: 3rem !important;
     height: 3rem !important;
     border-width: 0.3rem !important;
-    border-color: #0e639c !important;
+    border-color: #858585 !important;
+    border-right-color: transparent !important;
+}
+
+.loading-overlay--matrix .spinner-border {
+    width: 3rem !important;
+    height: 3rem !important;
+    border-width: 0.3rem !important;
+    border-color: #858585 !important;
     border-right-color: transparent !important;
 }
 

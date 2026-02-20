@@ -40,6 +40,7 @@ builder.Services.AddScoped<WorkspaceProjectRepository>();
 builder.Services.AddScoped<WorkspaceRepository>();
 builder.Services.AddSingleton<AgentConnectionTracker>();
 builder.Services.AddSingleton<IToastService, ToastService>();
+builder.Services.AddSingleton<MatrixOverlayPreferenceService>();
 builder.Services.AddScoped<SyncCommandHandler>();
 builder.Services.AddScoped<IAgentBridge, AgentBridge>();
 builder.Services.AddScoped<WorkspaceService>();

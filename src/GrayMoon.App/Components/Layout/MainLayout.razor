@@ -15,7 +15,12 @@
         <div class="top-row px-4">
             @if (!string.IsNullOrEmpty(version))
             {
-                <span class="header-version"><span class="text-muted">ver</span> @version</span>
+                <span class="header-version">
+                    <a href="https://github.com/Jandini/GrayMoon" target="_blank" rel="noopener noreferrer" class="header-github-link" title="GrayMoon on GitHub" aria-label="GrayMoon on GitHub">
+                        <i class="bi bi-github" aria-hidden="true"></i>
+                    </a>
+                    @version
+                </span>
             }
             <AgentStatusBadge />
         </div>

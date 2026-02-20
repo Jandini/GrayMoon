@@ -6,28 +6,35 @@
     text-overflow: ellipsis;
 }
 
-/* Dependency level section header: black background, reduced height, bottom border only */
+/* Dependency level section header: near-black background, reduced height, bottom border only */
 .repositories-table .dependency-level-header td.dependency-level-header-cell {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background-color: #000;
+    background-color: #0d0d0d;
     color: var(--text-secondary);
     font-weight: 600;
     font-size: 0.875rem;
     vertical-align: middle;
-    padding: 0.35rem 1rem;
+    padding: 0.5rem 0.6rem;
     border: none;
     border-bottom: 1px solid var(--border-color);
 }
 
 .repositories-table .dependency-level-header:hover td.dependency-level-header-cell {
-    background-color: #000;
+    background-color: #0d0d0d;
 }
 
 .repositories-table .dependency-level-header .dependency-level-count {
     color: var(--text-muted);
     font-weight: 400;
+}
+
+/* Fixed-width number (left-pad): number right-aligned so "1" and "11" line up */
+.repositories-table .dependency-level-header .dependency-level-count-num {
+    display: inline-block;
+    min-width: 3ch;
+    text-align: right;
 }
 
 .repositories-table .dependency-level-header .dependency-level-count-link {
@@ -36,13 +43,25 @@
 
 .repositories-table .dependency-level-header .dependency-level-count-link:hover {
     color: var(--text-muted);
-    text-decoration: underline;
 }
 
+/* Fixed total width so icons stay in same column; count at end of header; 100 repositories can shift */
 .repositories-table .dependency-level-header .dependency-level-links {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    justify-content: space-between;
+    min-width: 9.5rem;
+    
+    flex-shrink: 0;
+}
+
+/* Icons at start of fixed-width block so they align vertically across rows */
+.repositories-table .dependency-level-header .dependency-level-icons {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 1rem;
+    flex-shrink: 0;
 }
 
 /* No projects found: gray, not bold */
@@ -51,28 +70,42 @@
     font-weight: 400;
 }
 
-/* Pull Request link: own gray style, not inherited from header */
-.repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-pr-link {
-    color: #6a6a6a !important;
+/* Pull Request icon: dark gray */
+.repositories-table .dependency-level-header .dependency-level-pr-link,
+.repositories-table .dependency-level-header .dependency-level-pr-link i {
+    color: #505050 !important;
     cursor: pointer;
     font-weight: 400;
+    display: inline-flex;
+    align-items: center;
 }
 
-.repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-pr-link:hover {
-    color: #6a6a6a !important;
-    text-decoration: underline;
+.repositories-table .dependency-level-header .dependency-level-pr-link i {
+    font-size: 1.1rem;
 }
 
-/* Sync Commits link: same gray style as Pull Request */
-.repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-sync-commits-link {
-    color: #6a6a6a !important;
+.repositories-table .dependency-level-header .dependency-level-pr-link:hover,
+.repositories-table .dependency-level-header .dependency-level-pr-link:hover i {
+    color: #707070 !important;
+}
+
+/* Sync Commits icon: dark gray */
+.repositories-table .dependency-level-header .dependency-level-sync-commits-link,
+.repositories-table .dependency-level-header .dependency-level-sync-commits-link i {
+    color: #505050 !important;
     cursor: pointer;
     font-weight: 400;
+    display: inline-flex;
+    align-items: center;
 }
 
-.repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-sync-commits-link:hover {
-    color: #6a6a6a !important;
-    text-decoration: underline;
+.repositories-table .dependency-level-header .dependency-level-sync-commits-link i {
+    font-size: 1.1rem;
+}
+
+.repositories-table .dependency-level-header .dependency-level-sync-commits-link:hover,
+.repositories-table .dependency-level-header .dependency-level-sync-commits-link:hover i {
+    color: #707070 !important;
 }
 
 .repositories-table thead,
