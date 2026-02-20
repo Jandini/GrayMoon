@@ -45,6 +45,12 @@
     gap: 0.75rem;
 }
 
+/* No projects found: gray, not bold */
+.repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-title.dependency-level-no-projects {
+    color: #6a6a6a !important;
+    font-weight: 400;
+}
+
 /* Pull Request link: own gray style, not inherited from header */
 .repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-pr-link {
     color: #6a6a6a !important;
@@ -53,6 +59,18 @@
 }
 
 .repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-pr-link:hover {
+    color: #6a6a6a !important;
+    text-decoration: underline;
+}
+
+/* Sync Commits link: same gray style as Pull Request */
+.repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-sync-commits-link {
+    color: #6a6a6a !important;
+    cursor: pointer;
+    font-weight: 400;
+}
+
+.repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-sync-commits-link:hover {
     color: #6a6a6a !important;
     text-decoration: underline;
 }

@@ -122,11 +122,15 @@
                                     var levelPrUrlsJson = System.Text.Json.JsonSerializer.Serialize(levelPrUrls);
                                     <tr class="dependency-level-header">
                                         <td colspan="6" class="dependency-level-header-cell">
-                                            <span class="dependency-level-title">Level @(group.Key?.ToString() ?? "-")</span>
+                                            <span class="dependency-level-title @(group.Key == null ? "dependency-level-no-projects" : "")">@(group.Key == null ? "No projects found" : $"Level {group.Key}")</span>
                                             <span class="dependency-level-links">
                                                 <span class="dependency-level-pr-link"
                                                       title="Open Pull Request (current branch to main)..."
                                                       data-open-urls="@levelPrUrlsJson">Pull Request</span>
+                                                <span class="dependency-level-sync-commits-link"
+                                                      title="Sync commits for all repositories in this level..."
+                                                      @onclick="() => CommitSyncLevelAsync(group.Select(wr => wr.RepositoryId).ToList())"
+                                                      @onclick:preventDefault="true">Sync Commits</span>
                                                 <span class="dependency-level-count dependency-level-count-link"
                                                       title="Open in GitHub..."
                                                       data-open-urls="@levelUrlsJson">@group.Count() @(group.Count() == 1 ? "repository" : "repositories")</span>
@@ -847,6 +851,97 @@
             var errorMsg = "Commit sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
             repositoryErrors[repositoryId] = errorMsg;
             errorMessage = errorMsg;
+        }
+        finally
+        {
+            isCommitSyncing = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task CommitSyncLevelAsync(List<int> repositoryIds)
+    {
+        if (workspace == null || isCommitSyncing || isSyncing || isUpdating || repositoryIds == null || repositoryIds.Count == 0)
+            return;
+
+        _commitSyncCts?.Cancel();
+        _commitSyncCts?.Dispose();
+        _commitSyncCts = new CancellationTokenSource();
+
+        isCommitSyncing = true;
+        commitSyncProgressMessage = $"Synchronizing commits for {repositoryIds.Count} {(repositoryIds.Count == 1 ? "repository" : "repositories")}...";
+        errorMessage = null;
+        try
+        {
+            StateHasChanged();
+            await Task.Yield();
+
+            var httpClient = HttpClientFactory.CreateClient();
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+
+            // Sync all repositories in parallel
+            var syncTasks = repositoryIds.Select(async repositoryId =>
+            {
+                try
+                {
+                    var request = new
+                    {
+                        repositoryId,
+                        workspaceId = WorkspaceId
+                    };
+                    var json = System.Text.Json.JsonSerializer.Serialize(request);
+                    var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                    var response = await httpClient.PostAsync($"{baseUrl}/api/commitsync", content, _commitSyncCts.Token);
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var responseContent = await response.Content.ReadAsStringAsync(_commitSyncCts.Token);
+                        var result = System.Text.Json.JsonSerializer.Deserialize<CommitSyncResponse>(responseContent, AgentResponseJson.Options);
+
+                        if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
+                        {
+                            repositoryErrors[repositoryId] = result.ErrorMessage;
+                        }
+                        else if (result != null && result.MergeConflict)
+                        {
+                            repositoryErrors[repositoryId] = "Merge conflict detected. Merge aborted.";
+                        }
+                        else
+                        {
+                            repositoryErrors.Remove(repositoryId);
+                        }
+                    }
+                    else
+                    {
+                        var errorText = await response.Content.ReadAsStringAsync(_commitSyncCts.Token);
+                        repositoryErrors[repositoryId] = $"Commit sync failed: {response.StatusCode}";
+                        Logger.LogError("CommitSync failed for repository {RepositoryId}: {StatusCode}, {Error}", repositoryId, response.StatusCode, errorText);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Error syncing commits for repository {RepositoryId}", repositoryId);
+                    repositoryErrors[repositoryId] = "Commit sync failed. The GrayMoon Agent may be offline.";
+                }
+            });
+
+            await Task.WhenAll(syncTasks);
+
+            // Refresh workspace data to show updated commit counts
+            await RefreshFromSync();
+            commitSyncProgressMessage = "Commit sync completed.";
+            await Task.Delay(1000, _commitSyncCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Operation was cancelled
+            await ReloadWorkspaceDataAsync();
+            ApplySyncStateFromWorkspace();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error syncing commits for level");
+            errorMessage = "Commit sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
         }
         finally
         {
