@@ -26,7 +26,7 @@
   background: rgba(0, 0, 0, var(--overlay-dim, 0.45));
 }
 
-/* Content (spinner, message, abort) above canvas and veil */
+/* Content (spinner, message, abort) above canvas and veil – no panel, transparent */
 .loading-overlay-content {
   position: absolute;
   left: 50%;
@@ -39,9 +39,7 @@
   justify-content: center;
   gap: 1rem;
   padding: 1rem;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(6px);
+  background: transparent;
   user-select: none;
 }
 
