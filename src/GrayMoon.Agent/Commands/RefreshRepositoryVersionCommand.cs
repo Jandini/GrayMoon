@@ -17,6 +17,8 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git) : ICommandH
 
         var version = "-";
         var branch = "-";
+        int? outgoingCommits = null;
+        int? incomingCommits = null;
         if (git.DirectoryExists(repoPath))
         {
             var vr = await git.GetVersionAsync(repoPath, cancellationToken);
@@ -25,8 +27,14 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git) : ICommandH
                 version = vr.SemVer ?? vr.FullSemVer ?? "-";
                 branch = vr.BranchName ?? vr.EscapedBranchName ?? "-";
             }
+            if (branch != "-")
+            {
+                var (outgoing, incoming) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
+                outgoingCommits = outgoing;
+                incomingCommits = incoming;
+            }
         }
 
-        return new RefreshRepositoryVersionResponse { Version = version, Branch = branch };
+        return new RefreshRepositoryVersionResponse { Version = version, Branch = branch, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits };
     }
 }

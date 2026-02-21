@@ -450,7 +450,7 @@ public class WorkspaceGitService(
                 if (reposAtLevel.Count == 0) continue;
 
                 var repoIds = reposAtLevel.Select(r => r.RepoId).ToHashSet();
-                onProgressMessage?.Invoke($"Updating {reposAtLevel.Count} repo(s) for dependency level {level}...");
+                onProgressMessage?.Invoke($"Updating {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")} for dependency level {level}...");
                 await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Syncing {c} of {t} for dependency level {level}"), onRepoError: OnRepoError, repoIdsToSync: repoIds, cancellationToken: cancellationToken);
                 if (hadError)
                     break;
@@ -591,7 +591,7 @@ public class WorkspaceGitService(
                 }
             }
 
-            onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} repo(s) for dependency level {level}...");
+            onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")} for dependency level {level}...");
             await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
             await RefreshVersionsAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
         }
@@ -769,7 +769,14 @@ public class WorkspaceGitService(
             return new RepoGitVersionInfo { Version = "-", Branch = "-" };
 
         var (version, branch) = GetVersionBranch(response.Data);
-        return new RepoGitVersionInfo { Version = version, Branch = branch };
+        var (outgoingCommits, incomingCommits) = GetCommitCounts(response.Data);
+        return new RepoGitVersionInfo
+        {
+            Version = version,
+            Branch = branch,
+            OutgoingCommits = outgoingCommits,
+            IncomingCommits = incomingCommits
+        };
     }
 
     private static (string version, string branch) GetVersionBranch(object data)
