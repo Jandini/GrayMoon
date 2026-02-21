@@ -347,7 +347,7 @@ public class WorkspaceGitService(
             cancellationToken.ThrowIfCancellationRequested();
 
             var pathsToStage = repo.ProjectUpdates.Select(p => p.ProjectPath).Distinct().ToList();
-            var lines = new List<string> { "Update dependencies" };
+            var lines = new List<string> { "Update dependencies:" };
             foreach (var pu in repo.ProjectUpdates)
             {
                 foreach (var (packageId, newVersion) in pu.PackageUpdates)

@@ -531,9 +531,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return (false, err);
         }
 
-        var messageLines = commitMessage.Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
-        var commitArgs = "commit " + string.Join(" ", messageLines.Select(line => "-m \"" + line.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\""));
-        var (commitExit, commitOut, commitErr) = await RunProcessAsync("git", commitArgs, repoPath, ct);
+        var messageNormalized = commitMessage.Replace("\r\n", "\n").Replace("\r", "\n").TrimEnd();
+        var (commitExit, commitOut, commitErr) = await RunProcessWithStdinAsync("git", "commit -F -", repoPath, messageNormalized, ct);
         if (commitExit != 0)
         {
             var err = (commitErr ?? commitOut ?? "").Trim();
@@ -629,6 +628,40 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         using var process = Process.Start(startInfo);
         if (process == null)
             return (-1, null, "Failed to start process");
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
+        var stderrTask = process.StandardError.ReadToEndAsync(ct);
+        await process.WaitForExitAsync(ct);
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+        return (process.ExitCode, stdout, stderr);
+    }
+
+    private static async Task<(int ExitCode, string? Stdout, string? Stderr)> RunProcessWithStdinAsync(
+        string fileName,
+        string arguments,
+        string? workingDirectory,
+        string stdinContent,
+        CancellationToken ct)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = arguments,
+            WorkingDirectory = workingDirectory ?? "",
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = Process.Start(startInfo);
+        if (process == null)
+            return (-1, null, "Failed to start process");
+
+        await process.StandardInput.WriteAsync(stdinContent.AsMemory(), ct);
+        process.StandardInput.Close();
 
         var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
         var stderrTask = process.StandardError.ReadToEndAsync(ct);

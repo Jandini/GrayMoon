@@ -1243,7 +1243,7 @@
                     baseBranch,
                     onProgress: (completed, total) =>
                     {
-                        createBranchesProgressMessage = $"Creating branches {completed} of {total}";
+                        createBranchesProgressMessage = $"Created {completed} of {total} branches...";
                         InvokeAsync(StateHasChanged);
                     },
                     cancellationToken: _createBranchesCts.Token);
