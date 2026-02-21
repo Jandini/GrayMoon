@@ -29,12 +29,18 @@
 }
 
 .dependencies-page .repo-filter-dropdown {
-    width: 30%;
     margin-left: auto;
-    margin-right: 0.75rem;
+    margin-right: 0;
+    width: fit-content;
 }
 
+/* Same width as WorkspaceRepositories search box (min-width: 12rem), slightly wider for long names */
 .dependencies-page .repo-filter-select {
-    min-height: 2.5rem;
-    width: 100%;
+    min-width: 12rem;
+    width: 14rem;
+    height: calc(1.5em + 0.75rem + 2px);
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: none;
+    padding-right: 0.5rem;
 }

@@ -30,7 +30,7 @@
             @if (graph != null && graph.Nodes.Count > 0)
             {
                 <div class="repo-filter-dropdown">
-                    <select id="repo-filter" class="form-select form-select-sm repo-filter-select" value="@selectedFilterValue" @onchange="OnFilterChanged">
+                    <select id="repo-filter" class="form-select repo-filter-select" value="@selectedFilterValue" @onchange="OnFilterChanged">
                         <option value="">All repositories</option>
                         @foreach (var level in GetOrderedDependencyLevels())
                         {
