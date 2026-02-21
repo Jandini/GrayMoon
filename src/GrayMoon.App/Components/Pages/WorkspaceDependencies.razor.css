@@ -27,3 +27,12 @@
     left: 50%;
     transform: translate(-50%, -50%);
 }
+
+.dependencies-page .repo-filter-dropdown {
+    width: 30%;
+    margin-left: auto;
+}
+
+.dependencies-page .repo-filter-select {
+    min-height: 2.5rem;
+}

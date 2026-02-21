@@ -271,7 +271,7 @@
                                                         <div class="alert alert-danger alert-dismissible mb-0 rounded-0" 
                                                              role="alert"
                                                              style="@(isSyncing ? "" : "cursor: pointer;")"
-                                                             @onclick="() => { if (!isSyncing) SyncSingleRepoAsync(repo.RepositoryId); }"
+                                                             @onclick="async () => { if (!isSyncing) await SyncSingleRepoAsync(repo.RepositoryId); }"
                                                              title="@(isSyncing ? "" : "Click to sync this repository")">
                                                             <div class="d-flex align-items-start">
                                                                 <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">
