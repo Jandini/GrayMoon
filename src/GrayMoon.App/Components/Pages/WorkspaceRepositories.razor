@@ -48,12 +48,12 @@
                 </p>
             </div>
             <div class="d-flex gap-2">
-                <button class="btn btn-outline-primary"
+                <button class="btn btn-outline-secondary"
                         @onclick="ShowBranchModalAsync"
                         disabled="@(isSyncing || isUpdating || isPushing || workspaceRepositories.Count == 0)">
                     Branch
                 </button>
-                <button class="btn @(hasUnmatchedDependencies ? "btn-danger" : "btn-secondary")"
+                <button class="btn @(hasUnmatchedDependencies ? "btn-danger" : "btn-outline-secondary")"
                         @onclick="OnUpdateClickAsync"
                         disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating || isPushing)">
                     Update
@@ -666,7 +666,7 @@
         ShowConfirm("Do you want to sync commits for this repository?", () => CommitSyncAsync(repositoryId));
     }
 
-    /// <summary>Push button click: get push plan; if multi-level show modal; else run push directly.</summary>
+    /// <summary>Push button click: get push plan; if more than one repo show confirmation modal; else run push directly.</summary>
     private async Task OnPushClickAsync()
     {
         if (workspace == null || workspaceRepositories.Count == 0 || isPushing || isSyncing || isUpdating)
@@ -683,7 +683,7 @@
                 return;
             }
             pushPlanIsMultiLevel = isMultiLevel;
-            if (isMultiLevel)
+            if (payload.Count > 1)
             {
                 showPushModal = true;
                 await InvokeAsync(StateHasChanged);

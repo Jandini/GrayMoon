@@ -388,17 +388,19 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
             .ToListAsync(cancellationToken);
         if (links.Count == 0) return new List<PushRepoPayload>();
 
+        var repoIdsInWorkspace = links.Select(l => l.RepositoryId).ToHashSet();
         var levelByRepo = links
             .Where(wr => wr.DependencyLevel.HasValue)
             .ToDictionary(wr => wr.RepositoryId, wr => wr.DependencyLevel!.Value);
         var maxLevel = levelByRepo.Values.DefaultIfEmpty(0).Max();
         int effectiveLevel(int repoId) => levelByRepo.TryGetValue(repoId, out var l) ? l : maxLevel + 1;
 
-        var projects = await dbContext.WorkspaceProjects
+        var allProjects = await dbContext.WorkspaceProjects
             .AsNoTracking()
             .Include(p => p.Repository)
             .Where(p => p.WorkspaceId == workspaceId)
             .ToListAsync(cancellationToken);
+        var projects = allProjects.Where(p => repoIdsInWorkspace.Contains(p.RepositoryId)).ToList();
         var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
         var byProject = projects.ToDictionary(p => p.ProjectId);
 
