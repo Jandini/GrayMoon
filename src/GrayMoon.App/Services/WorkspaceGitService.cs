@@ -39,6 +39,7 @@ public class WorkspaceGitService(
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
         Action<int, int, int, RepoGitVersionInfo>? onProgress = null,
+        IReadOnlyList<int>? repositoryIds = null,
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
@@ -55,6 +56,9 @@ public class WorkspaceGitService(
             .Where(r => r != null)
             .Cast<Repository>()
             .ToList();
+
+        if (repositoryIds != null && repositoryIds.Count > 0)
+            repos = repos.Where(r => repositoryIds.Contains(r.RepositoryId)).ToList();
 
         if (repos.Count == 0)
             return new Dictionary<int, RepoGitVersionInfo>();
@@ -95,7 +99,19 @@ public class WorkspaceGitService(
 
         await PersistVersionsAsync(workspaceId, results, cancellationToken);
 
-        var isInSync = results.All(r => r.info.Version != "-" && r.info.Branch != "-");
+        bool isInSync;
+        if (repositoryIds != null && repositoryIds.Count > 0)
+        {
+            var allLinks = await _dbContext.WorkspaceRepositories
+                .Where(wr => wr.WorkspaceId == workspaceId)
+                .Select(wr => wr.SyncStatus)
+                .ToListAsync(cancellationToken);
+            isInSync = allLinks.Count > 0 && allLinks.All(s => s == RepoSyncStatus.InSync);
+        }
+        else
+        {
+            isInSync = results.All(r => r.info.Version != "-" && r.info.Branch != "-");
+        }
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
 
         _logger.LogDebug("Sync completed for workspace {WorkspaceName}", workspace.Name);

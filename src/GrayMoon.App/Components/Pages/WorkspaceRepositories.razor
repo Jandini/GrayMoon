@@ -256,7 +256,11 @@
                                             {
                                                 <tr class="repo-error-row">
                                                     <td colspan="6" class="p-0">
-                                                        <div class="alert alert-danger alert-dismissible mb-0 rounded-0" role="alert">
+                                                        <div class="alert alert-danger alert-dismissible mb-0 rounded-0" 
+                                                             role="alert"
+                                                             style="@(isSyncing ? "" : "cursor: pointer;")"
+                                                             @onclick="() => { if (!isSyncing) SyncSingleRepoAsync(repo.RepositoryId); }"
+                                                             title="@(isSyncing ? "" : "Click to sync this repository")">
                                                             <div class="d-flex align-items-start">
                                                                 <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">
                                                                     <strong>Error:</strong> @repoError
@@ -264,6 +268,7 @@
                                                                 <button type="button" 
                                                                         class="btn-close ms-2" 
                                                                         aria-label="Close"
+                                                                        @onclick:stopPropagation="true"
                                                                         @onclick='() => DismissRepositoryError(repo.RepositoryId)'></button>
                                                             </div>
                                                         </div>
@@ -566,10 +571,21 @@
                 RepoSyncStatus.Error => ("error", "#dc3545"),
                 _ => ("sync", "#6c757d")
             };
+            var needsSync = status != RepoSyncStatus.InSync;
+            var clickable = needsSync && !isSyncing;
             builder.OpenElement(0, "span");
             builder.AddAttribute(1, "class", "badge");
-            builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: #fff;");
-            builder.AddContent(3, text);
+            builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: #fff;{(clickable ? " cursor: pointer;" : "")}");
+            if (clickable)
+            {
+                builder.AddAttribute(3, "onclick", EventCallback.Factory.Create(this, () => SyncSingleRepoAsync(repositoryId)));
+                builder.AddAttribute(4, "title", "Click to sync this repository");
+                builder.AddContent(5, text);
+            }
+            else
+            {
+                builder.AddContent(3, text);
+            }
             builder.CloseElement();
         }
     };
@@ -631,28 +647,36 @@
 
     private void ShowConfirmOpenPr(int count, IReadOnlyList<string?> urls)
     {
-        var x = count == 1 ? "1 repository" : $"{count} repositories";
-        ShowConfirm($"Do you want to open pull request for {x}?", async () =>
+        async Task OpenPrAsync()
         {
             var list = urls.Where(u => !string.IsNullOrEmpty(u)).Cast<string>().ToList();
             await JSRuntime.InvokeVoidAsync("graymoonOpenUrls", list);
-        });
+        }
+        if (count <= 1)
+            _ = OpenPrAsync();
+        else
+            ShowConfirm($"Do you want to open pull request for {count} repositories?", OpenPrAsync);
     }
 
     private void ShowConfirmSyncCommitsLevel(List<int> repositoryIds)
     {
-        var x = repositoryIds.Count == 1 ? "1 repository" : $"{repositoryIds.Count} repositories";
-        ShowConfirm($"Do you want to sync commits for {x}?", () => CommitSyncLevelAsync(repositoryIds));
+        if (repositoryIds.Count <= 1)
+            _ = CommitSyncLevelAsync(repositoryIds);
+        else
+            ShowConfirm($"Do you want to sync commits for {repositoryIds.Count} repositories?", () => CommitSyncLevelAsync(repositoryIds));
     }
 
     private void ShowConfirmOpenGitHub(int count, IReadOnlyList<string?> urls)
     {
-        var x = count == 1 ? "1 repository" : $"{count} repositories";
-        ShowConfirm($"Do you want to open GitHub page for {x}?", async () =>
+        async Task OpenGitHubAsync()
         {
             var list = urls.Where(u => !string.IsNullOrEmpty(u)).Cast<string>().ToList();
             await JSRuntime.InvokeVoidAsync("graymoonOpenUrls", list);
-        });
+        }
+        if (count <= 1)
+            _ = OpenGitHubAsync();
+        else
+            ShowConfirm($"Do you want to open GitHub page for {count} repositories?", OpenGitHubAsync);
     }
 
     private void ShowConfirmUpdateDependencies(int repositoryId, int unmatchedCount)
@@ -1099,6 +1123,78 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error syncing workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+        }
+        finally
+        {
+            isSyncing = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Sync a single repository (same as Sync button but for one repo).</summary>
+    private async Task SyncSingleRepoAsync(int repositoryId)
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || isSyncing)
+            return;
+
+        _syncCts?.Cancel();
+        _syncCts = new CancellationTokenSource();
+
+        isSyncing = true;
+        syncProgressMessage = "Synchronizing repository...";
+        errorMessage = null;
+        try
+        {
+            StateHasChanged();
+            await Task.Yield();
+
+            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
+            {
+                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                var results = await workspaceGitService.SyncAsync(
+                    WorkspaceId,
+                    onProgress: (completed, total, repoId, info) =>
+                    {
+                        syncProgressMessage = $"Synchronized {completed} of {total}";
+                        repoSyncStatus[repoId] = (info.Version == "-" && info.Branch == "-")
+                            ? RepoSyncStatus.Error
+                            : RepoSyncStatus.InSync;
+                        var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
+                        if (wr != null)
+                        {
+                            wr.GitVersion = info.Version == "-" ? null : info.Version;
+                            wr.BranchName = info.Branch == "-" ? null : info.Branch;
+                            wr.Projects = info.Projects;
+                            wr.OutgoingCommits = info.OutgoingCommits;
+                            wr.IncomingCommits = info.IncomingCommits;
+                        }
+                        InvokeAsync(StateHasChanged);
+                    },
+                    repositoryIds: new[] { repositoryId },
+                    cancellationToken: _syncCts.Token);
+                repoGitInfos = results;
+            }
+            await ReloadWorkspaceDataAsync();
+            ApplySyncStateFromWorkspace();
+            isOutOfSync = repoSyncStatus.Values.Any(v => v != RepoSyncStatus.InSync);
+
+            foreach (var (repoId, info) in repoGitInfos)
+            {
+                if (!string.IsNullOrWhiteSpace(info.ErrorMessage))
+                    repositoryErrors[repoId] = info.ErrorMessage;
+                else
+                    repositoryErrors.Remove(repoId);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            await ReloadWorkspaceDataAsync();
+            ApplySyncStateFromWorkspace();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error syncing repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
             errorMessage = "Sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
         }
         finally
