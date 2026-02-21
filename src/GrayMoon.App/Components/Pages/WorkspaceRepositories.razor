@@ -143,6 +143,12 @@
                                             <span class="dependency-level-title @(group.Key == null ? "dependency-level-no-projects" : "")">@(group.Key == null ? "No projects found" : $"Level {group.Key}")</span>
                                             <span class="dependency-level-links">
                                                 <span class="dependency-level-icons">
+                                                    @if (group.Key.HasValue)
+                                                    {
+                                                        <a href="@GetDependencyGraphUrlForLevel(group.Key!.Value)" class="dependency-level-graph-link" title="View dependency graph for this level" aria-label="Dependency graph">
+                                                            <i class="bi bi-diagram-3" aria-hidden="true"></i>
+                                                        </a>
+                                                    }
                                                     <span class="dependency-level-pr-link"
                                                           role="button"
                                                           tabindex="0"
@@ -271,7 +277,7 @@
                                                         <div class="alert alert-danger alert-dismissible mb-0 rounded-0" 
                                                              role="alert"
                                                              style="@(isSyncing ? "" : "cursor: pointer;")"
-                                                             @onclick="() => { if (!isSyncing) SyncSingleRepoAsync(repo.RepositoryId); }"
+                                                             @onclick="async () => { if (!isSyncing) await SyncSingleRepoAsync(repo.RepositoryId); }"
                                                              title="@(isSyncing ? "" : "Click to sync this repository")">
                                                             <div class="d-flex align-items-start">
                                                                 <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">
@@ -1677,6 +1683,11 @@
     private string GetDependencyGraphUrl(int repositoryId)
     {
         return $"/workspaces/{WorkspaceId}/dependencies?repo={repositoryId}";
+    }
+
+    private string GetDependencyGraphUrlForLevel(int level)
+    {
+        return $"/workspaces/{WorkspaceId}/dependencies?level={level}";
     }
 
     private static string GetSyncBadgeText(RepoSyncStatus status)

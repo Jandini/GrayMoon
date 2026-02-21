@@ -59,14 +59,27 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
         wheelSensitivity: 0.3
     });
 
-    var layoutOpts = { name: 'dagre', rankDir: 'TB', nodeSep: 50, rankSep: 70, edgeSep: 20, padding: 10, ranker: 'network-simplex' };
+    var nodeCount = (nodes || []).length;
+    var edgeCount = (edges || []).length;
     var layout;
-    try {
-        layout = cy.layout(layoutOpts);
-    } catch (e) {
-        layoutOpts = { name: 'breadthfirst', directed: true, spacingFactor: 1.5, padding: 0 };
-        if (roots && roots.length > 0) layoutOpts.roots = roots.map(String);
-        layout = cy.layout(layoutOpts);
+    if (edgeCount === 0 && nodeCount > 0) {
+        /* No connections: distribute nodes in a grid (2+ columns when we have 2+ nodes) */
+        var gridOpts = { name: 'grid', fit: false, padding: 20, condense: false };
+        if (nodeCount === 1) {
+            gridOpts.rows = 1;
+        } else {
+            gridOpts.cols = Math.max(2, Math.ceil(Math.sqrt(nodeCount)));
+        }
+        layout = cy.layout(gridOpts);
+    } else {
+        var layoutOpts = { name: 'dagre', rankDir: 'TB', nodeSep: 50, rankSep: 70, edgeSep: 20, padding: 10, ranker: 'network-simplex' };
+        try {
+            layout = cy.layout(layoutOpts);
+        } catch (e) {
+            layoutOpts = { name: 'breadthfirst', directed: true, spacingFactor: 1.5, padding: 0 };
+            if (roots && roots.length > 0) layoutOpts.roots = roots.map(String);
+            layout = cy.layout(layoutOpts);
+        }
     }
     layout.run();
     function fitToContainer() {
