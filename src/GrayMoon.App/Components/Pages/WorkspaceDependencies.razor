@@ -30,8 +30,12 @@
             @if (graph != null && graph.Nodes.Count > 0)
             {
                 <div class="repo-filter-dropdown">
-                    <select id="repo-filter" class="form-select form-select-sm repo-filter-select" value="@(selectedFilterRepoId?.ToString() ?? "")" @onchange="OnFilterChanged">
+                    <select id="repo-filter" class="form-select form-select-sm repo-filter-select" value="@selectedFilterValue" @onchange="OnFilterChanged">
                         <option value="">All repositories</option>
+                        @foreach (var level in GetOrderedDependencyLevels())
+                        {
+                            <option value="level-@level">Level @level</option>
+                        }
                         @foreach (var n in graph.Nodes.OrderBy(n => n.RepositoryName, StringComparer.OrdinalIgnoreCase))
                         {
                             <option value="@n.RepositoryId">@n.RepositoryName</option>
@@ -68,14 +72,25 @@
     private RepositoryDependencyGraph? graph;
     private string? errorMessage;
     private bool isLoading = true;
-    private int? selectedFilterRepoId;
-    private int? _lastRenderedFilter = int.MinValue;
+    private string selectedFilterValue = "";
+    private string _lastRenderedFilter = "";
     private const string GraphContainerId = "cytoscape-dependency-graph";
+    private const string LevelPrefix = "level-";
 
     protected override async Task OnInitializedAsync()
     {
         await LoadAsync();
         ApplyRepositoryFilterFromQuery();
+    }
+
+    private IEnumerable<int> GetOrderedDependencyLevels()
+    {
+        if (workspace?.Repositories == null) return [];
+        return workspace.Repositories
+            .Where(l => l.DependencyLevel.HasValue)
+            .Select(l => l.DependencyLevel!.Value)
+            .Distinct()
+            .OrderBy(x => x);
     }
 
     private void ApplyRepositoryFilterFromQuery()
@@ -89,7 +104,7 @@
             if (kv.Length != 2 || !string.Equals(kv[0], "repo", StringComparison.OrdinalIgnoreCase)) continue;
             if (int.TryParse(Uri.UnescapeDataString(kv[1]), out var repoId) && graph.Nodes.Any(n => n.RepositoryId == repoId))
             {
-                selectedFilterRepoId = repoId;
+                selectedFilterValue = repoId.ToString();
                 break;
             }
         }
@@ -97,16 +112,15 @@
 
     private void OnFilterChanged(ChangeEventArgs e)
     {
-        var value = e.Value?.ToString();
-        selectedFilterRepoId = string.IsNullOrEmpty(value) || !int.TryParse(value, out var id) ? null : id;
+        selectedFilterValue = e.Value?.ToString() ?? "";
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (graph == null || graph.Nodes.Count == 0) return;
-        if (firstRender || _lastRenderedFilter != selectedFilterRepoId)
+        if (firstRender || _lastRenderedFilter != selectedFilterValue)
         {
-            _lastRenderedFilter = selectedFilterRepoId;
+            _lastRenderedFilter = selectedFilterValue;
             try
             {
                 await JSRuntime.InvokeVoidAsync("destroyCytoscapeGraph", GraphContainerId);
@@ -136,15 +150,44 @@
     private (IReadOnlyList<RepositoryDependencyNode> Nodes, IReadOnlyList<RepositoryDependencyEdge> Edges) GetFilteredNodesAndEdges()
     {
         if (graph == null) return (new List<RepositoryDependencyNode>(), new List<RepositoryDependencyEdge>());
-        if (selectedFilterRepoId == null)
+        if (string.IsNullOrEmpty(selectedFilterValue))
             return (graph.Nodes, graph.Edges);
 
-        var repoId = selectedFilterRepoId.Value;
-        var edgesFromSelected = graph.Edges.Where(e => e.DependentRepositoryId == repoId).ToList();
-        var referencedIds = edgesFromSelected.Select(e => e.ReferencedRepositoryId).ToHashSet();
-        var nodeIds = referencedIds.Union([repoId]).ToHashSet();
-        var filteredNodes = graph.Nodes.Where(n => nodeIds.Contains(n.RepositoryId)).ToList();
-        return (filteredNodes, edgesFromSelected);
+        if (selectedFilterValue.StartsWith(LevelPrefix, StringComparison.Ordinal) && int.TryParse(selectedFilterValue.AsSpan(LevelPrefix.Length), out var level))
+        {
+            var repoIdsAtLevel = GetRepoIdsAtLevel(level);
+            if (repoIdsAtLevel.Count == 0) return (new List<RepositoryDependencyNode>(), new List<RepositoryDependencyEdge>());
+            var referencedByLevel = graph.Edges
+                .Where(e => repoIdsAtLevel.Contains(e.DependentRepositoryId))
+                .Select(e => e.ReferencedRepositoryId)
+                .ToHashSet();
+            var nodeIds = repoIdsAtLevel.Union(referencedByLevel).ToHashSet();
+            var filteredNodes = graph.Nodes.Where(n => nodeIds.Contains(n.RepositoryId)).ToList();
+            var filteredEdges = graph.Edges
+                .Where(e => nodeIds.Contains(e.DependentRepositoryId) && nodeIds.Contains(e.ReferencedRepositoryId))
+                .ToList();
+            return (filteredNodes, filteredEdges);
+        }
+
+        if (int.TryParse(selectedFilterValue, out var repoId))
+        {
+            var edgesFromSelected = graph.Edges.Where(e => e.DependentRepositoryId == repoId).ToList();
+            var referencedIds = edgesFromSelected.Select(e => e.ReferencedRepositoryId).ToHashSet();
+            var nodeIds = referencedIds.Union([repoId]).ToHashSet();
+            var filteredNodes = graph.Nodes.Where(n => nodeIds.Contains(n.RepositoryId)).ToList();
+            return (filteredNodes, edgesFromSelected);
+        }
+
+        return (graph.Nodes, graph.Edges);
+    }
+
+    private HashSet<int> GetRepoIdsAtLevel(int level)
+    {
+        if (workspace?.Repositories == null) return [];
+        return workspace.Repositories
+            .Where(l => l.DependencyLevel == level)
+            .Select(l => l.RepositoryId)
+            .ToHashSet();
     }
 
     private (int NodeCount, int EdgeCount) GetFilteredCounts()
