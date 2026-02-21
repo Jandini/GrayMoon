@@ -31,8 +31,10 @@
 .dependencies-page .repo-filter-dropdown {
     width: 30%;
     margin-left: auto;
+    margin-right: 0.75rem;
 }
 
 .dependencies-page .repo-filter-select {
     min-height: 2.5rem;
+    width: 100%;
 }

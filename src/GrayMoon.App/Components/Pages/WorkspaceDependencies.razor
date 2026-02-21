@@ -124,6 +124,10 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (graph != null && graph.Nodes.Count > 0 && firstRender)
+        {
+            try { await JSRuntime.InvokeVoidAsync("focusElement", "repo-filter"); } catch { /* ignore */ }
+        }
         if (graph == null || graph.Nodes.Count == 0) return;
         if (firstRender || _lastRenderedFilter != selectedFilterValue)
         {

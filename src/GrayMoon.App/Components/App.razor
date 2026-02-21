@@ -31,6 +31,10 @@
                 if (input) input.focus();
             }
         };
+        window.focusElement = (id) => {
+            const el = document.getElementById(id);
+            if (el) el.focus();
+        };
         window.getAgentDownloadInfo = () => {
             const ua = navigator.userAgent.toLowerCase();
             const platform = (navigator.platform || '').toLowerCase();
