@@ -47,7 +47,9 @@
                     }
                 </p>
             </div>
-            <div class="d-flex gap-2">
+            <div class="d-flex gap-2 align-items-center">
+                <input class="form-control" style="min-width: 12rem;" placeholder="Search repositories..."
+                       @bind="searchTerm" @bind:event="oninput" />
                 <button class="btn btn-outline-secondary"
                         @onclick="ShowBranchModalAsync"
                         disabled="@(isSyncing || isUpdating || isPushing || workspaceRepositories.Count == 0)">
@@ -111,9 +113,17 @@
                                     </td>
                                 </tr>
                             }
+                            else if (FilteredWorkspaceRepositories.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted py-4">
+                                        No repositories match your search.
+                                    </td>
+                                </tr>
+                            }
                             else
                             {
-                                @foreach (var group in LevelGroups)
+                                @foreach (var group in FilteredLevelGroups)
                                 {
                                     var levelUrls = group.Select(wr => wr.Repository).Where(r => r != null).Select(r => GetRepositoryUrl(r!)).Where(u => !string.IsNullOrEmpty(u)).ToList();
                                     var levelUrlsJson = System.Text.Json.JsonSerializer.Serialize(levelUrls);
@@ -371,6 +381,13 @@
         workspaceRepositories
             .GroupBy(wr => wr.DependencyLevel)
             .OrderByDescending(g => g.Key ?? int.MinValue);
+
+    private List<WorkspaceRepositoryLink> FilteredWorkspaceRepositories => GetFilteredWorkspaceRepositories();
+
+    private IEnumerable<IGrouping<int?, WorkspaceRepositoryLink>> FilteredLevelGroups =>
+        FilteredWorkspaceRepositories
+            .GroupBy(wr => wr.DependencyLevel)
+            .OrderByDescending(g => g.Key ?? int.MinValue);
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private CancellationTokenSource? _syncCts;
     private bool isCommitSyncing = false;
@@ -407,6 +424,7 @@
     private bool showConfirmModal = false;
     private string confirmModalMessage = "";
     private Func<Task>? _pendingConfirmAction;
+    private string searchTerm = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -1657,6 +1675,40 @@
     private string GetDependencyGraphUrl(int repositoryId)
     {
         return $"/workspaces/{WorkspaceId}/dependencies?repo={repositoryId}";
+    }
+
+    private static string GetSyncBadgeText(RepoSyncStatus status)
+    {
+        return status switch
+        {
+            RepoSyncStatus.InSync => "in sync",
+            RepoSyncStatus.NeedsSync => "sync",
+            RepoSyncStatus.NotCloned => "not cloned",
+            RepoSyncStatus.VersionMismatch => "version",
+            RepoSyncStatus.Error => "error",
+            _ => "sync"
+        };
+    }
+
+    private List<WorkspaceRepositoryLink> GetFilteredWorkspaceRepositories()
+    {
+        var words = searchTerm
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(w => w.Trim())
+            .Where(w => w.Length > 0)
+            .ToList();
+
+        if (words.Count == 0)
+            return workspaceRepositories;
+
+        return workspaceRepositories.Where(wr =>
+        {
+            var repoName = wr.Repository?.RepositoryName ?? string.Empty;
+            var levelTitle = wr.DependencyLevel == null ? "No projects found" : $"Level {wr.DependencyLevel}";
+            var syncText = GetSyncBadgeText(repoSyncStatus.TryGetValue(wr.RepositoryId, out var s) ? s : RepoSyncStatus.NeedsSync);
+            var searchable = $"{repoName} {levelTitle} {syncText}";
+            return words.All(word => searchable.Contains(word, StringComparison.OrdinalIgnoreCase));
+        }).ToList();
     }
 
     /// <summary>Try to extract a user-facing error message from an API response body (JSON or plain text).</summary>
