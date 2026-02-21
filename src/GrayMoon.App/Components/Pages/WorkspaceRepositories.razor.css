@@ -207,6 +207,11 @@
     filter: brightness(1.1);
 }
 
+.repositories-table .dependency-badge-link--disabled {
+    pointer-events: none;
+    opacity: 0.7;
+}
+
 .col-commits {
     width: auto;
     max-width: 80px;

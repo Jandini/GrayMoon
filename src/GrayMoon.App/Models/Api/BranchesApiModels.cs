@@ -44,6 +44,16 @@ public sealed class CreateBranchResponse
     public string? ErrorMessage { get; set; }
 }
 
+/// <summary>Agent StageAndCommit response (camelCase).</summary>
+public sealed class StageAndCommitResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("errorMessage")]
+    public string? ErrorMessage { get; set; }
+}
+
 /// <summary>Response from POST /api/branches/common (camelCase).</summary>
 public sealed class CommonBranchesApiResult
 {

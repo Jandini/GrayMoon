@@ -509,6 +509,41 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return null;
     }
 
+    public async Task<(bool Success, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return (false, "Invalid repository path");
+        if (pathsToStage == null || pathsToStage.Count == 0)
+            return (false, "No paths to stage");
+        if (string.IsNullOrWhiteSpace(commitMessage))
+            return (false, "Commit message is required");
+
+        var paths = pathsToStage.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p!.Trim()).Distinct().ToList();
+        if (paths.Count == 0)
+            return (false, "No paths to stage");
+
+        var addArgs = "add -- " + string.Join(" ", paths.Select(p => p.Contains(' ') ? "\"" + p.Replace("\"", "\\\"") + "\"" : p));
+        var (addExit, addOut, addErr) = await RunProcessAsync("git", addArgs, repoPath, ct);
+        if (addExit != 0)
+        {
+            var err = (addErr ?? addOut ?? "").Trim();
+            logger.LogError("Git add failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, addExit, err);
+            return (false, err);
+        }
+
+        var messageNormalized = commitMessage.Replace("\r\n", "\n").Replace("\r", "\n").TrimEnd();
+        var (commitExit, commitOut, commitErr) = await RunProcessWithStdinAsync("git", "commit -F -", repoPath, messageNormalized, ct);
+        if (commitExit != 0)
+        {
+            var err = (commitErr ?? commitOut ?? "").Trim();
+            logger.LogError("Git commit failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, commitExit, err);
+            return (false, err);
+        }
+
+        logger.LogInformation("Git stage and commit completed for {RepoPath}", repoPath);
+        return (true, null);
+    }
+
     public void CreateDirectory(string path)
     {
         if (Directory.Exists(path))
@@ -593,6 +628,40 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         using var process = Process.Start(startInfo);
         if (process == null)
             return (-1, null, "Failed to start process");
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
+        var stderrTask = process.StandardError.ReadToEndAsync(ct);
+        await process.WaitForExitAsync(ct);
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+        return (process.ExitCode, stdout, stderr);
+    }
+
+    private static async Task<(int ExitCode, string? Stdout, string? Stderr)> RunProcessWithStdinAsync(
+        string fileName,
+        string arguments,
+        string? workingDirectory,
+        string stdinContent,
+        CancellationToken ct)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = arguments,
+            WorkingDirectory = workingDirectory ?? "",
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = Process.Start(startInfo);
+        if (process == null)
+            return (-1, null, "Failed to start process");
+
+        await process.StandardInput.WriteAsync(stdinContent.AsMemory(), ct);
+        process.StandardInput.Close();
 
         var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
         var stderrTask = process.StandardError.ReadToEndAsync(ct);

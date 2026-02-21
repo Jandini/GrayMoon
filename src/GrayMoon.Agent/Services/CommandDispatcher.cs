@@ -20,7 +20,8 @@ public sealed class CommandDispatcher(
     ICommandHandler<CheckoutBranchRequest, CheckoutBranchResponse> checkoutBranchCommand,
     ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse> syncToDefaultBranchCommand,
     ICommandHandler<RefreshBranchesRequest, RefreshBranchesResponse> refreshBranchesCommand,
-    ICommandHandler<CreateBranchRequest, CreateBranchResponse> createBranchCommand) : ICommandDispatcher
+    ICommandHandler<CreateBranchRequest, CreateBranchResponse> createBranchCommand,
+    ICommandHandler<StageAndCommitRequest, StageAndCommitResponse> stageAndCommitCommand) : ICommandDispatcher
 {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
@@ -40,6 +41,7 @@ public sealed class CommandDispatcher(
         ["SyncToDefaultBranch"] = async (req, ct) => await syncToDefaultBranchCommand.ExecuteAsync((SyncToDefaultBranchRequest)req, ct),
         ["RefreshBranches"] = async (req, ct) => await refreshBranchesCommand.ExecuteAsync((RefreshBranchesRequest)req, ct),
         ["CreateBranch"] = async (req, ct) => await createBranchCommand.ExecuteAsync((CreateBranchRequest)req, ct),
+        ["StageAndCommit"] = async (req, ct) => await stageAndCommitCommand.ExecuteAsync((StageAndCommitRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

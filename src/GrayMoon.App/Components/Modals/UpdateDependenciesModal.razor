@@ -1,0 +1,67 @@
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDown"
+         @ref="modalElement">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Update dependencies</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body">
+                    @if (IsMultiLevel)
+                    {
+                        <p class="mb-0">
+                            Repositories with dependency updates span multiple levels. Committing from lowest to highest ensures each level uses the latest versions before the next level is updated.
+                        </p>
+                        <p class="mb-0 mt-2">
+                            <strong>Proceed</strong> with dependency update and commits, or <strong>Update only</strong>.
+                        </p>
+                    }
+                    else
+                    {
+                        <p class="mb-0">
+                            Create update commits for the modified project files?
+                        </p>
+                        <p class="mb-0 mt-2 text-muted small">
+                            <strong>Proceed</strong> = update .csproj files and commit; <strong>Update only</strong> = update files without committing.
+                        </p>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-warning" @onclick="OnProceed" disabled="@IsBusy">
+                        @if (IsBusy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                        }
+                        Proceed
+                    </button>
+                    <button type="button" class="btn btn-primary" @onclick="OnUpdateOnly" disabled="@IsBusy">
+                        Update only
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel" disabled="@IsBusy">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public bool IsMultiLevel { get; set; }
+    [Parameter] public bool IsBusy { get; set; }
+    [Parameter] public EventCallback OnProceed { get; set; }
+    [Parameter] public EventCallback OnUpdateOnly { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private ElementReference modalElement;
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            await OnCancel.InvokeAsync();
+    }
+}
