@@ -92,3 +92,36 @@
   letter-spacing: 0.2px;
   margin: 0;
 }
+
+/* Easter egg: rabbit toggle in bottom-right (visible in both simple and matrix overlay) */
+.loading-overlay__rabbit {
+  position: fixed;
+  bottom: 0.75rem;
+  right: 0.75rem;
+  z-index: 10000;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.2rem;
+  margin: 0;
+  border: none;
+  background: none !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  opacity: 0.6;
+  filter: brightness(0.75);
+  transition: opacity 0.15s ease, filter 0.15s ease;
+  pointer-events: auto;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Only show rabbit when this overlay is visible (avoids multiple rabbits when many LoadingOverlay instances exist) */
+.loading-overlay:not(.show) .loading-overlay__rabbit {
+  display: none !important;
+}
+
+.loading-overlay__rabbit:hover {
+  opacity: 0.9;
+  filter: brightness(0.95);
+}
