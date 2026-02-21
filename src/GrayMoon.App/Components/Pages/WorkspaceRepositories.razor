@@ -7,6 +7,7 @@
 @using GrayMoon.App.Services
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Components.Modals
+@using Microsoft.AspNetCore.Components.Web
 @using Microsoft.AspNetCore.SignalR.Client
 @using System.Text.Json
 @inject WorkspaceRepository WorkspaceRepository
@@ -126,22 +127,35 @@
                                             <span class="dependency-level-links">
                                                 <span class="dependency-level-icons">
                                                     <span class="dependency-level-pr-link"
+                                                          role="button"
+                                                          tabindex="0"
                                                           title="Open Pull Request (current branch to main)..."
-                                                          data-open-urls="@levelPrUrlsJson"
+                                                          style="cursor: pointer;"
+                                                          @onclick="() => ShowConfirmOpenPr(group.Count(), levelPrUrls)"
+                                                          @onclick:preventDefault
+                                                          @onclick:stopPropagation
                                                           aria-label="Open Pull Request">
                                                         <i class="bi bi-git" aria-hidden="true"></i>
                                                     </span>
                                                     <span class="dependency-level-sync-commits-link"
+                                                          role="button"
+                                                          tabindex="0"
                                                           title="Sync commits for all repositories in this level..."
-                                                          @onclick="() => CommitSyncLevelAsync(group.Select(wr => wr.RepositoryId).ToList())"
-                                                          @onclick:preventDefault="true"
+                                                          style="cursor: pointer;"
+                                                          @onclick="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
+                                                          @onclick:preventDefault
                                                           aria-label="Sync commits">
                                                         <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
                                                     </span>
                                                 </span>
                                                 <span class="dependency-level-count dependency-level-count-link"
+                                                      role="button"
+                                                      tabindex="0"
                                                       title="Open in GitHub..."
-                                                      data-open-urls="@levelUrlsJson">
+                                                      style="cursor: pointer;"
+                                                      @onclick="() => ShowConfirmOpenGitHub(group.Count(), levelUrls)"
+                                                      @onclick:preventDefault
+                                                      @onclick:stopPropagation>
                                                     <span class="dependency-level-count-num">@group.Count()</span> @(group.Count() == 1 ? "repository" : "repositories")
                                                 </span>
                                             </span>
@@ -218,9 +232,16 @@
                                                 }
                                                 else
                                                 {
-                                                    <a href="@graphUrl" class="dependency-badge-link" title="View dependency graph for this repository">
+                                                    <span class="dependency-badge-link @(isUpdating || isSyncing ? "dependency-badge-link--disabled" : "")"
+                                                          role="button"
+                                                          tabindex="0"
+                                                          title="@(unmatchedDeps) of @(depCount) dependencies require update. Click to update this repository only."
+                                                          style="cursor: pointer;"
+                                                          @onclick="() => ShowConfirmUpdateDependencies(repo.RepositoryId, unmatchedDeps)"
+                                                          @onclick:preventDefault
+                                                          @onkeydown="(e) => HandleDependencyBadgeKeydown(e, repo.RepositoryId, unmatchedDeps)">
                                                         <span class="badge build-dep-badge build-dep-badge-mismatch">@unmatchedDeps of @depCount</span>
-                                                    </a>
+                                                    </span>
                                                 }
                                             </td>
                                             <td class="col-commits">@GetCommitsBadge(repo.RepositoryId, wr.OutgoingCommits, wr.IncomingCommits)</td>
@@ -294,6 +315,12 @@
                           OnUpdateOnly="@OnUpdateOnlyAsync"
                           OnCancel="@CloseUpdateModal" />
 
+<ConfirmModal IsVisible="@showConfirmModal"
+              Message="@confirmModalMessage"
+              ConfirmButtonText="Yes"
+              OnConfirm="@OnConfirmModalYesAsync"
+              OnCancel="@CloseConfirmModal" />
+
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
 <LoadingOverlay IsVisible="@isSyncing" Message="@syncProgressMessage" OnAbort="AbortSyncAsync" />
 <LoadingOverlay IsVisible="@isUpdating" Message="@updateProgressMessage" OnAbort="AbortUpdateAsync" />
@@ -354,6 +381,9 @@
     private CancellationTokenSource? _createBranchesCts;
     private bool showUpdateModal = false;
     private bool updatePlanIsMultiLevel = false;
+    private bool showConfirmModal = false;
+    private string confirmModalMessage = "";
+    private Func<Task>? _pendingConfirmAction;
 
     protected override async Task OnInitializedAsync()
     {
@@ -496,7 +526,7 @@
         builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: #fff;{(hasCommits ? " cursor: pointer;" : "")}");
         if (hasCommits)
         {
-            builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => CommitSyncAsync(repositoryId)));
+            builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => ShowConfirmSyncCommits(repositoryId)));
             builder.AddAttribute(4, "title", "Click to sync commits");
         }
         builder.AddContent(5, text);
@@ -543,6 +573,66 @@
     {
         showUpdateModal = false;
         StateHasChanged();
+    }
+
+    private void CloseConfirmModal()
+    {
+        showConfirmModal = false;
+        _pendingConfirmAction = null;
+        StateHasChanged();
+    }
+
+    private async Task OnConfirmModalYesAsync()
+    {
+        var action = _pendingConfirmAction;
+        CloseConfirmModal();
+        if (action != null)
+            await action();
+    }
+
+    private void ShowConfirm(string message, Func<Task> onConfirm)
+    {
+        confirmModalMessage = message;
+        _pendingConfirmAction = onConfirm;
+        showConfirmModal = true;
+        StateHasChanged();
+    }
+
+    private void ShowConfirmOpenPr(int count, IReadOnlyList<string?> urls)
+    {
+        var x = count == 1 ? "1 repository" : $"{count} repositories";
+        ShowConfirm($"Do you want to open pull request for {x}?", async () =>
+        {
+            var list = urls.Where(u => !string.IsNullOrEmpty(u)).Cast<string>().ToList();
+            await JSRuntime.InvokeVoidAsync("graymoonOpenUrls", list);
+        });
+    }
+
+    private void ShowConfirmSyncCommitsLevel(List<int> repositoryIds)
+    {
+        var x = repositoryIds.Count == 1 ? "1 repository" : $"{repositoryIds.Count} repositories";
+        ShowConfirm($"Do you want to sync commits for {x}?", () => CommitSyncLevelAsync(repositoryIds));
+    }
+
+    private void ShowConfirmOpenGitHub(int count, IReadOnlyList<string?> urls)
+    {
+        var x = count == 1 ? "1 repository" : $"{count} repositories";
+        ShowConfirm($"Do you want to open GitHub page for {x}?", async () =>
+        {
+            var list = urls.Where(u => !string.IsNullOrEmpty(u)).Cast<string>().ToList();
+            await JSRuntime.InvokeVoidAsync("graymoonOpenUrls", list);
+        });
+    }
+
+    private void ShowConfirmUpdateDependencies(int repositoryId, int unmatchedCount)
+    {
+        var x = unmatchedCount == 1 ? "1 dependency" : $"{unmatchedCount} dependencies";
+        ShowConfirm($"Do you want to update {x} in this repository?", () => UpdateSingleRepositoryAsync(repositoryId));
+    }
+
+    private void ShowConfirmSyncCommits(int repositoryId)
+    {
+        ShowConfirm("Do you want to sync commits for this repository?", () => CommitSyncAsync(repositoryId));
     }
 
     /// <summary>Update button click: get update plan; if no updates, toast; else show modal (single vs multi-level).</summary>
@@ -635,6 +725,72 @@
         {
             Logger.LogError(ex, "Error updating dependencies for workspace {WorkspaceId}", WorkspaceId);
             errorMessage = "Update failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+        }
+        finally
+        {
+            isUpdating = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void HandleDependencyBadgeKeydown(KeyboardEventArgs e, int repositoryId, int unmatchedDeps)
+    {
+        if ((e.Key == "Enter" || e.Key == " ") && !isUpdating && !isSyncing)
+            ShowConfirmUpdateDependencies(repositoryId, unmatchedDeps);
+    }
+
+    /// <summary>Update dependencies for a single repository only (refresh projects, sync deps, no commit). Same as Update but scoped to one repo.</summary>
+    private async Task UpdateSingleRepositoryAsync(int repositoryId)
+    {
+        if (workspace == null || isUpdating || isSyncing)
+            return;
+
+        _updateCts?.Cancel();
+        _updateCts?.Dispose();
+        _updateCts = new CancellationTokenSource();
+
+        isUpdating = true;
+        updateProgressMessage = "Updating repository...";
+        errorMessage = null;
+        repositoryErrors.Remove(repositoryId);
+        try
+        {
+            StateHasChanged();
+            await Task.Yield();
+
+            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
+            {
+                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                await workspaceGitService.RunUpdateSingleRepositoryAsync(
+                    WorkspaceId,
+                    repositoryId,
+                    onProgressMessage: msg =>
+                    {
+                        updateProgressMessage = msg;
+                        InvokeAsync(StateHasChanged);
+                    },
+                    onRepoError: (repoId, msg) =>
+                    {
+                        repositoryErrors[repoId] = msg;
+                        InvokeAsync(StateHasChanged);
+                    },
+                    cancellationToken: _updateCts.Token);
+            }
+
+            isUpdating = false;
+            await InvokeAsync(StateHasChanged);
+            await RefreshFromSync();
+        }
+        catch (OperationCanceledException)
+        {
+            isUpdating = false;
+            await ReloadWorkspaceDataAsync();
+            ApplySyncStateFromWorkspace();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
+            repositoryErrors[repositoryId] = "Update failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
         }
         finally
         {

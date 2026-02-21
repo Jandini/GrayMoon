@@ -165,6 +165,67 @@ public class WorkspaceGitService(
         _logger.LogDebug("RefreshWorkspaceProjects completed for workspace {WorkspaceName}", workspace.Name);
     }
 
+    /// <summary>Refreshes project and package reference data for a single repository. Merges into WorkspaceProjects and ProjectDependencies for that repo only, then recomputes dependency stats. Returns true if refresh succeeded.</summary>
+    public async Task<bool> RefreshSingleRepositoryProjectsAsync(
+        int workspaceId,
+        int repositoryId,
+        Action<int, string>? onRepoError = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_agentBridge.IsAgentConnected)
+            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to refresh projects.");
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            throw new InvalidOperationException($"Workspace {workspaceId} not found.");
+
+        var repo = workspace.Repositories.Select(l => l.Repository).FirstOrDefault(r => r != null && r.RepositoryId == repositoryId);
+        if (repo == null)
+            throw new InvalidOperationException($"Repository {repositoryId} not found in workspace.");
+
+        var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName };
+        var response = await _agentBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
+        if (!response.Success)
+        {
+            onRepoError?.Invoke(repositoryId, response.Error ?? "Refresh projects failed");
+            return false;
+        }
+
+        var projectsDetail = response.Data != null ? GetProjectsDetail(response.Data) : null;
+        if (projectsDetail is { Count: > 0 })
+            await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repositoryId, projectsDetail, cancellationToken);
+
+        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, [(repositoryId, projectsDetail)], cancellationToken);
+        _logger.LogDebug("RefreshSingleRepositoryProjects completed for workspace {WorkspaceName}, repo {RepositoryId}", workspace.Name, repositoryId);
+        return true;
+    }
+
+    /// <summary>Runs update for a single repository only: refresh that repo's projects, sync its dependencies, recompute and broadcast. Same behavior as Update but scoped to one repo (no commits). Stops on first error.</summary>
+    public async Task RunUpdateSingleRepositoryAsync(
+        int workspaceId,
+        int repositoryId,
+        Action<string>? onProgressMessage = null,
+        Action<int, string>? onRepoError = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_agentBridge.IsAgentConnected)
+            throw new InvalidOperationException("Agent not connected.");
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            throw new InvalidOperationException($"Workspace {workspaceId} not found.");
+
+        onProgressMessage?.Invoke("Refreshing repository projects...");
+        var refreshOk = await RefreshSingleRepositoryProjectsAsync(workspaceId, repositoryId, onRepoError: onRepoError, cancellationToken: cancellationToken);
+        if (!refreshOk)
+            return;
+
+        onProgressMessage?.Invoke("Syncing dependencies...");
+        var count = await SyncDependenciesAsync(workspaceId, repoIdsToSync: new HashSet<int> { repositoryId }, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: onRepoError, cancellationToken: cancellationToken);
+        await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+        _logger.LogDebug("RunUpdateSingleRepository completed for workspace {WorkspaceName}, repo {RepositoryId}, synced={Count}", workspace.Name, repositoryId, count);
+    }
+
     /// <summary>Gets the list of repos that need dependency updates, with levels. Used to detect single vs multi-level and to drive update-with-commit flow.</summary>
     public async Task<(IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)> GetUpdatePlanAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
