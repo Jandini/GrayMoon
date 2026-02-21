@@ -18,7 +18,10 @@ public class WorkspaceGitService(
     AppDbContext dbContext,
     Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<WorkspaceGitService> logger,
-    IHubContext<WorkspaceSyncHub>? hubContext = null)
+    IHubContext<WorkspaceSyncHub>? hubContext = null,
+    PackageRegistrySyncService? packageRegistrySyncService = null,
+    NuGetService? nuGetService = null,
+    ConnectorRepository? connectorRepository = null)
 {
     private readonly IAgentBridge _agentBridge = agentBridge ?? throw new ArgumentNullException(nameof(agentBridge));
     private readonly WorkspaceService _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
@@ -29,6 +32,9 @@ public class WorkspaceGitService(
     private readonly ILogger<WorkspaceGitService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxConcurrentGitOperations ?? 8);
     private readonly IHubContext<WorkspaceSyncHub>? _hubContext = hubContext;
+    private readonly PackageRegistrySyncService? _packageRegistrySyncService = packageRegistrySyncService;
+    private readonly NuGetService? _nuGetService = nuGetService;
+    private readonly ConnectorRepository? _connectorRepository = connectorRepository;
 
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
@@ -237,6 +243,17 @@ public class WorkspaceGitService(
         var levelsWithUpdates = withUpdates.Select(p => p.DependencyLevel ?? 0).Distinct().ToList();
         var isMultiLevel = levelsWithUpdates.Count > 1;
         return (withUpdates, isMultiLevel);
+    }
+
+    /// <summary>Gets push plan: all workspace repos by dependency level. Used to show multi-level dialog and run dependency-synchronized push.</summary>
+    public async Task<(IReadOnlyList<PushRepoPayload> Payload, bool IsMultiLevel)> GetPushPlanAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var payload = await _workspaceProjectRepository.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        if (payload.Count == 0)
+            return (payload, false);
+        var levels = payload.Select(p => p.DependencyLevel ?? 0).Distinct().ToList();
+        var isMultiLevel = levels.Count > 1;
+        return (payload, isMultiLevel);
     }
 
     /// <summary>Syncs dependency versions in .csproj files to match the current version of each referenced package source. Only repos with at least one mismatched dependency are updated. When <paramref name="repoIdsToSync"/> is set, only those repos are synced.</summary>
@@ -486,6 +503,155 @@ public class WorkspaceGitService(
 
         if (!hadError)
             await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+    }
+
+    /// <summary>Runs dependency-synchronized push: sync package registries, then push by level (lowest first). For each level, waits until required packages are in registry (or pushes all at once if not possible), then pushes all repos at that level in parallel. Ensures branch is upstreamed even when there are no commits to push.</summary>
+    public async Task RunPushAsync(
+        int workspaceId,
+        Action<string>? onProgressMessage = null,
+        Action<int, string>? onRepoError = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_agentBridge.IsAgentConnected)
+            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to push.");
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            throw new InvalidOperationException($"Workspace {workspaceId} not found.");
+
+        await _workspaceService.CreateDirectoryAsync(workspace.Name, cancellationToken);
+
+        onProgressMessage?.Invoke("Syncing package registries...");
+        if (_packageRegistrySyncService != null)
+            await _packageRegistrySyncService.SyncWorkspacePackageRegistriesAsync(workspaceId, cancellationToken: cancellationToken);
+
+        var payload = await _workspaceProjectRepository.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        if (payload.Count == 0)
+        {
+            onProgressMessage?.Invoke("No repositories to push.");
+            return;
+        }
+
+        var links = await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .ThenInclude(r => r!.Connector)
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+        var bearerByRepoId = links.Where(wr => wr.Repository != null).ToDictionary(wr => wr.RepositoryId, wr => wr.Repository!.Connector?.UserToken);
+
+        bool synchronizedPushPossible = payload.All(p => p.RequiredPackages.All(r => r.MatchedConnectorId.HasValue));
+        if (!synchronizedPushPossible && payload.Any(p => p.RequiredPackages.Count > 0))
+        {
+            _logger.LogInformation("Push: some dependencies have no matched registry; pushing all repositories at once.");
+        }
+
+        if (!synchronizedPushPossible || _nuGetService == null || _connectorRepository == null)
+        {
+            onProgressMessage?.Invoke("Pushing all repositories...");
+            await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
+            await RefreshVersionsAfterPushAsync(workspaceId, payload, cancellationToken);
+            if (_hubContext != null)
+                await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
+            return;
+        }
+
+        var levelsAsc = payload.Select(p => p.DependencyLevel ?? 0).Distinct().OrderBy(x => x).ToList();
+        foreach (var level in levelsAsc)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var reposAtLevel = payload.Where(p => (p.DependencyLevel ?? 0) == level).ToList();
+            if (reposAtLevel.Count == 0) continue;
+
+            var requiredForLevel = reposAtLevel
+                .SelectMany(r => r.RequiredPackages)
+                .DistinctBy(r => (r.PackageId, r.Version, r.MatchedConnectorId))
+                .Where(r => r.MatchedConnectorId.HasValue)
+                .ToList();
+            var totalDeps = requiredForLevel.Count;
+
+            if (totalDeps > 0)
+            {
+                onProgressMessage?.Invoke($"Waiting for {totalDeps} dependency(ies)...");
+                var found = 0;
+                while (found < totalDeps)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    found = 0;
+                    foreach (var req in requiredForLevel)
+                    {
+                        var connector = await _connectorRepository.GetByIdAsync(req.MatchedConnectorId!.Value);
+                        if (connector != null && await _nuGetService.PackageVersionExistsAsync(connector, req.PackageId, req.Version, cancellationToken))
+                            found++;
+                    }
+                    onProgressMessage?.Invoke($"{found} of {totalDeps} dependencies found in level {level}");
+                    if (found >= totalDeps)
+                        break;
+                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                }
+            }
+
+            onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} repo(s) for dependency level {level}...");
+            await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
+            await RefreshVersionsAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
+        }
+
+        if (_hubContext != null)
+            await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
+    }
+
+    private async Task PushReposAsync(
+        Workspace workspace,
+        IReadOnlyList<PushRepoPayload> repos,
+        IReadOnlyDictionary<int, string?> bearerByRepoId,
+        Action<string>? onProgressMessage,
+        Action<int, string>? onRepoError,
+        CancellationToken cancellationToken)
+    {
+        var completed = 0;
+        var total = repos.Count;
+        using var semaphore = new SemaphoreSlim(_maxConcurrent);
+        var pushTasks = repos.Select(async repo =>
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                var args = new
+                {
+                    workspaceName = workspace.Name,
+                    repositoryId = repo.RepoId,
+                    repositoryName = repo.RepoName,
+                    bearerToken = bearerByRepoId.GetValueOrDefault(repo.RepoId),
+                    workspaceId = workspace.WorkspaceId
+                };
+                var response = await _agentBridge.SendCommandAsync("PushRepository", args, cancellationToken);
+                var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data) is { Success: true };
+                if (!success)
+                {
+                    var err = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage ?? "Push failed";
+                    onRepoError?.Invoke(repo.RepoId, err);
+                }
+                var c = Interlocked.Increment(ref completed);
+                onProgressMessage?.Invoke($"Pushed {c} of {total}");
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+        await Task.WhenAll(pushTasks);
+    }
+
+    private async Task RefreshVersionsAfterPushAsync(int workspaceId, IReadOnlyList<PushRepoPayload> repos, CancellationToken cancellationToken)
+    {
+        if (repos.Count == 0) return;
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null) return;
+        foreach (var repo in repos)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await SyncSingleRepositoryAsync(repo.RepoId, workspaceId, cancellationToken);
+        }
     }
 
     /// <summary>Refreshes version for a single repo and persists. Returns (success, errorMessage) for caller to report and optionally stop workflow.</summary>

@@ -378,6 +378,73 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
         return result.OrderBy(r => r.RepoName, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    /// <summary>Returns push plan: all workspace repos with dependency level and, for each repo, the list of (PackageId, Version, MatchedConnectorId) that it depends on from lower-level repos. Used for dependency-synchronized push.</summary>
+    public async Task<List<PushRepoPayload>> GetPushPlanPayloadAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var links = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+        if (links.Count == 0) return new List<PushRepoPayload>();
+
+        var levelByRepo = links
+            .Where(wr => wr.DependencyLevel.HasValue)
+            .ToDictionary(wr => wr.RepositoryId, wr => wr.DependencyLevel!.Value);
+        var maxLevel = levelByRepo.Values.DefaultIfEmpty(0).Max();
+        int effectiveLevel(int repoId) => levelByRepo.TryGetValue(repoId, out var l) ? l : maxLevel + 1;
+
+        var projects = await dbContext.WorkspaceProjects
+            .AsNoTracking()
+            .Include(p => p.Repository)
+            .Where(p => p.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+        var projectIds = projects.Select(p => p.ProjectId).ToHashSet();
+        var byProject = projects.ToDictionary(p => p.ProjectId);
+
+        var dependencies = await dbContext.ProjectDependencies
+            .AsNoTracking()
+            .Where(d => projectIds.Contains(d.DependentProjectId) && projectIds.Contains(d.ReferencedProjectId))
+            .Select(d => new { d.DependentProjectId, d.ReferencedProjectId, d.Version })
+            .ToListAsync(cancellationToken);
+
+        var repoToRequired = new Dictionary<int, List<RequiredPackageForPush>>();
+        foreach (var link in links)
+            repoToRequired[link.RepositoryId] = new List<RequiredPackageForPush>();
+
+        var seenPerRepo = new Dictionary<int, HashSet<(string PackageId, string Version)>>();
+        foreach (var link in links)
+            seenPerRepo[link.RepositoryId] = new HashSet<(string, string)>();
+
+        foreach (var d in dependencies)
+        {
+            if (!byProject.TryGetValue(d.DependentProjectId, out var depProj) || !byProject.TryGetValue(d.ReferencedProjectId, out var refProj))
+                continue;
+            var depLevel = effectiveLevel(depProj.RepositoryId);
+            var refLevel = effectiveLevel(refProj.RepositoryId);
+            if (refLevel >= depLevel)
+                continue;
+            var packageId = (!string.IsNullOrWhiteSpace(refProj.PackageId) ? refProj.PackageId : refProj.ProjectName)?.Trim() ?? "";
+            var version = d.Version?.Trim() ?? "";
+            if (string.IsNullOrEmpty(packageId)) continue;
+            var key = (packageId.ToLowerInvariant(), version);
+            if (seenPerRepo[depProj.RepositoryId].Contains(key)) continue;
+            seenPerRepo[depProj.RepositoryId].Add(key);
+            repoToRequired[depProj.RepositoryId].Add(new RequiredPackageForPush(packageId, version, refProj.MatchedConnectorId));
+        }
+
+        var result = new List<PushRepoPayload>();
+        foreach (var link in links)
+        {
+            var repo = link.Repository;
+            var repoName = repo?.RepositoryName ?? "";
+            if (string.IsNullOrEmpty(repoName)) continue;
+            var required = repoToRequired[link.RepositoryId];
+            result.Add(new PushRepoPayload(link.RepositoryId, repoName, link.DependencyLevel, required));
+        }
+        return result.OrderBy(r => r.DependencyLevel ?? int.MaxValue).ThenBy(r => r.RepoName, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     /// <summary>Persists the new Version for ProjectDependencies that were updated by sync dependencies. Matches by (RepoId, ProjectPath) -> DependentProjectId and PackageId -> ReferencedProjectId.</summary>
     public async Task UpdateProjectDependencyVersionsAsync(
         int workspaceId,

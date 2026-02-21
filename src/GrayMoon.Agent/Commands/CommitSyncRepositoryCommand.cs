@@ -123,7 +123,7 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
         bool pushSuccess = true;
         if (outgoing.HasValue && outgoing.Value > 0)
         {
-            var (success, pushError) = await git.PushAsync(repoPath, branch, bearerToken, cancellationToken);
+            var (success, pushError) = await git.PushAsync(repoPath, branch, bearerToken, setTracking: false, ct: cancellationToken);
             pushSuccess = success;
             
             if (!pushSuccess)
