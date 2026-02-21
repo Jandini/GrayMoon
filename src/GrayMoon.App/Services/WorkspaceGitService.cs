@@ -347,11 +347,11 @@ public class WorkspaceGitService(
             cancellationToken.ThrowIfCancellationRequested();
 
             var pathsToStage = repo.ProjectUpdates.Select(p => p.ProjectPath).Distinct().ToList();
-            var lines = new List<string> { "Update dependencies:" };
+            var lines = new List<string> { "chore(deps): update package versions", "" };
             foreach (var pu in repo.ProjectUpdates)
             {
                 foreach (var (packageId, newVersion) in pu.PackageUpdates)
-                    lines.Add($"{packageId} {newVersion}");
+                    lines.Add($"- {packageId} to {newVersion}");
             }
             var commitMessage = string.Join("\r\n", lines);
 
@@ -433,13 +433,13 @@ public class WorkspaceGitService(
                 if (reposAtLevel.Count == 0) continue;
 
                 var repoIds = reposAtLevel.Select(r => r.RepoId).ToHashSet();
-                onProgressMessage?.Invoke($"Updating level {level} ({reposAtLevel.Count} repo(s))...");
-                await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Level {level}: syncing {c} of {t}"), onRepoError: OnRepoError, repoIdsToSync: repoIds, cancellationToken: cancellationToken);
+                onProgressMessage?.Invoke($"Updating {reposAtLevel.Count} repo(s) for dependency level {level}...");
+                await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Syncing {c} of {t} for dependency level {level}"), onRepoError: OnRepoError, repoIdsToSync: repoIds, cancellationToken: cancellationToken);
                 if (hadError)
                     break;
 
-                onProgressMessage?.Invoke($"Committing level {level}...");
-                var commitResults = await CommitDependencyUpdatesAsync(workspaceId, reposAtLevel, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Level {level}: committing {c} of {t}"), cancellationToken: cancellationToken);
+                onProgressMessage?.Invoke($"Committing for dependency level {level}...");
+                var commitResults = await CommitDependencyUpdatesAsync(workspaceId, reposAtLevel, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Committing {c} of {t} for dependency level {level}"), cancellationToken: cancellationToken);
                 foreach (var (repoId, errMsg) in commitResults)
                 {
                     if (!string.IsNullOrEmpty(errMsg))

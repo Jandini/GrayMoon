@@ -326,7 +326,7 @@
 <LoadingOverlay IsVisible="@isUpdating" Message="@updateProgressMessage" OnAbort="AbortUpdateAsync" />
 <LoadingOverlay IsVisible="@isCommitSyncing" Message="@commitSyncProgressMessage" OnAbort="AbortCommitSyncAsync" />
 <LoadingOverlay IsVisible="@isCheckingOut" Message="@checkoutProgressMessage" OnAbort="AbortCheckoutAsync" />
-<LoadingOverlay IsVisible="@(showRepositoriesModal && isPersisting)" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}...")" OnAbort="AbortFetchRepositories" />
+<LoadingOverlay IsVisible="@(showRepositoriesModal && isPersisting)" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}")" OnAbort="AbortFetchRepositories" />
 <LoadingOverlay IsVisible="@isCreatingBranches" Message="@createBranchesProgressMessage" />
 
 @code {
@@ -1243,7 +1243,7 @@
                     baseBranch,
                     onProgress: (completed, total) =>
                     {
-                        createBranchesProgressMessage = $"Created {completed} of {total} branches...";
+                        createBranchesProgressMessage = $"Created {completed} of {total} branches";
                         InvokeAsync(StateHasChanged);
                     },
                     cancellationToken: _createBranchesCts.Token);
