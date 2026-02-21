@@ -312,7 +312,7 @@ public class WorkspaceGitService(
         return results;
     }
 
-    /// <summary>Runs full update (refresh projects, sync deps, optional commits). Single-level: one pass then commit all. Multi-level: per level sync+commit then refresh version for committed repos, repeat.</summary>
+    /// <summary>Runs full update (refresh projects, sync deps, optional commits). Stops on first error and reports it via onRepoError (message under the repo). Single-level: one pass then commit all. Multi-level: per level sync+commit then refresh version for committed repos, repeat.</summary>
     public async Task RunUpdateAsync(
         int workspaceId,
         bool withCommits,
@@ -327,12 +327,21 @@ public class WorkspaceGitService(
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
+        var hadError = false;
+        void OnRepoError(int repoId, string msg)
+        {
+            hadError = true;
+            onRepoError?.Invoke(repoId, msg);
+        }
+
         onProgressMessage?.Invoke("Refreshing projects...");
         await RefreshWorkspaceProjectsAsync(
             workspaceId,
             onProgress: (c, t, _) => onProgressMessage?.Invoke($"Refreshing projects {c} of {t}"),
-            onRepoError: onRepoError,
+            onRepoError: OnRepoError,
             cancellationToken);
+        if (hadError)
+            return;
 
         var (payload, isMultiLevel) = await GetUpdatePlanAsync(workspaceId, cancellationToken);
         if (payload.Count == 0)
@@ -344,7 +353,9 @@ public class WorkspaceGitService(
         if (!withCommits)
         {
             onProgressMessage?.Invoke("Syncing dependencies...");
-            await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: onRepoError, cancellationToken: cancellationToken);
+            await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: OnRepoError, cancellationToken: cancellationToken);
+            if (hadError)
+                return;
             await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
             return;
         }
@@ -354,40 +365,76 @@ public class WorkspaceGitService(
             var levelsAsc = payload.Select(p => p.DependencyLevel ?? 0).Distinct().OrderBy(x => x).ToList();
             foreach (var level in levelsAsc)
             {
+                if (hadError)
+                    break;
+
                 var reposAtLevel = payload.Where(p => (p.DependencyLevel ?? 0) == level).ToList();
                 if (reposAtLevel.Count == 0) continue;
 
                 var repoIds = reposAtLevel.Select(r => r.RepoId).ToHashSet();
                 onProgressMessage?.Invoke($"Updating level {level} ({reposAtLevel.Count} repo(s))...");
-                await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Level {level}: syncing {c} of {t}"), onRepoError: onRepoError, repoIdsToSync: repoIds, cancellationToken: cancellationToken);
+                await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Level {level}: syncing {c} of {t}"), onRepoError: OnRepoError, repoIdsToSync: repoIds, cancellationToken: cancellationToken);
+                if (hadError)
+                    break;
+
                 onProgressMessage?.Invoke($"Committing level {level}...");
-                await CommitDependencyUpdatesAsync(workspaceId, reposAtLevel, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Level {level}: committing {c} of {t}"), cancellationToken: cancellationToken);
+                var commitResults = await CommitDependencyUpdatesAsync(workspaceId, reposAtLevel, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Level {level}: committing {c} of {t}"), cancellationToken: cancellationToken);
+                foreach (var (repoId, errMsg) in commitResults)
+                {
+                    if (!string.IsNullOrEmpty(errMsg))
+                    {
+                        OnRepoError(repoId, errMsg);
+                        break;
+                    }
+                }
+                if (hadError)
+                    break;
+
                 foreach (var repo in reposAtLevel)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    if (hadError)
+                        break;
                     onProgressMessage?.Invoke($"Refreshing version for {repo.RepoName}...");
-                    await SyncSingleRepositoryAsync(repo.RepoId, workspaceId, cancellationToken);
+                    var (refreshSuccess, refreshError) = await SyncSingleRepositoryAsync(repo.RepoId, workspaceId, cancellationToken);
+                    if (!refreshSuccess)
+                    {
+                        OnRepoError(repo.RepoId, refreshError ?? "Refresh version failed.");
+                        break;
+                    }
                 }
             }
         }
         else
         {
             onProgressMessage?.Invoke("Syncing dependencies...");
-            await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: onRepoError, cancellationToken: cancellationToken);
+            await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: OnRepoError, cancellationToken: cancellationToken);
+            if (hadError)
+                return;
             onProgressMessage?.Invoke("Committing updates...");
-            await CommitDependencyUpdatesAsync(workspaceId, payload, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Committing {c} of {t}"), cancellationToken: cancellationToken);
+            var commitResults = await CommitDependencyUpdatesAsync(workspaceId, payload, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Committing {c} of {t}"), cancellationToken: cancellationToken);
+            foreach (var (repoId, errMsg) in commitResults)
+            {
+                if (!string.IsNullOrEmpty(errMsg))
+                {
+                    OnRepoError(repoId, errMsg);
+                    break;
+                }
+            }
         }
 
-        await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+        if (!hadError)
+            await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
     }
 
-    public async Task<bool> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
+    /// <summary>Refreshes version for a single repo and persists. Returns (success, errorMessage) for caller to report and optionally stop workflow.</summary>
+    public async Task<(bool Success, string? ErrorMessage)> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
     {
         var repo = await _repositoryRepository.GetByIdAsync(repositoryId, cancellationToken);
         if (repo == null)
         {
             _logger.LogWarning("Sync skipped: repository not found for id {RepositoryId}", repositoryId);
-            return false;
+            return (false, "Repository not found.");
         }
 
         var isInWorkspace = await _dbContext.WorkspaceRepositories
@@ -395,14 +442,21 @@ public class WorkspaceGitService(
         if (!isInWorkspace)
         {
             _logger.LogWarning("Sync skipped: repository {RepositoryName} (id {RepositoryId}) is not linked to workspace {WorkspaceId}", repo.RepositoryName, repositoryId, workspaceId);
-            return false;
+            return (false, "Repository is not linked to this workspace.");
         }
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
-            return false;
+            return (false, "Workspace not found.");
 
         var response = await _agentBridge.SendCommandAsync("RefreshRepositoryVersion", new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName }, cancellationToken);
+        if (!response.Success)
+        {
+            var err = response.Error ?? "Refresh version failed.";
+            _logger.LogWarning("RefreshRepositoryVersion failed for repo {RepositoryId}: {Error}", repositoryId, err);
+            return (false, err);
+        }
+
         var info = ParseRefreshRepositoryVersionResponse(response);
 
         await PersistVersionsAsync(workspaceId, [(repo.RepositoryId, info)], cancellationToken);
@@ -418,7 +472,7 @@ public class WorkspaceGitService(
 
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
-        return true;
+        return (true, null);
     }
 
     public async Task<IReadOnlyDictionary<int, RepoSyncStatus>> GetRepoSyncStatusAsync(
