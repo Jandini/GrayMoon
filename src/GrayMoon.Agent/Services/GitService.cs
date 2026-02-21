@@ -228,15 +228,16 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, false, null);
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> PushAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct)
+    public async Task<(bool Success, string? ErrorMessage)> PushAsync(string repoPath, string branchName, string? bearerToken, bool setTracking = false, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (false, "Invalid repository path or branch name");
 
+        var pushOpts = setTracking ? "-u " : "";
         string args;
         if (string.IsNullOrWhiteSpace(bearerToken))
         {
-            args = $"push origin {branchName}";
+            args = $"push {pushOpts}origin {branchName}";
         }
         else
         {
@@ -244,7 +245,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
             var headerValue = "Authorization: Basic " + base64;
             var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
-            args = $"-c \"http.extraHeader={escaped}\" push origin {branchName}";
+            args = $"-c \"http.extraHeader={escaped}\" push {pushOpts}origin {branchName}";
         }
 
         var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);

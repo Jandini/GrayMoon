@@ -48,19 +48,24 @@
                 </p>
             </div>
             <div class="d-flex gap-2">
-                <button class="btn btn-outline-primary"
+                <button class="btn btn-outline-secondary"
                         @onclick="ShowBranchModalAsync"
-                        disabled="@(isSyncing || isUpdating || workspaceRepositories.Count == 0)">
+                        disabled="@(isSyncing || isUpdating || isPushing || workspaceRepositories.Count == 0)">
                     Branch
                 </button>
-                <button class="btn @(hasUnmatchedDependencies ? "btn-danger" : "btn-secondary")"
+                <button class="btn @(hasUnmatchedDependencies ? "btn-danger" : "btn-outline-secondary")"
                         @onclick="OnUpdateClickAsync"
-                        disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating)">
+                        disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating || isPushing)">
                     Update
+                </button>
+                <button class="btn @(isPushRecommended ? "btn-warning" : "btn-outline-secondary")"
+                        @onclick="OnPushClickAsync"
+                        disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating || isPushing)">
+                    Push
                 </button>
                 <button class="btn @(isOutOfSync == true ? "btn-danger" : "btn-primary")"
                         @onclick="SyncAsync"
-                        disabled="@(isSyncing || isUpdating || workspaceRepositories.Count == 0)">
+                        disabled="@(isSyncing || isUpdating || isPushing || workspaceRepositories.Count == 0)">
                     Sync
                 </button>
             </div>
@@ -315,6 +320,12 @@
                           OnUpdateOnly="@OnUpdateOnlyAsync"
                           OnCancel="@CloseUpdateModal" />
 
+<PushModal IsVisible="@showPushModal"
+          IsMultiLevel="@pushPlanIsMultiLevel"
+          IsBusy="@isPushing"
+          OnProceed="@OnPushProceedAsync"
+          OnCancel="@ClosePushModal" />
+
 <ConfirmModal IsVisible="@showConfirmModal"
               Message="@confirmModalMessage"
               ConfirmButtonText="Yes"
@@ -323,6 +334,7 @@
 
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
 <LoadingOverlay IsVisible="@isSyncing" Message="@syncProgressMessage" OnAbort="AbortSyncAsync" />
+<LoadingOverlay IsVisible="@isPushing" Message="@pushProgressMessage" OnAbort="AbortPushAsync" />
 <LoadingOverlay IsVisible="@isUpdating" Message="@updateProgressMessage" OnAbort="AbortUpdateAsync" />
 <LoadingOverlay IsVisible="@isCommitSyncing" Message="@commitSyncProgressMessage" OnAbort="AbortCommitSyncAsync" />
 <LoadingOverlay IsVisible="@isCheckingOut" Message="@checkoutProgressMessage" OnAbort="AbortCheckoutAsync" />
@@ -342,8 +354,14 @@
     private bool isUpdating = false;
     private string updateProgressMessage = "Updating dependencies...";
     private CancellationTokenSource? _updateCts;
+    private bool isPushing = false;
+    private string pushProgressMessage = "Pushing...";
+    private CancellationTokenSource? _pushCts;
+    private bool showPushModal = false;
+    private bool pushPlanIsMultiLevel = false;
     private bool? isOutOfSync = null;
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0);
+    private bool isPushRecommended => workspaceRepositories.Any(wr => (wr.OutgoingCommits ?? 0) > 0);
     private IEnumerable<IGrouping<int?, WorkspaceRepositoryLink>> LevelGroups =>
         workspaceRepositories
             .GroupBy(wr => wr.DependencyLevel)
@@ -429,6 +447,8 @@
         _syncCts?.Dispose();
         _updateCts?.Cancel();
         _updateCts?.Dispose();
+        _pushCts?.Cancel();
+        _pushCts?.Dispose();
         _commitSyncCts?.Cancel();
         _commitSyncCts?.Dispose();
         _fetchRepositoriesCts?.Cancel();
@@ -564,6 +584,17 @@
         _updateCts?.Cancel();
     }
 
+    private void AbortPushAsync()
+    {
+        _pushCts?.Cancel();
+    }
+
+    private void ClosePushModal()
+    {
+        showPushModal = false;
+        StateHasChanged();
+    }
+
     private void AbortCommitSyncAsync()
     {
         _commitSyncCts?.Cancel();
@@ -633,6 +664,104 @@
     private void ShowConfirmSyncCommits(int repositoryId)
     {
         ShowConfirm("Do you want to sync commits for this repository?", () => CommitSyncAsync(repositoryId));
+    }
+
+    /// <summary>Push button click: get push plan; if more than one repo show confirmation modal; else run push directly.</summary>
+    private async Task OnPushClickAsync()
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || isPushing || isSyncing || isUpdating)
+            return;
+
+        try
+        {
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+            var (payload, isMultiLevel) = await workspaceGitService.GetPushPlanAsync(WorkspaceId);
+            if (payload.Count == 0)
+            {
+                ToastService.Show("No repositories to push.");
+                return;
+            }
+            pushPlanIsMultiLevel = isMultiLevel;
+            if (payload.Count > 1)
+            {
+                showPushModal = true;
+                await InvokeAsync(StateHasChanged);
+            }
+            else
+            {
+                await RunPushCoreAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error getting push plan for workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Could not determine push plan. The GrayMoon Agent may be offline.";
+        }
+    }
+
+    private async Task OnPushProceedAsync()
+    {
+        ClosePushModal();
+        await RunPushCoreAsync();
+    }
+
+    /// <summary>Runs dependency-synchronized push. Overlay shows progress.</summary>
+    private async Task RunPushCoreAsync()
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || isPushing || isSyncing || isUpdating)
+            return;
+
+        _pushCts?.Cancel();
+        _pushCts?.Dispose();
+        _pushCts = new CancellationTokenSource();
+
+        isPushing = true;
+        pushProgressMessage = "Starting push...";
+        errorMessage = null;
+        try
+        {
+            StateHasChanged();
+            await Task.Yield();
+
+            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
+            {
+                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                await workspaceGitService.RunPushAsync(
+                    WorkspaceId,
+                    onProgressMessage: msg =>
+                    {
+                        pushProgressMessage = msg;
+                        InvokeAsync(StateHasChanged);
+                    },
+                    onRepoError: (repoId, msg) =>
+                    {
+                        repositoryErrors[repoId] = msg;
+                        InvokeAsync(StateHasChanged);
+                    },
+                    cancellationToken: _pushCts.Token);
+            }
+
+            isPushing = false;
+            await InvokeAsync(StateHasChanged);
+            await RefreshFromSync();
+        }
+        catch (OperationCanceledException)
+        {
+            isPushing = false;
+            await ReloadWorkspaceDataAsync();
+            ApplySyncStateFromWorkspace();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error pushing for workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Push failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+        }
+        finally
+        {
+            isPushing = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     /// <summary>Update button click: get update plan; if no updates, toast; else show modal (single vs multi-level).</summary>
@@ -1034,8 +1163,9 @@
             else
             {
                 var errorText = await response.Content.ReadAsStringAsync(_commitSyncCts.Token);
-                repositoryErrors[repositoryId] = $"Commit sync failed: {response.StatusCode}";
-                errorMessage = $"Commit sync failed: {response.StatusCode}";
+                var displayError = TryGetErrorMessageFromResponseBody(errorText) ?? $"Commit sync failed: {response.StatusCode}";
+                repositoryErrors[repositoryId] = displayError;
+                errorMessage = displayError;
                 Logger.LogError("CommitSync failed: {StatusCode}, {Error}", response.StatusCode, errorText);
             }
 
@@ -1117,7 +1247,7 @@
                     else
                     {
                         var errorText = await response.Content.ReadAsStringAsync(_commitSyncCts.Token);
-                        repositoryErrors[repositoryId] = $"Commit sync failed: {response.StatusCode}";
+                        repositoryErrors[repositoryId] = TryGetErrorMessageFromResponseBody(errorText) ?? $"Commit sync failed: {response.StatusCode}";
                         Logger.LogError("CommitSync failed for repository {RepositoryId}: {StatusCode}, {Error}", repositoryId, response.StatusCode, errorText);
                     }
                 }
@@ -1431,5 +1561,31 @@
     private string GetDependencyGraphUrl(int repositoryId)
     {
         return $"/workspaces/{WorkspaceId}/dependencies?repo={repositoryId}";
+    }
+
+    /// <summary>Try to extract a user-facing error message from an API response body (JSON or plain text).</summary>
+    private static string? TryGetErrorMessageFromResponseBody(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+            return null;
+        var trimmed = body.Trim();
+        if (trimmed.Length == 0)
+            return null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(trimmed);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("errorMessage", out var em) && em.ValueKind == System.Text.Json.JsonValueKind.String)
+                return em.GetString();
+            if (root.TryGetProperty("detail", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.String)
+                return d.GetString();
+            if (root.TryGetProperty("title", out var t) && t.ValueKind == System.Text.Json.JsonValueKind.String)
+                return t.GetString();
+        }
+        catch
+        {
+            // Not JSON or invalid
+        }
+        return trimmed.Length > 500 ? trimmed.Substring(0, 500) + "…" : trimmed;
     }
 }

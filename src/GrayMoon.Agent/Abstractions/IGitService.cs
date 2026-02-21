@@ -16,8 +16,8 @@ public interface IGitService
     Task<(int? Outgoing, int? Incoming)> GetCommitCountsAsync(string repoPath, string branchName, CancellationToken ct);
     /// <summary>Pulls from origin. Returns (success, mergeConflict, errorMessage).</summary>
     Task<(bool Success, bool MergeConflict, string? ErrorMessage)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct);
-    /// <summary>Pushes to origin. Returns (success, errorMessage).</summary>
-    Task<(bool Success, string? ErrorMessage)> PushAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct);
+    /// <summary>Pushes to origin. When setTracking is true, uses -u so the branch is upstreamed even when there are no commits to push. Returns (success, errorMessage).</summary>
+    Task<(bool Success, string? ErrorMessage)> PushAsync(string repoPath, string branchName, string? bearerToken, bool setTracking = false, CancellationToken ct = default);
     /// <summary>Aborts a merge in progress.</summary>
     Task AbortMergeAsync(string repoPath, CancellationToken ct);
     /// <summary>Gets all local branch names (without 'origin/' prefix).</summary>

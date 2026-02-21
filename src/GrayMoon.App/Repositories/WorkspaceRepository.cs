@@ -201,6 +201,17 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
         var toRemove = existing.Where(wr => !newRepoIds.Contains(wr.RepositoryId)).ToList();
         var toAdd = newRepoIds.Except(existingRepoIds).ToList();
 
+        var removedRepoIds = toRemove.Select(wr => wr.RepositoryId).ToHashSet();
+        if (removedRepoIds.Count > 0)
+        {
+            var projectsToRemove = await _dbContext.WorkspaceProjects
+                .Where(p => p.WorkspaceId == workspaceId && removedRepoIds.Contains(p.RepositoryId))
+                .ToListAsync();
+            _dbContext.WorkspaceProjects.RemoveRange(projectsToRemove);
+            _logger.LogDebug("Persistence: removed {Count} WorkspaceProjects for repos no longer in workspace. WorkspaceId={WorkspaceId}, RepositoryIds=[{RepositoryIds}]",
+                projectsToRemove.Count, workspaceId, string.Join(", ", removedRepoIds));
+        }
+
         foreach (var wr in toRemove)
         {
             _dbContext.WorkspaceRepositories.Remove(wr);

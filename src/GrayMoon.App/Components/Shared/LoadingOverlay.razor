@@ -21,7 +21,14 @@
         </div>
         @if (!string.IsNullOrEmpty(Message))
         {
-            <p class="loading-overlay-message">@Message</p>
+            var idx = Message.IndexOf('\n');
+            var countdown = idx >= 0 ? Message[(idx + 1)..].Trim() : null;
+            var messageText = idx >= 0 ? Message[..idx].Trim() : Message;
+            @if (!string.IsNullOrEmpty(countdown))
+            {
+                <p class="loading-overlay-countdown">@countdown</p>
+            }
+            <p class="loading-overlay-message">@messageText</p>
         }
         @if (OnAbort.HasDelegate)
         {

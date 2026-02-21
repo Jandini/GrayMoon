@@ -77,35 +77,38 @@ public static class CommitSyncEndpoints
             };
             var response = await agentBridge.SendCommandAsync("CommitSyncRepository", args, CancellationToken.None);
 
+            // Agent transport failure (e.g. agent threw): return same JSON shape so client can show error under repo
             if (!response.Success)
             {
-                logger.LogWarning("CommitSync failed for repository {RepositoryId}: {Error}", repositoryId, response.Error);
-                return Results.Problem(response.Error ?? "CommitSync failed", statusCode: 500);
+                var err = response.Error ?? "Commit sync failed.";
+                logger.LogWarning("CommitSync failed for repository {RepositoryId}: {Error}", repositoryId, err);
+                await SetWorkspaceRepositorySyncStatusErrorAsync(dbContext, workspaceId, repositoryId);
+                await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
+                return Results.Ok(new { success = false, mergeConflict = false, errorMessage = err });
             }
 
             // Parse response and update database
             var commitSyncResponse = AgentResponseJson.DeserializeAgentResponse<CommitSyncResponse>(response.Data);
-            if (commitSyncResponse != null)
+            var wr = await dbContext.WorkspaceRepositories
+                .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId);
+
+            if (commitSyncResponse != null && wr != null)
             {
-                // Update workspace repository link with new commit counts
-                var wr = await dbContext.WorkspaceRepositories
-                    .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId);
-
-                if (wr != null)
-                {
-                    wr.OutgoingCommits = commitSyncResponse.OutgoingCommits;
-                    wr.IncomingCommits = commitSyncResponse.IncomingCommits;
-                    if (commitSyncResponse.Version != null && commitSyncResponse.Version != "-")
-                        wr.GitVersion = commitSyncResponse.Version;
-                    if (commitSyncResponse.Branch != null && commitSyncResponse.Branch != "-")
-                        wr.BranchName = commitSyncResponse.Branch;
-                    wr.SyncStatus = commitSyncResponse.MergeConflict ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
-                    await dbContext.SaveChangesAsync();
-                }
-
-                // Broadcast update to refresh UI
-                await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
+                wr.OutgoingCommits = commitSyncResponse.OutgoingCommits;
+                wr.IncomingCommits = commitSyncResponse.IncomingCommits;
+                if (commitSyncResponse.Version != null && commitSyncResponse.Version != "-")
+                    wr.GitVersion = commitSyncResponse.Version;
+                if (commitSyncResponse.Branch != null && commitSyncResponse.Branch != "-")
+                    wr.BranchName = commitSyncResponse.Branch;
+                wr.SyncStatus = (commitSyncResponse.Success && !commitSyncResponse.MergeConflict) ? RepoSyncStatus.InSync : RepoSyncStatus.Error;
+                await dbContext.SaveChangesAsync();
             }
+
+            if (commitSyncResponse != null && !commitSyncResponse.Success && wr == null)
+                await SetWorkspaceRepositorySyncStatusErrorAsync(dbContext, workspaceId, repositoryId);
+
+            if (wr != null || commitSyncResponse != null)
+                await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
 
             var mergeConflict = commitSyncResponse?.MergeConflict ?? false;
             var errorMessage = commitSyncResponse?.ErrorMessage;
@@ -119,7 +122,28 @@ public static class CommitSyncEndpoints
         catch (Exception ex)
         {
             logger.LogError(ex, "Error executing CommitSync for repository {RepositoryId}", repositoryId);
-            return Results.Problem("An error occurred while executing CommitSync", statusCode: 500);
+            var err = ex.Message;
+            try
+            {
+                await SetWorkspaceRepositorySyncStatusErrorAsync(dbContext, workspaceId, repositoryId);
+                await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
+            }
+            catch
+            {
+                // Ignore secondary errors
+            }
+            return Results.Ok(new { success = false, mergeConflict = false, errorMessage = err });
+        }
+    }
+
+    private static async Task SetWorkspaceRepositorySyncStatusErrorAsync(AppDbContext dbContext, int workspaceId, int repositoryId)
+    {
+        var wr = await dbContext.WorkspaceRepositories
+            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId);
+        if (wr != null)
+        {
+            wr.SyncStatus = RepoSyncStatus.Error;
+            await dbContext.SaveChangesAsync();
         }
     }
 }

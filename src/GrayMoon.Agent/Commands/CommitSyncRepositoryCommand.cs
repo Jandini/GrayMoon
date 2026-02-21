@@ -9,6 +9,22 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
 {
     public async Task<CommitSyncRepositoryResponse> ExecuteAsync(CommitSyncRepositoryRequest request, CancellationToken cancellationToken = default)
     {
+        try
+        {
+            return await ExecuteCoreAsync(request, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return new CommitSyncRepositoryResponse
+            {
+                Success = false,
+                ErrorMessage = ex.Message
+            };
+        }
+    }
+
+    private async Task<CommitSyncRepositoryResponse> ExecuteCoreAsync(CommitSyncRepositoryRequest request, CancellationToken cancellationToken = default)
+    {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
         var bearerToken = request.BearerToken;
@@ -107,7 +123,7 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
         bool pushSuccess = true;
         if (outgoing.HasValue && outgoing.Value > 0)
         {
-            var (success, pushError) = await git.PushAsync(repoPath, branch, bearerToken, cancellationToken);
+            var (success, pushError) = await git.PushAsync(repoPath, branch, bearerToken, setTracking: false, ct: cancellationToken);
             pushSuccess = success;
             
             if (!pushSuccess)
