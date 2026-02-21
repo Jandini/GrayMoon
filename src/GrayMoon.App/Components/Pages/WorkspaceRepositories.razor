@@ -647,28 +647,36 @@
 
     private void ShowConfirmOpenPr(int count, IReadOnlyList<string?> urls)
     {
-        var x = count == 1 ? "1 repository" : $"{count} repositories";
-        ShowConfirm($"Do you want to open pull request for {x}?", async () =>
+        async Task OpenPrAsync()
         {
             var list = urls.Where(u => !string.IsNullOrEmpty(u)).Cast<string>().ToList();
             await JSRuntime.InvokeVoidAsync("graymoonOpenUrls", list);
-        });
+        }
+        if (count <= 1)
+            _ = OpenPrAsync();
+        else
+            ShowConfirm($"Do you want to open pull request for {count} repositories?", OpenPrAsync);
     }
 
     private void ShowConfirmSyncCommitsLevel(List<int> repositoryIds)
     {
-        var x = repositoryIds.Count == 1 ? "1 repository" : $"{repositoryIds.Count} repositories";
-        ShowConfirm($"Do you want to sync commits for {x}?", () => CommitSyncLevelAsync(repositoryIds));
+        if (repositoryIds.Count <= 1)
+            _ = CommitSyncLevelAsync(repositoryIds);
+        else
+            ShowConfirm($"Do you want to sync commits for {repositoryIds.Count} repositories?", () => CommitSyncLevelAsync(repositoryIds));
     }
 
     private void ShowConfirmOpenGitHub(int count, IReadOnlyList<string?> urls)
     {
-        var x = count == 1 ? "1 repository" : $"{count} repositories";
-        ShowConfirm($"Do you want to open GitHub page for {x}?", async () =>
+        async Task OpenGitHubAsync()
         {
             var list = urls.Where(u => !string.IsNullOrEmpty(u)).Cast<string>().ToList();
             await JSRuntime.InvokeVoidAsync("graymoonOpenUrls", list);
-        });
+        }
+        if (count <= 1)
+            _ = OpenGitHubAsync();
+        else
+            ShowConfirm($"Do you want to open GitHub page for {count} repositories?", OpenGitHubAsync);
     }
 
     private void ShowConfirmUpdateDependencies(int repositoryId, int unmatchedCount)
