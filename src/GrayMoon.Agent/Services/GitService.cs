@@ -532,7 +532,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
 
         var messageLines = commitMessage.Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
-        var commitArgs = string.Join(" ", messageLines.Select(line => "-m \"" + line.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\""));
+        var commitArgs = "commit " + string.Join(" ", messageLines.Select(line => "-m \"" + line.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\""));
         var (commitExit, commitOut, commitErr) = await RunProcessAsync("git", commitArgs, repoPath, ct);
         if (commitExit != 0)
         {
