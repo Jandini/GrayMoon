@@ -33,8 +33,10 @@
                     <NavLink href="workspaces" class="workspaces-breadcrumb-link" style="color: var(--text-muted) !important;">Workspace</NavLink><span> | </span>
                     @if (workspaceRepositories.Count > 0)
                     {
+                        var hasFilter = !string.IsNullOrWhiteSpace(searchTerm);
+                        var count = hasFilter ? FilteredWorkspaceRepositories.Count : workspaceRepositories.Count;
                         <span class="repositories-count-link" @onclick="ShowRepositoriesModalAsync" @onclick:preventDefault>
-                            @($"{workspaceRepositories.Count} {(workspaceRepositories.Count == 1 ? "repository" : "repositories")}")
+                            @(hasFilter ? $"{count} {(count == 1 ? "repository" : "repositories")} found" : $"{count} {(count == 1 ? "repository" : "repositories")}")
                         </span>
                     }
                     else if (workspace != null)
