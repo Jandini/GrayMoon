@@ -35,6 +35,7 @@
             <button type="button" class="btn btn-outline-light btn-sm" @onclick="AbortClicked">Abort</button>
         }
     </div>
+    <button type="button" class="loading-overlay__rabbit" aria-label="Toggle overlay style" @onclick="ToggleMatrixOverlay">🐇</button>
 </div>
 
 @code {
@@ -103,6 +104,11 @@
     }
 
     private async Task AbortClicked() => await OnAbort.InvokeAsync();
+
+    private void ToggleMatrixOverlay()
+    {
+        MatrixPreference.Toggle();
+    }
 
     public void Dispose()
     {
