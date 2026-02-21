@@ -572,22 +572,46 @@ public class WorkspaceGitService(
 
             if (totalDeps > 0)
             {
-                onProgressMessage?.Invoke($"Waiting for {totalDeps} dependency(ies)...");
+                var timeoutMinutes = totalDeps * Math.Max(0.1, workspaceOptions.Value.PushWaitDependencyTimeoutMinutesPerDependency);
+                var totalTimeout = TimeSpan.FromMinutes(timeoutMinutes);
+                using var timeoutCts = new CancellationTokenSource(totalTimeout);
+                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+                var linkedToken = linkedCts.Token;
+                var deadline = DateTime.UtcNow + totalTimeout;
                 var found = 0;
+                var lastPollUtc = DateTime.MinValue;
                 while (found < totalDeps)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    found = 0;
-                    foreach (var req in requiredForLevel)
+                    linkedToken.ThrowIfCancellationRequested();
+                    var remaining = deadline - DateTime.UtcNow;
+                    if (remaining <= TimeSpan.Zero)
                     {
-                        var connector = await _connectorRepository.GetByIdAsync(req.MatchedConnectorId!.Value);
-                        if (connector != null && await _nuGetService.PackageVersionExistsAsync(connector, req.PackageId, req.Version, cancellationToken))
-                            found++;
+                        onProgressMessage?.Invoke("Timed out.");
+                        throw new OperationCanceledException("Push wait for dependencies timed out.");
                     }
-                    onProgressMessage?.Invoke($"{found} of {totalDeps} dependencies found in level {level}");
+                    var line1 = found == 0
+                        ? $"Waiting for {totalDeps} {(totalDeps == 1 ? "dependency" : "dependencies")}..."
+                        : $"{found} of {totalDeps} dependencies...";
+                    var totalSec = (int)remaining.TotalSeconds;
+                    var mm = totalSec / 60;
+                    var ss = totalSec % 60;
+                    onProgressMessage?.Invoke($"{line1}\n{mm:D2}:{ss:D2}");
+
+                    if ((DateTime.UtcNow - lastPollUtc).TotalSeconds >= 2)
+                    {
+                        found = 0;
+                        foreach (var req in requiredForLevel)
+                        {
+                            var connector = await _connectorRepository.GetByIdAsync(req.MatchedConnectorId!.Value);
+                            if (connector != null && await _nuGetService.PackageVersionExistsAsync(connector, req.PackageId, req.Version, linkedToken))
+                                found++;
+                        }
+                        lastPollUtc = DateTime.UtcNow;
+                    }
+
                     if (found >= totalDeps)
                         break;
-                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                    await Task.Delay(TimeSpan.FromSeconds(1), linkedToken);
                 }
             }
 

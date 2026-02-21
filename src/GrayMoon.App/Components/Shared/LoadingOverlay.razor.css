@@ -15,6 +15,13 @@
     border-right-color: transparent !important;
 }
 
+.loading-overlay-countdown {
+    color: #858585 !important;
+    margin: 0 0 0.25rem 0;
+    font-size: 1.1rem;
+    text-align: center;
+}
+
 .loading-overlay-message {
     color: #cccccc !important;
     margin: 0;
