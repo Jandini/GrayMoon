@@ -352,6 +352,12 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
             packageDict[packageId] = refVersionNorm;
         }
 
+        var linkLevelByRepo = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .Select(wr => new { wr.RepositoryId, wr.DependencyLevel })
+            .ToDictionaryAsync(x => x.RepositoryId, x => x.DependencyLevel, cancellationToken);
+
         var result = new List<SyncDependenciesRepoPayload>();
         foreach (var p in projects.GroupBy(p => p.RepositoryId).Select(g => g.First()))
         {
@@ -362,10 +368,11 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
             if (!repoToProjectUpdates.TryGetValue(repoId, out var projectUpdatesDict) || projectUpdatesDict.Count == 0)
                 continue;
 
+            var dependencyLevel = linkLevelByRepo.GetValueOrDefault(repoId);
             var projectUpdates = projectUpdatesDict
                 .Select(kv => new SyncDependenciesProjectUpdate(kv.Key, kv.Value.Select(p => (p.Key, p.Value)).ToList()))
                 .ToList();
-            result.Add(new SyncDependenciesRepoPayload(repoId, repoName, projectUpdates));
+            result.Add(new SyncDependenciesRepoPayload(repoId, repoName, dependencyLevel, projectUpdates));
         }
 
         return result.OrderBy(r => r.RepoName, StringComparer.OrdinalIgnoreCase).ToList();

@@ -29,7 +29,7 @@
             <div>
                 <h2>@(workspace?.Name ?? "Workspace")</h2>
                 <p class="text-muted mb-0" style="min-height: 1.5rem;">
-                    <NavLink href="workspaces" class="workspaces-breadcrumb-link" style="color: var(--text-muted) !important;">Workspaces</NavLink><span> | </span>
+                    <NavLink href="workspaces" class="workspaces-breadcrumb-link" style="color: var(--text-muted) !important;">Workspace</NavLink><span> | </span>
                     @if (workspaceRepositories.Count > 0)
                     {
                         <span class="repositories-count-link" @onclick="ShowRepositoriesModalAsync" @onclick:preventDefault>
@@ -53,7 +53,7 @@
                     Branch
                 </button>
                 <button class="btn @(hasUnmatchedDependencies ? "btn-danger" : "btn-secondary")"
-                        @onclick="UpdateDependenciesAsync"
+                        @onclick="OnUpdateClickAsync"
                         disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating)">
                     Update
                 </button>
@@ -287,6 +287,13 @@
                    OnBranchChanged="@OnBranchChangedAsync"
                    OnCheckoutBranch="@CheckoutBranchAsync" />
 
+<UpdateDependenciesModal IsVisible="@showUpdateModal"
+                          IsMultiLevel="@updatePlanIsMultiLevel"
+                          IsBusy="@isUpdating"
+                          OnProceed="@OnUpdateProceedAsync"
+                          OnUpdateOnly="@OnUpdateOnlyAsync"
+                          OnCancel="@CloseUpdateModal" />
+
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
 <LoadingOverlay IsVisible="@isSyncing" Message="@syncProgressMessage" OnAbort="AbortSyncAsync" />
 <LoadingOverlay IsVisible="@isUpdating" Message="@updateProgressMessage" OnAbort="AbortUpdateAsync" />
@@ -345,6 +352,8 @@
     private bool isCreatingBranches = false;
     private string createBranchesProgressMessage = "Creating branches...";
     private CancellationTokenSource? _createBranchesCts;
+    private bool showUpdateModal = false;
+    private bool updatePlanIsMultiLevel = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -530,8 +539,53 @@
         _commitSyncCts?.Cancel();
     }
 
-    /// <summary>User-triggered: refresh project/dependency data and write .csproj files to match referenced versions. Runs in a fresh scope so the DB context sees current state (e.g. UnmatchedDeps from notify) and GetSyncDependenciesPayloadAsync returns correct payload.</summary>
-    private async Task UpdateDependenciesAsync()
+    private void CloseUpdateModal()
+    {
+        showUpdateModal = false;
+        StateHasChanged();
+    }
+
+    /// <summary>Update button click: get update plan; if no updates, toast; else show modal (single vs multi-level).</summary>
+    private async Task OnUpdateClickAsync()
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || isUpdating || isSyncing)
+            return;
+
+        try
+        {
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+            var (payload, isMultiLevel) = await workspaceGitService.GetUpdatePlanAsync(WorkspaceId);
+            if (payload.Count == 0)
+            {
+                ToastService.Show("No dependency updates required.");
+                return;
+            }
+            updatePlanIsMultiLevel = isMultiLevel;
+            showUpdateModal = true;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error getting update plan for workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Could not determine update plan. The GrayMoon Agent may be offline.";
+        }
+    }
+
+    private async Task OnUpdateProceedAsync()
+    {
+        CloseUpdateModal();
+        await RunUpdateCoreAsync(withCommits: true);
+    }
+
+    private async Task OnUpdateOnlyAsync()
+    {
+        CloseUpdateModal();
+        await RunUpdateCoreAsync(withCommits: false);
+    }
+
+    /// <summary>Runs update (refresh, sync deps, optional commits). Overlay shows progress.</summary>
+    private async Task RunUpdateCoreAsync(bool withCommits)
     {
         if (workspace == null || workspaceRepositories.Count == 0 || isUpdating || isSyncing)
             return;
@@ -541,7 +595,7 @@
         _updateCts = new CancellationTokenSource();
 
         isUpdating = true;
-        updateProgressMessage = "Refreshing projects...";
+        updateProgressMessage = "Starting update...";
         errorMessage = null;
         try
         {
@@ -551,11 +605,12 @@
             await using (var scope = ServiceScopeFactory.CreateAsyncScope())
             {
                 var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-                await workspaceGitService.RefreshWorkspaceProjectsAsync(
+                await workspaceGitService.RunUpdateAsync(
                     WorkspaceId,
-                    onProgress: (completed, total, _) =>
+                    withCommits,
+                    onProgressMessage: msg =>
                     {
-                        updateProgressMessage = $"Refreshing projects {completed} of {total}";
+                        updateProgressMessage = msg;
                         InvokeAsync(StateHasChanged);
                     },
                     onRepoError: (repoId, msg) =>
@@ -564,24 +619,6 @@
                         InvokeAsync(StateHasChanged);
                     },
                     cancellationToken: _updateCts.Token);
-
-                updateProgressMessage = "Syncing dependencies...";
-                await InvokeAsync(StateHasChanged);
-                await workspaceGitService.SyncDependenciesAsync(
-                    WorkspaceId,
-                    onProgress: (completed, total, _) =>
-                    {
-                        updateProgressMessage = $"Synced dependencies {completed} of {total}";
-                        InvokeAsync(StateHasChanged);
-                    },
-                    onRepoError: (repoId, msg) =>
-                    {
-                        repositoryErrors[repoId] = msg;
-                        InvokeAsync(StateHasChanged);
-                    },
-                    cancellationToken: _updateCts.Token);
-
-                await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId, _updateCts.Token);
             }
 
             isUpdating = false;

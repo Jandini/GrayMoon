@@ -4,6 +4,7 @@ namespace GrayMoon.App.Models;
 public sealed record SyncDependenciesRepoPayload(
     int RepoId,
     string RepoName,
+    int? DependencyLevel,
     IReadOnlyList<SyncDependenciesProjectUpdate> ProjectUpdates);
 
 /// <summary>Updates to apply to one .csproj file.</summary>
