@@ -1034,8 +1034,9 @@
             else
             {
                 var errorText = await response.Content.ReadAsStringAsync(_commitSyncCts.Token);
-                repositoryErrors[repositoryId] = $"Commit sync failed: {response.StatusCode}";
-                errorMessage = $"Commit sync failed: {response.StatusCode}";
+                var displayError = TryGetErrorMessageFromResponseBody(errorText) ?? $"Commit sync failed: {response.StatusCode}";
+                repositoryErrors[repositoryId] = displayError;
+                errorMessage = displayError;
                 Logger.LogError("CommitSync failed: {StatusCode}, {Error}", response.StatusCode, errorText);
             }
 
@@ -1117,7 +1118,7 @@
                     else
                     {
                         var errorText = await response.Content.ReadAsStringAsync(_commitSyncCts.Token);
-                        repositoryErrors[repositoryId] = $"Commit sync failed: {response.StatusCode}";
+                        repositoryErrors[repositoryId] = TryGetErrorMessageFromResponseBody(errorText) ?? $"Commit sync failed: {response.StatusCode}";
                         Logger.LogError("CommitSync failed for repository {RepositoryId}: {StatusCode}, {Error}", repositoryId, response.StatusCode, errorText);
                     }
                 }
@@ -1431,5 +1432,31 @@
     private string GetDependencyGraphUrl(int repositoryId)
     {
         return $"/workspaces/{WorkspaceId}/dependencies?repo={repositoryId}";
+    }
+
+    /// <summary>Try to extract a user-facing error message from an API response body (JSON or plain text).</summary>
+    private static string? TryGetErrorMessageFromResponseBody(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+            return null;
+        var trimmed = body.Trim();
+        if (trimmed.Length == 0)
+            return null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(trimmed);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("errorMessage", out var em) && em.ValueKind == System.Text.Json.JsonValueKind.String)
+                return em.GetString();
+            if (root.TryGetProperty("detail", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.String)
+                return d.GetString();
+            if (root.TryGetProperty("title", out var t) && t.ValueKind == System.Text.Json.JsonValueKind.String)
+                return t.GetString();
+        }
+        catch
+        {
+            // Not JSON or invalid
+        }
+        return trimmed.Length > 500 ? trimmed.Substring(0, 500) + "…" : trimmed;
     }
 }

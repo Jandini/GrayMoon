@@ -373,3 +373,7 @@
 .repo-error-row .alert strong {
     margin-right: 0.5rem;
 }
+
+.alert-dismissible .btn-close {
+    padding: 1rem 1rem;
+}
