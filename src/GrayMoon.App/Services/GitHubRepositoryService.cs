@@ -73,6 +73,10 @@ public class GitHubRepositoryService(
                 }
                 progress?.Report(uniqueCloneUrls.Count);
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error loading repositories for connector {ConnectorName}", connector.ConnectorName);

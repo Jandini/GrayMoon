@@ -541,6 +541,25 @@
             .ToList();
     }
 
+    /// <summary>Reload workspace after abort/cancel using a fresh scope. Swallows ObjectDisposedException and InvalidOperationException so abort does not cascade errors when the circuit or context is already disposed.</summary>
+    private async Task ReloadWorkspaceDataAfterCancelAsync()
+    {
+        try
+        {
+            await ReloadWorkspaceDataFromFreshScopeAsync();
+        }
+        catch (ObjectDisposedException ex)
+        {
+            Logger.LogDebug(ex, "Reload after cancel skipped (context disposed) for workspace {WorkspaceId}", WorkspaceId);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Logger.LogDebug(ex, "Reload after cancel skipped (invalid operation, e.g. circuit disposed) for workspace {WorkspaceId}", WorkspaceId);
+        }
+        ApplySyncStateFromWorkspace();
+        await InvokeAsync(StateHasChanged);
+    }
+
     /// <summary>Loads workspace using a new scope (fresh DbContext) so we get current DB values and avoid EF cache. Used by RefreshFromSync so the grid shows updated UnmatchedDeps after notify or Update.</summary>
     private async Task ReloadWorkspaceDataFromFreshScopeAsync()
     {
@@ -815,8 +834,7 @@
         catch (OperationCanceledException)
         {
             isPushing = false;
-            await ReloadWorkspaceDataAsync();
-            ApplySyncStateFromWorkspace();
+            await ReloadWorkspaceDataAfterCancelAsync();
         }
         catch (Exception ex)
         {
@@ -913,8 +931,7 @@
         catch (OperationCanceledException)
         {
             isUpdating = false;
-            await ReloadWorkspaceDataAsync();
-            ApplySyncStateFromWorkspace();
+            await ReloadWorkspaceDataAfterCancelAsync();
         }
         catch (Exception ex)
         {
@@ -979,8 +996,7 @@
         catch (OperationCanceledException)
         {
             isUpdating = false;
-            await ReloadWorkspaceDataAsync();
-            ApplySyncStateFromWorkspace();
+            await ReloadWorkspaceDataAfterCancelAsync();
         }
         catch (Exception ex)
         {
@@ -1159,8 +1175,7 @@
         catch (OperationCanceledException)
         {
             // Sync was cancelled - reload workspace to restore pre-sync data (onProgress may have partially updated in-memory state)
-            await ReloadWorkspaceDataAsync();
-            ApplySyncStateFromWorkspace();
+            await ReloadWorkspaceDataAfterCancelAsync();
         }
         catch (Exception ex)
         {
@@ -1231,8 +1246,7 @@
         }
         catch (OperationCanceledException)
         {
-            await ReloadWorkspaceDataAsync();
-            ApplySyncStateFromWorkspace();
+            await ReloadWorkspaceDataAfterCancelAsync();
         }
         catch (Exception ex)
         {
@@ -1313,8 +1327,7 @@
         catch (OperationCanceledException)
         {
             // Operation was cancelled
-            await ReloadWorkspaceDataAsync();
-            ApplySyncStateFromWorkspace();
+            await ReloadWorkspaceDataAfterCancelAsync();
         }
         catch (Exception ex)
         {
@@ -1406,8 +1419,7 @@
         catch (OperationCanceledException)
         {
             // Operation was cancelled
-            await ReloadWorkspaceDataAsync();
-            ApplySyncStateFromWorkspace();
+            await ReloadWorkspaceDataAfterCancelAsync();
         }
         catch (Exception ex)
         {
@@ -1520,8 +1532,7 @@
         }
         catch (OperationCanceledException)
         {
-            await ReloadWorkspaceDataAsync();
-            ApplySyncStateFromWorkspace();
+            await ReloadWorkspaceDataAfterCancelAsync();
         }
         catch (Exception ex)
         {
@@ -1608,8 +1619,7 @@
         catch (OperationCanceledException)
         {
             // Operation was cancelled
-            await ReloadWorkspaceDataAsync();
-            ApplySyncStateFromWorkspace();
+            await ReloadWorkspaceDataAfterCancelAsync();
         }
         catch (Exception ex)
         {
