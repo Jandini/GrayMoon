@@ -20,6 +20,7 @@
 @inject IHttpClientFactory HttpClientFactory
 @inject IJSRuntime JSRuntime
 @inject IToastService ToastService
+@inject WorkspaceFileVersionService FileVersionService
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
 <PageTitle>@(workspace?.Name ?? "Workspace")</PageTitle>
@@ -652,6 +653,24 @@
         _updateCts?.Cancel();
     }
 
+    /// <summary>
+    /// Silently attempts to update all configured file versions after a dependency update.
+    /// Logs warnings on failure; skips gracefully when no files are configured.
+    /// </summary>
+    private async Task TryUpdateFileVersionsAsync()
+    {
+        try
+        {
+            var (_, _, error) = await FileVersionService.UpdateAllVersionsAsync(WorkspaceId);
+            if (error != null && !error.Contains("No version configurations"))
+                Logger.LogWarning("Auto file-version update after dependency update: {Error}", error);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Auto file-version update failed after dependency update for workspace {WorkspaceId}", WorkspaceId);
+        }
+    }
+
     private void AbortPushAsync()
     {
         _pushCts?.Cancel();
@@ -926,6 +945,7 @@
 
             isUpdating = false;
             await InvokeAsync(StateHasChanged);
+            await TryUpdateFileVersionsAsync();
             await RefreshFromSync();
         }
         catch (OperationCanceledException)
@@ -991,6 +1011,7 @@
 
             isUpdating = false;
             await InvokeAsync(StateHasChanged);
+            await TryUpdateFileVersionsAsync();
             await RefreshFromSync();
         }
         catch (OperationCanceledException)
