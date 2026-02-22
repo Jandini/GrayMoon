@@ -24,9 +24,9 @@
                     <div class="mb-3 version-config-editor-wrap">
                         <label class="form-label d-flex align-items-baseline gap-2">
                             Version Pattern
-                            @if (!string.IsNullOrWhiteSpace(patternText) && validTokenCount > 0 && invalidTokens.Count == 0)
+                            @if (!string.IsNullOrWhiteSpace(patternText) && validTokenCount > 0)
                             {
-                                <span class="version-config-token-count">@validTokenCount token(s) resolved</span>
+                                <span class="version-config-token-count">@validTokenCount token@(validTokenCount > 1 ? "s" : "") resolved</span>
                             }
                         </label>
                         <textarea class="form-control version-config-textarea font-monospace"
