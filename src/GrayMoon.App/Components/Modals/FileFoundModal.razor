@@ -11,7 +11,7 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Find Files</h5>
+                    <h5 class="modal-title">Add Files</h5>
                     <button type="button" class="btn-close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body file-found-modal-body">
@@ -23,14 +23,38 @@
                                    value="@searchPattern"
                                    @oninput="OnSearchInput"
                                    @ref="searchInputRef" />
-                            <select class="form-select ms-2" style="width: auto; min-width: 180px;" @bind="selectedRepositoryName">
-                                <option value="">All repositories</option>
-                                @foreach (var repo in WorkspaceRepos)
+                            <div class="file-found-repo-dropdown ms-2 @(showRepoMenu ? "show" : "")">
+                                <button type="button"
+                                        class="btn btn-outline-secondary dropdown-toggle file-found-repo-toggle"
+                                        aria-expanded="@showRepoMenu"
+                                        title="@(string.IsNullOrEmpty(selectedRepositoryName) ? "All repositories" : selectedRepositoryName)"
+                                        @onclick="ToggleRepoMenu">
+                                    <span class="file-found-repo-toggle-label">@(string.IsNullOrEmpty(selectedRepositoryName) ? "All repositories" : selectedRepositoryName)</span>
+                                </button>
+                                <div class="file-found-repo-menu">
+                                    <button type="button"
+                                            class="dropdown-item file-found-repo-option @(string.IsNullOrEmpty(selectedRepositoryName) ? "active" : "")"
+                                            @onclick="() => SelectRepo(null)">
+                                        All repositories
+                                    </button>
+                                    @foreach (var repo in WorkspaceRepos)
+                                    {
+                                        <button type="button"
+                                                class="dropdown-item file-found-repo-option @(selectedRepositoryName == repo.RepositoryName ? "active" : "")"
+                                                @onclick="() => SelectRepo(repo.RepositoryName)">
+                                            @repo.RepositoryName
+                                        </button>
+                                    }
+                                </div>
+                                @if (showRepoMenu)
                                 {
-                                    <option value="@repo.RepositoryName">@repo.RepositoryName</option>
+                                    <div class="file-found-repo-backdrop" @onclick="CloseRepoMenu"></div>
                                 }
-                            </select>
+                            </div>
                         </div>
+                        <small class="form-text text-muted d-block mb-2 file-found-search-note">
+                            Use * and ? for wildcards. Search skips .git, bin, and obj. First 20 matching files are shown.
+                        </small>
                         <div class="repository-list border rounded file-found-grid-wrap">
                             @if (!HasRepos)
                             {
@@ -49,26 +73,25 @@
                                             </th>
                                             <th>File Name</th>
                                             <th>File Path</th>
-                                            <th>Repository</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         @if (searchResults == null && !isSearching)
                                         {
                                             <tr>
-                                                <td colspan="4" class="text-muted p-2">Type a file name or pattern to search.</td>
+                                                <td colspan="3" class="text-muted p-2">Type a file name or pattern to search.</td>
                                             </tr>
                                         }
                                         else if (isSearching)
                                         {
                                             <tr>
-                                                <td colspan="4" class="text-muted p-2">Searching...</td>
+                                                <td colspan="3" class="text-muted p-2">Searching...</td>
                                             </tr>
                                         }
                                         else if (searchError != null)
                                         {
                                             <tr>
-                                                <td colspan="4" class="p-2">
+                                                <td colspan="3" class="p-2">
                                                     <div class="alert alert-danger mb-0">@searchError</div>
                                                 </td>
                                             </tr>
@@ -81,6 +104,8 @@
                                                 var filePath = file.FilePath ?? "";
                                                 var key = (repoName, filePath);
                                                 var isSelected = selectedKeys.Contains(key);
+                                                var pathWithoutFileName = GetPathWithoutFileName(filePath);
+                                                var displayPath = string.IsNullOrEmpty(pathWithoutFileName) ? repoName : repoName + "/" + pathWithoutFileName;
                                                 <tr>
                                                     <td class="col-select">
                                                         <input class="form-check-input workspace-repo-checkbox"
@@ -94,13 +119,8 @@
                                                         </span>
                                                     </td>
                                                     <td>
-                                                        <span class="repo-name-cell" title="@(file.FilePath ?? "-")">
-                                                            @(file.FilePath ?? "-")
-                                                        </span>
-                                                    </td>
-                                                    <td>
-                                                        <span class="repo-name-cell" title="@(file.RepositoryName ?? "-")">
-                                                            @(file.RepositoryName ?? "-")
+                                                        <span class="repo-name-cell" title="@displayPath">
+                                                            @displayPath
                                                         </span>
                                                     </td>
                                                 </tr>
@@ -109,7 +129,7 @@
                                         else
                                         {
                                             <tr>
-                                                <td colspan="4" class="text-muted p-2">@(string.IsNullOrEmpty(selectedRepositoryName) ? "No files match." : "No files match. Try a different pattern or repository.")</td>
+                                                <td colspan="3" class="text-muted p-2">@(string.IsNullOrEmpty(selectedRepositoryName) ? "No files match." : "No files match. Try a different pattern or repository.")</td>
                                             </tr>
                                         }
                                     </tbody>
@@ -117,16 +137,15 @@
                             }
                         </div>
                     </div>
-                    @if (selectedKeys.Count > 0)
-                    {
-                        <p class="text-muted small mb-0 mt-2">@selectedKeys.Count file(s) selected.</p>
-                    }
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
-                    <button type="button" class="btn btn-primary" @onclick="OnAddClick" disabled="@(selectedKeys.Count == 0)">
-                        Add
-                    </button>
+                <div class="modal-footer d-flex align-items-center justify-content-between">
+                    <span class="text-muted small">@(selectedKeys.Count > 0 ? $"{selectedKeys.Count} file(s) selected." : "No files selected.")</span>
+                    <div>
+                        <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
+                        <button type="button" class="btn btn-primary" @onclick="OnAddClick" disabled="@(selectedKeys.Count == 0)">
+                            Add
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -145,6 +164,7 @@
     private HashSet<(string RepositoryName, string FilePath)> selectedKeys = new();
     private CancellationTokenSource? _debounceCts;
     private bool _wasVisible;
+    private bool showRepoMenu;
 
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public int WorkspaceId { get; set; }
@@ -282,6 +302,26 @@
         }
     }
 
+    private void ToggleRepoMenu()
+    {
+        showRepoMenu = !showRepoMenu;
+        StateHasChanged();
+    }
+
+    private void CloseRepoMenu()
+    {
+        showRepoMenu = false;
+        StateHasChanged();
+    }
+
+    private async Task SelectRepo(string? name)
+    {
+        selectedRepositoryName = name;
+        showRepoMenu = false;
+        StateHasChanged();
+        await SearchAsync();
+    }
+
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Escape")
@@ -294,5 +334,13 @@
         if (string.IsNullOrEmpty(trimmed)) return trimmed;
         if (trimmed.Contains('*') || trimmed.Contains('?')) return trimmed;
         return trimmed + "*";
+    }
+
+    /// <summary>Returns the file path without the file name (directory part only). Uses / as separator.</summary>
+    private static string GetPathWithoutFileName(string filePath)
+    {
+        if (string.IsNullOrEmpty(filePath)) return "";
+        var lastSlash = filePath.LastIndexOf('/');
+        return lastSlash >= 0 ? filePath.Substring(0, lastSlash) : "";
     }
 }

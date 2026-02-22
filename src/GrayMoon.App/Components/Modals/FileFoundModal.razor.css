@@ -8,7 +8,104 @@
 
 /* More space between search row and grid */
 .file-found-search-row {
-    margin-bottom: 1rem;
+    margin-bottom: 0.25rem;
+}
+
+/* Repository dropdown: custom so we can style scrollbar and keep it inside width */
+.file-found-repo-dropdown {
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1050;
+}
+
+.file-found-repo-toggle {
+    min-width: 20rem;
+    width: 25rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.file-found-repo-toggle-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+/* Menu: same width as button, right-aligned, scrollbar inside (does not stick out) */
+.file-found-repo-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 2px;
+    width: 100%;
+    box-sizing: border-box;
+    max-height: 16rem;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: var(--bs-dropdown-bg, #252526);
+    border: 1px solid rgba(0,0,0,.15);
+    border-radius: 0.25rem;
+    box-shadow: 0 0.5rem 1rem rgba(0,0,0,.15);
+    padding: 0;
+    z-index: 1;
+}
+
+.file-found-repo-dropdown.show .file-found-repo-menu {
+    display: block;
+}
+
+/* Gray scrollbar inside menu (does not stick out) */
+.file-found-repo-menu::-webkit-scrollbar {
+    width: 8px;
+}
+
+.file-found-repo-menu::-webkit-scrollbar-track {
+    background: var(--bg-card, #252526);
+}
+
+.file-found-repo-menu::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.file-found-repo-menu::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}
+
+.file-found-repo-menu {
+    scrollbar-width: thin;
+    scrollbar-color: #5a5a5a var(--bg-card, #252526);
+}
+
+.file-found-repo-option {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    padding: 0.25rem 1rem;
+    color: var(--bs-body-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.file-found-repo-option:hover,
+.file-found-repo-option.active {
+    background: var(--bs-dropdown-link-hover-bg, #2d2d30);
+    color: var(--bs-dropdown-link-hover-color);
+}
+
+.file-found-repo-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background: transparent;
 }
 
 .file-found-grid-wrap {
@@ -21,8 +118,7 @@
 }
 
 .repository-list:has(.repository-grid) {
-    height: min(320px, calc(50vh - 100px));
-    max-height: min(320px, calc(50vh - 100px));
+    height: calc(70vh - 120px);
     display: flex;
     flex-direction: column;
 }
@@ -131,17 +227,12 @@
 
 .repository-grid th:nth-child(2),
 .repository-grid td:nth-child(2) {
-    width: 25%;
+    width: 30%;
 }
 
 .repository-grid th:nth-child(3),
 .repository-grid td:nth-child(3) {
-    width: 45%;
-}
-
-.repository-grid th:nth-child(4),
-.repository-grid td:nth-child(4) {
-    width: 20%;
+    width: calc(70% - 40px);
 }
 
 .repo-name-cell {
@@ -154,12 +245,10 @@
 ::deep .modal-dialog {
     max-height: calc(100vh - 2rem);
     margin: 1rem auto;
-    min-height: 560px;
 }
 
 ::deep .modal-content {
     max-height: calc(100vh - 2rem);
-    min-height: 560px;
 }
 
 ::deep .modal-body.file-found-modal-body {
