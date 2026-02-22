@@ -26,10 +26,10 @@
 
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div>
-                <h2>@(workspace?.Name ?? "Workspace")</h2>
-                <p class="text-muted mb-0" style="min-height: 1.5rem;">
+        <div class="workspace-repos-header">
+            <div class="workspace-repos-title-row">
+                <h2 class="workspace-repos-title">@(workspace?.Name ?? "Workspace")</h2>
+                <p class="text-muted mb-0 workspace-repos-subtitle">
                     <NavLink href="workspaces" class="workspaces-breadcrumb-link" style="color: var(--text-muted) !important;">Workspace</NavLink><span> | </span>
                     @if (workspaceRepositories.Count > 0)
                     {
@@ -49,23 +49,23 @@
                     }
                 </p>
             </div>
-            <div class="d-flex gap-2 align-items-center">
-                <input class="form-control" style="min-width: 12rem;" placeholder="Search repositories..."
+            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
+                <input id="workspace-repos-search" class="form-control workspace-repos-search" placeholder="Search repositories..."
                        @bind="searchTerm" @bind:event="oninput" />
-                <button class="btn btn-outline-secondary"
-                        @onclick="ShowBranchModalAsync"
-                        disabled="@(isSyncing || isUpdating || isPushing || workspaceRepositories.Count == 0)">
-                    Branch
+                <button class="btn @(isPushRecommended ? "btn-warning" : "btn-outline-secondary")"
+                        @onclick="OnPushClickAsync"
+                        disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating || isPushing)">
+                    Push
                 </button>
                 <button class="btn @(hasUnmatchedDependencies ? "btn-danger" : "btn-outline-secondary")"
                         @onclick="OnUpdateClickAsync"
                         disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating || isPushing)">
                     Update
                 </button>
-                <button class="btn @(isPushRecommended ? "btn-warning" : "btn-outline-secondary")"
-                        @onclick="OnPushClickAsync"
-                        disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating || isPushing)">
-                    Push
+                <button class="btn btn-outline-secondary"
+                        @onclick="ShowBranchModalAsync"
+                        disabled="@(isSyncing || isUpdating || isPushing || workspaceRepositories.Count == 0)">
+                    Branch
                 </button>
                 <button class="btn @(isOutOfSync == true ? "btn-danger" : "btn-primary")"
                         @onclick="SyncAsync"
@@ -345,6 +345,7 @@
 
 <PushModal IsVisible="@showPushModal"
           IsMultiLevel="@pushPlanIsMultiLevel"
+          RepositoryCount="@pushPlanRepositoryCount"
           IsBusy="@isPushing"
           OnProceed="@OnPushProceedAsync"
           OnCancel="@ClosePushModal" />
@@ -382,6 +383,8 @@
     private CancellationTokenSource? _pushCts;
     private bool showPushModal = false;
     private bool pushPlanIsMultiLevel = false;
+    private int pushPlanRepositoryCount = 0;
+    private IReadOnlySet<int>? pushPlanRepoIds = null;
     private bool? isOutOfSync = null;
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0);
     private bool isPushRecommended => workspaceRepositories.Any(wr => (wr.OutgoingCommits ?? 0) > 0);
@@ -442,6 +445,10 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            try { await JSRuntime.InvokeVoidAsync("focusElement", "workspace-repos-search"); } catch { /* ignore */ }
+        }
         if (firstRender && workspace != null && errorMessage == null)
         {
             _hubConnection = new HubConnectionBuilder()
@@ -716,7 +723,7 @@
         ShowConfirm("Do you want to sync commits for this repository?", () => CommitSyncAsync(repositoryId));
     }
 
-    /// <summary>Push button click: get push plan; if more than one repo show confirmation modal; else run push directly.</summary>
+    /// <summary>Push button click: get push plan; filter to repos with unpushed commits; if more than one repo show confirmation modal; else run push directly.</summary>
     private async Task OnPushClickAsync()
     {
         if (workspace == null || workspaceRepositories.Count == 0 || isPushing || isSyncing || isUpdating)
@@ -726,21 +733,29 @@
         {
             await using var scope = ServiceScopeFactory.CreateAsyncScope();
             var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            var (payload, isMultiLevel) = await workspaceGitService.GetPushPlanAsync(WorkspaceId);
-            if (payload.Count == 0)
+            var (payload, _) = await workspaceGitService.GetPushPlanAsync(WorkspaceId);
+            var repoIdsWithUnpushed = workspaceRepositories
+                .Where(wr => (wr.OutgoingCommits ?? 0) > 0)
+                .Select(wr => wr.RepositoryId)
+                .ToHashSet();
+            var toPush = payload.Where(p => repoIdsWithUnpushed.Contains(p.RepoId)).ToList();
+            if (toPush.Count == 0)
             {
                 ToastService.Show("No repositories to push.");
                 return;
             }
-            pushPlanIsMultiLevel = isMultiLevel;
-            if (payload.Count > 1)
+            pushPlanRepoIds = repoIdsWithUnpushed;
+            var levels = toPush.Select(p => p.DependencyLevel ?? 0).Distinct().ToList();
+            pushPlanIsMultiLevel = levels.Count > 1;
+            pushPlanRepositoryCount = toPush.Count;
+            if (toPush.Count == 1)
             {
-                showPushModal = true;
-                await InvokeAsync(StateHasChanged);
+                await RunPushCoreAsync();
             }
             else
             {
-                await RunPushCoreAsync();
+                showPushModal = true;
+                await InvokeAsync(StateHasChanged);
             }
         }
         catch (Exception ex)
@@ -779,6 +794,7 @@
                 var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
                 await workspaceGitService.RunPushAsync(
                     WorkspaceId,
+                    repoIdsToPush: pushPlanRepoIds,
                     onProgressMessage: msg =>
                     {
                         pushProgressMessage = msg;

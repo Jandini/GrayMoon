@@ -521,9 +521,10 @@ public class WorkspaceGitService(
             await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
     }
 
-    /// <summary>Runs dependency-synchronized push: sync package registries, then push by level (lowest first). For each level, waits until required packages are in registry (or pushes all at once if not possible), then pushes all repos at that level in parallel. Ensures branch is upstreamed even when there are no commits to push.</summary>
+    /// <summary>Runs dependency-synchronized push: sync package registries, then push by level (lowest first). For each level, waits until required packages are in registry (or pushes all at once if not possible), then pushes all repos at that level in parallel. Ensures branch is upstreamed even when there are no commits to push. When <paramref name="repoIdsToPush"/> is set, only those repos are pushed.</summary>
     public async Task RunPushAsync(
         int workspaceId,
+        IReadOnlySet<int>? repoIdsToPush = null,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
         CancellationToken cancellationToken = default)
@@ -541,7 +542,10 @@ public class WorkspaceGitService(
         if (_packageRegistrySyncService != null)
             await _packageRegistrySyncService.SyncWorkspacePackageRegistriesAsync(workspaceId, cancellationToken: cancellationToken);
 
-        var payload = await _workspaceProjectRepository.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var fullPayload = await _workspaceProjectRepository.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var payload = repoIdsToPush is { Count: > 0 }
+            ? fullPayload.Where(p => repoIdsToPush.Contains(p.RepoId)).ToList()
+            : fullPayload;
         if (payload.Count == 0)
         {
             onProgressMessage?.Invoke("No repositories to push.");

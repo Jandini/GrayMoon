@@ -13,7 +13,7 @@
                     @if (IsMultiLevel)
                     {
                         <p class="mb-0">
-                            Repositories span multiple dependency levels. Push will run from lowest to highest level. At each level, the app will wait until required packages are available in the package registry before pushing.
+                            Repositories have multiple dependency levels. Push will run from lowest to highest. At each level, the app waits until required packages are available in the registry before continuing.
                         </p>
                         <p class="mb-0 mt-2">
                             <strong>Proceed</strong> with dependency-synchronized push?
@@ -22,7 +22,7 @@
                     else
                     {
                         <p class="mb-0">
-                            Push all repositories and set upstream for the current branch (even when there are no commits to push).
+                            You are about to push @RepositoryCount @(RepositoryCount == 1 ? "repository" : "repositories")...
                         </p>
                     }
                 </div>
@@ -46,6 +46,7 @@
 @code {
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public bool IsMultiLevel { get; set; }
+    [Parameter] public int RepositoryCount { get; set; }
     [Parameter] public bool IsBusy { get; set; }
     [Parameter] public EventCallback OnProceed { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
