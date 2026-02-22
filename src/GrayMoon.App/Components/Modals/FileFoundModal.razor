@@ -11,59 +11,49 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Find and add files</h5>
+                    <h5 class="modal-title">Find Files</h5>
                     <button type="button" class="btn-close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body">
                     <div class="mb-3">
-                        <label class="form-label mb-2">Search files</label>
-                        <div class="d-flex align-items-center gap-2 mb-2">
-                            <input class="form-control flex-grow-1"
-                                   placeholder="File name or pattern (e.g. *.cs, *.csproj)"
-                                   @bind="searchPattern"
-                                   @bind:event="oninput"
+                        <div class="d-flex align-items-center mb-1">
+                            <input class="form-control"
+                                   placeholder="File name or pattern..."
+                                   value="@searchPattern"
+                                   @oninput="OnSearchInput"
                                    @ref="searchInputRef" />
-                            <select class="form-select" style="width: auto; min-width: 180px;" @bind="selectedRepositoryName">
+                            <select class="form-select ms-2" style="width: auto; min-width: 180px;" @bind="selectedRepositoryName">
                                 <option value="">All repositories</option>
                                 @foreach (var repo in WorkspaceRepos)
                                 {
                                     <option value="@repo.RepositoryName">@repo.RepositoryName</option>
                                 }
                             </select>
-                            <button type="button"
-                                    class="btn btn-outline-primary"
-                                    @onclick="SearchAsync"
-                                    disabled="@(isSearching || !HasRepos)">
-                                Search
-                            </button>
                         </div>
-                        <small class="form-text text-muted d-block mb-2">
-                            Use * and ? for wildcards. Search skips .git, bin, and obj. Agent must be running.
-                        </small>
-                        <div class="file-search-results border rounded">
+                        <div class="repository-list border rounded">
                             @if (!HasRepos)
                             {
-                                <div class="text-muted p-3">No repositories in this workspace. Add repositories first.</div>
+                                <div class="text-muted p-2">No repositories in this workspace. Add repositories first.</div>
                             }
                             else if (searchResults == null && !isSearching)
                             {
-                                <div class="text-muted p-3">Enter a pattern and click Search.</div>
+                                <div class="text-muted p-2">Type a file name or pattern to search.</div>
                             }
                             else if (isSearching)
                             {
-                                <div class="text-muted p-3">Searching...</div>
+                                <div class="text-muted p-2">Searching...</div>
                             }
                             else if (searchError != null)
                             {
-                                <div class="alert alert-danger m-2">@searchError</div>
+                                <div class="alert alert-danger m-2 mb-0">@searchError</div>
                             }
                             else if (searchResults?.Files?.Count > 0)
                             {
-                                <table class="table table-sm mb-0 workspaces-table resizable-columns">
+                                <table class="table table-sm mb-0 repository-grid workspaces-table resizable-columns">
                                     <thead class="table-dark">
                                         <tr>
                                             <th class="col-select">
-                                                <input class="form-check-input"
+                                                <input class="form-check-input workspace-repo-checkbox"
                                                        type="checkbox"
                                                        checked="@AreAllResultsSelected()"
                                                        @onchange="ToggleAllResults" />
@@ -82,14 +72,26 @@
                                             var isSelected = selectedKeys.Contains(key);
                                             <tr>
                                                 <td class="col-select">
-                                                    <input class="form-check-input"
+                                                    <input class="form-check-input workspace-repo-checkbox"
                                                            type="checkbox"
                                                            checked="@isSelected"
                                                            @onchange="() => ToggleFile(key, !isSelected)" />
                                                 </td>
-                                                <td>@(file.FileName ?? "-")</td>
-                                                <td class="text-muted">@(file.FilePath ?? "-")</td>
-                                                <td>@(file.RepositoryName ?? "-")</td>
+                                                <td>
+                                                    <span class="repo-name-cell" title="@(file.FileName ?? "-")">
+                                                        @(file.FileName ?? "-")
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <span class="repo-name-cell" title="@(file.FilePath ?? "-")">
+                                                        @(file.FilePath ?? "-")
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <span class="repo-name-cell" title="@(file.RepositoryName ?? "-")">
+                                                        @(file.RepositoryName ?? "-")
+                                                    </span>
+                                                </td>
                                             </tr>
                                         }
                                     </tbody>
@@ -97,7 +99,7 @@
                             }
                             else
                             {
-                                <div class="text-muted p-3">No files match. Try a different pattern or repository.</div>
+                                <div class="text-muted p-2">No files match. Try a different pattern or repository.</div>
                             }
                         </div>
                     </div>
@@ -118,13 +120,17 @@
 }
 
 @code {
+    private const int DebounceMs = 400;
+
     private ElementReference searchInputRef;
-    private string searchPattern = "*";
+    private string searchPattern = "";
     private string? selectedRepositoryName;
     private AgentSearchFilesResponse? searchResults;
     private string? searchError;
     private bool isSearching;
     private HashSet<(string RepositoryName, string FilePath)> selectedKeys = new();
+    private CancellationTokenSource? _debounceCts;
+    private bool _wasVisible;
 
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public int WorkspaceId { get; set; }
@@ -133,6 +139,56 @@
     [Parameter] public EventCallback OnCancel { get; set; }
 
     private bool HasRepos => WorkspaceRepos?.Count > 0;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible && !_wasVisible)
+        {
+            _wasVisible = true;
+            try { await searchInputRef.FocusAsync(); } catch { /* ignore */ }
+        }
+        else if (!IsVisible)
+        {
+            _wasVisible = false;
+        }
+    }
+
+    private async Task OnSearchInput(ChangeEventArgs e)
+    {
+        searchPattern = e.Value?.ToString() ?? "";
+        _debounceCts?.Cancel();
+        _debounceCts = new CancellationTokenSource();
+        var cts = _debounceCts;
+        try
+        {
+            await Task.Delay(DebounceMs, cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        await InvokeAsync(async () =>
+        {
+            if (cts.IsCancellationRequested) return;
+            var trimmed = searchPattern.Trim();
+            if (trimmed == "*" || string.IsNullOrEmpty(trimmed))
+            {
+                if (trimmed == "*")
+                {
+                    searchError = "Enter a file name or pattern. Searching all files is not allowed.";
+                    searchResults = new AgentSearchFilesResponse { Files = new List<AgentSearchFileItemDto>() };
+                }
+                else
+                {
+                    searchError = null;
+                    searchResults = null;
+                }
+                StateHasChanged();
+                return;
+            }
+            await SearchAsync();
+        });
+    }
 
     private bool AreAllResultsSelected()
     {
@@ -161,13 +217,14 @@
     private async Task SearchAsync()
     {
         if (!HasRepos || isSearching) return;
+        var trimmed = searchPattern.Trim();
+        if (trimmed == "*" || string.IsNullOrEmpty(trimmed)) return;
         searchError = null;
         isSearching = true;
         StateHasChanged();
         try
         {
-            var pattern = string.IsNullOrWhiteSpace(searchPattern) ? "*" : searchPattern.Trim();
-            var data = await FileSearchService.SearchAsync(WorkspaceId, pattern, selectedRepositoryName);
+            var data = await FileSearchService.SearchAsync(WorkspaceId, trimmed, selectedRepositoryName);
             if (data != null)
             {
                 searchResults = data;

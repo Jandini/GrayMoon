@@ -23,7 +23,7 @@ public sealed class SearchFilesCommand(
 
         return new SearchFilesResponse
         {
-            Files = files.ToArray()
+            Files = files.Take(20).ToArray()
         };
     }
 }

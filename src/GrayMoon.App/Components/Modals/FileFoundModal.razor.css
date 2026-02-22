@@ -1,0 +1,156 @@
+/* Match WorkspaceRepositoriesModal grid: scrollable list, sticky header, horizontal scroll for long paths */
+.workspaces-table th,
+.workspaces-table td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.repository-list {
+    min-height: 200px;
+    overflow: hidden;
+}
+
+.repository-list:has(.repository-grid) {
+    height: min(387px, calc(55vh - 33px));
+    max-height: min(232px, calc(55vh - 33px));
+    display: flex;
+    flex-direction: column;
+}
+
+.repository-list.border {
+    border-color: #5a5a5a !important;
+    border-radius: 6px;
+}
+
+.repository-list .repository-grid {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+    height: 100%;
+}
+
+.repository-grid thead,
+.repository-grid tbody tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
+.repository-grid thead {
+    flex-shrink: 0;
+}
+
+.repository-grid tbody {
+    display: block;
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: auto;
+}
+
+.repository-grid tbody::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.repository-grid tbody::-webkit-scrollbar-track {
+    background: var(--bg-card, #252526);
+}
+
+.repository-grid tbody::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.repository-grid tbody::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}
+
+.repository-grid tbody {
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a var(--bg-card, #252526);
+}
+
+.repository-grid thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.repository-grid {
+    border: none;
+    border-collapse: collapse;
+    background-color: #252526;
+}
+
+.repository-grid,
+.repository-grid th,
+.repository-grid td {
+    border-color: #3c3c3c;
+}
+
+.repository-grid th {
+    background-color: #2d2d30;
+    color: #f1f1f1;
+}
+
+.repository-grid td {
+    background-color: #252526;
+    color: #d4d4d4;
+}
+
+.col-select {
+    width: 40px;
+}
+
+.workspace-repo-checkbox {
+    background-color: var(--bg-input) !important;
+    border-color: var(--border-light) !important;
+}
+
+.workspace-repo-checkbox:checked {
+    background-color: var(--accent-blue) !important;
+    border-color: var(--accent-blue) !important;
+}
+
+.repository-grid th.col-select,
+.repository-grid td.col-select {
+    padding-left: 12px;
+}
+
+.repository-grid th:nth-child(2),
+.repository-grid td:nth-child(2) {
+    width: 25%;
+}
+
+.repository-grid th:nth-child(3),
+.repository-grid td:nth-child(3) {
+    width: 45%;
+}
+
+.repository-grid th:nth-child(4),
+.repository-grid td:nth-child(4) {
+    width: 20%;
+}
+
+.repo-name-cell {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+::deep .modal-dialog {
+    max-height: calc(100vh - 2rem);
+    margin: 1rem auto;
+}
+
+::deep .modal-content {
+    max-height: calc(100vh - 2rem);
+}
+
+::deep .modal-body {
+    overflow-y: auto;
+}
