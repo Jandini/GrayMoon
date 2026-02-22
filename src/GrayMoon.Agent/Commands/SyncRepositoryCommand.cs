@@ -35,6 +35,7 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
         int? incomingCommits = null;
         if (git.DirectoryExists(repoPath))
         {
+            await git.AddSafeDirectoryAsync(repoPath, cancellationToken);
             // FindAsync only reads .csproj files; safe to run in parallel with git operations.
             var findProjectsTask = csProjFileService.FindAsync(repoPath, cancellationToken);
 

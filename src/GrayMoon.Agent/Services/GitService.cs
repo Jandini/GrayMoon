@@ -59,14 +59,38 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         var fullPath = Path.GetFullPath(repoPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var pathForGit = fullPath.Replace('\\', '/'); // Git accepts forward slashes on all platforms
-        var addArgs = $"config --local --add safe.directory \"{pathForGit.Replace("\"", "\\\"")}\"";
 
+        var (isSafe, _) = await CheckRepoSafeAsync(repoPath, pathForGit, ct);
+        logger.LogDebug("Git repo safety check: {Path} -> {Result}", pathForGit, isSafe ? "safe" : "not safe");
+
+        if (isSafe)
+        {
+            logger.LogDebug("Repository already safe, skipping safe.directory update: {Path}", pathForGit);
+            return;
+        }
+
+        var addArgs = $"config --local --add safe.directory \"{pathForGit.Replace("\"", "\\\"")}\"";
         var (exitCode, stdout, stderr) = await SafeDirectoryRetryPipeline.ExecuteAsync(
             async (cancellationToken) => await RunProcessAsync("git", addArgs, repoPath, cancellationToken),
             ct);
 
-        if (exitCode != 0)
+        if (exitCode == 0)
+            logger.LogDebug("Added safe.directory for repository: {Path}", pathForGit);
+        else
             logger.LogError("Git config safe.directory failed. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", exitCode, stdout, stderr);
+    }
+
+    /// <summary>
+    /// Uses git rev-parse --is-inside-work-tree: exit 0 = repo is safe, exit 128 with dubious ownership = not safe.
+    /// </summary>
+    private async Task<(bool IsSafe, bool IsDubiousOwnership)> CheckRepoSafeAsync(string repoPath, string pathForGit, CancellationToken ct)
+    {
+        var (exitCode, _, stderr) = await RunProcessAsync("git", "rev-parse --is-inside-work-tree", repoPath, ct);
+        if (exitCode == 0)
+            return (true, false);
+        var err = stderr ?? "";
+        var isDubious = exitCode == 128 && (err.Contains("dubious ownership", StringComparison.OrdinalIgnoreCase) || err.Contains("safe.directory", StringComparison.OrdinalIgnoreCase));
+        return (false, isDubious);
     }
 
     private static readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> SafeDirectoryRetryPipeline =

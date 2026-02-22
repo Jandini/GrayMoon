@@ -30,7 +30,7 @@
             <div class="workspace-repos-title-row">
                 <h2 class="workspace-repos-title">@(workspace?.Name ?? "Workspace")</h2>
                 <p class="text-muted mb-0 workspace-repos-subtitle">
-                    <NavLink href="workspaces" class="workspaces-breadcrumb-link" style="color: var(--text-muted) !important;">Workspace</NavLink><span> | </span>
+                    <NavLink href="workspaces" class="workspaces-breadcrumb-link" style="color: var(--text-muted) !important;">workspace</NavLink><span> | </span>
                     @if (workspaceRepositories.Count > 0)
                     {
                         var hasFilter = !string.IsNullOrWhiteSpace(searchTerm);

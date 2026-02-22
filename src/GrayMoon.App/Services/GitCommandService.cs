@@ -72,6 +72,7 @@ public class GitCommandService(ILogger<GitCommandService> logger)
 
     /// <summary>
     /// Adds the repository path to git's safe.directory (repo-local config) so git commands succeed when the repo is owned by another user (e.g. in containers).
+    /// Uses rev-parse to detect safety: exit 0 = safe, exit 128 with dubious ownership = not safe. Adds only when not safe.
     /// </summary>
     public async Task AddSafeDirectoryAsync(string repositoryPath, CancellationToken cancellationToken = default)
     {
@@ -80,16 +81,38 @@ public class GitCommandService(ILogger<GitCommandService> logger)
 
         var fullPath = Path.GetFullPath(repositoryPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var pathForGit = fullPath.Replace('\\', '/'); // Git accepts forward slashes on all platforms
-        var arguments = $"config --local --add safe.directory \"{pathForGit.Replace("\"", "\\\"")}\"";
 
+        var (isSafe, _) = await CheckRepoSafeAsync(repositoryPath, pathForGit, cancellationToken);
+        logger.LogDebug("Git repo safety check: {Path} -> {Result}", pathForGit, isSafe ? "safe" : "not safe");
+
+        if (isSafe)
+        {
+            logger.LogDebug("Repository already safe, skipping safe.directory update: {Path}", pathForGit);
+            return;
+        }
+
+        var arguments = $"config --local --add safe.directory \"{pathForGit.Replace("\"", "\\\"")}\"";
         var (exitCode, _, stderr) = await SafeDirectoryRetryPipeline.ExecuteAsync(
             async (ct) => await RunGitConfigAsync(arguments, ct, repositoryPath),
             cancellationToken);
 
         if (exitCode == 0)
-            logger.LogTrace("Added safe.directory: {Path}", fullPath);
+            logger.LogDebug("Added safe.directory for repository: {Path}", pathForGit);
         else
-            logger.LogDebug("Git config safe.directory returned {ExitCode} for {Path}", exitCode, fullPath);
+            logger.LogDebug("Git config safe.directory returned {ExitCode} for {Path}", exitCode, pathForGit);
+    }
+
+    /// <summary>
+    /// Uses git rev-parse --is-inside-work-tree: exit 0 = repo is safe, exit 128 with dubious ownership = not safe.
+    /// </summary>
+    private static async Task<(bool IsSafe, bool IsDubiousOwnership)> CheckRepoSafeAsync(string repositoryPath, string pathForGit, CancellationToken cancellationToken)
+    {
+        var (exitCode, _, stderr) = await RunGitConfigAsync("rev-parse --is-inside-work-tree", cancellationToken, repositoryPath);
+        if (exitCode == 0)
+            return (true, false);
+        var err = stderr ?? "";
+        var isDubious = exitCode == 128 && (err.Contains("dubious ownership", StringComparison.OrdinalIgnoreCase) || err.Contains("safe.directory", StringComparison.OrdinalIgnoreCase));
+        return (false, isDubious);
     }
 
     private static readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> SafeDirectoryRetryPipeline =
