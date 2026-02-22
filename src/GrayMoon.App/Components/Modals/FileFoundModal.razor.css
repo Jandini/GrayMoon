@@ -21,8 +21,8 @@
 }
 
 .repository-list:has(.repository-grid) {
-    height: min(480px, calc(70vh - 80px));
-    max-height: min(480px, calc(70vh - 80px));
+    height: min(320px, calc(50vh - 100px));
+    max-height: min(320px, calc(50vh - 100px));
     display: flex;
     flex-direction: column;
 }
