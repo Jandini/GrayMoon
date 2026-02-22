@@ -6,14 +6,23 @@
     text-overflow: ellipsis;
 }
 
+/* More space between search row and grid */
+.file-found-search-row {
+    margin-bottom: 1rem;
+}
+
+.file-found-grid-wrap {
+    margin-top: 0.25rem;
+}
+
 .repository-list {
     min-height: 200px;
     overflow: hidden;
 }
 
 .repository-list:has(.repository-grid) {
-    height: min(387px, calc(55vh - 33px));
-    max-height: min(232px, calc(55vh - 33px));
+    height: min(480px, calc(70vh - 80px));
+    max-height: min(480px, calc(70vh - 80px));
     display: flex;
     flex-direction: column;
 }
@@ -145,12 +154,15 @@
 ::deep .modal-dialog {
     max-height: calc(100vh - 2rem);
     margin: 1rem auto;
+    min-height: 560px;
 }
 
 ::deep .modal-content {
     max-height: calc(100vh - 2rem);
+    min-height: 560px;
 }
 
-::deep .modal-body {
+::deep .modal-body.file-found-modal-body {
     overflow-y: auto;
+    padding-bottom: 0.5rem;
 }
