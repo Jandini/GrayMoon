@@ -5,6 +5,8 @@ using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Polly;
+using Polly.Retry;
 
 namespace GrayMoon.Agent.Services;
 
@@ -55,12 +57,29 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return;
 
-        var fullPath = Path.GetFullPath(repoPath);
-        var args = $"config --global --add safe.directory \"{fullPath.Replace("\"", "\\\"")}\"";
-        var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, null, ct);
+        var fullPath = Path.GetFullPath(repoPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var pathForGit = fullPath.Replace('\\', '/'); // Git accepts forward slashes on all platforms
+        var addArgs = $"config --local --add safe.directory \"{pathForGit.Replace("\"", "\\\"")}\"";
+
+        var (exitCode, stdout, stderr) = await SafeDirectoryRetryPipeline.ExecuteAsync(
+            async (cancellationToken) => await RunProcessAsync("git", addArgs, repoPath, cancellationToken),
+            ct);
+
         if (exitCode != 0)
             logger.LogError("Git config safe.directory failed. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", exitCode, stdout, stderr);
     }
+
+    private static readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> SafeDirectoryRetryPipeline =
+        new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
+            .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
+            {
+                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>().HandleResult(r => r.ExitCode != 0),
+                MaxRetryAttempts = 3,
+                Delay = TimeSpan.FromMilliseconds(100),
+                BackoffType = DelayBackoffType.Exponential,
+                UseJitter = true
+            })
+            .Build();
 
     public async Task<GitVersionResult?> GetVersionAsync(string repoPath, CancellationToken ct)
     {

@@ -54,7 +54,7 @@ internal static class RunCommandHandler
 
         builder.Logging.ClearProviders();
         builder.Logging.AddSerilog(new LoggerConfiguration()
-            .MinimumLevel.Verbose()
+            .MinimumLevel.Debug()
             .Enrich.WithMachineName()
             .WriteTo.Console(
                 theme: AnsiConsoleTheme.Code,
