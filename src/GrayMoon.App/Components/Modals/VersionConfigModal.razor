@@ -29,7 +29,7 @@
                                 <span class="version-config-token-count">@validTokenCount token(s) resolved</span>
                             }
                         </label>
-                        <textarea class="form-control version-config-textarea font-monospace @(invalidTokens.Count > 0 ? "is-invalid" : "")"
+                        <textarea class="form-control version-config-textarea font-monospace"
                                   placeholder="GRAYMOON_VERSION={GrayMoon}"
                                   spellcheck="false"
                                   value="@patternText"
@@ -57,9 +57,15 @@
 
                         @if (invalidTokens.Count > 0)
                         {
-                            <div class="invalid-feedback d-block">
-                                Unknown repository name(s): <strong>@string.Join(", ", invalidTokens)</strong>.
-                                Names must exactly match a workspace repository.
+                            <div class="version-config-error-icon">
+                                &#x26A0;
+                                <div class="version-config-error-tooltip">
+                                    <div class="version-config-error-tooltip-title">Unknown repositories:</div>
+                                    @foreach (var t in invalidTokens)
+                                    {
+                                        <div>@t</div>
+                                    }
+                                </div>
                             </div>
                         }
                     </div>
@@ -67,7 +73,7 @@
                 <div class="modal-footer">
                     @if (!string.IsNullOrWhiteSpace(patternText))
                     {
-                        <button type="button" class="btn btn-outline-warning me-auto" @onclick="ClearPattern">
+                        <button type="button" class="btn btn-outline-secondary me-auto" @onclick="ClearPattern">
                             Clear
                         </button>
                     }

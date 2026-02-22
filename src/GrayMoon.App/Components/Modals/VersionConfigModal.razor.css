@@ -2,6 +2,47 @@
     position: relative;
 }
 
+.version-config-error-icon {
+    position: absolute;
+    top: 2.5rem;   
+    right: 0.5rem;
+    font-size: 1rem;
+    line-height: 1;
+    color: #e5a000;
+    cursor: default;
+    pointer-events: auto;
+    z-index: 10;
+    user-select: none;
+}
+
+.version-config-error-tooltip {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: 1.4rem;
+    background: #2a2a2a;
+    border: 1px solid #555;
+    border-radius: 0.25rem;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.78rem;
+    font-family: var(--bs-font-monospace);
+    color: #f0f0f0;
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    z-index: 2100;
+    pointer-events: none;
+}
+
+.version-config-error-tooltip-title {
+    color: #aaa;
+    margin-bottom: 0.2rem;
+    font-family: var(--bs-body-font-family);
+}
+
+.version-config-error-icon:hover .version-config-error-tooltip {
+    display: block;
+}
+
 .version-config-token-count {
     font-size: 0.78rem;
     font-weight: 400;
