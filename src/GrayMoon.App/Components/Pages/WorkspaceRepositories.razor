@@ -26,10 +26,10 @@
 
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
-        <div class="d-flex justify-content-between align-items-center mb-4 workspace-repos-header">
-            <div>
-                <h2>@(workspace?.Name ?? "Workspace")</h2>
-                <p class="text-muted mb-0" style="min-height: 1.5rem;">
+        <div class="workspace-repos-header">
+            <div class="workspace-repos-title-row">
+                <h2 class="workspace-repos-title">@(workspace?.Name ?? "Workspace")</h2>
+                <p class="text-muted mb-0 workspace-repos-subtitle">
                     <NavLink href="workspaces" class="workspaces-breadcrumb-link" style="color: var(--text-muted) !important;">Workspace</NavLink><span> | </span>
                     @if (workspaceRepositories.Count > 0)
                     {
@@ -50,7 +50,7 @@
                 </p>
             </div>
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
-                <input class="form-control workspace-repos-search" placeholder="Search repositories..."
+                <input id="workspace-repos-search" class="form-control workspace-repos-search" placeholder="Search repositories..."
                        @bind="searchTerm" @bind:event="oninput" />
                 <button class="btn btn-outline-secondary"
                         @onclick="ShowBranchModalAsync"
@@ -442,6 +442,10 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            try { await JSRuntime.InvokeVoidAsync("focusElement", "workspace-repos-search"); } catch { /* ignore */ }
+        }
         if (firstRender && workspace != null && errorMessage == null)
         {
             _hubConnection = new HubConnectionBuilder()
