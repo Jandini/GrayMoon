@@ -107,9 +107,11 @@
     private List<string> filteredRepos = new();
     private int suggestionIndex;
     private int _atPos;
+    private int _queryEnd;  // pre-computed end of @query — stable across Enter default-action timing
     private double _dropdownX;
     private double _dropdownY;
     private int _pendingCaret = -1;
+    private bool _justOpened;
 
     protected override void OnParametersSet()
     {
@@ -117,6 +119,7 @@
         {
             patternText = CurrentPattern ?? "";
             showSuggestions = false;
+            _justOpened = true;
             Validate();
         }
         _wasVisible = IsVisible;
@@ -124,10 +127,16 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (IsVisible && !_wasVisible)
+        if (_justOpened)
         {
+            _justOpened = false;
+            try { await JS.InvokeVoidAsync("versionPatternEditor.initAutocomplete", textareaRef); } catch { /* ignore */ }
             try { await textareaRef.FocusAsync(); } catch { /* ignore */ }
             try { await JS.InvokeVoidAsync("versionPatternEditor.autoResize", textareaRef); } catch { /* ignore */ }
+        }
+        if (IsVisible)
+        {
+            try { await JS.InvokeVoidAsync("versionPatternEditor.setAutocompleteActive", textareaRef, showSuggestions); } catch { /* ignore */ }
         }
         if (_pendingCaret >= 0)
         {
@@ -155,6 +164,7 @@
         }
         _atPos = ctx.AtPos;
         var query = ctx.Query ?? "";
+        _queryEnd = ctx.AtPos + 1 + query.Length;  // index right after the typed query chars
         filteredRepos = WorkspaceRepos
             .Select(r => r.RepositoryName)
             .Where(n => n.Contains(query, StringComparison.OrdinalIgnoreCase))
@@ -207,7 +217,7 @@
 
     private async Task AcceptSuggestion(string repoName)
     {
-        var result = await JS.InvokeAsync<InsertResult>("versionPatternEditor.insertRepo", textareaRef, _atPos, repoName);
+        var result = await JS.InvokeAsync<InsertResult>("versionPatternEditor.insertRepo", textareaRef, _atPos, _queryEnd, repoName);
         patternText = result.Value;
         _pendingCaret = result.Caret;
         showSuggestions = false;

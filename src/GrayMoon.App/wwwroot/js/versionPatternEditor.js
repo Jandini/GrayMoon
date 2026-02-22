@@ -15,14 +15,38 @@ window.versionPatternEditor = {
         return { atPos: lineStart + atIdx, query: afterAt };
     },
 
-    // Replaces the '@...' fragment at atPos with '{repoName}' and returns { value, caret }.
-    insertRepo: function (el, atPos, repoName) {
+    // Replaces the '@...' fragment at atPos..queryEnd with '{repoName}' and returns { value, caret }.
+    // queryEnd is the pre-computed end of the @query text (immune to any default-action mutations).
+    insertRepo: function (el, atPos, queryEnd, repoName) {
         const val = el.value;
-        const caretPos = el.selectionStart;
         const newToken = '{' + repoName + '}';
-        const newVal = val.substring(0, atPos) + newToken + val.substring(caretPos);
+        const newVal = val.substring(0, atPos) + newToken + val.substring(queryEnd);
         const newCaret = atPos + newToken.length;
+        // Write to DOM immediately so Blazor re-render (same value) causes no visible flicker
+        el.value = newVal;
+        el.setSelectionRange(newCaret, newCaret);
+        el.focus();
         return { value: newVal, caret: newCaret };
+    },
+
+    // Attaches a capture-phase keydown guard that synchronously calls preventDefault() for
+    // autocomplete navigation keys (Enter/Tab/ArrowUp/ArrowDown) when suggestions are visible.
+    // Must be called once after the textarea is mounted. Idempotent.
+    initAutocomplete: function (el) {
+        if (el.dataset.autocompleteInit) return;
+        el.dataset.autocompleteInit = '1';
+        el.addEventListener('keydown', function (e) {
+            if (el.dataset.autocompleteActive !== 'true') return;
+            if (e.key === 'Enter' || e.key === 'Tab' ||
+                e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                e.preventDefault();
+            }
+        }, true /* capture — fires before Blazor's listener and before browser default */);
+    },
+
+    // Activates or deactivates the keydown guard. Call whenever suggestion visibility changes.
+    setAutocompleteActive: function (el, active) {
+        el.dataset.autocompleteActive = active ? 'true' : '';
     },
 
     // Sets caret position in a textarea (call after Blazor re-render).
