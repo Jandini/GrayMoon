@@ -17,7 +17,7 @@
                     <p class="text-muted small mb-3">
                         Enter one version pattern per line. Each pattern is a line prefix followed by a <code>{repositoryname}</code> token.
                         For example: <code>MY_SERVICE_VERSION={repositoryname}</code> will match any line starting with <code>MY_SERVICE_VERSION=</code> and replace the rest with the repository's current version.
-                        The repository name must exactly match a workspace repository.
+                        The repository name should match a workspace repository — unknown tokens are silently ignored during update.
                         Type <kbd>@@</kbd> to autocomplete a repository name.
                     </p>
 
@@ -78,8 +78,7 @@
                         </button>
                     }
                     <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">Cancel</button>
-                    <button type="button" class="btn btn-primary" @onclick="SaveAsync"
-                            disabled="@(invalidTokens.Count > 0)">
+                    <button type="button" class="btn btn-primary" @onclick="SaveAsync">
                         Save
                     </button>
                 </div>
@@ -243,7 +242,6 @@
 
     private async Task SaveAsync()
     {
-        if (invalidTokens.Count > 0) return;
         await OnSaved.InvokeAsync(patternText.Trim());
     }
 
