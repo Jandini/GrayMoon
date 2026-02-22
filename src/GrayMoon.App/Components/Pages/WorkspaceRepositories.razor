@@ -345,6 +345,7 @@
 
 <PushModal IsVisible="@showPushModal"
           IsMultiLevel="@pushPlanIsMultiLevel"
+          RepositoryCount="@pushPlanRepositoryCount"
           IsBusy="@isPushing"
           OnProceed="@OnPushProceedAsync"
           OnCancel="@ClosePushModal" />
@@ -382,6 +383,8 @@
     private CancellationTokenSource? _pushCts;
     private bool showPushModal = false;
     private bool pushPlanIsMultiLevel = false;
+    private int pushPlanRepositoryCount = 0;
+    private IReadOnlySet<int>? pushPlanRepoIds = null;
     private bool? isOutOfSync = null;
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0);
     private bool isPushRecommended => workspaceRepositories.Any(wr => (wr.OutgoingCommits ?? 0) > 0);
@@ -720,7 +723,7 @@
         ShowConfirm("Do you want to sync commits for this repository?", () => CommitSyncAsync(repositoryId));
     }
 
-    /// <summary>Push button click: get push plan; if more than one repo show confirmation modal; else run push directly.</summary>
+    /// <summary>Push button click: get push plan; filter to repos with unpushed commits; if more than one repo show confirmation modal; else run push directly.</summary>
     private async Task OnPushClickAsync()
     {
         if (workspace == null || workspaceRepositories.Count == 0 || isPushing || isSyncing || isUpdating)
@@ -730,21 +733,29 @@
         {
             await using var scope = ServiceScopeFactory.CreateAsyncScope();
             var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            var (payload, isMultiLevel) = await workspaceGitService.GetPushPlanAsync(WorkspaceId);
-            if (payload.Count == 0)
+            var (payload, _) = await workspaceGitService.GetPushPlanAsync(WorkspaceId);
+            var repoIdsWithUnpushed = workspaceRepositories
+                .Where(wr => (wr.OutgoingCommits ?? 0) > 0)
+                .Select(wr => wr.RepositoryId)
+                .ToHashSet();
+            var toPush = payload.Where(p => repoIdsWithUnpushed.Contains(p.RepoId)).ToList();
+            if (toPush.Count == 0)
             {
                 ToastService.Show("No repositories to push.");
                 return;
             }
-            pushPlanIsMultiLevel = isMultiLevel;
-            if (payload.Count > 1)
+            pushPlanRepoIds = repoIdsWithUnpushed;
+            var levels = toPush.Select(p => p.DependencyLevel ?? 0).Distinct().ToList();
+            pushPlanIsMultiLevel = levels.Count > 1;
+            pushPlanRepositoryCount = toPush.Count;
+            if (toPush.Count == 1)
             {
-                showPushModal = true;
-                await InvokeAsync(StateHasChanged);
+                await RunPushCoreAsync();
             }
             else
             {
-                await RunPushCoreAsync();
+                showPushModal = true;
+                await InvokeAsync(StateHasChanged);
             }
         }
         catch (Exception ex)
@@ -783,6 +794,7 @@
                 var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
                 await workspaceGitService.RunPushAsync(
                     WorkspaceId,
+                    repoIdsToPush: pushPlanRepoIds,
                     onProgressMessage: msg =>
                     {
                         pushProgressMessage = msg;
