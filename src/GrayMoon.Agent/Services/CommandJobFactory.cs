@@ -65,6 +65,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid StageAndCommit args"),
             "PushRepository" => JsonSerializer.Deserialize<PushRepositoryRequest>(json, options)
                 ?? throw new ArgumentException("Invalid PushRepository args"),
+            "SearchFiles" => JsonSerializer.Deserialize<SearchFilesRequest>(json, options)
+                ?? throw new ArgumentException("Invalid SearchFiles args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

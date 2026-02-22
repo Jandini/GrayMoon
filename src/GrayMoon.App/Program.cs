@@ -37,6 +37,7 @@ builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connect
 builder.Services.AddScoped<ConnectorRepository>();
 builder.Services.AddScoped<GitHubRepositoryRepository>();
 builder.Services.AddScoped<WorkspaceProjectRepository>();
+builder.Services.AddScoped<WorkspaceFileRepository>();
 builder.Services.AddScoped<WorkspaceRepository>();
 builder.Services.AddSingleton<AgentConnectionTracker>();
 builder.Services.AddSingleton<IToastService, ToastService>();
@@ -48,6 +49,7 @@ builder.Services.AddScoped<WorkspaceGitService>();
 builder.Services.AddScoped<GitHubRepositoryService>();
 builder.Services.AddScoped<GitHubActionsService>();
 builder.Services.AddScoped<PackageRegistrySyncService>();
+builder.Services.AddScoped<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
 
 // Background sync service with controlled parallelism
 builder.Services.AddSingleton<SyncBackgroundService>();
@@ -97,6 +99,7 @@ using (var scope = app.Services.CreateScope())
     await MigrateWorkspaceProjectsMatchedConnectorAsync(dbContext);
     await MigrateRepositoryBranchesAsync(dbContext);
     await MigrateRepositoryBranchesIsDefaultAsync(dbContext);
+    await MigrateWorkspaceFilesAsync(dbContext);
 }
 
 static async Task MigrateWorkspaceProjectsMatchedConnectorAsync(AppDbContext dbContext)
@@ -458,6 +461,45 @@ static async Task MigrateRepositoryBranchesIsDefaultAsync(AppDbContext dbContext
             if (count == 0)
             {
                 cmd.CommandText = "ALTER TABLE RepositoryBranches ADD COLUMN IsDefault INTEGER NOT NULL DEFAULT 0";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateWorkspaceFilesAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceFiles'";
+            var tableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+
+            if (!tableExists)
+            {
+                cmd.CommandText = @"
+                    CREATE TABLE WorkspaceFiles (
+                        FileId INTEGER PRIMARY KEY AUTOINCREMENT,
+                        WorkspaceId INTEGER NOT NULL,
+                        RepositoryId INTEGER NOT NULL,
+                        FileName TEXT NOT NULL,
+                        FilePath TEXT NOT NULL,
+                        FOREIGN KEY (WorkspaceId) REFERENCES Workspaces(WorkspaceId) ON DELETE CASCADE,
+                        FOREIGN KEY (RepositoryId) REFERENCES Repositories(RepositoryId) ON DELETE CASCADE,
+                        UNIQUE(WorkspaceId, RepositoryId, FilePath)
+                    )";
+                await cmd.ExecuteNonQueryAsync();
+
+                cmd.CommandText = "CREATE INDEX IX_WorkspaceFiles_WorkspaceId ON WorkspaceFiles(WorkspaceId)";
                 await cmd.ExecuteNonQueryAsync();
             }
         }

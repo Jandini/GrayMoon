@@ -1,0 +1,218 @@
+@using System.IO
+@using GrayMoon.App.Models
+@using GrayMoon.App.Models.Api
+@using GrayMoon.App.Services
+@inject IWorkspaceFileSearchService FileSearchService
+@inject ILogger<FileFoundModal> Logger
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onkeydown="HandleKeyDown">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Find and add files</h5>
+                    <button type="button" class="btn-close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label mb-2">Search files</label>
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <input class="form-control flex-grow-1"
+                                   placeholder="File name or pattern (e.g. *.cs, *.csproj)"
+                                   @bind="searchPattern"
+                                   @bind:event="oninput"
+                                   @ref="searchInputRef" />
+                            <select class="form-select" style="width: auto; min-width: 180px;" @bind="selectedRepositoryName">
+                                <option value="">All repositories</option>
+                                @foreach (var repo in WorkspaceRepos)
+                                {
+                                    <option value="@repo.RepositoryName">@repo.RepositoryName</option>
+                                }
+                            </select>
+                            <button type="button"
+                                    class="btn btn-outline-primary"
+                                    @onclick="SearchAsync"
+                                    disabled="@(isSearching || !HasRepos)">
+                                Search
+                            </button>
+                        </div>
+                        <small class="form-text text-muted d-block mb-2">
+                            Use * and ? for wildcards. Search skips .git, bin, and obj. Agent must be running.
+                        </small>
+                        <div class="file-search-results border rounded">
+                            @if (!HasRepos)
+                            {
+                                <div class="text-muted p-3">No repositories in this workspace. Add repositories first.</div>
+                            }
+                            else if (searchResults == null && !isSearching)
+                            {
+                                <div class="text-muted p-3">Enter a pattern and click Search.</div>
+                            }
+                            else if (isSearching)
+                            {
+                                <div class="text-muted p-3">Searching...</div>
+                            }
+                            else if (searchError != null)
+                            {
+                                <div class="alert alert-danger m-2">@searchError</div>
+                            }
+                            else if (searchResults?.Files?.Count > 0)
+                            {
+                                <table class="table table-sm mb-0 workspaces-table resizable-columns">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th class="col-select">
+                                                <input class="form-check-input"
+                                                       type="checkbox"
+                                                       checked="@AreAllResultsSelected()"
+                                                       @onchange="ToggleAllResults" />
+                                            </th>
+                                            <th>File Name</th>
+                                            <th>File Path</th>
+                                            <th>Repository</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var file in searchResults!.Files!)
+                                        {
+                                            var repoName = file.RepositoryName ?? "";
+                                            var filePath = file.FilePath ?? "";
+                                            var key = (repoName, filePath);
+                                            var isSelected = selectedKeys.Contains(key);
+                                            <tr>
+                                                <td class="col-select">
+                                                    <input class="form-check-input"
+                                                           type="checkbox"
+                                                           checked="@isSelected"
+                                                           @onchange="() => ToggleFile(key, !isSelected)" />
+                                                </td>
+                                                <td>@(file.FileName ?? "-")</td>
+                                                <td class="text-muted">@(file.FilePath ?? "-")</td>
+                                                <td>@(file.RepositoryName ?? "-")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            }
+                            else
+                            {
+                                <div class="text-muted p-3">No files match. Try a different pattern or repository.</div>
+                            }
+                        </div>
+                    </div>
+                    @if (selectedKeys.Count > 0)
+                    {
+                        <p class="text-muted small mb-0">@selectedKeys.Count file(s) selected.</p>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="OnAddClick" disabled="@(selectedKeys.Count == 0)">
+                        Add
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private ElementReference searchInputRef;
+    private string searchPattern = "*";
+    private string? selectedRepositoryName;
+    private AgentSearchFilesResponse? searchResults;
+    private string? searchError;
+    private bool isSearching;
+    private HashSet<(string RepositoryName, string FilePath)> selectedKeys = new();
+
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public int WorkspaceId { get; set; }
+    [Parameter] public List<WorkspaceRepoItem> WorkspaceRepos { get; set; } = new();
+    [Parameter] public EventCallback<List<WorkspaceFileAddItem>> OnAdd { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private bool HasRepos => WorkspaceRepos?.Count > 0;
+
+    private bool AreAllResultsSelected()
+    {
+        if (searchResults?.Files == null || searchResults.Files.Count == 0) return false;
+        return searchResults.Files.All(f => selectedKeys.Contains((f.RepositoryName ?? "", f.FilePath ?? "")));
+    }
+
+    private void ToggleAllResults(ChangeEventArgs e)
+    {
+        var check = (bool)(e.Value ?? false);
+        if (searchResults?.Files == null) return;
+        foreach (var f in searchResults.Files)
+        {
+            var key = (f.RepositoryName ?? "", f.FilePath ?? "");
+            if (check) selectedKeys.Add(key); else selectedKeys.Remove(key);
+        }
+        StateHasChanged();
+    }
+
+    private void ToggleFile((string RepositoryName, string FilePath) key, bool selected)
+    {
+        if (selected) selectedKeys.Add(key); else selectedKeys.Remove(key);
+        StateHasChanged();
+    }
+
+    private async Task SearchAsync()
+    {
+        if (!HasRepos || isSearching) return;
+        searchError = null;
+        isSearching = true;
+        StateHasChanged();
+        try
+        {
+            var pattern = string.IsNullOrWhiteSpace(searchPattern) ? "*" : searchPattern.Trim();
+            var data = await FileSearchService.SearchAsync(WorkspaceId, pattern, selectedRepositoryName);
+            if (data != null)
+            {
+                searchResults = data;
+                if (searchResults?.Files == null) searchResults = new AgentSearchFilesResponse { Files = new List<AgentSearchFileItemDto>() };
+            }
+            else
+            {
+                searchError = "Search failed. Is the agent running?";
+                searchResults = new AgentSearchFilesResponse { Files = new List<AgentSearchFileItemDto>() };
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "File search failed");
+            searchError = ex.Message;
+            searchResults = new AgentSearchFilesResponse { Files = new List<AgentSearchFileItemDto>() };
+        }
+        finally
+        {
+            isSearching = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task OnAddClick()
+    {
+        if (selectedKeys.Count == 0) return;
+        var repoByName = WorkspaceRepos?.ToDictionary(r => r.RepositoryName, r => r.RepositoryId, StringComparer.OrdinalIgnoreCase) ?? new Dictionary<string, int>();
+        var list = new List<WorkspaceFileAddItem>();
+        foreach (var kv in selectedKeys)
+        {
+            if (!repoByName.TryGetValue(kv.RepositoryName, out var repoId)) continue;
+            var fileName = Path.GetFileName(kv.FilePath) ?? kv.FilePath;
+            list.Add(new WorkspaceFileAddItem { RepositoryId = repoId, FileName = fileName, FilePath = kv.FilePath });
+        }
+        if (list.Count > 0)
+        {
+            await OnAdd.InvokeAsync(list);
+            selectedKeys.Clear();
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            await OnCancel.InvokeAsync();
+    }
+}

@@ -22,7 +22,8 @@ public sealed class CommandDispatcher(
     ICommandHandler<RefreshBranchesRequest, RefreshBranchesResponse> refreshBranchesCommand,
     ICommandHandler<CreateBranchRequest, CreateBranchResponse> createBranchCommand,
     ICommandHandler<StageAndCommitRequest, StageAndCommitResponse> stageAndCommitCommand,
-    ICommandHandler<PushRepositoryRequest, PushRepositoryResponse> pushRepositoryCommand) : ICommandDispatcher
+    ICommandHandler<PushRepositoryRequest, PushRepositoryResponse> pushRepositoryCommand,
+    ICommandHandler<SearchFilesRequest, SearchFilesResponse> searchFilesCommand) : ICommandDispatcher
 {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
@@ -44,6 +45,7 @@ public sealed class CommandDispatcher(
         ["CreateBranch"] = async (req, ct) => await createBranchCommand.ExecuteAsync((CreateBranchRequest)req, ct),
         ["StageAndCommit"] = async (req, ct) => await stageAndCommitCommand.ExecuteAsync((StageAndCommitRequest)req, ct),
         ["PushRepository"] = async (req, ct) => await pushRepositoryCommand.ExecuteAsync((PushRepositoryRequest)req, ct),
+        ["SearchFiles"] = async (req, ct) => await searchFilesCommand.ExecuteAsync((SearchFilesRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

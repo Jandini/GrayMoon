@@ -71,6 +71,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<IGitService, GitService>();
         builder.Services.AddSingleton<ICsProjFileParser, CsProjFileParser>();
         builder.Services.AddSingleton<ICsProjFileService, CsProjFileService>();
+        builder.Services.AddSingleton<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
         builder.Services.AddSingleton<CommandJobFactory>();
         builder.Services.AddSingleton<ICommandDispatcher, CommandDispatcher>();
 
@@ -92,6 +93,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<CreateBranchRequest, CreateBranchResponse>, CreateBranchCommand>();
         builder.Services.AddSingleton<ICommandHandler<StageAndCommitRequest, StageAndCommitResponse>, StageAndCommitCommand>();
         builder.Services.AddSingleton<ICommandHandler<PushRepositoryRequest, PushRepositoryResponse>, PushRepositoryCommand>();
+        builder.Services.AddSingleton<ICommandHandler<SearchFilesRequest, SearchFilesResponse>, SearchFilesCommand>();
         builder.Services.AddSingleton<INotifySyncHandler, NotifySyncCommand>();
 
         builder.Services.AddHostedService<SignalRConnectionHostedService>();

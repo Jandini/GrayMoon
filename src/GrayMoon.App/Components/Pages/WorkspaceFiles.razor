@@ -1,0 +1,173 @@
+@page "/workspaces/{WorkspaceId:int}/files"
+@rendermode InteractiveServer
+@using GrayMoon.App.Models
+@using GrayMoon.App.Models.Api
+@using GrayMoon.App.Repositories
+@using GrayMoon.App.Components.Modals
+@using GrayMoon.App.Api.Endpoints
+@inject WorkspaceRepository WorkspaceRepository
+@inject WorkspaceFileRepository WorkspaceFileRepository
+@inject ILogger<WorkspaceFiles> Logger
+@using WorkspaceModel = GrayMoon.App.Models.Workspace
+
+<PageTitle>@(workspace?.Name ?? "Workspace") - Files</PageTitle>
+
+<div class="container-fluid page-container grid-page">
+    <div class="grid-page-header">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h2>@(workspace?.Name ?? "Workspace") Files</h2>
+                <p class="text-muted mb-0" style="min-height: 1.5rem;">
+                    @if (files.Count > 0)
+                    {
+                        @($"{files.Count} {(files.Count == 1 ? "file" : "files")}")
+                    }
+                    &nbsp;
+                </p>
+            </div>
+            <button class="btn btn-primary" @onclick="OpenAddFilesModal">
+                Add Files
+            </button>
+        </div>
+        @if (errorMessage != null)
+        {
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i> @errorMessage
+            </div>
+        }
+    </div>
+    <div class="grid-page-body">
+        <div class="card page-card mb-4">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover mb-0 workspaces-table resizable-columns">
+                        <thead class="table-dark">
+                            <tr>
+                                <th class="col-filename">File Name</th>
+                                <th class="col-filepath">File Path</th>
+                                <th class="col-repo">Repository</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (isLoading)
+                            {
+                                <tr>
+                                    <td colspan="3" class="text-center text-muted py-4">Loading files...</td>
+                                </tr>
+                            }
+                            else if (files.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="3" class="text-center text-muted py-4">
+                                        No files in this workspace. Use "Add Files" to search and add files from your repositories.
+                                    </td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var f in files)
+                                {
+                                    <tr>
+                                        <td class="col-filename"><strong>@f.FileName</strong></td>
+                                        <td class="col-filepath text-muted">@f.FilePath</td>
+                                        <td class="col-repo">@(f.RepositoryName ?? "-")</td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<FileFoundModal IsVisible="@showFileModal"
+                WorkspaceId="WorkspaceId"
+                WorkspaceRepos="@workspaceRepos"
+                OnAdd="OnFilesAdded"
+                OnCancel="CloseAddFilesModal" />
+
+@code {
+    [Parameter] public int WorkspaceId { get; set; }
+
+    private WorkspaceModel? workspace;
+    private List<WorkspaceFileDto> files = new();
+    private List<WorkspaceRepoItem> workspaceRepos = new();
+    private string? errorMessage;
+    private bool isLoading = true;
+    private bool showFileModal;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = null;
+            workspace = await WorkspaceRepository.GetByIdAsync(WorkspaceId);
+            if (workspace == null)
+            {
+                errorMessage = "Workspace not found.";
+                files = new List<WorkspaceFileDto>();
+                workspaceRepos = new List<WorkspaceRepoItem>();
+                return;
+            }
+            workspaceRepos = workspace.Repositories
+                .Where(r => r.Repository != null)
+                .Select(r => new WorkspaceRepoItem { RepositoryId = r.RepositoryId, RepositoryName = r.Repository!.RepositoryName })
+                .ToList();
+            var list = await WorkspaceFileRepository.GetByWorkspaceIdAsync(WorkspaceId);
+            files = list.Select(f => new WorkspaceFileDto
+            {
+                FileId = f.FileId,
+                WorkspaceId = f.WorkspaceId,
+                RepositoryId = f.RepositoryId,
+                RepositoryName = f.Repository?.RepositoryName,
+                FileName = f.FileName,
+                FilePath = f.FilePath
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading files for workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Failed to load files. Please try again later.";
+            files = new List<WorkspaceFileDto>();
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void OpenAddFilesModal()
+    {
+        showFileModal = true;
+    }
+
+    private void CloseAddFilesModal()
+    {
+        showFileModal = false;
+    }
+
+    private async Task OnFilesAdded(List<WorkspaceFileAddItem> items)
+    {
+        if (items.Count == 0) { CloseAddFilesModal(); return; }
+        try
+        {
+            var toAdd = items.Select(i => (i.RepositoryId, i.FileName, i.FilePath)).ToList();
+            await WorkspaceFileRepository.AddRangeAsync(WorkspaceId, toAdd);
+            CloseAddFilesModal();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error adding workspace files");
+            errorMessage = "Failed to add files. Please try again.";
+        }
+    }
+}
