@@ -127,3 +127,19 @@
     z-index: 0;
     background: transparent;
 }
+
+@media (max-width: 900px) {
+    .dependencies-page .deps-header-row {
+        flex-direction: column;
+        align-items: flex-start !important;
+    }
+
+    .deps-filter-dropdown {
+        width: 100%;
+        margin-left: 0;
+    }
+
+    .deps-filter-toggle {
+        width: 100%;
+    }
+}
