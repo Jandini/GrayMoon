@@ -120,10 +120,11 @@
 .repository-list {
     min-height: 200px;
     overflow: hidden;
+    margin-bottom: 0.75rem;
 }
 
 .repository-list:has(.repository-grid) {
-    height: calc(70vh - 120px);
+    height: calc(70vh - 140px);
     display: flex;
     flex-direction: column;
 }
