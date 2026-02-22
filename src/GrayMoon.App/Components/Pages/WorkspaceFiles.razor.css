@@ -7,18 +7,18 @@
 }
 
 .col-filename {
-    width: 20%;
+    width: 18%;
 }
 
 .col-filepath {
-    width: 50%;
+    width: 42%;
 }
 
 .col-repo {
-    width: 20%;
+    width: 18%;
 }
 
 .col-actions {
-    width: 10%;
+    width: 22%;
     white-space: nowrap;
 }

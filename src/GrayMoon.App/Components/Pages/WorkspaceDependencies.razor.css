@@ -28,19 +28,118 @@
     transform: translate(-50%, -50%);
 }
 
-.dependencies-page .repo-filter-dropdown {
+.deps-filter-dropdown {
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1050;
     margin-left: auto;
-    margin-right: 0;
-    width: fit-content;
 }
 
-/* Same width as WorkspaceRepositories search box (min-width: 20rem), slightly wider for long names */
-.dependencies-page .repo-filter-select {
-    min-width: 20rem;
+.deps-filter-toggle {
+    min-width: 5rem;
     width: 25rem;
-    height: calc(1.5em + 0.75rem + 2px);
-    appearance: none;
-    -webkit-appearance: none;
-    background-image: none;
-    padding-right: 0.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.deps-filter-toggle-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    text-align: left;
+}
+
+.deps-filter-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 2px;
+    width: 100%;
+    box-sizing: border-box;
+    max-height: 20rem;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: var(--bs-dropdown-bg, #252526);
+    border: 1px solid rgba(0,0,0,.15);
+    border-radius: 0.25rem;
+    box-shadow: 0 0.5rem 1rem rgba(0,0,0,.15);
+    padding: 0;
+    z-index: 1;
+}
+
+.deps-filter-dropdown.show .deps-filter-menu {
+    display: block;
+}
+
+.deps-filter-menu::-webkit-scrollbar {
+    width: 8px;
+}
+
+.deps-filter-menu::-webkit-scrollbar-track {
+    background: var(--bg-card, #252526);
+}
+
+.deps-filter-menu::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.deps-filter-menu::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}
+
+.deps-filter-menu {
+    scrollbar-width: thin;
+    scrollbar-color: #5a5a5a var(--bg-card, #252526);
+}
+
+.deps-filter-option {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    padding: 0.25rem 1rem;
+    color: var(--bs-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.deps-filter-option:hover {
+    background: var(--bs-primary, #2d2d30);
+    color: var(--bs-dropdown-link-hover-color);
+}
+
+.deps-filter-option.active {
+    background: var(--bs-gray, #2d2d30);
+    color: var(--bs-dropdown-link-hover-color);
+}
+
+.deps-filter-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background: transparent;
+}
+
+@media (max-width: 900px) {
+    .dependencies-page .deps-header-row {
+        flex-direction: column;
+        align-items: flex-start !important;
+    }
+
+    .deps-filter-dropdown {
+        width: 100%;
+        margin-left: 0;
+    }
+
+    .deps-filter-toggle {
+        width: 100%;
+    }
 }

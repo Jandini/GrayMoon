@@ -1,0 +1,193 @@
+@using GrayMoon.App.Models
+@using GrayMoon.App.Models.Api
+@using GrayMoon.App.Services
+@using GrayMoon.App.Api.Endpoints
+@inject IAgentBridge AgentBridge
+@inject IJSRuntime JS
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onkeydown="HandleKeyDown">
+        <div class="modal-dialog modal-xl view-file-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        @(File?.FileName ?? "")
+                        <span class="text-muted fw-normal fs-6 ms-2">@(File?.RepositoryName ?? "")</span>
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseAsync"></button>
+                </div>
+                <div class="modal-body p-0">
+                    @if (_isLoading)
+                    {
+                        <div class="d-flex justify-content-center align-items-center view-file-loading">
+                            <span class="spinner-border text-secondary" role="status"></span>
+                        </div>
+                    }
+                    else if (_errorMessage != null)
+                    {
+                        <div class="alert alert-danger m-3">@_errorMessage</div>
+                    }
+                    else
+                    {
+                        <textarea class="view-file-textarea font-monospace"
+                                  readonly
+                                  spellcheck="false"
+                                  value="@_content"
+                                  @onmouseup="OnSelectionChanged"
+                                  @onkeyup="OnSelectionChanged"
+                                  @ref="_textareaRef"></textarea>
+                    }
+                </div>
+                <div class="modal-footer d-flex justify-content-between">
+                    <div>
+                        <button type="button" class="btn btn-outline-secondary"
+                                disabled="@IsConfigured"
+                                @onclick="ConfigureAsync"
+                                title="@(IsConfigured ? "Already configured — edit via Configure in the files table" : "Configure versioning for this file")">
+                            Configure
+                        </button>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-primary"
+                                disabled="@(!_hasSelection)"
+                                @onclick="CopyAsync"
+                                title="Copy selection to clipboard and close">
+                            Copy
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" @onclick="CloseAsync">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public WorkspaceFileDto? File { get; set; }
+    [Parameter] public string? WorkspaceName { get; set; }
+    [Parameter] public bool IsConfigured { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<string?> OnConfigure { get; set; }
+
+    private bool _wasVisible;
+    private bool _isLoading;
+    private bool _loadTriggered;
+    private string? _content;
+    private string? _errorMessage;
+    private bool _hasSelection;
+    private ElementReference _textareaRef;
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !_wasVisible)
+        {
+            _wasVisible = true;
+            _content = null;
+            _errorMessage = null;
+            _hasSelection = false;
+            _isLoading = true;
+            _loadTriggered = false;
+        }
+        else if (!IsVisible)
+        {
+            _wasVisible = false;
+            _loadTriggered = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_isLoading && IsVisible && File != null && !_loadTriggered)
+        {
+            _loadTriggered = true;
+            await LoadContentAsync();
+        }
+    }
+
+    private async Task LoadContentAsync()
+    {
+        try
+        {
+            if (!AgentBridge.IsAgentConnected)
+            {
+                _errorMessage = "Agent is not connected.";
+                _isLoading = false;
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            var resp = await AgentBridge.SendCommandAsync("GetFileContents", new
+            {
+                workspaceName = WorkspaceName,
+                repositoryName = File!.RepositoryName,
+                filePath = File.FilePath
+            });
+
+            if (resp.Success && resp.Data != null)
+            {
+                var result = AgentResponseJson.DeserializeAgentResponse<AgentGetFileContentsResponse>(resp.Data);
+                if (result?.ErrorMessage != null)
+                    _errorMessage = result.ErrorMessage;
+                else
+                    _content = result?.Content ?? "";
+            }
+            else
+            {
+                _errorMessage = resp.Error ?? "Failed to load file contents.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task OnSelectionChanged()
+    {
+        try
+        {
+            _hasSelection = await JS.InvokeAsync<bool>("fileViewer.hasSelection", _textareaRef);
+        }
+        catch { /* ignore */ }
+    }
+
+    private async Task CopyAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("fileViewer.copySelection", _textareaRef);
+        }
+        catch { /* ignore */ }
+        await CloseAsync();
+    }
+
+    private async Task ConfigureAsync()
+    {
+        string? selectedText = null;
+        try
+        {
+            selectedText = await JS.InvokeAsync<string?>("fileViewer.getSelection", _textareaRef);
+        }
+        catch { /* ignore */ }
+        await OnConfigure.InvokeAsync(selectedText);
+    }
+
+    private async Task CloseAsync()
+    {
+        await OnClose.InvokeAsync();
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await CloseAsync();
+    }
+}

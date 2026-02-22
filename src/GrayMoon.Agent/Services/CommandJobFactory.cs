@@ -67,6 +67,10 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid PushRepository args"),
             "SearchFiles" => JsonSerializer.Deserialize<SearchFilesRequest>(json, options)
                 ?? throw new ArgumentException("Invalid SearchFiles args"),
+            "UpdateFileVersions" => JsonSerializer.Deserialize<UpdateFileVersionsRequest>(json, options)
+                ?? throw new ArgumentException("Invalid UpdateFileVersions args"),
+            "GetFileContents" => JsonSerializer.Deserialize<GetFileContentsRequest>(json, options)
+                ?? throw new ArgumentException("Invalid GetFileContents args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

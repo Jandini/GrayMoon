@@ -15,7 +15,7 @@
 
 <div class="container-fluid page-container grid-page dependencies-page">
     <div class="grid-page-header">
-        <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-4 deps-header-row">
             <div>
                 <h2>@(workspace?.Name ?? "workspace") Dependency Graph</h2>
                 <p class="text-muted mb-0" style="min-height: 1.5rem;">
@@ -29,18 +29,43 @@
             </div>
             @if (graph != null && graph.Nodes.Count > 0)
             {
-                <div class="repo-filter-dropdown">
-                    <select id="repo-filter" class="form-select repo-filter-select" value="@selectedFilterValue" @onchange="OnFilterChanged">
-                        <option value="">All repositories</option>
+                <div class="deps-filter-dropdown @(showFilterMenu ? "show" : "")">
+                    <button type="button"
+                            class="btn btn-outline-secondary dropdown-toggle deps-filter-toggle"
+                            aria-expanded="@showFilterMenu"
+                            title="@GetFilterLabel()"
+                            @onclick="ToggleFilterMenu">
+                        <span class="deps-filter-toggle-label">@GetFilterLabel()</span>
+                    </button>
+                    <div class="deps-filter-menu">
+                        <button type="button"
+                                class="dropdown-item deps-filter-option @(selectedFilterValue == "" ? "active" : "")"
+                                @onclick='() => SelectFilter("")'>
+                            All repositories
+                        </button>
                         @foreach (var level in GetOrderedDependencyLevels())
                         {
-                            <option value="level-@level">Level @level</option>
+                            var levelVal = $"level-{level}";
+                            <button type="button"
+                                    class="dropdown-item deps-filter-option @(selectedFilterValue == levelVal ? "active" : "")"
+                                    @onclick="() => SelectFilter(levelVal)">
+                                Level @level
+                            </button>
                         }
                         @foreach (var n in graph.Nodes.OrderBy(n => n.RepositoryName, StringComparer.OrdinalIgnoreCase))
                         {
-                            <option value="@n.RepositoryId">@n.RepositoryName</option>
+                            var repoVal = n.RepositoryId.ToString();
+                            <button type="button"
+                                    class="dropdown-item deps-filter-option @(selectedFilterValue == repoVal ? "active" : "")"
+                                    @onclick="() => SelectFilter(repoVal)">
+                                @n.RepositoryName
+                            </button>
                         }
-                    </select>
+                    </div>
+                    @if (showFilterMenu)
+                    {
+                        <div class="deps-filter-backdrop" @onclick="CloseFilterMenu"></div>
+                    }
                 </div>
             }
         </div>
@@ -74,6 +99,7 @@
     private bool isLoading = true;
     private string selectedFilterValue = "";
     private string _lastRenderedFilter = "";
+    private bool showFilterMenu;
     private const string GraphContainerId = "cytoscape-dependency-graph";
     private const string LevelPrefix = "level-";
 
@@ -117,17 +143,37 @@
         }
     }
 
-    private void OnFilterChanged(ChangeEventArgs e)
+    private void ToggleFilterMenu()
     {
-        selectedFilterValue = e.Value?.ToString() ?? "";
+        showFilterMenu = !showFilterMenu;
+    }
+
+    private void CloseFilterMenu()
+    {
+        showFilterMenu = false;
+    }
+
+    private void SelectFilter(string value)
+    {
+        selectedFilterValue = value;
+        showFilterMenu = false;
+    }
+
+    private string GetFilterLabel()
+    {
+        if (string.IsNullOrEmpty(selectedFilterValue)) return "All repositories";
+        if (selectedFilterValue.StartsWith(LevelPrefix, StringComparison.Ordinal))
+            return $"Level {selectedFilterValue.AsSpan(LevelPrefix.Length)}";
+        if (graph != null && int.TryParse(selectedFilterValue, out var repoId))
+        {
+            var node = graph.Nodes.FirstOrDefault(n => n.RepositoryId == repoId);
+            if (node != null) return node.RepositoryName;
+        }
+        return selectedFilterValue;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (graph != null && graph.Nodes.Count > 0 && firstRender)
-        {
-            try { await JSRuntime.InvokeVoidAsync("focusElement", "repo-filter"); } catch { /* ignore */ }
-        }
         if (graph == null || graph.Nodes.Count == 0) return;
         if (firstRender || _lastRenderedFilter != selectedFilterValue)
         {

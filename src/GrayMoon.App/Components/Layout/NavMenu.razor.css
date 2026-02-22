@@ -181,5 +181,24 @@
         /* Allow sidebar to scroll for tall menus */
         height: calc(100vh - 3.5rem);
         overflow-y: auto;
+        scrollbar-width: auto;
+        scrollbar-color: #5a5a5a var(--bg-card, #252526);
+    }
+
+    .nav-scrollable::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    .nav-scrollable::-webkit-scrollbar-track {
+        background: var(--bg-card, #252526);
+    }
+
+    .nav-scrollable::-webkit-scrollbar-thumb {
+        background: #5a5a5a;
+        border-radius: 4px;
+    }
+
+    .nav-scrollable::-webkit-scrollbar-thumb:hover {
+        background: #6a6a6a;
     }
 }
