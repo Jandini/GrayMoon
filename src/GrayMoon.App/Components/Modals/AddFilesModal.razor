@@ -3,7 +3,7 @@
 @using GrayMoon.App.Models.Api
 @using GrayMoon.App.Services
 @inject IWorkspaceFileSearchService FileSearchService
-@inject ILogger<FileFoundModal> Logger
+@inject ILogger<AddFilesModal> Logger
 
 @if (IsVisible)
 {
@@ -14,33 +14,33 @@
                     <h5 class="modal-title">Add Files</h5>
                     <button type="button" class="btn-close" @onclick="OnCancel"></button>
                 </div>
-                <div class="modal-body file-found-modal-body">
+                <div class="modal-body add-files-modal-body">
                     <div class="mb-0">
                         <label class="form-label mb-2">Search files</label>
-                        <div class="d-flex align-items-center file-found-search-row">
+                        <div class="d-flex align-items-center add-files-search-row">
                             <input class="form-control"
                                    placeholder="File name or pattern..."
                                    value="@searchPattern"
                                    @oninput="OnSearchInput"
                                    @ref="searchInputRef" />
-                            <div class="file-found-repo-dropdown ms-2 @(showRepoMenu ? "show" : "")">
+                            <div class="add-files-repo-dropdown ms-2 @(showRepoMenu ? "show" : "")">
                                 <button type="button"
-                                        class="btn btn-outline-secondary dropdown-toggle file-found-repo-toggle"
+                                        class="btn btn-outline-secondary dropdown-toggle add-files-repo-toggle"
                                         aria-expanded="@showRepoMenu"
                                         title="@(string.IsNullOrEmpty(selectedRepositoryName) ? "All repositories" : selectedRepositoryName)"
                                         @onclick="ToggleRepoMenu">
-                                    <span class="file-found-repo-toggle-label">@(string.IsNullOrEmpty(selectedRepositoryName) ? "All repositories" : selectedRepositoryName)</span>
+                                    <span class="add-files-repo-toggle-label">@(string.IsNullOrEmpty(selectedRepositoryName) ? "All repositories" : selectedRepositoryName)</span>
                                 </button>
-                                <div class="file-found-repo-menu">
+                                <div class="add-files-repo-menu">
                                     <button type="button"
-                                            class="dropdown-item file-found-repo-option @(string.IsNullOrEmpty(selectedRepositoryName) ? "active" : "")"
+                                            class="dropdown-item add-files-repo-option @(string.IsNullOrEmpty(selectedRepositoryName) ? "active" : "")"
                                             @onclick="() => SelectRepo(null)">
                                         All repositories
                                     </button>
                                     @foreach (var repo in WorkspaceRepos)
                                     {
                                         <button type="button"
-                                                class="dropdown-item file-found-repo-option @(selectedRepositoryName == repo.RepositoryName ? "active" : "")"
+                                                class="dropdown-item add-files-repo-option @(selectedRepositoryName == repo.RepositoryName ? "active" : "")"
                                                 @onclick="() => SelectRepo(repo.RepositoryName)">
                                             @repo.RepositoryName
                                         </button>
@@ -48,14 +48,14 @@
                                 </div>
                                 @if (showRepoMenu)
                                 {
-                                    <div class="file-found-repo-backdrop" @onclick="CloseRepoMenu"></div>
+                                    <div class="add-files-repo-backdrop" @onclick="CloseRepoMenu"></div>
                                 }
                             </div>
                         </div>
-                        <small class="form-text text-muted d-block mb-2 file-found-search-note">
+                        <small class="form-text text-muted d-block mb-2 add-files-search-note">
                             Use * and ? for wildcards. First 20 matching files are shown.
                         </small>
-                        <div class="repository-list border rounded file-found-grid-wrap">
+                        <div class="repository-list border rounded add-files-grid-wrap">
                             @if (!HasRepos)
                             {
                                 <div class="text-muted p-2">No repositories in this workspace. Add repositories first.</div>

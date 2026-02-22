@@ -4,7 +4,7 @@ using GrayMoon.App.Services;
 
 namespace GrayMoon.App.Services;
 
-/// <summary>Runs file search via the agent for a workspace. Used by FileFoundModal.</summary>
+/// <summary>Runs file search via the agent for a workspace. Used by AddFilesModal.</summary>
 public interface IWorkspaceFileSearchService
 {
     Task<AgentSearchFilesResponse?> SearchAsync(int workspaceId, string? pattern, string? repositoryName, CancellationToken cancellationToken = default);
