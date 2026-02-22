@@ -83,15 +83,15 @@
                                         <td class="col-filepath text-muted">@f.FilePath</td>
                                         <td class="col-repo">@(f.RepositoryName ?? "-")</td>
                                         <td class="col-actions">
-                                            <button class="btn btn-sm me-2 @(fileVersionConfigs.ContainsKey(f.FileId) ? "btn-info" : "btn-outline-secondary")"
-                                                    @onclick="() => OpenVersionConfigModal(f)"
-                                                    title="@(fileVersionConfigs.ContainsKey(f.FileId) ? "Edit version configuration" : "Configure versioning")">
-                                                Configure
-                                            </button>
                                             <button class="btn btn-sm btn-outline-secondary me-2"
                                                     @onclick="() => OpenViewFileModal(f)"
                                                     title="View file contents">
                                                 View
+                                            </button>
+                                            <button class="btn btn-sm me-2 @(fileVersionConfigs.ContainsKey(f.FileId) ? "btn-info" : "btn-outline-secondary")"
+                                                    @onclick="() => OpenVersionConfigModal(f)"
+                                                    title="@(fileVersionConfigs.ContainsKey(f.FileId) ? "Edit version configuration" : "Configure versioning")">
+                                                Configure
                                             </button>
                                             <button class="btn btn-sm btn-outline-danger"
                                                     @onclick="() => RemoveFileAsync(f)"
@@ -230,10 +230,10 @@
 
     private void OnConfigureFromView(string? selectedText)
     {
-        CloseViewFileModal();
         if (viewingFile == null) return;
         configuringFile = viewingFile;
         currentConfigPattern = selectedText;
+        showViewFileModal = false;
         showVersionConfigModal = true;
     }
 
