@@ -1,0 +1,53 @@
+.view-file-dialog {
+    max-height: calc(100vh - 2rem);
+    margin: 1rem auto;
+}
+
+::deep .modal-content {
+    max-height: calc(100vh - 2rem);
+}
+
+.view-file-loading {
+    height: 12rem;
+}
+
+.view-file-textarea {
+    display: block;
+    width: 100%;
+    height: 65vh;
+    min-height: 300px;
+    resize: none;
+    border: none;
+    border-radius: 0;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 1rem;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    overflow-y: auto;
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a #1e1e1e;
+}
+
+.view-file-textarea:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+.view-file-textarea::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.view-file-textarea::-webkit-scrollbar-track {
+    background: #1e1e1e;
+}
+
+.view-file-textarea::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.view-file-textarea::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}

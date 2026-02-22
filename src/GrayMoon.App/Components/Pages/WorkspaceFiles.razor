@@ -88,6 +88,11 @@
                                                     title="@(fileVersionConfigs.ContainsKey(f.FileId) ? "Edit version configuration" : "Configure versioning")">
                                                 Configure
                                             </button>
+                                            <button class="btn btn-sm btn-outline-secondary me-2"
+                                                    @onclick="() => OpenViewFileModal(f)"
+                                                    title="View file contents">
+                                                View
+                                            </button>
                                             <button class="btn btn-sm btn-outline-danger"
                                                     @onclick="() => RemoveFileAsync(f)"
                                                     title="Remove file">
@@ -118,6 +123,13 @@
                     OnSaved="OnVersionPatternSaved"
                     OnCancel="CloseVersionConfigModal" />
 
+<ViewFileModal IsVisible="@showViewFileModal"
+               File="@(viewingFile!)"
+               WorkspaceName="@(workspace?.Name)"
+               IsConfigured="@(viewingFile != null && fileVersionConfigs.ContainsKey(viewingFile.FileId))"
+               OnClose="CloseViewFileModal"
+               OnConfigure="OnConfigureFromView" />
+
 <LoadingOverlay IsVisible="@isUpdating" Message="@updateMessage" OnAbort="AbortUpdate" />
 
 @code {
@@ -133,6 +145,8 @@
     private bool showVersionConfigModal;
     private WorkspaceFileDto? configuringFile;
     private string? currentConfigPattern;
+    private bool showViewFileModal;
+    private WorkspaceFileDto? viewingFile;
     private bool isUpdating;
     private string updateMessage = "";
     private CancellationTokenSource? _updateCts;
@@ -199,6 +213,27 @@
     {
         configuringFile = f;
         currentConfigPattern = fileVersionConfigs.TryGetValue(f.FileId, out var p) ? p : null;
+        showVersionConfigModal = true;
+    }
+
+    private void OpenViewFileModal(WorkspaceFileDto f)
+    {
+        viewingFile = f;
+        showViewFileModal = true;
+    }
+
+    private void CloseViewFileModal()
+    {
+        showViewFileModal = false;
+        viewingFile = null;
+    }
+
+    private void OnConfigureFromView(string? selectedText)
+    {
+        CloseViewFileModal();
+        if (viewingFile == null) return;
+        configuringFile = viewingFile;
+        currentConfigPattern = selectedText;
         showVersionConfigModal = true;
     }
 

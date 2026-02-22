@@ -95,6 +95,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<PushRepositoryRequest, PushRepositoryResponse>, PushRepositoryCommand>();
         builder.Services.AddSingleton<ICommandHandler<SearchFilesRequest, SearchFilesResponse>, SearchFilesCommand>();
         builder.Services.AddSingleton<ICommandHandler<UpdateFileVersionsRequest, UpdateFileVersionsResponse>, UpdateFileVersionsCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetFileContentsRequest, GetFileContentsResponse>, GetFileContentsCommand>();
         builder.Services.AddSingleton<INotifySyncHandler, NotifySyncCommand>();
 
         builder.Services.AddHostedService<SignalRConnectionHostedService>();
