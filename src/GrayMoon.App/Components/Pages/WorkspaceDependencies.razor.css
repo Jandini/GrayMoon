@@ -34,9 +34,9 @@
     width: fit-content;
 }
 
-/* Same width as WorkspaceRepositories search box (min-width: 12rem), slightly wider for long names */
+/* Same width as WorkspaceRepositories search box (min-width: 20rem), slightly wider for long names */
 .dependencies-page .repo-filter-select {
-    min-width: 12rem;
+    min-width: 20rem;
     width: 25rem;
     height: calc(1.5em + 0.75rem + 2px);
     appearance: none;

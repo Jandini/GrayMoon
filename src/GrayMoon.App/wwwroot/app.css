@@ -348,6 +348,17 @@ h1:focus {
     flex-shrink: 0;
 }
 
+/* Keep subtitle on one line, shrink with ellipsis when space is limited */
+.grid-page-header .d-flex > div:first-child {
+    min-width: 0;
+}
+.grid-page-header p.text-muted.mb-0 {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
 .grid-page-body {
     flex: 1 1 auto;
     min-height: 0;

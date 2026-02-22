@@ -1,3 +1,20 @@
+/* Header: allow wrap when narrow; search box shrinks, buttons wrap */
+.workspace-repos-header {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+.workspace-repos-header-actions {
+    flex-wrap: wrap;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+.workspace-repos-search {
+    min-width: 10rem;
+    width: 20rem;
+    max-width: 100%;
+    flex: 1 1 auto;
+}
+
 /* Match Repositories / Workspaces: left-align all columns, status column right-aligned via col-status-badge; use global resizable-columns padding for header spacing */
 .repositories-table th,
 .repositories-table td {
