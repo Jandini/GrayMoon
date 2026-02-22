@@ -30,7 +30,7 @@
                 </p>
             </div>
             <div class="d-flex gap-2">
-                <button class="btn btn-outline-secondary" @onclick="UpdateVersionsAsync"
+                <button class="btn btn-outline-primary" @onclick="UpdateVersionsAsync"
                         disabled="@(fileVersionConfigs.Count == 0)" title="Update versions in all configured files">
                     Update Versions
                 </button>
@@ -83,7 +83,7 @@
                                         <td class="col-filepath text-muted">@f.FilePath</td>
                                         <td class="col-repo">@(f.RepositoryName ?? "-")</td>
                                         <td class="col-actions">
-                                            <button class="btn btn-sm @(fileVersionConfigs.ContainsKey(f.FileId) ? "btn-info" : "btn-outline-secondary")"
+                                            <button class="btn btn-sm me-2 @(fileVersionConfigs.ContainsKey(f.FileId) ? "btn-info" : "btn-outline-secondary")"
                                                     @onclick="() => OpenVersionConfigModal(f)"
                                                     title="@(fileVersionConfigs.ContainsKey(f.FileId) ? "Edit version configuration" : "Configure versioning")">
                                                 Configure
