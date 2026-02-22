@@ -19,8 +19,8 @@
 }
 
 .file-found-repo-toggle {
-    min-width: 20rem;
-    width: 25rem;
+    min-width: 5rem;
+    width: 22rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -32,6 +32,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     flex: 1;
+    text-align: left;
 }
 
 /* Menu: same width as button, right-aligned, scrollbar inside (does not stick out) */
@@ -88,16 +89,20 @@
     border: none;
     background: transparent;
     padding: 0.25rem 1rem;
-    color: var(--bs-body-color);
+    color: var(--bs-muted);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     cursor: pointer;
 }
 
-.file-found-repo-option:hover,
+.file-found-repo-option:hover {
+    background: var(--bs-primary, #2d2d30);
+    color: var(--bs-dropdown-link-hover-color);
+}
+
 .file-found-repo-option.active {
-    background: var(--bs-dropdown-link-hover-bg, #2d2d30);
+    background: var(--bs-gray, #2d2d30);
     color: var(--bs-dropdown-link-hover-color);
 }
 
