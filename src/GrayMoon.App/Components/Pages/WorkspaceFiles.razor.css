@@ -1,0 +1,24 @@
+.workspaces-table th,
+.workspaces-table td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 0; /* required for ellipsis to work in table cells */
+}
+
+.col-filename {
+    width: 20%;
+}
+
+.col-filepath {
+    width: 50%;
+}
+
+.col-repo {
+    width: 20%;
+}
+
+.col-actions {
+    width: 10%;
+    white-space: nowrap;
+}

@@ -1,0 +1,346 @@
+@using System.IO
+@using GrayMoon.App.Models
+@using GrayMoon.App.Models.Api
+@using GrayMoon.App.Services
+@inject IWorkspaceFileSearchService FileSearchService
+@inject ILogger<AddFilesModal> Logger
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onkeydown="HandleKeyDown">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add Files</h5>
+                    <button type="button" class="btn-close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body add-files-modal-body">
+                    <div class="mb-0">
+                        <label class="form-label mb-2">Search files</label>
+                        <div class="d-flex align-items-center add-files-search-row">
+                            <input class="form-control"
+                                   placeholder="File name or pattern..."
+                                   value="@searchPattern"
+                                   @oninput="OnSearchInput"
+                                   @ref="searchInputRef" />
+                            <div class="add-files-repo-dropdown ms-2 @(showRepoMenu ? "show" : "")">
+                                <button type="button"
+                                        class="btn btn-outline-secondary dropdown-toggle add-files-repo-toggle"
+                                        aria-expanded="@showRepoMenu"
+                                        title="@(string.IsNullOrEmpty(selectedRepositoryName) ? "All repositories" : selectedRepositoryName)"
+                                        @onclick="ToggleRepoMenu">
+                                    <span class="add-files-repo-toggle-label">@(string.IsNullOrEmpty(selectedRepositoryName) ? "All repositories" : selectedRepositoryName)</span>
+                                </button>
+                                <div class="add-files-repo-menu">
+                                    <button type="button"
+                                            class="dropdown-item add-files-repo-option @(string.IsNullOrEmpty(selectedRepositoryName) ? "active" : "")"
+                                            @onclick="() => SelectRepo(null)">
+                                        All repositories
+                                    </button>
+                                    @foreach (var repo in WorkspaceRepos)
+                                    {
+                                        <button type="button"
+                                                class="dropdown-item add-files-repo-option @(selectedRepositoryName == repo.RepositoryName ? "active" : "")"
+                                                @onclick="() => SelectRepo(repo.RepositoryName)">
+                                            @repo.RepositoryName
+                                        </button>
+                                    }
+                                </div>
+                                @if (showRepoMenu)
+                                {
+                                    <div class="add-files-repo-backdrop" @onclick="CloseRepoMenu"></div>
+                                }
+                            </div>
+                        </div>
+                        <small class="form-text text-muted d-block mb-2 add-files-search-note">
+                            Use * and ? for wildcards. First 20 matching files are shown.
+                        </small>
+                        <div class="repository-list border rounded add-files-grid-wrap">
+                            @if (!HasRepos)
+                            {
+                                <div class="text-muted p-2">No repositories in this workspace. Add repositories first.</div>
+                            }
+                            else
+                            {
+                                <table class="table table-sm mb-0 repository-grid workspaces-table resizable-columns">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th class="col-select">
+                                                <input class="form-check-input workspace-repo-checkbox"
+                                                       type="checkbox"
+                                                       checked="@AreAllResultsSelected()"
+                                                       @onchange="ToggleAllResults" />
+                                            </th>
+                                            <th>File Name</th>
+                                            <th>File Path</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @if (searchResults == null && !isSearching)
+                                        {
+                                            <tr>
+                                                <td colspan="3" class="text-muted p-2">Type a file name or pattern to search.</td>
+                                            </tr>
+                                        }
+                                        else if (isSearching)
+                                        {
+                                            <tr>
+                                                <td colspan="3" class="text-muted p-2">Searching...</td>
+                                            </tr>
+                                        }
+                                        else if (searchError != null)
+                                        {
+                                            <tr>
+                                                <td colspan="3" class="p-2">
+                                                    <div class="alert alert-danger mb-0">@searchError</div>
+                                                </td>
+                                            </tr>
+                                        }
+                                        else if (searchResults?.Files?.Count > 0)
+                                        {
+                                            @foreach (var file in searchResults!.Files!)
+                                            {
+                                                var repoName = file.RepositoryName ?? "";
+                                                var filePath = file.FilePath ?? "";
+                                                var key = (repoName, filePath);
+                                                var isSelected = selectedKeys.Contains(key);
+                                                var pathWithoutFileName = GetPathWithoutFileName(filePath);
+                                                var displayPath = string.IsNullOrEmpty(pathWithoutFileName) ? repoName : repoName + "/" + pathWithoutFileName;
+                                                <tr>
+                                                    <td class="col-select">
+                                                        <input class="form-check-input workspace-repo-checkbox"
+                                                               type="checkbox"
+                                                               checked="@isSelected"
+                                                               @onchange="() => ToggleFile(key, !isSelected)" />
+                                                    </td>
+                                                    <td>
+                                                        <span class="repo-name-cell" title="@(file.FileName ?? "-")">
+                                                            @(file.FileName ?? "-")
+                                                        </span>
+                                                    </td>
+                                                    <td>
+                                                        <span class="repo-name-cell" title="@displayPath">
+                                                            @displayPath
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <tr>
+                                                <td colspan="3" class="text-muted p-2">@(string.IsNullOrEmpty(selectedRepositoryName) ? "No files match." : "No files match. Try a different pattern or repository.")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            }
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer d-flex align-items-center justify-content-between">
+                    <span class="text-muted small">@(selectedKeys.Count > 0 ? $"{selectedKeys.Count} file(s) selected." : "No files selected.")</span>
+                    <div>
+                        <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
+                        <button type="button" class="btn btn-primary" @onclick="OnAddClick" disabled="@(selectedKeys.Count == 0)">
+                            Add
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private const int DebounceMs = 400;
+
+    private ElementReference searchInputRef;
+    private string searchPattern = "";
+    private string? selectedRepositoryName;
+    private AgentSearchFilesResponse? searchResults;
+    private string? searchError;
+    private bool isSearching;
+    private HashSet<(string RepositoryName, string FilePath)> selectedKeys = new();
+    private CancellationTokenSource? _debounceCts;
+    private bool _wasVisible;
+    private bool showRepoMenu;
+
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public int WorkspaceId { get; set; }
+    [Parameter] public List<WorkspaceRepoItem> WorkspaceRepos { get; set; } = new();
+    [Parameter] public EventCallback<List<WorkspaceFileAddItem>> OnAdd { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private bool HasRepos => WorkspaceRepos?.Count > 0;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible && !_wasVisible)
+        {
+            _wasVisible = true;
+            try { await searchInputRef.FocusAsync(); } catch { /* ignore */ }
+        }
+        else if (!IsVisible)
+        {
+            _wasVisible = false;
+        }
+    }
+
+    private async Task OnSearchInput(ChangeEventArgs e)
+    {
+        searchPattern = e.Value?.ToString() ?? "";
+        _debounceCts?.Cancel();
+        _debounceCts = new CancellationTokenSource();
+        var cts = _debounceCts;
+        try
+        {
+            await Task.Delay(DebounceMs, cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        await InvokeAsync(async () =>
+        {
+            if (cts.IsCancellationRequested) return;
+            var trimmed = searchPattern.Trim();
+            if (trimmed == "*" || string.IsNullOrEmpty(trimmed))
+            {
+                if (trimmed == "*")
+                {
+                    searchError = "Enter a file name or pattern. Searching all files is not allowed.";
+                    searchResults = new AgentSearchFilesResponse { Files = new List<AgentSearchFileItemDto>() };
+                }
+                else
+                {
+                    searchError = null;
+                    searchResults = null;
+                }
+                StateHasChanged();
+                return;
+            }
+            await SearchAsync();
+        });
+    }
+
+    private bool AreAllResultsSelected()
+    {
+        if (searchResults?.Files == null || searchResults.Files.Count == 0) return false;
+        return searchResults.Files.All(f => selectedKeys.Contains((f.RepositoryName ?? "", f.FilePath ?? "")));
+    }
+
+    private void ToggleAllResults(ChangeEventArgs e)
+    {
+        var check = (bool)(e.Value ?? false);
+        if (searchResults?.Files == null) return;
+        foreach (var f in searchResults.Files)
+        {
+            var key = (f.RepositoryName ?? "", f.FilePath ?? "");
+            if (check) selectedKeys.Add(key); else selectedKeys.Remove(key);
+        }
+        StateHasChanged();
+    }
+
+    private void ToggleFile((string RepositoryName, string FilePath) key, bool selected)
+    {
+        if (selected) selectedKeys.Add(key); else selectedKeys.Remove(key);
+        StateHasChanged();
+    }
+
+    private async Task SearchAsync()
+    {
+        if (!HasRepos || isSearching) return;
+        var trimmed = searchPattern.Trim();
+        if (trimmed == "*" || string.IsNullOrEmpty(trimmed)) return;
+        searchError = null;
+        isSearching = true;
+        StateHasChanged();
+        try
+        {
+            var effectivePattern = EffectiveSearchPattern(trimmed);
+            var data = await FileSearchService.SearchAsync(WorkspaceId, effectivePattern, selectedRepositoryName);
+            if (data != null)
+            {
+                searchResults = data;
+                if (searchResults?.Files == null) searchResults = new AgentSearchFilesResponse { Files = new List<AgentSearchFileItemDto>() };
+            }
+            else
+            {
+                searchError = "Search failed. Is the agent running?";
+                searchResults = new AgentSearchFilesResponse { Files = new List<AgentSearchFileItemDto>() };
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "File search failed");
+            searchError = ex.Message;
+            searchResults = new AgentSearchFilesResponse { Files = new List<AgentSearchFileItemDto>() };
+        }
+        finally
+        {
+            isSearching = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task OnAddClick()
+    {
+        if (selectedKeys.Count == 0) return;
+        var repoByName = WorkspaceRepos?.ToDictionary(r => r.RepositoryName, r => r.RepositoryId, StringComparer.OrdinalIgnoreCase) ?? new Dictionary<string, int>();
+        var list = new List<WorkspaceFileAddItem>();
+        foreach (var kv in selectedKeys)
+        {
+            if (!repoByName.TryGetValue(kv.RepositoryName, out var repoId)) continue;
+            var fileName = Path.GetFileName(kv.FilePath) ?? kv.FilePath;
+            list.Add(new WorkspaceFileAddItem { RepositoryId = repoId, FileName = fileName, FilePath = kv.FilePath });
+        }
+        if (list.Count > 0)
+        {
+            await OnAdd.InvokeAsync(list);
+            selectedKeys.Clear();
+        }
+    }
+
+    private void ToggleRepoMenu()
+    {
+        showRepoMenu = !showRepoMenu;
+        StateHasChanged();
+    }
+
+    private void CloseRepoMenu()
+    {
+        showRepoMenu = false;
+        StateHasChanged();
+    }
+
+    private async Task SelectRepo(string? name)
+    {
+        selectedRepositoryName = name;
+        showRepoMenu = false;
+        StateHasChanged();
+        await SearchAsync();
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            await OnCancel.InvokeAsync();
+    }
+
+    /// <summary>If the pattern contains no * or ?, suffix with * for prefix matching.</summary>
+    private static string EffectiveSearchPattern(string trimmed)
+    {
+        if (string.IsNullOrEmpty(trimmed)) return trimmed;
+        if (trimmed.Contains('*') || trimmed.Contains('?')) return trimmed;
+        return trimmed + "*";
+    }
+
+    /// <summary>Returns the file path without the file name (directory part only). Uses / as separator.</summary>
+    private static string GetPathWithoutFileName(string filePath)
+    {
+        if (string.IsNullOrEmpty(filePath)) return "";
+        var lastSlash = filePath.LastIndexOf('/');
+        return lastSlash >= 0 ? filePath.Substring(0, lastSlash) : "";
+    }
+}

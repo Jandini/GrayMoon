@@ -1,0 +1,263 @@
+/* Match WorkspaceRepositoriesModal grid: scrollable list, sticky header, horizontal scroll for long paths */
+.workspaces-table th,
+.workspaces-table td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* More space between search row and grid */
+.add-files-search-row {
+    margin-bottom: 0.25rem;
+}
+
+/* Repository dropdown: custom so we can style scrollbar and keep it inside width */
+.add-files-repo-dropdown {
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1050;
+}
+
+.add-files-repo-toggle {
+    min-width: 5rem;
+    width: 22rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.add-files-repo-toggle-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    text-align: left;
+}
+
+/* Menu: same width as button, right-aligned, scrollbar inside (does not stick out) */
+.add-files-repo-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 2px;
+    width: 100%;
+    box-sizing: border-box;
+    max-height: 16rem;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: var(--bs-dropdown-bg, #252526);
+    border: 1px solid rgba(0,0,0,.15);
+    border-radius: 0.25rem;
+    box-shadow: 0 0.5rem 1rem rgba(0,0,0,.15);
+    padding: 0;
+    z-index: 1;
+}
+
+.add-files-repo-dropdown.show .add-files-repo-menu {
+    display: block;
+}
+
+/* Gray scrollbar inside menu (does not stick out) */
+.add-files-repo-menu::-webkit-scrollbar {
+    width: 8px;
+}
+
+.add-files-repo-menu::-webkit-scrollbar-track {
+    background: var(--bg-card, #252526);
+}
+
+.add-files-repo-menu::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.add-files-repo-menu::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}
+
+.add-files-repo-menu {
+    scrollbar-width: thin;
+    scrollbar-color: #5a5a5a var(--bg-card, #252526);
+}
+
+.add-files-repo-option {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    padding: 0.25rem 1rem;
+    color: var(--bs-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.add-files-repo-option:hover {
+    background: var(--bs-primary, #2d2d30);
+    color: var(--bs-dropdown-link-hover-color);
+}
+
+.add-files-repo-option.active {
+    background: var(--bs-gray, #2d2d30);
+    color: var(--bs-dropdown-link-hover-color);
+}
+
+.add-files-repo-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background: transparent;
+}
+
+.add-files-grid-wrap {
+    margin-top: 0.25rem;
+}
+
+.repository-list {
+    min-height: 200px;
+    overflow: hidden;
+    margin-bottom: 0.75rem;
+}
+
+.repository-list:has(.repository-grid) {
+    height: calc(70vh - 140px);
+    display: flex;
+    flex-direction: column;
+}
+
+.repository-list.border {
+    border-color: #5a5a5a !important;
+    border-radius: 6px;
+}
+
+.repository-list .repository-grid {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+    height: 100%;
+}
+
+.repository-grid thead,
+.repository-grid tbody tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
+.repository-grid thead {
+    flex-shrink: 0;
+}
+
+.repository-grid tbody {
+    display: block;
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: auto;
+}
+
+.repository-grid tbody::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.repository-grid tbody::-webkit-scrollbar-track {
+    background: var(--bg-card, #252526);
+}
+
+.repository-grid tbody::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.repository-grid tbody::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}
+
+.repository-grid tbody {
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a var(--bg-card, #252526);
+}
+
+.repository-grid thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.repository-grid {
+    border: none;
+    border-collapse: collapse;
+    background-color: #252526;
+}
+
+.repository-grid,
+.repository-grid th,
+.repository-grid td {
+    border-color: #3c3c3c;
+}
+
+.repository-grid th {
+    background-color: #2d2d30;
+    color: #f1f1f1;
+}
+
+.repository-grid td {
+    background-color: #252526;
+    color: #d4d4d4;
+}
+
+.col-select {
+    width: 40px;
+}
+
+.workspace-repo-checkbox {
+    background-color: var(--bg-input) !important;
+    border-color: var(--border-light) !important;
+}
+
+.workspace-repo-checkbox:checked {
+    background-color: var(--accent-blue) !important;
+    border-color: var(--accent-blue) !important;
+}
+
+.repository-grid th.col-select,
+.repository-grid td.col-select {
+    padding-left: 12px;
+}
+
+.repository-grid th:nth-child(2),
+.repository-grid td:nth-child(2) {
+    width: 30%;
+}
+
+.repository-grid th:nth-child(3),
+.repository-grid td:nth-child(3) {
+    width: calc(70% - 40px);
+}
+
+.repo-name-cell {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+::deep .modal-dialog {
+    max-height: calc(100vh - 2rem);
+    margin: 1rem auto;
+}
+
+::deep .modal-content {
+    max-height: calc(100vh - 2rem);
+}
+
+::deep .modal-body.add-files-modal-body {
+    overflow-y: auto;
+    padding-bottom: 0.5rem;
+}

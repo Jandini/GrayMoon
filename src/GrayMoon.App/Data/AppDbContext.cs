@@ -12,6 +12,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<WorkspaceProject> WorkspaceProjects => Set<WorkspaceProject>();
     public DbSet<ProjectDependency> ProjectDependencies => Set<ProjectDependency>();
     public DbSet<RepositoryBranch> RepositoryBranches => Set<RepositoryBranch>();
+    public DbSet<WorkspaceFile> WorkspaceFiles => Set<WorkspaceFile>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -209,6 +210,34 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasOne(rb => rb.WorkspaceRepository)
                 .WithMany()
                 .HasForeignKey(rb => rb.WorkspaceRepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WorkspaceFile>(entity =>
+        {
+            entity.ToTable("WorkspaceFiles");
+            entity.HasKey(f => f.FileId);
+            entity.Property(f => f.FileId).ValueGeneratedOnAdd();
+
+            entity.HasIndex(f => new { f.WorkspaceId, f.RepositoryId, f.FilePath })
+                .IsUnique();
+
+            entity.Property(f => f.FileName)
+                .IsRequired()
+                .HasMaxLength(260);
+
+            entity.Property(f => f.FilePath)
+                .IsRequired()
+                .HasMaxLength(2000);
+
+            entity.HasOne(f => f.Workspace)
+                .WithMany()
+                .HasForeignKey(f => f.WorkspaceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(f => f.Repository)
+                .WithMany()
+                .HasForeignKey(f => f.RepositoryId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }
