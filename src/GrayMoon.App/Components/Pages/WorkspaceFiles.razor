@@ -43,22 +43,23 @@
                     <table class="table table-striped table-hover mb-0 workspaces-table resizable-columns">
                         <thead class="table-dark">
                             <tr>
-                                <th class="col-filename">File Name</th>
-                                <th class="col-filepath">File Path</th>
-                                <th class="col-repo">Repository</th>
+                                <th class="col-filename text-nowrap">File Name</th>
+                                <th class="col-filepath text-nowrap">File Path</th>
+                                <th class="col-repo text-nowrap">Repository</th>
+                                <th class="col-actions text-nowrap">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             @if (isLoading)
                             {
                                 <tr>
-                                    <td colspan="3" class="text-center text-muted py-4">Loading files...</td>
+                                    <td colspan="4" class="text-center text-muted py-4">Loading files...</td>
                                 </tr>
                             }
                             else if (files.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="3" class="text-center text-muted py-4">
+                                    <td colspan="4" class="text-center text-muted py-4">
                                         No files in this workspace. Use "Add Files" to search and add files from your repositories.
                                     </td>
                                 </tr>
@@ -71,6 +72,13 @@
                                         <td class="col-filename"><strong>@f.FileName</strong></td>
                                         <td class="col-filepath text-muted">@f.FilePath</td>
                                         <td class="col-repo">@(f.RepositoryName ?? "-")</td>
+                                        <td class="col-actions">
+                                            <button class="btn btn-sm btn-outline-danger"
+                                                    @onclick="() => RemoveFileAsync(f)"
+                                                    title="Remove file">
+                                                Remove
+                                            </button>
+                                        </td>
                                     </tr>
                                 }
                             }
@@ -152,6 +160,21 @@
     private void CloseAddFilesModal()
     {
         showFileModal = false;
+    }
+
+    private async Task RemoveFileAsync(WorkspaceFileDto f)
+    {
+        try
+        {
+            errorMessage = null;
+            await WorkspaceFileRepository.RemoveAsync(f.FileId);
+            files.Remove(f);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error removing workspace file {FileId}", f.FileId);
+            errorMessage = "Failed to remove file. Please try again.";
+        }
     }
 
     private async Task OnFilesAdded(List<WorkspaceFileAddItem> items)
