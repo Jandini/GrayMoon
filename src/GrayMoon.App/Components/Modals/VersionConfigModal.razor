@@ -1,0 +1,245 @@
+@using GrayMoon.App.Models
+@using GrayMoon.App.Models.Api
+@using GrayMoon.App.Services
+@using GrayMoon.App.Api.Endpoints
+@inject IJSRuntime JS
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onkeydown="HandleKeyDown">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Version Configuration <span class="text-muted fw-normal fs-6">@(File?.FileName ?? "")</span></h5>
+                    <button type="button" class="btn-close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">
+                        Enter one version pattern per line. Each pattern is a line prefix followed by a <code>{repositoryname}</code> token.
+                        For example: <code>MY_SERVICE_VERSION={repositoryname}</code> will match any line starting with <code>MY_SERVICE_VERSION=</code> and replace the rest with the repository's current version.
+                        The repository name must exactly match a workspace repository.
+                        Type <kbd>@@</kbd> to autocomplete a repository name.
+                    </p>
+
+                    <div class="mb-3 version-config-editor-wrap">
+                        <label class="form-label d-flex align-items-baseline gap-2">
+                            Version Pattern
+                            @if (!string.IsNullOrWhiteSpace(patternText) && validTokenCount > 0 && invalidTokens.Count == 0)
+                            {
+                                <span class="version-config-token-count">@validTokenCount token(s) resolved</span>
+                            }
+                        </label>
+                        <textarea class="form-control version-config-textarea font-monospace @(invalidTokens.Count > 0 ? "is-invalid" : "")"
+                                  placeholder="GRAYMOON_VERSION={GrayMoon}"
+                                  spellcheck="false"
+                                  value="@patternText"
+                                  @oninput="OnPatternInput"
+                                  @onkeydown="OnTextareaKeyDown"
+                                  @ref="textareaRef">
+                        </textarea>
+
+                        @if (showSuggestions && filteredRepos.Count > 0)
+                        {
+                            <div class="version-config-suggestions" style="left:@((int)_dropdownX)px;top:@((int)_dropdownY)px;">
+                                @for (int i = 0; i < filteredRepos.Count; i++)
+                                {
+                                    var idx = i;
+                                    var repo = filteredRepos[i];
+                                    <button type="button"
+                                            class="version-config-suggestion-item @(idx == suggestionIndex ? "active" : "")"
+                                            @onclick="() => AcceptSuggestion(repo)"
+                                            @onmousedown:preventDefault="true">
+                                        @repo
+                                    </button>
+                                }
+                            </div>
+                        }
+
+                        @if (invalidTokens.Count > 0)
+                        {
+                            <div class="invalid-feedback d-block">
+                                Unknown repository name(s): <strong>@string.Join(", ", invalidTokens)</strong>.
+                                Names must exactly match a workspace repository.
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    @if (!string.IsNullOrWhiteSpace(patternText))
+                    {
+                        <button type="button" class="btn btn-outline-warning me-auto" @onclick="ClearPattern">
+                            Clear
+                        </button>
+                    }
+                    <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="SaveAsync"
+                            disabled="@(invalidTokens.Count > 0)">
+                        Save
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public WorkspaceFileDto? File { get; set; }
+    [Parameter] public List<WorkspaceRepoItem> WorkspaceRepos { get; set; } = new();
+    [Parameter] public string? CurrentPattern { get; set; }
+    [Parameter] public EventCallback<string> OnSaved { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private string patternText = "";
+    private List<string> invalidTokens = new();
+    private int validTokenCount;
+    private bool _wasVisible;
+    private ElementReference textareaRef;
+
+    // Autocomplete state
+    private bool showSuggestions;
+    private List<string> filteredRepos = new();
+    private int suggestionIndex;
+    private int _atPos;
+    private double _dropdownX;
+    private double _dropdownY;
+    private int _pendingCaret = -1;
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !_wasVisible)
+        {
+            patternText = CurrentPattern ?? "";
+            showSuggestions = false;
+            Validate();
+        }
+        _wasVisible = IsVisible;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible && !_wasVisible)
+        {
+            try { await textareaRef.FocusAsync(); } catch { /* ignore */ }
+            try { await JS.InvokeVoidAsync("versionPatternEditor.autoResize", textareaRef); } catch { /* ignore */ }
+        }
+        if (_pendingCaret >= 0)
+        {
+            var pos = _pendingCaret;
+            _pendingCaret = -1;
+            try { await JS.InvokeVoidAsync("versionPatternEditor.setCaret", textareaRef, pos); } catch { /* ignore */ }
+        }
+    }
+
+    private async Task OnPatternInput(ChangeEventArgs e)
+    {
+        patternText = e.Value?.ToString() ?? "";
+        Validate();
+        await JS.InvokeVoidAsync("versionPatternEditor.autoResize", textareaRef);
+        await UpdateSuggestionsAsync();
+    }
+
+    private async Task UpdateSuggestionsAsync()
+    {
+        var ctx = await JS.InvokeAsync<AtContext?>("versionPatternEditor.getAtContext", textareaRef);
+        if (ctx == null)
+        {
+            showSuggestions = false;
+            return;
+        }
+        _atPos = ctx.AtPos;
+        var query = ctx.Query ?? "";
+        filteredRepos = WorkspaceRepos
+            .Select(r => r.RepositoryName)
+            .Where(n => n.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(n => n)
+            .ToList();
+        suggestionIndex = 0;
+        if (filteredRepos.Count > 0)
+        {
+            var coords = await JS.InvokeAsync<DropdownCoords>("versionPatternEditor.getAtPixelCoords", textareaRef, _atPos);
+            _dropdownX = coords.X;
+            _dropdownY = coords.Y;
+            showSuggestions = true;
+        }
+        else
+        {
+            showSuggestions = false;
+        }
+    }
+
+    private sealed class InsertResult
+    {
+        public string Value { get; set; } = "";
+        public int Caret { get; set; }
+    }
+
+    private sealed class DropdownCoords
+    {
+        public double X { get; set; }
+        public double Y { get; set; }
+    }
+
+    private async Task OnTextareaKeyDown(KeyboardEventArgs e)
+    {
+        if (showSuggestions)
+        {
+            if (e.Key == "ArrowDown") { suggestionIndex = Math.Min(suggestionIndex + 1, filteredRepos.Count - 1); return; }
+            if (e.Key == "ArrowUp") { suggestionIndex = Math.Max(suggestionIndex - 1, 0); return; }
+            if (e.Key == "Enter" || e.Key == "Tab")
+            {
+                if (filteredRepos.Count > 0) await AcceptSuggestion(filteredRepos[suggestionIndex]);
+                return;
+            }
+            if (e.Key == "Escape") { showSuggestions = false; return; }
+        }
+        else
+        {
+            if (e.Key == "Escape") await OnCancel.InvokeAsync();
+        }
+    }
+
+    private async Task AcceptSuggestion(string repoName)
+    {
+        var result = await JS.InvokeAsync<InsertResult>("versionPatternEditor.insertRepo", textareaRef, _atPos, repoName);
+        patternText = result.Value;
+        _pendingCaret = result.Caret;
+        showSuggestions = false;
+        Validate();
+    }
+
+    private void Validate()
+    {
+        var repoNames = WorkspaceRepos.Select(r => r.RepositoryName)
+                                      .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var tokens = WorkspaceFileVersionService.ExtractTokens(patternText);
+        invalidTokens = tokens.Where(t => !repoNames.Contains(t)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        validTokenCount = tokens.Where(t => repoNames.Contains(t)).Count();
+    }
+
+    private void ClearPattern()
+    {
+        patternText = "";
+        invalidTokens.Clear();
+        validTokenCount = 0;
+        showSuggestions = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (invalidTokens.Count > 0) return;
+        await OnSaved.InvokeAsync(patternText.Trim());
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        // Escape is handled per-context in OnTextareaKeyDown; this catches modal-level escape
+        if (!showSuggestions && e.Key == "Escape") await OnCancel.InvokeAsync();
+    }
+
+    private sealed class AtContext
+    {
+        public int AtPos { get; set; }
+        public string? Query { get; set; }
+    }
+}

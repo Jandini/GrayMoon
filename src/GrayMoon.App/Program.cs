@@ -37,8 +37,7 @@ builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connect
 builder.Services.AddScoped<ConnectorRepository>();
 builder.Services.AddScoped<GitHubRepositoryRepository>();
 builder.Services.AddScoped<WorkspaceProjectRepository>();
-builder.Services.AddScoped<WorkspaceFileRepository>();
-builder.Services.AddScoped<WorkspaceRepository>();
+builder.Services.AddScoped<WorkspaceFileRepository>();    builder.Services.AddScoped<WorkspaceFileVersionConfigRepository>();builder.Services.AddScoped<WorkspaceRepository>();
 builder.Services.AddSingleton<AgentConnectionTracker>();
 builder.Services.AddSingleton<IToastService, ToastService>();
 builder.Services.AddSingleton<MatrixOverlayPreferenceService>();
@@ -50,6 +49,7 @@ builder.Services.AddScoped<GitHubRepositoryService>();
 builder.Services.AddScoped<GitHubActionsService>();
 builder.Services.AddScoped<PackageRegistrySyncService>();
 builder.Services.AddScoped<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
+    builder.Services.AddScoped<WorkspaceFileVersionService>();
 
 // Background sync service with controlled parallelism
 builder.Services.AddSingleton<SyncBackgroundService>();
@@ -100,6 +100,7 @@ using (var scope = app.Services.CreateScope())
     await MigrateRepositoryBranchesAsync(dbContext);
     await MigrateRepositoryBranchesIsDefaultAsync(dbContext);
     await MigrateWorkspaceFilesAsync(dbContext);
+    await MigrateWorkspaceFileVersionConfigsAsync(dbContext);
 }
 
 static async Task MigrateWorkspaceProjectsMatchedConnectorAsync(AppDbContext dbContext)
@@ -500,6 +501,41 @@ static async Task MigrateWorkspaceFilesAsync(AppDbContext dbContext)
                 await cmd.ExecuteNonQueryAsync();
 
                 cmd.CommandText = "CREATE INDEX IX_WorkspaceFiles_WorkspaceId ON WorkspaceFiles(WorkspaceId)";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateWorkspaceFileVersionConfigsAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceFileVersionConfigs'";
+            var tableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+
+            if (!tableExists)
+            {
+                cmd.CommandText = @"
+                    CREATE TABLE WorkspaceFileVersionConfigs (
+                        ConfigId INTEGER PRIMARY KEY AUTOINCREMENT,
+                        FileId INTEGER NOT NULL UNIQUE,
+                        VersionPattern TEXT NOT NULL,
+                        FOREIGN KEY (FileId) REFERENCES WorkspaceFiles(FileId) ON DELETE CASCADE
+                    )";
+                await cmd.ExecuteNonQueryAsync();
+
+                cmd.CommandText = "CREATE INDEX IX_WorkspaceFileVersionConfigs_FileId ON WorkspaceFileVersionConfigs(FileId)";
                 await cmd.ExecuteNonQueryAsync();
             }
         }

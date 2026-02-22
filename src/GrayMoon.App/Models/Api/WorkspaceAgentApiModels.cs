@@ -58,3 +58,13 @@ public sealed class AgentSearchFileItemDto
     [JsonPropertyName("fileName")]
     public string? FileName { get; set; }
 }
+
+/// <summary>Agent UpdateFileVersions response.</summary>
+public sealed class AgentUpdateFileVersionsResponse
+{
+    [JsonPropertyName("updatedCount")]
+    public int UpdatedCount { get; set; }
+
+    [JsonPropertyName("errorMessage")]
+    public string? ErrorMessage { get; set; }
+}

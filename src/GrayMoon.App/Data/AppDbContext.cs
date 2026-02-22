@@ -13,6 +13,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ProjectDependency> ProjectDependencies => Set<ProjectDependency>();
     public DbSet<RepositoryBranch> RepositoryBranches => Set<RepositoryBranch>();
     public DbSet<WorkspaceFile> WorkspaceFiles => Set<WorkspaceFile>();
+    public DbSet<WorkspaceFileVersionConfig> WorkspaceFileVersionConfigs => Set<WorkspaceFileVersionConfig>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -238,6 +239,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasOne(f => f.Repository)
                 .WithMany()
                 .HasForeignKey(f => f.RepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WorkspaceFileVersionConfig>(entity =>
+        {
+            entity.ToTable("WorkspaceFileVersionConfigs");
+            entity.HasKey(c => c.ConfigId);
+            entity.Property(c => c.ConfigId).ValueGeneratedOnAdd();
+            entity.HasIndex(c => c.FileId).IsUnique();
+            entity.Property(c => c.VersionPattern).IsRequired();
+            entity.HasOne(c => c.File)
+                .WithMany()
+                .HasForeignKey(c => c.FileId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

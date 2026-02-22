@@ -3,10 +3,13 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Models.Api
 @using GrayMoon.App.Repositories
+@using GrayMoon.App.Services
 @using GrayMoon.App.Components.Modals
 @using GrayMoon.App.Api.Endpoints
 @inject WorkspaceRepository WorkspaceRepository
 @inject WorkspaceFileRepository WorkspaceFileRepository
+@inject WorkspaceFileVersionConfigRepository VersionConfigRepository
+@inject WorkspaceFileVersionService FileVersionService
 @inject ILogger<WorkspaceFiles> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
@@ -25,9 +28,15 @@
                     &nbsp;
                 </p>
             </div>
-            <button class="btn btn-primary" @onclick="OpenAddFilesModal">
-                Add Files
-            </button>
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-primary" @onclick="UpdateVersionsAsync"
+                        disabled="@(fileVersionConfigs.Count == 0)" title="Update versions in all configured files">
+                    Update Versions
+                </button>
+                <button class="btn btn-primary" @onclick="OpenAddFilesModal">
+                    Add Files
+                </button>
+            </div>
         </div>
         @if (errorMessage != null)
         {
@@ -73,6 +82,11 @@
                                         <td class="col-filepath text-muted">@f.FilePath</td>
                                         <td class="col-repo">@(f.RepositoryName ?? "-")</td>
                                         <td class="col-actions">
+                                            <button class="btn btn-sm @(fileVersionConfigs.ContainsKey(f.FileId) ? "btn-info" : "btn-outline-secondary")"
+                                                    @onclick="() => OpenVersionConfigModal(f)"
+                                                    title="@(fileVersionConfigs.ContainsKey(f.FileId) ? "Edit version configuration" : "Configure versioning")">
+                                                Configure
+                                            </button>
                                             <button class="btn btn-sm btn-outline-danger"
                                                     @onclick="() => RemoveFileAsync(f)"
                                                     title="Remove file">
@@ -96,15 +110,31 @@
                 OnAdd="OnFilesAdded"
                 OnCancel="CloseAddFilesModal" />
 
+<VersionConfigModal IsVisible="@showVersionConfigModal"
+                    File="@configuringFile"
+                    WorkspaceRepos="@workspaceRepos"
+                    CurrentPattern="@currentConfigPattern"
+                    OnSaved="OnVersionPatternSaved"
+                    OnCancel="CloseVersionConfigModal" />
+
+<LoadingOverlay IsVisible="@isUpdating" Message="@updateMessage" OnAbort="AbortUpdate" />
+
 @code {
     [Parameter] public int WorkspaceId { get; set; }
 
     private WorkspaceModel? workspace;
     private List<WorkspaceFileDto> files = new();
     private List<WorkspaceRepoItem> workspaceRepos = new();
+    private Dictionary<int, string> fileVersionConfigs = new();
     private string? errorMessage;
     private bool isLoading = true;
     private bool showFileModal;
+    private bool showVersionConfigModal;
+    private WorkspaceFileDto? configuringFile;
+    private string? currentConfigPattern;
+    private bool isUpdating;
+    private string updateMessage = "";
+    private CancellationTokenSource? _updateCts;
 
     protected override async Task OnInitializedAsync()
     {
@@ -139,6 +169,8 @@
                 FileName = f.FileName,
                 FilePath = f.FilePath
             }).ToList();
+            var configs = await VersionConfigRepository.GetByWorkspaceIdAsync(WorkspaceId);
+            fileVersionConfigs = configs.ToDictionary(c => c.FileId, c => c.VersionPattern);
         }
         catch (Exception ex)
         {
@@ -161,6 +193,76 @@
     {
         showFileModal = false;
     }
+
+    private void OpenVersionConfigModal(WorkspaceFileDto f)
+    {
+        configuringFile = f;
+        currentConfigPattern = fileVersionConfigs.TryGetValue(f.FileId, out var p) ? p : null;
+        showVersionConfigModal = true;
+    }
+
+    private void CloseVersionConfigModal()
+    {
+        showVersionConfigModal = false;
+        configuringFile = null;
+        currentConfigPattern = null;
+    }
+
+    private async Task OnVersionPatternSaved(string pattern)
+    {
+        if (configuringFile == null) return;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(pattern))
+            {
+                await VersionConfigRepository.DeleteByFileIdAsync(configuringFile.FileId);
+                fileVersionConfigs.Remove(configuringFile.FileId);
+            }
+            else
+            {
+                await VersionConfigRepository.UpsertAsync(configuringFile.FileId, pattern);
+                fileVersionConfigs[configuringFile.FileId] = pattern;
+            }
+            CloseVersionConfigModal();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving version config for FileId={FileId}", configuringFile.FileId);
+            errorMessage = "Failed to save version configuration.";
+        }
+    }
+
+    private async Task UpdateVersionsAsync()
+    {
+        _updateCts?.Cancel();
+        _updateCts?.Dispose();
+        _updateCts = new CancellationTokenSource();
+        isUpdating = true;
+        errorMessage = null;
+        updateMessage = "Updating file versions...";
+        StateHasChanged();
+        try
+        {
+            var (updated, failed, error) = await FileVersionService.UpdateAllVersionsAsync(WorkspaceId, _updateCts.Token);
+            if (error != null)
+                errorMessage = error;
+            else if (failed > 0)
+                errorMessage = $"Updated {updated} line(s). {failed} file(s) could not be updated — check logs.";
+        }
+        catch (OperationCanceledException) { /* user aborted */ }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating versions for WorkspaceId={WorkspaceId}", WorkspaceId);
+            errorMessage = "Failed to update versions. Please try again.";
+        }
+        finally
+        {
+            isUpdating = false;
+            StateHasChanged();
+        }
+    }
+
+    private void AbortUpdate() => _updateCts?.Cancel();
 
     private async Task RemoveFileAsync(WorkspaceFileDto f)
     {

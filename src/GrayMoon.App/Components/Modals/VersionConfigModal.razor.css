@@ -1,0 +1,91 @@
+.version-config-editor-wrap {
+    position: relative;
+}
+
+.version-config-token-count {
+    font-size: 0.78rem;
+    font-weight: 400;
+    color: #888;
+    margin-left: auto;
+}
+
+.version-config-textarea {
+    font-size: 0.85rem;
+    min-height: 12rem;
+    max-height: 12rem;
+    resize: none;
+    overflow-y: none;
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a var(--bg-card, #252526);
+}
+
+.version-config-textarea::-webkit-scrollbar {
+    width: 6px;
+}
+
+.version-config-textarea::-webkit-scrollbar-track {
+    background: #e0e0e0;
+    border-radius: 3px;
+}
+
+.version-config-textarea::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 3px;
+}
+
+.version-config-textarea::-webkit-scrollbar-thumb:hover {
+    background: #888;
+}
+
+.version-config-suggestions {
+    position: fixed;
+    z-index: 2000;
+    background: #1e1e1e;
+    border: 1px solid #474747;
+    border-radius: 0.25rem;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+    max-height: 13rem;
+    overflow-y: auto;
+    min-width: 180px;
+    width: max-content;
+    /* Gray scrollbar — standard */
+    scrollbar-width: thin;
+    scrollbar-color: #5a5a5a #2a2a2a;
+}
+
+.version-config-suggestions::-webkit-scrollbar {
+    width: 6px;
+}
+
+.version-config-suggestions::-webkit-scrollbar-track {
+    background: #2a2a2a;
+}
+
+.version-config-suggestions::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 3px;
+}
+
+.version-config-suggestions::-webkit-scrollbar-thumb:hover {
+    background: #888;
+}
+
+.version-config-suggestion-item {
+    display: block;
+    width: 100%;
+    padding: 0.3rem 0.75rem;
+    background: none;
+    border: none;
+    text-align: left;
+    font-size: 0.85rem;
+    font-family: var(--bs-font-monospace);
+    color: #cccccc;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.version-config-suggestion-item:hover,
+.version-config-suggestion-item.active {
+    background-color: #094771;
+    color: #ffffff;
+}
