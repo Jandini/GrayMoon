@@ -125,7 +125,11 @@
     white-space: nowrap;
 }
 
-.version-config-suggestion-item:hover,
+.version-config-suggestion-item:hover {
+    background-color: #3a3a3a;
+    color: #ffffff;
+}
+
 .version-config-suggestion-item.active {
     background-color: #094771;
     color: #ffffff;

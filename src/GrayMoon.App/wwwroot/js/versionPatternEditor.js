@@ -100,5 +100,14 @@ window.versionPatternEditor = {
             x: elRect.left + bLeft + pLeft + mRect.left   - el.scrollLeft,
             y: elRect.top  + bTop  + pTop  + mRect.bottom - el.scrollTop
         };
+    },
+
+    // Scrolls the active suggestion item into view inside the dropdown container.
+    // container: the dropdown div element; activeClass: CSS class on the selected item.
+    scrollActiveIntoView: function (container) {
+        if (!container) return;
+        const active = container.querySelector('.version-config-suggestion-item.active');
+        if (!active) return;
+        active.scrollIntoView({ block: 'nearest' });
     }
 };
