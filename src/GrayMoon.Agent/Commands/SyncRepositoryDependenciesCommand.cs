@@ -1,10 +1,12 @@
+using System.Diagnostics;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
+using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class SyncRepositoryDependenciesCommand(IGitService git, ICsProjFileService csProjFileService) : ICommandHandler<SyncRepositoryDependenciesRequest, SyncRepositoryDependenciesResponse>
+public sealed class SyncRepositoryDependenciesCommand(IGitService git, ICsProjFileService csProjFileService, ILogger<SyncRepositoryDependenciesCommand> logger) : ICommandHandler<SyncRepositoryDependenciesRequest, SyncRepositoryDependenciesResponse>
 {
     public async Task<SyncRepositoryDependenciesResponse> ExecuteAsync(SyncRepositoryDependenciesRequest request, CancellationToken cancellationToken = default)
     {
@@ -30,7 +32,11 @@ public sealed class SyncRepositoryDependenciesCommand(IGitService git, ICsProjFi
             .Where(t => t.PackageUpdates.Count > 0)
             .ToList();
 
+        var sw = Stopwatch.StartNew();
         var updatedCount = await csProjFileService.UpdatePackageVersionsAsync(repoPath, updates, cancellationToken);
+        sw.Stop();
+        logger.LogDebug("UpdatePackageVersions completed in {ElapsedMs}ms for {RepoName} ({UpdatedCount} updated)",
+            sw.ElapsedMilliseconds, repositoryName, updatedCount);
         return new SyncRepositoryDependenciesResponse { UpdatedCount = updatedCount };
     }
 }

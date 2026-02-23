@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using GrayMoon.App.Data;
 using Microsoft.AspNetCore.SignalR;
@@ -301,9 +302,9 @@ public class WorkspaceGitService(
 
         var completedCount = 0;
         var totalCount = toSync.Count;
-        var failedRepoIds = new HashSet<int>();
+        var failedRepoIds = new ConcurrentDictionary<int, bool>();
 
-        foreach (var repo in toSync)
+        var repoTasks = toSync.Select(async repo =>
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -325,19 +326,18 @@ public class WorkspaceGitService(
             var response = await _agentBridge.SendCommandAsync("SyncRepositoryDependencies", args, cancellationToken);
             if (!response.Success)
             {
-                failedRepoIds.Add(repo.RepoId);
+                failedRepoIds.TryAdd(repo.RepoId, true);
                 onRepoError?.Invoke(repo.RepoId, response.Error ?? "Sync dependencies failed");
-                var c = Interlocked.Increment(ref completedCount);
-                onProgress?.Invoke(c, totalCount, repo.RepoId);
-                continue;
             }
 
-            var c2 = Interlocked.Increment(ref completedCount);
-            onProgress?.Invoke(c2, totalCount, repo.RepoId);
-        }
+            var c = Interlocked.Increment(ref completedCount);
+            onProgress?.Invoke(c, totalCount, repo.RepoId);
+        });
+
+        await Task.WhenAll(repoTasks);
 
         var updatesToPersist = toSync
-            .Where(r => !failedRepoIds.Contains(r.RepoId))
+            .Where(r => !failedRepoIds.ContainsKey(r.RepoId))
             .SelectMany(r => r.ProjectUpdates.SelectMany(p => p.PackageUpdates.Select(u => (r.RepoId, p.ProjectPath, u.PackageId, u.NewVersion))))
             .ToList();
         if (updatesToPersist.Count > 0)
@@ -787,7 +787,7 @@ public class WorkspaceGitService(
         if (!response.Success || response.Data == null)
             return new RepoGitVersionInfo { Version = "-", Branch = "-", ErrorMessage = response.Error ?? "Sync failed" };
 
-        var (version, branch) = GetVersionBranch(response.Data);
+        var (version, branch, gitVersionError) = GetVersionBranch(response.Data);
         var projectsCount = GetProjects(response.Data);
         var projectsDetail = GetProjectsDetail(response.Data);
         var (outgoingCommits, incomingCommits) = GetCommitCounts(response.Data);
@@ -803,7 +803,7 @@ public class WorkspaceGitService(
             LocalBranches = localBranches,
             RemoteBranches = remoteBranches,
             DefaultBranch = defaultBranch,
-            ErrorMessage = null
+            ErrorMessage = gitVersionError
         };
     }
 
@@ -812,21 +812,22 @@ public class WorkspaceGitService(
         if (!response.Success || response.Data == null)
             return new RepoGitVersionInfo { Version = "-", Branch = "-" };
 
-        var (version, branch) = GetVersionBranch(response.Data);
+        var (version, branch, gitVersionError) = GetVersionBranch(response.Data);
         var (outgoingCommits, incomingCommits) = GetCommitCounts(response.Data);
         return new RepoGitVersionInfo
         {
             Version = version,
             Branch = branch,
             OutgoingCommits = outgoingCommits,
-            IncomingCommits = incomingCommits
+            IncomingCommits = incomingCommits,
+            ErrorMessage = gitVersionError
         };
     }
 
-    private static (string version, string branch) GetVersionBranch(object data)
+    private static (string version, string branch, string? gitVersionError) GetVersionBranch(object data)
     {
         var r = AgentResponseJson.DeserializeAgentResponse<AgentVersionBranchResponse>(data);
-        return (r?.Version ?? "-", r?.Branch ?? "-");
+        return (r?.Version ?? "-", r?.Branch ?? "-", r?.GitVersionError);
     }
 
     private static int? GetProjects(object data)

@@ -23,7 +23,7 @@ public sealed class HookListenerHostedService(
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _listener = new HttpListener();
-        _listener.Prefixes.Add($"http://127.0.0.1:{_options.ListenPort}/");
+        _listener.Prefixes.Add($"http://127.0.0.1:{_options.ListenPort}/hook/");
         _listener.Start();
         logger.LogInformation("Hook listener started on http://127.0.0.1:{Port}/", _options.ListenPort);
 
@@ -54,7 +54,16 @@ public sealed class HookListenerHostedService(
 
     private async Task HandleRequestAsync(HttpListenerContext context, CancellationToken ct)
     {
-        if (context.Request.HttpMethod != "POST" || !context.Request.Url?.AbsolutePath.Equals("/notify", StringComparison.OrdinalIgnoreCase) == true)
+        var path = context.Request.Url?.AbsolutePath ?? "";
+        var hookKind = path.ToLowerInvariant() switch
+        {
+            "/hook/checkout" => (NotifyHookKind?)NotifyHookKind.Checkout,
+            "/hook/commit"   => NotifyHookKind.Commit,
+            "/hook/merge"    => NotifyHookKind.Merge,
+            _                => null
+        };
+
+        if (context.Request.HttpMethod != "POST" || hookKind == null)
         {
             context.Response.StatusCode = 404;
             context.Response.Close();
@@ -82,18 +91,19 @@ public sealed class HookListenerHostedService(
             {
                 RepositoryId = payload.RepositoryId,
                 WorkspaceId = payload.WorkspaceId,
-                RepositoryPath = payload.RepositoryPath
+                RepositoryPath = payload.RepositoryPath,
+                HookKind = hookKind.Value
             };
             var envelope = JobEnvelope.Notify(notifyJob);
             await jobQueue.EnqueueAsync(envelope, ct);
-            logger.LogDebug("Enqueued NotifySync: workspace={WorkspaceId}, repo={RepoId}", payload.WorkspaceId, payload.RepositoryId);
+            logger.LogDebug("Enqueued {HookKind} hook: workspace={WorkspaceId}, repo={RepoId}", hookKind, payload.WorkspaceId, payload.RepositoryId);
 
             context.Response.StatusCode = 202;
             context.Response.Close();
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error handling /notify");
+            logger.LogError(ex, "Error handling {Path}", path);
             context.Response.StatusCode = 500;
             context.Response.Close();
         }

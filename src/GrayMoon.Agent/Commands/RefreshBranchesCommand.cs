@@ -33,7 +33,7 @@ public sealed class RefreshBranchesCommand(IGitService git) : ICommandHandler<Re
 
         // Get current branch
         string? currentBranch = null;
-        var versionResult = await git.GetVersionAsync(repoPath, cancellationToken);
+        var (versionResult, _) = await git.GetVersionAsync(repoPath, cancellationToken);
         if (versionResult != null)
         {
             currentBranch = versionResult.BranchName ?? versionResult.EscapedBranchName;

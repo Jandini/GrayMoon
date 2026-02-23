@@ -10,6 +10,9 @@ public sealed class AgentVersionBranchResponse
 
     [JsonPropertyName("branch")]
     public string? Branch { get; set; }
+
+    [JsonPropertyName("gitVersionError")]
+    public string? GitVersionError { get; set; }
 }
 
 /// <summary>Agent response with exists, version, branch (GetRepositoryVersion).</summary>

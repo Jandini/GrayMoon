@@ -33,13 +33,15 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
         IReadOnlyList<CsProjFileInfo>? projects = null;
         int? outgoingCommits = null;
         int? incomingCommits = null;
+        string? versionError = null;
         if (git.DirectoryExists(repoPath))
         {
             await git.AddSafeDirectoryAsync(repoPath, cancellationToken);
             // FindAsync only reads .csproj files; safe to run in parallel with git operations.
             var findProjectsTask = csProjFileService.FindAsync(repoPath, cancellationToken);
 
-            var vr = await git.GetVersionAsync(repoPath, cancellationToken);
+            GitVersionResult? vr;
+            (vr, versionError) = await git.GetVersionAsync(repoPath, cancellationToken);
             if (vr != null)
             {
                 version = vr.SemVer ?? vr.FullSemVer ?? "-";
@@ -88,10 +90,11 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 IncomingCommits = incomingCommits,
                 LocalBranches = localBranches,
                 RemoteBranches = remoteBranches,
-                DefaultBranch = defaultBranch
+                DefaultBranch = defaultBranch,
+                GitVersionError = versionError
             };
         }
 
-        return new SyncRepositoryResponse { Version = version, Branch = branch, Projects = projects, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits };
+        return new SyncRepositoryResponse { Version = version, Branch = branch, Projects = projects, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits, GitVersionError = versionError };
     }
 }

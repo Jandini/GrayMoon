@@ -6,21 +6,31 @@ using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class NotifySyncCommand(IGitService git, IHubConnectionProvider hubProvider, ILogger<NotifySyncCommand> logger) : INotifySyncHandler
+/// <summary>
+/// Handles post-checkout hooks: runs GitVersion and git fetch in parallel, then gets commit counts.
+/// Fetch is required here because a branch switch may reveal new remote commits.
+/// </summary>
+public sealed class CheckoutHookSyncCommand(IGitService git, IHubConnectionProvider hubProvider, ILogger<CheckoutHookSyncCommand> logger)
 {
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(payload.RepositoryPath))
         {
-            logger.LogWarning("NotifySync job missing repositoryPath");
+            logger.LogWarning("CheckoutHookSync job missing repositoryPath");
             return;
         }
 
-        var versionResult = await git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
+        // GetVersionAsync (dotnet-gitversion) reads local history; FetchAsync writes refs/remotes/ atomically.
+        // Both are safe to run in parallel. GetCommitCountsAsync reads origin/{branch} so must wait for fetch.
+        var versionTask = git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
+        var fetchTask = git.FetchAsync(payload.RepositoryPath, includeTags: true, bearerToken: null, cancellationToken);
+
+        var (versionResult, _) = await versionTask;
         var version = versionResult?.SemVer ?? versionResult?.FullSemVer ?? "-";
         var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
 
-        await git.FetchAsync(payload.RepositoryPath, includeTags: true, bearerToken: null, cancellationToken);
+        await fetchTask; // must complete before commit counts (needs up-to-date remote tracking refs)
+
         int? outgoing = null;
         int? incoming = null;
         if (branch != "-")
@@ -34,12 +44,12 @@ public sealed class NotifySyncCommand(IGitService git, IHubConnectionProvider hu
         if (connection?.State == HubConnectionState.Connected)
         {
             await connection.InvokeAsync("SyncCommand", payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, cancellationToken);
-            logger.LogInformation("SyncCommand sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}",
+            logger.LogInformation("CheckoutHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}",
                 payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming);
         }
         else
         {
-            logger.LogWarning("Hub not connected, cannot send SyncCommand");
+            logger.LogWarning("Hub not connected, cannot send CheckoutHookSync SyncCommand");
         }
     }
 }

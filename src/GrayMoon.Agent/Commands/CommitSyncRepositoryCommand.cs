@@ -42,13 +42,13 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
         }
 
         // Get current branch
-        var versionResult = await git.GetVersionAsync(repoPath, cancellationToken);
+        var (versionResult, versionError) = await git.GetVersionAsync(repoPath, cancellationToken);
         if (versionResult == null)
         {
             return new CommitSyncRepositoryResponse
             {
                 Success = false,
-                ErrorMessage = "Could not determine repository version"
+                ErrorMessage = versionError ?? "Could not determine repository version"
             };
         }
 
