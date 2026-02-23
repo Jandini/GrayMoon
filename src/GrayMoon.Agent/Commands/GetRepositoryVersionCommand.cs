@@ -20,7 +20,7 @@ public sealed class GetRepositoryVersionCommand(IGitService git) : ICommandHandl
         string? branch = null;
         if (exists)
         {
-            var vr = await git.GetVersionAsync(repoPath, cancellationToken);
+            var (vr, _) = await git.GetVersionAsync(repoPath, cancellationToken);
             if (vr != null)
             {
                 version = vr.SemVer ?? vr.FullSemVer;

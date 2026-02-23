@@ -15,4 +15,7 @@ public sealed class RefreshRepositoryVersionResponse
 
     [JsonPropertyName("incomingCommits")]
     public int? IncomingCommits { get; set; }
+
+    [JsonPropertyName("gitVersionError")]
+    public string? GitVersionError { get; set; }
 }

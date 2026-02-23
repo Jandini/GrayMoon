@@ -8,7 +8,7 @@ public interface IGitService
     string GetWorkspacePath(string workspaceName);
     Task<bool> CloneAsync(string workingDir, string cloneUrl, string? bearerToken, CancellationToken ct);
     Task AddSafeDirectoryAsync(string repoPath, CancellationToken ct);
-    Task<GitVersionResult?> GetVersionAsync(string repoPath, CancellationToken ct);
+    Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, CancellationToken ct);
     Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct);
     /// <summary>Fetches from origin; when <paramref name="includeTags"/> is true, fetches tags as well.</summary>
     Task FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct);

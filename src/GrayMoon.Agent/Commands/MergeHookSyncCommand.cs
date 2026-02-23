@@ -20,7 +20,7 @@ public sealed class MergeHookSyncCommand(IGitService git, IHubConnectionProvider
             return;
         }
 
-        var versionResult = await git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
+        var (versionResult, _) = await git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
         var version = versionResult?.SemVer ?? versionResult?.FullSemVer ?? "-";
         var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
 

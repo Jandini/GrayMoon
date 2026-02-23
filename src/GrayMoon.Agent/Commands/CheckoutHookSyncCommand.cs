@@ -25,7 +25,7 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IHubConnectionProvi
         var versionTask = git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
         var fetchTask = git.FetchAsync(payload.RepositoryPath, includeTags: true, bearerToken: null, cancellationToken);
 
-        var versionResult = await versionTask;
+        var (versionResult, _) = await versionTask;
         var version = versionResult?.SemVer ?? versionResult?.FullSemVer ?? "-";
         var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
 

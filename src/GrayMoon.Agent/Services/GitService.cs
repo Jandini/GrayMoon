@@ -107,28 +107,30 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             })
             .Build();
 
-    public async Task<GitVersionResult?> GetVersionAsync(string repoPath, CancellationToken ct)
+    public async Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
-            return null;
+            return (null, null);
 
         var sw = Stopwatch.StartNew();
         var (exitCode, stdout, stderr) = await RunProcessAsync("dotnet-gitversion", "", repoPath, ct);
         sw.Stop();
         if (exitCode != 0)
         {
+            var error = (!string.IsNullOrWhiteSpace(stderr) ? stderr : stdout)?.Trim()
+                        ?? $"dotnet-gitversion exited with code {exitCode}";
             logger.LogError("dotnet-gitversion failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, exitCode, stdout, stderr);
-            return null;
+            return (null, error);
         }
         logger.LogDebug("dotnet-gitversion completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
 
         try
         {
-            return JsonSerializer.Deserialize<GitVersionResult>(stdout ?? "", JsonOptions);
+            return (JsonSerializer.Deserialize<GitVersionResult>(stdout ?? "", JsonOptions), null);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            return null;
+            return (null, $"Failed to parse dotnet-gitversion output: {ex.Message}");
         }
     }
 

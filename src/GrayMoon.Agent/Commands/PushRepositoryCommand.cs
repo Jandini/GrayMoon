@@ -41,13 +41,13 @@ public sealed class PushRepositoryCommand(IGitService git) : ICommandHandler<Pus
             };
         }
 
-        var versionResult = await git.GetVersionAsync(repoPath, cancellationToken);
+        var (versionResult, versionError) = await git.GetVersionAsync(repoPath, cancellationToken);
         if (versionResult == null)
         {
             return new PushRepositoryResponse
             {
                 Success = false,
-                ErrorMessage = "Could not determine repository version"
+                ErrorMessage = versionError ?? "Could not determine repository version"
             };
         }
 

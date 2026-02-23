@@ -21,7 +21,7 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git) : ICommandH
         int? incomingCommits = null;
         if (git.DirectoryExists(repoPath))
         {
-            var vr = await git.GetVersionAsync(repoPath, cancellationToken);
+            var (vr, versionError) = await git.GetVersionAsync(repoPath, cancellationToken);
             if (vr != null)
             {
                 version = vr.SemVer ?? vr.FullSemVer ?? "-";
@@ -33,6 +33,7 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git) : ICommandH
                 outgoingCommits = outgoing;
                 incomingCommits = incoming;
             }
+            return new RefreshRepositoryVersionResponse { Version = version, Branch = branch, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits, GitVersionError = versionError };
         }
 
         return new RefreshRepositoryVersionResponse { Version = version, Branch = branch, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits };

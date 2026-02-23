@@ -787,7 +787,7 @@ public class WorkspaceGitService(
         if (!response.Success || response.Data == null)
             return new RepoGitVersionInfo { Version = "-", Branch = "-", ErrorMessage = response.Error ?? "Sync failed" };
 
-        var (version, branch) = GetVersionBranch(response.Data);
+        var (version, branch, gitVersionError) = GetVersionBranch(response.Data);
         var projectsCount = GetProjects(response.Data);
         var projectsDetail = GetProjectsDetail(response.Data);
         var (outgoingCommits, incomingCommits) = GetCommitCounts(response.Data);
@@ -803,7 +803,7 @@ public class WorkspaceGitService(
             LocalBranches = localBranches,
             RemoteBranches = remoteBranches,
             DefaultBranch = defaultBranch,
-            ErrorMessage = null
+            ErrorMessage = gitVersionError
         };
     }
 
@@ -812,21 +812,22 @@ public class WorkspaceGitService(
         if (!response.Success || response.Data == null)
             return new RepoGitVersionInfo { Version = "-", Branch = "-" };
 
-        var (version, branch) = GetVersionBranch(response.Data);
+        var (version, branch, gitVersionError) = GetVersionBranch(response.Data);
         var (outgoingCommits, incomingCommits) = GetCommitCounts(response.Data);
         return new RepoGitVersionInfo
         {
             Version = version,
             Branch = branch,
             OutgoingCommits = outgoingCommits,
-            IncomingCommits = incomingCommits
+            IncomingCommits = incomingCommits,
+            ErrorMessage = gitVersionError
         };
     }
 
-    private static (string version, string branch) GetVersionBranch(object data)
+    private static (string version, string branch, string? gitVersionError) GetVersionBranch(object data)
     {
         var r = AgentResponseJson.DeserializeAgentResponse<AgentVersionBranchResponse>(data);
-        return (r?.Version ?? "-", r?.Branch ?? "-");
+        return (r?.Version ?? "-", r?.Branch ?? "-", r?.GitVersionError);
     }
 
     private static int? GetProjects(object data)
