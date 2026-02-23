@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Hub;
 using GrayMoon.Agent.Jobs;
@@ -36,7 +37,12 @@ public sealed class JobBackgroundService(
             try
             {
                 if (envelope.Kind == JobKind.Notify && envelope.NotifyJob != null)
+                {
+                    var nsw = Stopwatch.StartNew();
                     await notifySyncHandler.ExecuteAsync(envelope.NotifyJob, stoppingToken);
+                    logger.LogInformation("NotifySync completed for repo={RepoId} workspace={WorkspaceId} in {ElapsedMs}ms",
+                        envelope.NotifyJob.RepositoryId, envelope.NotifyJob.WorkspaceId, nsw.ElapsedMilliseconds);
+                }
                 else if (envelope.Kind == JobKind.Command && envelope.CommandJob != null)
                     await ProcessCommandAsync(envelope.CommandJob, stoppingToken);
             }
@@ -60,8 +66,10 @@ public sealed class JobBackgroundService(
 
     private async Task ProcessCommandAsync(ICommandJob job, CancellationToken ct)
     {
+        var sw = Stopwatch.StartNew();
         var result = await dispatcher.ExecuteAsync(job.Command, job.Request, ct);
-        logger.LogInformation("ResponseCommand {RequestId} completed ({Command})", job.RequestId, job.Command);
+        sw.Stop();
+        logger.LogInformation("ResponseCommand {RequestId} completed ({Command}) in {ElapsedMs}ms", job.RequestId, job.Command, sw.ElapsedMilliseconds);
         logger.LogTrace("ResponseCommand {RequestId} response content: {@ResponseBody}", job.RequestId, result);
         await SendResponseAsync(job.RequestId, true, result, null);
     }

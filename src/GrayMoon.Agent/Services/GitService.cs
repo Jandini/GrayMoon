@@ -42,13 +42,15 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             Directory.CreateDirectory(workingDir);
 
         var args = BuildCloneArguments(cloneUrl, bearerToken);
+        var sw = Stopwatch.StartNew();
         var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, workingDir, ct);
+        sw.Stop();
         if (exitCode != 0)
         {
-            logger.LogError("Git clone failed. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", exitCode, stdout, stderr);
+            logger.LogError("Git clone failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, exitCode, stdout, stderr);
             return false;
         }
-        logger.LogInformation("Git clone completed: {Url} -> {Dir}", cloneUrl, workingDir);
+        logger.LogInformation("Git clone completed in {ElapsedMs}ms: {Url} -> {Dir}", sw.ElapsedMilliseconds, cloneUrl, workingDir);
         return true;
     }
 
@@ -110,12 +112,15 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return null;
 
+        var sw = Stopwatch.StartNew();
         var (exitCode, stdout, stderr) = await RunProcessAsync("dotnet-gitversion", "", repoPath, ct);
+        sw.Stop();
         if (exitCode != 0)
         {
-            logger.LogError("dotnet-gitversion failed. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", exitCode, stdout, stderr);
+            logger.LogError("dotnet-gitversion failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, exitCode, stdout, stderr);
             return null;
         }
+        logger.LogDebug("dotnet-gitversion completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
 
         try
         {
@@ -163,9 +168,13 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             var fetchCmd = includeTags ? "fetch origin --prune --tags" : "fetch origin --prune";
             args = $"-c \"http.extraHeader={escaped}\" {fetchCmd}";
         }
+        var sw = Stopwatch.StartNew();
         var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);
+        sw.Stop();
         if (exitCode != 0)
-            logger.LogError("Git fetch failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            logger.LogError("Git fetch failed in {ElapsedMs}ms for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, repoPath, exitCode, stdout, stderr);
+        else
+            logger.LogDebug("Git fetch completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
     }
 
     public async Task<(int? Outgoing, int? Incoming)> GetCommitCountsAsync(string repoPath, string branchName, CancellationToken ct)
