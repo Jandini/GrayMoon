@@ -6,13 +6,17 @@ using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class NotifySyncCommand(IGitService git, IHubConnectionProvider hubProvider, ILogger<NotifySyncCommand> logger) : INotifySyncHandler
+/// <summary>
+/// Handles post-merge hooks: re-runs GitVersion and gets commit counts.
+/// No git fetch — the merge already brought remote changes in; existing remote tracking refs are current enough.
+/// </summary>
+public sealed class MergeHookSyncCommand(IGitService git, IHubConnectionProvider hubProvider, ILogger<MergeHookSyncCommand> logger)
 {
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(payload.RepositoryPath))
         {
-            logger.LogWarning("NotifySync job missing repositoryPath");
+            logger.LogWarning("MergeHookSync job missing repositoryPath");
             return;
         }
 
@@ -20,7 +24,6 @@ public sealed class NotifySyncCommand(IGitService git, IHubConnectionProvider hu
         var version = versionResult?.SemVer ?? versionResult?.FullSemVer ?? "-";
         var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
 
-        await git.FetchAsync(payload.RepositoryPath, includeTags: true, bearerToken: null, cancellationToken);
         int? outgoing = null;
         int? incoming = null;
         if (branch != "-")
@@ -34,12 +37,12 @@ public sealed class NotifySyncCommand(IGitService git, IHubConnectionProvider hu
         if (connection?.State == HubConnectionState.Connected)
         {
             await connection.InvokeAsync("SyncCommand", payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, cancellationToken);
-            logger.LogInformation("SyncCommand sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}",
+            logger.LogInformation("MergeHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}",
                 payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming);
         }
         else
         {
-            logger.LogWarning("Hub not connected, cannot send SyncCommand");
+            logger.LogWarning("Hub not connected, cannot send MergeHookSync SyncCommand");
         }
     }
 }

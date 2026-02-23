@@ -182,6 +182,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (null, null);
 
+        var sw = Stopwatch.StartNew();
         var originBranch = "origin/" + branchName.Trim();
         
         // Check if the remote branch exists locally (after fetch) before trying to count commits
@@ -207,6 +208,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
             var aheadCount = int.TryParse((stdoutDefault ?? "").Trim(), out var ahead) ? ahead : (int?)null;
             // No incoming commits for a branch that doesn't exist upstream
+            sw.Stop();
+            logger.LogDebug("GetCommitCounts (vs default branch) completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
             return (aheadCount, null);
         }
 
@@ -228,6 +231,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         var outVal = int.TryParse((stdoutOut ?? "").Trim(), out var o) ? o : (int?)null;
         var inVal = int.TryParse((stdoutIn ?? "").Trim(), out var i) ? i : (int?)null;
+        sw.Stop();
+        logger.LogDebug("GetCommitCounts completed in {ElapsedMs}ms for {RepoPath} (↑{Outgoing} ↓{Incoming})", sw.ElapsedMilliseconds, repoPath, outVal, inVal);
         return (outVal, inVal);
     }
 
@@ -619,17 +624,20 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var hooksDir = Path.Combine(repoPath, ".git", "hooks");
         Directory.CreateDirectory(hooksDir);
 
-        var notifyUrl = $"http://127.0.0.1:{_listenPort}/notify";
-        var payload = JsonSerializer.Serialize(new { repositoryId, workspaceId, repositoryPath = repoPath });
-        var curlLine = $"curl -s -X POST \"{notifyUrl}\" -H \"Content-Type: application/json\" -d '{payload.Replace("'", "'\\''")}'";
+        var jsonPayload = JsonSerializer.Serialize(new { repositoryId, workspaceId, repositoryPath = repoPath });
+        var escapedPayload = jsonPayload.Replace("'", "'\\'' ");
+        var header = "-H \"Content-Type: application/json\"";
+        var commitCurl   = $"curl -s -X POST \"http://127.0.0.1:{_listenPort}/hook/commit\"   {header} -d '{escapedPayload}'";
+        var checkoutCurl = $"curl -s -X POST \"http://127.0.0.1:{_listenPort}/hook/checkout\" {header} -d '{escapedPayload}'";
+        var mergeCurl    = $"curl -s -X POST \"http://127.0.0.1:{_listenPort}/hook/merge\"    {header} -d '{escapedPayload}'";
 
         var utf8 = new UTF8Encoding(false);
         var comment = $"# Created by GrayMoon.Agent at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}Z\n";
 
-        WriteHookFile(Path.Combine(hooksDir, "post-commit"), "#!/bin/sh\n" + comment + curlLine + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "post-checkout"), "#!/bin/sh\n" + comment + "[ \"$3\" = \"1\" ] && " + curlLine.TrimEnd() + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "post-merge"), "#!/bin/sh\n" + comment + curlLine + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "post-update"), "#!/bin/sh\n" + comment + curlLine + "\n", utf8);
+        WriteHookFile(Path.Combine(hooksDir, "post-commit"),   "#!/bin/sh\n" + comment + commitCurl + "\n", utf8);
+        WriteHookFile(Path.Combine(hooksDir, "post-checkout"),  "#!/bin/sh\n" + comment + "[ \"$3\" = \"1\" ] && " + checkoutCurl.TrimEnd() + "\n", utf8);
+        WriteHookFile(Path.Combine(hooksDir, "post-merge"),     "#!/bin/sh\n" + comment + mergeCurl + "\n", utf8);
+        WriteHookFile(Path.Combine(hooksDir, "post-update"),    "#!/bin/sh\n" + comment + commitCurl + "\n", utf8);
         logger.LogDebug("Sync hooks written for repo {RepoId} in workspace {WorkspaceId}", repositoryId, workspaceId);
     }
 
