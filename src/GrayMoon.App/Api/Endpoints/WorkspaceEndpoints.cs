@@ -74,6 +74,7 @@ public static class WorkspaceEndpoints
         [FromQuery] string? pattern,
         [FromQuery] string? repositoryName,
         [FromServices] WorkspaceRepository workspaceRepository,
+        [FromServices] WorkspaceService workspaceService,
         [FromServices] IAgentBridge agentBridge,
         CancellationToken cancellationToken)
     {
@@ -84,12 +85,14 @@ public static class WorkspaceEndpoints
         if (!agentBridge.IsAgentConnected)
             return TypedResults.BadRequest(new ProblemDetails { Title = "Agent not connected. Start GrayMoon.Agent to search files." });
 
+        var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         var searchPattern = string.IsNullOrWhiteSpace(pattern) ? "*" : pattern.Trim();
         var response = await agentBridge.SendCommandAsync("SearchFiles", new
         {
             workspaceName = workspace.Name,
             repositoryName = string.IsNullOrWhiteSpace(repositoryName) ? null : repositoryName.Trim(),
-            searchPattern
+            searchPattern,
+            workspaceRoot
         }, cancellationToken);
 
         if (!response.Success || response.Data == null)

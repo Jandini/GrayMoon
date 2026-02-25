@@ -1,0 +1,2 @@
+- When you compmlete a task, single sentence about completed task.
+- **Line endings:** Always use **Windows (CRLF)** in generated or edited code. Do not use LF-only.

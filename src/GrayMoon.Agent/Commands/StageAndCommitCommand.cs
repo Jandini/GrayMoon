@@ -13,7 +13,7 @@ public sealed class StageAndCommitCommand(IGitService git) : ICommandHandler<Sta
         var commitMessage = request.CommitMessage ?? throw new ArgumentException("commitMessage required");
         var pathsToStage = request.PathsToStage ?? [];
 
-        var workspacePath = git.GetWorkspacePath(workspaceName);
+        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = Path.Combine(workspacePath, repositoryName);
 
         if (!git.DirectoryExists(repoPath))

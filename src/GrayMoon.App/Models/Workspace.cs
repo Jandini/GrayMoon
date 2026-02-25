@@ -12,6 +12,9 @@ public class Workspace
 
     public bool IsDefault { get; set; }
 
+    [MaxLength(500)]
+    public string? RootPath { get; set; }
+
     public DateTime? LastSyncedAt { get; set; }
 
     public bool IsInSync { get; set; }

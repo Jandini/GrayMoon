@@ -11,7 +11,6 @@ public sealed class CommandDispatcher(
     ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResponse> getWorkspaceRepositoriesCommand,
     ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResponse> getRepositoryVersionCommand,
     ICommandHandler<GetWorkspaceExistsRequest, GetWorkspaceExistsResponse> getWorkspaceExistsCommand,
-    ICommandHandler<GetWorkspaceRootRequest, GetWorkspaceRootResponse> getWorkspaceRootCommand,
     ICommandHandler<GetHostInfoRequest, GetHostInfoResponse> getHostInfoCommand,
     ICommandHandler<SyncRepositoryDependenciesRequest, SyncRepositoryDependenciesResponse> syncRepositoryDependenciesCommand,
     ICommandHandler<RefreshRepositoryProjectsRequest, RefreshRepositoryProjectsResponse> refreshRepositoryProjectsCommand,
@@ -25,7 +24,8 @@ public sealed class CommandDispatcher(
     ICommandHandler<PushRepositoryRequest, PushRepositoryResponse> pushRepositoryCommand,
     ICommandHandler<SearchFilesRequest, SearchFilesResponse> searchFilesCommand,
     ICommandHandler<UpdateFileVersionsRequest, UpdateFileVersionsResponse> updateFileVersionsCommand,
-    ICommandHandler<GetFileContentsRequest, GetFileContentsResponse> getFileContentsCommand) : ICommandDispatcher
+    ICommandHandler<GetFileContentsRequest, GetFileContentsResponse> getFileContentsCommand,
+    ICommandHandler<ValidatePathRequest, ValidatePathResponse> validatePathCommand) : ICommandDispatcher
 {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
@@ -36,7 +36,6 @@ public sealed class CommandDispatcher(
         ["GetWorkspaceRepositories"] = async (req, ct) => await getWorkspaceRepositoriesCommand.ExecuteAsync((GetWorkspaceRepositoriesRequest)req, ct),
         ["GetRepositoryVersion"] = async (req, ct) => await getRepositoryVersionCommand.ExecuteAsync((GetRepositoryVersionRequest)req, ct),
         ["GetWorkspaceExists"] = async (req, ct) => await getWorkspaceExistsCommand.ExecuteAsync((GetWorkspaceExistsRequest)req, ct),
-        ["GetWorkspaceRoot"] = async (req, ct) => await getWorkspaceRootCommand.ExecuteAsync((GetWorkspaceRootRequest)req, ct),
         ["GetHostInfo"] = async (req, ct) => await getHostInfoCommand.ExecuteAsync((GetHostInfoRequest)req, ct),
         ["SyncRepositoryDependencies"] = async (req, ct) => await syncRepositoryDependenciesCommand.ExecuteAsync((SyncRepositoryDependenciesRequest)req, ct),
         ["CommitSyncRepository"] = async (req, ct) => await commitSyncRepositoryCommand.ExecuteAsync((CommitSyncRepositoryRequest)req, ct),
@@ -50,6 +49,7 @@ public sealed class CommandDispatcher(
         ["SearchFiles"] = async (req, ct) => await searchFilesCommand.ExecuteAsync((SearchFilesRequest)req, ct),
         ["UpdateFileVersions"] = async (req, ct) => await updateFileVersionsCommand.ExecuteAsync((UpdateFileVersionsRequest)req, ct),
         ["GetFileContents"] = async (req, ct) => await getFileContentsCommand.ExecuteAsync((GetFileContentsRequest)req, ct),
+        ["ValidatePath"] = async (req, ct) => await validatePathCommand.ExecuteAsync((ValidatePathRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

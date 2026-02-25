@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace GrayMoon.Agent.Jobs.Requests;
 
-public sealed class RefreshRepositoryVersionRequest
+public sealed class RefreshRepositoryVersionRequest : WorkspaceCommandRequest
 {
     [JsonPropertyName("workspaceName")]
     public string? WorkspaceName { get; set; }

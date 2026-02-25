@@ -77,8 +77,6 @@
                                     <div class="host-info-grid small">
                                         <span class="text-muted">Agent</span>
                                         <span>@VersionBadge(AgentConnectionTracker.AgentSemVer)</span>
-                                        <span class="text-muted">Workspace</span>
-                                        <span class="font-monospace">@hostInfo.WorkspaceRoot</span>
                                         <span class="text-muted">Dotnet</span>
                                         <span>@DotnetCell(hostInfo.DotnetVersion)</span>
                                         <span class="text-muted">Git</span>
@@ -103,7 +101,7 @@
         </div>
     </div>
 @code {
-    private sealed record HostInfoDto(string WorkspaceRoot, string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion);
+    private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion);
 
     private string installCommand = string.Empty;
     private string uninstallCommand = string.Empty;
@@ -160,7 +158,7 @@
         {
             var json = response.Data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(response.Data);
             var dto = JsonSerializer.Deserialize<HostInfoDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            hostInfo = dto ?? new HostInfoDto(string.Empty, null, null, null);
+            hostInfo = dto ?? new HostInfoDto(null, null, null);
         }
         catch
         {

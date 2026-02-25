@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace GrayMoon.Agent.Jobs.Requests;
 
-public sealed class SyncToDefaultBranchRequest
+public sealed class SyncToDefaultBranchRequest : WorkspaceCommandRequest
 {
     [JsonPropertyName("workspaceName")]
     public string? WorkspaceName { get; set; }

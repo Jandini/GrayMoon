@@ -14,7 +14,7 @@ public sealed class SyncRepositoryDependenciesCommand(IGitService git, ICsProjFi
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
         var projectUpdates = request.ProjectUpdates ?? [];
 
-        var workspacePath = git.GetWorkspacePath(workspaceName);
+        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = Path.Combine(workspacePath, repositoryName);
 
         if (!git.DirectoryExists(repoPath))

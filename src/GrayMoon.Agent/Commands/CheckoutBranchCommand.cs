@@ -13,7 +13,7 @@ public sealed class CheckoutBranchCommand(IGitService git) : ICommandHandler<Che
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
         var branchName = request.BranchName ?? throw new ArgumentException("branchName required");
 
-        var workspacePath = git.GetWorkspacePath(workspaceName);
+        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = Path.Combine(workspacePath, repositoryName);
 
         if (!git.DirectoryExists(repoPath))

@@ -42,8 +42,6 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid GetRepositoryVersion args"),
             "GetWorkspaceExists" => JsonSerializer.Deserialize<GetWorkspaceExistsRequest>(json, options)
                 ?? throw new ArgumentException("Invalid GetWorkspaceExists args"),
-            "GetWorkspaceRoot" => JsonSerializer.Deserialize<GetWorkspaceRootRequest>(json, options)
-                ?? throw new ArgumentException("Invalid GetWorkspaceRoot args"),
             "GetHostInfo" => JsonSerializer.Deserialize<GetHostInfoRequest>(json, options) ?? new GetHostInfoRequest(),
             "SyncRepositoryDependencies" => JsonSerializer.Deserialize<SyncRepositoryDependenciesRequest>(json, options)
                 ?? throw new ArgumentException("Invalid SyncRepositoryDependencies args"),
@@ -71,6 +69,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid UpdateFileVersions args"),
             "GetFileContents" => JsonSerializer.Deserialize<GetFileContentsRequest>(json, options)
                 ?? throw new ArgumentException("Invalid GetFileContents args"),
+            "ValidatePath" => JsonSerializer.Deserialize<ValidatePathRequest>(json, options)
+                ?? throw new ArgumentException("Invalid ValidatePath args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

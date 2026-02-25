@@ -5,6 +5,7 @@ namespace GrayMoon.App.Services;
 
 public sealed class WorkspaceFileVersionService(
     IAgentBridge agentBridge,
+    WorkspaceService workspaceService,
     WorkspaceRepository workspaceRepository,
     WorkspaceFileVersionConfigRepository versionConfigRepository,
     ILogger<WorkspaceFileVersionService> logger)
@@ -38,10 +39,12 @@ public sealed class WorkspaceFileVersionService(
         foreach (var repoName in repoNamesInUse)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
             var resp = await agentBridge.SendCommandAsync("GetRepositoryVersion", new
             {
                 workspaceName = workspace.Name,
-                repositoryName = repoName
+                repositoryName = repoName,
+                workspaceRoot
             }, cancellationToken);
 
             if (resp.Success && resp.Data != null)
@@ -70,13 +73,15 @@ public sealed class WorkspaceFileVersionService(
 
             try
             {
+                var workspaceRoot2 = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
                 var resp = await agentBridge.SendCommandAsync("UpdateFileVersions", new
                 {
                     workspaceName = workspace.Name,
                     repositoryName = file.Repository.RepositoryName,
                     filePath = file.FilePath,
                     versionPattern = cfg.VersionPattern,
-                    repoVersions
+                    repoVersions,
+                    workspaceRoot = workspaceRoot2
                 }, cancellationToken);
 
                 if (resp.Success && resp.Data != null)

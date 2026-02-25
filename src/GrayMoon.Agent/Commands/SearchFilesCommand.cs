@@ -11,7 +11,7 @@ public sealed class SearchFilesCommand(
     public async Task<SearchFilesResponse> ExecuteAsync(SearchFilesRequest request, CancellationToken cancellationToken = default)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
-        var workspacePath = git.GetWorkspacePath(workspaceName);
+        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         if (string.IsNullOrEmpty(workspacePath) || !Directory.Exists(workspacePath))
             return new SearchFilesResponse { Files = [] };
 

@@ -1,9 +1,10 @@
-using System.Text.Json;
+using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
+using GrayMoon.App.Repositories;
 
 namespace GrayMoon.App.Services;
 
-public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService> logger)
+public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService> logger, AppSettingRepository appSettingRepository)
 {
     private string? _cachedRootPath;
     private readonly SemaphoreSlim _cacheLock = new(1, 1);
@@ -15,37 +16,26 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
         if (_cachedRootPath != null)
             return _cachedRootPath;
 
-        if (!agentBridge.IsAgentConnected)
-            return null;
-
         await _cacheLock.WaitAsync(cancellationToken);
         try
         {
             if (_cachedRootPath != null)
                 return _cachedRootPath;
 
-            if (!agentBridge.IsAgentConnected)
-                return null;
-
-            var response = await agentBridge.SendCommandAsync("GetWorkspaceRoot", new { }, cancellationToken);
-            if (response.Success && response.Data != null)
+            var dbOverride = await appSettingRepository.GetValueAsync(AppSettingRepository.WorkspaceRootPathKey);
+            if (!string.IsNullOrWhiteSpace(dbOverride))
             {
-                var data = AgentResponseJson.DeserializeAgentResponse<AgentWorkspaceRootResponse>(response.Data);
-                var root = data?.WorkspaceRoot;
-                if (!string.IsNullOrWhiteSpace(root))
-                {
-                    _cachedRootPath = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                    logger.LogInformation("Fetched workspace root from agent: {RootPath}", _cachedRootPath);
-                    return _cachedRootPath;
-                }
+                _cachedRootPath = dbOverride.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                logger.LogInformation("Using configured workspace root: {RootPath}", _cachedRootPath);
+                return _cachedRootPath;
             }
 
-            logger.LogWarning("Failed to fetch workspace root from agent");
+            logger.LogWarning("No workspace root configured. Set one on the Settings page.");
             return null;
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Error fetching workspace root from agent");
+            logger.LogWarning(ex, "Error reading workspace root from settings");
             return null;
         }
         finally
@@ -54,30 +44,39 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
         }
     }
 
-    public string GetWorkspacePath(string workspaceName)
+    /// <summary>Returns the workspace root for a specific workspace, falling back to the global configured root.</summary>
+    public async Task<string?> GetRootPathForWorkspaceAsync(Workspace? workspace, CancellationToken cancellationToken = default)
     {
-        var root = RootPath;
+        if (!string.IsNullOrWhiteSpace(workspace?.RootPath))
+            return workspace.RootPath;
+        return await GetRootPathAsync(cancellationToken);
+    }
+
+    public string GetWorkspacePath(string workspaceName, string? rootOverride = null)
+    {
+        var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : RootPath;
         if (string.IsNullOrEmpty(root))
             return string.Empty;
         var safeName = SanitizeDirectoryName(workspaceName);
         return Path.Combine(root, safeName);
     }
 
-    public async Task<string?> GetWorkspacePathAsync(string workspaceName, CancellationToken cancellationToken = default)
+    public async Task<string?> GetWorkspacePathAsync(string workspaceName, string? rootOverride = null, CancellationToken cancellationToken = default)
     {
-        var root = await GetRootPathAsync(cancellationToken);
+        var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
         if (string.IsNullOrEmpty(root))
             return null;
         var safeName = SanitizeDirectoryName(workspaceName);
         return Path.Combine(root, safeName);
     }
 
-    public async Task<bool> DirectoryExistsAsync(string workspaceName, CancellationToken cancellationToken = default)
+    public async Task<bool> DirectoryExistsAsync(string workspaceName, string? rootOverride = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workspaceName))
             return false;
 
-        var response = await agentBridge.SendCommandAsync("GetWorkspaceExists", new { workspaceName }, cancellationToken);
+        var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
+        var response = await agentBridge.SendCommandAsync("GetWorkspaceExists", new { workspaceName, workspaceRoot = root }, cancellationToken);
         if (!response.Success || response.Data == null)
             return false;
 
@@ -85,12 +84,13 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
         return data?.Exists ?? false;
     }
 
-    public async Task<int> GetRepositoryCountAsync(string workspaceName, CancellationToken cancellationToken = default)
+    public async Task<int> GetRepositoryCountAsync(string workspaceName, string? rootOverride = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workspaceName))
             return 0;
 
-        var response = await agentBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName }, cancellationToken);
+        var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
+        var response = await agentBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName, workspaceRoot = root }, cancellationToken);
         if (!response.Success || response.Data == null)
             return 0;
 
@@ -100,12 +100,14 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
 
     public async Task<IReadOnlyList<(string Name, string? OriginUrl)>> GetWorkspaceRepositoryInfosAsync(
         string workspaceName,
+        string? rootOverride = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workspaceName))
             return Array.Empty<(string, string?)>();
 
-        var response = await agentBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName }, cancellationToken);
+        var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
+        var response = await agentBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName, workspaceRoot = root }, cancellationToken);
         if (!response.Success || response.Data == null)
             return Array.Empty<(string, string?)>();
 
@@ -123,41 +125,27 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
         return list;
     }
 
-    public async Task CreateDirectoryAsync(string workspaceName, CancellationToken cancellationToken = default)
+    public async Task CreateDirectoryAsync(string workspaceName, string? rootOverride = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workspaceName))
             return;
 
-        await agentBridge.SendCommandAsync("EnsureWorkspace", new { workspaceName }, cancellationToken);
+        var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
+        await agentBridge.SendCommandAsync("EnsureWorkspace", new { workspaceName, workspaceRoot = root }, cancellationToken);
         logger.LogInformation("Created workspace directory: {Name}", workspaceName);
     }
 
-    /// <summary>Refreshes the cached workspace root from the agent. Call this when agent connects.</summary>
+    /// <summary>Refreshes the cached workspace root from DB settings. Call this when settings change or on startup.</summary>
     public async Task RefreshRootPathAsync(CancellationToken cancellationToken = default)
     {
-        if (!agentBridge.IsAgentConnected)
-        {
-            _cachedRootPath = null;
-            return;
-        }
-
         await _cacheLock.WaitAsync(cancellationToken);
         try
         {
-            var response = await agentBridge.SendCommandAsync("GetWorkspaceRoot", new { }, cancellationToken);
-            if (response.Success && response.Data != null)
+            var dbOverride = await appSettingRepository.GetValueAsync(AppSettingRepository.WorkspaceRootPathKey);
+            if (!string.IsNullOrWhiteSpace(dbOverride))
             {
-                var data = AgentResponseJson.DeserializeAgentResponse<AgentWorkspaceRootResponse>(response.Data);
-                var root = data?.WorkspaceRoot;
-                if (!string.IsNullOrWhiteSpace(root))
-                {
-                    _cachedRootPath = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                    logger.LogInformation("Refreshed workspace root from agent: {RootPath}", _cachedRootPath);
-                }
-                else
-                {
-                    _cachedRootPath = null;
-                }
+                _cachedRootPath = dbOverride.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                logger.LogInformation("Using configured workspace root: {RootPath}", _cachedRootPath);
             }
             else
             {
@@ -166,7 +154,7 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Error refreshing workspace root from agent");
+            logger.LogWarning(ex, "Error refreshing workspace root from settings");
             _cachedRootPath = null;
         }
         finally
@@ -175,10 +163,21 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
         }
     }
 
-    /// <summary>Clears the cached workspace root. Call this when agent disconnects.</summary>
+    /// <summary>Clears the cached workspace root.</summary>
     public void ClearCachedRootPath()
     {
         _cachedRootPath = null;
+    }
+
+    /// <summary>Asks the agent to validate whether the given path is usable as a workspace root.</summary>
+    public async Task<(bool IsValid, string? ErrorMessage)> ValidatePathAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var response = await agentBridge.SendCommandAsync("ValidatePath", new { path }, cancellationToken);
+        if (!response.Success)
+            return (false, response.Error ?? "Agent did not respond.");
+
+        var data = AgentResponseJson.DeserializeAgentResponse<ValidatePathAgentResponse>(response.Data);
+        return (data?.IsValid ?? false, data?.ErrorMessage);
     }
 
 

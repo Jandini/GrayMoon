@@ -4,8 +4,7 @@ namespace GrayMoon.Agent.Abstractions;
 
 public interface IGitService
 {
-    string WorkspaceRoot { get; }
-    string GetWorkspacePath(string workspaceName);
+    string GetWorkspacePath(string root, string workspaceName);
     Task<bool> CloneAsync(string workingDir, string cloneUrl, string? bearerToken, CancellationToken ct);
     Task AddSafeDirectoryAsync(string repoPath, CancellationToken ct);
     Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, CancellationToken ct);

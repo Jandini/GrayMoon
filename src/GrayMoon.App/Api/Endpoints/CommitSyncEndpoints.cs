@@ -23,6 +23,7 @@ public static class CommitSyncEndpoints
     private static async Task<IResult> PostCommitSync(
         CommitSyncRequest? body,
         IAgentBridge agentBridge,
+        WorkspaceService workspaceService,
         GitHubRepositoryRepository repoRepository,
         WorkspaceRepository workspaceRepository,
         AppDbContext dbContext,
@@ -67,13 +68,15 @@ public static class CommitSyncEndpoints
 
         try
         {
+            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, CancellationToken.None);
             var args = new
             {
                 workspaceName = workspace.Name,
                 repositoryId = repo.RepositoryId,
                 repositoryName = repo.RepositoryName,
                 bearerToken = repo.Connector?.UserToken,
-                workspaceId
+                workspaceId,
+                workspaceRoot
             };
             var response = await agentBridge.SendCommandAsync("CommitSyncRepository", args, CancellationToken.None);
 

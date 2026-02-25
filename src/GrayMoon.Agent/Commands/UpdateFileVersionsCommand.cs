@@ -17,7 +17,7 @@ public sealed class UpdateFileVersionsCommand(IGitService git) : ICommandHandler
         if (string.IsNullOrWhiteSpace(versionPattern))
             return new UpdateFileVersionsResponse { UpdatedCount = 0 };
 
-        var workspacePath = git.GetWorkspacePath(workspaceName);
+        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = Path.Combine(workspacePath, repositoryName);
         var fullFilePath = Path.Combine(repoPath, filePath.Replace('/', Path.DirectorySeparatorChar));
 

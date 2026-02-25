@@ -14,7 +14,7 @@ public sealed class CreateBranchCommand(IGitService git) : ICommandHandler<Creat
         var newBranchName = request.NewBranchName ?? throw new ArgumentException("newBranchName required");
         var baseBranchName = request.BaseBranchName ?? throw new ArgumentException("baseBranchName required");
 
-        var workspacePath = git.GetWorkspacePath(workspaceName);
+        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = Path.Combine(workspacePath, repositoryName);
 
         if (!git.DirectoryExists(repoPath))

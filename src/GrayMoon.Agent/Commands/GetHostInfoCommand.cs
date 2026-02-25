@@ -5,7 +5,7 @@ using GrayMoon.Agent.Jobs.Response;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class GetHostInfoCommand(IGitService git) : ICommandHandler<GetHostInfoRequest, GetHostInfoResponse>
+public sealed class GetHostInfoCommand : ICommandHandler<GetHostInfoRequest, GetHostInfoResponse>
 {
     public async Task<GetHostInfoResponse> ExecuteAsync(GetHostInfoRequest request, CancellationToken cancellationToken = default)
     {
@@ -15,7 +15,6 @@ public sealed class GetHostInfoCommand(IGitService git) : ICommandHandler<GetHos
 
         return new GetHostInfoResponse
         {
-            WorkspaceRoot = git.WorkspaceRoot,
             DotnetVersion = dotnetVersion,
             GitVersion = gitVersion,
             GitVersionToolVersion = gitVersionToolVersion

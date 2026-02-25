@@ -32,8 +32,8 @@ internal static class RunCommandHandler
 
         var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
         Log.Information(
-            "GrayMoon Agent. Version: {Version}. AppHubUrl: {AppHubUrl}, ListenPort: {ListenPort}, WorkspaceRoot: {WorkspaceRoot}, MaxConcurrentCommands: {MaxConcurrentCommands}",
-            version, options.AppHubUrl, options.ListenPort, options.WorkspaceRoot, options.MaxConcurrentCommands);
+            "GrayMoon Agent. Version: {Version}. AppHubUrl: {AppHubUrl}, ListenPort: {ListenPort}, MaxConcurrentCommands: {MaxConcurrentCommands}",
+            version, options.AppHubUrl, options.ListenPort, options.MaxConcurrentCommands);
 
         var builder = Host.CreateApplicationBuilder(args: Array.Empty<string>());
         builder.Configuration.Sources.Insert(0, new ChainedConfigurationSource { Configuration = appConfig });
@@ -41,7 +41,6 @@ internal static class RunCommandHandler
         {
             [$"{AgentOptions.SectionName}:{nameof(AgentOptions.AppHubUrl)}"] = options.AppHubUrl,
             [$"{AgentOptions.SectionName}:{nameof(AgentOptions.ListenPort)}"] = options.ListenPort.ToString(),
-            [$"{AgentOptions.SectionName}:{nameof(AgentOptions.WorkspaceRoot)}"] = options.WorkspaceRoot,
             [$"{AgentOptions.SectionName}:{nameof(AgentOptions.MaxConcurrentCommands)}"] = options.MaxConcurrentCommands.ToString(),
         });
 
@@ -81,7 +80,6 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResponse>, GetWorkspaceRepositoriesCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResponse>, GetRepositoryVersionCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetWorkspaceExistsRequest, GetWorkspaceExistsResponse>, GetWorkspaceExistsCommand>();
-        builder.Services.AddSingleton<ICommandHandler<GetWorkspaceRootRequest, GetWorkspaceRootResponse>, GetWorkspaceRootCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetHostInfoRequest, GetHostInfoResponse>, GetHostInfoCommand>();
         builder.Services.AddSingleton<ICommandHandler<SyncRepositoryDependenciesRequest, SyncRepositoryDependenciesResponse>, SyncRepositoryDependenciesCommand>();
         builder.Services.AddSingleton<ICommandHandler<RefreshRepositoryProjectsRequest, RefreshRepositoryProjectsResponse>, RefreshRepositoryProjectsCommand>();
@@ -96,6 +94,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<SearchFilesRequest, SearchFilesResponse>, SearchFilesCommand>();
         builder.Services.AddSingleton<ICommandHandler<UpdateFileVersionsRequest, UpdateFileVersionsResponse>, UpdateFileVersionsCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetFileContentsRequest, GetFileContentsResponse>, GetFileContentsCommand>();
+        builder.Services.AddSingleton<ICommandHandler<ValidatePathRequest, ValidatePathResponse>, ValidatePathCommand>();
         builder.Services.AddSingleton<CheckoutHookSyncCommand>();
         builder.Services.AddSingleton<CommitHookSyncCommand>();
         builder.Services.AddSingleton<MergeHookSyncCommand>();

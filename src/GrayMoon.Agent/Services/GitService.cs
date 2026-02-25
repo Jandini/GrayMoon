@@ -12,23 +12,13 @@ namespace GrayMoon.Agent.Services;
 
 public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitService> logger) : IGitService
 {
-    private readonly string _workspaceRoot = GetWorkspaceRoot(options.Value.WorkspaceRoot);
     private readonly int _listenPort = options.Value.ListenPort;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
-    private static string GetWorkspaceRoot(string? root)
-    {
-        if (string.IsNullOrWhiteSpace(root))
-            return OperatingSystem.IsWindows() ? @"C:\Workspace" : "/var/graymoon/workspaces";
-        return root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-    }
-
-    public string WorkspaceRoot => _workspaceRoot;
-
-    public string GetWorkspacePath(string workspaceName)
+    public string GetWorkspacePath(string root, string workspaceName)
     {
         var safe = SanitizeDirectoryName(workspaceName);
-        return Path.Combine(_workspaceRoot, safe);
+        return Path.Combine(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), safe);
     }
 
     public async Task<bool> CloneAsync(string workingDir, string cloneUrl, string? bearerToken, CancellationToken ct)

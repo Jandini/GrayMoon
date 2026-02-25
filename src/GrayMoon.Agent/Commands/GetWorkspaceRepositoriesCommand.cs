@@ -12,7 +12,7 @@ public sealed class GetWorkspaceRepositoriesCommand(IGitService git) : ICommandH
     public async Task<GetWorkspaceRepositoriesResponse> ExecuteAsync(GetWorkspaceRepositoriesRequest request, CancellationToken cancellationToken = default)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
-        var path = git.GetWorkspacePath(workspaceName);
+        var path = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repositories = git.GetDirectories(path);
 
         if (repositories.Length == 0)

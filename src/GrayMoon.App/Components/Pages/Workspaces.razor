@@ -105,7 +105,7 @@
                                                 }
                                             </div>
                                         </td>
-                                        <td class="col-path text-muted">@WorkspaceService.GetWorkspacePath(workspace.Name)</td>
+                                        <td class="col-path text-muted">@WorkspaceService.GetWorkspacePath(workspace.Name, workspace.RootPath)</td>
                                         <td class="col-count">@workspace.Repositories.Count</td>
                                         <td class="col-count">@workspace.Repositories.Sum(r => r.Projects ?? 0)</td>
                                         <td class="col-actions">
@@ -215,6 +215,7 @@
     private string? repositoriesModalErrorMessage;
     private string editorTitle = "Add Workspace";
     private int? editingWorkspaceId;
+    private string? editingWorkspaceRootPath;
     private HashSet<int> editingWorkspaceRepositoryIds = new();
     private WorkspaceModel? workspaceToDelete;
     private HashSet<int> selectedRepositoryIds = new();
@@ -296,18 +297,28 @@
         }
     }
 
-    private Task ShowCreateModalAsync()
+    private async Task ShowCreateModalAsync()
     {
         editingWorkspaceId = null;
+        editingWorkspaceRootPath = null;
         editorTitle = "Add Workspace";
         workspaceName = string.Empty;
         directoryExists = false;
         existingRepositoryCount = 0;
-        editorErrorMessage = !AgentBridge.IsAgentConnected
-            ? "Agent is not available. Please start the GrayMoon Agent to add workspaces."
-            : null;
+
+        if (!AgentBridge.IsAgentConnected)
+        {
+            editorErrorMessage = "Agent is not available. Please start the GrayMoon Agent to add workspaces.";
+        }
+        else
+        {
+            var rootPath = await WorkspaceService.GetRootPathAsync();
+            editorErrorMessage = string.IsNullOrWhiteSpace(rootPath)
+                ? "Workspace root path is not configured. Go to Settings to configure it before adding workspaces."
+                : null;
+        }
+
         showEditorModal = true;
-        return Task.CompletedTask;
     }
 
     private async Task ShowEditModalAsync(int workspaceId)
@@ -319,6 +330,7 @@
         }
 
         editingWorkspaceId = workspaceId;
+        editingWorkspaceRootPath = workspace.RootPath;
         editorTitle = "Edit Workspace";
         workspaceName = workspace.Name;
         editorErrorMessage = null;
@@ -371,6 +383,24 @@
         {
             editorErrorMessage = "Agent is not available. Please start the GrayMoon Agent to add workspaces.";
             return;
+        }
+
+        if (editingWorkspaceId == null)
+        {
+            var rootPath = await WorkspaceService.GetRootPathAsync();
+            if (string.IsNullOrWhiteSpace(rootPath))
+            {
+                editorErrorMessage = "Workspace root path is not configured. Go to Settings to configure it before adding workspaces.";
+                return;
+            }
+
+            var workspacePath = WorkspaceService.GetWorkspacePath(workspaceName, editingWorkspaceRootPath);
+            var (isValid, pathError) = await WorkspaceService.ValidatePathAsync(workspacePath);
+            if (!isValid)
+            {
+                editorErrorMessage = pathError ?? "The workspace path is not valid or cannot be created.";
+                return;
+            }
         }
 
         try
@@ -576,8 +606,8 @@
     private string GetWorkspacePath()
     {
         if (string.IsNullOrWhiteSpace(workspaceName))
-            return WorkspaceService.RootPath ?? string.Empty;
-        return WorkspaceService.GetWorkspacePath(workspaceName);
+            return editingWorkspaceRootPath ?? WorkspaceService.RootPath ?? string.Empty;
+        return WorkspaceService.GetWorkspacePath(workspaceName, editingWorkspaceRootPath);
     }
 
     private async Task OnWorkspaceNameChangedAsync(string value)
@@ -620,8 +650,8 @@
         try
         {
             isLoadingDirectoryInfo = true;
-            var existsTask = WorkspaceService.DirectoryExistsAsync(workspaceName, ct);
-            var countTask = WorkspaceService.GetRepositoryCountAsync(workspaceName, ct);
+            var existsTask = WorkspaceService.DirectoryExistsAsync(workspaceName, editingWorkspaceRootPath, ct);
+            var countTask = WorkspaceService.GetRepositoryCountAsync(workspaceName, editingWorkspaceRootPath, ct);
             directoryExists = await existsTask;
             existingRepositoryCount = await countTask;
         }
@@ -644,7 +674,7 @@
     {
         try
         {
-            var infos = await WorkspaceService.GetWorkspaceRepositoryInfosAsync(workspaceName);
+            var infos = await WorkspaceService.GetWorkspaceRepositoryInfosAsync(workspaceName, editingWorkspaceRootPath);
             if (infos.Count == 0)
                 return;
 

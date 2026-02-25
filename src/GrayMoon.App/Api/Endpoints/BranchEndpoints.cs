@@ -135,6 +135,7 @@ public static class BranchEndpoints
     private static async Task<IResult> CheckoutBranch(
         CheckoutBranchApiRequest? body,
         IAgentBridge agentBridge,
+        WorkspaceService workspaceService,
         WorkspaceRepository workspaceRepository,
         GitHubRepositoryRepository repoRepository,
         AppDbContext dbContext,
@@ -170,11 +171,13 @@ public static class BranchEndpoints
 
         try
         {
+            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, CancellationToken.None);
             var args = new
             {
                 workspaceName = workspace.Name,
                 repositoryName = repo.RepositoryName,
-                branchName
+                branchName,
+                workspaceRoot
             };
             var response = await agentBridge.SendCommandAsync("CheckoutBranch", args, CancellationToken.None);
 
@@ -201,6 +204,7 @@ public static class BranchEndpoints
     private static async Task<IResult> SyncToDefaultBranch(
         SyncToDefaultBranchApiRequest? body,
         IAgentBridge agentBridge,
+        WorkspaceService workspaceService,
         WorkspaceRepository workspaceRepository,
         GitHubRepositoryRepository repoRepository,
         AppDbContext dbContext,
@@ -236,11 +240,13 @@ public static class BranchEndpoints
 
         try
         {
+            var workspaceRoot = await workspaceService.GetRootPathAsync(CancellationToken.None);
             var args = new
             {
                 workspaceName = workspace.Name,
                 repositoryName = repo.RepositoryName,
-                currentBranchName
+                currentBranchName,
+                workspaceRoot
             };
             var response = await agentBridge.SendCommandAsync("SyncToDefaultBranch", args, CancellationToken.None);
             
@@ -262,6 +268,7 @@ public static class BranchEndpoints
     private static async Task<IResult> RefreshBranches(
         RefreshBranchesApiRequest? body,
         IAgentBridge agentBridge,
+        WorkspaceService workspaceService,
         WorkspaceRepository workspaceRepository,
         GitHubRepositoryRepository repoRepository,
         AppDbContext dbContext,
@@ -297,10 +304,12 @@ public static class BranchEndpoints
 
         try
         {
+            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, CancellationToken.None);
             var args = new
             {
                 workspaceName = workspace.Name,
-                repositoryName = repo.RepositoryName
+                repositoryName = repo.RepositoryName,
+                workspaceRoot
             };
             var response = await agentBridge.SendCommandAsync("RefreshBranches", args, CancellationToken.None);
             

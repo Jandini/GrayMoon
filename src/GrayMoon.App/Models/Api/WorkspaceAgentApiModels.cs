@@ -19,13 +19,6 @@ public sealed class AgentRepositoryInfoDto
     public string? OriginUrl { get; set; }
 }
 
-/// <summary>Agent GetWorkspaceRoot response.</summary>
-public sealed class AgentWorkspaceRootResponse
-{
-    [JsonPropertyName("workspaceRoot")]
-    public string? WorkspaceRoot { get; set; }
-}
-
 /// <summary>Agent GetWorkspaceExists response.</summary>
 public sealed class AgentWorkspaceExistsResponse
 {
@@ -74,6 +67,16 @@ public sealed class AgentGetFileContentsResponse
 {
     [JsonPropertyName("content")]
     public string? Content { get; set; }
+
+    [JsonPropertyName("errorMessage")]
+    public string? ErrorMessage { get; set; }
+}
+
+/// <summary>Agent ValidatePath response.</summary>
+public sealed class ValidatePathAgentResponse
+{
+    [JsonPropertyName("isValid")]
+    public bool IsValid { get; set; }
 
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
