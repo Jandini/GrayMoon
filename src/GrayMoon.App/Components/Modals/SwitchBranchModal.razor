@@ -64,16 +64,6 @@
                                         </button>
                                     </li>
                                 </ul>
-                                <button type="button" 
-                                        class="btn btn-outline-secondary btn-sm"
-                                        @onclick="RefreshBranchesAsync"
-                                        disabled="@isRefreshing">
-                                    @if (isRefreshing)
-                                    {
-                                        <span class="spinner-border spinner-border-sm me-1"></span>
-                                    }
-                                    Fetch
-                                </button>
                             </div>
                         </div>
 
@@ -97,22 +87,37 @@
                                             <div class="branch-item p-2 @(selectedBranch == branch ? "bg-light" : "")" 
                                                  style="cursor: pointer;"
                                                  @onclick='() => SelectBranch(branch)'>
-                                                <div class="d-flex align-items-center">
-                                                    <input type="radio" 
-                                                           name="branchSelection" 
-                                                           checked="@(selectedBranch == branch)"
-                                                           @onchange='() => SelectBranch(branch)' />
-                                                    <span class="ms-2 @(branch == currentBranchLocal ? "fw-bold" : "")">
-                                                        @branch
-                                                        @if (branch == currentBranchLocal)
-                                                        {
-                                                            <span class="badge bg-primary ms-2">Current</span>
-                                                            @if (showSyncToDefaultButton)
+                                                <div class="d-flex align-items-center justify-content-between">
+                                                    <div class="d-flex align-items-center flex-grow-1 min-w-0">
+                                                        <input type="radio" 
+                                                               name="branchSelection" 
+                                                               checked="@(selectedBranch == branch)"
+                                                               @onchange='() => SelectBranch(branch)' />
+                                                        <span class="ms-2 @(branch == currentBranchLocal ? "fw-bold" : "")">
+                                                            @branch
+                                                            @if (branch == currentBranchLocal)
                                                             {
-                                                                <span class="badge ms-2" style="background-color: #ffc107; color: #000;">Local Only</span>
+                                                                <span class="badge bg-primary ms-2">Current</span>
+                                                                @if (showSyncToDefaultButton)
+                                                                {
+                                                                    <span class="badge ms-2" style="background-color: #ffc107; color: #000;">Local Only</span>
+                                                                }
                                                             }
-                                                        }
-                                                    </span>
+                                                        </span>
+                                                    </div>
+                                                    @if (!string.IsNullOrWhiteSpace(RepositoryUrl) && !string.IsNullOrWhiteSpace(defaultBranch))
+                                                    {
+                                                        <a href="@GetPullRequestUrlForBranch(branch)" 
+                                                           class="branch-pr-link" 
+                                                           target="_blank" 
+                                                           rel="noopener noreferrer" 
+                                                           title="Open Pull Request (default...@branch)"
+                                                           aria-label="Open Pull Request"
+                                                           @onclick="(e) => { }"
+                                                           @onclick:stopPropagation="true">
+                                                            <i class="bi bi-git" aria-hidden="true"></i>
+                                                        </a>
+                                                    }
                                                 </div>
                                             </div>
                                         }
@@ -131,18 +136,33 @@
                                             <div class="branch-item p-2 @(selectedBranch == branch ? "bg-light" : "")" 
                                                  style="cursor: pointer;"
                                                  @onclick='() => SelectBranch(branch)'>
-                                                <div class="d-flex align-items-center">
-                                                    <input type="radio" 
-                                                           name="branchSelection" 
-                                                           checked="@(selectedBranch == branch)"
-                                                           @onchange='() => SelectBranch(branch)' />
-                                                    <span class="ms-2">
-                                                        @GetRemoteBranchDisplayName(branch)
-                                                        @if (branch == defaultBranch)
-                                                        {
-                                                            <span class="badge bg-success ms-2">Default</span>
-                                                        }
-                                                    </span>
+                                                <div class="d-flex align-items-center justify-content-between">
+                                                    <div class="d-flex align-items-center flex-grow-1 min-w-0">
+                                                        <input type="radio" 
+                                                               name="branchSelection" 
+                                                               checked="@(selectedBranch == branch)"
+                                                               @onchange='() => SelectBranch(branch)' />
+                                                        <span class="ms-2">
+                                                            @GetRemoteBranchDisplayName(branch)
+                                                            @if (branch == defaultBranch)
+                                                            {
+                                                                <span class="badge bg-success ms-2">Default</span>
+                                                            }
+                                                        </span>
+                                                    </div>
+                                                    @if (!string.IsNullOrWhiteSpace(RepositoryUrl) && !string.IsNullOrWhiteSpace(defaultBranch))
+                                                    {
+                                                        <a href="@GetPullRequestUrlForBranch(branch)" 
+                                                           class="branch-pr-link" 
+                                                           target="_blank" 
+                                                           rel="noopener noreferrer" 
+                                                           title="Open Pull Request (default...@branch)"
+                                                           aria-label="Open Pull Request"
+                                                           @onclick="(e) => { }"
+                                                           @onclick:stopPropagation="true">
+                                                            <i class="bi bi-git" aria-hidden="true"></i>
+                                                        </a>
+                                                    }
                                                 </div>
                                             </div>
                                         }
@@ -240,7 +260,20 @@
                     <div class="d-flex gap-2">
                         @if (activeTab != "newbranch")
                         {
-                            @* Locals only: Sync to default; Remotes: Pull Request (left side) *@
+                            <button type="button" 
+                                    class="btn btn-outline-secondary"
+                                    @onclick="RefreshBranchesAsync"
+                                    disabled="@isRefreshing">
+                                @if (isRefreshing)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1"></span>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>
+                                }
+                                Fetch
+                            </button>
                             @if (showSyncToDefaultButton && !string.IsNullOrWhiteSpace(defaultBranch) && activeTab == "local")
                             {
                                 <button type="button" 
@@ -248,15 +281,6 @@
                                         @onclick="SyncToDefaultAsync">
                                     Sync to @defaultBranch
                                 </button>
-                            }
-                            @if (!string.IsNullOrWhiteSpace(RepositoryUrl) && !string.IsNullOrWhiteSpace(defaultBranch))
-                            {
-                                <a href="@GetPullRequestUrl()" 
-                                   target="_blank" 
-                                   rel="noopener noreferrer"
-                                   class="btn btn-outline-primary">
-                                    Pull Request
-                                </a>
                             }
                         }
                     </div>
@@ -577,21 +601,21 @@
 
         // Use current branch or selected branch for comparison
         var compareBranch = selectedBranch ?? currentBranchLocal ?? defaultBranch;
-        
-        // Convert git clone URL to GitHub web URL
+        return GetPullRequestUrlForBranch(compareBranch);
+    }
+
+    private string GetPullRequestUrlForBranch(string branchName)
+    {
+        if (string.IsNullOrWhiteSpace(RepositoryUrl) || string.IsNullOrWhiteSpace(defaultBranch) || string.IsNullOrWhiteSpace(branchName))
+            return "#";
+
         var url = RepositoryUrl.Trim();
         if (url.StartsWith("git@github.com:", StringComparison.OrdinalIgnoreCase))
-        {
             url = url.Replace("git@github.com:", "https://github.com/", StringComparison.OrdinalIgnoreCase);
-        }
-        
         if (url.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-        {
             url = url.Substring(0, url.Length - 4);
-        }
 
-        // Create pull request URL: compare defaultBranch...compareBranch
-        return $"{url}/compare/{Uri.EscapeDataString(defaultBranch)}...{Uri.EscapeDataString(compareBranch)}";
+        return $"{url}/compare/{Uri.EscapeDataString(defaultBranch)}...{Uri.EscapeDataString(branchName)}";
     }
 
     private async Task RefreshBranchesAsync()

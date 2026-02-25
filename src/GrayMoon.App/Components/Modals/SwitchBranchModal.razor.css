@@ -136,3 +136,21 @@
 .branch-item.bg-light {
     background-color: var(--bg-active) !important;
 }
+
+/* Pull Request icon on each branch row (same styling as dependency-level-pr-link in WorkspaceRepositories) */
+.branch-pr-link,
+.branch-pr-link i {
+    color: #505050 !important;
+    cursor: pointer;
+    font-weight: 400;
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
+}
+.branch-pr-link i {
+    font-size: 1.1rem;
+}
+.branch-pr-link:hover,
+.branch-pr-link:hover i {
+    color: #707070 !important;
+}
