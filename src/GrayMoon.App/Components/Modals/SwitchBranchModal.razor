@@ -573,7 +573,7 @@
                 selectedBranch = currentBranchLocal;
 
                 // Show sync button only when we have synced/fetched remote data (not when lists are empty from no sync yet)
-                if (remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !remoteBranches.Contains(currentBranchLocal))
+                if (remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !IsCurrentBranchOnRemote())
                 {
                     showSyncToDefaultButton = true;
                 }
@@ -633,7 +633,7 @@
                     defaultBranch = data.DefaultBranch;
                 }
                 selectedBranch = currentBranchLocal;
-                if (remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !remoteBranches.Contains(currentBranchLocal))
+                if (remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !IsCurrentBranchOnRemote())
                     showSyncToDefaultButton = true;
                 else
                     showSyncToDefaultButton = false;
@@ -713,6 +713,17 @@
             return remoteBranches;
         var term = branchFilter.Trim();
         return remoteBranches.Where(b => b.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>True if the current branch exists on remote (exact match or origin/currentBranch).</summary>
+    private bool IsCurrentBranchOnRemote()
+    {
+        if (string.IsNullOrWhiteSpace(currentBranchLocal) || remoteBranches.Count == 0)
+            return false;
+        if (remoteBranches.Any(r => string.Equals(r, currentBranchLocal, StringComparison.OrdinalIgnoreCase)))
+            return true;
+        var originRef = "origin/" + currentBranchLocal;
+        return remoteBranches.Any(r => string.Equals(r, originRef, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Local branches for "Based on" dropdown (current branch first).</summary>
@@ -1017,7 +1028,7 @@
                 selectedBranch = currentBranchLocal;
 
                 // Show sync button if current branch doesn't exist in remote
-                if (!string.IsNullOrWhiteSpace(currentBranchLocal) && !remoteBranches.Contains(currentBranchLocal))
+                if (!string.IsNullOrWhiteSpace(currentBranchLocal) && !IsCurrentBranchOnRemote())
                 {
                     showSyncToDefaultButton = true;
                 }
