@@ -84,7 +84,13 @@
                                 {
                                     @if (GetFilteredLocalBranches().Count() == 0)
                                     {
-                                        <div class="text-muted p-3">@(localBranches.Count == 0 ? "No local branches found." : "No branches match the filter.")</div>
+                                        <div class="d-flex align-items-center justify-content-between px-3 py-3 text-muted">
+                                            <span>@(localBranches.Count == 0 ? "No local branches found." : "No branches match the filter.")</span>
+                                            @if (localBranches.Count > 0 && !string.IsNullOrWhiteSpace(branchFilter))
+                                            {
+                                                <button type="button" class="btn btn-secondary btn-sm" @onclick="CreateFromFilter" @onclick:stopPropagation="true">Create</button>
+                                            }
+                                        </div>
                                     }
                                     else
                                     {
@@ -301,7 +307,19 @@
                                                 <span>@(defaultBranch != null ? GetRemoteBranchDisplayName(defaultBranch) : "default")</span>
                                                 <span class="badge bg-success ms-2">Default</span>
                                             </li>
-                                            @foreach (var branch in remoteBranches.Where(b => !string.Equals(b, defaultBranch, StringComparison.OrdinalIgnoreCase)))
+                                            @foreach (var branch in GetLocalBranchesForBasedOn())
+                                            {
+                                                <li class="new-branch-based-on-item px-3 py-2 @(selectedBaseBranch == branch ? "selected" : "")"
+                                                    style="cursor: pointer;"
+                                                    @onclick='() => SelectBaseBranch(branch)'>
+                                                    @branch
+                                                    @if (branch == currentBranchLocal)
+                                                    {
+                                                        <span class="badge bg-primary ms-2">Current</span>
+                                                    }
+                                                </li>
+                                            }
+                                            @foreach (var branch in GetRemoteBranchesForBasedOn())
                                             {
                                                 <li class="new-branch-based-on-item px-3 py-2 @(selectedBaseBranch == branch ? "selected" : "")"
                                                     style="cursor: pointer;"
@@ -415,6 +433,7 @@
     private ElementReference branchFilterInput;
     private bool _focusFilterOnNextRender;
     private bool _escapeConsumedByFilter;
+    private bool _suppressNextEnterForNewBranch;
     private string? branchToDelete;
     private bool deleteIsRemote = false;
     private bool isDeleting = false;
@@ -625,6 +644,14 @@
         StateHasChanged();
     }
 
+    /// <summary>Copy filter text to New branch name and switch to New Branch tab (when Locals filter matched no branches).</summary>
+    private void CreateFromFilter()
+    {
+        newBranchName = branchFilter?.Trim() ?? "";
+        activeTab = "newbranch";
+        StateHasChanged();
+    }
+
     private void SelectBranch(string branch)
     {
         selectedBranch = branch;
@@ -677,6 +704,34 @@
         return remoteBranches.Where(b => b.Contains(term, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>Local branches for "Based on" dropdown (current branch first).</summary>
+    private IEnumerable<string> GetLocalBranchesForBasedOn()
+    {
+        if (localBranches.Count == 0)
+            return Enumerable.Empty<string>();
+        if (string.IsNullOrWhiteSpace(currentBranchLocal))
+            return localBranches;
+        var current = localBranches.FirstOrDefault(b => string.Equals(b, currentBranchLocal, StringComparison.OrdinalIgnoreCase));
+        if (current == null)
+            return localBranches;
+        return localBranches.Where(b => !string.Equals(b, current, StringComparison.OrdinalIgnoreCase)).Prepend(current);
+    }
+
+    /// <summary>Remote branches for "Based on" dropdown (exclude default and remotes that duplicate a local branch name).</summary>
+    private IEnumerable<string> GetRemoteBranchesForBasedOn()
+    {
+        var localSet = new HashSet<string>(localBranches, StringComparer.OrdinalIgnoreCase);
+        foreach (var b in remoteBranches)
+        {
+            if (string.Equals(b, defaultBranch, StringComparison.OrdinalIgnoreCase))
+                continue;
+            var shortName = b.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? b.Substring("origin/".Length) : b;
+            if (localSet.Contains(shortName))
+                continue;
+            yield return b;
+        }
+    }
+
     private void SelectClosestMatchingBranch()
     {
         var filtered = activeTab == "local" ? GetFilteredLocalBranches().ToList() : GetFilteredRemoteBranches().ToList();
@@ -702,6 +757,8 @@
     {
         if (selectedBaseBranch == "__default__")
             return defaultBranch != null ? GetRemoteBranchDisplayName(defaultBranch) : "default";
+        if (localBranches.Any(b => string.Equals(b, selectedBaseBranch, StringComparison.OrdinalIgnoreCase)))
+            return selectedBaseBranch ?? "";
         return GetRemoteBranchDisplayName(selectedBaseBranch);
     }
 
@@ -856,6 +913,13 @@
             return;
         if (activeTab == "newbranch" || isRefreshing)
             return;
+        // Locals tab: when filter matched no branches, Enter opens New Branch with filter text as name
+        if (activeTab == "local" && localBranches.Count > 0 && GetFilteredLocalBranches().Count() == 0)
+        {
+            _suppressNextEnterForNewBranch = true;
+            CreateFromFilter();
+            return;
+        }
         if (string.IsNullOrWhiteSpace(selectedBranch) || selectedBranch == currentBranchLocal)
             return;
         await CheckoutAsync();
@@ -992,6 +1056,11 @@
         }
         if (e.Key == "Enter" && activeTab == "newbranch" && !isCreating)
         {
+            if (_suppressNextEnterForNewBranch)
+            {
+                _suppressNextEnterForNewBranch = false;
+                return;
+            }
             if (showBranchExistsConfirmation)
                 await ProceedWithCreateAsync();
             else if (!string.IsNullOrWhiteSpace(newBranchName?.Trim()))
@@ -1003,6 +1072,11 @@
     {
         if (e.Key == "Enter" && !isCreating)
         {
+            if (_suppressNextEnterForNewBranch)
+            {
+                _suppressNextEnterForNewBranch = false;
+                return;
+            }
             if (showBranchExistsConfirmation)
                 await ProceedWithCreateAsync();
             else if (!string.IsNullOrWhiteSpace(newBranchName?.Trim()))

@@ -241,9 +241,9 @@ public static class BranchEndpoints
         if (repo == null)
             return Results.NotFound("Repository not found.");
 
-        var isInWorkspace = await dbContext.WorkspaceRepositories
-            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId);
-        if (!isInWorkspace)
+        var wr = await dbContext.WorkspaceRepositories
+            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId);
+        if (wr == null)
             return Results.NotFound("Repository is not in the given workspace.");
 
         if (!agentBridge.IsAgentConnected)
@@ -263,6 +263,16 @@ public static class BranchEndpoints
             
             if (!response.Success)
                 return Results.Problem(response.Error ?? "Failed to sync to default branch", statusCode: 500);
+
+            // Sync prunes the previous local branch; remove it from persistence
+            var toRemove = await dbContext.RepositoryBranches
+                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && !rb.IsRemote && rb.BranchName == currentBranchName)
+                .ToListAsync(CancellationToken.None);
+            if (toRemove.Count > 0)
+            {
+                dbContext.RepositoryBranches.RemoveRange(toRemove);
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+            }
 
             // Broadcast update to refresh UI
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
