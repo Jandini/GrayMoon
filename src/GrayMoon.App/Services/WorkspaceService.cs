@@ -169,6 +169,17 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
         _cachedRootPath = null;
     }
 
+    /// <summary>Asks the agent to validate whether the given path is usable as a workspace root.</summary>
+    public async Task<(bool IsValid, string? ErrorMessage)> ValidatePathAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var response = await agentBridge.SendCommandAsync("ValidatePath", new { path }, cancellationToken);
+        if (!response.Success)
+            return (false, response.Error ?? "Agent did not respond.");
+
+        var data = AgentResponseJson.DeserializeAgentResponse<ValidatePathAgentResponse>(response.Data);
+        return (data?.IsValid ?? false, data?.ErrorMessage);
+    }
+
 
     private static string SanitizeDirectoryName(string name)
     {

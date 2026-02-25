@@ -297,7 +297,7 @@
         }
     }
 
-    private Task ShowCreateModalAsync()
+    private async Task ShowCreateModalAsync()
     {
         editingWorkspaceId = null;
         editingWorkspaceRootPath = null;
@@ -305,11 +305,20 @@
         workspaceName = string.Empty;
         directoryExists = false;
         existingRepositoryCount = 0;
-        editorErrorMessage = !AgentBridge.IsAgentConnected
-            ? "Agent is not available. Please start the GrayMoon Agent to add workspaces."
-            : null;
+
+        if (!AgentBridge.IsAgentConnected)
+        {
+            editorErrorMessage = "Agent is not available. Please start the GrayMoon Agent to add workspaces.";
+        }
+        else
+        {
+            var rootPath = await WorkspaceService.GetRootPathAsync();
+            editorErrorMessage = string.IsNullOrWhiteSpace(rootPath)
+                ? "Workspace root path is not configured. Go to Settings to configure it before adding workspaces."
+                : null;
+        }
+
         showEditorModal = true;
-        return Task.CompletedTask;
     }
 
     private async Task ShowEditModalAsync(int workspaceId)
@@ -374,6 +383,24 @@
         {
             editorErrorMessage = "Agent is not available. Please start the GrayMoon Agent to add workspaces.";
             return;
+        }
+
+        if (editingWorkspaceId == null)
+        {
+            var rootPath = await WorkspaceService.GetRootPathAsync();
+            if (string.IsNullOrWhiteSpace(rootPath))
+            {
+                editorErrorMessage = "Workspace root path is not configured. Go to Settings to configure it before adding workspaces.";
+                return;
+            }
+
+            var workspacePath = WorkspaceService.GetWorkspacePath(workspaceName, editingWorkspaceRootPath);
+            var (isValid, pathError) = await WorkspaceService.ValidatePathAsync(workspacePath);
+            if (!isValid)
+            {
+                editorErrorMessage = pathError ?? "The workspace path is not valid or cannot be created.";
+                return;
+            }
         }
 
         try

@@ -69,6 +69,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid UpdateFileVersions args"),
             "GetFileContents" => JsonSerializer.Deserialize<GetFileContentsRequest>(json, options)
                 ?? throw new ArgumentException("Invalid GetFileContents args"),
+            "ValidatePath" => JsonSerializer.Deserialize<ValidatePathRequest>(json, options)
+                ?? throw new ArgumentException("Invalid ValidatePath args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

@@ -71,3 +71,13 @@ public sealed class AgentGetFileContentsResponse
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
 }
+
+/// <summary>Agent ValidatePath response.</summary>
+public sealed class ValidatePathAgentResponse
+{
+    [JsonPropertyName("isValid")]
+    public bool IsValid { get; set; }
+
+    [JsonPropertyName("errorMessage")]
+    public string? ErrorMessage { get; set; }
+}

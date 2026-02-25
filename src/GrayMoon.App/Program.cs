@@ -102,7 +102,7 @@ using (var scope = app.Services.CreateScope())
     await MigrateRepositoryBranchesIsDefaultAsync(dbContext);
     await MigrateWorkspaceFilesAsync(dbContext);
     await MigrateWorkspaceFileVersionConfigsAsync(dbContext);
-    await MigrateAppSettingsAsync(dbContext);
+    await MigrateSettingsAsync(dbContext);
     await MigrateWorkspaceRootPathAsync(dbContext);
 }
 
@@ -549,7 +549,7 @@ static async Task MigrateWorkspaceFileVersionConfigsAsync(AppDbContext dbContext
     }
 }
 
-static async Task MigrateAppSettingsAsync(AppDbContext dbContext)
+static async Task MigrateSettingsAsync(AppDbContext dbContext)
 {
     try
     {
@@ -559,18 +559,39 @@ static async Task MigrateAppSettingsAsync(AppDbContext dbContext)
 
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AppSettings'";
-            var tableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+            // Rename old AppSettings table to Settings if needed
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='Settings'";
+            var settingsExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
 
-            if (!tableExists)
+            if (!settingsExists)
             {
-                cmd.CommandText = @"
-                    CREATE TABLE AppSettings (
-                        AppSettingId INTEGER PRIMARY KEY AUTOINCREMENT,
-                        Key TEXT NOT NULL,
-                        Value TEXT,
-                        UNIQUE(Key)
-                    )";
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AppSettings'";
+                var oldTableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+
+                if (oldTableExists)
+                {
+                    cmd.CommandText = "ALTER TABLE AppSettings RENAME TO Settings";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+                else
+                {
+                    cmd.CommandText = @"
+                        CREATE TABLE Settings (
+                            SettingId INTEGER PRIMARY KEY AUTOINCREMENT,
+                            Key TEXT NOT NULL,
+                            Value TEXT,
+                            UNIQUE(Key)
+                        )";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+
+            // Rename AppSettingId column to SettingId if it still exists
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Settings') WHERE name='AppSettingId'";
+            var oldColumnExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+            if (oldColumnExists)
+            {
+                cmd.CommandText = "ALTER TABLE Settings RENAME COLUMN AppSettingId TO SettingId";
                 await cmd.ExecuteNonQueryAsync();
             }
         }

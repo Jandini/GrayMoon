@@ -1,8 +1,8 @@
 namespace GrayMoon.App.Models;
 
-public class AppSetting
+public class Setting
 {
-    public int AppSettingId { get; set; }
+    public int SettingId { get; set; }
     public string Key { get; set; } = string.Empty;
     public string? Value { get; set; }
 }

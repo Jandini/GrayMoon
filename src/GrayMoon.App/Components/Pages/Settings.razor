@@ -26,11 +26,12 @@
                     </p>
                     <div class="input-group">
                         <input type="text"
-                               class="form-control font-monospace"
+                               class="form-control font-monospace @(pathValidation == false ? "is-invalid" : pathValidation == true ? "is-valid" : "")"
                                id="workspaceRootPath"
                                placeholder="e.g. C:\Workspaces or /home/user/workspaces"
                                @bind="workspaceRootPath"
-                               @bind:event="oninput" />
+                               @bind:event="oninput"
+                               @onkeydown="OnWorkspaceRootKeyDownAsync" />
                         <button class="btn btn-primary" type="button" @onclick="SaveWorkspaceRootPathAsync" disabled="@isSaving">
                             @if (isSaving)
                             {
@@ -40,15 +41,20 @@
                         </button>
                     </div>
 
-                    @if (saveSuccess.HasValue)
+                    @if (saveSuccess.HasValue || pathValidation == false)
                     {
-                        <div class="mt-2 small @(saveSuccess.Value ? "text-success" : "text-danger")">
-                            @if (saveSuccess.Value)
+                        <div class="mt-2 small @(pathValidation == false ? "text-danger" : saveSuccess == true ? "text-success" : "text-danger")">
+                            @if (pathValidation == false)
+                            {
+                                <i class="bi bi-exclamation-circle me-1"></i>
+                                <span>@pathValidationMessage</span>
+                            }
+                            else if (saveSuccess == true)
                             {
                                 <i class="bi bi-check-circle me-1"></i>
                                 <span>Workspace root path saved.</span>
                             }
-                            else
+                            else if (saveSuccess == false)
                             {
                                 <i class="bi bi-exclamation-circle me-1"></i>
                                 <span>Failed to save. Please try again.</span>
@@ -65,19 +71,44 @@
     private string? workspaceRootPath;
     private bool isSaving;
     private bool? saveSuccess;
+    private bool? pathValidation;
+    private string? pathValidationMessage;
 
     protected override async Task OnInitializedAsync()
     {
         workspaceRootPath = await AppSettingRepository.GetValueAsync(AppSettingRepository.WorkspaceRootPathKey);
     }
 
+    private async Task OnWorkspaceRootKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            await SaveWorkspaceRootPathAsync();
+    }
+
     private async Task SaveWorkspaceRootPathAsync()
     {
         isSaving = true;
         saveSuccess = null;
+        pathValidation = null;
+        pathValidationMessage = null;
+
         try
         {
-            await AppSettingRepository.SetValueAsync(AppSettingRepository.WorkspaceRootPathKey, workspaceRootPath?.Trim());
+            var trimmed = workspaceRootPath?.Trim();
+
+            if (!string.IsNullOrWhiteSpace(trimmed))
+            {
+                var (isValid, errorMessage) = await WorkspaceService.ValidatePathAsync(trimmed);
+                if (!isValid)
+                {
+                    pathValidation = false;
+                    pathValidationMessage = errorMessage ?? "The path is not valid or cannot be created.";
+                    return;
+                }
+                pathValidation = true;
+            }
+
+            await AppSettingRepository.SetValueAsync(AppSettingRepository.WorkspaceRootPathKey, trimmed);
             WorkspaceService.ClearCachedRootPath();
             workspaceRootPath = await AppSettingRepository.GetValueAsync(AppSettingRepository.WorkspaceRootPathKey);
             saveSuccess = true;

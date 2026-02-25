@@ -14,7 +14,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<RepositoryBranch> RepositoryBranches => Set<RepositoryBranch>();
     public DbSet<WorkspaceFile> WorkspaceFiles => Set<WorkspaceFile>();
     public DbSet<WorkspaceFileVersionConfig> WorkspaceFileVersionConfigs => Set<WorkspaceFileVersionConfig>();
-    public DbSet<AppSetting> AppSettings => Set<AppSetting>();
+    public DbSet<Setting> Settings => Set<Setting>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -256,10 +256,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<AppSetting>(entity =>
+        modelBuilder.Entity<Setting>(entity =>
         {
-            entity.ToTable("AppSettings");
-            entity.HasKey(s => s.AppSettingId);
+            entity.ToTable("Settings");
+            entity.HasKey(s => s.SettingId);
             entity.HasIndex(s => s.Key).IsUnique();
             entity.Property(s => s.Key).IsRequired().HasMaxLength(200);
             entity.Property(s => s.Value).HasMaxLength(2000);
