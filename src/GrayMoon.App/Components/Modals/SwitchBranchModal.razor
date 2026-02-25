@@ -63,15 +63,15 @@
 
                         @if (activeTab != "newbranch")
                         {
-                            <div class="d-flex align-items-center justify-content-between switch-branch-filter-title">
-                                <label class="form-label mb-0">Branch name</label>
-                                <span class="switch-branch-tab-count">@GetBranchCountText(activeTab == "local" ? GetFilteredLocalBranches().Count() : GetFilteredRemoteBranches().Count())</span>
-                            </div>
-                            <div class="mb-3">
+                            <div class="mb-3 switch-branch-field-block">
+                                <div class="d-flex align-items-center justify-content-between switch-branch-label-row">
+                                    <label class="form-label mb-0" for="branch-filter">Branch name</label>
+                                    <span class="switch-branch-tab-count">@GetBranchCountText(activeTab == "local" ? GetFilteredLocalBranches().Count() : GetFilteredRemoteBranches().Count(), !string.IsNullOrWhiteSpace(branchFilter))</span>
+                                </div>
                                 <input id="branch-filter"
                                        type="text"
                                        class="form-control"
-                                       placeholder="Search branch..."
+                                       placeholder="search branch..."
                                        @bind="branchFilter"
                                        @bind:event="oninput"
                                        @bind:after="SelectClosestMatchingBranch"
@@ -207,7 +207,7 @@
                                     </div>
                                 </div>
                             }
-                            <div class="mb-3">
+                            <div class="mb-3 switch-branch-field-block">
                                 <label class="form-label" for="new-branch-name">Branch name</label>
                                 <input id="new-branch-name"
                                        type="text"
@@ -218,7 +218,7 @@
                                        @onkeydown="HandleBranchNameKeyDown"
                                        @ref="newBranchNameInput" />
                             </div>
-                            <div class="mb-3">
+                            <div class="mb-3 switch-branch-field-block">
                                 <label class="form-label" for="based-on">Based on</label>
                                 <div class="position-relative new-branch-based-on-wrapper">
                                     <button type="button"
@@ -532,8 +532,10 @@
         showBasedOnDropdown = false;
     }
 
-    private string GetBranchCountText(int count)
+    private string GetBranchCountText(int count, bool isFiltered = false)
     {
+        if (isFiltered)
+            return count == 1 ? "1 branch matched" : $"{count} branches matched";
         return count == 1 ? "1 branch" : $"{count} branches";
     }
 
