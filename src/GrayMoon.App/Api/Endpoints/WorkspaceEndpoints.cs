@@ -85,7 +85,7 @@ public static class WorkspaceEndpoints
         if (!agentBridge.IsAgentConnected)
             return TypedResults.BadRequest(new ProblemDetails { Title = "Agent not connected. Start GrayMoon.Agent to search files." });
 
-        var workspaceRoot = await workspaceService.GetRootPathAsync(cancellationToken);
+        var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         var searchPattern = string.IsNullOrWhiteSpace(pattern) ? "*" : pattern.Trim();
         var response = await agentBridge.SendCommandAsync("SearchFiles", new
         {

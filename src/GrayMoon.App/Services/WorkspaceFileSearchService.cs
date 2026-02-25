@@ -21,7 +21,7 @@ public sealed class WorkspaceFileSearchService(
         if (workspace == null || !agentBridge.IsAgentConnected)
             return null;
 
-        var workspaceRoot = await workspaceService.GetRootPathAsync(cancellationToken);
+        var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         var searchPattern = string.IsNullOrWhiteSpace(pattern) ? "*" : pattern.Trim();
         var response = await agentBridge.SendCommandAsync("SearchFiles", new
         {

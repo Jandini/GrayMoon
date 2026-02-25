@@ -171,7 +171,7 @@ public static class BranchEndpoints
 
         try
         {
-            var workspaceRoot = await workspaceService.GetRootPathAsync(CancellationToken.None);
+            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, CancellationToken.None);
             var args = new
             {
                 workspaceName = workspace.Name,
@@ -304,7 +304,7 @@ public static class BranchEndpoints
 
         try
         {
-            var workspaceRoot = await workspaceService.GetRootPathAsync(CancellationToken.None);
+            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, CancellationToken.None);
             var args = new
             {
                 workspaceName = workspace.Name,

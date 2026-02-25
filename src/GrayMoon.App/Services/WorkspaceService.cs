@@ -1,3 +1,4 @@
+using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 
@@ -43,30 +44,38 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
         }
     }
 
-    public string GetWorkspacePath(string workspaceName)
+    /// <summary>Returns the workspace root for a specific workspace, falling back to the global configured root.</summary>
+    public async Task<string?> GetRootPathForWorkspaceAsync(Workspace? workspace, CancellationToken cancellationToken = default)
     {
-        var root = RootPath;
+        if (!string.IsNullOrWhiteSpace(workspace?.RootPath))
+            return workspace.RootPath;
+        return await GetRootPathAsync(cancellationToken);
+    }
+
+    public string GetWorkspacePath(string workspaceName, string? rootOverride = null)
+    {
+        var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : RootPath;
         if (string.IsNullOrEmpty(root))
             return string.Empty;
         var safeName = SanitizeDirectoryName(workspaceName);
         return Path.Combine(root, safeName);
     }
 
-    public async Task<string?> GetWorkspacePathAsync(string workspaceName, CancellationToken cancellationToken = default)
+    public async Task<string?> GetWorkspacePathAsync(string workspaceName, string? rootOverride = null, CancellationToken cancellationToken = default)
     {
-        var root = await GetRootPathAsync(cancellationToken);
+        var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
         if (string.IsNullOrEmpty(root))
             return null;
         var safeName = SanitizeDirectoryName(workspaceName);
         return Path.Combine(root, safeName);
     }
 
-    public async Task<bool> DirectoryExistsAsync(string workspaceName, CancellationToken cancellationToken = default)
+    public async Task<bool> DirectoryExistsAsync(string workspaceName, string? rootOverride = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workspaceName))
             return false;
 
-        var root = await GetRootPathAsync(cancellationToken);
+        var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
         var response = await agentBridge.SendCommandAsync("GetWorkspaceExists", new { workspaceName, workspaceRoot = root }, cancellationToken);
         if (!response.Success || response.Data == null)
             return false;
@@ -75,12 +84,12 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
         return data?.Exists ?? false;
     }
 
-    public async Task<int> GetRepositoryCountAsync(string workspaceName, CancellationToken cancellationToken = default)
+    public async Task<int> GetRepositoryCountAsync(string workspaceName, string? rootOverride = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workspaceName))
             return 0;
 
-        var root = await GetRootPathAsync(cancellationToken);
+        var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
         var response = await agentBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName, workspaceRoot = root }, cancellationToken);
         if (!response.Success || response.Data == null)
             return 0;
@@ -91,12 +100,13 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
 
     public async Task<IReadOnlyList<(string Name, string? OriginUrl)>> GetWorkspaceRepositoryInfosAsync(
         string workspaceName,
+        string? rootOverride = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workspaceName))
             return Array.Empty<(string, string?)>();
 
-        var root = await GetRootPathAsync(cancellationToken);
+        var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
         var response = await agentBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName, workspaceRoot = root }, cancellationToken);
         if (!response.Success || response.Data == null)
             return Array.Empty<(string, string?)>();
@@ -115,12 +125,12 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
         return list;
     }
 
-    public async Task CreateDirectoryAsync(string workspaceName, CancellationToken cancellationToken = default)
+    public async Task CreateDirectoryAsync(string workspaceName, string? rootOverride = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workspaceName))
             return;
 
-        var root = await GetRootPathAsync(cancellationToken);
+        var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
         await agentBridge.SendCommandAsync("EnsureWorkspace", new { workspaceName, workspaceRoot = root }, cancellationToken);
         logger.LogInformation("Created workspace directory: {Name}", workspaceName);
     }

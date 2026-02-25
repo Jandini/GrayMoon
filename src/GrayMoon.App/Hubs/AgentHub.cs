@@ -3,17 +3,20 @@ using Microsoft.AspNetCore.SignalR;
 
 namespace GrayMoon.App.Hubs;
 
-public sealed class AgentHub(AgentConnectionTracker connectionTracker, SyncCommandHandler syncCommandHandler, WorkspaceService workspaceService) : Hub
+public sealed class AgentHub(AgentConnectionTracker connectionTracker, SyncCommandHandler syncCommandHandler, IServiceScopeFactory scopeFactory) : Hub
 {
     public override async Task OnConnectedAsync()
     {
         connectionTracker.OnAgentConnected(Context.ConnectionId);
-        // Refresh workspace root from agent when it connects
+        // Refresh workspace root from settings when agent connects.
+        // Use a new scope so the DbContext isn't disposed before the delay completes.
         _ = Task.Run(async () =>
         {
             try
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(500), CancellationToken.None); // Small delay to ensure connection is fully established
+                await Task.Delay(TimeSpan.FromMilliseconds(500), CancellationToken.None);
+                await using var scope = scopeFactory.CreateAsyncScope();
+                var workspaceService = scope.ServiceProvider.GetRequiredService<WorkspaceService>();
                 await workspaceService.RefreshRootPathAsync(CancellationToken.None);
             }
             catch
@@ -27,7 +30,10 @@ public sealed class AgentHub(AgentConnectionTracker connectionTracker, SyncComma
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         connectionTracker.OnAgentDisconnected(Context.ConnectionId);
-        // Clear cached workspace root when agent disconnects
+        // Clear cached workspace root when agent disconnects.
+        // WorkspaceService is scoped, so resolve it from a fresh scope.
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var workspaceService = scope.ServiceProvider.GetRequiredService<WorkspaceService>();
         workspaceService.ClearCachedRootPath();
         await base.OnDisconnectedAsync(exception);
     }

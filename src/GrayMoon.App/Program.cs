@@ -103,6 +103,7 @@ using (var scope = app.Services.CreateScope())
     await MigrateWorkspaceFilesAsync(dbContext);
     await MigrateWorkspaceFileVersionConfigsAsync(dbContext);
     await MigrateAppSettingsAsync(dbContext);
+    await MigrateWorkspaceRootPathAsync(dbContext);
 }
 
 static async Task MigrateWorkspaceProjectsMatchedConnectorAsync(AppDbContext dbContext)
@@ -570,6 +571,31 @@ static async Task MigrateAppSettingsAsync(AppDbContext dbContext)
                         Value TEXT,
                         UNIQUE(Key)
                     )";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateWorkspaceRootPathAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Workspaces') WHERE name='RootPath'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Workspaces ADD COLUMN RootPath TEXT";
                 await cmd.ExecuteNonQueryAsync();
             }
         }
