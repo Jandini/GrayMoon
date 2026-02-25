@@ -142,6 +142,7 @@ public static class BranchEndpoints
         WorkspaceRepository workspaceRepository,
         GitHubRepositoryRepository repoRepository,
         AppDbContext dbContext,
+        WorkspaceGitService workspaceGitService,
         IHubContext<WorkspaceSyncHub> hubContext,
         ILoggerFactory loggerFactory)
     {
@@ -164,9 +165,9 @@ public static class BranchEndpoints
         if (repo == null)
             return Results.NotFound("Repository not found.");
 
-        var isInWorkspace = await dbContext.WorkspaceRepositories
-            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId);
-        if (!isInWorkspace)
+        var wr = await dbContext.WorkspaceRepositories
+            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId);
+        if (wr == null)
             return Results.NotFound("Repository is not in the given workspace.");
 
         if (!agentBridge.IsAgentConnected)
@@ -191,6 +192,13 @@ public static class BranchEndpoints
 
             if (!commandSuccess)
                 return Results.Ok(new CheckoutBranchApiResult(false, errorMessage));
+
+            // When a remote branch is checked out, persist it as local so it appears in Locals without a fetch
+            var localBranchName = checkoutResponse?.CurrentBranch?.Trim();
+            if (string.IsNullOrWhiteSpace(localBranchName))
+                localBranchName = branchName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? branchName.Substring("origin/".Length) : branchName;
+            if (!string.IsNullOrWhiteSpace(localBranchName) && wr != null)
+                await workspaceGitService.EnsureLocalBranchPersistedAsync(wr.WorkspaceRepositoryId, localBranchName, CancellationToken.None);
 
             // Broadcast update to refresh UI
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
