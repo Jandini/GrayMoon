@@ -44,7 +44,7 @@
                                                 type="button" 
                                                 role="tab"
                                                 @onclick='() => SetActiveTab("local")'>
-                                            Locals (@localBranches.Count)
+                                            Locals
                                         </button>
                                     </li>
                                     <li class="nav-item" role="presentation">
@@ -52,7 +52,7 @@
                                                 type="button" 
                                                 role="tab"
                                                 @onclick='() => SetActiveTab("remote")'>
-                                            Remotes (@remoteBranches.Count)
+                                            Remotes
                                         </button>
                                     </li>
                                     <li class="nav-item" role="presentation">
@@ -79,7 +79,10 @@
 
                         @if (activeTab != "newbranch")
                         {
-                            <label class="form-label">Branch name</label>
+                            <div class="d-flex align-items-center justify-content-between mb-1">
+                                <label class="form-label mb-0">Branch name</label>
+                                <span class="switch-branch-tab-count">@GetBranchCountText(activeTab == "local" ? localBranches.Count : remoteBranches.Count)</span>
+                            </div>
                             <div class="branch-list border rounded">
                                 @if (activeTab == "local")
                                 {
@@ -134,7 +137,7 @@
                                                            checked="@(selectedBranch == branch)"
                                                            @onchange='() => SelectBranch(branch)' />
                                                     <span class="ms-2">
-                                                        @branch
+                                                        @GetRemoteBranchDisplayName(branch)
                                                         @if (branch == defaultBranch)
                                                         {
                                                             <span class="badge bg-success ms-2">Default</span>
@@ -214,15 +217,15 @@
                                             <li class="new-branch-based-on-item px-3 py-2 @(selectedBaseBranch == "__default__" ? "selected" : "")"
                                                 style="cursor: pointer;"
                                                 @onclick='() => SelectBaseBranch("__default__")'>
-                                                <span>@(defaultBranch ?? "default")</span>
+                                                <span>@(defaultBranch != null ? GetRemoteBranchDisplayName(defaultBranch) : "default")</span>
                                                 <span class="badge bg-success ms-2">Default</span>
                                             </li>
-                                            @foreach (var branch in remoteBranches)
+                                            @foreach (var branch in remoteBranches.Where(b => !string.Equals(b, defaultBranch, StringComparison.OrdinalIgnoreCase)))
                                             {
                                                 <li class="new-branch-based-on-item px-3 py-2 @(selectedBaseBranch == branch ? "selected" : "")"
                                                     style="cursor: pointer;"
                                                     @onclick='() => SelectBaseBranch(branch)'>
-                                                    @branch
+                                                    @GetRemoteBranchDisplayName(branch)
                                                 </li>
                                             }
                                         </ul>
@@ -483,11 +486,23 @@
         showBasedOnDropdown = false;
     }
 
+    private string GetBranchCountText(int count)
+    {
+        return count == 1 ? "1 branch" : $"{count} branches";
+    }
+
+    private static string GetRemoteBranchDisplayName(string? branch)
+    {
+        if (string.IsNullOrWhiteSpace(branch))
+            return branch ?? "";
+        return branch.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? branch : "origin/" + branch;
+    }
+
     private string GetSelectedBaseDisplayText()
     {
         if (selectedBaseBranch == "__default__")
-            return defaultBranch ?? "default";
-        return selectedBaseBranch;
+            return defaultBranch != null ? GetRemoteBranchDisplayName(defaultBranch) : "default";
+        return GetRemoteBranchDisplayName(selectedBaseBranch);
     }
 
     private async Task CreateAsync()

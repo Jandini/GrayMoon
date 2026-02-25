@@ -45,6 +45,15 @@
     box-shadow: 0 0 0 0.1rem var(--bg-primary), 0 0 0 0.25rem var(--accent-blue);
 }
 
+/* Tab count / branch count next to title: smaller, dark gray */
+.switch-branch-tab-count {
+    font-size: 0.8em;
+    color: #5a5a5a;
+}
+.switch-branch-tabs .switch-branch-tab-count {
+    margin-left: 0.2em;
+}
+
 /* Based-on dropdown (same as Branch modal) */
 .new-branch-based-on-wrapper {
     /* Keep dropdown within modal: limit height so it doesn't overlap footer */
