@@ -362,10 +362,15 @@
                 _pendingCreateName = null;
                 _pendingCreateBaseBranch = null;
                 errorMessage = null;
+                _prevVisible = true;
+                currentBranchLocal = CurrentBranch;
+                await LoadBranchesAsync();
             }
-            _prevVisible = true;
-            currentBranchLocal = CurrentBranch;
-            await LoadBranchesAsync();
+            else
+            {
+                currentBranchLocal = CurrentBranch;
+                // Do not reload from persistence when modal was already open (e.g. after Fetch) to avoid flicker
+            }
         }
         else
         {

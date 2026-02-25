@@ -154,3 +154,11 @@
 .branch-pr-link:hover i {
     color: #707070 !important;
 }
+
+/* Cancel button: same look when disabled (e.g. during Fetch) to avoid color change */
+.modal-footer .btn-secondary:disabled {
+    opacity: 1;
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
