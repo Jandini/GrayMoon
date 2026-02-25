@@ -54,6 +54,16 @@ public sealed class DeleteBranchResponse
     public string? ErrorMessage { get; set; }
 }
 
+/// <summary>Agent SetUpstreamBranch response (camelCase).</summary>
+public sealed class SetUpstreamBranchResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("errorMessage")]
+    public string? ErrorMessage { get; set; }
+}
+
 /// <summary>API response for POST /api/branches/delete (camelCase).</summary>
 public sealed class DeleteBranchApiResult
 {

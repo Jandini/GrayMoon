@@ -1581,9 +1581,9 @@
         await RefreshFromSync();
     }
 
-    private async Task CreateSingleBranchAsync((int RepositoryId, string? RepositoryName, string NewBranchName, string BaseBranch) request)
+    private async Task CreateSingleBranchAsync((int RepositoryId, string? RepositoryName, string NewBranchName, string BaseBranch, bool SetUpstream) request)
     {
-        var (repositoryId, repositoryName, newBranchName, baseBranch) = request;
+        var (repositoryId, repositoryName, newBranchName, baseBranch, setUpstream) = request;
         if (workspace == null || isCreatingBranch || isSyncing || isUpdating)
             return;
 
@@ -1614,6 +1614,27 @@
                 var result = System.Text.Json.JsonSerializer.Deserialize<CreateBranchApiResult>(responseContent, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                 if (result != null && result.Success)
                 {
+                    if (setUpstream)
+                    {
+                        var upstreamRequest = new
+                        {
+                            workspaceId = WorkspaceId,
+                            repositoryId,
+                            branchName = newBranchName
+                        };
+                        var upstreamJson = System.Text.Json.JsonSerializer.Serialize(upstreamRequest);
+                        var upstreamContent = new System.Net.Http.StringContent(upstreamJson, System.Text.Encoding.UTF8, "application/json");
+                        var upstreamResponse = await httpClient.PostAsync($"{baseUrl}/api/branches/set-upstream", upstreamContent);
+                        if (upstreamResponse.IsSuccessStatusCode)
+                        {
+                            var upstreamResponseContent = await upstreamResponse.Content.ReadAsStringAsync();
+                            var upstreamResult = System.Text.Json.JsonSerializer.Deserialize<CreateBranchApiResult>(upstreamResponseContent, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                            if (upstreamResult != null && !upstreamResult.Success)
+                                errorMessage = upstreamResult.Error ?? "Branch created but failed to set upstream.";
+                        }
+                        else
+                            errorMessage = "Branch created but failed to set upstream.";
+                    }
                     await RefreshFromSync();
                 }
                 else

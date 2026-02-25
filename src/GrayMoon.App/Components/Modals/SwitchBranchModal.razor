@@ -331,6 +331,13 @@
                                     }
                                 </div>
                             </div>
+                            <div class="mb-3 switch-branch-field-block form-check">
+                                <input id="create-with-upstream"
+                                       type="checkbox"
+                                       class="form-check-input"
+                                       @bind="createWithUpstream" />
+                                <label class="form-check-label" for="create-with-upstream">Upstream branch</label>
+                            </div>
                         }
 
                     }
@@ -403,7 +410,7 @@
     [Parameter] public EventCallback OnBranchChanged { get; set; }
     [Parameter] public EventCallback<(int RepositoryId, string BranchName)> OnCheckoutBranch { get; set; }
     [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string CurrentBranchName, string DefaultBranch)> OnSyncToDefault { get; set; }
-    [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string NewBranchName, string BaseBranch)> OnCreateBranch { get; set; }
+    [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string NewBranchName, string BaseBranch, bool SetUpstream)> OnCreateBranch { get; set; }
 
     private string activeTab = "local";
     private List<string> localBranches = new();
@@ -425,9 +432,11 @@
     private bool isCreating = false;
     private bool showBasedOnDropdown = false;
     private bool showBranchExistsConfirmation = false;
+    private bool createWithUpstream = false;
     private string branchExistsConfirmMessage = "";
     private string? _pendingCreateName;
     private string? _pendingCreateBaseBranch;
+    private bool _pendingCreateSetUpstream;
     private ElementReference newBranchNameInput;
     private string branchFilter = "";
     private ElementReference branchFilterInput;
@@ -453,9 +462,11 @@
                 selectedBaseBranch = "__default__";
                 showBasedOnDropdown = false;
                 showBranchExistsConfirmation = false;
+                createWithUpstream = false;
                 branchExistsConfirmMessage = "";
                 _pendingCreateName = null;
                 _pendingCreateBaseBranch = null;
+                _pendingCreateSetUpstream = false;
                 errorMessage = null;
                 branchFilter = "";
                 branchToDelete = null;
@@ -783,13 +794,14 @@
             branchExistsConfirmMessage = $"The branch already exists in this repository.";
             _pendingCreateName = name;
             _pendingCreateBaseBranch = baseBranch;
+            _pendingCreateSetUpstream = createWithUpstream;
             showBranchExistsConfirmation = true;
             StateHasChanged();
             return;
         }
 
         // Close dialog and let parent show full-page overlay and run create
-        await OnCreateBranch.InvokeAsync((RepositoryId, RepositoryName, name, baseBranch));
+        await OnCreateBranch.InvokeAsync((RepositoryId, RepositoryName, name, baseBranch, createWithUpstream));
         await OnCancel.InvokeAsync();
     }
 
@@ -799,6 +811,7 @@
         branchExistsConfirmMessage = "";
         _pendingCreateName = null;
         _pendingCreateBaseBranch = null;
+        _pendingCreateSetUpstream = false;
         StateHasChanged();
     }
 
@@ -884,7 +897,7 @@
             return;
 
         // Close dialog and let parent show full-page overlay and run create
-        await OnCreateBranch.InvokeAsync((RepositoryId, RepositoryName, _pendingCreateName, _pendingCreateBaseBranch));
+        await OnCreateBranch.InvokeAsync((RepositoryId, RepositoryName, _pendingCreateName, _pendingCreateBaseBranch, _pendingCreateSetUpstream));
         await OnCancel.InvokeAsync();
     }
     private async Task CheckoutAsync()

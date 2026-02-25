@@ -23,6 +23,7 @@ public static class BranchEndpoints
         routes.MapPost("/api/branches/common", GetCommonBranches);
         routes.MapPost("/api/branches/exists-in-workspace", BranchExistsInWorkspace);
         routes.MapPost("/api/branches/create", CreateBranch);
+        routes.MapPost("/api/branches/set-upstream", SetUpstreamBranch);
         routes.MapPost("/api/branches/delete", DeleteBranch);
         return routes;
     }
@@ -455,6 +456,90 @@ public static class BranchEndpoints
         }
     }
 
+    private static async Task<IResult> SetUpstreamBranch(
+        SetUpstreamBranchApiRequest? body,
+        IAgentBridge agentBridge,
+        WorkspaceService workspaceService,
+        WorkspaceRepository workspaceRepository,
+        GitHubRepositoryRepository repoRepository,
+        AppDbContext dbContext,
+        IHubContext<WorkspaceSyncHub> hubContext,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.Branches");
+        if (body == null)
+            return Results.BadRequest("Request body is required.");
+
+        var workspaceId = body.WorkspaceId;
+        var repositoryId = body.RepositoryId;
+        var branchName = body.BranchName?.Trim();
+
+        if (workspaceId <= 0 || repositoryId <= 0 || string.IsNullOrWhiteSpace(branchName))
+            return Results.BadRequest("workspaceId, repositoryId, and branchName are required.");
+
+        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            return Results.NotFound("Workspace not found.");
+
+        var repo = await repoRepository.GetByIdAsync(repositoryId);
+        if (repo == null)
+            return Results.NotFound("Repository not found.");
+
+        var wr = await dbContext.WorkspaceRepositories
+            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId);
+        if (wr == null)
+            return Results.NotFound("Repository is not in the given workspace.");
+
+        if (!agentBridge.IsAgentConnected)
+            return Results.Problem("Agent not connected.", statusCode: 503);
+
+        try
+        {
+            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, CancellationToken.None);
+            var args = new
+            {
+                workspaceName = workspace.Name,
+                repositoryName = repo.RepositoryName,
+                branchName,
+                workspaceRoot
+            };
+            var response = await agentBridge.SendCommandAsync("SetUpstreamBranch", args, CancellationToken.None);
+
+            var upstreamResponse = AgentResponseJson.DeserializeAgentResponse<SetUpstreamBranchResponse>(response.Data);
+            var success = upstreamResponse?.Success ?? response.Success;
+            var errorMessage = upstreamResponse?.ErrorMessage ?? response.Error;
+
+            if (!success)
+                return Results.Ok(new { success = false, error = errorMessage ?? "Failed to set upstream" });
+
+            // Persist the branch as remote (origin) so it appears in Remotes without a fetch
+            var remoteBranchName = branchName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? branchName : "origin/" + branchName;
+            var exists = await dbContext.RepositoryBranches
+                .AnyAsync(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsRemote && rb.BranchName == remoteBranchName, CancellationToken.None);
+            if (!exists)
+            {
+                dbContext.RepositoryBranches.Add(new RepositoryBranch
+                {
+                    WorkspaceRepositoryId = wr.WorkspaceRepositoryId,
+                    BranchName = remoteBranchName,
+                    IsRemote = true,
+                    LastSeenAt = DateTime.UtcNow,
+                    IsDefault = false
+                });
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+            }
+
+            await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
+
+            return Results.Ok(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error setting upstream for repository {RepositoryId}", repositoryId);
+            return Results.Problem("An error occurred while setting upstream", statusCode: 500);
+        }
+    }
+
     private static async Task<IResult> DeleteBranch(
         DeleteBranchApiRequest? body,
         IAgentBridge agentBridge,
@@ -669,6 +754,13 @@ public sealed class CreateBranchApiRequest
     public int RepositoryId { get; set; }
     public string? NewBranchName { get; set; }
     public string? BaseBranch { get; set; }
+}
+
+public sealed class SetUpstreamBranchApiRequest
+{
+    public int WorkspaceId { get; set; }
+    public int RepositoryId { get; set; }
+    public string? BranchName { get; set; }
 }
 
 public sealed class DeleteBranchApiRequest

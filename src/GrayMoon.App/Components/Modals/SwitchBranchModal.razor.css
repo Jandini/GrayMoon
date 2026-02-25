@@ -84,8 +84,28 @@
     color: var(--text-primary);
     border: 1px solid var(--border-input) !important;
     box-shadow: none !important;
-    max-height: 12rem;
+    max-height: min(14rem, 60vh);
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a var(--bg-input, #252526);
+}
+
+.new-branch-based-on-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+.new-branch-based-on-list::-webkit-scrollbar-track {
+    background: var(--bg-input, #252526);
+}
+
+.new-branch-based-on-list::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.new-branch-based-on-list::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
 }
 
 .new-branch-based-on-item {
