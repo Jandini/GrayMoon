@@ -1,8 +1,12 @@
 /* Switch Branch Modal - scoped styles matching Agent page pattern */
 
-/* Tabs: Primary color when selected, gray when not selected */
+/* Tab row: bottom border under tabs (same as Branch modal .branch-modal-tabs) */
+.switch-branch-tabs-wrapper {
+    /* Wrapper only for structure; border on tabs below */
+}
+
 .switch-branch-tabs {
-    border-bottom-color: var(--border-color);
+    border-bottom: 1px solid var(--border-color);
 }
 
 .switch-branch-tabs .nav-link {
@@ -39,6 +43,44 @@
 
 .switch-branch-tabs .nav-link:focus-visible {
     box-shadow: 0 0 0 0.1rem var(--bg-primary), 0 0 0 0.25rem var(--accent-blue);
+}
+
+/* Based-on dropdown (same as Branch modal) */
+.new-branch-based-on-wrapper {
+    /* Keep dropdown within modal: limit height so it doesn't overlap footer */
+}
+
+.new-branch-based-on-trigger {
+    height: calc(1.5em + 0.75rem + 2px);
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+    border: 1px solid var(--border-input) !important;
+    box-shadow: none !important;
+}
+
+.new-branch-based-on-trigger .text-truncate {
+    color: var(--text-primary);
+}
+
+.new-branch-based-on-list {
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+    border: 1px solid var(--border-input) !important;
+    box-shadow: none !important;
+    max-height: 12rem;
+    overflow-y: auto;
+}
+
+.new-branch-based-on-item {
+    color: var(--text-primary);
+}
+
+.new-branch-based-on-item.selected {
+    background-color: var(--bg-active);
+}
+
+.new-branch-based-on-item:hover {
+    background-color: var(--bg-hover);
 }
 
 /* Branch list: show up to 4 branches then scroll; same gray scrollbar as grids */
