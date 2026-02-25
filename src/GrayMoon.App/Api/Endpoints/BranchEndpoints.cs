@@ -444,7 +444,6 @@ public static class BranchEndpoints
         WorkspaceRepository workspaceRepository,
         GitHubRepositoryRepository repoRepository,
         AppDbContext dbContext,
-        WorkspaceGitService workspaceGitService,
         IHubContext<WorkspaceSyncHub> hubContext,
         ILoggerFactory loggerFactory)
     {
@@ -503,22 +502,14 @@ public static class BranchEndpoints
             if (!success)
                 return Results.Ok(new { success = false, error = errorMessage ?? "Failed to delete branch" });
 
-            var refreshResponse = await agentBridge.SendCommandAsync("RefreshBranches", new
+            // Update persistence: remove the deleted branch only (no fetch).
+            var toRemove = await dbContext.RepositoryBranches
+                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsRemote == isRemote && rb.BranchName == branchName)
+                .ToListAsync(CancellationToken.None);
+            if (toRemove.Count > 0)
             {
-                workspaceName = workspace.Name,
-                repositoryName = repo.RepositoryName,
-                workspaceRoot
-            }, CancellationToken.None);
-
-            if (refreshResponse.Success)
-            {
-                var branchesData = AgentResponseJson.DeserializeAgentResponse<BranchesResponse>(refreshResponse.Data);
-                if (branchesData != null)
-                {
-                    var localBranches = branchesData.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
-                    var remoteBranches = branchesData.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
-                    await workspaceGitService.PersistBranchesAsync(wr.WorkspaceRepositoryId, localBranches, remoteBranches, branchesData.DefaultBranch, CancellationToken.None);
-                }
+                dbContext.RepositoryBranches.RemoveRange(toRemove);
+                await dbContext.SaveChangesAsync(CancellationToken.None);
             }
 
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);

@@ -579,6 +579,44 @@
         }
     }
 
+    /// <summary>Reload branch lists from persistence (GET api/branches/get) without running fetch. Used after delete so UI reflects updated persistence.</summary>
+    private async Task ReloadBranchesFromPersistenceAsync()
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            var request = new { workspaceId = WorkspaceId, repositoryId = RepositoryId };
+            var json = JsonSerializer.Serialize(request);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/get", content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                var data = JsonSerializer.Deserialize<BranchesResponse>(responseContent, AgentResponseJson.Options);
+                if (data != null)
+                {
+                    localBranches = data.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    remoteBranches = data.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    currentBranchLocal = data.CurrentBranch;
+                    defaultBranch = data.DefaultBranch;
+                }
+                selectedBranch = currentBranchLocal;
+                if (remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !remoteBranches.Contains(currentBranchLocal))
+                    showSyncToDefaultButton = true;
+                else
+                    showSyncToDefaultButton = false;
+                await OnBranchChanged.InvokeAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error reloading branches from persistence");
+        }
+        StateHasChanged();
+    }
+
     private void SetActiveTab(string tab)
     {
         activeTab = tab;
@@ -757,7 +795,7 @@
                 if (data != null && data.Success)
                 {
                     DismissDeleteConfirmation();
-                    await RefreshBranchesAsync();
+                    await ReloadBranchesFromPersistenceAsync();
                 }
                 else
                 {
