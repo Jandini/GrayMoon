@@ -137,6 +137,14 @@
     border-bottom: none;
 }
 
+.branch-delete-confirm {
+    border-bottom: 1px solid var(--border-color);
+    background-color: rgba(220, 53, 69, 0.08);
+}
+.branch-delete-confirm + .branch-item {
+    border-top-width: 0;
+}
+
 .branch-item:hover {
     background-color: var(--bg-hover) !important;
 }
@@ -160,6 +168,20 @@
 }
 .branch-pr-link:hover,
 .branch-pr-link:hover i {
+    color: #707070 !important;
+}
+
+/* Delete branch icon (trash) next to PR link */
+.branch-delete-link,
+.branch-delete-link i {
+    color: #505050 !important;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+}
+.branch-delete-link:hover,
+.branch-delete-link:hover i {
     color: #707070 !important;
 }
 

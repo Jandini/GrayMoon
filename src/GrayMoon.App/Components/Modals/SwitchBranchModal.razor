@@ -4,6 +4,7 @@
 @using GrayMoon.App.Services
 @inject IHttpClientFactory HttpClientFactory
 @inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
 @inject ILogger<SwitchBranchModal> Logger
 
 @if (IsVisible)
@@ -110,21 +111,50 @@
                                                             }
                                                         </span>
                                                     </div>
-                                                    @if (!string.IsNullOrWhiteSpace(RepositoryUrl) && !string.IsNullOrWhiteSpace(defaultBranch))
-                                                    {
-                                                        <a href="@GetPullRequestUrlForBranch(branch)" 
-                                                           class="branch-pr-link" 
-                                                           target="_blank" 
-                                                           rel="noopener noreferrer" 
-                                                           title="Open Pull Request (default...@branch)"
-                                                           aria-label="Open Pull Request"
-                                                           @onclick="(e) => { }"
-                                                           @onclick:stopPropagation="true">
-                                                            <i class="bi bi-git" aria-hidden="true"></i>
-                                                        </a>
-                                                    }
+                                                    <div class="d-flex align-items-center gap-1">
+                                                        @if (!string.IsNullOrWhiteSpace(RepositoryUrl) && !string.IsNullOrWhiteSpace(defaultBranch))
+                                                        {
+                                                            <a href="@GetPullRequestUrlForBranch(branch)" 
+                                                               class="branch-pr-link" 
+                                                               target="_blank" 
+                                                               rel="noopener noreferrer" 
+                                                               title="Open Pull Request (default...@branch)"
+                                                               aria-label="Open Pull Request"
+                                                               @onclick="(e) => { }"
+                                                               @onclick:stopPropagation="true">
+                                                                <i class="bi bi-git" aria-hidden="true"></i>
+                                                            </a>
+                                                        }
+                                                        @if (branch != currentBranchLocal)
+                                                        {
+                                                            <button type="button"
+                                                                    class="btn btn-link p-0 branch-delete-link"
+                                                                    title="Delete branch"
+                                                                    aria-label="Delete branch"
+                                                                    @onclick="(e) => { RequestDeleteBranch(branch, false); }"
+                                                                    @onclick:stopPropagation="true">
+                                                                <i class="bi bi-trash" aria-hidden="true"></i>
+                                                            </button>
+                                                        }
+                                                    </div>
                                                 </div>
                                             </div>
+                                            @if (branchToDelete == branch && !deleteIsRemote)
+                                            {
+                                                <div class="branch-delete-confirm d-flex align-items-center justify-content-between px-2 py-2" @ref="deleteConfirmElementRef">
+                                                    <span class="text-danger small">@deleteConfirmMessage This cannot be undone.</span>
+                                                    <div class="d-flex gap-2 flex-shrink-0">
+                                                        <button type="button" class="btn btn-danger btn-sm" @onclick="ProceedWithDeleteAsync" disabled="@(isDeleting || isRefreshing)" @onclick:stopPropagation="true">
+                                                            @if (isDeleting)
+                                                            {
+                                                                <span class="spinner-border spinner-border-sm me-1"></span>
+                                                            }
+                                                            Delete
+                                                        </button>
+                                                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="DismissDeleteConfirmation" disabled="@(isDeleting || isRefreshing)" @onclick:stopPropagation="true">Cancel</button>
+                                                    </div>
+                                                </div>
+                                            }
                                         }
                                     }
                                 }
@@ -155,21 +185,47 @@
                                                             }
                                                         </span>
                                                     </div>
-                                                    @if (!string.IsNullOrWhiteSpace(RepositoryUrl) && !string.IsNullOrWhiteSpace(defaultBranch))
-                                                    {
-                                                        <a href="@GetPullRequestUrlForBranch(branch)" 
-                                                           class="branch-pr-link" 
-                                                           target="_blank" 
-                                                           rel="noopener noreferrer" 
-                                                           title="Open Pull Request (default...@branch)"
-                                                           aria-label="Open Pull Request"
-                                                           @onclick="(e) => { }"
-                                                           @onclick:stopPropagation="true">
-                                                            <i class="bi bi-git" aria-hidden="true"></i>
-                                                        </a>
-                                                    }
+                                                    <div class="d-flex align-items-center gap-1">
+                                                        @if (!string.IsNullOrWhiteSpace(RepositoryUrl) && !string.IsNullOrWhiteSpace(defaultBranch))
+                                                        {
+                                                            <a href="@GetPullRequestUrlForBranch(branch)" 
+                                                               class="branch-pr-link" 
+                                                               target="_blank" 
+                                                               rel="noopener noreferrer" 
+                                                               title="Open Pull Request (default...@branch)"
+                                                               aria-label="Open Pull Request"
+                                                               @onclick="(e) => { }"
+                                                               @onclick:stopPropagation="true">
+                                                                <i class="bi bi-git" aria-hidden="true"></i>
+                                                            </a>
+                                                        }
+                                                        <button type="button"
+                                                                class="btn btn-link p-0 branch-delete-link"
+                                                                title="Delete remote branch"
+                                                                aria-label="Delete remote branch"
+                                                                @onclick="(e) => { RequestDeleteBranch(branch, true); }"
+                                                                @onclick:stopPropagation="true">
+                                                            <i class="bi bi-trash" aria-hidden="true"></i>
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
+                                            @if (branchToDelete == branch && deleteIsRemote)
+                                            {
+                                                <div class="branch-delete-confirm d-flex align-items-center justify-content-between px-2 py-2" @ref="deleteConfirmElementRef">
+                                                    <span class="text-danger small">@deleteConfirmMessage This cannot be undone.</span>
+                                                    <div class="d-flex gap-2 flex-shrink-0">
+                                                        <button type="button" class="btn btn-danger btn-sm" @onclick="ProceedWithDeleteAsync" disabled="@(isDeleting || isRefreshing)" @onclick:stopPropagation="true">
+                                                            @if (isDeleting)
+                                                            {
+                                                                <span class="spinner-border spinner-border-sm me-1"></span>
+                                                            }
+                                                            Delete
+                                                        </button>
+                                                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="DismissDeleteConfirmation" disabled="@(isDeleting || isRefreshing)" @onclick:stopPropagation="true">Cancel</button>
+                                                    </div>
+                                                </div>
+                                            }
                                         }
                                     }
                                 }
@@ -359,6 +415,12 @@
     private ElementReference branchFilterInput;
     private bool _focusFilterOnNextRender;
     private bool _escapeConsumedByFilter;
+    private string? branchToDelete;
+    private bool deleteIsRemote = false;
+    private bool isDeleting = false;
+    private string deleteConfirmMessage = "";
+    private ElementReference deleteConfirmElementRef;
+    private bool _scrollToDeleteConfirm;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -377,6 +439,7 @@
                 _pendingCreateBaseBranch = null;
                 errorMessage = null;
                 branchFilter = "";
+                branchToDelete = null;
                 _prevVisible = true;
                 _focusFilterOnNextRender = true;
                 currentBranchLocal = CurrentBranch;
@@ -428,6 +491,16 @@
             try
             {
                 await branchFilterInput.FocusAsync();
+            }
+            catch { }
+        }
+        // Scroll delete confirmation into view when shown (e.g. when user deletes the last branch in the list)
+        if (IsVisible && _scrollToDeleteConfirm && branchToDelete != null)
+        {
+            _scrollToDeleteConfirm = false;
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("scrollElementIntoView", deleteConfirmElementRef);
             }
             catch { }
         }
@@ -632,6 +705,82 @@
         _pendingCreateName = null;
         _pendingCreateBaseBranch = null;
         StateHasChanged();
+    }
+
+    private void RequestDeleteBranch(string branch, bool isRemote)
+    {
+        branchToDelete = branch;
+        deleteIsRemote = isRemote;
+        deleteConfirmMessage = isRemote
+            ? $"Delete remote branch '{GetRemoteBranchDisplayName(branch)}'?"
+            : $"Delete branch '{branch}'?";
+        errorMessage = null;
+        _scrollToDeleteConfirm = true;
+        StateHasChanged();
+    }
+
+    private void DismissDeleteConfirmation()
+    {
+        branchToDelete = null;
+        deleteConfirmMessage = "";
+        StateHasChanged();
+    }
+
+    private async Task ProceedWithDeleteAsync()
+    {
+        if (string.IsNullOrWhiteSpace(branchToDelete))
+            return;
+
+        isDeleting = true;
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            var request = new
+            {
+                workspaceId = WorkspaceId,
+                repositoryId = RepositoryId,
+                branchName = branchToDelete,
+                isRemote = deleteIsRemote
+            };
+            var json = JsonSerializer.Serialize(request);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/delete", content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                var data = JsonSerializer.Deserialize<DeleteBranchApiResult>(responseContent, AgentResponseJson.Options);
+                if (data != null && data.Success)
+                {
+                    DismissDeleteConfirmation();
+                    await RefreshBranchesAsync();
+                }
+                else
+                {
+                    errorMessage = data?.Error ?? "Failed to delete branch.";
+                }
+            }
+            else
+            {
+                var errorText = await response.Content.ReadAsStringAsync();
+                errorMessage = $"Delete failed: {response.StatusCode}";
+                Logger.LogError("Delete branch failed: {StatusCode}, {Error}", response.StatusCode, errorText);
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "An error occurred while deleting the branch.";
+            Logger.LogError(ex, "Error deleting branch");
+        }
+        finally
+        {
+            isDeleting = false;
+            StateHasChanged();
+        }
     }
 
     private async Task ProceedWithCreateAsync()

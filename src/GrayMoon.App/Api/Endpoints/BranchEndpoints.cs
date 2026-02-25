@@ -23,6 +23,7 @@ public static class BranchEndpoints
         routes.MapPost("/api/branches/common", GetCommonBranches);
         routes.MapPost("/api/branches/exists-in-workspace", BranchExistsInWorkspace);
         routes.MapPost("/api/branches/create", CreateBranch);
+        routes.MapPost("/api/branches/delete", DeleteBranch);
         return routes;
     }
 
@@ -435,6 +436,101 @@ public static class BranchEndpoints
             return Results.Problem("An error occurred while creating branch", statusCode: 500);
         }
     }
+
+    private static async Task<IResult> DeleteBranch(
+        DeleteBranchApiRequest? body,
+        IAgentBridge agentBridge,
+        WorkspaceService workspaceService,
+        WorkspaceRepository workspaceRepository,
+        GitHubRepositoryRepository repoRepository,
+        AppDbContext dbContext,
+        WorkspaceGitService workspaceGitService,
+        IHubContext<WorkspaceSyncHub> hubContext,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.Branches");
+        if (body == null)
+            return Results.BadRequest("Request body is required.");
+
+        var workspaceId = body.WorkspaceId;
+        var repositoryId = body.RepositoryId;
+        var branchName = body.BranchName?.Trim();
+        var isRemote = body.IsRemote;
+
+        if (workspaceId <= 0 || repositoryId <= 0 || string.IsNullOrWhiteSpace(branchName))
+            return Results.BadRequest("workspaceId, repositoryId, and branchName are required.");
+
+        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            return Results.NotFound("Workspace not found.");
+
+        var repo = await repoRepository.GetByIdAsync(repositoryId);
+        if (repo == null)
+            return Results.NotFound("Repository not found.");
+
+        var wr = await dbContext.WorkspaceRepositories
+            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId);
+        if (wr == null)
+            return Results.NotFound("Repository is not in the given workspace.");
+
+        if (!isRemote)
+        {
+            var currentBranch = wr.BranchName;
+            if (string.Equals(currentBranch, branchName, StringComparison.OrdinalIgnoreCase))
+                return Results.BadRequest("Cannot delete the current branch. Check out another branch first.");
+        }
+
+        if (!agentBridge.IsAgentConnected)
+            return Results.Problem("Agent not connected.", statusCode: 503);
+
+        try
+        {
+            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, CancellationToken.None);
+            var args = new
+            {
+                workspaceName = workspace.Name,
+                repositoryName = repo.RepositoryName,
+                branchName,
+                isRemote,
+                workspaceRoot
+            };
+            var response = await agentBridge.SendCommandAsync("DeleteBranch", args, CancellationToken.None);
+
+            var deleteResponse = AgentResponseJson.DeserializeAgentResponse<DeleteBranchResponse>(response.Data);
+            var success = deleteResponse?.Success ?? response.Success;
+            var errorMessage = deleteResponse?.ErrorMessage ?? response.Error;
+
+            if (!success)
+                return Results.Ok(new { success = false, error = errorMessage ?? "Failed to delete branch" });
+
+            var refreshResponse = await agentBridge.SendCommandAsync("RefreshBranches", new
+            {
+                workspaceName = workspace.Name,
+                repositoryName = repo.RepositoryName,
+                workspaceRoot
+            }, CancellationToken.None);
+
+            if (refreshResponse.Success)
+            {
+                var branchesData = AgentResponseJson.DeserializeAgentResponse<BranchesResponse>(refreshResponse.Data);
+                if (branchesData != null)
+                {
+                    var localBranches = branchesData.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    var remoteBranches = branchesData.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    await workspaceGitService.PersistBranchesAsync(wr.WorkspaceRepositoryId, localBranches, remoteBranches, branchesData.DefaultBranch, CancellationToken.None);
+                }
+            }
+
+            await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
+
+            return Results.Ok(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error deleting branch for repository {RepositoryId}", repositoryId);
+            return Results.Problem("An error occurred while deleting branch", statusCode: 500);
+        }
+    }
     private static async Task<IResult> GetCommonBranches(
         CommonBranchesApiRequest? body,
         WorkspaceRepository workspaceRepository,
@@ -564,5 +660,13 @@ public sealed class CreateBranchApiRequest
     public int RepositoryId { get; set; }
     public string? NewBranchName { get; set; }
     public string? BaseBranch { get; set; }
+}
+
+public sealed class DeleteBranchApiRequest
+{
+    public int WorkspaceId { get; set; }
+    public int RepositoryId { get; set; }
+    public string? BranchName { get; set; }
+    public bool IsRemote { get; set; }
 }
 

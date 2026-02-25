@@ -59,6 +59,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid RefreshBranches args"),
             "CreateBranch" => JsonSerializer.Deserialize<CreateBranchRequest>(json, options)
                 ?? throw new ArgumentException("Invalid CreateBranch args"),
+            "DeleteBranch" => JsonSerializer.Deserialize<DeleteBranchRequest>(json, options)
+                ?? throw new ArgumentException("Invalid DeleteBranch args"),
             "StageAndCommit" => JsonSerializer.Deserialize<StageAndCommitRequest>(json, options)
                 ?? throw new ArgumentException("Invalid StageAndCommit args"),
             "PushRepository" => JsonSerializer.Deserialize<PushRepositoryRequest>(json, options)
