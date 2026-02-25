@@ -245,12 +245,7 @@
                             {
                                 <button type="button" 
                                         class="btn btn-warning" 
-                                        @onclick="SyncToDefaultAsync"
-                                        disabled="@isProcessing">
-                                    @if (isProcessing)
-                                    {
-                                        <span class="spinner-border spinner-border-sm me-2"></span>
-                                    }
+                                        @onclick="SyncToDefaultAsync">
                                     Sync to @defaultBranch
                                 </button>
                             }
@@ -277,7 +272,7 @@
                             <button type="button" 
                                     class="btn btn-primary" 
                                     @onclick="CheckoutAsync"
-                                    disabled="@(isProcessing || string.IsNullOrWhiteSpace(selectedBranch) || selectedBranch == currentBranchLocal)">
+                                    disabled="@(string.IsNullOrWhiteSpace(selectedBranch) || selectedBranch == currentBranchLocal)">
                                 @if (isProcessing)
                                 {
                                     <span class="spinner-border spinner-border-sm me-2"></span>
@@ -303,6 +298,7 @@
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback OnBranchChanged { get; set; }
     [Parameter] public EventCallback<(int RepositoryId, string BranchName)> OnCheckoutBranch { get; set; }
+    [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string CurrentBranchName, string DefaultBranch)> OnSyncToDefault { get; set; }
     [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string NewBranchName, string BaseBranch)> OnCreateBranch { get; set; }
 
     private string activeTab = "local";
@@ -569,47 +565,9 @@
         if (string.IsNullOrWhiteSpace(currentBranchLocal) || string.IsNullOrWhiteSpace(defaultBranch))
             return;
 
-        isProcessing = true;
-        errorMessage = null;
-        StateHasChanged();
-
-        try
-        {
-            var httpClient = HttpClientFactory.CreateClient();
-            var request = new
-            {
-                workspaceId = WorkspaceId,
-                repositoryId = RepositoryId,
-                currentBranchName = currentBranchLocal
-            };
-            var json = JsonSerializer.Serialize(request);
-            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            
-            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
-            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/sync-to-default", content);
-            
-            if (response.IsSuccessStatusCode)
-            {
-                await OnBranchChanged.InvokeAsync();
-                await OnCancel.InvokeAsync();
-            }
-            else
-            {
-                var errorText = await response.Content.ReadAsStringAsync();
-                errorMessage = $"Failed to sync to default branch: {response.StatusCode}";
-                Logger.LogError("Failed to sync to default branch: {StatusCode}, {Error}", response.StatusCode, errorText);
-            }
-        }
-        catch (Exception ex)
-        {
-            errorMessage = "An error occurred while syncing to default branch.";
-            Logger.LogError(ex, "Error syncing to default branch");
-        }
-        finally
-        {
-            isProcessing = false;
-            StateHasChanged();
-        }
+        // Close dialog and let parent show full-page overlay and run sync
+        await OnSyncToDefault.InvokeAsync((RepositoryId, RepositoryName, currentBranchLocal, defaultBranch));
+        await OnCancel.InvokeAsync();
     }
 
     private string GetPullRequestUrl()
