@@ -63,20 +63,31 @@
 
                         @if (activeTab != "newbranch")
                         {
-                            <div class="d-flex align-items-center justify-content-between mb-1">
+                            <div class="d-flex align-items-center justify-content-between switch-branch-filter-title">
                                 <label class="form-label mb-0">Branch name</label>
-                                <span class="switch-branch-tab-count">@GetBranchCountText(activeTab == "local" ? localBranches.Count : remoteBranches.Count)</span>
+                                <span class="switch-branch-tab-count">@GetBranchCountText(activeTab == "local" ? GetFilteredLocalBranches().Count() : GetFilteredRemoteBranches().Count())</span>
+                            </div>
+                            <div class="mb-3">
+                                <input id="branch-filter"
+                                       type="text"
+                                       class="form-control"
+                                       placeholder="Search branch..."
+                                       @bind="branchFilter"
+                                       @bind:event="oninput"
+                                       @bind:after="SelectClosestMatchingBranch"
+                                       @onkeydown="HandleBranchFilterKeyDown"
+                                       @ref="branchFilterInput" />
                             </div>
                             <div class="branch-list border rounded">
                                 @if (activeTab == "local")
                                 {
-                                    @if (localBranches.Count == 0)
+                                    @if (GetFilteredLocalBranches().Count() == 0)
                                     {
-                                        <div class="text-muted p-3">No local branches found.</div>
+                                        <div class="text-muted p-3">@(localBranches.Count == 0 ? "No local branches found." : "No branches match the filter.")</div>
                                     }
                                     else
                                     {
-                                        @foreach (var branch in localBranches)
+                                        @foreach (var branch in GetFilteredLocalBranches())
                                         {
                                             <div class="branch-item p-2 @(selectedBranch == branch ? "bg-light" : "")" 
                                                  style="cursor: pointer;"
@@ -119,13 +130,13 @@
                                 }
                                 else
                                 {
-                                    @if (remoteBranches.Count == 0)
+                                    @if (GetFilteredRemoteBranches().Count() == 0)
                                     {
-                                        <div class="text-muted p-3">No remote branches found.</div>
+                                        <div class="text-muted p-3">@(remoteBranches.Count == 0 ? "No remote branches found." : "No branches match the filter.")</div>
                                     }
                                     else
                                     {
-                                        @foreach (var branch in remoteBranches)
+                                        @foreach (var branch in GetFilteredRemoteBranches())
                                         {
                                             <div class="branch-item p-2 @(selectedBranch == branch ? "bg-light" : "")" 
                                                  style="cursor: pointer;"
@@ -268,7 +279,7 @@
                                 }
                                 Fetch
                             </button>
-                            @if (showSyncToDefaultButton && !string.IsNullOrWhiteSpace(defaultBranch) && activeTab == "local")
+                            @if (showSyncToDefaultButton && !string.IsNullOrWhiteSpace(defaultBranch) && activeTab == "local" && selectedBranch == currentBranchLocal)
                             {
                                 <button type="button" 
                                         class="btn btn-warning" 
@@ -296,7 +307,7 @@
                                 {
                                     <span class="spinner-border spinner-border-sm me-2"></span>
                                 }
-                                Check Out
+                                Check out
                             </button>
                         }
                         <button type="button" class="btn btn-secondary" @onclick="OnCancel" disabled="@(isCreating || isRefreshing)">Cancel</button>
@@ -329,7 +340,6 @@
     private bool isLoading = false;
     private bool isProcessing = false;
     private bool isRefreshing = false;
-    private string loadingMessage = "Loading branches...";
     private string? errorMessage;
     private bool showSyncToDefaultButton = false;
     private ElementReference modalElement;
@@ -345,6 +355,10 @@
     private string? _pendingCreateName;
     private string? _pendingCreateBaseBranch;
     private ElementReference newBranchNameInput;
+    private string branchFilter = "";
+    private ElementReference branchFilterInput;
+    private bool _focusFilterOnNextRender;
+    private bool _escapeConsumedByFilter;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -362,7 +376,9 @@
                 _pendingCreateName = null;
                 _pendingCreateBaseBranch = null;
                 errorMessage = null;
+                branchFilter = "";
                 _prevVisible = true;
+                _focusFilterOnNextRender = true;
                 currentBranchLocal = CurrentBranch;
                 await LoadBranchesAsync();
             }
@@ -402,6 +418,16 @@
             try
             {
                 await newBranchNameInput.FocusAsync();
+            }
+            catch { }
+        }
+        // Focus filter input when switching to Locals or Remotes tab
+        if (IsVisible && _focusFilterOnNextRender && (activeTab == "local" || activeTab == "remote"))
+        {
+            _focusFilterOnNextRender = false;
+            try
+            {
+                await branchFilterInput.FocusAsync();
             }
             catch { }
         }
@@ -456,7 +482,6 @@
                 // If no branches were persisted, automatically fetch them (keep loading state)
                 if (localBranches.Count == 0 && remoteBranches.Count == 0)
                 {
-                    loadingMessage = "Fetching branches...";
                     StateHasChanged();
                     await RefreshBranchesAsync();
                     return;
@@ -477,7 +502,6 @@
         finally
         {
             isLoading = false;
-            loadingMessage = "Loading branches...";
             StateHasChanged();
         }
     }
@@ -485,6 +509,8 @@
     private void SetActiveTab(string tab)
     {
         activeTab = tab;
+        if (tab == "local" || tab == "remote")
+            _focusFilterOnNextRender = true;
         StateHasChanged();
     }
 
@@ -509,6 +535,47 @@
     private string GetBranchCountText(int count)
     {
         return count == 1 ? "1 branch" : $"{count} branches";
+    }
+
+    private IEnumerable<string> GetFilteredLocalBranches()
+    {
+        IEnumerable<string> filtered;
+        if (string.IsNullOrWhiteSpace(branchFilter))
+            filtered = localBranches;
+        else
+        {
+            var term = branchFilter.Trim();
+            filtered = localBranches.Where(b => b.Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+        var list = filtered.ToList();
+        if (string.IsNullOrWhiteSpace(currentBranchLocal))
+            return list;
+        var current = list.FirstOrDefault(b => string.Equals(b, currentBranchLocal, StringComparison.OrdinalIgnoreCase));
+        if (current == null)
+            return list;
+        return list.Where(b => !string.Equals(b, current, StringComparison.OrdinalIgnoreCase)).Prepend(current);
+    }
+
+    private IEnumerable<string> GetFilteredRemoteBranches()
+    {
+        if (string.IsNullOrWhiteSpace(branchFilter))
+            return remoteBranches;
+        var term = branchFilter.Trim();
+        return remoteBranches.Where(b => b.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void SelectClosestMatchingBranch()
+    {
+        var filtered = activeTab == "local" ? GetFilteredLocalBranches().ToList() : GetFilteredRemoteBranches().ToList();
+        if (filtered.Count == 0)
+        {
+            selectedBranch = null;
+        }
+        else if (selectedBranch == null || !filtered.Contains(selectedBranch))
+        {
+            selectedBranch = filtered[0];
+        }
+        StateHasChanged();
     }
 
     private static string GetRemoteBranchDisplayName(string? branch)
@@ -582,6 +649,27 @@
         // Close modal immediately and trigger checkout from parent
         await OnCancel.InvokeAsync();
         await OnCheckoutBranch.InvokeAsync((RepositoryId, selectedBranch));
+    }
+
+    private async Task HandleBranchFilterKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" || e.Code == "Escape")
+        {
+            if (!string.IsNullOrWhiteSpace(branchFilter))
+            {
+                branchFilter = "";
+                SelectClosestMatchingBranch();
+                _escapeConsumedByFilter = true;
+            }
+            return;
+        }
+        if (e.Key != "Enter" && e.Code != "Enter")
+            return;
+        if (activeTab == "newbranch" || isRefreshing)
+            return;
+        if (string.IsNullOrWhiteSpace(selectedBranch) || selectedBranch == currentBranchLocal)
+            return;
+        await CheckoutAsync();
     }
 
     private async Task SyncToDefaultAsync()
@@ -705,6 +793,11 @@
     {
         if (e.Key == "Escape" || e.Code == "Escape")
         {
+            if (_escapeConsumedByFilter)
+            {
+                _escapeConsumedByFilter = false;
+                return;
+            }
             await OnCancel.InvokeAsync();
             return;
         }

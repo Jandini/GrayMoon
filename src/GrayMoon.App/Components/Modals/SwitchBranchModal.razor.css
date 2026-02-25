@@ -54,6 +54,11 @@
     margin-left: 0.2em;
 }
 
+/* Branch name row: smaller gap above search box than New Branch tab */
+.switch-branch-filter-title {
+    margin-bottom: 2px;
+}
+
 /* Based-on dropdown (same as Branch modal) */
 .new-branch-based-on-wrapper {
     /* Keep dropdown within modal: limit height so it doesn't overlap footer */
