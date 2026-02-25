@@ -16,7 +16,7 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
         var bearerToken = request.BearerToken;
         var workspaceId = request.WorkspaceId;
 
-        var workspacePath = git.GetWorkspacePath(workspaceName);
+        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = Path.Combine(workspacePath, repositoryName);
 
         git.CreateDirectory(workspacePath);

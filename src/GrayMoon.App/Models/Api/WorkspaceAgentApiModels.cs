@@ -19,13 +19,6 @@ public sealed class AgentRepositoryInfoDto
     public string? OriginUrl { get; set; }
 }
 
-/// <summary>Agent GetWorkspaceRoot response.</summary>
-public sealed class AgentWorkspaceRootResponse
-{
-    [JsonPropertyName("workspaceRoot")]
-    public string? WorkspaceRoot { get; set; }
-}
-
 /// <summary>Agent GetWorkspaceExists response.</summary>
 public sealed class AgentWorkspaceExistsResponse
 {

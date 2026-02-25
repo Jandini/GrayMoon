@@ -75,6 +75,7 @@ public class WorkspaceGitService(
             await semaphore.WaitAsync(cancellationToken);
             try
             {
+                var workspaceRoot = await _workspaceService.GetRootPathAsync(cancellationToken);
                 var args = new
                 {
                     workspaceName = workspace.Name,
@@ -82,7 +83,8 @@ public class WorkspaceGitService(
                     repositoryName = repo.RepositoryName,
                     cloneUrl = repo.CloneUrl,
                     bearerToken = repo.Connector?.UserToken,
-                    workspaceId
+                    workspaceId,
+                    workspaceRoot
                 };
                 var response = await _agentBridge.SendCommandAsync("SyncRepository", args, cancellationToken);
                 var info = ParseSyncRepositoryResponse(response);
@@ -156,7 +158,8 @@ public class WorkspaceGitService(
             await semaphore.WaitAsync(cancellationToken);
             try
             {
-                var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName };
+                var workspaceRoot = await _workspaceService.GetRootPathAsync(cancellationToken);
+                var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot };
                 var response = await _agentBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
                 if (!response.Success)
                 {
@@ -206,7 +209,8 @@ public class WorkspaceGitService(
         if (repo == null)
             throw new InvalidOperationException($"Repository {repositoryId} not found in workspace.");
 
-        var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName };
+        var workspaceRoot = await _workspaceService.GetRootPathAsync(cancellationToken);
+        var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot };
         var response = await _agentBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
         if (!response.Success)
         {
@@ -316,11 +320,13 @@ public class WorkspaceGitService(
                 })
                 .ToList();
 
+            var workspaceRoot = await _workspaceService.GetRootPathAsync(cancellationToken);
             var args = new
             {
                 workspaceName = workspace.Name,
                 repositoryName = repo.RepoName,
-                projectUpdates
+                projectUpdates,
+                workspaceRoot
             };
 
             var response = await _agentBridge.SendCommandAsync("SyncRepositoryDependencies", args, cancellationToken);
@@ -388,12 +394,14 @@ public class WorkspaceGitService(
             }
             var commitMessage = string.Join("\r\n", lines);
 
+            var workspaceRoot = await _workspaceService.GetRootPathAsync(cancellationToken);
             var args = new
             {
                 workspaceName = workspace.Name,
                 repositoryName = repo.RepoName,
                 commitMessage,
-                pathsToStage
+                pathsToStage,
+                workspaceRoot
             };
             var response = await _agentBridge.SendCommandAsync("StageAndCommit", args, cancellationToken);
             var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data) is { Success: true };
@@ -660,13 +668,15 @@ public class WorkspaceGitService(
             await semaphore.WaitAsync(cancellationToken);
             try
             {
+                var workspaceRoot = await _workspaceService.GetRootPathAsync(cancellationToken);
                 var args = new
                 {
                     workspaceName = workspace.Name,
                     repositoryId = repo.RepoId,
                     repositoryName = repo.RepoName,
                     bearerToken = bearerByRepoId.GetValueOrDefault(repo.RepoId),
-                    workspaceId = workspace.WorkspaceId
+                    workspaceId = workspace.WorkspaceId,
+                    workspaceRoot
                 };
                 var response = await _agentBridge.SendCommandAsync("PushRepository", args, cancellationToken);
                 var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data) is { Success: true };
@@ -720,7 +730,8 @@ public class WorkspaceGitService(
         if (workspace == null)
             return (false, "Workspace not found.");
 
-        var response = await _agentBridge.SendCommandAsync("RefreshRepositoryVersion", new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName }, cancellationToken);
+        var workspaceRoot = await _workspaceService.GetRootPathAsync(cancellationToken);
+        var response = await _agentBridge.SendCommandAsync("RefreshRepositoryVersion", new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot }, cancellationToken);
         if (!response.Success)
         {
             var err = response.Error ?? "Refresh version failed.";
@@ -766,7 +777,8 @@ public class WorkspaceGitService(
             var repo = wr.Repository;
             if (repo == null) continue;
 
-            var response = await _agentBridge.SendCommandAsync("GetRepositoryVersion", new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName }, cancellationToken);
+            var workspaceRoot = await _workspaceService.GetRootPathAsync(cancellationToken);
+            var response = await _agentBridge.SendCommandAsync("GetRepositoryVersion", new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot }, cancellationToken);
             RepoSyncStatus status;
             if (!response.Success || response.Data == null)
                 status = RepoSyncStatus.Error;
@@ -1050,12 +1062,14 @@ public class WorkspaceGitService(
                     baseBranchName = baseBranch;
                 }
 
+                var workspaceRoot = await _workspaceService.GetRootPathAsync(cancellationToken);
                 var args = new
                 {
                     workspaceName = workspace.Name,
                     repositoryName = repo.RepositoryName,
                     newBranchName,
-                    baseBranchName
+                    baseBranchName,
+                    workspaceRoot
                 };
                 var response = await _agentBridge.SendCommandAsync("CreateBranch", args, cancellationToken);
                 var createResponse = AgentResponseJson.DeserializeAgentResponse<CreateBranchResponse>(response.Data);

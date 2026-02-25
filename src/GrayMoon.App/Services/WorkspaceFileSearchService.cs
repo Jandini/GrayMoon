@@ -12,6 +12,7 @@ public interface IWorkspaceFileSearchService
 
 public sealed class WorkspaceFileSearchService(
     IAgentBridge agentBridge,
+    WorkspaceService workspaceService,
     WorkspaceRepository workspaceRepository) : IWorkspaceFileSearchService
 {
     public async Task<AgentSearchFilesResponse?> SearchAsync(int workspaceId, string? pattern, string? repositoryName, CancellationToken cancellationToken = default)
@@ -20,12 +21,14 @@ public sealed class WorkspaceFileSearchService(
         if (workspace == null || !agentBridge.IsAgentConnected)
             return null;
 
+        var workspaceRoot = await workspaceService.GetRootPathAsync(cancellationToken);
         var searchPattern = string.IsNullOrWhiteSpace(pattern) ? "*" : pattern.Trim();
         var response = await agentBridge.SendCommandAsync("SearchFiles", new
         {
             workspaceName = workspace.Name,
             repositoryName = string.IsNullOrWhiteSpace(repositoryName) ? null : repositoryName.Trim(),
-            searchPattern
+            searchPattern,
+            workspaceRoot
         }, cancellationToken);
 
         if (!response.Success || response.Data == null)

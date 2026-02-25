@@ -19,12 +19,6 @@ internal static class AgentCliOptions
         Arity = ArgumentArity.ZeroOrOne
     };
 
-    public static readonly Option<string> WorkspaceRoot = new("--workspace-root", "-w")
-    {
-        Description = "Root path for workspace directories",
-        Arity = ArgumentArity.ZeroOrOne
-    };
-
     public static readonly Option<int> Concurrency = new("--concurrency", "-c")
     {
         Description = "Max concurrent command executions",
@@ -38,7 +32,6 @@ internal static class AgentCliOptions
     {
         command.Options.Add(HubUrl);
         command.Options.Add(ListenPort);
-        command.Options.Add(WorkspaceRoot);
         command.Options.Add(Concurrency);
     }
 
@@ -57,8 +50,6 @@ internal static class AgentCliOptions
             options.AppHubUrl = hubUrl;
         if (WasPassed(parseResult, ListenPort))
             options.ListenPort = parseResult.GetValue(ListenPort);
-        if (WasPassed(parseResult, WorkspaceRoot) && parseResult.GetValue(WorkspaceRoot) is { } root)
-            options.WorkspaceRoot = root;
         if (WasPassed(parseResult, Concurrency))
             options.MaxConcurrentCommands = parseResult.GetValue(Concurrency);
     }
@@ -74,8 +65,6 @@ internal static class AgentCliOptions
             parts.Add($"--hub-url \"{hubUrl}\"");
         if (WasPassed(parseResult, ListenPort))
             parts.Add($"--listen-port {parseResult.GetValue(ListenPort)}");
-        if (WasPassed(parseResult, WorkspaceRoot) && parseResult.GetValue(WorkspaceRoot) is { } root)
-            parts.Add($"--workspace-root \"{root}\"");
         if (WasPassed(parseResult, Concurrency))
             parts.Add($"--concurrency {parseResult.GetValue(Concurrency)}");
         return string.Join(" ", parts);

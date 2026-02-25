@@ -1,11 +1,9 @@
 @page "/settings"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
-@implements IDisposable
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
 @inject AppSettingRepository AppSettingRepository
 @inject WorkspaceService WorkspaceService
-@inject AgentConnectionTracker AgentConnectionTracker
 
 <PageTitle>Settings - GrayMoon</PageTitle>
 
@@ -24,9 +22,7 @@
                 <div class="mb-3">
                     <label class="form-label fw-semibold" for="workspaceRootPath">Workspace Root Path</label>
                     <p class="text-muted small mb-2">
-                        Override the root directory where workspace folders are created.
-                        When set, this takes precedence over the path reported by the agent.
-                        Leave empty to use the agent-reported path.
+                        The root directory where workspace folders are created.
                     </p>
                     <div class="input-group">
                         <input type="text"
@@ -60,26 +56,6 @@
                         </div>
                     }
                 </div>
-
-                <div class="agent-info-row">
-                    <span class="text-muted small">
-                        <i class="bi bi-cpu me-1"></i>Agent-reported path:
-                    </span>
-                    <span class="font-monospace small ms-2">
-                        @if (agentRootPath != null)
-                        {
-                            @agentRootPath
-                        }
-                        else if (AgentConnectionTracker.State == AgentConnectionState.Online)
-                        {
-                            <span class="text-muted fst-italic">not available</span>
-                        }
-                        else
-                        {
-                            <span class="text-muted fst-italic">agent not connected</span>
-                        }
-                    </span>
-                </div>
             </div>
         </div>
     </div>
@@ -87,36 +63,12 @@
 
 @code {
     private string? workspaceRootPath;
-    private string? agentRootPath;
     private bool isSaving;
     private bool? saveSuccess;
-    private bool _disposed;
 
     protected override async Task OnInitializedAsync()
     {
         workspaceRootPath = await AppSettingRepository.GetValueAsync(AppSettingRepository.WorkspaceRootPathKey);
-        agentRootPath = WorkspaceService.RootPath;
-        AgentConnectionTracker.OnStateChanged(OnAgentStateChanged);
-    }
-
-    private void OnAgentStateChanged(AgentConnectionState state)
-    {
-        if (_disposed) return;
-        if (state is AgentConnectionState.Online or AgentConnectionState.VersionMismatch)
-            _ = InvokeAsync(async () =>
-            {
-                agentRootPath = await WorkspaceService.GetRootPathAsync();
-                if (!_disposed)
-                    StateHasChanged();
-            });
-        else
-            _ = InvokeAsync(() =>
-            {
-                agentRootPath = null;
-                if (!_disposed)
-                    StateHasChanged();
-                return Task.CompletedTask;
-            });
     }
 
     private async Task SaveWorkspaceRootPathAsync()
@@ -138,10 +90,5 @@
         {
             isSaving = false;
         }
-    }
-
-    public void Dispose()
-    {
-        _disposed = true;
     }
 }

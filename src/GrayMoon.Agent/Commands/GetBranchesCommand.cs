@@ -12,7 +12,7 @@ public sealed class GetBranchesCommand(IGitService git) : ICommandHandler<GetBra
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
 
-        var workspacePath = git.GetWorkspacePath(workspaceName);
+        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = Path.Combine(workspacePath, repositoryName);
 
         if (!git.DirectoryExists(repoPath))

@@ -12,7 +12,7 @@ public sealed class SyncToDefaultBranchCommand(IGitService git) : ICommandHandle
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
         var currentBranchName = request.CurrentBranchName ?? throw new ArgumentException("currentBranchName required");
 
-        var workspacePath = git.GetWorkspacePath(workspaceName);
+        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = Path.Combine(workspacePath, repositoryName);
 
         if (!git.DirectoryExists(repoPath))

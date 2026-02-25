@@ -29,7 +29,7 @@ public sealed class PushRepositoryCommand(IGitService git) : ICommandHandler<Pus
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
         var bearerToken = request.BearerToken;
 
-        var workspacePath = git.GetWorkspacePath(workspaceName);
+        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = Path.Combine(workspacePath, repositoryName);
 
         if (!git.DirectoryExists(repoPath))
