@@ -1,9 +1,10 @@
 using System.Text.Json;
 using GrayMoon.App.Models.Api;
+using GrayMoon.App.Repositories;
 
 namespace GrayMoon.App.Services;
 
-public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService> logger)
+public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService> logger, AppSettingRepository appSettingRepository)
 {
     private string? _cachedRootPath;
     private readonly SemaphoreSlim _cacheLock = new(1, 1);
@@ -23,6 +24,14 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
         {
             if (_cachedRootPath != null)
                 return _cachedRootPath;
+
+            var dbOverride = await appSettingRepository.GetValueAsync(AppSettingRepository.WorkspaceRootPathKey);
+            if (!string.IsNullOrWhiteSpace(dbOverride))
+            {
+                _cachedRootPath = dbOverride.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                logger.LogInformation("Using configured workspace root: {RootPath}", _cachedRootPath);
+                return _cachedRootPath;
+            }
 
             if (!agentBridge.IsAgentConnected)
                 return null;
@@ -144,6 +153,20 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
         await _cacheLock.WaitAsync(cancellationToken);
         try
         {
+            var dbOverride = await appSettingRepository.GetValueAsync(AppSettingRepository.WorkspaceRootPathKey);
+            if (!string.IsNullOrWhiteSpace(dbOverride))
+            {
+                _cachedRootPath = dbOverride.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                logger.LogInformation("Using configured workspace root: {RootPath}", _cachedRootPath);
+                return;
+            }
+
+            if (!agentBridge.IsAgentConnected)
+            {
+                _cachedRootPath = null;
+                return;
+            }
+
             var response = await agentBridge.SendCommandAsync("GetWorkspaceRoot", new { }, cancellationToken);
             if (response.Success && response.Data != null)
             {

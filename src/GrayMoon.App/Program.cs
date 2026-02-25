@@ -38,6 +38,7 @@ builder.Services.AddScoped<ConnectorRepository>();
 builder.Services.AddScoped<GitHubRepositoryRepository>();
 builder.Services.AddScoped<WorkspaceProjectRepository>();
 builder.Services.AddScoped<WorkspaceFileRepository>();    builder.Services.AddScoped<WorkspaceFileVersionConfigRepository>();builder.Services.AddScoped<WorkspaceRepository>();
+builder.Services.AddScoped<AppSettingRepository>();
 builder.Services.AddSingleton<AgentConnectionTracker>();
 builder.Services.AddSingleton<IToastService, ToastService>();
 builder.Services.AddSingleton<MatrixOverlayPreferenceService>();
@@ -101,6 +102,7 @@ using (var scope = app.Services.CreateScope())
     await MigrateRepositoryBranchesIsDefaultAsync(dbContext);
     await MigrateWorkspaceFilesAsync(dbContext);
     await MigrateWorkspaceFileVersionConfigsAsync(dbContext);
+    await MigrateAppSettingsAsync(dbContext);
 }
 
 static async Task MigrateWorkspaceProjectsMatchedConnectorAsync(AppDbContext dbContext)
@@ -536,6 +538,38 @@ static async Task MigrateWorkspaceFileVersionConfigsAsync(AppDbContext dbContext
                 await cmd.ExecuteNonQueryAsync();
 
                 cmd.CommandText = "CREATE INDEX IX_WorkspaceFileVersionConfigs_FileId ON WorkspaceFileVersionConfigs(FileId)";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateAppSettingsAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AppSettings'";
+            var tableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+
+            if (!tableExists)
+            {
+                cmd.CommandText = @"
+                    CREATE TABLE AppSettings (
+                        AppSettingId INTEGER PRIMARY KEY AUTOINCREMENT,
+                        Key TEXT NOT NULL,
+                        Value TEXT,
+                        UNIQUE(Key)
+                    )";
                 await cmd.ExecuteNonQueryAsync();
             }
         }

@@ -1,0 +1,147 @@
+@page "/settings"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@implements IDisposable
+@using GrayMoon.App.Repositories
+@using GrayMoon.App.Services
+@inject AppSettingRepository AppSettingRepository
+@inject WorkspaceService WorkspaceService
+@inject AgentConnectionTracker AgentConnectionTracker
+
+<PageTitle>Settings - GrayMoon</PageTitle>
+
+<div class="container-fluid page-container grid-page">
+    <div class="grid-page-header">
+        <h2>Settings</h2>
+        <p class="text-muted">Configure application settings</p>
+    </div>
+
+    <div class="grid-page-body">
+        <div class="card page-card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Workspace</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold" for="workspaceRootPath">Workspace Root Path</label>
+                    <p class="text-muted small mb-2">
+                        Override the root directory where workspace folders are created.
+                        When set, this takes precedence over the path reported by the agent.
+                        Leave empty to use the agent-reported path.
+                    </p>
+                    <div class="input-group">
+                        <input type="text"
+                               class="form-control font-monospace"
+                               id="workspaceRootPath"
+                               placeholder="e.g. C:\Workspaces or /home/user/workspaces"
+                               @bind="workspaceRootPath"
+                               @bind:event="oninput" />
+                        <button class="btn btn-primary" type="button" @onclick="SaveWorkspaceRootPathAsync" disabled="@isSaving">
+                            @if (isSaving)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                            }
+                            Save
+                        </button>
+                    </div>
+
+                    @if (saveSuccess.HasValue)
+                    {
+                        <div class="mt-2 small @(saveSuccess.Value ? "text-success" : "text-danger")">
+                            @if (saveSuccess.Value)
+                            {
+                                <i class="bi bi-check-circle me-1"></i>
+                                <span>Workspace root path saved.</span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-exclamation-circle me-1"></i>
+                                <span>Failed to save. Please try again.</span>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <div class="agent-info-row">
+                    <span class="text-muted small">
+                        <i class="bi bi-cpu me-1"></i>Agent-reported path:
+                    </span>
+                    <span class="font-monospace small ms-2">
+                        @if (agentRootPath != null)
+                        {
+                            @agentRootPath
+                        }
+                        else if (AgentConnectionTracker.State == AgentConnectionState.Online)
+                        {
+                            <span class="text-muted fst-italic">not available</span>
+                        }
+                        else
+                        {
+                            <span class="text-muted fst-italic">agent not connected</span>
+                        }
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string? workspaceRootPath;
+    private string? agentRootPath;
+    private bool isSaving;
+    private bool? saveSuccess;
+    private bool _disposed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        workspaceRootPath = await AppSettingRepository.GetValueAsync(AppSettingRepository.WorkspaceRootPathKey);
+        agentRootPath = WorkspaceService.RootPath;
+        AgentConnectionTracker.OnStateChanged(OnAgentStateChanged);
+    }
+
+    private void OnAgentStateChanged(AgentConnectionState state)
+    {
+        if (_disposed) return;
+        if (state is AgentConnectionState.Online or AgentConnectionState.VersionMismatch)
+            _ = InvokeAsync(async () =>
+            {
+                agentRootPath = await WorkspaceService.GetRootPathAsync();
+                if (!_disposed)
+                    StateHasChanged();
+            });
+        else
+            _ = InvokeAsync(() =>
+            {
+                agentRootPath = null;
+                if (!_disposed)
+                    StateHasChanged();
+                return Task.CompletedTask;
+            });
+    }
+
+    private async Task SaveWorkspaceRootPathAsync()
+    {
+        isSaving = true;
+        saveSuccess = null;
+        try
+        {
+            await AppSettingRepository.SetValueAsync(AppSettingRepository.WorkspaceRootPathKey, workspaceRootPath?.Trim());
+            WorkspaceService.ClearCachedRootPath();
+            workspaceRootPath = await AppSettingRepository.GetValueAsync(AppSettingRepository.WorkspaceRootPathKey);
+            saveSuccess = true;
+        }
+        catch
+        {
+            saveSuccess = false;
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+    }
+}
