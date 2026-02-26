@@ -41,6 +41,7 @@ public class WorkspaceGitService(
         int workspaceId,
         Action<int, int, int, RepoGitVersionInfo>? onProgress = null,
         IReadOnlyList<int>? repositoryIds = null,
+        bool skipDependencyLevelPersistence = false,
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
@@ -100,7 +101,7 @@ public class WorkspaceGitService(
 
         var results = await Task.WhenAll(syncTasks);
 
-        await PersistVersionsAsync(workspaceId, results, cancellationToken);
+        await PersistVersionsAsync(workspaceId, results, persistDependencyLevel: !skipDependencyLevelPersistence, cancellationToken);
 
         bool isInSync;
         if (repositoryIds != null && repositoryIds.Count > 0)
@@ -190,7 +191,7 @@ public class WorkspaceGitService(
         }
 
         var resultsForDeps = syncResults.Select(r => (r.RepositoryId, r.ProjectsDetail)).ToList();
-        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, resultsForDeps, cancellationToken);
+        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, resultsForDeps, persistDependencyLevel: true, cancellationToken);
 
         _logger.LogDebug("RefreshWorkspaceProjects completed for workspace {WorkspaceName}", workspace.Name);
     }
@@ -226,7 +227,7 @@ public class WorkspaceGitService(
         if (projectsDetail is { Count: > 0 })
             await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repositoryId, projectsDetail, cancellationToken);
 
-        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, [(repositoryId, projectsDetail)], cancellationToken);
+        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, [(repositoryId, projectsDetail)], persistDependencyLevel: true, cancellationToken);
         _logger.LogDebug("RefreshSingleRepositoryProjects completed for workspace {WorkspaceName}, repo {RepositoryId}", workspace.Name, repositoryId);
         return true;
     }
@@ -750,7 +751,7 @@ public class WorkspaceGitService(
 
         var info = ParseRefreshRepositoryVersionResponse(response);
 
-        await PersistVersionsAsync(workspaceId, [(repo.RepositoryId, info)], cancellationToken);
+        await PersistVersionsAsync(workspaceId, [(repo.RepositoryId, info)], true, cancellationToken);
 
         var allLinks = await _dbContext.WorkspaceRepositories
             .Where(wr => wr.WorkspaceId == workspaceId)
@@ -912,7 +913,8 @@ public class WorkspaceGitService(
     private async Task PersistVersionsAsync(
         int workspaceId,
         IEnumerable<(int RepoId, RepoGitVersionInfo info)> results,
-        CancellationToken cancellationToken)
+        bool persistDependencyLevel = true,
+        CancellationToken cancellationToken = default)
     {
         var resultList = results.ToList();
         if (resultList.Count == 0) return;
@@ -948,7 +950,7 @@ public class WorkspaceGitService(
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         var syncResults = resultList.Select(r => (r.RepoId, r.info.ProjectsDetail)).ToList();
-        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, syncResults, cancellationToken);
+        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, syncResults, persistDependencyLevel, cancellationToken);
 
         _logger.LogInformation("Persistence: saved WorkspaceRepository link versions. WorkspaceId={WorkspaceId}, RepoCount={RepoCount}",
             workspaceId, resultList.Count);

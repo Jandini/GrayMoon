@@ -206,7 +206,7 @@
     margin-right: 0.5rem;
 }
 
-/* No projects found: gray, not bold */
+/* No dependencies: gray, not bold */
 .repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-title.dependency-level-no-projects {
     color: #6a6a6a !important;
     font-weight: 400;

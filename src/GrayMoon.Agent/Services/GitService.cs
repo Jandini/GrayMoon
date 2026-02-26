@@ -17,7 +17,9 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
     public string GetWorkspacePath(string root, string workspaceName)
     {
-        var safe = SanitizeDirectoryName(workspaceName);
+        if (string.IsNullOrWhiteSpace(root))
+            throw new ArgumentException("Workspace root path is required.", nameof(root));
+        var safe = SanitizeDirectoryName(workspaceName ?? "");
         return Path.Combine(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), safe);
     }
 

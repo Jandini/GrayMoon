@@ -69,6 +69,7 @@
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public WorkspaceFileDto? File { get; set; }
     [Parameter] public string? WorkspaceName { get; set; }
+    [Parameter] public string? WorkspaceRoot { get; set; }
     [Parameter] public bool IsConfigured { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback<string?> OnConfigure { get; set; }
@@ -119,10 +120,18 @@
                 await InvokeAsync(StateHasChanged);
                 return;
             }
+            if (string.IsNullOrWhiteSpace(WorkspaceRoot))
+            {
+                _errorMessage = "Workspace root is not configured. Set it in Settings.";
+                _isLoading = false;
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
 
             var resp = await AgentBridge.SendCommandAsync("GetFileContents", new
             {
                 workspaceName = WorkspaceName,
+                workspaceRoot = WorkspaceRoot,
                 repositoryName = File!.RepositoryName,
                 filePath = File.FilePath
             });

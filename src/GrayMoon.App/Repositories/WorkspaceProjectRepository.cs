@@ -111,10 +111,11 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
             workspaceId, repositoryId, toRemove.Count, byName.Count);
     }
 
-    /// <summary>Replaces project dependencies for workspace projects from sync results. Only dependencies where the referenced package is a workspace project are persisted.</summary>
+    /// <summary>Replaces project dependencies for workspace projects from sync results. Only dependencies where the referenced package is a workspace project are persisted. When <paramref name="persistDependencyLevel"/> is false, DependencyLevel/Dependencies/UnmatchedDeps are not recomputed (e.g. when syncing only selected repos or retrying after error).</summary>
     public async Task MergeWorkspaceProjectDependenciesAsync(
         int workspaceId,
         IReadOnlyList<(int RepoId, IReadOnlyList<SyncProjectInfo>? ProjectsDetail)> syncResults,
+        bool persistDependencyLevel = true,
         CancellationToken cancellationToken = default)
     {
         var workspaceProjects = await dbContext.WorkspaceProjects
@@ -184,7 +185,8 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
         logger.LogInformation("Persistence: ProjectDependencies. WorkspaceId={WorkspaceId}, DependentCount={Count}, EdgeCount={Edges}",
             workspaceId, dependentProjectIds.Count, uniqueEdges.Count);
 
-        await PersistRepositoryDependencyLevelAndDependenciesAsync(workspaceId, workspaceProjects, uniqueEdges, cancellationToken);
+        if (persistDependencyLevel)
+            await PersistRepositoryDependencyLevelAndDependenciesAsync(workspaceId, workspaceProjects, uniqueEdges, cancellationToken);
     }
 
     /// <summary>Recomputes DependencyLevel, Dependencies, and UnmatchedDeps from current DB state (workspace projects and project dependencies) and persists to WorkspaceRepositoryLink. Use after a repository version change (e.g. notify job) so the grid can refresh without re-reading .csproj files.</summary>

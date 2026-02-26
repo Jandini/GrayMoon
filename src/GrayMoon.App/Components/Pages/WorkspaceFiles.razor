@@ -11,6 +11,7 @@
 @inject WorkspaceFileRepository WorkspaceFileRepository
 @inject WorkspaceFileVersionConfigRepository VersionConfigRepository
 @inject WorkspaceFileVersionService FileVersionService
+@inject WorkspaceService WorkspaceService
 @inject ILogger<WorkspaceFiles> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
@@ -126,6 +127,7 @@
 <ViewFileModal IsVisible="@showViewFileModal"
                File="@(viewingFile!)"
                WorkspaceName="@(workspace?.Name)"
+               WorkspaceRoot="@workspaceRoot"
                IsConfigured="@(viewingFile != null && fileVersionConfigs.ContainsKey(viewingFile.FileId))"
                OnClose="CloseViewFileModal"
                OnConfigure="OnConfigureFromView" />
@@ -147,6 +149,7 @@
     private string? currentConfigPattern;
     private bool showViewFileModal;
     private WorkspaceFileDto? viewingFile;
+    private string? workspaceRoot;
     private bool isUpdating;
     private string updateMessage = "";
     private CancellationTokenSource? _updateCts;
@@ -168,8 +171,10 @@
                 errorMessage = "Workspace not found.";
                 files = new List<WorkspaceFileDto>();
                 workspaceRepos = new List<WorkspaceRepoItem>();
+                workspaceRoot = null;
                 return;
             }
+            workspaceRoot = await WorkspaceService.GetRootPathForWorkspaceAsync(workspace, default);
             workspaceRepos = workspace.Repositories
                 .Where(r => r.Repository != null)
                 .Select(r => new WorkspaceRepoItem { RepositoryId = r.RepositoryId, RepositoryName = r.Repository!.RepositoryName })
