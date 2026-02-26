@@ -62,20 +62,20 @@
                            @bind="searchTerm" @bind:event="oninput"
                            @onkeydown="OnSearchKeyDown" />
                 </div>
-                <button class="btn @(isPushRecommended ? "btn-warning" : "btn-outline-secondary")"
-                        @onclick="OnPushClickAsync"
-                        disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating || isPushing)">
-                    Push
+                <button class="btn btn-outline-secondary"
+                        @onclick="ShowBranchModalAsync"
+                        disabled="@(isSyncing || isUpdating || isPushing || workspaceRepositories.Count == 0)">
+                    Branch
                 </button>
                 <button class="btn @(hasUnmatchedDependencies ? "btn-danger" : "btn-outline-secondary")"
                         @onclick="OnUpdateClickAsync"
                         disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating || isPushing)">
                     Update
                 </button>
-                <button class="btn btn-outline-secondary"
-                        @onclick="ShowBranchModalAsync"
-                        disabled="@(isSyncing || isUpdating || isPushing || workspaceRepositories.Count == 0)">
-                    Branch
+                <button class="btn @(isPushRecommended ? "btn-warning" : "btn-outline-secondary")"
+                        @onclick="OnPushClickAsync"
+                        disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating || isPushing)">
+                    Push
                 </button>
                 <button class="btn @(isOutOfSync == true ? "btn-danger" : "btn-primary")"
                         @onclick="SyncAsync"
