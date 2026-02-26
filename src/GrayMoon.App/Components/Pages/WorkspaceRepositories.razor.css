@@ -78,11 +78,10 @@
     border-color: var(--accent-blue) !important;
 }
 
-/* When in "All" mode: checkbox appears checked but disabled (muted) */
+/* When unchecked / muted: same look as grid unchecked checkbox */
 .workspace-repos-search-wrapper .workspace-repos-mode-checkbox--all,
 .workspace-repos-search-wrapper .workspace-repos-mode-checkbox--all:checked {
-    opacity: 0.7;
-    background-color: var(--text-muted) !important;
+    background-color: var(--bg-input) !important;
     border-color: var(--border-light) !important;
 }
 
