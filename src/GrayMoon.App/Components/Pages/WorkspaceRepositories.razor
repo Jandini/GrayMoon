@@ -681,7 +681,8 @@
         {
             var (text, bgColor) = status switch
             {
-                RepoSyncStatus.InSync => ("in sync", "#198754"),
+                // In-sync badge: match primary Sync button blue
+                RepoSyncStatus.InSync => ("in sync", "#0e639c"),
                 RepoSyncStatus.NeedsSync => ("sync", "#dc3545"),
                 RepoSyncStatus.NotCloned => ("not cloned", "#6c757d"),
                 RepoSyncStatus.VersionMismatch => ("version", "#dc3545"),
