@@ -46,6 +46,7 @@
         const savedWidths = getColumnWidths(table);
         if (savedWidths && savedWidths.length === ths.length) {
             ths.forEach((th, i) => {
+                if (th.classList.contains('no-resize')) return;
                 th.style.width = savedWidths[i] + '%';
                 th.style.minWidth = MIN_COL_WIDTH + 'px';
             });
@@ -56,6 +57,7 @@
             const tableWidth = tableRect.width;
             if (tableWidth > 0) {
                 ths.forEach(th => {
+                    if (th.classList.contains('no-resize')) return;
                     const cellWidth = th.getBoundingClientRect().width;
                     const pct = (cellWidth / tableWidth) * 100;
                     th.style.width = pct + '%';
@@ -63,12 +65,14 @@
                 });
             } else {
                 ths.forEach(th => {
+                    if (th.classList.contains('no-resize')) return;
                     th.style.minWidth = MIN_COL_WIDTH + 'px';
                 });
             }
         }
 
         ths.forEach((th, index) => {
+            if (th.classList.contains('no-resize')) return;
             th.style.position = 'relative';
             th.style.overflow = 'hidden';
             const handle = document.createElement('div');

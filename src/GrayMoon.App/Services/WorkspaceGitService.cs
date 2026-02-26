@@ -121,11 +121,12 @@ public class WorkspaceGitService(
         return results.ToDictionary(r => r.RepositoryId, r => r.info);
     }
 
-    /// <summary>Refreshes project and package reference data from .csproj files on disk (no git). Merges into WorkspaceProjects and ProjectDependencies.</summary>
+    /// <summary>Refreshes project and package reference data from .csproj files on disk (no git). Merges into WorkspaceProjects and ProjectDependencies. When <paramref name="repositoryIds"/> is set, only those repos are refreshed.</summary>
     public async Task RefreshWorkspaceProjectsAsync(
         int workspaceId,
         Action<int, int, int>? onProgress = null,
         Action<int, string>? onRepoError = null,
+        IReadOnlySet<int>? repositoryIds = null,
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
@@ -140,6 +141,9 @@ public class WorkspaceGitService(
             .Where(r => r != null)
             .Cast<Repository>()
             .ToList();
+
+        if (repositoryIds != null && repositoryIds.Count > 0)
+            repos = repos.Where(r => repositoryIds.Contains(r.RepositoryId)).ToList();
 
         if (repos.Count == 0)
         {
@@ -253,11 +257,13 @@ public class WorkspaceGitService(
         _logger.LogDebug("RunUpdateSingleRepository completed for workspace {WorkspaceName}, repo {RepositoryId}, synced={Count}", workspace.Name, repositoryId, count);
     }
 
-    /// <summary>Gets the list of repos that need dependency updates, with levels. Used to detect single vs multi-level and to drive update-with-commit flow.</summary>
-    public async Task<(IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)> GetUpdatePlanAsync(int workspaceId, CancellationToken cancellationToken = default)
+    /// <summary>Gets the list of repos that need dependency updates, with levels. Used to detect single vs multi-level and to drive update-with-commit flow. When <paramref name="repositoryIds"/> is set, only those repos are considered.</summary>
+    public async Task<(IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)> GetUpdatePlanAsync(int workspaceId, IReadOnlySet<int>? repositoryIds = null, CancellationToken cancellationToken = default)
     {
         var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, cancellationToken);
         var withUpdates = payloads.Where(p => p.ProjectUpdates.Count > 0).ToList();
+        if (repositoryIds != null && repositoryIds.Count > 0)
+            withUpdates = withUpdates.Where(p => repositoryIds.Contains(p.RepoId)).ToList();
         if (withUpdates.Count == 0)
             return (withUpdates, false);
 
@@ -414,12 +420,13 @@ public class WorkspaceGitService(
         return results;
     }
 
-    /// <summary>Runs full update (refresh projects, sync deps, optional commits). Stops on first error and reports it via onRepoError (message under the repo). Single-level: one pass then commit all. Multi-level: per level sync+commit then refresh version for committed repos, repeat.</summary>
+    /// <summary>Runs full update (refresh projects, sync deps, optional commits). Stops on first error and reports it via onRepoError (message under the repo). When <paramref name="repoIdsToUpdate"/> is set, only those repos are updated.</summary>
     public async Task RunUpdateAsync(
         int workspaceId,
         bool withCommits,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
+        IReadOnlySet<int>? repoIdsToUpdate = null,
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
@@ -441,11 +448,12 @@ public class WorkspaceGitService(
             workspaceId,
             onProgress: (c, t, _) => onProgressMessage?.Invoke($"Refreshing projects {c} of {t}"),
             onRepoError: OnRepoError,
+            repositoryIds: repoIdsToUpdate,
             cancellationToken);
         if (hadError)
             return;
 
-        var (payload, isMultiLevel) = await GetUpdatePlanAsync(workspaceId, cancellationToken);
+        var (payload, isMultiLevel) = await GetUpdatePlanAsync(workspaceId, repoIdsToUpdate, cancellationToken);
         if (payload.Count == 0)
         {
             await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
@@ -455,7 +463,7 @@ public class WorkspaceGitService(
         if (!withCommits)
         {
             onProgressMessage?.Invoke("Syncing dependencies...");
-            await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: OnRepoError, cancellationToken: cancellationToken);
+            await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: OnRepoError, repoIdsToSync: repoIdsToUpdate, cancellationToken: cancellationToken);
             if (hadError)
                 return;
             await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
@@ -510,7 +518,7 @@ public class WorkspaceGitService(
         else
         {
             onProgressMessage?.Invoke("Syncing dependencies...");
-            await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: OnRepoError, cancellationToken: cancellationToken);
+            await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: OnRepoError, repoIdsToSync: repoIdsToUpdate, cancellationToken: cancellationToken);
             if (hadError)
                 return;
             onProgressMessage?.Invoke("Committing updates...");
@@ -1012,12 +1020,13 @@ public class WorkspaceGitService(
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    /// <summary>Creates a new branch in all workspace repos (in parallel), then checks it out. baseBranch is "__default__" to use each repo's default, or a branch name. Calls onProgress(completed, total).</summary>
+    /// <summary>Creates a new branch in all workspace repos (in parallel), then checks it out. baseBranch is "__default__" to use each repo's default, or a branch name. When <paramref name="repositoryIds"/> is set, only those repos are included.</summary>
     public async Task CreateBranchesAsync(
         int workspaceId,
         string newBranchName,
         string baseBranch,
         Action<int, int>? onProgress = null,
+        IReadOnlySet<int>? repositoryIds = null,
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
@@ -1031,6 +1040,9 @@ public class WorkspaceGitService(
             .Where(wr => wr.WorkspaceId == workspaceId)
             .Include(wr => wr.Repository)
             .ToListAsync(cancellationToken);
+
+        if (repositoryIds != null && repositoryIds.Count > 0)
+            links = links.Where(wr => repositoryIds.Contains(wr.RepositoryId)).ToList();
 
         if (links.Count == 0)
             return;

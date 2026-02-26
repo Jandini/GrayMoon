@@ -66,6 +66,8 @@
             if (Array.isArray(urls))
                 urls.forEach(url => window.open(url, '_blank', 'noopener,noreferrer'));
         };
+        window.graymoonStorageGet = (key) => localStorage.getItem(key);
+        window.graymoonStorageSet = (key, value) => { localStorage.setItem(key, value); };
         document.body.addEventListener('click', (e) => {
             const el = e.target.closest('.dependency-level-count-link') || e.target.closest('.dependency-level-pr-link');
             if (!el) return;
