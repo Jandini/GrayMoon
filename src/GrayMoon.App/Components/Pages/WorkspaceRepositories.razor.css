@@ -44,6 +44,9 @@
 
 .workspace-repos-search-wrapper .workspace-repos-select-btn {
     flex-shrink: 0;
+    width: 4.75rem;
+    min-width: 4.75rem;
+    max-width: 4.75rem;
     border-top-right-radius: 0;
     border-bottom-right-radius: 0;
     border-right: none;
