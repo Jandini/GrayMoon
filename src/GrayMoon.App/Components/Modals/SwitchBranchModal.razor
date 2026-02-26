@@ -103,6 +103,7 @@
                                                     <div class="d-flex align-items-center flex-grow-1 min-w-0">
                                                         <input type="radio" 
                                                                name="branchSelection" 
+                                                               class="switch-branch-radio"
                                                                checked="@(selectedBranch == branch)"
                                                                @onchange='() => SelectBranch(branch)' />
                                                         <span class="ms-2 @(branch == currentBranchLocal ? "fw-bold" : "")">
@@ -181,6 +182,7 @@
                                                     <div class="d-flex align-items-center flex-grow-1 min-w-0">
                                                         <input type="radio" 
                                                                name="branchSelection" 
+                                                               class="switch-branch-radio"
                                                                checked="@(selectedBranch == branch)"
                                                                @onchange='() => SelectBranch(branch)' />
                                                         <span class="ms-2">
@@ -313,7 +315,7 @@
                             <div class="mb-3 switch-branch-field-block form-check">
                                 <input id="create-with-upstream"
                                        type="checkbox"
-                                       class="form-check-input"
+                                       class="form-check-input switch-branch-checkbox"
                                        @bind="createWithUpstream" />
                                 <label class="form-check-label" for="create-with-upstream">Upstream branch</label>
                             </div>
