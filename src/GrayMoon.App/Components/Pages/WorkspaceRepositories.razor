@@ -886,7 +886,10 @@
         _pushCts = new CancellationTokenSource();
 
         isPushing = true;
-        pushProgressMessage = "Starting push...";
+        var pushCount = pushPlanRepoIds?.Count ?? 0;
+        pushProgressMessage = pushCount > 0
+            ? $"Pushing {pushCount} {(pushCount == 1 ? "repository" : "repositories")}..."
+            : "Pushing...";
         errorMessage = null;
         try
         {
@@ -983,7 +986,10 @@
         _updateCts = new CancellationTokenSource();
 
         isUpdating = true;
-        updateProgressMessage = "Starting update...";
+        var updateCount = EffectiveActionRepositoryIds?.Count ?? 0;
+        updateProgressMessage = updateCount > 0
+            ? $"Updating {updateCount} {(updateCount == 1 ? "repository" : "repositories")}..."
+            : "Updating dependencies...";
         errorMessage = null;
         try
         {
@@ -1215,7 +1221,10 @@
         _syncCts = new CancellationTokenSource();
 
         isSyncing = true;
-        syncProgressMessage = "Synchronizing...";
+        var syncCount = EffectiveActionRepositoryIds?.Count ?? 0;
+        syncProgressMessage = syncCount > 0
+            ? $"Synchronizing {syncCount} {(syncCount == 1 ? "repository" : "repositories")}..."
+            : "Synchronizing...";
         errorMessage = null;
         try
         {
@@ -1596,7 +1605,10 @@
         _createBranchesCts = new CancellationTokenSource();
 
         isCreatingBranches = true;
-        createBranchesProgressMessage = "Creating branches...";
+        var branchCount = EffectiveActionRepositoryIds?.Count ?? 0;
+        createBranchesProgressMessage = branchCount > 0
+            ? $"Creating branches for {branchCount} {(branchCount == 1 ? "repository" : "repositories")}..."
+            : "Creating branches...";
         errorMessage = null;
         StateHasChanged();
 
