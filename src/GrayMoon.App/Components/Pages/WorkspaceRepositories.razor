@@ -59,7 +59,8 @@
                         @(showSelectionColumn ? "Clear" : "Select")
                     </button>
                     <input id="workspace-repos-search" class="form-control workspace-repos-search" placeholder="Search repositories..."
-                           @bind="searchTerm" @bind:event="oninput" />
+                           @bind="searchTerm" @bind:event="oninput"
+                           @onkeydown="OnSearchKeyDown" />
                 </div>
                 <button class="btn @(isPushRecommended ? "btn-warning" : "btn-outline-secondary")"
                         @onclick="OnPushClickAsync"
@@ -643,17 +644,21 @@
         }
         var text = $"↑{x} ↓{y}";
         string bgColor;
+        string textColor = "#fff";
         bool hasCommits = (y > 0) || (x > 0);
         if (y > 0)
             bgColor = "#dc3545";   // red: need to pull
         else if (x > 0)
-            bgColor = "#fd7e14";   // orange: need to push
+        {
+            bgColor = "#ffc107";   // yellow: need to push (match Push button)
+            textColor = "#000";
+        }
         else
             bgColor = "#198754";   // green: in sync (0,0)
         
         builder.OpenElement(0, "span");
         builder.AddAttribute(1, "class", "badge");
-        builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: #fff;{(hasCommits ? " cursor: pointer;" : "")}");
+        builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: {textColor};{(hasCommits ? " cursor: pointer;" : "")}");
         if (hasCommits)
         {
             builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => ShowConfirmSyncCommits(repositoryId)));
@@ -2007,6 +2012,15 @@
             gridSelectedRepositoryIds.Add(repositoryId);
         await PersistGridSelectionAsync();
         StateHasChanged();
+    }
+
+    private void OnSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            searchTerm = string.Empty;
+            StateHasChanged();
+        }
     }
 
     private List<WorkspaceRepositoryLink> GetFilteredWorkspaceRepositories()

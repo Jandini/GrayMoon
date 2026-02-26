@@ -148,6 +148,27 @@ a.workspaces-breadcrumb-link:hover {
     color: var(--text-secondary) !important;
 }
 
+/* Outline secondary (e.g. Branch button): gray border, hover = gray fill + white text */
+.btn-outline-secondary,
+.btn-outline-secondary:link,
+.btn-outline-secondary:visited,
+.btn-outline-secondary:active,
+.btn-outline-secondary:focus,
+.btn-sm.btn-outline-secondary,
+.btn-lg.btn-outline-secondary {
+    color: var(--text-secondary);
+    border-color: var(--border-light);
+    background-color: transparent;
+}
+
+.btn-outline-secondary:hover:not(:disabled),
+.btn-sm.btn-outline-secondary:hover:not(:disabled),
+.btn-lg.btn-outline-secondary:hover:not(:disabled) {
+    background-color: var(--bg-hover);
+    border-color: var(--border-hover);
+    color: #ffffff;
+}
+
 /* Ensure outline primary button text is light gray */
 .btn-outline-primary *:not(:hover),
 .btn-outline-primary span:not(:hover),

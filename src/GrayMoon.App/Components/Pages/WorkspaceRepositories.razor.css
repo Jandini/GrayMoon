@@ -55,7 +55,7 @@
 }
 
 .workspace-repos-search-wrapper .workspace-repos-select-btn:hover {
-    background-color: var(--bg-active);
+    background-color: var(--bg-hover);
     border-color: var(--border-hover);
     color: #ffffff;
 }
@@ -70,7 +70,8 @@
 }
 
 .workspace-repos-search-wrapper .workspace-repos-select-btn:focus:hover {
-    background-color: var(--bg-active);
+    background-color: var(--bg-hover);
+    border-color: var(--border-hover);
     color: #ffffff;
 }
 
