@@ -1,0 +1,11 @@
+---
+description: Brief summary of changes
+globs: **/*.cs
+alwaysApply: true
+---
+
+# Summary of changes
+
+Write very brief summary of changes. One or two sentences. Ignore this rule if user ask for "summarize".
+
+

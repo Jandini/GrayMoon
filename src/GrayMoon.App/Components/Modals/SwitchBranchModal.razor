@@ -4,6 +4,7 @@
 @using GrayMoon.App.Services
 @inject IHttpClientFactory HttpClientFactory
 @inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
 @inject ILogger<SwitchBranchModal> Logger
 
 @if (IsVisible)
@@ -14,20 +15,11 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Switch Branch - @RepositoryName</h5>
-                    <button type="button" class="btn-close" @onclick="OnCancel"></button>
+                    <h5 class="modal-title">Branch - @RepositoryName</h5>
+                    <button type="button" class="btn-close" @onclick="OnCancel" disabled="@isRefreshing"></button>
                 </div>
                 <div class="modal-body">
-                    @if (isLoading)
-                    {
-                        <div class="text-center py-4">
-                            <div class="spinner-border" role="status">
-                                <span class="visually-hidden">@loadingMessage</span>
-                            </div>
-                            <p class="mt-2 text-muted">@loadingMessage</p>
-                        </div>
-                    }
-                    else if (errorMessage != null)
+                    @if (errorMessage != null)
                     {
                         <div class="alert alert-danger alert-dismissible d-flex align-items-start" role="alert">
                             <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">@errorMessage</div>
@@ -36,149 +28,367 @@
                     }
                     else
                     {
-                        <div class="mb-3">
+                        <div class="mb-3 switch-branch-tabs-wrapper">
                             <div class="d-flex align-items-center justify-content-between">
-                                <ul class="nav nav-tabs switch-branch-tabs" role="tablist">
+                                <ul class="nav nav-tabs switch-branch-tabs mb-0 flex-grow-1" role="tablist">
                                     <li class="nav-item" role="presentation">
                                         <button class="nav-link @(activeTab == "local" ? "active" : "")" 
                                                 type="button" 
                                                 role="tab"
+                                                disabled="@isRefreshing"
                                                 @onclick='() => SetActiveTab("local")'>
-                                            Locals (@localBranches.Count)
+                                            Locals
                                         </button>
                                     </li>
                                     <li class="nav-item" role="presentation">
                                         <button class="nav-link @(activeTab == "remote" ? "active" : "")" 
                                                 type="button" 
                                                 role="tab"
+                                                disabled="@isRefreshing"
                                                 @onclick='() => SetActiveTab("remote")'>
-                                            Remotes (@remoteBranches.Count)
+                                            Remotes
+                                        </button>
+                                    </li>
+                                    <li class="nav-item" role="presentation">
+                                        <button class="nav-link @(activeTab == "newbranch" ? "active" : "")"
+                                                type="button"
+                                                role="tab"
+                                                disabled="@isRefreshing"
+                                                @onclick='() => SetActiveTab("newbranch")'>
+                                            New Branch
                                         </button>
                                     </li>
                                 </ul>
-                                <button type="button" 
-                                        class="btn btn-outline-secondary btn-sm"
-                                        @onclick="RefreshBranchesAsync"
-                                        disabled="@isRefreshing">
-                                    @if (isRefreshing)
-                                    {
-                                        <span class="spinner-border spinner-border-sm me-1"></span>
-                                    }
-                                    Fetch
-                                </button>
                             </div>
                         </div>
 
-                        <div class="branch-list border rounded">
-                            @if (activeTab == "local")
-                            {
-                                @if (localBranches.Count == 0)
+                        @if (activeTab != "newbranch")
+                        {
+                            <div class="mb-3 switch-branch-field-block">
+                                <div class="d-flex align-items-center justify-content-between switch-branch-label-row">
+                                    <label class="form-label mb-0" for="branch-filter">Branch name</label>
+                                    <span class="switch-branch-tab-count">@GetBranchCountText(activeTab == "local" ? GetFilteredLocalBranches().Count() : GetFilteredRemoteBranches().Count(), !string.IsNullOrWhiteSpace(branchFilter))</span>
+                                </div>
+                                <input id="branch-filter"
+                                       type="text"
+                                       class="form-control"
+                                       placeholder="search branch..."
+                                       @bind="branchFilter"
+                                       @bind:event="oninput"
+                                       @bind:after="SelectClosestMatchingBranch"
+                                       @onkeydown="HandleBranchFilterKeyDown"
+                                       @ref="branchFilterInput" />
+                            </div>
+                            <div class="branch-list border rounded">
+                                @if (activeTab == "local")
                                 {
-                                    <div class="text-muted p-3">No local branches found.</div>
+                                    @if (GetFilteredLocalBranches().Count() == 0)
+                                    {
+                                        <div class="d-flex align-items-center justify-content-between px-3 py-3 text-muted">
+                                            <span>@(localBranches.Count == 0 ? "No local branches found." : "No branches match the filter.")</span>
+                                            @if (localBranches.Count > 0 && !string.IsNullOrWhiteSpace(branchFilter))
+                                            {
+                                                <button type="button" class="btn btn-secondary btn-sm" @onclick="CreateFromFilter" @onclick:stopPropagation="true">Create</button>
+                                            }
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var branch in GetFilteredLocalBranches())
+                                        {
+                                            <div class="branch-item p-2 @(selectedBranch == branch ? "bg-light" : "")" 
+                                                 style="cursor: pointer;"
+                                                 @onclick='() => SelectBranch(branch)'>
+                                                <div class="d-flex align-items-center justify-content-between">
+                                                    <div class="d-flex align-items-center flex-grow-1 min-w-0">
+                                                        <input type="radio" 
+                                                               name="branchSelection" 
+                                                               checked="@(selectedBranch == branch)"
+                                                               @onchange='() => SelectBranch(branch)' />
+                                                        <span class="ms-2 @(branch == currentBranchLocal ? "fw-bold" : "")">
+                                                            @branch
+                                                            @if (branch == currentBranchLocal)
+                                                            {
+                                                                <span class="badge bg-primary ms-2">Current</span>
+                                                                @if (showSyncToDefaultButton)
+                                                                {
+                                                                    <span class="badge ms-2" style="background-color: #ffc107; color: #000;">Local Only</span>
+                                                                }
+                                                            }
+                                                        </span>
+                                                    </div>
+                                                    <div class="d-flex align-items-center gap-1">
+                                                        @if (!string.IsNullOrWhiteSpace(RepositoryUrl) && !string.IsNullOrWhiteSpace(defaultBranch))
+                                                        {
+                                                            <a href="@GetPullRequestUrlForBranch(branch)" 
+                                                               class="branch-pr-link" 
+                                                               target="_blank" 
+                                                               rel="noopener noreferrer" 
+                                                               title="Open Pull Request (default...@branch)"
+                                                               aria-label="Open Pull Request"
+                                                               @onclick="(e) => { }"
+                                                               @onclick:stopPropagation="true">
+                                                                <i class="bi bi-git" aria-hidden="true"></i>
+                                                            </a>
+                                                        }
+                                                        @if (branch != currentBranchLocal)
+                                                        {
+                                                            <button type="button"
+                                                                    class="btn btn-link p-0 branch-delete-link"
+                                                                    title="Delete branch"
+                                                                    aria-label="Delete branch"
+                                                                    @onclick="(e) => { RequestDeleteBranch(branch, false); }"
+                                                                    @onclick:stopPropagation="true">
+                                                                <i class="bi bi-trash" aria-hidden="true"></i>
+                                                            </button>
+                                                        }
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            @if (branchToDelete == branch && !deleteIsRemote)
+                                            {
+                                                <div class="branch-delete-confirm d-flex align-items-center justify-content-between px-2 py-2" @ref="deleteConfirmElementRef">
+                                                    <span class="text-danger small">@deleteConfirmMessage This cannot be undone.</span>
+                                                    <div class="d-flex gap-2 flex-shrink-0">
+                                                        <button type="button" class="btn btn-danger btn-sm" @onclick="ProceedWithDeleteAsync" disabled="@(isDeleting || isRefreshing)" @onclick:stopPropagation="true">
+                                                            @if (isDeleting)
+                                                            {
+                                                                <span class="spinner-border spinner-border-sm me-1"></span>
+                                                            }
+                                                            Delete
+                                                        </button>
+                                                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="DismissDeleteConfirmation" disabled="@(isDeleting || isRefreshing)" @onclick:stopPropagation="true">Cancel</button>
+                                                    </div>
+                                                </div>
+                                            }
+                                        }
+                                    }
                                 }
                                 else
                                 {
-                                    @foreach (var branch in localBranches)
+                                    @if (GetFilteredRemoteBranches().Count() == 0)
                                     {
-                                        <div class="branch-item p-2 @(selectedBranch == branch ? "bg-light" : "")" 
-                                             style="cursor: pointer;"
-                                             @onclick='() => SelectBranch(branch)'>
-                                            <div class="d-flex align-items-center">
-                                                <input type="radio" 
-                                                       name="branchSelection" 
-                                                       checked="@(selectedBranch == branch)"
-                                                       @onchange='() => SelectBranch(branch)' />
-                                                <span class="ms-2 @(branch == currentBranchLocal ? "fw-bold" : "")">
+                                        <div class="text-muted p-3">@(remoteBranches.Count == 0 ? "No remote branches found." : "No branches match the filter.")</div>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var branch in GetFilteredRemoteBranches())
+                                        {
+                                            <div class="branch-item p-2 @(selectedBranch == branch ? "bg-light" : "")" 
+                                                 style="cursor: pointer;"
+                                                 @onclick='() => SelectBranch(branch)'>
+                                                <div class="d-flex align-items-center justify-content-between">
+                                                    <div class="d-flex align-items-center flex-grow-1 min-w-0">
+                                                        <input type="radio" 
+                                                               name="branchSelection" 
+                                                               checked="@(selectedBranch == branch)"
+                                                               @onchange='() => SelectBranch(branch)' />
+                                                        <span class="ms-2">
+                                                            @GetRemoteBranchDisplayName(branch)
+                                                            @if (branch == defaultBranch)
+                                                            {
+                                                                <span class="badge bg-success ms-2">Default</span>
+                                                            }
+                                                        </span>
+                                                    </div>
+                                                    <div class="d-flex align-items-center gap-1">
+                                                        @if (!string.IsNullOrWhiteSpace(RepositoryUrl) && !string.IsNullOrWhiteSpace(defaultBranch))
+                                                        {
+                                                            <a href="@GetPullRequestUrlForBranch(branch)" 
+                                                               class="branch-pr-link" 
+                                                               target="_blank" 
+                                                               rel="noopener noreferrer" 
+                                                               title="Open Pull Request (default...@branch)"
+                                                               aria-label="Open Pull Request"
+                                                               @onclick="(e) => { }"
+                                                               @onclick:stopPropagation="true">
+                                                                <i class="bi bi-git" aria-hidden="true"></i>
+                                                            </a>
+                                                        }
+                                                        <button type="button"
+                                                                class="btn btn-link p-0 branch-delete-link"
+                                                                title="Delete remote branch"
+                                                                aria-label="Delete remote branch"
+                                                                @onclick="(e) => { RequestDeleteBranch(branch, true); }"
+                                                                @onclick:stopPropagation="true">
+                                                            <i class="bi bi-trash" aria-hidden="true"></i>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            @if (branchToDelete == branch && deleteIsRemote)
+                                            {
+                                                <div class="branch-delete-confirm d-flex align-items-center justify-content-between px-2 py-2" @ref="deleteConfirmElementRef">
+                                                    <span class="text-danger small">@deleteConfirmMessage This cannot be undone.</span>
+                                                    <div class="d-flex gap-2 flex-shrink-0">
+                                                        <button type="button" class="btn btn-danger btn-sm" @onclick="ProceedWithDeleteAsync" disabled="@(isDeleting || isRefreshing)" @onclick:stopPropagation="true">
+                                                            @if (isDeleting)
+                                                            {
+                                                                <span class="spinner-border spinner-border-sm me-1"></span>
+                                                            }
+                                                            Delete
+                                                        </button>
+                                                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="DismissDeleteConfirmation" disabled="@(isDeleting || isRefreshing)" @onclick:stopPropagation="true">Cancel</button>
+                                                    </div>
+                                                </div>
+                                            }
+                                        }
+                                    }
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            @* New Branch tab UI (single-repo creation) *@
+                            @if (errorMessage != null)
+                            {
+                                <div class="alert alert-danger alert-dismissible d-flex align-items-start" role="alert">
+                                    <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">@errorMessage</div>
+                                    <button type="button" class="btn-close ms-2" aria-label="Close" @onclick='() => { errorMessage = null; StateHasChanged(); }'></button>
+                                </div>
+                            }
+                            <div class="mb-3 switch-branch-field-block">
+                                <label class="form-label" for="new-branch-name">Branch name</label>
+                                <input id="new-branch-name"
+                                       type="text"
+                                       class="form-control"
+                                       placeholder="e.g. feature/my-feature"
+                                       @bind="newBranchName"
+                                       @bind:event="oninput"
+                                       @bind:after="OnNewBranchNameChanged"
+                                       @onkeydown="HandleBranchNameKeyDown"
+                                       @ref="newBranchNameInput" />
+                            </div>
+                            <div class="mb-3 switch-branch-field-block">
+                                <label class="form-label" for="based-on">Based on</label>
+                                <div class="position-relative new-branch-based-on-wrapper">
+                                    <button type="button"
+                                            id="based-on"
+                                            class="new-branch-based-on-trigger border rounded w-100 d-flex align-items-center gap-2 text-start"
+                                            style="cursor: pointer; padding: 0.375rem 0.75rem;"
+                                            @onclick="ToggleBasedOnDropdown">
+                                        <span class="d-flex align-items-center gap-2 flex-grow-1 min-w-0">
+                                            <span class="text-truncate">@GetSelectedBaseDisplayText()</span>
+                                            @if (selectedBaseBranch == "__default__")
+                                            {
+                                                <span class="badge bg-success flex-shrink-0">Default</span>
+                                            }
+                                        </span>
+                                        <i class="bi bi-chevron-down flex-shrink-0 text-secondary"></i>
+                                    </button>
+                                    @if (showBasedOnDropdown)
+                                    {
+                                        <ul class="list-unstyled border rounded mt-1 mb-0 py-1 new-branch-based-on-list position-absolute start-0 end-0 shadow"
+                                            style="z-index: 1050; font-size: 1rem;">
+                                            <li class="new-branch-based-on-item px-3 py-2 @(selectedBaseBranch == "__default__" ? "selected" : "")"
+                                                style="cursor: pointer;"
+                                                @onclick='() => SelectBaseBranch("__default__")'>
+                                                <span>@(defaultBranch != null ? GetRemoteBranchDisplayName(defaultBranch) : "default")</span>
+                                                <span class="badge bg-success ms-2">Default</span>
+                                            </li>
+                                            @foreach (var branch in GetLocalBranchesForBasedOn())
+                                            {
+                                                <li class="new-branch-based-on-item px-3 py-2 @(selectedBaseBranch == branch ? "selected" : "")"
+                                                    style="cursor: pointer;"
+                                                    @onclick='() => SelectBaseBranch(branch)'>
                                                     @branch
                                                     @if (branch == currentBranchLocal)
                                                     {
                                                         <span class="badge bg-primary ms-2">Current</span>
                                                     }
-                                                </span>
-                                            </div>
-                                        </div>
+                                                </li>
+                                            }
+                                            @foreach (var branch in GetRemoteBranchesForBasedOn())
+                                            {
+                                                <li class="new-branch-based-on-item px-3 py-2 @(selectedBaseBranch == branch ? "selected" : "")"
+                                                    style="cursor: pointer;"
+                                                    @onclick='() => SelectBaseBranch(branch)'>
+                                                    @GetRemoteBranchDisplayName(branch)
+                                                </li>
+                                            }
+                                        </ul>
                                     }
-                                }
-                            }
-                            else
-                            {
-                                @if (remoteBranches.Count == 0)
-                                {
-                                    <div class="text-muted p-3">No remote branches found.</div>
-                                }
-                                else
-                                {
-                                    @foreach (var branch in remoteBranches)
-                                    {
-                                        <div class="branch-item p-2 @(selectedBranch == branch ? "bg-light" : "")" 
-                                             style="cursor: pointer;"
-                                             @onclick='() => SelectBranch(branch)'>
-                                            <div class="d-flex align-items-center">
-                                                <input type="radio" 
-                                                       name="branchSelection" 
-                                                       checked="@(selectedBranch == branch)"
-                                                       @onchange='() => SelectBranch(branch)' />
-                                                <span class="ms-2">
-                                                    @branch
-                                                    @if (branch == defaultBranch)
-                                                    {
-                                                        <span class="badge bg-success ms-2">Default</span>
-                                                    }
-                                                </span>
-                                            </div>
-                                        </div>
-                                    }
-                                }
-                            }
-                        </div>
-
-                        @if (showSyncToDefaultButton)
-                        {
-                            <div class="alert alert-info mt-3">
-                                <i class="bi bi-info-circle"></i> Current branch "@currentBranchLocal" does not exist in origin.
+                                </div>
+                            </div>
+                            <div class="mb-3 switch-branch-field-block form-check">
+                                <input id="create-with-upstream"
+                                       type="checkbox"
+                                       class="form-check-input"
+                                       @bind="createWithUpstream" />
+                                <label class="form-check-label" for="create-with-upstream">Upstream branch</label>
                             </div>
                         }
+
                     }
                 </div>
                 <div class="modal-footer d-flex justify-content-between flex-row">
-                    <div class="d-flex gap-2">
-                        @if (showSyncToDefaultButton && !string.IsNullOrWhiteSpace(defaultBranch))
+                    <div class="d-flex gap-2 align-items-center">
+                        @if (activeTab == "newbranch" && showBranchExistsConfirmation)
+                        {
+                            <span class="text-warning small">The branch already exists in this repository.</span>
+                        }
+                        else if (activeTab != "newbranch")
                         {
                             <button type="button" 
-                                    class="btn btn-warning" 
-                                    @onclick="SyncToDefaultAsync"
-                                    disabled="@isProcessing">
-                                @if (isProcessing)
+                                    class="btn btn-outline-secondary"
+                                    @onclick="RefreshBranchesAsync"
+                                    disabled="@isRefreshing">
+                                @if (isRefreshing)
                                 {
-                                    <span class="spinner-border spinner-border-sm me-2"></span>
+                                    <span class="spinner-border spinner-border-sm me-1"></span>
                                 }
-                                Sync to @defaultBranch
+                                else
+                                {
+                                    <i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>
+                                }
+                                Fetch
                             </button>
+                            @if (showSyncToDefaultButton && !string.IsNullOrWhiteSpace(defaultBranch) && activeTab == "local" && selectedBranch == currentBranchLocal)
+                            {
+                                <button type="button" 
+                                        class="btn btn-warning" 
+                                        @onclick="SyncToDefaultAsync"
+                                        disabled="@isRefreshing">
+                                    Sync to @defaultBranch
+                                </button>
+                            }
                         }
-                        @if (!string.IsNullOrWhiteSpace(selectedBranch) && selectedBranch != currentBranchLocal)
+                    </div>
+                    <div class="d-flex gap-2 ms-auto">
+                        @if (activeTab == "newbranch")
+                        {
+                            @if (showBranchExistsConfirmation)
+                            {
+                                <button type="button" class="btn btn-primary" @onclick="CheckoutExistingBranchAsync" disabled="@(isCreating || isRefreshing)">
+                                    @if (isCreating)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-2"></span>
+                                    }
+                                    Check out
+                                </button>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-primary" @onclick="CreateAsync" disabled="@(string.IsNullOrWhiteSpace(newBranchName?.Trim()) || isRefreshing)">
+                                    Create
+                                </button>
+                            }
+                        }
+                        else
                         {
                             <button type="button" 
                                     class="btn btn-primary" 
                                     @onclick="CheckoutAsync"
-                                    disabled="@isProcessing">
+                                    disabled="@(string.IsNullOrWhiteSpace(selectedBranch) || selectedBranch == currentBranchLocal || isRefreshing)">
                                 @if (isProcessing)
                                 {
                                     <span class="spinner-border spinner-border-sm me-2"></span>
                                 }
-                                Checkout
+                                Check out
                             </button>
                         }
-                        @if (!string.IsNullOrWhiteSpace(RepositoryUrl) && !string.IsNullOrWhiteSpace(defaultBranch))
-                        {
-                            <a href="@GetPullRequestUrl()" 
-                               target="_blank" 
-                               rel="noopener noreferrer"
-                               class="btn btn-outline-primary">
-                                Pull Request
-                            </a>
-                        }
+                        <button type="button" class="btn btn-secondary" @onclick="OnCancel" disabled="@(isCreating || isRefreshing)">Cancel</button>
                     </div>
-                    <button type="button" class="btn btn-secondary ms-auto" @onclick="OnCancel">Cancel</button>
                 </div>
             </div>
         </div>
@@ -195,6 +405,8 @@
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback OnBranchChanged { get; set; }
     [Parameter] public EventCallback<(int RepositoryId, string BranchName)> OnCheckoutBranch { get; set; }
+    [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string CurrentBranchName, string DefaultBranch)> OnSyncToDefault { get; set; }
+    [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string NewBranchName, string BaseBranch, bool SetUpstream)> OnCreateBranch { get; set; }
 
     private string activeTab = "local";
     private List<string> localBranches = new();
@@ -205,18 +417,69 @@
     private bool isLoading = false;
     private bool isProcessing = false;
     private bool isRefreshing = false;
-    private string loadingMessage = "Loading branches...";
     private string? errorMessage;
     private bool showSyncToDefaultButton = false;
     private ElementReference modalElement;
     private bool _wasVisible;
+    private bool _prevVisible;
+    // New-branch state (single-repo create)
+    private string newBranchName = "";
+    private string selectedBaseBranch = "__default__";
+    private bool isCreating = false;
+    private bool showBasedOnDropdown = false;
+    private bool showBranchExistsConfirmation = false;
+    private bool createWithUpstream = false;
+    private string branchExistsConfirmMessage = "";
+    private string? _pendingCreateName;
+    private string? _pendingCreateBaseBranch;
+    private bool _pendingCreateSetUpstream;
+    private ElementReference newBranchNameInput;
+    private string branchFilter = "";
+    private ElementReference branchFilterInput;
+    private bool _focusFilterOnNextRender;
+    private bool _escapeConsumedByFilter;
+    private bool _suppressNextEnterForNewBranch;
+    private string? branchToDelete;
+    private bool deleteIsRemote = false;
+    private bool isDeleting = false;
+    private string deleteConfirmMessage = "";
+    private ElementReference deleteConfirmElementRef;
+    private bool _scrollToDeleteConfirm;
 
     protected override async Task OnParametersSetAsync()
     {
         if (IsVisible)
         {
-            currentBranchLocal = CurrentBranch;
-            await LoadBranchesAsync();
+            if (!_prevVisible)
+            {
+                // Modal just opened: reset New Branch tab and always start on Locals
+                activeTab = "local";
+                newBranchName = "";
+                selectedBaseBranch = "__default__";
+                showBasedOnDropdown = false;
+                showBranchExistsConfirmation = false;
+                createWithUpstream = false;
+                branchExistsConfirmMessage = "";
+                _pendingCreateName = null;
+                _pendingCreateBaseBranch = null;
+                _pendingCreateSetUpstream = false;
+                errorMessage = null;
+                branchFilter = "";
+                branchToDelete = null;
+                _prevVisible = true;
+                _focusFilterOnNextRender = true;
+                currentBranchLocal = CurrentBranch;
+                await LoadBranchesAsync();
+            }
+            else
+            {
+                currentBranchLocal = CurrentBranch;
+                // Do not reload from persistence when modal was already open (e.g. after Fetch) to avoid flicker
+            }
+        }
+        else
+        {
+            _prevVisible = false;
         }
     }
 
@@ -237,6 +500,35 @@
         else if (!IsVisible)
         {
             _wasVisible = false;
+        }
+        // Focus new branch input when opening New Branch tab
+        if (IsVisible && activeTab == "newbranch")
+        {
+            try
+            {
+                await newBranchNameInput.FocusAsync();
+            }
+            catch { }
+        }
+        // Focus filter input when switching to Locals or Remotes tab
+        if (IsVisible && _focusFilterOnNextRender && (activeTab == "local" || activeTab == "remote"))
+        {
+            _focusFilterOnNextRender = false;
+            try
+            {
+                await branchFilterInput.FocusAsync();
+            }
+            catch { }
+        }
+        // Scroll delete confirmation into view when shown (e.g. when user deletes the last branch in the list)
+        if (IsVisible && _scrollToDeleteConfirm && branchToDelete != null)
+        {
+            _scrollToDeleteConfirm = false;
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("scrollElementIntoView", deleteConfirmElementRef);
+            }
+            catch { }
         }
     }
 
@@ -277,7 +569,7 @@
                 selectedBranch = currentBranchLocal;
 
                 // Show sync button only when we have synced/fetched remote data (not when lists are empty from no sync yet)
-                if (remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !remoteBranches.Contains(currentBranchLocal))
+                if (remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !IsCurrentBranchOnRemote())
                 {
                     showSyncToDefaultButton = true;
                 }
@@ -289,7 +581,6 @@
                 // If no branches were persisted, automatically fetch them (keep loading state)
                 if (localBranches.Count == 0 && remoteBranches.Count == 0)
                 {
-                    loadingMessage = "Fetching branches...";
                     StateHasChanged();
                     await RefreshBranchesAsync();
                     return;
@@ -310,14 +601,61 @@
         finally
         {
             isLoading = false;
-            loadingMessage = "Loading branches...";
             StateHasChanged();
         }
+    }
+
+    /// <summary>Reload branch lists from persistence (GET api/branches/get) without running fetch. Used after delete so UI reflects updated persistence.</summary>
+    private async Task ReloadBranchesFromPersistenceAsync()
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            var request = new { workspaceId = WorkspaceId, repositoryId = RepositoryId };
+            var json = JsonSerializer.Serialize(request);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/get", content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                var data = JsonSerializer.Deserialize<BranchesResponse>(responseContent, AgentResponseJson.Options);
+                if (data != null)
+                {
+                    localBranches = data.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    remoteBranches = data.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    currentBranchLocal = data.CurrentBranch;
+                    defaultBranch = data.DefaultBranch;
+                }
+                selectedBranch = currentBranchLocal;
+                if (remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !IsCurrentBranchOnRemote())
+                    showSyncToDefaultButton = true;
+                else
+                    showSyncToDefaultButton = false;
+                await OnBranchChanged.InvokeAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error reloading branches from persistence");
+        }
+        StateHasChanged();
     }
 
     private void SetActiveTab(string tab)
     {
         activeTab = tab;
+        if (tab == "local" || tab == "remote")
+            _focusFilterOnNextRender = true;
+        StateHasChanged();
+    }
+
+    /// <summary>Copy filter text to New branch name and switch to New Branch tab (when Locals filter matched no branches).</summary>
+    private void CreateFromFilter()
+    {
+        newBranchName = branchFilter?.Trim() ?? "";
+        activeTab = "newbranch";
         StateHasChanged();
     }
 
@@ -327,22 +665,209 @@
         StateHasChanged();
     }
 
-    private async Task CheckoutAsync()
+    // New-branch helpers (single-repo create)
+    private void ToggleBasedOnDropdown()
     {
-        if (string.IsNullOrWhiteSpace(selectedBranch))
-            return;
-
-        // Close modal immediately and trigger checkout from parent
-        await OnCancel.InvokeAsync();
-        await OnCheckoutBranch.InvokeAsync((RepositoryId, selectedBranch));
+        showBasedOnDropdown = !showBasedOnDropdown;
     }
 
-    private async Task SyncToDefaultAsync()
+    private void SelectBaseBranch(string value)
     {
-        if (string.IsNullOrWhiteSpace(currentBranchLocal) || string.IsNullOrWhiteSpace(defaultBranch))
+        selectedBaseBranch = value;
+        showBasedOnDropdown = false;
+    }
+
+    private string GetBranchCountText(int count, bool isFiltered = false)
+    {
+        if (isFiltered)
+            return count == 1 ? "1 branch matched" : $"{count} branches matched";
+        return count == 1 ? "1 branch" : $"{count} branches";
+    }
+
+    private IEnumerable<string> GetFilteredLocalBranches()
+    {
+        IEnumerable<string> filtered;
+        if (string.IsNullOrWhiteSpace(branchFilter))
+            filtered = localBranches;
+        else
+        {
+            var term = branchFilter.Trim();
+            filtered = localBranches.Where(b => b.Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+        var list = filtered.ToList();
+        if (string.IsNullOrWhiteSpace(currentBranchLocal))
+            return list;
+        var current = list.FirstOrDefault(b => string.Equals(b, currentBranchLocal, StringComparison.OrdinalIgnoreCase));
+        if (current == null)
+            return list;
+        return list.Where(b => !string.Equals(b, current, StringComparison.OrdinalIgnoreCase)).Prepend(current);
+    }
+
+    private IEnumerable<string> GetFilteredRemoteBranches()
+    {
+        if (string.IsNullOrWhiteSpace(branchFilter))
+            return remoteBranches;
+        var term = branchFilter.Trim();
+        return remoteBranches.Where(b => b.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>True if the current branch exists on remote (exact match or origin/currentBranch).</summary>
+    private bool IsCurrentBranchOnRemote()
+    {
+        if (string.IsNullOrWhiteSpace(currentBranchLocal) || remoteBranches.Count == 0)
+            return false;
+        if (remoteBranches.Any(r => string.Equals(r, currentBranchLocal, StringComparison.OrdinalIgnoreCase)))
+            return true;
+        var originRef = "origin/" + currentBranchLocal;
+        return remoteBranches.Any(r => string.Equals(r, originRef, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Local branches for "Based on" dropdown (current branch first).</summary>
+    private IEnumerable<string> GetLocalBranchesForBasedOn()
+    {
+        if (localBranches.Count == 0)
+            return Enumerable.Empty<string>();
+        if (string.IsNullOrWhiteSpace(currentBranchLocal))
+            return localBranches;
+        var current = localBranches.FirstOrDefault(b => string.Equals(b, currentBranchLocal, StringComparison.OrdinalIgnoreCase));
+        if (current == null)
+            return localBranches;
+        return localBranches.Where(b => !string.Equals(b, current, StringComparison.OrdinalIgnoreCase)).Prepend(current);
+    }
+
+    /// <summary>Remote branches for "Based on" dropdown (exclude default and remotes that duplicate a local branch name).</summary>
+    private IEnumerable<string> GetRemoteBranchesForBasedOn()
+    {
+        var localSet = new HashSet<string>(localBranches, StringComparer.OrdinalIgnoreCase);
+        foreach (var b in remoteBranches)
+        {
+            if (string.Equals(b, defaultBranch, StringComparison.OrdinalIgnoreCase))
+                continue;
+            var shortName = b.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? b.Substring("origin/".Length) : b;
+            if (localSet.Contains(shortName))
+                continue;
+            yield return b;
+        }
+    }
+
+    private void SelectClosestMatchingBranch()
+    {
+        var filtered = activeTab == "local" ? GetFilteredLocalBranches().ToList() : GetFilteredRemoteBranches().ToList();
+        if (filtered.Count == 0)
+        {
+            selectedBranch = null;
+        }
+        else if (selectedBranch == null || !filtered.Contains(selectedBranch))
+        {
+            selectedBranch = filtered[0];
+        }
+        StateHasChanged();
+    }
+
+    private static string GetRemoteBranchDisplayName(string? branch)
+    {
+        if (string.IsNullOrWhiteSpace(branch))
+            return branch ?? "";
+        return branch.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? branch : "origin/" + branch;
+    }
+
+    private string GetSelectedBaseDisplayText()
+    {
+        if (selectedBaseBranch == "__default__")
+            return defaultBranch != null ? GetRemoteBranchDisplayName(defaultBranch) : "default";
+        if (localBranches.Any(b => string.Equals(b, selectedBaseBranch, StringComparison.OrdinalIgnoreCase)))
+            return selectedBaseBranch ?? "";
+        return GetRemoteBranchDisplayName(selectedBaseBranch);
+    }
+
+    private async Task CreateAsync()
+    {
+        var name = newBranchName?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            errorMessage = "Enter a branch name.";
+            return;
+        }
+        var baseBranch = selectedBaseBranch ?? "__default__";
+
+        showBranchExistsConfirmation = false;
+        errorMessage = null;
+        StateHasChanged();
+
+        // If branch exists locally/remotely, show confirm
+        if (localBranches.Any(b => string.Equals(b, name, StringComparison.OrdinalIgnoreCase)) ||
+            remoteBranches.Any(b => string.Equals(b, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            branchExistsConfirmMessage = $"The branch already exists in this repository.";
+            _pendingCreateName = name;
+            _pendingCreateBaseBranch = baseBranch;
+            _pendingCreateSetUpstream = createWithUpstream;
+            showBranchExistsConfirmation = true;
+            StateHasChanged();
+            return;
+        }
+
+        // Close dialog and let parent show full-page overlay and run create
+        await OnCreateBranch.InvokeAsync((RepositoryId, RepositoryName, name, baseBranch, createWithUpstream));
+        await OnCancel.InvokeAsync();
+    }
+
+    private void DismissBranchExistsConfirmation()
+    {
+        showBranchExistsConfirmation = false;
+        branchExistsConfirmMessage = "";
+        _pendingCreateName = null;
+        _pendingCreateBaseBranch = null;
+        _pendingCreateSetUpstream = false;
+        StateHasChanged();
+    }
+
+    /// <summary>When branch name input changes, revert from "branch exists" state so button goes back to Create.</summary>
+    private void OnNewBranchNameChanged()
+    {
+        if (showBranchExistsConfirmation)
+        {
+            DismissBranchExistsConfirmation();
+        }
+    }
+
+    /// <summary>Check out the existing branch (when user chose "Check out" after entering an existing branch name).</summary>
+    private async Task CheckoutExistingBranchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_pendingCreateName))
             return;
 
-        isProcessing = true;
+        var branchToCheckout = _pendingCreateName;
+        DismissBranchExistsConfirmation();
+        await OnCancel.InvokeAsync();
+        await OnCheckoutBranch.InvokeAsync((RepositoryId, branchToCheckout));
+    }
+
+    private void RequestDeleteBranch(string branch, bool isRemote)
+    {
+        branchToDelete = branch;
+        deleteIsRemote = isRemote;
+        deleteConfirmMessage = isRemote
+            ? $"Delete remote branch '{GetRemoteBranchDisplayName(branch)}'?"
+            : $"Delete branch '{branch}'?";
+        errorMessage = null;
+        _scrollToDeleteConfirm = true;
+        StateHasChanged();
+    }
+
+    private void DismissDeleteConfirmation()
+    {
+        branchToDelete = null;
+        deleteConfirmMessage = "";
+        StateHasChanged();
+    }
+
+    private async Task ProceedWithDeleteAsync()
+    {
+        if (string.IsNullOrWhiteSpace(branchToDelete))
+            return;
+
+        isDeleting = true;
         errorMessage = null;
         StateHasChanged();
 
@@ -353,36 +878,102 @@
             {
                 workspaceId = WorkspaceId,
                 repositoryId = RepositoryId,
-                currentBranchName = currentBranchLocal
+                branchName = branchToDelete,
+                isRemote = deleteIsRemote
             };
             var json = JsonSerializer.Serialize(request);
             var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            
             var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
-            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/sync-to-default", content);
-            
+            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/delete", content);
+
             if (response.IsSuccessStatusCode)
             {
-                await OnBranchChanged.InvokeAsync();
-                await OnCancel.InvokeAsync();
+                var responseContent = await response.Content.ReadAsStringAsync();
+                var data = JsonSerializer.Deserialize<DeleteBranchApiResult>(responseContent, AgentResponseJson.Options);
+                if (data != null && data.Success)
+                {
+                    DismissDeleteConfirmation();
+                    await ReloadBranchesFromPersistenceAsync();
+                }
+                else
+                {
+                    errorMessage = data?.Error ?? "Failed to delete branch.";
+                }
             }
             else
             {
                 var errorText = await response.Content.ReadAsStringAsync();
-                errorMessage = $"Failed to sync to default branch: {response.StatusCode}";
-                Logger.LogError("Failed to sync to default branch: {StatusCode}, {Error}", response.StatusCode, errorText);
+                errorMessage = $"Delete failed: {response.StatusCode}";
+                Logger.LogError("Delete branch failed: {StatusCode}, {Error}", response.StatusCode, errorText);
             }
         }
         catch (Exception ex)
         {
-            errorMessage = "An error occurred while syncing to default branch.";
-            Logger.LogError(ex, "Error syncing to default branch");
+            errorMessage = "An error occurred while deleting the branch.";
+            Logger.LogError(ex, "Error deleting branch");
         }
         finally
         {
-            isProcessing = false;
+            isDeleting = false;
             StateHasChanged();
         }
+    }
+
+    private async Task ProceedWithCreateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_pendingCreateName) || string.IsNullOrWhiteSpace(_pendingCreateBaseBranch))
+            return;
+
+        // Close dialog and let parent show full-page overlay and run create
+        await OnCreateBranch.InvokeAsync((RepositoryId, RepositoryName, _pendingCreateName, _pendingCreateBaseBranch, _pendingCreateSetUpstream));
+        await OnCancel.InvokeAsync();
+    }
+    private async Task CheckoutAsync()
+    {
+        if (string.IsNullOrWhiteSpace(selectedBranch))
+            return;
+
+        // Close modal immediately and trigger checkout from parent
+        await OnCancel.InvokeAsync();
+        await OnCheckoutBranch.InvokeAsync((RepositoryId, selectedBranch));
+    }
+
+    private async Task HandleBranchFilterKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" || e.Code == "Escape")
+        {
+            if (!string.IsNullOrWhiteSpace(branchFilter))
+            {
+                branchFilter = "";
+                SelectClosestMatchingBranch();
+                _escapeConsumedByFilter = true;
+            }
+            return;
+        }
+        if (e.Key != "Enter" && e.Code != "Enter")
+            return;
+        if (activeTab == "newbranch" || isRefreshing)
+            return;
+        // Locals tab: when filter matched no branches, Enter opens New Branch with filter text as name
+        if (activeTab == "local" && localBranches.Count > 0 && GetFilteredLocalBranches().Count() == 0)
+        {
+            _suppressNextEnterForNewBranch = true;
+            CreateFromFilter();
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(selectedBranch) || selectedBranch == currentBranchLocal)
+            return;
+        await CheckoutAsync();
+    }
+
+    private async Task SyncToDefaultAsync()
+    {
+        if (string.IsNullOrWhiteSpace(currentBranchLocal) || string.IsNullOrWhiteSpace(defaultBranch))
+            return;
+
+        // Close dialog and let parent show full-page overlay and run sync
+        await OnSyncToDefault.InvokeAsync((RepositoryId, RepositoryName, currentBranchLocal, defaultBranch));
+        await OnCancel.InvokeAsync();
     }
 
     private string GetPullRequestUrl()
@@ -392,21 +983,21 @@
 
         // Use current branch or selected branch for comparison
         var compareBranch = selectedBranch ?? currentBranchLocal ?? defaultBranch;
-        
-        // Convert git clone URL to GitHub web URL
+        return GetPullRequestUrlForBranch(compareBranch);
+    }
+
+    private string GetPullRequestUrlForBranch(string branchName)
+    {
+        if (string.IsNullOrWhiteSpace(RepositoryUrl) || string.IsNullOrWhiteSpace(defaultBranch) || string.IsNullOrWhiteSpace(branchName))
+            return "#";
+
         var url = RepositoryUrl.Trim();
         if (url.StartsWith("git@github.com:", StringComparison.OrdinalIgnoreCase))
-        {
             url = url.Replace("git@github.com:", "https://github.com/", StringComparison.OrdinalIgnoreCase);
-        }
-        
         if (url.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-        {
             url = url.Substring(0, url.Length - 4);
-        }
 
-        // Create pull request URL: compare defaultBranch...compareBranch
-        return $"{url}/compare/{Uri.EscapeDataString(defaultBranch)}...{Uri.EscapeDataString(compareBranch)}";
+        return $"{url}/compare/{Uri.EscapeDataString(defaultBranch)}...{Uri.EscapeDataString(branchName)}";
     }
 
     private async Task RefreshBranchesAsync()
@@ -454,7 +1045,7 @@
                 selectedBranch = currentBranchLocal;
 
                 // Show sync button if current branch doesn't exist in remote
-                if (!string.IsNullOrWhiteSpace(currentBranchLocal) && !remoteBranches.Contains(currentBranchLocal))
+                if (!string.IsNullOrWhiteSpace(currentBranchLocal) && !IsCurrentBranchOnRemote())
                 {
                     showSyncToDefaultButton = true;
                 }
@@ -496,7 +1087,48 @@
     {
         if (e.Key == "Escape" || e.Code == "Escape")
         {
+            if (_escapeConsumedByFilter)
+            {
+                _escapeConsumedByFilter = false;
+                return;
+            }
             await OnCancel.InvokeAsync();
+            return;
+        }
+        if (e.Key == "Enter" && activeTab == "newbranch" && !isCreating)
+        {
+            if (_suppressNextEnterForNewBranch)
+            {
+                _suppressNextEnterForNewBranch = false;
+                return;
+            }
+            if (showBranchExistsConfirmation)
+                await CheckoutExistingBranchAsync();
+            else if (!string.IsNullOrWhiteSpace(newBranchName?.Trim()))
+                await CreateAsync();
         }
     }
+
+    private async Task HandleBranchNameKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !isCreating)
+        {
+            if (_suppressNextEnterForNewBranch)
+            {
+                _suppressNextEnterForNewBranch = false;
+                return;
+            }
+            if (showBranchExistsConfirmation)
+                await CheckoutExistingBranchAsync();
+            else if (!string.IsNullOrWhiteSpace(newBranchName?.Trim()))
+                await CreateAsync();
+        }
+    }
+
+    private sealed class CreateBranchApiResult
+    {
+        public bool Success { get; set; }
+        public string? Error { get; set; }
+    }
+
 }

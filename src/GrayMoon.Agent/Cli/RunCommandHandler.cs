@@ -89,6 +89,8 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse>, SyncToDefaultBranchCommand>();
         builder.Services.AddSingleton<ICommandHandler<RefreshBranchesRequest, RefreshBranchesResponse>, RefreshBranchesCommand>();
         builder.Services.AddSingleton<ICommandHandler<CreateBranchRequest, CreateBranchResponse>, CreateBranchCommand>();
+        builder.Services.AddSingleton<ICommandHandler<SetUpstreamBranchRequest, SetUpstreamBranchResponse>, SetUpstreamBranchCommand>();
+        builder.Services.AddSingleton<ICommandHandler<DeleteBranchRequest, DeleteBranchResponse>, DeleteBranchCommand>();
         builder.Services.AddSingleton<ICommandHandler<StageAndCommitRequest, StageAndCommitResponse>, StageAndCommitCommand>();
         builder.Services.AddSingleton<ICommandHandler<PushRepositoryRequest, PushRepositoryResponse>, PushRepositoryCommand>();
         builder.Services.AddSingleton<ICommandHandler<SearchFilesRequest, SearchFilesResponse>, SearchFilesCommand>();

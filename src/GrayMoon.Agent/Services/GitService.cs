@@ -514,6 +514,73 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return true;
     }
 
+    public async Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
+            return (false, "Invalid repository path or branch name");
+
+        static string CombineOutput(string? stdout, string? stderr)
+        {
+            var outStr = (stdout ?? "").Trim();
+            var errStr = (stderr ?? "").Trim();
+            return string.IsNullOrWhiteSpace(outStr) ? errStr
+                 : string.IsNullOrWhiteSpace(errStr) ? outStr
+                 : $"{outStr}\n{errStr}";
+        }
+
+        if (isRemote)
+        {
+            // Remote only: delete the branch on origin. Does not modify local refs (refs/heads/).
+            var name = branchName.Trim();
+            if (name.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
+                name = name.Substring("origin/".Length);
+            if (string.IsNullOrWhiteSpace(name))
+                return (false, "Invalid branch name");
+            var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"push origin --delete {name}", repoPath, ct);
+            if (exitCode != 0)
+            {
+                var combined = CombineOutput(stdout, stderr);
+                logger.LogWarning("Git push --delete failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}", repoPath, name, exitCode);
+                return (false, combined);
+            }
+            logger.LogInformation("Git remote branch deleted for {RepoPath}. Branch={Branch}", repoPath, name);
+            return (true, null);
+        }
+
+        // Local only: delete the branch in refs/heads/. Does not run push or modify remote.
+        var localName = branchName.Trim();
+        if (localName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
+            localName = localName.Substring("origin/".Length);
+        if (string.IsNullOrWhiteSpace(localName))
+            return (false, "Invalid branch name");
+
+        var (exitCheck, _, _) = await RunProcessAsync("git", $"rev-parse --verify refs/heads/{localName}", repoPath, ct);
+        if (exitCheck != 0)
+        {
+            logger.LogWarning("Branch {Branch} does not exist in {RepoPath}", localName, repoPath);
+            return (false, "Branch does not exist.");
+        }
+
+        var (exitCurrent, stdoutCurrent, _) = await RunProcessAsync("git", "branch --show-current", repoPath, ct);
+        if (exitCurrent == 0 && (stdoutCurrent ?? "").Trim().Equals(localName, StringComparison.Ordinal))
+        {
+            logger.LogWarning("Cannot delete current branch {Branch} in {RepoPath}", localName, repoPath);
+            return (false, "Cannot delete the current branch. Check out another branch first.");
+        }
+
+        var args = $"branch -d {localName}";
+        var (exitCodeLocal, stdoutLocal, stderrLocal) = await RunProcessAsync("git", args, repoPath, ct);
+        if (exitCodeLocal != 0)
+        {
+            var combined = CombineOutput(stdoutLocal, stderrLocal);
+            logger.LogWarning("Git branch delete failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}", repoPath, localName, exitCodeLocal);
+            return (false, combined);
+        }
+
+        logger.LogInformation("Git branch deleted for {RepoPath}. Branch={Branch}", repoPath, localName);
+        return (true, null);
+    }
+
     public async Task<string?> GetDefaultBranchNameAsync(string repoPath, CancellationToken ct)
     {
         var defaultBranch = await GetDefaultBranchAsync(repoPath, ct);

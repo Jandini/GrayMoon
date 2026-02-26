@@ -335,7 +335,9 @@
                    RepositoryUrl="@switchBranchRepositoryUrl"
                    OnCancel="@CloseSwitchBranchModal"
                    OnBranchChanged="@OnBranchChangedAsync"
-                   OnCheckoutBranch="@CheckoutBranchAsync" />
+                   OnCheckoutBranch="@CheckoutBranchAsync"
+                   OnSyncToDefault="@SyncToDefaultFromModalAsync"
+                   OnCreateBranch="@CreateSingleBranchAsync" />
 
 <UpdateDependenciesModal IsVisible="@showUpdateModal"
                           IsMultiLevel="@updatePlanIsMultiLevel"
@@ -365,6 +367,8 @@
 <LoadingOverlay IsVisible="@isCheckingOut" Message="@checkoutProgressMessage" OnAbort="AbortCheckoutAsync" />
 <LoadingOverlay IsVisible="@(showRepositoriesModal && isPersisting)" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}")" OnAbort="AbortFetchRepositories" />
 <LoadingOverlay IsVisible="@isCreatingBranches" Message="@createBranchesProgressMessage" />
+<LoadingOverlay IsVisible="@isCreatingBranch" Message="@createBranchMessage" />
+<LoadingOverlay IsVisible="@isSyncingToDefault" Message="@syncToDefaultMessage" />
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
@@ -431,6 +435,10 @@
     private bool isCreatingBranches = false;
     private string createBranchesProgressMessage = "Creating branches...";
     private CancellationTokenSource? _createBranchesCts;
+    private bool isCreatingBranch = false;
+    private string createBranchMessage = "";
+    private bool isSyncingToDefault = false;
+    private string syncToDefaultMessage = "";
     private bool showUpdateModal = false;
     private bool updatePlanIsMultiLevel = false;
     private bool showConfirmModal = false;
@@ -1573,6 +1581,135 @@
         await RefreshFromSync();
     }
 
+    private async Task CreateSingleBranchAsync((int RepositoryId, string? RepositoryName, string NewBranchName, string BaseBranch, bool SetUpstream) request)
+    {
+        var (repositoryId, repositoryName, newBranchName, baseBranch, setUpstream) = request;
+        if (workspace == null || isCreatingBranch || isSyncing || isUpdating)
+            return;
+
+        CloseSwitchBranchModal();
+        isCreatingBranch = true;
+        createBranchMessage = $"Creating {newBranchName} for {repositoryName ?? "repository"}...";
+        errorMessage = null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            var apiRequest = new
+            {
+                workspaceId = WorkspaceId,
+                repositoryId,
+                newBranchName,
+                baseBranch
+            };
+            var json = System.Text.Json.JsonSerializer.Serialize(apiRequest);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/create", content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                var result = System.Text.Json.JsonSerializer.Deserialize<CreateBranchApiResult>(responseContent, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (result != null && result.Success)
+                {
+                    if (setUpstream)
+                    {
+                        var upstreamRequest = new
+                        {
+                            workspaceId = WorkspaceId,
+                            repositoryId,
+                            branchName = newBranchName
+                        };
+                        var upstreamJson = System.Text.Json.JsonSerializer.Serialize(upstreamRequest);
+                        var upstreamContent = new System.Net.Http.StringContent(upstreamJson, System.Text.Encoding.UTF8, "application/json");
+                        var upstreamResponse = await httpClient.PostAsync($"{baseUrl}/api/branches/set-upstream", upstreamContent);
+                        if (upstreamResponse.IsSuccessStatusCode)
+                        {
+                            var upstreamResponseContent = await upstreamResponse.Content.ReadAsStringAsync();
+                            var upstreamResult = System.Text.Json.JsonSerializer.Deserialize<CreateBranchApiResult>(upstreamResponseContent, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                            if (upstreamResult != null && !upstreamResult.Success)
+                                errorMessage = upstreamResult.Error ?? "Branch created but failed to set upstream.";
+                        }
+                        else
+                            errorMessage = "Branch created but failed to set upstream.";
+                    }
+                    await RefreshFromSync();
+                }
+                else
+                {
+                    errorMessage = result?.Error ?? "Failed to create branch.";
+                }
+            }
+            else
+            {
+                var errorText = await response.Content.ReadAsStringAsync();
+                errorMessage = $"Failed to create branch: {response.StatusCode}";
+                Logger.LogError("CreateBranch failed: {StatusCode}, {Error}", response.StatusCode, errorText);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error creating branch for repository {RepositoryId}", repositoryId);
+            errorMessage = "An error occurred while creating branch.";
+        }
+        finally
+        {
+            isCreatingBranch = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task SyncToDefaultFromModalAsync((int RepositoryId, string? RepositoryName, string CurrentBranchName, string DefaultBranch) request)
+    {
+        var (repositoryId, repositoryName, currentBranchName, defaultBranch) = request;
+        if (workspace == null || isSyncingToDefault || isSyncing || isUpdating)
+            return;
+
+        CloseSwitchBranchModal();
+        isSyncingToDefault = true;
+        syncToDefaultMessage = $"Syncing to {defaultBranch} for {repositoryName ?? "repository"}...";
+        errorMessage = null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            var apiRequest = new
+            {
+                workspaceId = WorkspaceId,
+                repositoryId,
+                currentBranchName
+            };
+            var json = System.Text.Json.JsonSerializer.Serialize(apiRequest);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/sync-to-default", content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                await RefreshFromSync();
+            }
+            else
+            {
+                var errorText = await response.Content.ReadAsStringAsync();
+                errorMessage = $"Failed to sync to default branch: {response.StatusCode}";
+                Logger.LogError("SyncToDefault failed: {StatusCode}, {Error}", response.StatusCode, errorText);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error syncing to default branch for repository {RepositoryId}", repositoryId);
+            errorMessage = "An error occurred while syncing to default branch.";
+        }
+        finally
+        {
+            isSyncingToDefault = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
     private async Task CheckoutBranchAsync((int RepositoryId, string BranchName) request)
     {
         var (repositoryId, branchName) = request;
@@ -1795,5 +1932,11 @@
             // Not JSON or invalid
         }
         return trimmed.Length > 500 ? trimmed.Substring(0, 500) + "…" : trimmed;
+    }
+
+    private sealed class CreateBranchApiResult
+    {
+        public bool Success { get; set; }
+        public string? Error { get; set; }
     }
 }
