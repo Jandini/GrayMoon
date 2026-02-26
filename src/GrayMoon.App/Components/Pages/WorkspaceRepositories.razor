@@ -753,7 +753,7 @@
     {
         try
         {
-            var (_, _, error) = await FileVersionService.UpdateAllVersionsAsync(WorkspaceId);
+            var (_, _, error) = await FileVersionService.UpdateAllVersionsAsync(WorkspaceId, EffectiveActionRepositoryIds);
             if (error != null && !error.Contains("No version configurations"))
                 Logger.LogWarning("Auto file-version update after dependency update: {Error}", error);
         }

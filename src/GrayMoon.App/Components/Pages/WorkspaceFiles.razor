@@ -284,7 +284,7 @@
         StateHasChanged();
         try
         {
-            var (updated, failed, error) = await FileVersionService.UpdateAllVersionsAsync(WorkspaceId, _updateCts.Token);
+            var (updated, failed, error) = await FileVersionService.UpdateAllVersionsAsync(WorkspaceId, selectedRepositoryIds: null, cancellationToken: _updateCts.Token);
             if (error != null)
                 errorMessage = error;
             else if (failed > 0)
