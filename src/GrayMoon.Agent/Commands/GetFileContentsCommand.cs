@@ -11,8 +11,9 @@ public sealed class GetFileContentsCommand(IGitService git) : ICommandHandler<Ge
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
         var filePath = request.FilePath ?? throw new ArgumentException("filePath required");
+        var workspaceRoot = request.WorkspaceRoot ?? throw new ArgumentException("workspaceRoot required");
 
-        var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
+        var workspacePath = git.GetWorkspacePath(workspaceRoot, workspaceName);
         var repoPath = Path.Combine(workspacePath, repositoryName);
         var fullFilePath = Path.Combine(repoPath, filePath.Replace('/', Path.DirectorySeparatorChar));
 

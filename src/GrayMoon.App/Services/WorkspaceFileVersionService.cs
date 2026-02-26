@@ -14,10 +14,13 @@ public sealed class WorkspaceFileVersionService(
     /// For every file in the workspace that has a version pattern configured:
     ///   1. Resolves the current version for each repo token referenced in patterns via GetRepositoryVersion.
     ///   2. Calls UpdateFileVersions on the agent to perform the in-place substitution.
+    /// When <paramref name="selectedRepositoryIds"/> is set, only repositories in that set are included: pattern lines are filtered to tokens matching selected repo names, and only files in selected repos are updated.
     /// Returns (updatedLineCount, failedFileCount, fatalError).
     /// </summary>
     public async Task<(int Updated, int Failed, string? Error)> UpdateAllVersionsAsync(
-        int workspaceId, CancellationToken cancellationToken = default)
+        int workspaceId,
+        IReadOnlySet<int>? selectedRepositoryIds = null,
+        CancellationToken cancellationToken = default)
     {
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return (0, 0, "Workspace not found.");
@@ -26,6 +29,18 @@ public sealed class WorkspaceFileVersionService(
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         if (configs.Count == 0) return (0, 0, "No version configurations found. Use Configure on a file first.");
 
+        HashSet<string>? selectedRepoNames = null;
+        if (selectedRepositoryIds != null && selectedRepositoryIds.Count > 0)
+        {
+            selectedRepoNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var link in workspace.Repositories)
+            {
+                if (link.RepositoryId != 0 && selectedRepositoryIds.Contains(link.RepositoryId) && !string.IsNullOrEmpty(link.Repository?.RepositoryName))
+                    selectedRepoNames.Add(link.Repository.RepositoryName);
+            }
+            if (selectedRepoNames.Count == 0) return (0, 0, "No selected repositories.");
+        }
+
         // Collect all unique repo-name tokens used across all patterns
         var repoNamesInUse = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var cfg in configs)
@@ -33,6 +48,8 @@ public sealed class WorkspaceFileVersionService(
             foreach (var token in ExtractTokens(cfg.VersionPattern))
                 repoNamesInUse.Add(token);
         }
+        if (selectedRepoNames != null)
+            repoNamesInUse.IntersectWith(selectedRepoNames);
 
         // Resolve current version for each referenced repo
         var repoVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -71,6 +88,16 @@ public sealed class WorkspaceFileVersionService(
             var file = cfg.File;
             if (file?.Repository == null) continue;
 
+            if (selectedRepositoryIds != null && selectedRepositoryIds.Count > 0 && !selectedRepositoryIds.Contains(file.RepositoryId))
+                continue;
+
+            var versionPatternToSend = cfg.VersionPattern;
+            if (selectedRepoNames != null)
+            {
+                versionPatternToSend = FilterPatternLinesToRepos(cfg.VersionPattern, selectedRepoNames);
+                if (string.IsNullOrWhiteSpace(versionPatternToSend)) continue;
+            }
+
             try
             {
                 var workspaceRoot2 = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
@@ -79,7 +106,7 @@ public sealed class WorkspaceFileVersionService(
                     workspaceName = workspace.Name,
                     repositoryName = file.Repository.RepositoryName,
                     filePath = file.FilePath,
-                    versionPattern = cfg.VersionPattern,
+                    versionPattern = versionPatternToSend,
                     repoVersions,
                     workspaceRoot = workspaceRoot2
                 }, cancellationToken);
@@ -122,5 +149,24 @@ public sealed class WorkspaceFileVersionService(
                 tokens.Add(line[(start + 1)..end]);
         }
         return tokens;
+    }
+
+    /// <summary>Returns version pattern with only lines whose {repositoryName} token is in <paramref name="allowedRepoNames"/>.</summary>
+    public static string FilterPatternLinesToRepos(string? versionPattern, IReadOnlySet<string> allowedRepoNames)
+    {
+        if (string.IsNullOrWhiteSpace(versionPattern) || allowedRepoNames.Count == 0) return string.Empty;
+        var lines = new List<string>();
+        foreach (var raw in versionPattern.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            var start = line.IndexOf('{');
+            var end = start >= 0 ? line.IndexOf('}', start) : -1;
+            if (start < 0 || end <= start) continue;
+            var token = line[(start + 1)..end];
+            if (string.IsNullOrEmpty(token) || !allowedRepoNames.Contains(token)) continue;
+            lines.Add(line);
+        }
+        return string.Join("\n", lines);
     }
 }
