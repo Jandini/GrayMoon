@@ -44,17 +44,46 @@
 
 .workspace-repos-search-wrapper .workspace-repos-select-btn {
     flex-shrink: 0;
-    width: 4.25rem;
-    min-width: 4.25rem;
-    max-width: 4.25rem;
+    width: 2.55rem;
+    min-width: 2.55rem;
+    max-width: 2.55rem;
     border-top-right-radius: 0;
     border-bottom-right-radius: 0;
     border-right: none;
-    padding-left: 0.6rem;
-    padding-right: 0.6rem;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background-color: var(--bg-input);
     border: 1px solid var(--border-input);
     color: var(--text-secondary);
+}
+
+/* Checkbox inside button is icon-only; button handles click */
+.workspace-repos-search-wrapper .workspace-repos-mode-checkbox {
+    margin: 0;
+    pointer-events: none;
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+}
+
+.workspace-repos-search-wrapper .workspace-repos-mode-checkbox {
+    background-color: var(--bg-input) !important;
+    border-color: var(--border-light) !important;
+}
+
+.workspace-repos-search-wrapper .workspace-repos-mode-checkbox:checked {
+    background-color: var(--accent-blue) !important;
+    border-color: var(--accent-blue) !important;
+}
+
+/* When in "All" mode: checkbox appears checked but disabled (muted) */
+.workspace-repos-search-wrapper .workspace-repos-mode-checkbox--all,
+.workspace-repos-search-wrapper .workspace-repos-mode-checkbox--all:checked {
+    opacity: 0.7;
+    background-color: var(--text-muted) !important;
+    border-color: var(--border-light) !important;
 }
 
 .workspace-repos-search-wrapper .workspace-repos-select-btn:hover {
