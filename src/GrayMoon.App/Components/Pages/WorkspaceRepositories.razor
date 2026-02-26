@@ -55,10 +55,10 @@
                     <button type="button"
                             class="btn workspace-repos-select-btn"
                             @onclick="ToggleSelectionModeAsync"
-                            title="@(showSelectionColumn ? "Clear selection and hide checkboxes" : "Select repositories to run Push, Update, Branch, Sync only on selected")">
-                        @(showSelectionColumn ? "Clear" : "Select")
+                            title="@(showSelectionColumn ? "Run commands against all repositories (selection kept)" : "Show checkboxes to run Push, Update, Branch, Sync only on selected repos")">
+                        @(showSelectionColumn ? "All" : "Select")
                     </button>
-                    <input id="workspace-repos-search" class="form-control workspace-repos-search" placeholder="Search repositories..."
+                    <input id="workspace-repos-search" class="form-control workspace-repos-search" placeholder="repositories...."
                            @bind="searchTerm" @bind:event="oninput"
                            @onkeydown="OnSearchKeyDown" />
                 </div>
@@ -1980,8 +1980,7 @@
         if (showSelectionColumn)
         {
             showSelectionColumn = false;
-            gridSelectedRepositoryIds = new HashSet<int>();
-            await PersistGridSelectionAsync();
+            // Keep selection persisted; commands will run against all repos until user clicks Select again
         }
         else
         {
