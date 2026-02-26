@@ -247,28 +247,6 @@
                                     <button type="button" class="btn-close ms-2" aria-label="Close" @onclick='() => { errorMessage = null; StateHasChanged(); }'></button>
                                 </div>
                             }
-                            @if (showBranchExistsConfirmation)
-                            {
-                                <div class="alert alert-warning d-flex flex-column align-items-start mb-3" role="alert">
-                                    <div class="d-flex align-items-start w-100">
-                                        <i class="bi bi-exclamation-triangle-fill me-2 flex-shrink-0"></i>
-                                        <div class="flex-grow-1">
-                                            <p class="mb-1">@branchExistsConfirmMessage</p>
-                                            <p class="mb-0">This repository will have the existing branch checked out.</p>
-                                        </div>
-                                    </div>
-                                    <div class="d-flex gap-2 mt-2">
-                                        <button type="button" class="btn btn-warning" @onclick="ProceedWithCreateAsync" disabled="@(isCreating || isRefreshing)">
-                                            @if (isCreating)
-                                            {
-                                                <span class="spinner-border spinner-border-sm me-2"></span>
-                                            }
-                                            Proceed
-                                        </button>
-                                        <button type="button" class="btn btn-outline-secondary" @onclick="DismissBranchExistsConfirmation" disabled="@(isCreating || isRefreshing)">Cancel</button>
-                                    </div>
-                                </div>
-                            }
                             <div class="mb-3 switch-branch-field-block">
                                 <label class="form-label" for="new-branch-name">Branch name</label>
                                 <input id="new-branch-name"
@@ -277,6 +255,7 @@
                                        placeholder="e.g. feature/my-feature"
                                        @bind="newBranchName"
                                        @bind:event="oninput"
+                                       @bind:after="OnNewBranchNameChanged"
                                        @onkeydown="HandleBranchNameKeyDown"
                                        @ref="newBranchNameInput" />
                             </div>
@@ -343,8 +322,12 @@
                     }
                 </div>
                 <div class="modal-footer d-flex justify-content-between flex-row">
-                    <div class="d-flex gap-2">
-                        @if (activeTab != "newbranch")
+                    <div class="d-flex gap-2 align-items-center">
+                        @if (activeTab == "newbranch" && showBranchExistsConfirmation)
+                        {
+                            <span class="text-warning small">The branch already exists in this repository.</span>
+                        }
+                        else if (activeTab != "newbranch")
                         {
                             <button type="button" 
                                     class="btn btn-outline-secondary"
@@ -372,13 +355,26 @@
                         }
                     </div>
                     <div class="d-flex gap-2 ms-auto">
-                        @if (activeTab == "newbranch" && !showBranchExistsConfirmation)
+                        @if (activeTab == "newbranch")
                         {
-                            <button type="button" class="btn btn-primary" @onclick="CreateAsync" disabled="@(string.IsNullOrWhiteSpace(newBranchName?.Trim()) || isRefreshing)">
-                                Create
-                            </button>
+                            @if (showBranchExistsConfirmation)
+                            {
+                                <button type="button" class="btn btn-primary" @onclick="CheckoutExistingBranchAsync" disabled="@(isCreating || isRefreshing)">
+                                    @if (isCreating)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-2"></span>
+                                    }
+                                    Check out
+                                </button>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-primary" @onclick="CreateAsync" disabled="@(string.IsNullOrWhiteSpace(newBranchName?.Trim()) || isRefreshing)">
+                                    Create
+                                </button>
+                            }
                         }
-                        else if (activeTab != "newbranch")
+                        else
                         {
                             <button type="button" 
                                     class="btn btn-primary" 
@@ -826,6 +822,27 @@
         StateHasChanged();
     }
 
+    /// <summary>When branch name input changes, revert from "branch exists" state so button goes back to Create.</summary>
+    private void OnNewBranchNameChanged()
+    {
+        if (showBranchExistsConfirmation)
+        {
+            DismissBranchExistsConfirmation();
+        }
+    }
+
+    /// <summary>Check out the existing branch (when user chose "Check out" after entering an existing branch name).</summary>
+    private async Task CheckoutExistingBranchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_pendingCreateName))
+            return;
+
+        var branchToCheckout = _pendingCreateName;
+        DismissBranchExistsConfirmation();
+        await OnCancel.InvokeAsync();
+        await OnCheckoutBranch.InvokeAsync((RepositoryId, branchToCheckout));
+    }
+
     private void RequestDeleteBranch(string branch, bool isRemote)
     {
         branchToDelete = branch;
@@ -1086,7 +1103,7 @@
                 return;
             }
             if (showBranchExistsConfirmation)
-                await ProceedWithCreateAsync();
+                await CheckoutExistingBranchAsync();
             else if (!string.IsNullOrWhiteSpace(newBranchName?.Trim()))
                 await CreateAsync();
         }
@@ -1102,7 +1119,7 @@
                 return;
             }
             if (showBranchExistsConfirmation)
-                await ProceedWithCreateAsync();
+                await CheckoutExistingBranchAsync();
             else if (!string.IsNullOrWhiteSpace(newBranchName?.Trim()))
                 await CreateAsync();
         }
