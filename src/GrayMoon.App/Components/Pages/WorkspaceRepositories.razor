@@ -35,9 +35,16 @@
                     @if (workspaceRepositories.Count > 0)
                     {
                         var hasFilter = !string.IsNullOrWhiteSpace(searchTerm);
-                        var count = hasFilter ? FilteredWorkspaceRepositories.Count : workspaceRepositories.Count;
+                        var list = hasFilter ? FilteredWorkspaceRepositories : workspaceRepositories;
+                        var count = list.Count;
+                        var selectedInList = showSelectionColumn && gridSelectedRepositoryIds.Count > 0
+                            ? list.Count(wr => gridSelectedRepositoryIds.Contains(wr.RepositoryId))
+                            : 0;
+                        var suffix = hasFilter ? " found" : "";
                         <span class="repositories-count-link" @onclick="ShowRepositoriesModalAsync" @onclick:preventDefault>
-                            @(hasFilter ? $"{count} {(count == 1 ? "repository" : "repositories")} found" : $"{count} {(count == 1 ? "repository" : "repositories")}")
+                            @(selectedInList > 0
+                                ? $"selected {selectedInList} of {count} {(count == 1 ? "repository" : "repositories")}{suffix}"
+                                : $"{count} {(count == 1 ? "repository" : "repositories")}{suffix}")
                         </span>
                     }
                     else if (workspace != null)
