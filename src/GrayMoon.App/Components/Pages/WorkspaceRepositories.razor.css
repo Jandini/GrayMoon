@@ -55,9 +55,23 @@
 }
 
 .workspace-repos-search-wrapper .workspace-repos-select-btn:hover {
+    background-color: var(--bg-active);
+    border-color: var(--border-hover);
+    color: #ffffff;
+}
+
+/* Focus: single-pixel frame like the text box (accent blue), no thick ring */
+.workspace-repos-search-wrapper .workspace-repos-select-btn:focus {
+    box-shadow: none;
+    outline: none;
+    border-color: var(--accent-blue);
     background-color: var(--bg-input);
-    border-color: var(--border-color);
-    color: var(--text-primary);
+    color: var(--text-secondary);
+}
+
+.workspace-repos-search-wrapper .workspace-repos-select-btn:focus:hover {
+    background-color: var(--bg-active);
+    color: #ffffff;
 }
 
 .workspace-repos-search-wrapper .workspace-repos-search {

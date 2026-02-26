@@ -46,9 +46,15 @@
         const savedWidths = getColumnWidths(table);
         if (savedWidths && savedWidths.length === ths.length) {
             ths.forEach((th, i) => {
-                if (th.classList.contains('no-resize')) return;
-                th.style.width = savedWidths[i] + '%';
-                th.style.minWidth = MIN_COL_WIDTH + 'px';
+                if (th.classList.contains('no-resize')) {
+                    const px = th.getBoundingClientRect().width;
+                    th.style.width = px + 'px';
+                    th.style.minWidth = px + 'px';
+                    th.style.maxWidth = px + 'px';
+                } else {
+                    th.style.width = savedWidths[i] + '%';
+                    th.style.minWidth = MIN_COL_WIDTH + 'px';
+                }
             });
         } else {
             // On first load (no saved widths): capture the current header widths
@@ -57,16 +63,24 @@
             const tableWidth = tableRect.width;
             if (tableWidth > 0) {
                 ths.forEach(th => {
-                    if (th.classList.contains('no-resize')) return;
-                    const cellWidth = th.getBoundingClientRect().width;
-                    const pct = (cellWidth / tableWidth) * 100;
-                    th.style.width = pct + '%';
-                    th.style.minWidth = MIN_COL_WIDTH + 'px';
+                    const px = th.getBoundingClientRect().width;
+                    if (th.classList.contains('no-resize')) {
+                        th.style.width = px + 'px';
+                        th.style.minWidth = px + 'px';
+                        th.style.maxWidth = px + 'px';
+                    } else {
+                        const pct = (px / tableWidth) * 100;
+                        th.style.width = pct + '%';
+                        th.style.minWidth = MIN_COL_WIDTH + 'px';
+                    }
                 });
             } else {
                 ths.forEach(th => {
-                    if (th.classList.contains('no-resize')) return;
-                    th.style.minWidth = MIN_COL_WIDTH + 'px';
+                    if (th.classList.contains('no-resize')) {
+                        th.style.minWidth = MIN_COL_WIDTH + 'px';
+                    } else {
+                        th.style.minWidth = MIN_COL_WIDTH + 'px';
+                    }
                 });
             }
         }
@@ -94,8 +108,18 @@
             const tds = tr.querySelectorAll('td');
             if (tds.length !== numCols) return; /* skip colspan placeholder rows */
             ths.forEach((th, i) => {
-                tds[i].style.width = th.style.width || '';
-                tds[i].style.minWidth = th.style.minWidth || '';
+                const w = th.style.width || '';
+                const mw = th.style.minWidth || '';
+                if (th.classList.contains('no-resize')) {
+                    const px = th.getBoundingClientRect().width;
+                    tds[i].style.width = px + 'px';
+                    tds[i].style.minWidth = px + 'px';
+                    tds[i].style.maxWidth = px + 'px';
+                } else {
+                    tds[i].style.width = w;
+                    tds[i].style.minWidth = mw;
+                    tds[i].style.maxWidth = '';
+                }
             });
         });
     }
