@@ -40,6 +40,7 @@
         if (ths.length === 0) return;
 
         table.dataset.resizableColumnsInit = '1';
+        table.dataset.resizableColumnsCount = String(ths.length);
         table.style.tableLayout = 'fixed';
         table.style.width = '100%';
 
@@ -215,14 +216,23 @@
         // Always resync body column widths for already-initialized tables so that
         // when a grid's rows are reloaded (e.g. statuses updated), the new rows
         // inherit the existing header widths instead of drifting.
+        // If the column count changed (e.g. checkbox column toggled), re-initialize.
         document.querySelectorAll('table.resizable-columns').forEach(tbl => {
-            if (tbl.dataset.resizableColumnsInit === '1') {
-                const thead = tbl.querySelector('thead');
-                const headerRow = thead && thead.querySelector('tr');
-                const ths = headerRow ? Array.from(headerRow.querySelectorAll('th')) : [];
-                if (ths.length) {
-                    syncBodyColumnWidths(tbl, ths);
-                }
+            const thead = tbl.querySelector('thead');
+            const headerRow = thead && thead.querySelector('tr');
+            const ths = headerRow ? Array.from(headerRow.querySelectorAll('th')) : [];
+            if (ths.length === 0) return;
+
+            const expectedCount = tbl.dataset.resizableColumnsCount ? parseInt(tbl.dataset.resizableColumnsCount, 10) : 0;
+            if (tbl.dataset.resizableColumnsInit === '1' && expectedCount !== ths.length) {
+                delete tbl.dataset.resizableColumnsInit;
+                delete tbl.dataset.resizableColumnsCount;
+                initTable(tbl);
+                return;
+            }
+
+            if (tbl.dataset.resizableColumnsInit === '1' && ths.length) {
+                syncBodyColumnWidths(tbl, ths);
             }
         });
     });
