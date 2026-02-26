@@ -12,8 +12,8 @@ public sealed class WorkspaceFileVersionService(
 {
     /// <summary>
     /// For every file in the workspace that has a version pattern configured:
-    ///   1. Resolves the current version for each repo token referenced in patterns via GetRepositoryVersion.
-    ///   2. Calls UpdateFileVersions on the agent to perform the in-place substitution.
+    ///   1. Resolves the current version for each repo from the workspace's repository links (DB state); no GitVersion is run.
+    ///   2. Calls UpdateFileVersions on the agent with those versions in the request to perform the in-place substitution.
     /// When <paramref name="selectedRepositoryIds"/> is set, only repositories in that set are included: pattern lines are filtered to tokens matching selected repo names, and only files in selected repos are updated.
     /// Returns (updatedLineCount, failedFileCount, fatalError).
     /// </summary>
@@ -51,31 +51,19 @@ public sealed class WorkspaceFileVersionService(
         if (selectedRepoNames != null)
             repoNamesInUse.IntersectWith(selectedRepoNames);
 
-        // Resolve current version for each referenced repo
+        // Build repo name -> version from workspace links (DB state). No GitVersion is run.
         var repoVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var link in workspace.Repositories)
+        {
+            if (link.Repository == null || string.IsNullOrEmpty(link.GitVersion)) continue;
+            var name = link.Repository.RepositoryName;
+            if (!repoNamesInUse.Contains(name)) continue;
+            repoVersions[name] = link.GitVersion;
+        }
         foreach (var repoName in repoNamesInUse)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
-            var resp = await agentBridge.SendCommandAsync("GetRepositoryVersion", new
-            {
-                workspaceName = workspace.Name,
-                repositoryName = repoName,
-                workspaceRoot
-            }, cancellationToken);
-
-            if (resp.Success && resp.Data != null)
-            {
-                var vr = AgentResponseJson.DeserializeAgentResponse<AgentGetRepositoryVersionResponse>(resp.Data);
-                if (vr?.Version != null)
-                    repoVersions[repoName] = vr.Version;
-                else
-                    logger.LogWarning("Could not resolve version for repo {RepoName}", repoName);
-            }
-            else
-            {
-                logger.LogWarning("GetRepositoryVersion failed for {RepoName}: {Error}", repoName, resp.Error);
-            }
+            if (!repoVersions.ContainsKey(repoName))
+                logger.LogWarning("No version in workspace for repo {RepoName}; version pattern tokens for this repo will be skipped.", repoName);
         }
 
         // Update each configured file
