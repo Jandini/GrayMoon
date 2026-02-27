@@ -746,14 +746,17 @@
     }
 
     /// <summary>
-    /// Silently attempts to update all configured file versions after a dependency update.
-    /// Logs warnings on failure; skips gracefully when no files are configured.
+    /// Attempts to update all configured file versions at the end of an update workflow.
+    /// Shows a toast for each file that was updated; logs warnings on failure and skips gracefully when no files are configured.
     /// </summary>
     private async Task TryUpdateFileVersionsAsync()
     {
         try
         {
-            var (_, _, error) = await FileVersionService.UpdateAllVersionsAsync(WorkspaceId, EffectiveActionRepositoryIds);
+            var (_, _, error) = await FileVersionService.UpdateAllVersionsAsync(
+                WorkspaceId,
+                selectedRepositoryIds: null,
+                onFileUpdated: filePath => ToastService.Show($"File {filePath} updated."));
             if (error != null && !error.Contains("No version configurations"))
                 Logger.LogWarning("Auto file-version update after dependency update: {Error}", error);
         }
@@ -978,6 +981,7 @@
             if (payload.Count == 0)
             {
                 ToastService.Show("No dependency updates required.");
+                await TryUpdateFileVersionsAsync();
                 return;
             }
             updatePlanIsMultiLevel = isMultiLevel;

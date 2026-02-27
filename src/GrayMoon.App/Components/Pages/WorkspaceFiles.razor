@@ -12,6 +12,7 @@
 @inject WorkspaceFileVersionConfigRepository VersionConfigRepository
 @inject WorkspaceFileVersionService FileVersionService
 @inject WorkspaceService WorkspaceService
+@inject IToastService ToastService
 @inject ILogger<WorkspaceFiles> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
@@ -289,6 +290,8 @@
                 errorMessage = error;
             else if (failed > 0)
                 errorMessage = $"Updated {updated} line(s). {failed} file(s) could not be updated — check logs.";
+            else
+                ToastService.Show("Versions updated in configured files.");
         }
         catch (OperationCanceledException) { /* user aborted */ }
         catch (Exception ex)

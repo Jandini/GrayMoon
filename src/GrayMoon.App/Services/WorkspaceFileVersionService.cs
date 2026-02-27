@@ -20,6 +20,7 @@ public sealed class WorkspaceFileVersionService(
     public async Task<(int Updated, int Failed, string? Error)> UpdateAllVersionsAsync(
         int workspaceId,
         IReadOnlySet<int>? selectedRepositoryIds = null,
+        Action<string>? onFileUpdated = null,
         CancellationToken cancellationToken = default)
     {
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
@@ -102,7 +103,10 @@ public sealed class WorkspaceFileVersionService(
                 if (resp.Success && resp.Data != null)
                 {
                     var result = AgentResponseJson.DeserializeAgentResponse<AgentUpdateFileVersionsResponse>(resp.Data);
-                    totalUpdated += result?.UpdatedCount ?? 0;
+                    var updatedForFile = result?.UpdatedCount ?? 0;
+                    totalUpdated += updatedForFile;
+                    if (updatedForFile > 0 && onFileUpdated != null && file.FilePath != null)
+                        onFileUpdated(file.FilePath);
                     if (result?.ErrorMessage != null)
                         logger.LogWarning("UpdateFileVersions warning for {FilePath}: {Msg}", file.FilePath, result.ErrorMessage);
                 }
