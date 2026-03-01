@@ -96,6 +96,7 @@ using (var scope = app.Services.CreateScope())
     await MigrateWorkspaceRepositoriesSyncStatusAsync(dbContext);
     await MigrateWorkspaceRepositoriesProjectsAsync(dbContext);
     await MigrateWorkspaceRepositoriesCommitsAsync(dbContext);
+    await MigrateWorkspaceRepositoriesBranchHasUpstreamAsync(dbContext);
     await MigrateWorkspaceRepositoriesDependencyLevelAndDependenciesAsync(dbContext);
     await MigrateWorkspaceProjectsMatchedConnectorAsync(dbContext);
     await MigrateRepositoryBranchesAsync(dbContext);
@@ -331,6 +332,31 @@ static async Task MigrateWorkspaceRepositoriesCommitsAsync(AppDbContext dbContex
             if (count == 0)
             {
                 cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN IncomingCommits INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateWorkspaceRepositoriesBranchHasUpstreamAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='BranchHasUpstream'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN BranchHasUpstream INTEGER";
                 await cmd.ExecuteNonQueryAsync();
             }
         }

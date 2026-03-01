@@ -390,6 +390,12 @@
     text-overflow: clip;
 }
 
+/* Commits badge: yellow when new branch not upstreamed (see GetCommitsBadge) */
+.repositories-table .commits-badge.commits-badge-not-upstreamed {
+    background-color: #ffc107 !important;
+    color: #000 !important;
+}
+
 .col-version {
     width: auto;
     min-width: 0;

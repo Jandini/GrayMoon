@@ -199,7 +199,23 @@ public static class BranchEndpoints
             if (string.IsNullOrWhiteSpace(localBranchName))
                 localBranchName = branchName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? branchName.Substring("origin/".Length) : branchName;
             if (!string.IsNullOrWhiteSpace(localBranchName) && wr != null)
+            {
                 await workspaceGitService.EnsureLocalBranchPersistedAsync(wr.WorkspaceRepositoryId, localBranchName, CancellationToken.None);
+                wr.BranchName = localBranchName;
+                wr.BranchHasUpstream = null;
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+
+                // Refresh branch list from agent so we can set BranchHasUpstream correctly (e.g. main has upstream)
+                var refreshArgs = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot };
+                var refreshResponse = await agentBridge.SendCommandAsync("RefreshBranches", refreshArgs, CancellationToken.None);
+                if (refreshResponse.Success && refreshResponse.Data != null)
+                {
+                    var branchesResponse = AgentResponseJson.DeserializeAgentResponse<BranchesResponse>(refreshResponse.Data);
+                    var remoteBranches = branchesResponse?.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
+                    wr.BranchHasUpstream = ComputeBranchHasUpstream(localBranchName, remoteBranches);
+                    await dbContext.SaveChangesAsync(CancellationToken.None);
+                }
+            }
 
             // Broadcast update to refresh UI
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
@@ -264,6 +280,10 @@ public static class BranchEndpoints
             
             if (!response.Success)
                 return Results.Problem(response.Error ?? "Failed to sync to default branch", statusCode: 500);
+
+            // Default branch always has upstream
+            wr.BranchHasUpstream = true;
+            await dbContext.SaveChangesAsync(CancellationToken.None);
 
             // Sync prunes the previous local branch; remove it from persistence
             var toRemove = await dbContext.RepositoryBranches
@@ -345,6 +365,8 @@ public static class BranchEndpoints
                 var localBranches = refreshResponse.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
                 var remoteBranches = refreshResponse.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
                 await workspaceGitService.PersistBranchesAsync(wr.WorkspaceRepositoryId, localBranches, remoteBranches, refreshResponse.DefaultBranch, CancellationToken.None);
+                wr.BranchHasUpstream = ComputeBranchHasUpstream(wr.BranchName, remoteBranches);
+                await dbContext.SaveChangesAsync(CancellationToken.None);
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
             }
 
@@ -511,6 +533,10 @@ public static class BranchEndpoints
 
             if (!success)
                 return Results.Ok(new { success = false, error = errorMessage ?? "Failed to set upstream" });
+
+            // Mark branch as having upstream so Commits badge shows normal state
+            wr.BranchHasUpstream = true;
+            await dbContext.SaveChangesAsync(CancellationToken.None);
 
             // Persist the branch as remote (origin) so it appears in Remotes without a fetch
             var remoteBranchName = branchName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? branchName : "origin/" + branchName;
@@ -694,6 +720,17 @@ public static class BranchEndpoints
             commonBranchNames,
             defaultDisplayText
         });
+    }
+
+    /// <summary>Returns true if the current branch has a matching remote (e.g. origin/branchName), false otherwise. Returns null when unknown (no branch name or no remote list).</summary>
+    private static bool? ComputeBranchHasUpstream(string? currentBranchName, IReadOnlyList<string>? remoteBranches)
+    {
+        if (string.IsNullOrWhiteSpace(currentBranchName) || remoteBranches == null || remoteBranches.Count == 0)
+            return null;
+        var branch = currentBranchName.Trim();
+        var hasUpstream = remoteBranches.Any(r => !string.IsNullOrEmpty(r) &&
+            (string.Equals(r, "origin/" + branch, StringComparison.OrdinalIgnoreCase) || r.EndsWith("/" + branch, StringComparison.OrdinalIgnoreCase)));
+        return hasUpstream;
     }
 }
 

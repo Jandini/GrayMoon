@@ -314,7 +314,7 @@
                                                     </span>
                                                 }
                                             </td>
-                                            <td class="col-commits">@GetCommitsBadge(repo.RepositoryId, wr.OutgoingCommits, wr.IncomingCommits)</td>
+                                            <td class="col-commits">@GetCommitsBadge(repo.RepositoryId, wr.OutgoingCommits, wr.IncomingCommits, wr.BranchHasUpstream)</td>
                                             <td class="col-sync col-status-badge">@GetRepoSyncBadge(repo.RepositoryId)</td>
                                         </tr>
                                             @if (repositoryErrors.TryGetValue(repo.RepositoryId, out var repoError))
@@ -667,36 +667,37 @@
             .ToList();
     }
 
-    private RenderFragment GetCommitsBadge(int repositoryId, int? outgoing, int? incoming) => builder =>
+    private RenderFragment GetCommitsBadge(int repositoryId, int? outgoing, int? incoming, bool? branchHasUpstream) => builder =>
     {
         var x = outgoing ?? 0;
-        var y = incoming ?? 0;
-        if (!outgoing.HasValue && !incoming.HasValue)
+        var y = branchHasUpstream == false ? 0 : (incoming ?? 0);
+        if (!outgoing.HasValue && !incoming.HasValue && branchHasUpstream != false)
         {
             builder.AddContent(0, "-");
             return;
         }
-        var text = $"↑{x} ↓{y}";
+        var text = branchHasUpstream == false ? $"↑{x}" : $"↑{x} ↓{y}";
         string bgColor;
         string textColor = "#fff";
         bool hasCommits = (y > 0) || (x > 0);
         if (y > 0)
             bgColor = "#dc3545";   // red: need to pull
-        else if (x > 0)
+        else if (x > 0 || branchHasUpstream == false)
         {
-            bgColor = "#ffc107";   // yellow: need to push (match Push button)
+            bgColor = "#ffc107";   // yellow: need to push or new branch not upstreamed
             textColor = "#000";
         }
         else
             bgColor = "#198754";   // green: in sync (0,0)
-        
+
+        var cssClass = branchHasUpstream == false ? "badge commits-badge commits-badge-not-upstreamed" : "badge";
         builder.OpenElement(0, "span");
-        builder.AddAttribute(1, "class", "badge");
+        builder.AddAttribute(1, "class", cssClass);
         builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: {textColor};{(hasCommits ? " cursor: pointer;" : "")}");
         if (hasCommits)
         {
             builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => ShowConfirmSyncCommits(repositoryId)));
-            builder.AddAttribute(4, "title", "Click to sync commits");
+            builder.AddAttribute(4, "title", branchHasUpstream == false ? "New branch, not pushed yet. Click to sync commits." : "Click to sync commits");
         }
         builder.AddContent(5, text);
         builder.CloseElement();
