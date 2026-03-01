@@ -34,6 +34,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid SyncRepository args"),
             "RefreshRepositoryVersion" => JsonSerializer.Deserialize<RefreshRepositoryVersionRequest>(json, options)
                 ?? throw new ArgumentException("Invalid RefreshRepositoryVersion args"),
+            "GetCommitCounts" => JsonSerializer.Deserialize<GetCommitCountsRequest>(json, options)
+                ?? throw new ArgumentException("Invalid GetCommitCounts args"),
             "EnsureWorkspace" => JsonSerializer.Deserialize<EnsureWorkspaceRequest>(json, options)
                 ?? throw new ArgumentException("Invalid EnsureWorkspace args"),
             "GetWorkspaceRepositories" => JsonSerializer.Deserialize<GetWorkspaceRepositoriesRequest>(json, options)

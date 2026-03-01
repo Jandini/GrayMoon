@@ -7,6 +7,7 @@ namespace GrayMoon.Agent.Services;
 public sealed class CommandDispatcher(
     ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse> syncRepositoryCommand,
     ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse> refreshRepositoryVersionCommand,
+    ICommandHandler<GetCommitCountsRequest, GetCommitCountsResponse> getCommitCountsCommand,
     ICommandHandler<EnsureWorkspaceRequest, EnsureWorkspaceResponse> ensureWorkspaceCommand,
     ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResponse> getWorkspaceRepositoriesCommand,
     ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResponse> getRepositoryVersionCommand,
@@ -33,6 +34,7 @@ public sealed class CommandDispatcher(
     {
         ["SyncRepository"] = async (req, ct) => await syncRepositoryCommand.ExecuteAsync((SyncRepositoryRequest)req, ct),
         ["RefreshRepositoryVersion"] = async (req, ct) => await refreshRepositoryVersionCommand.ExecuteAsync((RefreshRepositoryVersionRequest)req, ct),
+        ["GetCommitCounts"] = async (req, ct) => await getCommitCountsCommand.ExecuteAsync((GetCommitCountsRequest)req, ct),
         ["RefreshRepositoryProjects"] = async (req, ct) => await refreshRepositoryProjectsCommand.ExecuteAsync((RefreshRepositoryProjectsRequest)req, ct),
         ["EnsureWorkspace"] = async (req, ct) => await ensureWorkspaceCommand.ExecuteAsync((EnsureWorkspaceRequest)req, ct),
         ["GetWorkspaceRepositories"] = async (req, ct) => await getWorkspaceRepositoriesCommand.ExecuteAsync((GetWorkspaceRepositoriesRequest)req, ct),

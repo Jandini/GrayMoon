@@ -832,11 +832,50 @@ public class WorkspaceGitService(
         if (repos.Count == 0) return;
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return;
-        foreach (var repo in repos)
+
+        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+
+        var results = await Task.WhenAll(repos.Select(async repo =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            await SyncSingleRepositoryAsync(repo.RepoId, workspaceId, cancellationToken);
+            try
+            {
+                var response = await _agentBridge.SendCommandAsync("GetCommitCounts", new
+                {
+                    workspaceName = workspace.Name,
+                    repositoryName = repo.RepoName,
+                    workspaceRoot
+                }, cancellationToken);
+                if (!response.Success || response.Data == null)
+                    return (RepoId: repo.RepoId, Outgoing: (int?)null, Incoming: (int?)null);
+                var data = AgentResponseJson.DeserializeAgentResponse<AgentCommitCountsResponse>(response.Data);
+                return (RepoId: repo.RepoId, Outgoing: data?.OutgoingCommits, Incoming: data?.IncomingCommits);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "GetCommitCounts failed for repo {RepoId} ({RepoName})", repo.RepoId, repo.RepoName);
+                return (RepoId: repo.RepoId, Outgoing: (int?)null, Incoming: (int?)null);
+            }
+        }));
+
+        var repoIds = repos.Select(r => r.RepoId).ToHashSet();
+        var links = await _dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.RepositoryId))
+            .ToListAsync(cancellationToken);
+        var resultByRepo = results.ToDictionary(r => r.RepoId);
+        foreach (var wr in links)
+        {
+            if (resultByRepo.TryGetValue(wr.RepositoryId, out var r))
+            {
+                wr.OutgoingCommits = r.Outgoing;
+                wr.IncomingCommits = r.Incoming;
+            }
         }
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
+
+        if (_hubContext != null)
+            await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
 
     /// <summary>Refreshes version for a single repo and persists. Returns (success, errorMessage) for caller to report and optionally stop workflow.</summary>

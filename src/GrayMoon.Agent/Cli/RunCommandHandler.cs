@@ -76,6 +76,7 @@ internal static class RunCommandHandler
 
         builder.Services.AddSingleton<ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>, SyncRepositoryCommand>();
         builder.Services.AddSingleton<ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse>, RefreshRepositoryVersionCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetCommitCountsRequest, GetCommitCountsResponse>, GetCommitCountsCommand>();
         builder.Services.AddSingleton<ICommandHandler<EnsureWorkspaceRequest, EnsureWorkspaceResponse>, EnsureWorkspaceCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResponse>, GetWorkspaceRepositoriesCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetRepositoryVersionRequest, GetRepositoryVersionResponse>, GetRepositoryVersionCommand>();
