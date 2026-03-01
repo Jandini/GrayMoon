@@ -914,7 +914,7 @@
 
     private void OnCommitDependencyProgress(int current, int total, int unused)
     {
-        updateProgressMessage = $"Committed {current} of {total}...";
+        updateProgressMessage = $"Committed {current} of {total}";
         _ = InvokeAsync(StateHasChanged);
     }
 

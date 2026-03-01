@@ -504,13 +504,13 @@ public class WorkspaceGitService(
                 if (reposAtLevel.Count == 0) continue;
 
                 var repoIds = reposAtLevel.Select(r => r.RepoId).ToHashSet();
-                onProgressMessage?.Invoke($"Updating {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")} for dependency level {level}...");
-                await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Syncing {c} of {t} for dependency level {level}"), onRepoError: OnRepoError, repoIdsToSync: repoIds, cancellationToken: cancellationToken);
+                onProgressMessage?.Invoke($"Updating {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
+                await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Syncing {c} of {t}"), onRepoError: OnRepoError, repoIdsToSync: repoIds, cancellationToken: cancellationToken);
                 if (hadError)
                     break;
 
-                onProgressMessage?.Invoke($"Committing for dependency level {level}...");
-                var commitResults = await CommitDependencyUpdatesAsync(workspaceId, reposAtLevel, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Committed {c} of {t} for dependency level {level}"), cancellationToken: cancellationToken);
+                onProgressMessage?.Invoke($"Committing...");
+                var commitResults = await CommitDependencyUpdatesAsync(workspaceId, reposAtLevel, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Committed {c} of {t}"), cancellationToken: cancellationToken);
                 foreach (var (repoId, errMsg) in commitResults)
                 {
                     if (!string.IsNullOrEmpty(errMsg))
@@ -704,7 +704,7 @@ public class WorkspaceGitService(
                     var found = getFoundCount();
                     var line1 = found == 0
                         ? $"Waiting for {totalDeps} {(totalDeps == 1 ? "dependency" : "dependencies")}..."
-                        : $"Found {found} of {totalDeps} {(totalDeps == 1 ? "dependency" : "dependencies")}...";
+                        : $"Found {found} of {totalDeps} {(totalDeps == 1 ? "dependency" : "dependencies")}";
                     var totalSec = (int)remaining.TotalSeconds;
                     var mm = totalSec / 60;
                     var ss = totalSec % 60;
@@ -752,7 +752,7 @@ public class WorkspaceGitService(
                 }
             }
 
-            onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")} for dependency level {level}...");
+            onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
             await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
             await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
         }

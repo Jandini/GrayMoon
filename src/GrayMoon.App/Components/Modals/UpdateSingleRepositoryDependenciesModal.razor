@@ -52,7 +52,7 @@
     [Parameter] public EventCallback<bool> OnProceed { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
 
-    private bool CommitVersionUpdate { get; set; }
+    private bool CommitVersionUpdate { get; set; } = true;
     private ElementReference _modalElement;
 
     private IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> PackageLines =>
@@ -64,7 +64,7 @@
     protected override void OnParametersSet()
     {
         if (IsVisible)
-            CommitVersionUpdate = false;
+            CommitVersionUpdate = true;
     }
 
     private async Task Proceed()

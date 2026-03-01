@@ -70,7 +70,7 @@
     [Parameter] public EventCallback<bool> OnProceed { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
 
-    private bool SynchronizedPush { get; set; }
+    private bool SynchronizedPush { get; set; } = true;
     private ElementReference _modalElement;
 
     private bool IsMultipleRepos => (Info?.PayloadForRepo.RepoName?.Contains("repositories") == true) && (Info?.PayloadForRepo.RepoName != "1 repository");
@@ -111,7 +111,7 @@
     protected override void OnParametersSet()
     {
         if (IsVisible)
-            SynchronizedPush = false;
+            SynchronizedPush = true;
     }
 
     private async Task Proceed()
