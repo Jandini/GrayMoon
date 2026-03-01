@@ -396,6 +396,32 @@
     color: #000 !important;
 }
 
+/* Force black icon (Bootstrap Icons use ::before; color must apply to .bi and its ::before) */
+.repositories-table .commits-badge.commits-badge-not-upstreamed .bi,
+.repositories-table .commits-badge.commits-badge-not-upstreamed .bi::before {
+    color: #000 !important;
+    -webkit-text-fill-color: #000 !important;
+}
+
+/* Cloud-arrow-up icon when branch needs to be upstreamed: icon only, same height as badge */
+.repositories-table .commits-badge-icon-up {
+    display: inline-flex;
+    align-items: center;
+    line-height: 1;
+    font-size: 0.95em;
+}
+.repositories-table .commits-badge-icon-up .bi {
+    font-size: 1em;
+}
+.repositories-table .commits-badge-icon-up--black {
+    color: #000 !important;
+}
+.repositories-table .commits-badge-icon-up--black .bi,
+.repositories-table .commits-badge-icon-up--black .bi::before {
+    color: #000 !important;
+    -webkit-text-fill-color: #000 !important;
+}
+
 .col-version {
     width: auto;
     min-width: 0;

@@ -518,6 +518,13 @@ h1:focus {
     font-weight: 400; /* normal weight (not bold) for all badges */
 }
 
+/* Not-upstreamed commits badge: icon must stay black (overrides .table tbody td * below) */
+.table tbody td .badge.commits-badge-not-upstreamed .commits-badge-icon-up--black .bi,
+.table tbody td .badge.commits-badge-not-upstreamed .commits-badge-icon-up--black .bi::before {
+    color: #000 !important;
+    -webkit-text-fill-color: #000 !important;
+}
+
 .bg-success {
     background-color: var(--success) !important;
     color: var(--bg-primary) !important;

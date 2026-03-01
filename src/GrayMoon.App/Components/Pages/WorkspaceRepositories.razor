@@ -676,7 +676,6 @@
             builder.AddContent(0, "-");
             return;
         }
-        var text = branchHasUpstream == false ? $"↑{x}" : $"↑{x} ↓{y}";
         string bgColor;
         string textColor = "#fff";
         bool hasCommits = (y > 0) || (x > 0);
@@ -699,7 +698,20 @@
             builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => ShowConfirmSyncCommits(repositoryId)));
             builder.AddAttribute(4, "title", branchHasUpstream == false ? "New branch, not pushed yet. Click to sync commits." : "Click to sync commits");
         }
-        builder.AddContent(5, text);
+        if (branchHasUpstream == false)
+        {
+            builder.OpenElement(5, "span");
+            builder.AddAttribute(6, "class", "commits-badge-icon-up commits-badge-icon-up--black");
+            builder.OpenElement(7, "i");
+            builder.AddAttribute(8, "class", "bi bi-cloud-arrow-up");
+            builder.AddAttribute(9, "aria-hidden", "true");
+            builder.CloseElement();
+            builder.CloseElement();
+        }
+        else
+        {
+            builder.AddContent(5, $"↑{x} ↓{y}");
+        }
         builder.CloseElement();
     };
 
