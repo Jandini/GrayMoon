@@ -706,6 +706,58 @@ public class WorkspaceGitService(
         await Task.WhenAll(pushTasks);
     }
 
+    /// <summary>Pushes a single repository's current branch with upstream (-u). Used when user clicks the not-upstreamed badge. Branch name is provided by the app; when null or empty, the agent resolves it via GitVersion.</summary>
+    public async Task<(bool Success, string? ErrorMessage)> PushSingleRepositoryWithUpstreamAsync(
+        int workspaceId,
+        int repositoryId,
+        string? branchName,
+        Action<string>? onProgressMessage = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_agentBridge.IsAgentConnected)
+            return (false, "Agent not connected. Start GrayMoon.Agent to push.");
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            return (false, "Workspace not found.");
+
+        var link = await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .ThenInclude(r => r!.Connector)
+            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
+
+        if (link?.Repository == null)
+            return (false, "Repository not in workspace or not found.");
+
+        var repo = link.Repository;
+        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+
+        onProgressMessage?.Invoke("Pushing to set upstream...");
+
+        var args = new
+        {
+            workspaceName = workspace.Name,
+            repositoryId = repo.RepositoryId,
+            repositoryName = repo.RepositoryName,
+            bearerToken = repo.Connector?.UserToken,
+            workspaceId,
+            workspaceRoot,
+            branchName = string.IsNullOrWhiteSpace(branchName) ? null : branchName.Trim()
+        };
+
+        var response = await _agentBridge.SendCommandAsync("PushRepository", args, cancellationToken);
+        var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data) is { Success: true };
+        if (!success)
+        {
+            var err = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage ?? "Push failed";
+            return (false, err);
+        }
+
+        await SyncSingleRepositoryAsync(repositoryId, workspaceId, cancellationToken);
+        return (true, null);
+    }
+
     private async Task RefreshVersionsAfterPushAsync(int workspaceId, IReadOnlyList<PushRepoPayload> repos, CancellationToken cancellationToken)
     {
         if (repos.Count == 0) return;

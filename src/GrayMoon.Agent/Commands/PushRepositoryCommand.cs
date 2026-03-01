@@ -41,17 +41,21 @@ public sealed class PushRepositoryCommand(IGitService git) : ICommandHandler<Pus
             };
         }
 
-        var (versionResult, versionError) = await git.GetVersionAsync(repoPath, cancellationToken);
-        if (versionResult == null)
+        string? branch = request.BranchName?.Trim();
+        if (string.IsNullOrEmpty(branch))
         {
-            return new PushRepositoryResponse
+            var (versionResult, versionError) = await git.GetVersionAsync(repoPath, cancellationToken);
+            if (versionResult == null)
             {
-                Success = false,
-                ErrorMessage = versionError ?? "Could not determine repository version"
-            };
+                return new PushRepositoryResponse
+                {
+                    Success = false,
+                    ErrorMessage = versionError ?? "Could not determine repository version"
+                };
+            }
+            branch = versionResult.BranchName ?? versionResult.EscapedBranchName;
         }
 
-        var branch = versionResult.BranchName ?? versionResult.EscapedBranchName;
         if (string.IsNullOrWhiteSpace(branch))
         {
             return new PushRepositoryResponse

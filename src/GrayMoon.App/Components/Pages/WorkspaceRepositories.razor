@@ -314,7 +314,7 @@
                                                     </span>
                                                 }
                                             </td>
-                                            <td class="col-commits">@GetCommitsBadge(repo.RepositoryId, wr.OutgoingCommits, wr.IncomingCommits, wr.BranchHasUpstream)</td>
+                                            <td class="col-commits">@GetCommitsBadge(repo.RepositoryId, wr.OutgoingCommits, wr.IncomingCommits, wr.BranchHasUpstream, wr.BranchName)</td>
                                             <td class="col-sync col-status-badge">@GetRepoSyncBadge(repo.RepositoryId)</td>
                                         </tr>
                                             @if (repositoryErrors.TryGetValue(repo.RepositoryId, out var repoError))
@@ -667,7 +667,7 @@
             .ToList();
     }
 
-    private RenderFragment GetCommitsBadge(int repositoryId, int? outgoing, int? incoming, bool? branchHasUpstream) => builder =>
+    private RenderFragment GetCommitsBadge(int repositoryId, int? outgoing, int? incoming, bool? branchHasUpstream, string? branchName) => builder =>
     {
         var x = outgoing ?? 0;
         var y = branchHasUpstream == false ? 0 : (incoming ?? 0);
@@ -679,9 +679,10 @@
         string bgColor;
         string textColor = "#fff";
         bool hasCommits = (y > 0) || (x > 0);
+        bool notUpstreamed = branchHasUpstream == false;
         if (y > 0)
             bgColor = "#dc3545";   // red: need to pull
-        else if (x > 0 || branchHasUpstream == false)
+        else if (x > 0 || notUpstreamed)
         {
             bgColor = "#ffc107";   // yellow: need to push or new branch not upstreamed
             textColor = "#000";
@@ -689,16 +690,25 @@
         else
             bgColor = "#198754";   // green: in sync (0,0)
 
-        var cssClass = branchHasUpstream == false ? "badge commits-badge commits-badge-not-upstreamed" : "badge";
+        var cssClass = notUpstreamed ? "badge commits-badge commits-badge-not-upstreamed" : "badge";
+        var clickable = hasCommits || notUpstreamed;
         builder.OpenElement(0, "span");
         builder.AddAttribute(1, "class", cssClass);
-        builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: {textColor};{(hasCommits ? " cursor: pointer;" : "")}");
-        if (hasCommits)
+        builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: {textColor};{(clickable ? " cursor: pointer;" : "")}");
+        if (clickable)
         {
-            builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => ShowConfirmSyncCommits(repositoryId)));
-            builder.AddAttribute(4, "title", branchHasUpstream == false ? "New branch, not pushed yet. Click to sync commits." : "Click to sync commits");
+            if (notUpstreamed)
+            {
+                builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => PushSingleRepositoryWithUpstreamAsync(repositoryId, branchName)));
+                builder.AddAttribute(4, "title", "Push to set upstream");
+            }
+            else
+            {
+                builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => ShowConfirmSyncCommits(repositoryId)));
+                builder.AddAttribute(4, "title", "Click to sync commits");
+            }
         }
-        if (branchHasUpstream == false)
+        if (notUpstreamed)
         {
             builder.OpenElement(5, "span");
             builder.AddAttribute(6, "class", "commits-badge-icon-up commits-badge-icon-up--black");
@@ -867,6 +877,50 @@
     private void ShowConfirmSyncCommits(int repositoryId)
     {
         ShowConfirm("Do you want to sync commits for this repository?", () => CommitSyncAsync(repositoryId));
+    }
+
+    /// <summary>Push with upstream for a single repository (e.g. when user clicks the not-upstreamed badge). Uses the page overlay.</summary>
+    private async Task PushSingleRepositoryWithUpstreamAsync(int repositoryId, string? branchName)
+    {
+        if (workspace == null || isPushing || isSyncing || isUpdating)
+            return;
+
+        _pushCts?.Cancel();
+        _pushCts?.Dispose();
+        _pushCts = new CancellationTokenSource();
+        isPushing = true;
+        pushProgressMessage = "Setting upstream...";
+
+        try
+        {
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+            var (success, errorMessage) = await workspaceGitService.PushSingleRepositoryWithUpstreamAsync(
+                WorkspaceId,
+                repositoryId,
+                branchName,
+                msg => { pushProgressMessage = msg; _ = InvokeAsync(StateHasChanged); },
+                _pushCts.Token);
+
+            if (success)
+                await RefreshFromSync();
+            else
+                ToastService.Show(errorMessage ?? "Push failed.");
+        }
+        catch (OperationCanceledException)
+        {
+            ToastService.Show("Push cancelled.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Push with upstream failed for repository {RepositoryId}", repositoryId);
+            ToastService.Show(ex.Message);
+        }
+        finally
+        {
+            isPushing = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     /// <summary>Push button click: get push plan; filter to repos with unpushed commits or no upstream branch; if selection active filter to selected; if more than one repo show confirmation modal; else run push directly.</summary>
