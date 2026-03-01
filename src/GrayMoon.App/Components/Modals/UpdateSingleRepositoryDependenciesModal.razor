@@ -6,22 +6,24 @@
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
          @onkeydown="HandleKeyDown"
          @ref="_modalElement">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-lg update-deps-modal">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Update dependencies</h5>
                     <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-2">
+                    <p class="mb-2 small">
                         The following @(PackageLines.Count == 1 ? "dependency" : "dependencies") will be updated in <strong>@(RepoName ?? Payload.RepoName)</strong>:
                     </p>
-                    <ul class="list-unstyled mb-3 ps-0">
-                        @foreach (var line in PackageLines)
-                        {
-                            <li class="mb-1"><code>@line.PackageId</code> @line.CurrentVersion → @line.NewVersion</li>
-                        }
-                    </ul>
+                    <div class="update-deps-modal-packages-scroll small mb-3">
+                        <ul class="list-unstyled mb-0 ps-0 update-deps-modal-packages">
+                            @foreach (var line in PackageLines)
+                            {
+                                <li class="mb-1"><code>@line.PackageId</code> <span class="update-deps-modal-versions">@line.CurrentVersion <span class="update-deps-modal-arrow">→</span> @line.NewVersion</span></li>
+                            }
+                        </ul>
+                    </div>
                     <div class="form-check">
                         <input id="update-single-commit-checkbox" type="checkbox" class="form-check-input" @bind="CommitVersionUpdate" />
                         <label class="form-check-label" for="update-single-commit-checkbox">Commit version update</label>

@@ -1,0 +1,72 @@
+/* Keep modal inside viewport so only the packages list scrolls, not the page */
+.update-deps-modal {
+    max-height: calc(100vh - 2rem);
+    margin: 1rem auto;
+}
+
+.update-deps-modal .modal-content {
+    max-height: calc(100vh - 2rem);
+    display: flex;
+    flex-direction: column;
+}
+
+.update-deps-modal .modal-body {
+    overflow: hidden;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Scrollable dependencies list: gray scrollbar, max height */
+.update-deps-modal-packages-scroll {
+    flex: 0 1 auto;
+    font-size: 0.875rem;
+    max-height: 12rem;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: auto;
+    scrollbar-color: #6c757d transparent;
+}
+
+.update-deps-modal-packages-scroll::-webkit-scrollbar {
+    width: 0.6rem;
+    height: 0.6rem;
+}
+
+.update-deps-modal-packages-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.update-deps-modal-packages-scroll::-webkit-scrollbar-thumb {
+    background: #6c757d;
+    border-radius: 0.3rem;
+}
+
+.update-deps-modal-packages-scroll::-webkit-scrollbar-thumb:hover {
+    background: #5a6268;
+}
+
+/* Repo name and package list: same small style as push-with-dependencies modal */
+.update-deps-modal .modal-body > p.small {
+    font-size: 0.875rem;
+}
+
+.update-deps-modal-packages {
+    font-size: 0.875rem;
+}
+
+/* Versions (current → new): even smaller so they fit on the line, same font style as repo name */
+.update-deps-modal-versions {
+    font-size: 0.75rem;
+    font-family: inherit;
+    color: inherit;
+}
+
+.update-deps-modal-packages code {
+    font-size: 0.875rem;
+}
+
+/* Arrow between versions: gray to match muted/secondary text */
+.update-deps-modal-arrow {
+    color: var(--bs-secondary-color, #6c757d);
+}

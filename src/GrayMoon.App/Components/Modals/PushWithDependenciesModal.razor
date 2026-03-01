@@ -6,30 +6,35 @@
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
          @onkeydown="HandleKeyDown"
          @ref="_modalElement">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-lg push-deps-modal">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Push with upstream</h5>
+                    <h5 class="modal-title">Push</h5>
                     <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-2">
+                    <p class="mb-2 small">
                         <strong>@(RepoName ?? Info.PayloadForRepo.RepoName)</strong> has package dependencies. Push will include this repository and its dependency path.
                     </p>
                     <p class="mb-1 small text-muted">Required packages:</p>
-                    <ul class="small mb-2 ps-3">
-                        @foreach (var pkg in Info.PayloadForRepo.RequiredPackages)
+                    <div class="push-deps-modal-packages-scroll small mb-3">
+                        @foreach (var group in PackagesByLevel)
                         {
-                            <li><code>@pkg.PackageId</code> @pkg.Version</li>
+                            <div class="push-deps-modal-level-group">
+                                <div class="push-deps-modal-level-first-line">
+                                    <div class="push-deps-modal-package-line">
+                                        @{ var first = group.Packages[0]; }
+                                        <code>@first.PackageId</code> <span class="push-deps-modal-version">@first.Version</span>
+                                    </div>
+                                    <span class="push-deps-modal-level-label">Level @group.Level</span>
+                                </div>
+                                @foreach (var pkg in group.Packages.Skip(1))
+                                {
+                                    <div class="push-deps-modal-package-line"><code>@pkg.PackageId</code> <span class="push-deps-modal-version">@pkg.Version</span></div>
+                                }
+                            </div>
                         }
-                    </ul>
-                    <p class="mb-1 small text-muted">Dependency path (level order):</p>
-                    <ul class="small mb-3 ps-3">
-                        @foreach (var dep in Info.DependencyPathPayloads)
-                        {
-                            <li>@dep.RepoName (level @(dep.DependencyLevel ?? 0))</li>
-                        }
-                    </ul>
+                    </div>
                     <div class="form-check">
                         <input id="push-sync-checkbox" type="checkbox" class="form-check-input" @bind="SynchronizedPush" />
                         <label class="form-check-label" for="push-sync-checkbox">Synchronized Push</label>
@@ -67,6 +72,31 @@
 
     private bool SynchronizedPush { get; set; }
     private ElementReference _modalElement;
+
+    /// <summary>Required packages grouped by dependency level (level order), for display.</summary>
+    private IReadOnlyList<(int Level, IReadOnlyList<RequiredPackageForPush> Packages)> PackagesByLevel
+    {
+        get
+        {
+            if (Info == null) return Array.Empty<(int, IReadOnlyList<RequiredPackageForPush>)>();
+            var path = Info.DependencyPathPayloads;
+            var packageToLevel = path
+                .Where(p => p.DependencyLevel.HasValue)
+                .ToDictionary(p => p.RepoName.Trim(), p => p.DependencyLevel!.Value, StringComparer.OrdinalIgnoreCase);
+            var byLevel = new Dictionary<int, List<RequiredPackageForPush>>();
+            foreach (var pkg in Info.PayloadForRepo.RequiredPackages)
+            {
+                var level = packageToLevel.TryGetValue(pkg.PackageId.Trim(), out var l) ? l : int.MaxValue;
+                if (!byLevel.TryGetValue(level, out var list))
+                {
+                    list = new List<RequiredPackageForPush>();
+                    byLevel[level] = list;
+                }
+                list.Add(pkg);
+            }
+            return byLevel.OrderBy(kv => kv.Key).Select(kv => (kv.Key, (IReadOnlyList<RequiredPackageForPush>)kv.Value)).ToList();
+        }
+    }
 
     protected override void OnParametersSet()
     {
