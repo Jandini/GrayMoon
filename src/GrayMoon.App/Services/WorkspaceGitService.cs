@@ -382,7 +382,7 @@ public class WorkspaceGitService(
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
 
-    /// <summary>Stages updated .csproj paths and commits with message "Update dependencies" plus one line per package (name version).</summary>
+    /// <summary>Stages updated .csproj paths and commits with message "Update dependencies" plus one line per package (name version). Runs up to 8 commits in parallel.</summary>
     public async Task<IReadOnlyList<(int RepoId, string? ErrorMessage)>> CommitDependencyUpdatesAsync(
         int workspaceId,
         IReadOnlyList<SyncDependenciesRepoPayload> reposToCommit,
@@ -396,41 +396,50 @@ public class WorkspaceGitService(
         if (workspace == null)
             return reposToCommit.Select(r => (r.RepoId, (string?)"Workspace not found.")).ToList();
 
-        var results = new List<(int RepoId, string? ErrorMessage)>();
-        var completed = 0;
         var total = reposToCommit.Count;
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        const int maxParallelCommit = 8;
+        var completed = 0;
+        var semaphore = new SemaphoreSlim(maxParallelCommit);
 
-        foreach (var repo in reposToCommit)
+        var tasks = reposToCommit.Select(async repo =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var pathsToStage = repo.ProjectUpdates.Select(p => p.ProjectPath).Distinct().ToList();
-            var lines = new List<string> { "chore(deps): update package versions", "" };
-            foreach (var pu in repo.ProjectUpdates)
+            await semaphore.WaitAsync(cancellationToken);
+            try
             {
-                foreach (var (packageId, _, newVersion) in pu.PackageUpdates)
-                    lines.Add($"- {packageId} to {newVersion}");
+                var pathsToStage = repo.ProjectUpdates.Select(p => p.ProjectPath).Distinct().ToList();
+                var lines = new List<string> { "chore(deps): update package versions", "" };
+                foreach (var pu in repo.ProjectUpdates)
+                {
+                    foreach (var (packageId, _, newVersion) in pu.PackageUpdates)
+                        lines.Add($"- {packageId} to {newVersion}");
+                }
+                var commitMessage = string.Join("\r\n", lines);
+
+                var args = new
+                {
+                    workspaceName = workspace.Name,
+                    repositoryName = repo.RepoName,
+                    commitMessage,
+                    pathsToStage,
+                    workspaceRoot
+                };
+                var response = await _agentBridge.SendCommandAsync("StageAndCommit", args, cancellationToken);
+                var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data) is { Success: true };
+                var err = success ? null : (response.Error ?? AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data!)?.ErrorMessage ?? "Commit failed");
+                var c = Interlocked.Increment(ref completed);
+                onProgress?.Invoke(c, total, repo.RepoId);
+                return (RepoId: repo.RepoId, ErrorMessage: err);
             }
-            var commitMessage = string.Join("\r\n", lines);
-
-            var args = new
+            finally
             {
-                workspaceName = workspace.Name,
-                repositoryName = repo.RepoName,
-                commitMessage,
-                pathsToStage,
-                workspaceRoot
-            };
-            var response = await _agentBridge.SendCommandAsync("StageAndCommit", args, cancellationToken);
-            var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data) is { Success: true };
-            var err = success ? null : (response.Error ?? AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data!)?.ErrorMessage ?? "Commit failed");
-            results.Add((repo.RepoId, err));
-            completed++;
-            onProgress?.Invoke(completed, total, repo.RepoId);
-        }
+                semaphore.Release();
+            }
+        });
 
-        return results;
+        var completedResults = await Task.WhenAll(tasks);
+        var byRepo = completedResults.ToDictionary(x => x.RepoId, x => x.ErrorMessage);
+        return reposToCommit.Select(r => (r.RepoId, ErrorMessage: byRepo[r.RepoId])).ToList();
     }
 
     /// <summary>Runs full update (refresh projects, sync deps, optional commits). Stops on first error and reports it via onRepoError (message under the repo). When <paramref name="repoIdsToUpdate"/> is set, only those repos are updated.</summary>
@@ -501,7 +510,7 @@ public class WorkspaceGitService(
                     break;
 
                 onProgressMessage?.Invoke($"Committing for dependency level {level}...");
-                var commitResults = await CommitDependencyUpdatesAsync(workspaceId, reposAtLevel, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Committing {c} of {t} for dependency level {level}"), cancellationToken: cancellationToken);
+                var commitResults = await CommitDependencyUpdatesAsync(workspaceId, reposAtLevel, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Committed {c} of {t} for dependency level {level}"), cancellationToken: cancellationToken);
                 foreach (var (repoId, errMsg) in commitResults)
                 {
                     if (!string.IsNullOrEmpty(errMsg))
@@ -547,7 +556,7 @@ public class WorkspaceGitService(
             if (hadError)
                 return;
             onProgressMessage?.Invoke("Committing updates...");
-            var commitResults = await CommitDependencyUpdatesAsync(workspaceId, payload, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Committing {c} of {t}"), cancellationToken: cancellationToken);
+            var commitResults = await CommitDependencyUpdatesAsync(workspaceId, payload, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Committed {c} of {t}"), cancellationToken: cancellationToken);
             foreach (var (repoId, errMsg) in commitResults)
             {
                 if (!string.IsNullOrEmpty(errMsg))
