@@ -514,7 +514,20 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
             .ToList();
         var dependencyRepoIdsList = dependencyPathPayloads.Select(p => p.RepoId).ToList();
 
-        return new PushDependencyInfoForRepo(payloadForRepo, dependencyRepoIdsList, dependencyPathPayloads);
+        var packageToRepoId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in projects)
+        {
+            var key = p.PackageId?.Trim();
+            if (!string.IsNullOrEmpty(key) && !packageToRepoId.ContainsKey(key))
+                packageToRepoId[key] = p.RepositoryId;
+        }
+        var packageIdToLevel = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pkg in payloadForRepo.RequiredPackages)
+        {
+            if (packageToRepoId.TryGetValue(pkg.PackageId.Trim(), out var repoId) && levelByRepo.TryGetValue(repoId, out var level))
+                packageIdToLevel[pkg.PackageId.Trim()] = level;
+        }
+        return new PushDependencyInfoForRepo(payloadForRepo, dependencyRepoIdsList, dependencyPathPayloads, packageIdToLevel.Count > 0 ? packageIdToLevel : null);
     }
 
     /// <summary>Gets push dependency info for a set of repos: merged required packages and dependency path (union of all repos' paths). Used for main Push button to show same modal as single-repo.</summary>
@@ -552,7 +565,26 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
             repoIds.Count == 1 ? payloadByRepo.GetValueOrDefault(repoIdsList[0])?.RepoName ?? "1 repository" : $"{repoIds.Count} repositories",
             null,
             mergedRequired);
-        return new PushDependencyInfoForRepo(syntheticPayload, dependencyRepoIdsList, dependencyPathPayloads);
+
+        var projects = await dbContext.WorkspaceProjects
+            .AsNoTracking()
+            .Where(p => p.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+        var packageToRepoId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in projects)
+        {
+            var key = p.PackageId?.Trim();
+            if (!string.IsNullOrEmpty(key) && !packageToRepoId.ContainsKey(key))
+                packageToRepoId[key] = p.RepositoryId;
+        }
+        var levelByRepo = fullPlan.ToDictionary(p => p.RepoId, p => p.DependencyLevel ?? int.MaxValue);
+        var packageIdToLevel = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pkg in mergedRequired)
+        {
+            if (packageToRepoId.TryGetValue(pkg.PackageId.Trim(), out var repoId) && levelByRepo.TryGetValue(repoId, out var level))
+                packageIdToLevel[pkg.PackageId.Trim()] = level;
+        }
+        return new PushDependencyInfoForRepo(syntheticPayload, dependencyRepoIdsList, dependencyPathPayloads, packageIdToLevel.Count > 0 ? packageIdToLevel : null);
     }
 
     /// <summary>Persists the new Version for ProjectDependencies that were updated by sync dependencies. Matches by (RepoId, ProjectPath) -> DependentProjectId and PackageId -> ReferencedProjectId.</summary>

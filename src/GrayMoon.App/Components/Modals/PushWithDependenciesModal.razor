@@ -26,7 +26,7 @@
                                         @{ var first = group.Packages[0]; }
                                         <code>@first.PackageId</code> <span class="push-deps-modal-version">@first.Version</span>
                                     </div>
-                                    <span class="push-deps-modal-level-label">Level @group.Level</span>
+                                    <span class="push-deps-modal-level-label">Level @(group.Level == int.MaxValue ? "unknown" : group.Level.ToString())</span>
                                 </div>
                                 @foreach (var pkg in group.Packages.Skip(1))
                                 {
@@ -85,6 +85,14 @@
             var packageToLevel = path
                 .Where(p => p.DependencyLevel.HasValue)
                 .ToDictionary(p => p.RepoName.Trim(), p => p.DependencyLevel!.Value, StringComparer.OrdinalIgnoreCase);
+            if (Info.PackageIdToLevel != null)
+            {
+                foreach (var kv in Info.PackageIdToLevel)
+                {
+                    if (!string.IsNullOrWhiteSpace(kv.Key))
+                        packageToLevel[kv.Key.Trim()] = kv.Value;
+                }
+            }
             var byLevel = new Dictionary<int, List<RequiredPackageForPush>>();
             foreach (var pkg in Info.PayloadForRepo.RequiredPackages)
             {
