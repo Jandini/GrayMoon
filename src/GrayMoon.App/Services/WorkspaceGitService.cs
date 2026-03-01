@@ -627,18 +627,26 @@ public class WorkspaceGitService(
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
                 var linkedToken = linkedCts.Token;
                 var deadline = DateTime.UtcNow + totalTimeout;
-                var found = 0;
+                const int maxParallelChecks = 8;
+                var foundByIndex = new bool[totalDeps];
+                var foundLock = new object();
+                int getFoundCount()
+                {
+                    lock (foundLock) { return foundByIndex.Count(x => x); }
+                }
                 var lastPollUtc = DateTime.MinValue;
-                while (found < totalDeps)
+
+                while (getFoundCount() < totalDeps)
                 {
                     linkedToken.ThrowIfCancellationRequested();
                     var remaining = deadline - DateTime.UtcNow;
                     if (remaining <= TimeSpan.Zero)
                     {
                         onProgressMessage?.Invoke("Timed out.");
-                        _logger.LogWarning("Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", totalTimeout.TotalMinutes, found, totalDeps);
+                        _logger.LogWarning("Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", totalTimeout.TotalMinutes, getFoundCount(), totalDeps);
                         throw new OperationCanceledException("Push wait for dependencies timed out.");
                     }
+                    var found = getFoundCount();
                     var line1 = found == 0
                         ? $"Waiting for {totalDeps} {(totalDeps == 1 ? "dependency" : "dependencies")}..."
                         : $"Found {found} of {totalDeps} {(totalDeps == 1 ? "dependency" : "dependencies")}...";
@@ -649,27 +657,41 @@ public class WorkspaceGitService(
 
                     if ((DateTime.UtcNow - lastPollUtc).TotalSeconds >= 2)
                     {
-                        found = 0;
-                        foreach (var req in requiredForLevel)
-                        {
-                            var connector = await _connectorRepository.GetByIdAsync(req.MatchedConnectorId!.Value);
-                            if (connector == null)
-                            {
-                                _logger.LogWarning("Push wait: package {PackageId} {Version} has no connector (MatchedConnectorId={ConnectorId}).", req.PackageId, req.Version, req.MatchedConnectorId);
-                                continue;
-                            }
-                            var exists = await _nuGetService.PackageVersionExistsAsync(connector, req.PackageId, req.Version, linkedToken);
-                            _logger.LogInformation("Push wait: checking {PackageId} {Version} in registry {ConnectorName} (Id={ConnectorId}) -> {Result}",
-                                req.PackageId, req.Version, connector.ConnectorName, connector.ConnectorId, exists ? "found" : "not found");
-                            if (exists)
-                                found++;
-                        }
                         lastPollUtc = DateTime.UtcNow;
-                        if (found >= totalDeps)
-                            _logger.LogInformation("Push wait: all {Total} package(s) found for level {Level}, proceeding.", totalDeps, level);
+                        int[] toCheck;
+                        lock (foundLock)
+                        {
+                            toCheck = Enumerable.Range(0, totalDeps).Where(i => !foundByIndex[i]).ToArray();
+                        }
+                        if (toCheck.Length > 0)
+                        {
+                            foreach (var chunk in toCheck.Chunk(maxParallelChecks))
+                            {
+                                await Task.WhenAll(chunk.Select(async i =>
+                                {
+                                    var req = requiredForLevel[i];
+                                    var connector = await _connectorRepository.GetByIdAsync(req.MatchedConnectorId!.Value);
+                                    if (connector == null)
+                                    {
+                                        _logger.LogWarning("Push wait: package {PackageId} {Version} has no connector (MatchedConnectorId={ConnectorId}).", req.PackageId, req.Version, req.MatchedConnectorId);
+                                        return;
+                                    }
+                                    var exists = await _nuGetService.PackageVersionExistsAsync(connector, req.PackageId, req.Version, linkedToken);
+                                    _logger.LogInformation("Push wait: checking {PackageId} {Version} in registry {ConnectorName} (Id={ConnectorId}) -> {Result}",
+                                        req.PackageId, req.Version, connector.ConnectorName, connector.ConnectorId, exists ? "found" : "not found");
+                                    if (exists)
+                                    {
+                                        lock (foundLock)
+                                            foundByIndex[i] = true;
+                                    }
+                                }));
+                            }
+                            if (getFoundCount() >= totalDeps)
+                                _logger.LogInformation("Push wait: all {Total} package(s) found for level {Level}, proceeding.", totalDeps, level);
+                        }
                     }
 
-                    if (found >= totalDeps)
+                    if (getFoundCount() >= totalDeps)
                         break;
                     await Task.Delay(TimeSpan.FromSeconds(1), linkedToken);
                 }
