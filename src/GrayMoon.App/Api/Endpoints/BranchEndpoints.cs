@@ -199,9 +199,13 @@ public static class BranchEndpoints
             if (string.IsNullOrWhiteSpace(localBranchName))
                 localBranchName = branchName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? branchName.Substring("origin/".Length) : branchName;
             if (!string.IsNullOrWhiteSpace(localBranchName) && wr != null)
+            {
                 await workspaceGitService.EnsureLocalBranchPersistedAsync(wr.WorkspaceRepositoryId, localBranchName, CancellationToken.None);
+                wr.BranchName = localBranchName;
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+            }
 
-            // Broadcast update to refresh UI
+            // Broadcast update to refresh UI (branch name). BranchHasUpstream and commit counts will be updated when the checkout hook notify runs (CheckoutHookSync → SyncCommand).
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
 
             return Results.Ok(new CheckoutBranchApiResult(true, null) { CurrentBranch = checkoutResponse?.CurrentBranch });
@@ -615,6 +619,13 @@ public static class BranchEndpoints
                 await dbContext.SaveChangesAsync(CancellationToken.None);
             }
 
+            // If the deleted branch was the current branch's remote, mark as no upstream.
+            if (isRemote && string.Equals(wr.BranchName, branchName, StringComparison.OrdinalIgnoreCase))
+            {
+                wr.BranchHasUpstream = false;
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+            }
+
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
 
             return Results.Ok(new { success = true });
@@ -694,6 +705,19 @@ public static class BranchEndpoints
             commonBranchNames,
             defaultDisplayText
         });
+    }
+
+    /// <summary>Returns true if the current branch has a matching remote (e.g. origin/branchName or branchName), false otherwise. Returns null when unknown (no branch name or no remote list).</summary>
+    private static bool? ComputeBranchHasUpstream(string? currentBranchName, IReadOnlyList<string>? remoteBranches)
+    {
+        if (string.IsNullOrWhiteSpace(currentBranchName) || remoteBranches == null || remoteBranches.Count == 0)
+            return null;
+        var branch = currentBranchName.Trim();
+        var hasUpstream = remoteBranches.Any(r => !string.IsNullOrEmpty(r) &&
+            (string.Equals(r, branch, StringComparison.OrdinalIgnoreCase)
+             || string.Equals(r, "origin/" + branch, StringComparison.OrdinalIgnoreCase)
+             || r.EndsWith("/" + branch, StringComparison.OrdinalIgnoreCase)));
+        return hasUpstream;
     }
 }
 

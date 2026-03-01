@@ -7,13 +7,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services;
 
-/// <summary>Handles SyncCommand from the agent (hook flow): persist version/branch/commit counts, recompute dependency stats for the workspace, then broadcast WorkspaceSynced so the grid can refresh.</summary>
+/// <summary>Handles SyncCommand from the agent (hook flow): persist version/branch/commit counts and upstream flag, recompute dependency stats for the workspace, then broadcast WorkspaceSynced so the grid can refresh.</summary>
 public sealed class SyncCommandHandler(
     IServiceScopeFactory scopeFactory,
     IHubContext<WorkspaceSyncHub> hubContext,
     ILogger<SyncCommandHandler> logger)
 {
-    public async Task HandleAsync(int workspaceId, int repositoryId, string version, string branch, int? outgoingCommits = null, int? incomingCommits = null)
+    public async Task HandleAsync(int workspaceId, int repositoryId, string version, string branch, int? outgoingCommits = null, int? incomingCommits = null, bool? hasUpstream = null)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -31,6 +31,7 @@ public sealed class SyncCommandHandler(
         wr.BranchName = branch == "-" ? null : branch;
         if (outgoingCommits.HasValue) wr.OutgoingCommits = outgoingCommits;
         if (incomingCommits.HasValue) wr.IncomingCommits = incomingCommits;
+        if (hasUpstream.HasValue) wr.BranchHasUpstream = hasUpstream.Value;
         wr.SyncStatus = (version == "-" || branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
 
         await dbContext.SaveChangesAsync();

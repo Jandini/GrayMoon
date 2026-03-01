@@ -35,13 +35,10 @@ public sealed class CheckoutBranchCommand(IGitService git) : ICommandHandler<Che
             };
         }
 
-        // Get current branch after checkout
-        string? currentBranch = null;
-        var (versionResult, _) = await git.GetVersionAsync(repoPath, cancellationToken);
-        if (versionResult != null)
-        {
-            currentBranch = versionResult.BranchName ?? versionResult.EscapedBranchName;
-        }
+        // Return current branch name without running GitVersion; the checkout hook will run and send SyncCommand with version, branch, and hasUpstream
+        var currentBranch = branchName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase)
+            ? branchName.Substring("origin/".Length)
+            : branchName;
 
         return new CheckoutBranchResponse
         {

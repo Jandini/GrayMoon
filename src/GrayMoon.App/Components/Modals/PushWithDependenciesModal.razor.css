@@ -1,0 +1,88 @@
+/* Keep modal inside viewport so only the packages div scrolls, not the page */
+.push-deps-modal {
+    max-height: calc(100vh - 2rem);
+    margin: 1rem auto;
+}
+
+.push-deps-modal .modal-content {
+    max-height: calc(100vh - 2rem);
+    display: flex;
+    flex-direction: column;
+}
+
+.push-deps-modal .modal-body {
+    overflow: hidden;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Scrollable required packages list: gray scrollbar, max height */
+.push-deps-modal-packages-scroll {
+    flex: 0 1 auto;
+    font-size: 0.875rem;
+    max-height: 12rem;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: auto;
+    scrollbar-color: #6c757d transparent;
+}
+
+.push-deps-modal-packages-scroll::-webkit-scrollbar {
+    width: 0.6rem;
+    height: 0.6rem;
+}
+
+.push-deps-modal-packages-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.push-deps-modal-packages-scroll::-webkit-scrollbar-thumb {
+    background: #6c757d;
+    border-radius: 0.3rem;
+}
+
+.push-deps-modal-packages-scroll::-webkit-scrollbar-thumb:hover {
+    background: #5a6268;
+}
+
+/* Level group: first line has package + level label on right */
+.push-deps-modal-level-group {
+    margin-bottom: 0;
+}
+
+.push-deps-modal-level-first-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.1rem;
+}
+
+.push-deps-modal-level-first-line .push-deps-modal-package-line {
+    margin-bottom: 0;
+    min-width: 0;
+}
+
+.push-deps-modal-level-label {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.75rem;
+    flex-shrink: 0;
+    padding-right: 0.35rem;
+}
+
+.push-deps-modal-package-line {
+    padding-left: 0.25rem;
+    margin-bottom: 0.1rem;
+}
+
+/* Version same small font as update-deps modal */
+.push-deps-modal-version {
+    font-size: 0.75rem;
+    font-family: inherit;
+    color: inherit;
+}
+
+.push-deps-modal-packages-scroll code {
+    font-size: 0.875rem;
+}

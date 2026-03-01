@@ -284,6 +284,18 @@ public class WorkspaceGitService(
         return (payload, isMultiLevel);
     }
 
+    /// <summary>Gets dependency path and levels for a single repo (e.g. when user clicks the not-upstreamed badge). Returns null if repo not in workspace.</summary>
+    public async Task<PushDependencyInfoForRepo?> GetPushDependencyInfoForRepoAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
+    {
+        return await _workspaceProjectRepository.GetPushDependencyInfoForRepoAsync(workspaceId, repositoryId, cancellationToken);
+    }
+
+    /// <summary>Gets push dependency info for a set of repos (merged required packages and dependency path). Used for main Push button.</summary>
+    public async Task<PushDependencyInfoForRepo?> GetPushDependencyInfoForRepoSetAsync(int workspaceId, IReadOnlySet<int> repoIds, CancellationToken cancellationToken = default)
+    {
+        return await _workspaceProjectRepository.GetPushDependencyInfoForRepoSetAsync(workspaceId, repoIds, cancellationToken);
+    }
+
     /// <summary>Syncs dependency versions in .csproj files to match the current version of each referenced package source. Only repos with at least one mismatched dependency are updated. When <paramref name="repoIdsToSync"/> is set, only those repos are synced.</summary>
     public async Task<int> SyncDependenciesAsync(
         int workspaceId,
@@ -370,7 +382,7 @@ public class WorkspaceGitService(
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
 
-    /// <summary>Stages updated .csproj paths and commits with message "Update dependencies" plus one line per package (name version).</summary>
+    /// <summary>Stages updated .csproj paths and commits with message "Update dependencies" plus one line per package (name version). Runs up to 8 commits in parallel.</summary>
     public async Task<IReadOnlyList<(int RepoId, string? ErrorMessage)>> CommitDependencyUpdatesAsync(
         int workspaceId,
         IReadOnlyList<SyncDependenciesRepoPayload> reposToCommit,
@@ -384,41 +396,50 @@ public class WorkspaceGitService(
         if (workspace == null)
             return reposToCommit.Select(r => (r.RepoId, (string?)"Workspace not found.")).ToList();
 
-        var results = new List<(int RepoId, string? ErrorMessage)>();
-        var completed = 0;
         var total = reposToCommit.Count;
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        const int maxParallelCommit = 8;
+        var completed = 0;
+        var semaphore = new SemaphoreSlim(maxParallelCommit);
 
-        foreach (var repo in reposToCommit)
+        var tasks = reposToCommit.Select(async repo =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var pathsToStage = repo.ProjectUpdates.Select(p => p.ProjectPath).Distinct().ToList();
-            var lines = new List<string> { "chore(deps): update package versions", "" };
-            foreach (var pu in repo.ProjectUpdates)
+            await semaphore.WaitAsync(cancellationToken);
+            try
             {
-                foreach (var (packageId, newVersion) in pu.PackageUpdates)
-                    lines.Add($"- {packageId} to {newVersion}");
+                var pathsToStage = repo.ProjectUpdates.Select(p => p.ProjectPath).Distinct().ToList();
+                var lines = new List<string> { "chore(deps): update package versions", "" };
+                foreach (var pu in repo.ProjectUpdates)
+                {
+                    foreach (var (packageId, _, newVersion) in pu.PackageUpdates)
+                        lines.Add($"- {packageId} to {newVersion}");
+                }
+                var commitMessage = string.Join("\r\n", lines);
+
+                var args = new
+                {
+                    workspaceName = workspace.Name,
+                    repositoryName = repo.RepoName,
+                    commitMessage,
+                    pathsToStage,
+                    workspaceRoot
+                };
+                var response = await _agentBridge.SendCommandAsync("StageAndCommit", args, cancellationToken);
+                var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data) is { Success: true };
+                var err = success ? null : (response.Error ?? AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data!)?.ErrorMessage ?? "Commit failed");
+                var c = Interlocked.Increment(ref completed);
+                onProgress?.Invoke(c, total, repo.RepoId);
+                return (RepoId: repo.RepoId, ErrorMessage: err);
             }
-            var commitMessage = string.Join("\r\n", lines);
-
-            var args = new
+            finally
             {
-                workspaceName = workspace.Name,
-                repositoryName = repo.RepoName,
-                commitMessage,
-                pathsToStage,
-                workspaceRoot
-            };
-            var response = await _agentBridge.SendCommandAsync("StageAndCommit", args, cancellationToken);
-            var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data) is { Success: true };
-            var err = success ? null : (response.Error ?? AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data!)?.ErrorMessage ?? "Commit failed");
-            results.Add((repo.RepoId, err));
-            completed++;
-            onProgress?.Invoke(completed, total, repo.RepoId);
-        }
+                semaphore.Release();
+            }
+        });
 
-        return results;
+        var completedResults = await Task.WhenAll(tasks);
+        var byRepo = completedResults.ToDictionary(x => x.RepoId, x => x.ErrorMessage);
+        return reposToCommit.Select(r => (r.RepoId, ErrorMessage: byRepo[r.RepoId])).ToList();
     }
 
     /// <summary>Runs full update (refresh projects, sync deps, optional commits). Stops on first error and reports it via onRepoError (message under the repo). When <paramref name="repoIdsToUpdate"/> is set, only those repos are updated.</summary>
@@ -483,13 +504,13 @@ public class WorkspaceGitService(
                 if (reposAtLevel.Count == 0) continue;
 
                 var repoIds = reposAtLevel.Select(r => r.RepoId).ToHashSet();
-                onProgressMessage?.Invoke($"Updating {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")} for dependency level {level}...");
-                await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Syncing {c} of {t} for dependency level {level}"), onRepoError: OnRepoError, repoIdsToSync: repoIds, cancellationToken: cancellationToken);
+                onProgressMessage?.Invoke($"Updating {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
+                await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Syncing {c} of {t}"), onRepoError: OnRepoError, repoIdsToSync: repoIds, cancellationToken: cancellationToken);
                 if (hadError)
                     break;
 
-                onProgressMessage?.Invoke($"Committing for dependency level {level}...");
-                var commitResults = await CommitDependencyUpdatesAsync(workspaceId, reposAtLevel, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Committing {c} of {t} for dependency level {level}"), cancellationToken: cancellationToken);
+                onProgressMessage?.Invoke($"Committing...");
+                var commitResults = await CommitDependencyUpdatesAsync(workspaceId, reposAtLevel, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Committed {c} of {t}"), cancellationToken: cancellationToken);
                 foreach (var (repoId, errMsg) in commitResults)
                 {
                     if (!string.IsNullOrEmpty(errMsg))
@@ -501,18 +522,30 @@ public class WorkspaceGitService(
                 if (hadError)
                     break;
 
-                foreach (var repo in reposAtLevel)
+                const int maxParallelRefresh = 8;
+                var totalRefresh = reposAtLevel.Count;
+                var completedRefresh = 0;
+                var refreshSemaphore = new SemaphoreSlim(maxParallelRefresh);
+                var refreshTasks = reposAtLevel.Select(async repo =>
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (hadError)
-                        break;
-                    onProgressMessage?.Invoke($"Refreshing version for {repo.RepoName}...");
-                    var (refreshSuccess, refreshError) = await SyncSingleRepositoryAsync(repo.RepoId, workspaceId, cancellationToken);
-                    if (!refreshSuccess)
+                    await refreshSemaphore.WaitAsync(cancellationToken);
+                    try
                     {
-                        OnRepoError(repo.RepoId, refreshError ?? "Refresh version failed.");
-                        break;
+                        var (refreshSuccess, refreshError) = await SyncSingleRepositoryAsync(repo.RepoId, workspaceId, cancellationToken);
+                        var c = Interlocked.Increment(ref completedRefresh);
+                        onProgressMessage?.Invoke($"Updating version {c} of {totalRefresh}...");
+                        return (repo.RepoId, refreshSuccess, refreshError);
                     }
+                    finally
+                    {
+                        refreshSemaphore.Release();
+                    }
+                });
+                var refreshResults = await Task.WhenAll(refreshTasks);
+                foreach (var (repoId, success, err) in refreshResults)
+                {
+                    if (!success)
+                        OnRepoError(repoId, err ?? "Refresh version failed.");
                 }
             }
         }
@@ -523,7 +556,7 @@ public class WorkspaceGitService(
             if (hadError)
                 return;
             onProgressMessage?.Invoke("Committing updates...");
-            var commitResults = await CommitDependencyUpdatesAsync(workspaceId, payload, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Committing {c} of {t}"), cancellationToken: cancellationToken);
+            var commitResults = await CommitDependencyUpdatesAsync(workspaceId, payload, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Committed {c} of {t}"), cancellationToken: cancellationToken);
             foreach (var (repoId, errMsg) in commitResults)
             {
                 if (!string.IsNullOrEmpty(errMsg))
@@ -532,18 +565,47 @@ public class WorkspaceGitService(
                     break;
                 }
             }
+            if (!hadError && payload.Count > 0)
+            {
+                const int maxParallelRefresh = 8;
+                var totalRefresh = payload.Count;
+                var completedRefresh = 0;
+                var refreshSemaphore = new SemaphoreSlim(maxParallelRefresh);
+                var refreshTasks = payload.Select(async repo =>
+                {
+                    await refreshSemaphore.WaitAsync(cancellationToken);
+                    try
+                    {
+                        var (refreshSuccess, refreshError) = await SyncSingleRepositoryAsync(repo.RepoId, workspaceId, cancellationToken);
+                        var c = Interlocked.Increment(ref completedRefresh);
+                        onProgressMessage?.Invoke($"Updating version {c} of {totalRefresh}...");
+                        return (repo.RepoId, refreshSuccess, refreshError);
+                    }
+                    finally
+                    {
+                        refreshSemaphore.Release();
+                    }
+                });
+                var refreshResults = await Task.WhenAll(refreshTasks);
+                foreach (var (repoId, success, err) in refreshResults)
+                {
+                    if (!success)
+                        OnRepoError(repoId, err ?? "Refresh version failed.");
+                }
+            }
         }
 
         if (!hadError)
             await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
     }
 
-    /// <summary>Runs dependency-synchronized push: sync package registries, then push by level (lowest first). For each level, waits until required packages are in registry (or pushes all at once if not possible), then pushes all repos at that level in parallel. Ensures branch is upstreamed even when there are no commits to push. When <paramref name="repoIdsToPush"/> is set, only those repos are pushed.</summary>
+    /// <summary>Runs dependency-synchronized push: sync package registries (unless already done by caller), then push by level (lowest first). For each level, waits until required packages are in registry (or pushes all at once if not possible), then pushes all repos at that level in parallel. Ensures branch is upstreamed even when there are no commits to push. When <paramref name="repoIdsToPush"/> is set, only those repos are pushed. Set <paramref name="packageRegistriesAlreadySynced"/> to true when the caller already synced required packages (e.g. via SyncRegistriesForPackageIdsAsync) to avoid syncing twice.</summary>
     public async Task RunPushAsync(
         int workspaceId,
         IReadOnlySet<int>? repoIdsToPush = null,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
+        bool packageRegistriesAlreadySynced = false,
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
@@ -556,9 +618,12 @@ public class WorkspaceGitService(
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         await _workspaceService.CreateDirectoryAsync(workspace.Name, workspaceRoot, cancellationToken);
 
-        onProgressMessage?.Invoke("Syncing package registries...");
-        if (_packageRegistrySyncService != null)
-            await _packageRegistrySyncService.SyncWorkspacePackageRegistriesAsync(workspaceId, cancellationToken: cancellationToken);
+        if (!packageRegistriesAlreadySynced)
+        {
+            onProgressMessage?.Invoke("Syncing package registries...");
+            if (_packageRegistrySyncService != null)
+                await _packageRegistrySyncService.SyncWorkspacePackageRegistriesAsync(workspaceId, cancellationToken: cancellationToken);
+        }
 
         var fullPayload = await _workspaceProjectRepository.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
         var payload = repoIdsToPush is { Count: > 0 }
@@ -588,7 +653,7 @@ public class WorkspaceGitService(
         {
             onProgressMessage?.Invoke("Pushing all repositories...");
             await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
-            await RefreshVersionsAfterPushAsync(workspaceId, payload, cancellationToken);
+            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
             if (_hubContext != null)
                 await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
             return;
@@ -610,26 +675,40 @@ public class WorkspaceGitService(
 
             if (totalDeps > 0)
             {
+                _logger.LogInformation("Push wait: level {Level}, waiting for {Count} package(s): {Packages}",
+                    level,
+                    totalDeps,
+                    string.Join(", ", requiredForLevel.Select(r => r.PackageId + "@" + r.Version + " (connector " + r.MatchedConnectorId + ")")));
+
                 var timeoutMinutes = totalDeps * Math.Max(0.1, workspaceOptions.Value.PushWaitDependencyTimeoutMinutesPerDependency);
                 var totalTimeout = TimeSpan.FromMinutes(timeoutMinutes);
                 using var timeoutCts = new CancellationTokenSource(totalTimeout);
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
                 var linkedToken = linkedCts.Token;
                 var deadline = DateTime.UtcNow + totalTimeout;
-                var found = 0;
+                const int maxParallelChecks = 8;
+                var foundByIndex = new bool[totalDeps];
+                var foundLock = new object();
+                int getFoundCount()
+                {
+                    lock (foundLock) { return foundByIndex.Count(x => x); }
+                }
                 var lastPollUtc = DateTime.MinValue;
-                while (found < totalDeps)
+
+                while (getFoundCount() < totalDeps)
                 {
                     linkedToken.ThrowIfCancellationRequested();
                     var remaining = deadline - DateTime.UtcNow;
                     if (remaining <= TimeSpan.Zero)
                     {
                         onProgressMessage?.Invoke("Timed out.");
+                        _logger.LogWarning("Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", totalTimeout.TotalMinutes, getFoundCount(), totalDeps);
                         throw new OperationCanceledException("Push wait for dependencies timed out.");
                     }
+                    var found = getFoundCount();
                     var line1 = found == 0
                         ? $"Waiting for {totalDeps} {(totalDeps == 1 ? "dependency" : "dependencies")}..."
-                        : $"{found} of {totalDeps} dependencies...";
+                        : $"Found {found} of {totalDeps} {(totalDeps == 1 ? "dependency" : "dependencies")}";
                     var totalSec = (int)remaining.TotalSeconds;
                     var mm = totalSec / 60;
                     var ss = totalSec % 60;
@@ -637,27 +716,52 @@ public class WorkspaceGitService(
 
                     if ((DateTime.UtcNow - lastPollUtc).TotalSeconds >= 2)
                     {
-                        found = 0;
-                        foreach (var req in requiredForLevel)
-                        {
-                            var connector = await _connectorRepository.GetByIdAsync(req.MatchedConnectorId!.Value);
-                            if (connector != null && await _nuGetService.PackageVersionExistsAsync(connector, req.PackageId, req.Version, linkedToken))
-                                found++;
-                        }
                         lastPollUtc = DateTime.UtcNow;
+                        int[] toCheck;
+                        lock (foundLock)
+                        {
+                            toCheck = Enumerable.Range(0, totalDeps).Where(i => !foundByIndex[i]).ToArray();
+                        }
+                        if (toCheck.Length > 0)
+                        {
+                            foreach (var chunk in toCheck.Chunk(maxParallelChecks))
+                            {
+                                await Task.WhenAll(chunk.Select(async i =>
+                                {
+                                    var req = requiredForLevel[i];
+                                    var connector = await _connectorRepository.GetByIdAsync(req.MatchedConnectorId!.Value);
+                                    if (connector == null)
+                                    {
+                                        _logger.LogWarning("Push wait: package {PackageId} {Version} has no connector (MatchedConnectorId={ConnectorId}).", req.PackageId, req.Version, req.MatchedConnectorId);
+                                        return;
+                                    }
+                                    var exists = await _nuGetService.PackageVersionExistsAsync(connector, req.PackageId, req.Version, linkedToken);
+                                    _logger.LogInformation("Push wait: checking {PackageId} {Version} in registry {ConnectorName} (Id={ConnectorId}) -> {Result}",
+                                        req.PackageId, req.Version, connector.ConnectorName, connector.ConnectorId, exists ? "found" : "not found");
+                                    if (exists)
+                                    {
+                                        lock (foundLock)
+                                            foundByIndex[i] = true;
+                                    }
+                                }));
+                            }
+                            if (getFoundCount() >= totalDeps)
+                                _logger.LogInformation("Push wait: all {Total} package(s) found for level {Level}, proceeding.", totalDeps, level);
+                        }
                     }
 
-                    if (found >= totalDeps)
+                    if (getFoundCount() >= totalDeps)
                         break;
                     await Task.Delay(TimeSpan.FromSeconds(1), linkedToken);
                 }
             }
 
-            onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")} for dependency level {level}...");
+            onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
             await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
-            await RefreshVersionsAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
+            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
         }
 
+        await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
@@ -706,16 +810,158 @@ public class WorkspaceGitService(
         await Task.WhenAll(pushTasks);
     }
 
-    private async Task RefreshVersionsAfterPushAsync(int workspaceId, IReadOnlyList<PushRepoPayload> repos, CancellationToken cancellationToken)
+    /// <summary>Pushes a single repository's current branch with upstream (-u). Used when user clicks the not-upstreamed badge. Branch name is provided by the app; when null or empty, the agent resolves it via GitVersion.
+    /// After success we call Refresh (SyncSingleRepositoryAsync) to persist BranchHasUpstream and the new remote branch. An alternative would be for PushRepository to return hasUpstream and for the app to persist it directly—we use Refresh so one code path (RefreshRepositoryVersion) provides version, commit counts, branches, and hasUpstream, and so the new remote branch is added to RepositoryBranches.</summary>
+    public async Task<(bool Success, string? ErrorMessage)> PushSingleRepositoryWithUpstreamAsync(
+        int workspaceId,
+        int repositoryId,
+        string? branchName,
+        Action<string>? onProgressMessage = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_agentBridge.IsAgentConnected)
+            return (false, "Agent not connected. Start GrayMoon.Agent to push.");
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            return (false, "Workspace not found.");
+
+        var link = await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .ThenInclude(r => r!.Connector)
+            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
+
+        if (link?.Repository == null)
+            return (false, "Repository not in workspace or not found.");
+
+        var repo = link.Repository;
+        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+
+        onProgressMessage?.Invoke("Pushing to set upstream...");
+
+        var args = new
+        {
+            workspaceName = workspace.Name,
+            repositoryId = repo.RepositoryId,
+            repositoryName = repo.RepositoryName,
+            bearerToken = repo.Connector?.UserToken,
+            workspaceId,
+            workspaceRoot,
+            branchName = string.IsNullOrWhiteSpace(branchName) ? null : branchName.Trim()
+        };
+
+        var response = await _agentBridge.SendCommandAsync("PushRepository", args, cancellationToken);
+        var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data) is { Success: true };
+        if (!success)
+        {
+            var err = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage ?? "Push failed";
+            return (false, err);
+        }
+
+        await SyncSingleRepositoryAsync(repositoryId, workspaceId, cancellationToken);
+        return (true, null);
+    }
+
+    /// <summary>Pushes a set of repos in dependency level order (lowest first) with upstream, without waiting for packages in registry. Used when user chooses non-synchronized push from the badge.</summary>
+    public async Task RunPushReposInLevelOrderAsync(
+        int workspaceId,
+        IReadOnlySet<int> repoIds,
+        Action<string>? onProgressMessage = null,
+        Action<int, string>? onRepoError = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_agentBridge.IsAgentConnected)
+            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to push.");
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            throw new InvalidOperationException($"Workspace {workspaceId} not found.");
+
+        var fullPayload = await _workspaceProjectRepository.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var payload = fullPayload.Where(p => repoIds.Contains(p.RepoId)).ToList();
+        if (payload.Count == 0)
+        {
+            onProgressMessage?.Invoke("No repositories to push.");
+            return;
+        }
+
+        var links = await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .ThenInclude(r => r!.Connector)
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+        var bearerByRepoId = links.Where(wr => wr.Repository != null).ToDictionary(wr => wr.RepositoryId, wr => wr.Repository!.Connector?.UserToken);
+
+        var levelsAsc = payload.Select(p => p.DependencyLevel ?? 0).Distinct().OrderBy(x => x).ToList();
+        foreach (var level in levelsAsc)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var reposAtLevel = payload.Where(p => (p.DependencyLevel ?? 0) == level).ToList();
+            if (reposAtLevel.Count == 0) continue;
+            onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
+            await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
+            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
+        }
+
+        await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
+        if (_hubContext != null)
+            await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
+    }
+
+    /// <summary>After push: fetches commit counts and hasUpstream from the agent for the pushed repos, then updates WorkspaceRepositories (OutgoingCommits, IncomingCommits, BranchHasUpstream) and broadcasts. Does not refresh GitVersion or branch lists.</summary>
+    private async Task UpdateCommitCountsAndUpstreamAfterPushAsync(int workspaceId, IReadOnlyList<PushRepoPayload> repos, CancellationToken cancellationToken)
     {
         if (repos.Count == 0) return;
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return;
-        foreach (var repo in repos)
+
+        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+
+        var results = await Task.WhenAll(repos.Select(async repo =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            await SyncSingleRepositoryAsync(repo.RepoId, workspaceId, cancellationToken);
+            try
+            {
+                var response = await _agentBridge.SendCommandAsync("GetCommitCounts", new
+                {
+                    workspaceName = workspace.Name,
+                    repositoryName = repo.RepoName,
+                    workspaceRoot
+                }, cancellationToken);
+                if (!response.Success || response.Data == null)
+                    return (RepoId: repo.RepoId, Outgoing: (int?)null, Incoming: (int?)null, HasUpstream: (bool?)null);
+                var data = AgentResponseJson.DeserializeAgentResponse<AgentCommitCountsResponse>(response.Data);
+                return (RepoId: repo.RepoId, Outgoing: data?.OutgoingCommits, Incoming: data?.IncomingCommits, HasUpstream: data?.HasUpstream);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "GetCommitCounts failed for repo {RepoId} ({RepoName})", repo.RepoId, repo.RepoName);
+                return (RepoId: repo.RepoId, Outgoing: (int?)null, Incoming: (int?)null, HasUpstream: (bool?)null);
+            }
+        }));
+
+        var repoIds = repos.Select(r => r.RepoId).ToHashSet();
+        var links = await _dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.RepositoryId))
+            .ToListAsync(cancellationToken);
+        var resultByRepo = results.ToDictionary(r => r.RepoId);
+        foreach (var wr in links)
+        {
+            if (resultByRepo.TryGetValue(wr.RepositoryId, out var r))
+            {
+                wr.OutgoingCommits = r.Outgoing;
+                wr.IncomingCommits = r.Incoming;
+                if (r.HasUpstream.HasValue)
+                    wr.BranchHasUpstream = r.HasUpstream.Value;
+            }
         }
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
+
+        if (_hubContext != null)
+            await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
 
     /// <summary>Refreshes version for a single repo and persists. Returns (success, errorMessage) for caller to report and optionally stop workflow.</summary>
@@ -814,6 +1060,7 @@ public class WorkspaceGitService(
         var projectsDetail = GetProjectsDetail(response.Data);
         var (outgoingCommits, incomingCommits) = GetCommitCounts(response.Data);
         var (localBranches, remoteBranches, defaultBranch) = GetBranches(response.Data);
+        var hasUpstream = ComputeHasUpstream(branch, remoteBranches);
         return new RepoGitVersionInfo
         {
             Version = version,
@@ -822,11 +1069,19 @@ public class WorkspaceGitService(
             ProjectsDetail = projectsDetail,
             OutgoingCommits = outgoingCommits,
             IncomingCommits = incomingCommits,
+            HasUpstream = hasUpstream,
             LocalBranches = localBranches,
             RemoteBranches = remoteBranches,
             DefaultBranch = defaultBranch,
             ErrorMessage = gitVersionError
         };
+    }
+
+    private static bool? ComputeHasUpstream(string? branch, IReadOnlyList<string>? remoteBranches)
+    {
+        if (string.IsNullOrWhiteSpace(branch) || branch == "-" || remoteBranches == null || remoteBranches.Count == 0)
+            return null;
+        return remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
     }
 
     private static RepoGitVersionInfo ParseRefreshRepositoryVersionResponse(AgentCommandResponse response)
@@ -836,14 +1091,26 @@ public class WorkspaceGitService(
 
         var (version, branch, gitVersionError) = GetVersionBranch(response.Data);
         var (outgoingCommits, incomingCommits) = GetCommitCounts(response.Data);
+        var (hasUpstream, remoteBranches, localBranches) = GetRefreshBranchesAndUpstream(response.Data);
         return new RepoGitVersionInfo
         {
             Version = version,
             Branch = branch,
             OutgoingCommits = outgoingCommits,
             IncomingCommits = incomingCommits,
+            HasUpstream = hasUpstream,
+            RemoteBranches = remoteBranches,
+            LocalBranches = localBranches,
             ErrorMessage = gitVersionError
         };
+    }
+
+    private static (bool? HasUpstream, IReadOnlyList<string>? RemoteBranches, IReadOnlyList<string>? LocalBranches) GetRefreshBranchesAndUpstream(object data)
+    {
+        var r = AgentResponseJson.DeserializeAgentResponse<AgentVersionBranchResponse>(data);
+        var remote = r?.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
+        var local = r?.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
+        return (r?.HasUpstream, remote?.Count > 0 ? remote : null, local?.Count > 0 ? local : null);
     }
 
     private static (string version, string branch, string? gitVersionError) GetVersionBranch(object data)
@@ -934,6 +1201,7 @@ public class WorkspaceGitService(
                 if (info.Projects.HasValue) wr.Projects = info.Projects;
                 if (info.OutgoingCommits.HasValue) wr.OutgoingCommits = info.OutgoingCommits;
                 if (info.IncomingCommits.HasValue) wr.IncomingCommits = info.IncomingCommits;
+                if (info.HasUpstream.HasValue) wr.BranchHasUpstream = info.HasUpstream.Value;
                 wr.SyncStatus = (info.Version == "-" || info.Branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
             }
 

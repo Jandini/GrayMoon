@@ -35,17 +35,24 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IHubConnectionProvi
         int? incoming = null;
         if (branch != "-")
         {
-            var (o, i) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, cancellationToken);
+            var (o, i, _) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, cancellationToken);
             outgoing = o;
             incoming = i;
+        }
+
+        bool? hasUpstream = null;
+        if (branch != "-")
+        {
+            var remoteBranches = await git.GetRemoteBranchesAsync(payload.RepositoryPath, cancellationToken);
+            hasUpstream = remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
         }
 
         var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)
         {
-            await connection.InvokeAsync("SyncCommand", payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, cancellationToken);
-            logger.LogInformation("CheckoutHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}",
-                payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming);
+            await connection.InvokeAsync("SyncCommand", payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream, cancellationToken);
+            logger.LogInformation("CheckoutHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}, hasUpstream={HasUpstream}",
+                payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream);
         }
         else
         {

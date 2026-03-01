@@ -1,0 +1,127 @@
+@using Microsoft.AspNetCore.Components.Web
+@using GrayMoon.App.Models
+
+@if (IsVisible && Info != null)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDown"
+         @ref="_modalElement">
+        <div class="modal-dialog modal-lg push-deps-modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Push</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2 small">
+                        <strong>@(RepoName ?? Info.PayloadForRepo.RepoName)</strong> @(IsMultipleRepos ? "have" : "has") package dependencies. Push will include @(IsMultipleRepos ? "these repositories" : "this repository") and @(IsMultipleRepos ? "their" : "its") dependency path@(IsMultipleRepos ? "s" : "").
+                    </p>
+                    <p class="mb-1 small text-muted">Required packages:</p>
+                    <div class="push-deps-modal-packages-scroll small mb-3">
+                        @foreach (var group in PackagesByLevel)
+                        {
+                            <div class="push-deps-modal-level-group">
+                                <div class="push-deps-modal-level-first-line">
+                                    <div class="push-deps-modal-package-line">
+                                        @{ var first = group.Packages[0]; }
+                                        <code>@first.PackageId</code> <span class="push-deps-modal-version">@first.Version</span>
+                                    </div>
+                                    <span class="push-deps-modal-level-label">Level @(group.Level == int.MaxValue ? "unknown" : group.Level.ToString())</span>
+                                </div>
+                                @foreach (var pkg in group.Packages.Skip(1))
+                                {
+                                    <div class="push-deps-modal-package-line"><code>@pkg.PackageId</code> <span class="push-deps-modal-version">@pkg.Version</span></div>
+                                }
+                            </div>
+                        }
+                    </div>
+                    <div class="form-check">
+                        <input id="push-sync-checkbox" type="checkbox" class="form-check-input" @bind="SynchronizedPush" />
+                        <label class="form-check-label" for="push-sync-checkbox">Synchronized Push</label>
+                    </div>
+                    <p class="small text-muted mt-1 mb-0">
+                        @if (SynchronizedPush)
+                        {
+                            <span>Registries will be synced for required packages; then push runs by level and waits for packages in registry before each level.</span>
+                        }
+                        else
+                        {
+                            <span>Push this repo and all dependency repos (by level) without waiting for packages in registry.</span>
+                        }
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-warning" @onclick="Proceed">
+                        Proceed
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public PushDependencyInfoForRepo? Info { get; set; }
+    [Parameter] public string? RepoName { get; set; }
+    [Parameter] public EventCallback<bool> OnProceed { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private bool SynchronizedPush { get; set; } = true;
+    private ElementReference _modalElement;
+
+    private bool IsMultipleRepos => (Info?.PayloadForRepo.RepoName?.Contains("repositories") == true) && (Info?.PayloadForRepo.RepoName != "1 repository");
+
+    /// <summary>Required packages grouped by dependency level (level order), for display.</summary>
+    private IReadOnlyList<(int Level, IReadOnlyList<RequiredPackageForPush> Packages)> PackagesByLevel
+    {
+        get
+        {
+            if (Info == null) return Array.Empty<(int, IReadOnlyList<RequiredPackageForPush>)>();
+            var path = Info.DependencyPathPayloads;
+            var packageToLevel = path
+                .Where(p => p.DependencyLevel.HasValue)
+                .ToDictionary(p => p.RepoName.Trim(), p => p.DependencyLevel!.Value, StringComparer.OrdinalIgnoreCase);
+            if (Info.PackageIdToLevel != null)
+            {
+                foreach (var kv in Info.PackageIdToLevel)
+                {
+                    if (!string.IsNullOrWhiteSpace(kv.Key))
+                        packageToLevel[kv.Key.Trim()] = kv.Value;
+                }
+            }
+            var byLevel = new Dictionary<int, List<RequiredPackageForPush>>();
+            foreach (var pkg in Info.PayloadForRepo.RequiredPackages)
+            {
+                var level = packageToLevel.TryGetValue(pkg.PackageId.Trim(), out var l) ? l : int.MaxValue;
+                if (!byLevel.TryGetValue(level, out var list))
+                {
+                    list = new List<RequiredPackageForPush>();
+                    byLevel[level] = list;
+                }
+                list.Add(pkg);
+            }
+            return byLevel.OrderBy(kv => kv.Key).Select(kv => (kv.Key, (IReadOnlyList<RequiredPackageForPush>)kv.Value)).ToList();
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible)
+            SynchronizedPush = true;
+    }
+
+    private async Task Proceed()
+    {
+        await OnProceed.InvokeAsync(SynchronizedPush);
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            await OnCancel.InvokeAsync();
+    }
+}

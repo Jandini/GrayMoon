@@ -68,7 +68,7 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
         await git.FetchAsync(repoPath, includeTags: false, bearerToken, cancellationToken);
 
         // Get commit counts
-        var (outgoing, incoming) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
+        var (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
 
         bool pullSuccess = true;
         bool mergeConflict = false;
@@ -87,7 +87,7 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
                 
                 // Refresh commit counts after abort
                 await git.FetchAsync(repoPath, includeTags: false, bearerToken, cancellationToken);
-                (outgoing, incoming) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
+                (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
 
                 return new CommitSyncRepositoryResponse
                 {
@@ -116,7 +116,7 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
 
             // Refresh commit counts after pull
             await git.FetchAsync(repoPath, includeTags: false, bearerToken, cancellationToken);
-            (outgoing, incoming) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
+            (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
         }
 
         // Push if there are outgoing commits
@@ -141,7 +141,7 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
 
             // Refresh commit counts after push
             await git.FetchAsync(repoPath, includeTags: false, bearerToken, cancellationToken);
-            (outgoing, incoming) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
+            (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
         }
 
         return new CommitSyncRepositoryResponse

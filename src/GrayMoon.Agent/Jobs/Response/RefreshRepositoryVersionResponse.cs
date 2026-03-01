@@ -18,4 +18,13 @@ public sealed class RefreshRepositoryVersionResponse
 
     [JsonPropertyName("gitVersionError")]
     public string? GitVersionError { get; set; }
+
+    [JsonPropertyName("hasUpstream")]
+    public bool? HasUpstream { get; set; }
+
+    [JsonPropertyName("remoteBranches")]
+    public List<string>? RemoteBranches { get; set; }
+
+    [JsonPropertyName("localBranches")]
+    public List<string>? LocalBranches { get; set; }
 }

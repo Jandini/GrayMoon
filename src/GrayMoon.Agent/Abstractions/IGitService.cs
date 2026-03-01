@@ -11,8 +11,8 @@ public interface IGitService
     Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct);
     /// <summary>Fetches from origin; when <paramref name="includeTags"/> is true, fetches tags as well.</summary>
     Task FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct);
-    /// <summary>Returns (outgoing count, incoming count) for the current branch vs origin/branchName. Returns (null, null) if unavailable.</summary>
-    Task<(int? Outgoing, int? Incoming)> GetCommitCountsAsync(string repoPath, string branchName, CancellationToken ct);
+    /// <summary>Returns (outgoing count, incoming count, hasUpstream) for the current branch vs origin/branchName. When the branch has no upstream, returns (null, null) or (aheadOfDefault, null) and hasUpstream false.</summary>
+    Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, CancellationToken ct);
     /// <summary>Pulls from origin. Returns (success, mergeConflict, errorMessage).</summary>
     Task<(bool Success, bool MergeConflict, string? ErrorMessage)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct);
     /// <summary>Pushes to origin. When setTracking is true, uses -u so the branch is upstreamed even when there are no commits to push. Returns (success, errorMessage).</summary>

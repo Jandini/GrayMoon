@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace GrayMoon.App.Models.Api;
 
-/// <summary>Agent SyncRepository / GetRepositoryVersion response shape (version, branch, etc.).</summary>
+/// <summary>Agent SyncRepository / GetRepositoryVersion / RefreshRepositoryVersion response shape (version, branch, hasUpstream, branches).</summary>
 public sealed class AgentVersionBranchResponse
 {
     [JsonPropertyName("version")]
@@ -13,6 +13,15 @@ public sealed class AgentVersionBranchResponse
 
     [JsonPropertyName("gitVersionError")]
     public string? GitVersionError { get; set; }
+
+    [JsonPropertyName("hasUpstream")]
+    public bool? HasUpstream { get; set; }
+
+    [JsonPropertyName("remoteBranches")]
+    public List<string>? RemoteBranches { get; set; }
+
+    [JsonPropertyName("localBranches")]
+    public List<string>? LocalBranches { get; set; }
 }
 
 /// <summary>Agent response with exists, version, branch (GetRepositoryVersion).</summary>
@@ -28,7 +37,7 @@ public sealed class AgentGetRepositoryVersionResponse
     public string? Branch { get; set; }
 }
 
-/// <summary>Agent response with commit counts.</summary>
+/// <summary>Agent response with commit counts and hasUpstream (from GetCommitCounts).</summary>
 public sealed class AgentCommitCountsResponse
 {
     [JsonPropertyName("outgoingCommits")]
@@ -36,6 +45,9 @@ public sealed class AgentCommitCountsResponse
 
     [JsonPropertyName("incomingCommits")]
     public int? IncomingCommits { get; set; }
+
+    [JsonPropertyName("hasUpstream")]
+    public bool? HasUpstream { get; set; }
 }
 
 /// <summary>Agent response with localBranches, remoteBranches, and defaultBranch (e.g. from SyncRepository or RefreshBranches).</summary>

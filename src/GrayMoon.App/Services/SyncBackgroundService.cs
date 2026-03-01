@@ -11,7 +11,7 @@ public class SyncBackgroundService(
     ILogger<SyncBackgroundService> logger,
     IConfiguration configuration) : BackgroundService
 {
-    private readonly int _maxConcurrency = configuration.GetValue<int?>("Sync:MaxConcurrency") ?? 8;
+    private readonly int _maxConcurrency = configuration.GetValue<int?>("Sync:MaxConcurrency") ?? 16;
     private readonly bool _enableDeduplication = configuration.GetValue<bool?>("Sync:EnableDeduplication") ?? true;
     private readonly Channel<SyncRequestItem> _channel = Channel.CreateUnbounded<SyncRequestItem>(new UnboundedChannelOptions
     {
