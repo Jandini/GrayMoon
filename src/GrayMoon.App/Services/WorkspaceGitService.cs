@@ -599,12 +599,13 @@ public class WorkspaceGitService(
             await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
     }
 
-    /// <summary>Runs dependency-synchronized push: sync package registries, then push by level (lowest first). For each level, waits until required packages are in registry (or pushes all at once if not possible), then pushes all repos at that level in parallel. Ensures branch is upstreamed even when there are no commits to push. When <paramref name="repoIdsToPush"/> is set, only those repos are pushed.</summary>
+    /// <summary>Runs dependency-synchronized push: sync package registries (unless already done by caller), then push by level (lowest first). For each level, waits until required packages are in registry (or pushes all at once if not possible), then pushes all repos at that level in parallel. Ensures branch is upstreamed even when there are no commits to push. When <paramref name="repoIdsToPush"/> is set, only those repos are pushed. Set <paramref name="packageRegistriesAlreadySynced"/> to true when the caller already synced required packages (e.g. via SyncRegistriesForPackageIdsAsync) to avoid syncing twice.</summary>
     public async Task RunPushAsync(
         int workspaceId,
         IReadOnlySet<int>? repoIdsToPush = null,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
+        bool packageRegistriesAlreadySynced = false,
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
@@ -617,9 +618,12 @@ public class WorkspaceGitService(
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         await _workspaceService.CreateDirectoryAsync(workspace.Name, workspaceRoot, cancellationToken);
 
-        onProgressMessage?.Invoke("Syncing package registries...");
-        if (_packageRegistrySyncService != null)
-            await _packageRegistrySyncService.SyncWorkspacePackageRegistriesAsync(workspaceId, cancellationToken: cancellationToken);
+        if (!packageRegistriesAlreadySynced)
+        {
+            onProgressMessage?.Invoke("Syncing package registries...");
+            if (_packageRegistrySyncService != null)
+                await _packageRegistrySyncService.SyncWorkspacePackageRegistriesAsync(workspaceId, cancellationToken: cancellationToken);
+        }
 
         var fullPayload = await _workspaceProjectRepository.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
         var payload = repoIdsToPush is { Count: > 0 }

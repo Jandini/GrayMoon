@@ -1056,9 +1056,9 @@
                 await InvokeAsync(StateHasChanged);
                 if (requiredPackageIds.Count > 0 && scope.ServiceProvider.GetService<PackageRegistrySyncService>() is { } syncService)
                     await syncService.SyncRegistriesForPackageIdsAsync(WorkspaceId, requiredPackageIds, _pushCts.Token);
-                pushProgressMessage = "Pushing (synchronized)...";
+                pushProgressMessage = "Pushing synchronized...";
                 await InvokeAsync(StateHasChanged);
-                await workspaceGitService.RunPushAsync(WorkspaceId, repoIds, msg => { pushProgressMessage = msg; _ = InvokeAsync(StateHasChanged); }, (id, err) => ToastService.Show($"{id}: {err}"), _pushCts.Token);
+                await workspaceGitService.RunPushAsync(WorkspaceId, repoIds, msg => { pushProgressMessage = msg; _ = InvokeAsync(StateHasChanged); }, (id, err) => ToastService.Show($"{id}: {err}"), packageRegistriesAlreadySynced: requiredPackageIds.Count > 0, _pushCts.Token);
             }
             else
             {
