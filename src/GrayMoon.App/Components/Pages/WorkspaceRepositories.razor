@@ -455,7 +455,7 @@
     private IReadOnlySet<int>? pushPlanRepoIds = null;
     private bool? isOutOfSync = null;
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0);
-    private bool isPushRecommended => workspaceRepositories.Any(wr => (wr.OutgoingCommits ?? 0) > 0);
+    private bool isPushRecommended => workspaceRepositories.Any(wr => (wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false);
     private IEnumerable<IGrouping<int?, WorkspaceRepositoryLink>> LevelGroups =>
         workspaceRepositories
             .GroupBy(wr => wr.DependencyLevel)
@@ -869,7 +869,7 @@
         ShowConfirm("Do you want to sync commits for this repository?", () => CommitSyncAsync(repositoryId));
     }
 
-    /// <summary>Push button click: get push plan; filter to repos with unpushed commits; if selection active filter to selected; if more than one repo show confirmation modal; else run push directly.</summary>
+    /// <summary>Push button click: get push plan; filter to repos with unpushed commits or no upstream branch; if selection active filter to selected; if more than one repo show confirmation modal; else run push directly.</summary>
     private async Task OnPushClickAsync()
     {
         if (workspace == null || workspaceRepositories.Count == 0 || isPushing || isSyncing || isUpdating)
@@ -881,7 +881,7 @@
             var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
             var (payload, _) = await workspaceGitService.GetPushPlanAsync(WorkspaceId);
             var repoIdsWithUnpushed = workspaceRepositories
-                .Where(wr => (wr.OutgoingCommits ?? 0) > 0)
+                .Where(wr => (wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false)
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
             if (EffectiveActionRepositoryIds != null)
