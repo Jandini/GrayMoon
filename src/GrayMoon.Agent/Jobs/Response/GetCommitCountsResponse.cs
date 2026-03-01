@@ -9,4 +9,7 @@ public sealed class GetCommitCountsResponse
 
     [JsonPropertyName("incomingCommits")]
     public int? IncomingCommits { get; set; }
+
+    [JsonPropertyName("hasUpstream")]
+    public bool HasUpstream { get; set; }
 }

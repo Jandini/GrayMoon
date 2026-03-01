@@ -23,11 +23,12 @@ public sealed class GetCommitCountsCommand(IGitService git) : ICommandHandler<Ge
         if (string.IsNullOrWhiteSpace(branch))
             return new GetCommitCountsResponse();
 
-        var (outgoing, incoming) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
+        var (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
         return new GetCommitCountsResponse
         {
             OutgoingCommits = outgoing,
-            IncomingCommits = incoming
+            IncomingCommits = incoming,
+            HasUpstream = hasUpstream
         };
     }
 }

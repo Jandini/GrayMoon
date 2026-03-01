@@ -35,7 +35,7 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IHubConnectionProvi
         int? incoming = null;
         if (branch != "-")
         {
-            var (o, i) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, cancellationToken);
+            var (o, i, _) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, cancellationToken);
             outgoing = o;
             incoming = i;
         }

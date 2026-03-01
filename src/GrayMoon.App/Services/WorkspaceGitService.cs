@@ -600,7 +600,7 @@ public class WorkspaceGitService(
         {
             onProgressMessage?.Invoke("Pushing all repositories...");
             await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
-            await RefreshVersionsAfterPushAsync(workspaceId, payload, cancellationToken);
+            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
             if (_hubContext != null)
                 await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
             return;
@@ -705,10 +705,10 @@ public class WorkspaceGitService(
 
             onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")} for dependency level {level}...");
             await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
-            await RefreshVersionsAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
+            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
         }
 
-        await RefreshVersionsAfterPushAsync(workspaceId, payload, cancellationToken);
+        await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
@@ -849,15 +849,16 @@ public class WorkspaceGitService(
             if (reposAtLevel.Count == 0) continue;
             onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")} (level {level})...");
             await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
-            await RefreshVersionsAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
+            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
         }
 
-        await RefreshVersionsAfterPushAsync(workspaceId, payload, cancellationToken);
+        await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
 
-    private async Task RefreshVersionsAfterPushAsync(int workspaceId, IReadOnlyList<PushRepoPayload> repos, CancellationToken cancellationToken)
+    /// <summary>After push: fetches commit counts and hasUpstream from the agent for the pushed repos, then updates WorkspaceRepositories (OutgoingCommits, IncomingCommits, BranchHasUpstream) and broadcasts. Does not refresh GitVersion or branch lists.</summary>
+    private async Task UpdateCommitCountsAndUpstreamAfterPushAsync(int workspaceId, IReadOnlyList<PushRepoPayload> repos, CancellationToken cancellationToken)
     {
         if (repos.Count == 0) return;
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
@@ -876,14 +877,14 @@ public class WorkspaceGitService(
                     workspaceRoot
                 }, cancellationToken);
                 if (!response.Success || response.Data == null)
-                    return (RepoId: repo.RepoId, Outgoing: (int?)null, Incoming: (int?)null);
+                    return (RepoId: repo.RepoId, Outgoing: (int?)null, Incoming: (int?)null, HasUpstream: (bool?)null);
                 var data = AgentResponseJson.DeserializeAgentResponse<AgentCommitCountsResponse>(response.Data);
-                return (RepoId: repo.RepoId, Outgoing: data?.OutgoingCommits, Incoming: data?.IncomingCommits);
+                return (RepoId: repo.RepoId, Outgoing: data?.OutgoingCommits, Incoming: data?.IncomingCommits, HasUpstream: data?.HasUpstream);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "GetCommitCounts failed for repo {RepoId} ({RepoName})", repo.RepoId, repo.RepoName);
-                return (RepoId: repo.RepoId, Outgoing: (int?)null, Incoming: (int?)null);
+                return (RepoId: repo.RepoId, Outgoing: (int?)null, Incoming: (int?)null, HasUpstream: (bool?)null);
             }
         }));
 
@@ -898,6 +899,8 @@ public class WorkspaceGitService(
             {
                 wr.OutgoingCommits = r.Outgoing;
                 wr.IncomingCommits = r.Incoming;
+                if (r.HasUpstream.HasValue)
+                    wr.BranchHasUpstream = r.HasUpstream.Value;
             }
         }
         await _dbContext.SaveChangesAsync(cancellationToken);

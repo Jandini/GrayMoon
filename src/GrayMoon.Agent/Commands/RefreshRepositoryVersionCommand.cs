@@ -29,7 +29,7 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git) : ICommandH
             }
             if (branch != "-")
             {
-                var (outgoing, incoming) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
+                var (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
                 outgoingCommits = outgoing;
                 incomingCommits = incoming;
             }

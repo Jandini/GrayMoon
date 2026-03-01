@@ -171,14 +171,14 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             logger.LogDebug("Git fetch completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
     }
 
-    public async Task<(int? Outgoing, int? Incoming)> GetCommitCountsAsync(string repoPath, string branchName, CancellationToken ct)
+    public async Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
-            return (null, null);
+            return (null, null, false);
 
         var sw = Stopwatch.StartNew();
         var originBranch = "origin/" + branchName.Trim();
-        
+
         // Check if the remote branch exists locally (after fetch) before trying to count commits
         // This is faster than ls-remote and works since we fetch before calling this method
         var (exitCheck, _, _) = await RunProcessAsync("git", $"rev-parse --verify {originBranch}", repoPath, ct);
@@ -189,7 +189,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             if (defaultBranch == null)
             {
                 logger.LogDebug("Remote branch {OriginBranch} does not exist upstream and no default branch found for {RepoPath}, skipping commit counts", originBranch, repoPath);
-                return (null, null);
+                return (null, null, false);
             }
 
             // Count commits ahead of the default branch
@@ -197,37 +197,37 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             if (exitDefault != 0)
             {
                 logger.LogWarning("Git rev-list (outgoing vs default branch) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitDefault, stdoutDefault, stderrDefault);
-                return (null, null);
+                return (null, null, false);
             }
 
             var aheadCount = int.TryParse((stdoutDefault ?? "").Trim(), out var ahead) ? ahead : (int?)null;
             // No incoming commits for a branch that doesn't exist upstream
             sw.Stop();
             logger.LogDebug("GetCommitCounts (vs default branch) completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
-            return (aheadCount, null);
+            return (aheadCount, null, false);
         }
 
         // Branch exists upstream - use standard comparison
         var (exitOut, stdoutOut, stderrOut) = await RunProcessAsync("git", $"rev-list --count {originBranch}..HEAD", repoPath, ct);
         var (exitIn, stdoutIn, stderrIn) = await RunProcessAsync("git", $"rev-list --count HEAD..{originBranch}", repoPath, ct);
-        
+
         // If either command fails, return null values gracefully (don't break sync)
         if (exitOut != 0)
         {
             logger.LogWarning("Git rev-list (outgoing) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitOut, stdoutOut, stderrOut);
-            return (null, null);
+            return (null, null, true);
         }
         if (exitIn != 0)
         {
             logger.LogWarning("Git rev-list (incoming) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitIn, stdoutIn, stderrIn);
-            return (null, null);
+            return (null, null, true);
         }
 
         var outVal = int.TryParse((stdoutOut ?? "").Trim(), out var o) ? o : (int?)null;
         var inVal = int.TryParse((stdoutIn ?? "").Trim(), out var i) ? i : (int?)null;
         sw.Stop();
         logger.LogDebug("GetCommitCounts completed in {ElapsedMs}ms for {RepoPath} (↑{Outgoing} ↓{Incoming})", sw.ElapsedMilliseconds, repoPath, outVal, inVal);
-        return (outVal, inVal);
+        return (outVal, inVal, true);
     }
 
     public async Task<(bool Success, bool MergeConflict, string? ErrorMessage)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct)

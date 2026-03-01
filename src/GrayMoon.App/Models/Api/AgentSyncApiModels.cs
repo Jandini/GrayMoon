@@ -37,7 +37,7 @@ public sealed class AgentGetRepositoryVersionResponse
     public string? Branch { get; set; }
 }
 
-/// <summary>Agent response with commit counts.</summary>
+/// <summary>Agent response with commit counts and hasUpstream (from GetCommitCounts).</summary>
 public sealed class AgentCommitCountsResponse
 {
     [JsonPropertyName("outgoingCommits")]
@@ -45,6 +45,9 @@ public sealed class AgentCommitCountsResponse
 
     [JsonPropertyName("incomingCommits")]
     public int? IncomingCommits { get; set; }
+
+    [JsonPropertyName("hasUpstream")]
+    public bool? HasUpstream { get; set; }
 }
 
 /// <summary>Agent response with localBranches, remoteBranches, and defaultBranch (e.g. from SyncRepository or RefreshBranches).</summary>
