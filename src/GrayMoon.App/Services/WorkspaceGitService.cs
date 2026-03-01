@@ -641,7 +641,7 @@ public class WorkspaceGitService(
                     }
                     var line1 = found == 0
                         ? $"Waiting for {totalDeps} {(totalDeps == 1 ? "dependency" : "dependencies")}..."
-                        : $"{found} of {totalDeps} dependencies...";
+                        : $"Found {found} of {totalDeps} {(totalDeps == 1 ? "dependency" : "dependencies")}...";
                     var totalSec = (int)remaining.TotalSeconds;
                     var mm = totalSec / 60;
                     var ss = totalSec % 60;
