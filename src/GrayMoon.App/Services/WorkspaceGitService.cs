@@ -290,6 +290,12 @@ public class WorkspaceGitService(
         return await _workspaceProjectRepository.GetPushDependencyInfoForRepoAsync(workspaceId, repositoryId, cancellationToken);
     }
 
+    /// <summary>Gets push dependency info for a set of repos (merged required packages and dependency path). Used for main Push button.</summary>
+    public async Task<PushDependencyInfoForRepo?> GetPushDependencyInfoForRepoSetAsync(int workspaceId, IReadOnlySet<int> repoIds, CancellationToken cancellationToken = default)
+    {
+        return await _workspaceProjectRepository.GetPushDependencyInfoForRepoSetAsync(workspaceId, repoIds, cancellationToken);
+    }
+
     /// <summary>Syncs dependency versions in .csproj files to match the current version of each referenced package source. Only repos with at least one mismatched dependency are updated. When <paramref name="repoIdsToSync"/> is set, only those repos are synced.</summary>
     public async Task<int> SyncDependenciesAsync(
         int workspaceId,
@@ -702,6 +708,7 @@ public class WorkspaceGitService(
             await RefreshVersionsAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
         }
 
+        await RefreshVersionsAfterPushAsync(workspaceId, payload, cancellationToken);
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
@@ -845,6 +852,7 @@ public class WorkspaceGitService(
             await RefreshVersionsAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
         }
 
+        await RefreshVersionsAfterPushAsync(workspaceId, payload, cancellationToken);
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }

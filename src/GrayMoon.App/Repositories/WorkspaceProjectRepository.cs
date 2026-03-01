@@ -517,6 +517,44 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
         return new PushDependencyInfoForRepo(payloadForRepo, dependencyRepoIdsList, dependencyPathPayloads);
     }
 
+    /// <summary>Gets push dependency info for a set of repos: merged required packages and dependency path (union of all repos' paths). Used for main Push button to show same modal as single-repo.</summary>
+    public async Task<PushDependencyInfoForRepo?> GetPushDependencyInfoForRepoSetAsync(int workspaceId, IReadOnlySet<int> repoIds, CancellationToken cancellationToken = default)
+    {
+        if (repoIds == null || repoIds.Count == 0) return null;
+        var fullPlan = await GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var payloadByRepo = fullPlan.ToDictionary(p => p.RepoId);
+        var repoIdsList = repoIds.ToList();
+        var allRequired = new List<RequiredPackageForPush>();
+        var pathPayloadsByRepoId = new Dictionary<int, PushRepoPayload>();
+        foreach (var repoId in repoIdsList)
+        {
+            if (!payloadByRepo.TryGetValue(repoId, out var payloadForRepo)) continue;
+            foreach (var pkg in payloadForRepo.RequiredPackages)
+                allRequired.Add(pkg);
+            var single = await GetPushDependencyInfoForRepoAsync(workspaceId, repoId, cancellationToken);
+            if (single?.DependencyPathPayloads != null)
+            {
+                foreach (var p in single.DependencyPathPayloads)
+                {
+                    if (!pathPayloadsByRepoId.ContainsKey(p.RepoId))
+                        pathPayloadsByRepoId[p.RepoId] = p;
+                }
+            }
+        }
+        var mergedRequired = allRequired.DistinctBy(r => (r.PackageId, r.Version, r.MatchedConnectorId)).ToList();
+        var dependencyPathPayloads = pathPayloadsByRepoId.Values
+            .OrderBy(p => p.DependencyLevel ?? int.MaxValue)
+            .ThenBy(p => p.RepoName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var dependencyRepoIdsList = dependencyPathPayloads.Select(p => p.RepoId).ToList();
+        var syntheticPayload = new PushRepoPayload(
+            0,
+            repoIds.Count == 1 ? payloadByRepo.GetValueOrDefault(repoIdsList[0])?.RepoName ?? "1 repository" : $"{repoIds.Count} repositories",
+            null,
+            mergedRequired);
+        return new PushDependencyInfoForRepo(syntheticPayload, dependencyRepoIdsList, dependencyPathPayloads);
+    }
+
     /// <summary>Persists the new Version for ProjectDependencies that were updated by sync dependencies. Matches by (RepoId, ProjectPath) -> DependentProjectId and PackageId -> ReferencedProjectId.</summary>
     public async Task UpdateProjectDependencyVersionsAsync(
         int workspaceId,

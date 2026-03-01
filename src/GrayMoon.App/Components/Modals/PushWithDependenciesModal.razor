@@ -14,7 +14,7 @@
                 </div>
                 <div class="modal-body">
                     <p class="mb-2 small">
-                        <strong>@(RepoName ?? Info.PayloadForRepo.RepoName)</strong> has package dependencies. Push will include this repository and its dependency path.
+                        <strong>@(RepoName ?? Info.PayloadForRepo.RepoName)</strong> @(IsMultipleRepos ? "have" : "has") package dependencies. Push will include @(IsMultipleRepos ? "these repositories" : "this repository") and @(IsMultipleRepos ? "their" : "its") dependency path@(IsMultipleRepos ? "s" : "").
                     </p>
                     <p class="mb-1 small text-muted">Required packages:</p>
                     <div class="push-deps-modal-packages-scroll small mb-3">
@@ -72,6 +72,8 @@
 
     private bool SynchronizedPush { get; set; }
     private ElementReference _modalElement;
+
+    private bool IsMultipleRepos => (Info?.PayloadForRepo.RepoName?.Contains("repositories") == true) && (Info?.PayloadForRepo.RepoName != "1 repository");
 
     /// <summary>Required packages grouped by dependency level (level order), for display.</summary>
     private IReadOnlyList<(int Level, IReadOnlyList<RequiredPackageForPush> Packages)> PackagesByLevel

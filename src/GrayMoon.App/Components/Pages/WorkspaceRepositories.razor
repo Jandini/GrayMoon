@@ -417,13 +417,6 @@
                           OnProceed="@OnUpdateSingleRepositoryDependenciesProceedAsync"
                           OnCancel="@CloseUpdateSingleRepositoryDependenciesModal" />
 
-<PushModal IsVisible="@showPushModal"
-          IsMultiLevel="@pushPlanIsMultiLevel"
-          RepositoryCount="@pushPlanRepositoryCount"
-          IsBusy="@isPushing"
-          OnProceed="@OnPushProceedAsync"
-          OnCancel="@ClosePushModal" />
-
 <PushWithDependenciesModal IsVisible="@showPushWithDependenciesModal"
           Info="@pushWithDependenciesInfo"
           RepoName="@pushWithDependenciesRepoName"
@@ -463,14 +456,12 @@
     private bool isPushing = false;
     private string pushProgressMessage = "Pushing...";
     private CancellationTokenSource? _pushCts;
-    private bool showPushModal = false;
     private bool showPushWithDependenciesModal = false;
     private PushDependencyInfoForRepo? pushWithDependenciesInfo = null;
+    private IReadOnlySet<int>? pushWithDependenciesRepoIdsToPush = null;
     private int pushWithDependenciesRepoId;
     private string? pushWithDependenciesBranchName;
     private string? pushWithDependenciesRepoName;
-    private bool pushPlanIsMultiLevel = false;
-    private int pushPlanRepositoryCount = 0;
     private IReadOnlySet<int>? pushPlanRepoIds = null;
     private bool? isOutOfSync = null;
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0);
@@ -817,11 +808,6 @@
         _pushCts?.Cancel();
     }
 
-    private void ClosePushModal()
-    {
-        showPushModal = false;
-        StateHasChanged();
-    }
 
     private void AbortCommitSyncAsync()
     {
@@ -1017,6 +1003,7 @@
 
             var repoName = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.Repository?.RepositoryName;
             pushWithDependenciesInfo = depInfo;
+            pushWithDependenciesRepoIdsToPush = null;
             pushWithDependenciesRepoId = repositoryId;
             pushWithDependenciesBranchName = branchName;
             pushWithDependenciesRepoName = repoName;
@@ -1034,6 +1021,7 @@
     {
         showPushWithDependenciesModal = false;
         pushWithDependenciesInfo = null;
+        pushWithDependenciesRepoIdsToPush = null;
     }
 
     /// <summary>Proceed from PushWithDependencies modal: either level-order push (no sync) or synchronized push (sync registries then level-order push with wait).</summary>
@@ -1042,7 +1030,9 @@
         if (pushWithDependenciesInfo == null || workspace == null)
             return;
 
-        var repoIds = pushWithDependenciesInfo.DependencyRepoIds.Concat(new[] { pushWithDependenciesRepoId }).ToHashSet();
+        var repoIds = pushWithDependenciesRepoIdsToPush != null
+            ? pushWithDependenciesRepoIdsToPush
+            : pushWithDependenciesInfo.DependencyRepoIds.Concat(new[] { pushWithDependenciesRepoId }).ToHashSet();
         var requiredPackageIds = pushWithDependenciesInfo.PayloadForRepo.RequiredPackages
             .Select(r => r.PackageId?.Trim())
             .Where(id => !string.IsNullOrEmpty(id))
@@ -1162,90 +1152,23 @@
                 return;
             }
             pushPlanRepoIds = repoIdsWithUnpushed;
-            var levels = toPush.Select(p => p.DependencyLevel ?? 0).Distinct().ToList();
-            pushPlanIsMultiLevel = levels.Count > 1;
-            pushPlanRepositoryCount = toPush.Count;
-            if (toPush.Count == 1)
+            var depInfo = await workspaceGitService.GetPushDependencyInfoForRepoSetAsync(WorkspaceId, pushPlanRepoIds);
+            if (depInfo == null)
             {
-                await RunPushCoreAsync();
+                ToastService.Show("Could not load push plan. Try again.");
+                return;
             }
-            else
-            {
-                showPushModal = true;
-                await InvokeAsync(StateHasChanged);
-            }
+            pushWithDependenciesInfo = depInfo;
+            pushWithDependenciesRepoIdsToPush = pushPlanRepoIds;
+            pushWithDependenciesRepoId = 0;
+            pushWithDependenciesRepoName = null;
+            showPushWithDependenciesModal = true;
+            await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error getting push plan for workspace {WorkspaceId}", WorkspaceId);
             errorMessage = "Could not determine push plan. The GrayMoon Agent may be offline.";
-        }
-    }
-
-    private async Task OnPushProceedAsync()
-    {
-        ClosePushModal();
-        await RunPushCoreAsync();
-    }
-
-    /// <summary>Runs dependency-synchronized push. Overlay shows progress.</summary>
-    private async Task RunPushCoreAsync()
-    {
-        if (workspace == null || workspaceRepositories.Count == 0 || isPushing || isSyncing || isUpdating)
-            return;
-
-        _pushCts?.Cancel();
-        _pushCts?.Dispose();
-        _pushCts = new CancellationTokenSource();
-
-        isPushing = true;
-        var pushCount = pushPlanRepoIds?.Count ?? 0;
-        pushProgressMessage = pushCount > 0
-            ? $"Pushing {pushCount} {(pushCount == 1 ? "repository" : "repositories")}..."
-            : "Pushing...";
-        errorMessage = null;
-        try
-        {
-            StateHasChanged();
-            await Task.Yield();
-
-            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
-            {
-                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-                await workspaceGitService.RunPushAsync(
-                    WorkspaceId,
-                    repoIdsToPush: pushPlanRepoIds,
-                    onProgressMessage: msg =>
-                    {
-                        pushProgressMessage = msg;
-                        InvokeAsync(StateHasChanged);
-                    },
-                    onRepoError: (repoId, msg) =>
-                    {
-                        repositoryErrors[repoId] = msg;
-                        InvokeAsync(StateHasChanged);
-                    },
-                    cancellationToken: _pushCts.Token);
-            }
-
-            isPushing = false;
-            await InvokeAsync(StateHasChanged);
-            await RefreshFromSync();
-        }
-        catch (OperationCanceledException)
-        {
-            isPushing = false;
-            await ReloadWorkspaceDataAfterCancelAsync();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Error pushing for workspace {WorkspaceId}", WorkspaceId);
-            errorMessage = "Push failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
-        }
-        finally
-        {
-            isPushing = false;
-            await InvokeAsync(StateHasChanged);
         }
     }
 
