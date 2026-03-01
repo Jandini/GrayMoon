@@ -896,7 +896,7 @@ public class WorkspaceGitService(
             cancellationToken.ThrowIfCancellationRequested();
             var reposAtLevel = payload.Where(p => (p.DependencyLevel ?? 0) == level).ToList();
             if (reposAtLevel.Count == 0) continue;
-            onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")} (level {level})...");
+            onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
             await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
             await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
         }
