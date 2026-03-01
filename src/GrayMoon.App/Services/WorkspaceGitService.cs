@@ -616,6 +616,11 @@ public class WorkspaceGitService(
 
             if (totalDeps > 0)
             {
+                _logger.LogInformation("Push wait: level {Level}, waiting for {Count} package(s): {Packages}",
+                    level,
+                    totalDeps,
+                    string.Join(", ", requiredForLevel.Select(r => r.PackageId + "@" + r.Version + " (connector " + r.MatchedConnectorId + ")")));
+
                 var timeoutMinutes = totalDeps * Math.Max(0.1, workspaceOptions.Value.PushWaitDependencyTimeoutMinutesPerDependency);
                 var totalTimeout = TimeSpan.FromMinutes(timeoutMinutes);
                 using var timeoutCts = new CancellationTokenSource(totalTimeout);
@@ -631,6 +636,7 @@ public class WorkspaceGitService(
                     if (remaining <= TimeSpan.Zero)
                     {
                         onProgressMessage?.Invoke("Timed out.");
+                        _logger.LogWarning("Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", totalTimeout.TotalMinutes, found, totalDeps);
                         throw new OperationCanceledException("Push wait for dependencies timed out.");
                     }
                     var line1 = found == 0
@@ -647,10 +653,20 @@ public class WorkspaceGitService(
                         foreach (var req in requiredForLevel)
                         {
                             var connector = await _connectorRepository.GetByIdAsync(req.MatchedConnectorId!.Value);
-                            if (connector != null && await _nuGetService.PackageVersionExistsAsync(connector, req.PackageId, req.Version, linkedToken))
+                            if (connector == null)
+                            {
+                                _logger.LogWarning("Push wait: package {PackageId} {Version} has no connector (MatchedConnectorId={ConnectorId}).", req.PackageId, req.Version, req.MatchedConnectorId);
+                                continue;
+                            }
+                            var exists = await _nuGetService.PackageVersionExistsAsync(connector, req.PackageId, req.Version, linkedToken);
+                            _logger.LogInformation("Push wait: checking {PackageId} {Version} in registry {ConnectorName} (Id={ConnectorId}) -> {Result}",
+                                req.PackageId, req.Version, connector.ConnectorName, connector.ConnectorId, exists ? "found" : "not found");
+                            if (exists)
                                 found++;
                         }
                         lastPollUtc = DateTime.UtcNow;
+                        if (found >= totalDeps)
+                            _logger.LogInformation("Push wait: all {Total} package(s) found for level {Level}, proceeding.", totalDeps, level);
                     }
 
                     if (found >= totalDeps)
