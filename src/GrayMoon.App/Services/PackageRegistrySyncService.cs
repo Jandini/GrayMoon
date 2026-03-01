@@ -97,4 +97,55 @@ public sealed class PackageRegistrySyncService(
         await workspaceProjectRepository.SetPackagesMatchedConnectorsAsync(workspaceId, new Dictionary<int, int?>(projectIdToConnectorId), cancellationToken);
         logger.LogTrace("Synced package registries for workspace {WorkspaceId}: {PackageCount} packages, {ConnectorCount} NuGet connectors.", workspaceId, packages.Count, connectors.Count);
     }
+
+    /// <summary>Syncs registry matches only for workspace packages whose PackageId is in <paramref name="packageIds"/>. Use when doing synchronized push for a single repo and only its required packages need matching.</summary>
+    public async Task SyncRegistriesForPackageIdsAsync(
+        int workspaceId,
+        IReadOnlySet<string> packageIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (packageIds == null || packageIds.Count == 0) return;
+        var packages = await workspaceProjectRepository.GetPackagesByWorkspaceIdAndPackageIdsAsync(workspaceId, packageIds, cancellationToken);
+        logger.LogTrace("Sync registries for {PackageCount} selected packages in workspace {WorkspaceId}.", packages.Count, workspaceId);
+        if (packages.Count == 0) return;
+
+        var connectors = (await connectorRepository.GetActiveAsync())
+            .Where(c => c.ConnectorType == ConnectorType.NuGet)
+            .ToList();
+        if (connectors.Count == 0) return;
+
+        var projectIdToConnectorId = new ConcurrentDictionary<int, int?>();
+        var total = packages.Count;
+        var completed = 0;
+        var options = new ParallelOptions { MaxDegreeOfParallelism = MaxParallelPackageLookups, CancellationToken = cancellationToken };
+
+        await Parallel.ForEachAsync(packages, options, async (p, ct) =>
+        {
+            var packageId = (p.PackageId ?? p.ProjectName).Trim();
+            if (string.IsNullOrEmpty(packageId))
+            {
+                projectIdToConnectorId[p.ProjectId] = null;
+                Interlocked.Increment(ref completed);
+                return;
+            }
+            int? matchedConnectorId = null;
+            var lookupTasks = connectors.Select(async connector =>
+            {
+                try
+                {
+                    var exists = await nuGetService.PackageExistsAsync(connector, packageId, ct);
+                    return (connector, exists);
+                }
+                catch { return (connector, false); }
+            });
+            var results = await Task.WhenAll(lookupTasks);
+            var firstMatch = results.FirstOrDefault(r => r.Item2);
+            if (firstMatch.Item1 != null)
+                matchedConnectorId = firstMatch.Item1.ConnectorId;
+            projectIdToConnectorId[p.ProjectId] = matchedConnectorId;
+            Interlocked.Increment(ref completed);
+        });
+
+        await workspaceProjectRepository.SetPackagesMatchedConnectorsAsync(workspaceId, new Dictionary<int, int?>(projectIdToConnectorId), cancellationToken);
+    }
 }

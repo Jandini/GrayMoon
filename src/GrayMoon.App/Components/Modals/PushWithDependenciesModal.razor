@@ -1,0 +1,87 @@
+@using Microsoft.AspNetCore.Components.Web
+@using GrayMoon.App.Models
+
+@if (IsVisible && Info != null)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDown"
+         @ref="_modalElement">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Push with upstream</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2">
+                        <strong>@(RepoName ?? Info.PayloadForRepo.RepoName)</strong> has package dependencies. Push will include this repository and its dependency path.
+                    </p>
+                    <p class="mb-1 small text-muted">Required packages:</p>
+                    <ul class="small mb-2 ps-3">
+                        @foreach (var pkg in Info.PayloadForRepo.RequiredPackages)
+                        {
+                            <li><code>@pkg.PackageId</code> @pkg.Version</li>
+                        }
+                    </ul>
+                    <p class="mb-1 small text-muted">Dependency path (level order):</p>
+                    <ul class="small mb-3 ps-3">
+                        @foreach (var dep in Info.DependencyPathPayloads)
+                        {
+                            <li>@dep.RepoName (level @(dep.DependencyLevel ?? 0))</li>
+                        }
+                    </ul>
+                    <div class="form-check">
+                        <input id="push-sync-checkbox" type="checkbox" class="form-check-input" @bind="SynchronizedPush" />
+                        <label class="form-check-label" for="push-sync-checkbox">Synchronized Push</label>
+                    </div>
+                    <p class="small text-muted mt-1 mb-0">
+                        @if (SynchronizedPush)
+                        {
+                            <span>Registries will be synced for required packages; then push runs by level and waits for packages in registry before each level.</span>
+                        }
+                        else
+                        {
+                            <span>Push this repo and all dependency repos (by level) without waiting for packages in registry.</span>
+                        }
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-warning" @onclick="Proceed">
+                        Proceed
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public PushDependencyInfoForRepo? Info { get; set; }
+    [Parameter] public string? RepoName { get; set; }
+    [Parameter] public EventCallback<bool> OnProceed { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private bool SynchronizedPush { get; set; }
+    private ElementReference _modalElement;
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible)
+            SynchronizedPush = false;
+    }
+
+    private async Task Proceed()
+    {
+        await OnProceed.InvokeAsync(SynchronizedPush);
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            await OnCancel.InvokeAsync();
+    }
+}

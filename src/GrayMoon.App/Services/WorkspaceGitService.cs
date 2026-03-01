@@ -284,6 +284,12 @@ public class WorkspaceGitService(
         return (payload, isMultiLevel);
     }
 
+    /// <summary>Gets dependency path and levels for a single repo (e.g. when user clicks the not-upstreamed badge). Returns null if repo not in workspace.</summary>
+    public async Task<PushDependencyInfoForRepo?> GetPushDependencyInfoForRepoAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
+    {
+        return await _workspaceProjectRepository.GetPushDependencyInfoForRepoAsync(workspaceId, repositoryId, cancellationToken);
+    }
+
     /// <summary>Syncs dependency versions in .csproj files to match the current version of each referenced package source. Only repos with at least one mismatched dependency are updated. When <paramref name="repoIdsToSync"/> is set, only those repos are synced.</summary>
     public async Task<int> SyncDependenciesAsync(
         int workspaceId,
@@ -757,6 +763,52 @@ public class WorkspaceGitService(
 
         await SyncSingleRepositoryAsync(repositoryId, workspaceId, cancellationToken);
         return (true, null);
+    }
+
+    /// <summary>Pushes a set of repos in dependency level order (lowest first) with upstream, without waiting for packages in registry. Used when user chooses non-synchronized push from the badge.</summary>
+    public async Task RunPushReposInLevelOrderAsync(
+        int workspaceId,
+        IReadOnlySet<int> repoIds,
+        Action<string>? onProgressMessage = null,
+        Action<int, string>? onRepoError = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_agentBridge.IsAgentConnected)
+            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to push.");
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            throw new InvalidOperationException($"Workspace {workspaceId} not found.");
+
+        var fullPayload = await _workspaceProjectRepository.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var payload = fullPayload.Where(p => repoIds.Contains(p.RepoId)).ToList();
+        if (payload.Count == 0)
+        {
+            onProgressMessage?.Invoke("No repositories to push.");
+            return;
+        }
+
+        var links = await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .ThenInclude(r => r!.Connector)
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+        var bearerByRepoId = links.Where(wr => wr.Repository != null).ToDictionary(wr => wr.RepositoryId, wr => wr.Repository!.Connector?.UserToken);
+
+        var levelsAsc = payload.Select(p => p.DependencyLevel ?? 0).Distinct().OrderBy(x => x).ToList();
+        foreach (var level in levelsAsc)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var reposAtLevel = payload.Where(p => (p.DependencyLevel ?? 0) == level).ToList();
+            if (reposAtLevel.Count == 0) continue;
+            onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")} (level {level})...");
+            await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
+            await RefreshVersionsAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
+        }
+
+        if (_hubContext != null)
+            await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
 
     private async Task RefreshVersionsAfterPushAsync(int workspaceId, IReadOnlyList<PushRepoPayload> repos, CancellationToken cancellationToken)
