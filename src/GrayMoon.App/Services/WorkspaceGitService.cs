@@ -513,18 +513,30 @@ public class WorkspaceGitService(
                 if (hadError)
                     break;
 
-                foreach (var repo in reposAtLevel)
+                const int maxParallelRefresh = 8;
+                var totalRefresh = reposAtLevel.Count;
+                var completedRefresh = 0;
+                var refreshSemaphore = new SemaphoreSlim(maxParallelRefresh);
+                var refreshTasks = reposAtLevel.Select(async repo =>
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (hadError)
-                        break;
-                    onProgressMessage?.Invoke($"Refreshing version for {repo.RepoName}...");
-                    var (refreshSuccess, refreshError) = await SyncSingleRepositoryAsync(repo.RepoId, workspaceId, cancellationToken);
-                    if (!refreshSuccess)
+                    await refreshSemaphore.WaitAsync(cancellationToken);
+                    try
                     {
-                        OnRepoError(repo.RepoId, refreshError ?? "Refresh version failed.");
-                        break;
+                        var (refreshSuccess, refreshError) = await SyncSingleRepositoryAsync(repo.RepoId, workspaceId, cancellationToken);
+                        var c = Interlocked.Increment(ref completedRefresh);
+                        onProgressMessage?.Invoke($"Updating version {c} of {totalRefresh}...");
+                        return (repo.RepoId, refreshSuccess, refreshError);
                     }
+                    finally
+                    {
+                        refreshSemaphore.Release();
+                    }
+                });
+                var refreshResults = await Task.WhenAll(refreshTasks);
+                foreach (var (repoId, success, err) in refreshResults)
+                {
+                    if (!success)
+                        OnRepoError(repoId, err ?? "Refresh version failed.");
                 }
             }
         }
@@ -542,6 +554,34 @@ public class WorkspaceGitService(
                 {
                     OnRepoError(repoId, errMsg);
                     break;
+                }
+            }
+            if (!hadError && payload.Count > 0)
+            {
+                const int maxParallelRefresh = 8;
+                var totalRefresh = payload.Count;
+                var completedRefresh = 0;
+                var refreshSemaphore = new SemaphoreSlim(maxParallelRefresh);
+                var refreshTasks = payload.Select(async repo =>
+                {
+                    await refreshSemaphore.WaitAsync(cancellationToken);
+                    try
+                    {
+                        var (refreshSuccess, refreshError) = await SyncSingleRepositoryAsync(repo.RepoId, workspaceId, cancellationToken);
+                        var c = Interlocked.Increment(ref completedRefresh);
+                        onProgressMessage?.Invoke($"Updating version {c} of {totalRefresh}...");
+                        return (repo.RepoId, refreshSuccess, refreshError);
+                    }
+                    finally
+                    {
+                        refreshSemaphore.Release();
+                    }
+                });
+                var refreshResults = await Task.WhenAll(refreshTasks);
+                foreach (var (repoId, success, err) in refreshResults)
+                {
+                    if (!success)
+                        OnRepoError(repoId, err ?? "Refresh version failed.");
                 }
             }
         }
