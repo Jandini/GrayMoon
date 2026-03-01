@@ -33,7 +33,24 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git) : ICommandH
                 outgoingCommits = outgoing;
                 incomingCommits = incoming;
             }
-            return new RefreshRepositoryVersionResponse { Version = version, Branch = branch, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits, GitVersionError = versionError };
+
+            var remoteBranches = await git.GetRemoteBranchesAsync(repoPath, cancellationToken);
+            var localBranches = await git.GetLocalBranchesAsync(repoPath, cancellationToken);
+            bool? hasUpstream = null;
+            if (branch != "-" && remoteBranches.Count > 0)
+                hasUpstream = remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
+
+            return new RefreshRepositoryVersionResponse
+            {
+                Version = version,
+                Branch = branch,
+                OutgoingCommits = outgoingCommits,
+                IncomingCommits = incomingCommits,
+                GitVersionError = versionError,
+                HasUpstream = hasUpstream,
+                RemoteBranches = remoteBranches.ToList(),
+                LocalBranches = localBranches.ToList()
+            };
         }
 
         return new RefreshRepositoryVersionResponse { Version = version, Branch = branch, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits };

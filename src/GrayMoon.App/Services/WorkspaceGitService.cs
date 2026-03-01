@@ -706,7 +706,8 @@ public class WorkspaceGitService(
         await Task.WhenAll(pushTasks);
     }
 
-    /// <summary>Pushes a single repository's current branch with upstream (-u). Used when user clicks the not-upstreamed badge. Branch name is provided by the app; when null or empty, the agent resolves it via GitVersion.</summary>
+    /// <summary>Pushes a single repository's current branch with upstream (-u). Used when user clicks the not-upstreamed badge. Branch name is provided by the app; when null or empty, the agent resolves it via GitVersion.
+    /// After success we call Refresh (SyncSingleRepositoryAsync) to persist BranchHasUpstream and the new remote branch. An alternative would be for PushRepository to return hasUpstream and for the app to persist it directly—we use Refresh so one code path (RefreshRepositoryVersion) provides version, commit counts, branches, and hasUpstream, and so the new remote branch is added to RepositoryBranches.</summary>
     public async Task<(bool Success, string? ErrorMessage)> PushSingleRepositoryWithUpstreamAsync(
         int workspaceId,
         int repositoryId,
@@ -866,6 +867,7 @@ public class WorkspaceGitService(
         var projectsDetail = GetProjectsDetail(response.Data);
         var (outgoingCommits, incomingCommits) = GetCommitCounts(response.Data);
         var (localBranches, remoteBranches, defaultBranch) = GetBranches(response.Data);
+        var hasUpstream = ComputeHasUpstream(branch, remoteBranches);
         return new RepoGitVersionInfo
         {
             Version = version,
@@ -874,11 +876,19 @@ public class WorkspaceGitService(
             ProjectsDetail = projectsDetail,
             OutgoingCommits = outgoingCommits,
             IncomingCommits = incomingCommits,
+            HasUpstream = hasUpstream,
             LocalBranches = localBranches,
             RemoteBranches = remoteBranches,
             DefaultBranch = defaultBranch,
             ErrorMessage = gitVersionError
         };
+    }
+
+    private static bool? ComputeHasUpstream(string? branch, IReadOnlyList<string>? remoteBranches)
+    {
+        if (string.IsNullOrWhiteSpace(branch) || branch == "-" || remoteBranches == null || remoteBranches.Count == 0)
+            return null;
+        return remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
     }
 
     private static RepoGitVersionInfo ParseRefreshRepositoryVersionResponse(AgentCommandResponse response)
@@ -888,14 +898,26 @@ public class WorkspaceGitService(
 
         var (version, branch, gitVersionError) = GetVersionBranch(response.Data);
         var (outgoingCommits, incomingCommits) = GetCommitCounts(response.Data);
+        var (hasUpstream, remoteBranches, localBranches) = GetRefreshBranchesAndUpstream(response.Data);
         return new RepoGitVersionInfo
         {
             Version = version,
             Branch = branch,
             OutgoingCommits = outgoingCommits,
             IncomingCommits = incomingCommits,
+            HasUpstream = hasUpstream,
+            RemoteBranches = remoteBranches,
+            LocalBranches = localBranches,
             ErrorMessage = gitVersionError
         };
+    }
+
+    private static (bool? HasUpstream, IReadOnlyList<string>? RemoteBranches, IReadOnlyList<string>? LocalBranches) GetRefreshBranchesAndUpstream(object data)
+    {
+        var r = AgentResponseJson.DeserializeAgentResponse<AgentVersionBranchResponse>(data);
+        var remote = r?.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
+        var local = r?.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
+        return (r?.HasUpstream, remote?.Count > 0 ? remote : null, local?.Count > 0 ? local : null);
     }
 
     private static (string version, string branch, string? gitVersionError) GetVersionBranch(object data)
@@ -986,6 +1008,7 @@ public class WorkspaceGitService(
                 if (info.Projects.HasValue) wr.Projects = info.Projects;
                 if (info.OutgoingCommits.HasValue) wr.OutgoingCommits = info.OutgoingCommits;
                 if (info.IncomingCommits.HasValue) wr.IncomingCommits = info.IncomingCommits;
+                if (info.HasUpstream.HasValue) wr.BranchHasUpstream = info.HasUpstream.Value;
                 wr.SyncStatus = (info.Version == "-" || info.Branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
             }
 

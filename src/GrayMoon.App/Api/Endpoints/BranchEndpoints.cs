@@ -619,6 +619,13 @@ public static class BranchEndpoints
                 await dbContext.SaveChangesAsync(CancellationToken.None);
             }
 
+            // If the deleted branch was the current branch's remote, mark as no upstream.
+            if (isRemote && string.Equals(wr.BranchName, branchName, StringComparison.OrdinalIgnoreCase))
+            {
+                wr.BranchHasUpstream = false;
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+            }
+
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
 
             return Results.Ok(new { success = true });

@@ -17,6 +17,8 @@ public class RepoGitVersionInfo
     public IReadOnlyList<string>? RemoteBranches { get; init; }
     /// <summary>Default branch name (e.g. main or master) from sync; used to persist IsDefault.</summary>
     public string? DefaultBranch { get; init; }
+    /// <summary>True if current branch has an upstream (remote) branch. Set from RefreshRepositoryVersion / SyncCommand.</summary>
+    public bool? HasUpstream { get; init; }
     /// <summary>Error message when sync failed for this repo.</summary>
     public string? ErrorMessage { get; init; }
 }
