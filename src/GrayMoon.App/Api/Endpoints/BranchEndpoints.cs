@@ -202,22 +202,10 @@ public static class BranchEndpoints
             {
                 await workspaceGitService.EnsureLocalBranchPersistedAsync(wr.WorkspaceRepositoryId, localBranchName, CancellationToken.None);
                 wr.BranchName = localBranchName;
-                wr.BranchHasUpstream = null;
                 await dbContext.SaveChangesAsync(CancellationToken.None);
-
-                // Refresh branch list from agent so we can set BranchHasUpstream correctly (e.g. main has upstream)
-                var refreshArgs = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot };
-                var refreshResponse = await agentBridge.SendCommandAsync("RefreshBranches", refreshArgs, CancellationToken.None);
-                if (refreshResponse.Success && refreshResponse.Data != null)
-                {
-                    var branchesResponse = AgentResponseJson.DeserializeAgentResponse<BranchesResponse>(refreshResponse.Data);
-                    var remoteBranches = branchesResponse?.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
-                    wr.BranchHasUpstream = ComputeBranchHasUpstream(localBranchName, remoteBranches);
-                    await dbContext.SaveChangesAsync(CancellationToken.None);
-                }
             }
 
-            // Broadcast update to refresh UI
+            // Broadcast update to refresh UI (branch name). BranchHasUpstream and commit counts will be updated when the checkout hook notify runs (CheckoutHookSync → SyncCommand).
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
 
             return Results.Ok(new CheckoutBranchApiResult(true, null) { CurrentBranch = checkoutResponse?.CurrentBranch });
@@ -712,14 +700,16 @@ public static class BranchEndpoints
         });
     }
 
-    /// <summary>Returns true if the current branch has a matching remote (e.g. origin/branchName), false otherwise. Returns null when unknown (no branch name or no remote list).</summary>
+    /// <summary>Returns true if the current branch has a matching remote (e.g. origin/branchName or branchName), false otherwise. Returns null when unknown (no branch name or no remote list).</summary>
     private static bool? ComputeBranchHasUpstream(string? currentBranchName, IReadOnlyList<string>? remoteBranches)
     {
         if (string.IsNullOrWhiteSpace(currentBranchName) || remoteBranches == null || remoteBranches.Count == 0)
             return null;
         var branch = currentBranchName.Trim();
         var hasUpstream = remoteBranches.Any(r => !string.IsNullOrEmpty(r) &&
-            (string.Equals(r, "origin/" + branch, StringComparison.OrdinalIgnoreCase) || r.EndsWith("/" + branch, StringComparison.OrdinalIgnoreCase)));
+            (string.Equals(r, branch, StringComparison.OrdinalIgnoreCase)
+             || string.Equals(r, "origin/" + branch, StringComparison.OrdinalIgnoreCase)
+             || r.EndsWith("/" + branch, StringComparison.OrdinalIgnoreCase)));
         return hasUpstream;
     }
 }
