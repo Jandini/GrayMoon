@@ -403,7 +403,7 @@ public class WorkspaceGitService(
             var lines = new List<string> { "chore(deps): update package versions", "" };
             foreach (var pu in repo.ProjectUpdates)
             {
-                foreach (var (packageId, newVersion) in pu.PackageUpdates)
+                foreach (var (packageId, _, newVersion) in pu.PackageUpdates)
                     lines.Add($"- {packageId} to {newVersion}");
             }
             var commitMessage = string.Join("\r\n", lines);

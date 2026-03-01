@@ -59,17 +59,19 @@
             </div>
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
                 <div class="workspace-repos-search-wrapper">
-                    <button type="button"
-                            class="btn workspace-repos-select-btn"
-                            @onclick="ToggleSelectionModeAsync"
-                            title="@(showSelectionColumn ? "Run commands against all repositories (selection kept)" : "Show checkboxes to run Push, Update, Branch, Sync only on selected repos")">
+                    <div role="button"
+                         tabindex="0"
+                         class="btn workspace-repos-select-btn"
+                         @onclick="ToggleSelectionModeAsync"
+                         @onkeydown="OnSelectionModeKeyDown"
+                         title="@(showSelectionColumn ? "Run commands against all repositories (selection kept)" : "Show checkboxes to run Push, Update, Branch, Sync only on selected repos")">
                         <input type="checkbox"
                                class="form-check-input workspace-repos-mode-checkbox @(showSelectionColumn && gridSelectedRepositoryIds.Count > 0 ? "" : "workspace-repos-mode-checkbox--all")"
                                checked="@(showSelectionColumn && gridSelectedRepositoryIds.Count > 0)"
                                readonly
                                tabindex="-1"
                                aria-hidden="true" />
-                    </button>
+                    </div>
                     <input id="workspace-repos-search" class="form-control workspace-repos-search" placeholder="Search repositories..."
                            @bind="searchTerm" @bind:event="oninput"
                            @onkeydown="OnSearchKeyDown" />
@@ -307,7 +309,7 @@
                                                           tabindex="0"
                                                           title="@(unmatchedDeps) of @(depCount) dependencies require update. Click to update this repository only."
                                                           style="cursor: pointer;"
-                                                          @onclick="() => ShowConfirmUpdateDependencies(repo.RepositoryId, unmatchedDeps)"
+                                                          @onclick="() => ShowConfirmUpdateDependenciesAsync(repo.RepositoryId, unmatchedDeps)"
                                                           @onclick:preventDefault
                                                           @onkeydown="(e) => HandleDependencyBadgeKeydown(e, repo.RepositoryId, unmatchedDeps)">
                                                         <span class="badge build-dep-badge build-dep-badge-mismatch">@unmatchedDeps of @depCount</span>
@@ -408,6 +410,12 @@
                           OnProceed="@OnUpdateProceedAsync"
                           OnUpdateOnly="@OnUpdateOnlyAsync"
                           OnCancel="@CloseUpdateModal" />
+
+<UpdateSingleRepositoryDependenciesModal IsVisible="@showUpdateSingleRepoDependenciesModal"
+                          Payload="@updateSingleRepoDependenciesPayload"
+                          RepoName="@updateSingleRepoDependenciesRepoName"
+                          OnProceed="@OnUpdateSingleRepositoryDependenciesProceedAsync"
+                          OnCancel="@CloseUpdateSingleRepositoryDependenciesModal" />
 
 <PushModal IsVisible="@showPushModal"
           IsMultiLevel="@pushPlanIsMultiLevel"
@@ -514,6 +522,10 @@
     private bool isSyncingToDefault = false;
     private string syncToDefaultMessage = "";
     private bool showUpdateModal = false;
+    private bool showUpdateSingleRepoDependenciesModal = false;
+    private SyncDependenciesRepoPayload? updateSingleRepoDependenciesPayload = null;
+    private int updateSingleRepoDependenciesRepositoryId;
+    private string? updateSingleRepoDependenciesRepoName;
     private bool updatePlanIsMultiLevel = false;
     private bool showConfirmModal = false;
     private string confirmModalMessage = "";
@@ -879,10 +891,105 @@
             ShowConfirm($"Do you want to open GitHub page for {count} repositories?", OpenGitHubAsync);
     }
 
-    private void ShowConfirmUpdateDependencies(int repositoryId, int unmatchedCount)
+    private async Task ShowConfirmUpdateDependenciesAsync(int repositoryId, int unmatchedCount)
     {
-        var x = unmatchedCount == 1 ? "1 dependency" : $"{unmatchedCount} dependencies";
-        ShowConfirm($"Do you want to update {x} in this repository?", () => UpdateSingleRepositoryAsync(repositoryId));
+        if (workspace == null || isUpdating || isSyncing)
+            return;
+        try
+        {
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+            var (payload, _) = await workspaceGitService.GetUpdatePlanAsync(WorkspaceId, new HashSet<int> { repositoryId });
+            if (payload == null || payload.Count == 0)
+            {
+                ToastService.Show("No dependency updates for this repository.");
+                return;
+            }
+            var repoPayload = payload[0];
+            var repoName = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.Repository?.RepositoryName;
+            updateSingleRepoDependenciesPayload = repoPayload;
+            updateSingleRepoDependenciesRepositoryId = repositoryId;
+            updateSingleRepoDependenciesRepoName = repoName;
+            showUpdateSingleRepoDependenciesModal = true;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error getting update plan for repository {RepositoryId}", repositoryId);
+            ToastService.Show("Could not load dependency updates.");
+        }
+    }
+
+    private void CloseUpdateSingleRepositoryDependenciesModal()
+    {
+        showUpdateSingleRepoDependenciesModal = false;
+        updateSingleRepoDependenciesPayload = null;
+    }
+
+    private void OnCommitDependencyProgress(int current, int total, int unused)
+    {
+        updateProgressMessage = $"Committing {current} of {total}...";
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnUpdateSingleRepositoryDependenciesProceedAsync(bool commitVersionUpdate)
+    {
+        if (updateSingleRepoDependenciesPayload == null)
+            return;
+        var repositoryId = updateSingleRepoDependenciesRepositoryId;
+        var payloadToCommit = updateSingleRepoDependenciesPayload;
+        CloseUpdateSingleRepositoryDependenciesModal();
+
+        _updateCts?.Cancel();
+        _updateCts?.Dispose();
+        _updateCts = new CancellationTokenSource();
+        isUpdating = true;
+        updateProgressMessage = "Updating repository...";
+        repositoryErrors.Remove(repositoryId);
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
+            {
+                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                await workspaceGitService.RunUpdateSingleRepositoryAsync(
+                    WorkspaceId,
+                    repositoryId,
+                    onProgressMessage: msg => { updateProgressMessage = msg; _ = InvokeAsync(StateHasChanged); },
+                    onRepoError: (repoId, msg) => { repositoryErrors[repoId] = msg; _ = InvokeAsync(StateHasChanged); },
+                    cancellationToken: _updateCts.Token);
+
+                if (commitVersionUpdate)
+                {
+                    updateProgressMessage = "Committing version update...";
+                    await InvokeAsync(StateHasChanged);
+                    var commitResults = await workspaceGitService.CommitDependencyUpdatesAsync(
+                        WorkspaceId,
+                        new[] { payloadToCommit },
+                        onProgress: OnCommitDependencyProgress,
+                        cancellationToken: _updateCts.Token);
+                    var err = commitResults.FirstOrDefault(r => r.RepoId == repositoryId).ErrorMessage;
+                    if (err != null)
+                        ToastService.Show(err);
+                }
+            }
+            await TryUpdateFileVersionsAsync();
+            await RefreshFromSync();
+        }
+        catch (OperationCanceledException)
+        {
+            ToastService.Show("Update cancelled.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Update dependencies failed for repository {RepositoryId}", repositoryId);
+            ToastService.Show(ex.Message);
+        }
+        finally
+        {
+            isUpdating = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private void ShowConfirmSyncCommits(int repositoryId)
@@ -939,6 +1046,7 @@
         var requiredPackageIds = pushWithDependenciesInfo.PayloadForRepo.RequiredPackages
             .Select(r => r.PackageId?.Trim())
             .Where(id => !string.IsNullOrEmpty(id))
+            .Cast<string>()
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         ClosePushWithDependenciesModal();
 
@@ -1244,10 +1352,10 @@
         }
     }
 
-    private void HandleDependencyBadgeKeydown(KeyboardEventArgs e, int repositoryId, int unmatchedDeps)
+    private async Task HandleDependencyBadgeKeydown(KeyboardEventArgs e, int repositoryId, int unmatchedDeps)
     {
         if ((e.Key == "Enter" || e.Key == " ") && !isUpdating && !isSyncing)
-            ShowConfirmUpdateDependencies(repositoryId, unmatchedDeps);
+            await ShowConfirmUpdateDependenciesAsync(repositoryId, unmatchedDeps);
     }
 
     /// <summary>Update dependencies for a single repository only (refresh projects, sync deps, no commit). Same as Update but scoped to one repo.</summary>
@@ -2223,6 +2331,14 @@
         showSelectionColumn = !showSelectionColumn;
         await PersistShowSelectionAsync();
         StateHasChanged();
+    }
+
+    private async Task OnSelectionModeKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" || e.Key == " ")
+        {
+            await ToggleSelectionModeAsync();
+        }
     }
 
     private async Task PersistShowSelectionAsync()

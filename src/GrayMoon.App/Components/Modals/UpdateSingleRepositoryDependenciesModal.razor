@@ -1,0 +1,78 @@
+@using Microsoft.AspNetCore.Components.Web
+@using GrayMoon.App.Models
+
+@if (IsVisible && Payload != null)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDown"
+         @ref="_modalElement">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Update dependencies</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2">
+                        The following @(PackageLines.Count == 1 ? "dependency" : "dependencies") will be updated in <strong>@(RepoName ?? Payload.RepoName)</strong>:
+                    </p>
+                    <ul class="list-unstyled mb-3 ps-0">
+                        @foreach (var line in PackageLines)
+                        {
+                            <li class="mb-1"><code>@line.PackageId</code> @line.CurrentVersion → @line.NewVersion</li>
+                        }
+                    </ul>
+                    <div class="form-check">
+                        <input id="update-single-commit-checkbox" type="checkbox" class="form-check-input" @bind="CommitVersionUpdate" />
+                        <label class="form-check-label" for="update-single-commit-checkbox">Commit version update</label>
+                    </div>
+                    <p class="small text-muted mt-1 mb-0">
+                        If checked, updated .csproj files will be committed after the update.
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-warning" @onclick="Proceed">
+                        Proceed
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public SyncDependenciesRepoPayload? Payload { get; set; }
+    [Parameter] public string? RepoName { get; set; }
+    [Parameter] public EventCallback<bool> OnProceed { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private bool CommitVersionUpdate { get; set; }
+    private ElementReference _modalElement;
+
+    private IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> PackageLines =>
+        Payload?.ProjectUpdates
+            .SelectMany(p => p.PackageUpdates)
+            .ToList()
+        ?? (IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>)Array.Empty<(string PackageId, string CurrentVersion, string NewVersion)>();
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible)
+            CommitVersionUpdate = false;
+    }
+
+    private async Task Proceed()
+    {
+        await OnProceed.InvokeAsync(CommitVersionUpdate);
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            await OnCancel.InvokeAsync();
+    }
+}

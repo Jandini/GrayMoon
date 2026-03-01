@@ -338,9 +338,9 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
             .ToListAsync(cancellationToken);
 
         var repoIds = projects.Select(p => p.RepositoryId).Distinct().ToList();
-        var repoToProjectUpdates = new Dictionary<int, Dictionary<string, Dictionary<string, string>>>(repoIds.Count);
+        var repoToProjectUpdates = new Dictionary<int, Dictionary<string, Dictionary<string, (string Current, string New)>>> (repoIds.Count);
         foreach (var repoId in repoIds)
-            repoToProjectUpdates[repoId] = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+            repoToProjectUpdates[repoId] = new Dictionary<string, Dictionary<string, (string Current, string New)> >(StringComparer.OrdinalIgnoreCase);
 
         foreach (var d in dependencies)
         {
@@ -364,10 +364,10 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
             var repoUpdates = repoToProjectUpdates[depProj.RepositoryId];
             if (!repoUpdates.TryGetValue(projectPath, out var packageDict))
             {
-                packageDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                packageDict = new Dictionary<string, (string Current, string New)>(StringComparer.OrdinalIgnoreCase);
                 repoUpdates[projectPath] = packageDict;
             }
-            packageDict[packageId] = refVersionNorm;
+            packageDict[packageId] = (depVersion, refVersionNorm);
         }
 
         var linkLevelByRepo = await dbContext.WorkspaceRepositories
@@ -388,7 +388,7 @@ public sealed class WorkspaceProjectRepository(AppDbContext dbContext, ILogger<W
 
             var dependencyLevel = linkLevelByRepo.GetValueOrDefault(repoId);
             var projectUpdates = projectUpdatesDict
-                .Select(kv => new SyncDependenciesProjectUpdate(kv.Key, kv.Value.Select(p => (p.Key, p.Value)).ToList()))
+                .Select(kv => new SyncDependenciesProjectUpdate(kv.Key, kv.Value.Select(p => (p.Key, p.Value.Current, p.Value.New)).ToList()))
                 .ToList();
             result.Add(new SyncDependenciesRepoPayload(repoId, repoName, dependencyLevel, projectUpdates));
         }

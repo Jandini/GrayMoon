@@ -10,4 +10,4 @@ public sealed record SyncDependenciesRepoPayload(
 /// <summary>Updates to apply to one .csproj file.</summary>
 public sealed record SyncDependenciesProjectUpdate(
     string ProjectPath,
-    IReadOnlyList<(string PackageId, string NewVersion)> PackageUpdates);
+    IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> PackageUpdates);
