@@ -281,10 +281,6 @@ public static class BranchEndpoints
             if (!response.Success)
                 return Results.Problem(response.Error ?? "Failed to sync to default branch", statusCode: 500);
 
-            // Default branch always has upstream
-            wr.BranchHasUpstream = true;
-            await dbContext.SaveChangesAsync(CancellationToken.None);
-
             // Sync prunes the previous local branch; remove it from persistence
             var toRemove = await dbContext.RepositoryBranches
                 .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && !rb.IsRemote && rb.BranchName == currentBranchName)
@@ -365,8 +361,6 @@ public static class BranchEndpoints
                 var localBranches = refreshResponse.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
                 var remoteBranches = refreshResponse.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
                 await workspaceGitService.PersistBranchesAsync(wr.WorkspaceRepositoryId, localBranches, remoteBranches, refreshResponse.DefaultBranch, CancellationToken.None);
-                wr.BranchHasUpstream = ComputeBranchHasUpstream(wr.BranchName, remoteBranches);
-                await dbContext.SaveChangesAsync(CancellationToken.None);
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
             }
 
@@ -533,10 +527,6 @@ public static class BranchEndpoints
 
             if (!success)
                 return Results.Ok(new { success = false, error = errorMessage ?? "Failed to set upstream" });
-
-            // Mark branch as having upstream so Commits badge shows normal state
-            wr.BranchHasUpstream = true;
-            await dbContext.SaveChangesAsync(CancellationToken.None);
 
             // Persist the branch as remote (origin) so it appears in Remotes without a fetch
             var remoteBranchName = branchName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? branchName : "origin/" + branchName;

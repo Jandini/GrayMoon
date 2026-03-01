@@ -588,7 +588,6 @@ public class WorkspaceGitService(
         {
             onProgressMessage?.Invoke("Pushing all repositories...");
             await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
-            await SetBranchHasUpstreamAsync(workspaceId, payload.Select(p => p.RepoId).ToList(), true, cancellationToken);
             await RefreshVersionsAfterPushAsync(workspaceId, payload, cancellationToken);
             if (_hubContext != null)
                 await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
@@ -656,7 +655,6 @@ public class WorkspaceGitService(
 
             onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")} for dependency level {level}...");
             await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
-            await SetBranchHasUpstreamAsync(workspaceId, reposAtLevel.Select(p => p.RepoId).ToList(), true, cancellationToken);
             await RefreshVersionsAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
         }
 
@@ -718,17 +716,6 @@ public class WorkspaceGitService(
             cancellationToken.ThrowIfCancellationRequested();
             await SyncSingleRepositoryAsync(repo.RepoId, workspaceId, cancellationToken);
         }
-    }
-
-    private async Task SetBranchHasUpstreamAsync(int workspaceId, IReadOnlyList<int> repositoryIds, bool hasUpstream, CancellationToken cancellationToken)
-    {
-        if (repositoryIds.Count == 0) return;
-        var links = await _dbContext.WorkspaceRepositories
-            .Where(wr => wr.WorkspaceId == workspaceId && repositoryIds.Contains(wr.RepositoryId))
-            .ToListAsync(cancellationToken);
-        foreach (var wr in links)
-            wr.BranchHasUpstream = hasUpstream;
-        await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>Refreshes version for a single repo and persists. Returns (success, errorMessage) for caller to report and optionally stop workflow.</summary>
@@ -947,13 +934,6 @@ public class WorkspaceGitService(
                 if (info.Projects.HasValue) wr.Projects = info.Projects;
                 if (info.OutgoingCommits.HasValue) wr.OutgoingCommits = info.OutgoingCommits;
                 if (info.IncomingCommits.HasValue) wr.IncomingCommits = info.IncomingCommits;
-                if (info.RemoteBranches != null && !string.IsNullOrEmpty(info.Branch) && info.Branch != "-")
-                {
-                    var branch = info.Branch.Trim();
-                    var hasUpstream = info.RemoteBranches.Any(r => !string.IsNullOrEmpty(r) &&
-                        (string.Equals(r, "origin/" + branch, StringComparison.OrdinalIgnoreCase) || r.EndsWith("/" + branch, StringComparison.OrdinalIgnoreCase)));
-                    wr.BranchHasUpstream = hasUpstream;
-                }
                 wr.SyncStatus = (info.Version == "-" || info.Branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
             }
 
