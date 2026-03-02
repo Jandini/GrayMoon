@@ -113,6 +113,47 @@
     min-width: 0;
 }
 
+/* Search input + clear button container */
+.workspace-repos-search-input-wrap {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: stretch;
+}
+
+.workspace-repos-search-input-wrap.has-filter .workspace-repos-search {
+    padding-right: 2.25rem;
+}
+
+/* Gray x-circle-fill clear icon inside search box, right-aligned */
+.workspace-repos-search-clear {
+    position: absolute;
+    right: 0.5rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: auto;
+    height: auto;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #6c757d;
+    transition: color 0.15s ease;
+}
+
+.workspace-repos-search-clear:hover {
+    color: #5a6268;
+}
+
+.workspace-repos-search-clear .bi {
+    font-size: 1.25rem;
+}
+
+
 /* Checkbox column: fixed width, non-resizable */
 .col-select {
     width: 2.5rem;
