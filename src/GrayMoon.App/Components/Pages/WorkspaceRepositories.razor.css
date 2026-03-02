@@ -291,6 +291,25 @@
     color: #707070 !important;
 }
 
+/* Sync (level) icon: same style as PR/sync-commits */
+.repositories-table .dependency-level-header .dependency-level-sync-link,
+.repositories-table .dependency-level-header .dependency-level-sync-link i {
+    color: #505050 !important;
+    cursor: pointer;
+    font-weight: 400;
+    display: inline-flex;
+    align-items: center;
+}
+
+.repositories-table .dependency-level-header .dependency-level-sync-link i {
+    font-size: 1.1rem;
+}
+
+.repositories-table .dependency-level-header .dependency-level-sync-link:hover,
+.repositories-table .dependency-level-header .dependency-level-sync-link:hover i {
+    color: #707070 !important;
+}
+
 /* Graph icon link: same style as PR/sync icons */
 .repositories-table .dependency-level-header .dependency-level-graph-link,
 .repositories-table .dependency-level-header .dependency-level-graph-link i {

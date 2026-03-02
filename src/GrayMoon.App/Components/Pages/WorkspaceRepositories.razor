@@ -212,6 +212,16 @@
                                                             <i class="bi bi-diagram-3" aria-hidden="true"></i>
                                                         </a>
                                                     }
+                                                    <span class="dependency-level-sync-commits-link"
+                                                          role="button"
+                                                          tabindex="0"
+                                                          title="Sync commits (pull) for all repositories in this level..."
+                                                          style="cursor: pointer;"
+                                                          @onclick="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
+                                                          @onclick:preventDefault
+                                                          aria-label="Sync commits">
+                                                        <i class="bi bi-arrow-down-up" aria-hidden="true"></i>
+                                                    </span>
                                                     <span class="dependency-level-pr-link"
                                                           role="button"
                                                           tabindex="0"
@@ -223,14 +233,14 @@
                                                           aria-label="Open Pull Request">
                                                         <i class="bi bi-git" aria-hidden="true"></i>
                                                     </span>
-                                                    <span class="dependency-level-sync-commits-link"
+                                                    <span class="dependency-level-sync-link"
                                                           role="button"
                                                           tabindex="0"
-                                                          title="Sync commits for all repositories in this level..."
+                                                          title="Sync (refresh version, branch, commits) for all repositories in this level..."
                                                           style="cursor: pointer;"
-                                                          @onclick="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
+                                                          @onclick="() => ShowConfirmSyncLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                           @onclick:preventDefault
-                                                          aria-label="Sync commits">
+                                                          aria-label="Sync level">
                                                         <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
                                                     </span>
                                                 </span>
@@ -893,6 +903,14 @@
             _ = CommitSyncLevelAsync(repositoryIds);
         else
             ShowConfirm($"Do you want to sync commits for {repositoryIds.Count} repositories?", () => CommitSyncLevelAsync(repositoryIds));
+    }
+
+    private void ShowConfirmSyncLevel(List<int> repositoryIds)
+    {
+        if (repositoryIds.Count <= 1)
+            _ = SyncLevelAsync(repositoryIds);
+        else
+            ShowConfirm($"Do you want to sync (refresh version, branch, commits) for {repositoryIds.Count} repositories in this level?", () => SyncLevelAsync(repositoryIds));
     }
 
     private void ShowConfirmOpenGitHub(int count, IReadOnlyList<string?> urls)
@@ -1579,6 +1597,78 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error syncing workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+        }
+        finally
+        {
+            isSyncing = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Sync (refresh version, branch, commits) for the given repositories in a level. Same overlay and error handling as SyncAsync.</summary>
+    private async Task SyncLevelAsync(List<int> repositoryIds)
+    {
+        if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || isSyncing)
+            return;
+
+        _syncCts?.Cancel();
+        _syncCts = new CancellationTokenSource();
+
+        isSyncing = true;
+        syncProgressMessage = $"Synchronizing {repositoryIds.Count} {(repositoryIds.Count == 1 ? "repository" : "repositories")}...";
+        errorMessage = null;
+        try
+        {
+            StateHasChanged();
+            await Task.Yield();
+
+            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
+            {
+                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                var results = await workspaceGitService.SyncAsync(
+                    WorkspaceId,
+                    onProgress: (completed, total, repoId, info) =>
+                    {
+                        syncProgressMessage = $"Synchronized {completed} of {total}";
+                        repoSyncStatus[repoId] = (info.Version == "-" && info.Branch == "-")
+                            ? RepoSyncStatus.Error
+                            : RepoSyncStatus.InSync;
+                        var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
+                        if (wr != null)
+                        {
+                            wr.GitVersion = info.Version == "-" ? null : info.Version;
+                            wr.BranchName = info.Branch == "-" ? null : info.Branch;
+                            wr.Projects = info.Projects;
+                            wr.OutgoingCommits = info.OutgoingCommits;
+                            wr.IncomingCommits = info.IncomingCommits;
+                        }
+                        InvokeAsync(StateHasChanged);
+                    },
+                    repositoryIds: repositoryIds,
+                    skipDependencyLevelPersistence: true,
+                    cancellationToken: _syncCts.Token);
+                repoGitInfos = results;
+            }
+            await ReloadWorkspaceDataAsync();
+            ApplySyncStateFromWorkspace();
+            isOutOfSync = repoSyncStatus.Values.Any(v => v != RepoSyncStatus.InSync);
+
+            foreach (var (repoId, info) in repoGitInfos)
+            {
+                if (!string.IsNullOrWhiteSpace(info.ErrorMessage))
+                    repositoryErrors[repoId] = info.ErrorMessage;
+                else
+                    repositoryErrors.Remove(repoId);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            await ReloadWorkspaceDataAfterCancelAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error syncing level for workspace {WorkspaceId}", WorkspaceId);
             errorMessage = "Sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
         }
         finally
