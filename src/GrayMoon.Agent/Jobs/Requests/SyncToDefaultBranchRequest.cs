@@ -12,4 +12,7 @@ public sealed class SyncToDefaultBranchRequest : WorkspaceCommandRequest
 
     [JsonPropertyName("currentBranchName")]
     public string? CurrentBranchName { get; set; }
+
+    [JsonPropertyName("bearerToken")]
+    public string? BearerToken { get; set; }
 }

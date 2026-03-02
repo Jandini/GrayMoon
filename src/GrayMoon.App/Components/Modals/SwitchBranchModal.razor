@@ -351,7 +351,7 @@
                                         class="btn btn-warning" 
                                         @onclick="SyncToDefaultAsync"
                                         disabled="@isRefreshing">
-                                    Sync to @defaultBranch
+                                    Sync to @(string.Equals(defaultBranch, "main", StringComparison.OrdinalIgnoreCase) ? "Main" : defaultBranch)
                                 </button>
                             }
                         }

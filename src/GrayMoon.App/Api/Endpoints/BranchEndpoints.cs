@@ -262,6 +262,7 @@ public static class BranchEndpoints
                 workspaceName = workspace.Name,
                 repositoryName = repo.RepositoryName,
                 currentBranchName,
+                bearerToken = repo.Connector?.UserToken,
                 workspaceRoot
             };
             var response = await agentBridge.SendCommandAsync("SyncToDefaultBranch", args, CancellationToken.None);
