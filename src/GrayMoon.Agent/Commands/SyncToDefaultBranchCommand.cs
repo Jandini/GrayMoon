@@ -54,6 +54,19 @@ public sealed class SyncToDefaultBranchCommand(IGitService git) : ICommandHandle
             await git.DeleteLocalBranchAsync(repoPath, currentBranchName, force: false, cancellationToken);
         }
 
+        // Always pull after switching to default so local is up to date
+        var (pullSuccess, mergeConflict, pullError) = await git.PullAsync(repoPath, defaultBranch, request.BearerToken, cancellationToken);
+        if (!pullSuccess)
+        {
+            return new SyncToDefaultBranchResponse
+            {
+                Success = false,
+                ErrorMessage = mergeConflict ? (pullError ?? "Merge conflict after pull.") : (pullError ?? "Failed to pull after switching to default branch"),
+                CurrentBranch = defaultBranch,
+                DefaultBranch = defaultBranch
+            };
+        }
+
         return new SyncToDefaultBranchResponse
         {
             Success = true,
