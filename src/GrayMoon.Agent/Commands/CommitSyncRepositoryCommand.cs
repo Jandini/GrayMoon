@@ -65,7 +65,7 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
         var version = versionResult.SemVer ?? versionResult.FullSemVer ?? "-";
 
         // Fetch first to get latest commit counts
-        await git.FetchAsync(repoPath, includeTags: false, bearerToken, cancellationToken);
+        await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
 
         // Get commit counts
         var (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
@@ -86,7 +86,7 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
                 await git.AbortMergeAsync(repoPath, cancellationToken);
                 
                 // Refresh commit counts after abort
-                await git.FetchAsync(repoPath, includeTags: false, bearerToken, cancellationToken);
+                await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
                 (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
 
                 return new CommitSyncRepositoryResponse
@@ -115,7 +115,7 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
             }
 
             // Refresh commit counts after pull
-            await git.FetchAsync(repoPath, includeTags: false, bearerToken, cancellationToken);
+            await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
             (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
         }
 
@@ -140,7 +140,7 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
             }
 
             // Refresh commit counts after push
-            await git.FetchAsync(repoPath, includeTags: false, bearerToken, cancellationToken);
+            await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
             (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
         }
 

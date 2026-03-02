@@ -25,7 +25,7 @@ public sealed class GetBranchesCommand(IGitService git) : ICommandHandler<GetBra
         }
 
         // Fetch to ensure remote branches are up to date
-        await git.FetchAsync(repoPath, includeTags: false, bearerToken: null, cancellationToken);
+        await git.FetchAsync(repoPath, includeTags: true, bearerToken: null, cancellationToken);
 
         var localBranches = await git.GetLocalBranchesAsync(repoPath, cancellationToken);
         var remoteBranches = await git.GetRemoteBranchesAsync(repoPath, cancellationToken);
