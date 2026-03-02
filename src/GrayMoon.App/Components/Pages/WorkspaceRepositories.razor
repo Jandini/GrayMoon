@@ -72,9 +72,22 @@
                                tabindex="-1"
                                aria-hidden="true" />
                     </div>
-                    <input id="workspace-repos-search" class="form-control workspace-repos-search" placeholder="Search repositories..."
-                           @bind="searchTerm" @bind:event="oninput"
-                           @onkeydown="OnSearchKeyDown" />
+                    <div class="workspace-repos-search-input-wrap @(!string.IsNullOrWhiteSpace(searchTerm) ? "has-filter" : null)">
+                        <input id="workspace-repos-search" class="form-control workspace-repos-search" placeholder="Search repositories..."
+                               @bind="searchTerm" @bind:event="oninput"
+                               @onkeydown="OnSearchKeyDown" />
+                        @if (!string.IsNullOrWhiteSpace(searchTerm))
+                        {
+                            <button type="button"
+                                    class="workspace-repos-search-clear"
+                                    title="Clear filter"
+                                    aria-label="Clear repository filter"
+                                    @onclick="ClearSearchFilter"
+                                    @onclick:stopPropagation="true">
+                                <i class="bi bi-x-circle" aria-hidden="true"></i>
+                            </button>
+                        }
+                    </div>
                 </div>
                 <button class="btn btn-outline-secondary"
                         @onclick="ShowBranchModalAsync"
@@ -2307,6 +2320,12 @@
             searchTerm = string.Empty;
             StateHasChanged();
         }
+    }
+
+    private void ClearSearchFilter()
+    {
+        searchTerm = string.Empty;
+        StateHasChanged();
     }
 
     private List<WorkspaceRepositoryLink> GetFilteredWorkspaceRepositories()
