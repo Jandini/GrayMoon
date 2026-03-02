@@ -99,11 +99,22 @@
                         disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating || isPushing)">
                     Update
                 </button>
-                <button class="btn @(isPushRecommended ? "btn-warning" : "btn-outline-secondary")"
-                        @onclick="OnPushClickAsync"
-                        disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating || isPushing)">
-                    Push
-                </button>
+                @if (hasIncomingCommits)
+                {
+                    <button class="btn btn-danger"
+                            @onclick="OnPullClickAsync"
+                            disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating || isPushing || isCommitSyncing)">
+                        Pull
+                    </button>
+                }
+                else
+                {
+                    <button class="btn @(isPushRecommended ? "btn-warning" : "btn-outline-secondary")"
+                            @onclick="OnPushClickAsync"
+                            disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating || isPushing)">
+                        Push
+                    </button>
+                }
                 <button class="btn @(isOutOfSync == true ? "btn-danger" : "btn-primary")"
                         @onclick="SyncAsync"
                         disabled="@(isSyncing || isUpdating || isPushing || workspaceRepositories.Count == 0)">
@@ -201,6 +212,16 @@
                                                             <i class="bi bi-diagram-3" aria-hidden="true"></i>
                                                         </a>
                                                     }
+                                                    <span class="dependency-level-sync-commits-link"
+                                                          role="button"
+                                                          tabindex="0"
+                                                          title="Sync commits (pull) for all repositories in this level..."
+                                                          style="cursor: pointer;"
+                                                          @onclick="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
+                                                          @onclick:preventDefault
+                                                          aria-label="Sync commits">
+                                                        <i class="bi bi-arrow-down-up" aria-hidden="true"></i>
+                                                    </span>
                                                     <span class="dependency-level-pr-link"
                                                           role="button"
                                                           tabindex="0"
@@ -212,14 +233,14 @@
                                                           aria-label="Open Pull Request">
                                                         <i class="bi bi-git" aria-hidden="true"></i>
                                                     </span>
-                                                    <span class="dependency-level-sync-commits-link"
+                                                    <span class="dependency-level-sync-link"
                                                           role="button"
                                                           tabindex="0"
-                                                          title="Sync commits for all repositories in this level..."
+                                                          title="Sync (refresh version, branch, commits) for all repositories in this level..."
                                                           style="cursor: pointer;"
-                                                          @onclick="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
+                                                          @onclick="() => ShowConfirmSyncLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                           @onclick:preventDefault
-                                                          aria-label="Sync commits">
+                                                          aria-label="Sync level">
                                                         <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
                                                     </span>
                                                 </span>
@@ -479,6 +500,8 @@
     private bool? isOutOfSync = null;
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0);
     private bool isPushRecommended => workspaceRepositories.Any(wr => (wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false);
+    /// <summary>When true, any repository has incoming commits; header shows red Pull button and executes only Pull (commit sync).</summary>
+    private bool hasIncomingCommits => workspaceRepositories.Any(wr => (wr.IncomingCommits ?? 0) > 0);
     private IEnumerable<IGrouping<int?, WorkspaceRepositoryLink>> LevelGroups =>
         workspaceRepositories
             .GroupBy(wr => wr.DependencyLevel)
@@ -729,6 +752,11 @@
                 builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => OnPushBadgeClickAsync(repositoryId, branchName)));
                 builder.AddAttribute(4, "title", "Push to set upstream");
             }
+            else if (y > 0)
+            {
+                builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => OnPullBadgeClickAsync(repositoryId)));
+                builder.AddAttribute(4, "title", "Click to pull");
+            }
             else
             {
                 builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => OnPushBadgeClickAsync(repositoryId, branchName)));
@@ -877,6 +905,14 @@
             ShowConfirm($"Do you want to sync commits for {repositoryIds.Count} repositories?", () => CommitSyncLevelAsync(repositoryIds));
     }
 
+    private void ShowConfirmSyncLevel(List<int> repositoryIds)
+    {
+        if (repositoryIds.Count <= 1)
+            _ = SyncLevelAsync(repositoryIds);
+        else
+            ShowConfirm($"Do you want to sync (refresh version, branch, commits) for {repositoryIds.Count} repositories in this level?", () => SyncLevelAsync(repositoryIds));
+    }
+
     private void ShowConfirmOpenGitHub(int count, IReadOnlyList<string?> urls)
     {
         async Task OpenGitHubAsync()
@@ -994,6 +1030,14 @@
     private void ShowConfirmSyncCommits(int repositoryId)
     {
         ShowConfirm("Do you want to sync commits for this repository?", () => CommitSyncAsync(repositoryId));
+    }
+
+    /// <summary>When user clicks the Commits badge and there are incoming commits: run Pull (commit sync) only, with same merge/error handling as CommitSyncAsync.</summary>
+    private void OnPullBadgeClickAsync(int repositoryId)
+    {
+        if (workspace == null || isCommitSyncing || isSyncing || isUpdating)
+            return;
+        ShowConfirm("Do you want to pull for this repository?", () => CommitSyncAsync(repositoryId));
     }
 
     /// <summary>When user clicks the not-upstreamed badge: check dependencies. No deps = push directly; has deps = show modal with dependency list and Synchronized Push option.</summary>
@@ -1183,6 +1227,29 @@
             Logger.LogError(ex, "Error getting push plan for workspace {WorkspaceId}", WorkspaceId);
             errorMessage = "Could not determine push plan. The GrayMoon Agent may be offline.";
         }
+    }
+
+    /// <summary>Pull button click (when any repo has incoming commits): run commit sync (Pull) only for repos with incoming commits. Uses same overlay and merge/error handling as CommitSyncAsync/CommitSyncLevelAsync.</summary>
+    private void OnPullClickAsync()
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || isCommitSyncing || isSyncing || isUpdating)
+            return;
+
+        var repoIdsWithIncoming = workspaceRepositories
+            .Where(wr => (wr.IncomingCommits ?? 0) > 0)
+            .Select(wr => wr.RepositoryId)
+            .ToList();
+        if (EffectiveActionRepositoryIds != null)
+            repoIdsWithIncoming = repoIdsWithIncoming.Where(EffectiveActionRepositoryIds.Contains).ToList();
+        if (repoIdsWithIncoming.Count == 0)
+        {
+            ToastService.Show("No repositories with incoming commits to pull.");
+            return;
+        }
+        if (repoIdsWithIncoming.Count == 1)
+            ShowConfirm("Do you want to pull for this repository?", () => CommitSyncAsync(repoIdsWithIncoming[0]));
+        else
+            ShowConfirm($"Do you want to pull for {repoIdsWithIncoming.Count} repositories?", () => CommitSyncLevelAsync(repoIdsWithIncoming));
     }
 
     /// <summary>Update button click: get update plan; if no updates, toast; else show modal (single vs multi-level).</summary>
@@ -1530,6 +1597,78 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error syncing workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+        }
+        finally
+        {
+            isSyncing = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Sync (refresh version, branch, commits) for the given repositories in a level. Same overlay and error handling as SyncAsync.</summary>
+    private async Task SyncLevelAsync(List<int> repositoryIds)
+    {
+        if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || isSyncing)
+            return;
+
+        _syncCts?.Cancel();
+        _syncCts = new CancellationTokenSource();
+
+        isSyncing = true;
+        syncProgressMessage = $"Synchronizing {repositoryIds.Count} {(repositoryIds.Count == 1 ? "repository" : "repositories")}...";
+        errorMessage = null;
+        try
+        {
+            StateHasChanged();
+            await Task.Yield();
+
+            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
+            {
+                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                var results = await workspaceGitService.SyncAsync(
+                    WorkspaceId,
+                    onProgress: (completed, total, repoId, info) =>
+                    {
+                        syncProgressMessage = $"Synchronized {completed} of {total}";
+                        repoSyncStatus[repoId] = (info.Version == "-" && info.Branch == "-")
+                            ? RepoSyncStatus.Error
+                            : RepoSyncStatus.InSync;
+                        var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
+                        if (wr != null)
+                        {
+                            wr.GitVersion = info.Version == "-" ? null : info.Version;
+                            wr.BranchName = info.Branch == "-" ? null : info.Branch;
+                            wr.Projects = info.Projects;
+                            wr.OutgoingCommits = info.OutgoingCommits;
+                            wr.IncomingCommits = info.IncomingCommits;
+                        }
+                        InvokeAsync(StateHasChanged);
+                    },
+                    repositoryIds: repositoryIds,
+                    skipDependencyLevelPersistence: true,
+                    cancellationToken: _syncCts.Token);
+                repoGitInfos = results;
+            }
+            await ReloadWorkspaceDataAsync();
+            ApplySyncStateFromWorkspace();
+            isOutOfSync = repoSyncStatus.Values.Any(v => v != RepoSyncStatus.InSync);
+
+            foreach (var (repoId, info) in repoGitInfos)
+            {
+                if (!string.IsNullOrWhiteSpace(info.ErrorMessage))
+                    repositoryErrors[repoId] = info.ErrorMessage;
+                else
+                    repositoryErrors.Remove(repoId);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            await ReloadWorkspaceDataAfterCancelAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error syncing level for workspace {WorkspaceId}", WorkspaceId);
             errorMessage = "Sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
         }
         finally
