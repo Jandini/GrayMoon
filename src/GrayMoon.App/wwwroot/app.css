@@ -812,7 +812,7 @@ table.resizable-columns th:hover .resize-handle::after {
 .repositories-table td.col-divergence .divergence-inner {
     display: grid;
     grid-template-columns: 3ch auto 3ch;
-    column-gap: 0.25rem;
+    column-gap: 0.1rem;
     align-items: center;
     font-variant-numeric: tabular-nums;
     font-size: 0.85em;
@@ -829,7 +829,7 @@ table.resizable-columns th:hover .resize-handle::after {
 .repositories-table td.col-divergence .divergence-link {
     display: inline-flex;
     align-items: center;
-    padding: 0 0.35rem;
+    padding: 0 0.25rem;
     border: 1px solid transparent;
     border-radius: 0.25rem;
     cursor: pointer;
