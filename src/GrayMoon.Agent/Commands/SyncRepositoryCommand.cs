@@ -61,6 +61,8 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 incomingCommits = incoming;
             }
 
+            var (defaultBehind, defaultAhead) = await git.GetCommitCountsVsDefaultAsync(repoPath, cancellationToken);
+
             // Fetch branches after fetch completes (branches are now up to date)
             IReadOnlyList<string>? localBranches = null;
             IReadOnlyList<string>? remoteBranches = null;
@@ -91,7 +93,9 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 LocalBranches = localBranches,
                 RemoteBranches = remoteBranches,
                 DefaultBranch = defaultBranch,
-                GitVersionError = versionError
+                GitVersionError = versionError,
+                DefaultBranchBehind = defaultBehind,
+                DefaultBranchAhead = defaultAhead
             };
         }
 

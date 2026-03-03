@@ -153,6 +153,7 @@
                                 <th class="col-repo">Repository</th>
                                 <th class="col-version">Version</th>
                                 <th class="col-branch">Branch</th>
+                                <th class="col-divergence text-center">Divergence</th>
                                 <th class="col-deps">Dependencies</th>
                                 <th class="col-commits">Commits</th>
                                 <th class="col-sync col-status-badge">Status</th>
@@ -160,7 +161,7 @@
                         </thead>
                         <tbody>
                             @{
-                                var colSpan = showSelectionColumn ? 7 : 6;
+                                var colSpan = showSelectionColumn ? 8 : 7;
                             }
                             @if (isLoading)
                             {
@@ -318,6 +319,9 @@
                                                     <span>-</span>
                                                 }
                                             </td>
+                                            <td class="col-divergence text-center text-nowrap">
+                                                @GetDivergenceDisplay(wr.DefaultBranchBehindCommits, wr.DefaultBranchAheadCommits, wr.BranchName)
+                                            </td>
                                             <td class="col-deps col-status-badge">
                                                 @{
                                                     var depCount = wr.Dependencies ?? 0;
@@ -394,7 +398,7 @@
                             <table class="table table-striped table-hover mb-0 repositories-table">
                                 <tbody>
                                     <tr>
-                                        <td colspan="6" class="text-center text-muted py-4">Loading...</td>
+                                        <td colspan="7" class="text-center text-muted py-4">Loading...</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -716,6 +720,28 @@
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
     }
+
+    private RenderFragment GetDivergenceDisplay(int? defaultBehind, int? defaultAhead, string? branchName) => builder =>
+    {
+        if (string.IsNullOrWhiteSpace(branchName) || (!defaultBehind.HasValue && !defaultAhead.HasValue))
+        {
+            builder.AddContent(0, "—");
+            return;
+        }
+        var behind = defaultBehind ?? 0;
+        var ahead = defaultAhead ?? 0;
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", "divergence-cell");
+        builder.AddAttribute(2, "style", "font-variant-numeric: tabular-nums;");
+        builder.AddContent(3, behind.ToString());
+        builder.OpenElement(4, "span");
+        builder.AddAttribute(5, "class", "text-muted");
+        builder.AddAttribute(6, "style", "color: #6c757d;");
+        builder.AddContent(7, " | ");
+        builder.CloseElement();
+        builder.AddContent(8, ahead.ToString());
+        builder.CloseElement();
+    };
 
     private RenderFragment GetCommitsBadge(int repositoryId, int? outgoing, int? incoming, bool? branchHasUpstream, string? branchName) => builder =>
     {

@@ -98,6 +98,7 @@ using (var scope = app.Services.CreateScope())
     await MigrateWorkspaceRepositoriesCommitsAsync(dbContext);
     await MigrateWorkspaceRepositoriesBranchHasUpstreamAsync(dbContext);
     await MigrateWorkspaceRepositoriesDependencyLevelAndDependenciesAsync(dbContext);
+    await MigrateWorkspaceRepositoriesDefaultBranchDivergenceAsync(dbContext);
     await MigrateWorkspaceProjectsMatchedConnectorAsync(dbContext);
     await MigrateRepositoryBranchesAsync(dbContext);
     await MigrateRepositoryBranchesIsDefaultAsync(dbContext);
@@ -428,6 +429,38 @@ static async Task MigrateWorkspaceRepositoriesDependencyLevelAndDependenciesAsyn
             if (count == 0)
             {
                 cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN UnmatchedDeps INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateWorkspaceRepositoriesDefaultBranchDivergenceAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='DefaultBranchBehindCommits'";
+            var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN DefaultBranchBehindCommits INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+            }
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='DefaultBranchAheadCommits'";
+            count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            if (count == 0)
+            {
+                cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN DefaultBranchAheadCommits INTEGER";
                 await cmd.ExecuteNonQueryAsync();
             }
         }

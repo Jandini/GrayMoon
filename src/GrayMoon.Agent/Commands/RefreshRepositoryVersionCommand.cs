@@ -34,6 +34,8 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git) : ICommandH
                 incomingCommits = incoming;
             }
 
+            var (defaultBehind, defaultAhead) = await git.GetCommitCountsVsDefaultAsync(repoPath, cancellationToken);
+
             var remoteBranches = await git.GetRemoteBranchesAsync(repoPath, cancellationToken);
             var localBranches = await git.GetLocalBranchesAsync(repoPath, cancellationToken);
             bool? hasUpstream = null;
@@ -49,7 +51,9 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git) : ICommandH
                 GitVersionError = versionError,
                 HasUpstream = hasUpstream,
                 RemoteBranches = remoteBranches.ToList(),
-                LocalBranches = localBranches.ToList()
+                LocalBranches = localBranches.ToList(),
+                DefaultBranchBehind = defaultBehind,
+                DefaultBranchAhead = defaultAhead
             };
         }
 

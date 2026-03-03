@@ -522,7 +522,7 @@ public class WorkspaceGitService(
                 if (hadError)
                     break;
 
-                const int maxParallelRefresh = 8;
+                const int maxParallelRefresh = 16;
                 var totalRefresh = reposAtLevel.Count;
                 var completedRefresh = 0;
                 var refreshSemaphore = new SemaphoreSlim(maxParallelRefresh);
@@ -567,7 +567,7 @@ public class WorkspaceGitService(
             }
             if (!hadError && payload.Count > 0)
             {
-                const int maxParallelRefresh = 8;
+                const int maxParallelRefresh = 16;
                 var totalRefresh = payload.Count;
                 var completedRefresh = 0;
                 var refreshSemaphore = new SemaphoreSlim(maxParallelRefresh);
@@ -930,14 +930,14 @@ public class WorkspaceGitService(
                     workspaceRoot
                 }, cancellationToken);
                 if (!response.Success || response.Data == null)
-                    return (RepoId: repo.RepoId, Outgoing: (int?)null, Incoming: (int?)null, HasUpstream: (bool?)null);
+                    return (RepoId: repo.RepoId, Outgoing: (int?)null, Incoming: (int?)null, HasUpstream: (bool?)null, DefaultBehind: (int?)null, DefaultAhead: (int?)null);
                 var data = AgentResponseJson.DeserializeAgentResponse<AgentCommitCountsResponse>(response.Data);
-                return (RepoId: repo.RepoId, Outgoing: data?.OutgoingCommits, Incoming: data?.IncomingCommits, HasUpstream: data?.HasUpstream);
+                return (RepoId: repo.RepoId, Outgoing: data?.OutgoingCommits, Incoming: data?.IncomingCommits, HasUpstream: data?.HasUpstream, DefaultBehind: data?.DefaultBranchBehind, DefaultAhead: data?.DefaultBranchAhead);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "GetCommitCounts failed for repo {RepoId} ({RepoName})", repo.RepoId, repo.RepoName);
-                return (RepoId: repo.RepoId, Outgoing: (int?)null, Incoming: (int?)null, HasUpstream: (bool?)null);
+                return (RepoId: repo.RepoId, Outgoing: (int?)null, Incoming: (int?)null, HasUpstream: (bool?)null, DefaultBehind: (int?)null, DefaultAhead: (int?)null);
             }
         }));
 
@@ -954,6 +954,8 @@ public class WorkspaceGitService(
                 wr.IncomingCommits = r.Incoming;
                 if (r.HasUpstream.HasValue)
                     wr.BranchHasUpstream = r.HasUpstream.Value;
+                if (r.DefaultBehind.HasValue) wr.DefaultBranchBehindCommits = r.DefaultBehind;
+                if (r.DefaultAhead.HasValue) wr.DefaultBranchAheadCommits = r.DefaultAhead;
             }
         }
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -1058,7 +1060,7 @@ public class WorkspaceGitService(
         var (version, branch, gitVersionError) = GetVersionBranch(response.Data);
         var projectsCount = GetProjects(response.Data);
         var projectsDetail = GetProjectsDetail(response.Data);
-        var (outgoingCommits, incomingCommits) = GetCommitCounts(response.Data);
+        var (outgoingCommits, incomingCommits, defaultBehind, defaultAhead) = GetCommitCounts(response.Data);
         var (localBranches, remoteBranches, defaultBranch) = GetBranches(response.Data);
         var hasUpstream = ComputeHasUpstream(branch, remoteBranches);
         return new RepoGitVersionInfo
@@ -1069,6 +1071,8 @@ public class WorkspaceGitService(
             ProjectsDetail = projectsDetail,
             OutgoingCommits = outgoingCommits,
             IncomingCommits = incomingCommits,
+            DefaultBranchBehindCommits = defaultBehind,
+            DefaultBranchAheadCommits = defaultAhead,
             HasUpstream = hasUpstream,
             LocalBranches = localBranches,
             RemoteBranches = remoteBranches,
@@ -1090,7 +1094,7 @@ public class WorkspaceGitService(
             return new RepoGitVersionInfo { Version = "-", Branch = "-" };
 
         var (version, branch, gitVersionError) = GetVersionBranch(response.Data);
-        var (outgoingCommits, incomingCommits) = GetCommitCounts(response.Data);
+        var (outgoingCommits, incomingCommits, defaultBehind, defaultAhead) = GetCommitCounts(response.Data);
         var (hasUpstream, remoteBranches, localBranches) = GetRefreshBranchesAndUpstream(response.Data);
         return new RepoGitVersionInfo
         {
@@ -1098,6 +1102,8 @@ public class WorkspaceGitService(
             Branch = branch,
             OutgoingCommits = outgoingCommits,
             IncomingCommits = incomingCommits,
+            DefaultBranchBehindCommits = defaultBehind,
+            DefaultBranchAheadCommits = defaultAhead,
             HasUpstream = hasUpstream,
             RemoteBranches = remoteBranches,
             LocalBranches = localBranches,
@@ -1127,10 +1133,10 @@ public class WorkspaceGitService(
         return projects.Count > 0 ? projects.Count : null;
     }
 
-    private static (int? Outgoing, int? Incoming) GetCommitCounts(object data)
+    private static (int? Outgoing, int? Incoming, int? DefaultBehind, int? DefaultAhead) GetCommitCounts(object data)
     {
         var r = AgentResponseJson.DeserializeAgentResponse<AgentCommitCountsResponse>(data);
-        return (r?.OutgoingCommits, r?.IncomingCommits);
+        return (r?.OutgoingCommits, r?.IncomingCommits, r?.DefaultBranchBehind, r?.DefaultBranchAhead);
     }
 
     private static (IReadOnlyList<string>? LocalBranches, IReadOnlyList<string>? RemoteBranches, string? DefaultBranch) GetBranches(object data)
@@ -1202,6 +1208,8 @@ public class WorkspaceGitService(
                 if (info.OutgoingCommits.HasValue) wr.OutgoingCommits = info.OutgoingCommits;
                 if (info.IncomingCommits.HasValue) wr.IncomingCommits = info.IncomingCommits;
                 if (info.HasUpstream.HasValue) wr.BranchHasUpstream = info.HasUpstream.Value;
+                if (info.DefaultBranchBehindCommits.HasValue) wr.DefaultBranchBehindCommits = info.DefaultBranchBehindCommits;
+                if (info.DefaultBranchAheadCommits.HasValue) wr.DefaultBranchAheadCommits = info.DefaultBranchAheadCommits;
                 wr.SyncStatus = (info.Version == "-" || info.Branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
             }
 

@@ -24,11 +24,14 @@ public sealed class GetCommitCountsCommand(IGitService git) : ICommandHandler<Ge
             return new GetCommitCountsResponse();
 
         var (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
+        var (defaultBehind, defaultAhead) = await git.GetCommitCountsVsDefaultAsync(repoPath, cancellationToken);
         return new GetCommitCountsResponse
         {
             OutgoingCommits = outgoing,
             IncomingCommits = incoming,
-            HasUpstream = hasUpstream
+            HasUpstream = hasUpstream,
+            DefaultBranchBehind = defaultBehind,
+            DefaultBranchAhead = defaultAhead
         };
     }
 }

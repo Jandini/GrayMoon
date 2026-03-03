@@ -9,6 +9,10 @@ public class RepoGitVersionInfo
     public int? OutgoingCommits { get; init; }
     /// <summary>Incoming commits (behind remote).</summary>
     public int? IncomingCommits { get; init; }
+    /// <summary>Commits on default branch not in current branch (vs default, for Divergence column).</summary>
+    public int? DefaultBranchBehindCommits { get; init; }
+    /// <summary>Commits on current branch not in default branch (vs default, for Divergence column).</summary>
+    public int? DefaultBranchAheadCommits { get; init; }
     /// <summary>Full project list from sync (for merge persistence).</summary>
     public IReadOnlyList<SyncProjectInfo>? ProjectsDetail { get; init; }
     /// <summary>Local branches fetched during sync.</summary>

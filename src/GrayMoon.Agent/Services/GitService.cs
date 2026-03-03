@@ -230,6 +230,39 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (outVal, inVal, true);
     }
 
+    public async Task<(int? DefaultBehind, int? DefaultAhead)> GetCommitCountsVsDefaultAsync(string repoPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return (null, null);
+
+        var defaultBranch = await GetDefaultBranchAsync(repoPath, ct);
+        if (defaultBranch == null)
+        {
+            logger.LogDebug("GetCommitCountsVsDefault: no default branch for {RepoPath}", repoPath);
+            return (null, null);
+        }
+
+        // ahead = commits on current branch not in default; behind = commits on default not in current branch
+        var (exitAhead, stdoutAhead, stderrAhead) = await RunProcessAsync("git", $"rev-list --count {defaultBranch}..HEAD", repoPath, ct);
+        var (exitBehind, stdoutBehind, stderrBehind) = await RunProcessAsync("git", $"rev-list --count HEAD..{defaultBranch}", repoPath, ct);
+
+        if (exitAhead != 0)
+        {
+            logger.LogDebug("GetCommitCountsVsDefault (ahead) failed for {RepoPath}. ExitCode={ExitCode}", repoPath, exitAhead);
+            return (null, null);
+        }
+        if (exitBehind != 0)
+        {
+            logger.LogDebug("GetCommitCountsVsDefault (behind) failed for {RepoPath}. ExitCode={ExitCode}", repoPath, exitBehind);
+            return (null, null);
+        }
+
+        var ahead = int.TryParse((stdoutAhead ?? "").Trim(), out var a) ? a : (int?)null;
+        var behind = int.TryParse((stdoutBehind ?? "").Trim(), out var b) ? b : (int?)null;
+        logger.LogDebug("GetCommitCountsVsDefault for {RepoPath}: behind={Behind}, ahead={Ahead}", repoPath, behind, ahead);
+        return (behind, ahead);
+    }
+
     public async Task<(bool Success, bool MergeConflict, string? ErrorMessage)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
