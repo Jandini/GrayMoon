@@ -725,21 +725,26 @@
     {
         if (string.IsNullOrWhiteSpace(branchName) || (!defaultBehind.HasValue && !defaultAhead.HasValue))
         {
-            builder.AddContent(0, "—");
+            builder.AddContent(0, "-");
             return;
         }
         var behind = defaultBehind ?? 0;
         var ahead = defaultAhead ?? 0;
-        builder.OpenElement(0, "span");
-        builder.AddAttribute(1, "class", "divergence-cell");
-        builder.AddAttribute(2, "style", "font-variant-numeric: tabular-nums;");
-        builder.AddContent(3, behind.ToString());
-        builder.OpenElement(4, "span");
-        builder.AddAttribute(5, "class", "text-muted");
-        builder.AddAttribute(6, "style", "color: #6c757d;");
-        builder.AddContent(7, " | ");
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "divergence-container");
+        builder.OpenElement(2, "span");
+        builder.AddAttribute(3, "class", "divergence-inner");
+        builder.AddAttribute(4, "style", "font-variant-numeric: tabular-nums; font-size: 0.85em; cursor: pointer;");
+        builder.AddAttribute(5, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => OnDivergenceClick(behind, ahead)));
+        builder.AddAttribute(6, "title", $"{behind} commits behind | {ahead} commits ahead vs default branch");
+        builder.AddContent(7, behind.ToString());
+        builder.OpenElement(8, "span");
+        builder.AddAttribute(9, "class", "text-muted");
+        builder.AddAttribute(10, "style", "color: #6c757d;");
+        builder.AddContent(11, " | ");
         builder.CloseElement();
-        builder.AddContent(8, ahead.ToString());
+        builder.AddContent(12, ahead.ToString());
+        builder.CloseElement();
         builder.CloseElement();
     };
 
@@ -2353,6 +2358,11 @@
             clickedVersions.Remove(version);
             StateHasChanged();
         }
+    }
+
+    private void OnDivergenceClick(int behind, int ahead)
+    {
+        ToastService.Show($"{behind} commits behind | {ahead} commits ahead vs default branch");
     }
 
     private string GetDependencyGraphUrl(int repositoryId)

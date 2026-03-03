@@ -801,3 +801,36 @@ table.resizable-columns th .resize-handle::after {
 table.resizable-columns th:hover .resize-handle::after {
     background: var(--border-hover);
 }
+
+/* Divergence column data rows: same hover frame as Version/Branch (global so it applies to RenderFragment output) */
+.repositories-table td.col-divergence .divergence-container {
+    display: inline-flex;
+    align-items: center;
+    height: calc(1.5rem + 4px);
+    cursor: pointer;
+}
+
+.repositories-table td.col-divergence .divergence-inner {
+    display: inline-flex;
+    align-items: center;
+    height: calc(1.5rem + 4px);
+    line-height: calc(1.5rem + 4px);
+    padding: 0 0.5rem;
+    border: 1px solid transparent;
+    border-radius: 0.25rem;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.repositories-table td.col-divergence .divergence-container:hover .divergence-inner {
+    background-color: #212529;
+    color: #f8f9fa;
+    border-color: #495057;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.repositories-table td.col-divergence .divergence-inner:hover {
+    background-color: #2c3136;
+    border-color: #5a6268;
+}
