@@ -27,4 +27,10 @@ public sealed class RefreshRepositoryVersionResponse
 
     [JsonPropertyName("localBranches")]
     public List<string>? LocalBranches { get; set; }
+
+    [JsonPropertyName("defaultBranchBehind")]
+    public int? DefaultBranchBehind { get; set; }
+
+    [JsonPropertyName("defaultBranchAhead")]
+    public int? DefaultBranchAhead { get; set; }
 }

@@ -48,6 +48,12 @@ public sealed class AgentCommitCountsResponse
 
     [JsonPropertyName("hasUpstream")]
     public bool? HasUpstream { get; set; }
+
+    [JsonPropertyName("defaultBranchBehind")]
+    public int? DefaultBranchBehind { get; set; }
+
+    [JsonPropertyName("defaultBranchAhead")]
+    public int? DefaultBranchAhead { get; set; }
 }
 
 /// <summary>Agent response with localBranches, remoteBranches, and defaultBranch (e.g. from SyncRepository or RefreshBranches).</summary>

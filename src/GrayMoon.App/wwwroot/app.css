@@ -801,3 +801,61 @@ table.resizable-columns th .resize-handle::after {
 table.resizable-columns th:hover .resize-handle::after {
     background: var(--border-hover);
 }
+
+/* Divergence column: two separate "buttons" [x] | [y]; frame only on each number hover */
+.repositories-table td.col-divergence .divergence-container {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+}
+
+.repositories-table td.col-divergence .divergence-inner {
+    display: grid;
+    grid-template-columns: 3ch auto 3ch;
+    column-gap: 0.1rem;
+    align-items: center;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85em;
+}
+
+.repositories-table td.col-divergence .divergence-separator {
+    color: #495057 !important;
+}
+
+/* Override .table tbody td * so only the pipe is gray, not primary */
+.repositories-table.table tbody td.col-divergence .divergence-inner span.divergence-separator {
+    color: #495057 !important;
+}
+
+.repositories-table td.col-divergence .divergence-link,
+.repositories-table td.col-divergence .divergence-link:link,
+.repositories-table td.col-divergence .divergence-link:visited,
+.repositories-table td.col-divergence .divergence-link:focus {
+    color: var(--text-primary) !important;
+    text-decoration: none;
+}
+
+.repositories-table td.col-divergence .divergence-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 0.25rem;
+    border: 1px solid transparent;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.repositories-table td.col-divergence .divergence-link-behind {
+    justify-self: end;
+}
+
+.repositories-table td.col-divergence .divergence-link-ahead {
+    justify-self: start;
+}
+
+.repositories-table td.col-divergence .divergence-link:hover {
+    background-color: #212529;
+    color: #f8f9fa !important;
+    border-color: #495057;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}

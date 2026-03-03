@@ -153,6 +153,7 @@
                                 <th class="col-repo">Repository</th>
                                 <th class="col-version">Version</th>
                                 <th class="col-branch">Branch</th>
+                                <th class="col-divergence text-center">Divergence</th>
                                 <th class="col-deps">Dependencies</th>
                                 <th class="col-commits">Commits</th>
                                 <th class="col-sync col-status-badge">Status</th>
@@ -160,7 +161,7 @@
                         </thead>
                         <tbody>
                             @{
-                                var colSpan = showSelectionColumn ? 7 : 6;
+                                var colSpan = showSelectionColumn ? 8 : 7;
                             }
                             @if (isLoading)
                             {
@@ -318,6 +319,14 @@
                                                     <span>-</span>
                                                 }
                                             </td>
+                                            <td class="col-divergence text-center text-nowrap">
+                                                @GetDivergenceDisplay(
+                                                    wr.DefaultBranchBehindCommits,
+                                                    wr.DefaultBranchAheadCommits,
+                                                    wr.BranchName,
+                                                    GetRepositoryUrl(repo),
+                                                    "main")
+                                            </td>
                                             <td class="col-deps col-status-badge">
                                                 @{
                                                     var depCount = wr.Dependencies ?? 0;
@@ -394,7 +403,7 @@
                             <table class="table table-striped table-hover mb-0 repositories-table">
                                 <tbody>
                                     <tr>
-                                        <td colspan="6" class="text-center text-muted py-4">Loading...</td>
+                                        <td colspan="7" class="text-center text-muted py-4">Loading...</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -716,6 +725,99 @@
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
     }
+
+    private RenderFragment GetDivergenceDisplay(
+        int? defaultBehind,
+        int? defaultAhead,
+        string? branchName,
+        string? repositoryUrl,
+        string defaultBranchName) => builder =>
+    {
+        if (string.IsNullOrWhiteSpace(branchName) || (!defaultBehind.HasValue && !defaultAhead.HasValue))
+        {
+            builder.AddContent(0, "-");
+            return;
+        }
+        var behind = defaultBehind ?? 0;
+        var ahead = defaultAhead ?? 0;
+        var hasRepoUrl = !string.IsNullOrWhiteSpace(repositoryUrl);
+
+        // Compute GitHub compare URLs when repo URL is available
+        string? aheadUrl = null;
+        string? behindUrl = null;
+        if (hasRepoUrl)
+        {
+            var encDefault = Uri.EscapeDataString(defaultBranchName);
+            var encBranch = Uri.EscapeDataString(branchName!);
+            // Ahead of default: default...branch
+            aheadUrl = $"{repositoryUrl}/compare/{encDefault}...{encBranch}";
+            // Behind default: branch...default
+            behindUrl = $"{repositoryUrl}/compare/{encBranch}...{encDefault}";
+        }
+
+        var aheadTitle = ahead == 1
+            ? $"This branch is 1 commit ahead of {defaultBranchName}"
+            : $"This branch is {ahead} commits ahead of {defaultBranchName}";
+        var behindTitle = behind == 1
+            ? $"This branch is 1 commit behind {defaultBranchName}"
+            : $"This branch is {behind} commits behind {defaultBranchName}";
+
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "divergence-container");
+        builder.OpenElement(2, "span");
+        builder.AddAttribute(3, "class", "divergence-inner");
+
+        // Left side: behind
+        if (!string.IsNullOrWhiteSpace(behindUrl))
+        {
+            builder.OpenElement(5, "a");
+            builder.AddAttribute(6, "href", behindUrl);
+            builder.AddAttribute(7, "target", "_blank");
+            builder.AddAttribute(8, "rel", "noopener noreferrer");
+            builder.AddAttribute(9, "class", "divergence-link divergence-link-behind");
+            builder.AddAttribute(10, "title", behindTitle);
+            builder.AddContent(11, behind.ToString());
+            builder.CloseElement();
+        }
+        else
+        {
+            builder.OpenElement(5, "span");
+            builder.AddAttribute(6, "class", "divergence-link divergence-link-behind");
+            builder.AddAttribute(7, "title", behindTitle);
+            builder.AddContent(8, behind.ToString());
+            builder.CloseElement();
+        }
+
+        // Separator
+        builder.OpenElement(12, "span");
+        builder.AddAttribute(13, "class", "divergence-separator");
+        builder.AddContent(15, " | ");
+        builder.CloseElement();
+
+        // Right side: ahead
+        if (!string.IsNullOrWhiteSpace(aheadUrl))
+        {
+            builder.OpenElement(16, "a");
+            builder.AddAttribute(17, "href", aheadUrl);
+            builder.AddAttribute(18, "target", "_blank");
+            builder.AddAttribute(19, "rel", "noopener noreferrer");
+            builder.AddAttribute(20, "class", "divergence-link divergence-link-ahead");
+            builder.AddAttribute(21, "title", aheadTitle);
+            builder.AddContent(22, ahead.ToString());
+            builder.CloseElement();
+        }
+        else
+        {
+            builder.OpenElement(16, "span");
+            builder.AddAttribute(17, "class", "divergence-link divergence-link-ahead");
+            builder.AddAttribute(18, "title", aheadTitle);
+            builder.AddContent(19, ahead.ToString());
+            builder.CloseElement();
+        }
+
+        builder.CloseElement(); // divergence-inner
+        builder.CloseElement(); // divergence-container
+    };
 
     private RenderFragment GetCommitsBadge(int repositoryId, int? outgoing, int? incoming, bool? branchHasUpstream, string? branchName) => builder =>
     {

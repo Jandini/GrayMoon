@@ -33,11 +33,16 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IHubConnectionProvi
 
         int? outgoing = null;
         int? incoming = null;
+        int? defaultBehind = null;
+        int? defaultAhead = null;
         if (branch != "-")
         {
             var (o, i, _) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, cancellationToken);
             outgoing = o;
             incoming = i;
+            var (db, da) = await git.GetCommitCountsVsDefaultAsync(payload.RepositoryPath, cancellationToken);
+            defaultBehind = db;
+            defaultAhead = da;
         }
 
         bool? hasUpstream = null;
@@ -50,7 +55,7 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IHubConnectionProvi
         var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)
         {
-            await connection.InvokeAsync("SyncCommand", payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream, cancellationToken);
+            await connection.InvokeAsync("SyncCommand", payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream, defaultBehind, defaultAhead, cancellationToken);
             logger.LogInformation("CheckoutHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}, hasUpstream={HasUpstream}",
                 payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream);
         }

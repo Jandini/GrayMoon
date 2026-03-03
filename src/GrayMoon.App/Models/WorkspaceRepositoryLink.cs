@@ -36,6 +36,12 @@ public class WorkspaceRepositoryLink
     /// <summary>Incoming commits (behind remote). Set during sync after fetch.</summary>
     public int? IncomingCommits { get; set; }
 
+    /// <summary>Commits on default branch not in current branch (vs default, for Divergence column). Set during sync.</summary>
+    public int? DefaultBranchBehindCommits { get; set; }
+
+    /// <summary>Commits on current branch not in default branch (vs default, for Divergence column). Set during sync.</summary>
+    public int? DefaultBranchAheadCommits { get; set; }
+
     /// <summary>True if the current branch has an upstream (remote branch). False when branch is new and not pushed. Null when unknown (e.g. not yet synced with branch list).</summary>
     public bool? BranchHasUpstream { get; set; }
 

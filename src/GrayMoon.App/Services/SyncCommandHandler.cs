@@ -13,7 +13,7 @@ public sealed class SyncCommandHandler(
     IHubContext<WorkspaceSyncHub> hubContext,
     ILogger<SyncCommandHandler> logger)
 {
-    public async Task HandleAsync(int workspaceId, int repositoryId, string version, string branch, int? outgoingCommits = null, int? incomingCommits = null, bool? hasUpstream = null)
+    public async Task HandleAsync(int workspaceId, int repositoryId, string version, string branch, int? outgoingCommits = null, int? incomingCommits = null, bool? hasUpstream = null, int? defaultBranchBehind = null, int? defaultBranchAhead = null)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -32,6 +32,8 @@ public sealed class SyncCommandHandler(
         if (outgoingCommits.HasValue) wr.OutgoingCommits = outgoingCommits;
         if (incomingCommits.HasValue) wr.IncomingCommits = incomingCommits;
         if (hasUpstream.HasValue) wr.BranchHasUpstream = hasUpstream.Value;
+        if (defaultBranchBehind.HasValue) wr.DefaultBranchBehindCommits = defaultBranchBehind;
+        if (defaultBranchAhead.HasValue) wr.DefaultBranchAheadCommits = defaultBranchAhead;
         wr.SyncStatus = (version == "-" || branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
 
         await dbContext.SaveChangesAsync();
