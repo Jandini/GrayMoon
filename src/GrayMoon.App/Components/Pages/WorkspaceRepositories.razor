@@ -320,7 +320,12 @@
                                                 }
                                             </td>
                                             <td class="col-divergence text-center text-nowrap">
-                                                @GetDivergenceDisplay(wr.DefaultBranchBehindCommits, wr.DefaultBranchAheadCommits, wr.BranchName)
+                                                @GetDivergenceDisplay(
+                                                    wr.DefaultBranchBehindCommits,
+                                                    wr.DefaultBranchAheadCommits,
+                                                    wr.BranchName,
+                                                    GetRepositoryUrl(repo),
+                                                    "main")
                                             </td>
                                             <td class="col-deps col-status-badge">
                                                 @{
@@ -721,7 +726,12 @@
             .ToList();
     }
 
-    private RenderFragment GetDivergenceDisplay(int? defaultBehind, int? defaultAhead, string? branchName) => builder =>
+    private RenderFragment GetDivergenceDisplay(
+        int? defaultBehind,
+        int? defaultAhead,
+        string? branchName,
+        string? repositoryUrl,
+        string defaultBranchName) => builder =>
     {
         if (string.IsNullOrWhiteSpace(branchName) || (!defaultBehind.HasValue && !defaultAhead.HasValue))
         {
@@ -730,22 +740,84 @@
         }
         var behind = defaultBehind ?? 0;
         var ahead = defaultAhead ?? 0;
+        var hasRepoUrl = !string.IsNullOrWhiteSpace(repositoryUrl);
+
+        // Compute GitHub compare URLs when repo URL is available
+        string? aheadUrl = null;
+        string? behindUrl = null;
+        if (hasRepoUrl)
+        {
+            var encDefault = Uri.EscapeDataString(defaultBranchName);
+            var encBranch = Uri.EscapeDataString(branchName!);
+            // Ahead of default: default...branch
+            aheadUrl = $"{repositoryUrl}/compare/{encDefault}...{encBranch}";
+            // Behind default: branch...default
+            behindUrl = $"{repositoryUrl}/compare/{encBranch}...{encDefault}";
+        }
+
+        var aheadTitle = ahead == 1
+            ? $"This branch is 1 commit ahead of {defaultBranchName}"
+            : $"This branch is {ahead} commits ahead of {defaultBranchName}";
+        var behindTitle = behind == 1
+            ? $"This branch is 1 commit behind {defaultBranchName}"
+            : $"This branch is {behind} commits behind {defaultBranchName}";
+
         builder.OpenElement(0, "div");
         builder.AddAttribute(1, "class", "divergence-container");
         builder.OpenElement(2, "span");
         builder.AddAttribute(3, "class", "divergence-inner");
-        builder.AddAttribute(4, "style", "font-variant-numeric: tabular-nums; font-size: 0.85em; cursor: pointer;");
-        builder.AddAttribute(5, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => OnDivergenceClick(behind, ahead)));
-        builder.AddAttribute(6, "title", $"{behind} commits behind | {ahead} commits ahead vs default branch");
-        builder.AddContent(7, behind.ToString());
-        builder.OpenElement(8, "span");
-        builder.AddAttribute(9, "class", "text-muted");
-        builder.AddAttribute(10, "style", "color: #6c757d;");
-        builder.AddContent(11, " | ");
+
+        // Left side: behind
+        if (!string.IsNullOrWhiteSpace(behindUrl))
+        {
+            builder.OpenElement(5, "a");
+            builder.AddAttribute(6, "href", behindUrl);
+            builder.AddAttribute(7, "target", "_blank");
+            builder.AddAttribute(8, "rel", "noopener noreferrer");
+            builder.AddAttribute(9, "class", "divergence-link divergence-link-behind");
+            builder.AddAttribute(10, "title", behindTitle);
+            builder.AddContent(11, behind.ToString());
+            builder.CloseElement();
+        }
+        else
+        {
+            builder.OpenElement(5, "span");
+            builder.AddAttribute(6, "class", "divergence-link divergence-link-behind");
+            builder.AddAttribute(7, "title", behindTitle);
+            builder.AddContent(8, behind.ToString());
+            builder.CloseElement();
+        }
+
+        // Separator
+        builder.OpenElement(12, "span");
+        builder.AddAttribute(13, "class", "text-muted");
+        builder.AddAttribute(14, "style", "color: #6c757d;");
+        builder.AddContent(15, " | ");
         builder.CloseElement();
-        builder.AddContent(12, ahead.ToString());
-        builder.CloseElement();
-        builder.CloseElement();
+
+        // Right side: ahead
+        if (!string.IsNullOrWhiteSpace(aheadUrl))
+        {
+            builder.OpenElement(16, "a");
+            builder.AddAttribute(17, "href", aheadUrl);
+            builder.AddAttribute(18, "target", "_blank");
+            builder.AddAttribute(19, "rel", "noopener noreferrer");
+            builder.AddAttribute(20, "class", "divergence-link divergence-link-ahead");
+            builder.AddAttribute(21, "title", aheadTitle);
+            builder.AddContent(22, ahead.ToString());
+            builder.CloseElement();
+        }
+        else
+        {
+            builder.OpenElement(16, "span");
+            builder.AddAttribute(17, "class", "divergence-link divergence-link-ahead");
+            builder.AddAttribute(18, "title", aheadTitle);
+            builder.AddContent(19, ahead.ToString());
+            builder.CloseElement();
+        }
+
+        builder.CloseElement(); // divergence-inner
+        builder.CloseElement(); // divergence-container
     };
 
     private RenderFragment GetCommitsBadge(int repositoryId, int? outgoing, int? incoming, bool? branchHasUpstream, string? branchName) => builder =>
@@ -2358,11 +2430,6 @@
             clickedVersions.Remove(version);
             StateHasChanged();
         }
-    }
-
-    private void OnDivergenceClick(int behind, int ahead)
-    {
-        ToastService.Show($"{behind} commits behind | {ahead} commits ahead vs default branch");
     }
 
     private string GetDependencyGraphUrl(int repositoryId)
