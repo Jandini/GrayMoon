@@ -22,11 +22,24 @@
                     </p>
 
                     <div class="mb-3 version-config-editor-wrap">
-                        <label class="form-label d-flex align-items-baseline gap-2">
+                        <label class="form-label d-flex align-items-baseline gap-2 flex-wrap">
                             Version Pattern
-                            @if (!string.IsNullOrWhiteSpace(patternText) && validTokenCount > 0)
+                            @if (!string.IsNullOrWhiteSpace(patternText) && (validTokenCount > 0 || invalidTokens.Count > 0))
                             {
-                                <span class="version-config-token-count">@validTokenCount token@(validTokenCount > 1 ? "s" : "") resolved</span>
+                                @if (invalidTokens.Count > 0)
+                                {
+                                    <span class="version-config-error-icon">
+                                        &#x26A0;
+                                        <div class="version-config-error-tooltip">
+                                            <div class="version-config-error-tooltip-title">Unknown repositories:</div>
+                                            @foreach (var t in invalidTokens)
+                                            {
+                                                <div>@t</div>
+                                            }
+                                        </div>
+                                    </span>
+                                }
+                                <span class="version-config-token-count @(invalidTokens.Count > 0 ? "version-config-token-count-warning" : "")">@validTokenCount token@(validTokenCount != 1 ? "s" : "") resolved</span>
                             }
                         </label>
                         <textarea class="form-control version-config-textarea font-monospace"
@@ -55,19 +68,6 @@
                             </div>
                         }
 
-                        @if (invalidTokens.Count > 0)
-                        {
-                            <div class="version-config-error-icon">
-                                &#x26A0;
-                                <div class="version-config-error-tooltip">
-                                    <div class="version-config-error-tooltip-title">Unknown repositories:</div>
-                                    @foreach (var t in invalidTokens)
-                                    {
-                                        <div>@t</div>
-                                    }
-                                </div>
-                            </div>
-                        }
                     </div>
                 </div>
                 <div class="modal-footer">
