@@ -3,22 +3,23 @@
 }
 
 .version-config-error-icon {
-    position: absolute;
-    top: 2.5rem;   
-    right: 0.5rem;
+    position: relative;
     font-size: 1rem;
     line-height: 1;
     color: #e5a000;
     cursor: default;
     pointer-events: auto;
-    z-index: 10;
     user-select: none;
+}
+
+.version-config-token-count-warning {
+    color: #e5a000 !important;
 }
 
 .version-config-error-tooltip {
     display: none;
     position: absolute;
-    right: 0;
+    left: 0;
     top: 1.4rem;
     background: #2a2a2a;
     border: 1px solid #555;
