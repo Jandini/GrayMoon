@@ -818,6 +818,15 @@ table.resizable-columns th:hover .resize-handle::after {
     font-size: 0.85em;
 }
 
+.repositories-table td.col-divergence .divergence-separator {
+    color: #495057 !important;
+}
+
+/* Override .table tbody td * so only the pipe is gray, not primary */
+.repositories-table.table tbody td.col-divergence .divergence-inner span.divergence-separator {
+    color: #495057 !important;
+}
+
 .repositories-table td.col-divergence .divergence-link,
 .repositories-table td.col-divergence .divergence-link:link,
 .repositories-table td.col-divergence .divergence-link:visited,
