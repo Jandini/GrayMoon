@@ -511,6 +511,9 @@
     private Func<Task>? _pendingConfirmAction;
     private string searchTerm = string.Empty;
 
+    private const int RefreshDebounceMs = 200;
+    private CancellationTokenSource? _refreshDebounceCts;
+
     protected override async Task OnInitializedAsync()
     {
         await LoadWorkspaceAsync();
@@ -531,8 +534,28 @@
                 .Build();
             _hubConnection.On<int>("WorkspaceSynced", async (workspaceId) =>
             {
-                if (workspaceId == WorkspaceId)
+                if (workspaceId != WorkspaceId) return;
+                _refreshDebounceCts?.Cancel();
+                _refreshDebounceCts?.Dispose();
+                _refreshDebounceCts = new CancellationTokenSource();
+                var cts = _refreshDebounceCts;
+                try
+                {
+                    await Task.Delay(RefreshDebounceMs, cts.Token);
                     await InvokeAsync(RefreshFromSync);
+                }
+                catch (OperationCanceledException)
+                {
+                    /* debounced */
+                }
+                finally
+                {
+                    if (cts == _refreshDebounceCts)
+                    {
+                        _refreshDebounceCts?.Dispose();
+                        _refreshDebounceCts = null;
+                    }
+                }
             });
             await _hubConnection.StartAsync();
         }
@@ -553,6 +576,9 @@
 
     public void Dispose()
     {
+        _refreshDebounceCts?.Cancel();
+        _refreshDebounceCts?.Dispose();
+        _refreshDebounceCts = null;
         _ = _hubConnection?.StopAsync();
         _hubConnection?.DisposeAsync();
         _syncCts?.Cancel();
