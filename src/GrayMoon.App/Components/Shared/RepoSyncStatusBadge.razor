@@ -1,0 +1,37 @@
+@using GrayMoon.App.Services
+@using Microsoft.AspNetCore.Components.Web
+
+@if (Status.HasValue)
+{
+    var (text, bgColor) = Status.Value switch
+    {
+        RepoSyncStatus.InSync => ("in sync", "#0e639c"),
+        RepoSyncStatus.NeedsSync => ("sync", "#dc3545"),
+        RepoSyncStatus.NotCloned => ("not cloned", "#6c757d"),
+        RepoSyncStatus.VersionMismatch => ("version", "#dc3545"),
+        RepoSyncStatus.Error => ("error", "#dc3545"),
+        _ => ("sync", "#6c757d")
+    };
+    var needsSync = Status.Value != RepoSyncStatus.InSync;
+    var clickable = needsSync && !IsSyncing;
+
+    <span class="badge"
+          style="@($"background-color: {bgColor}; color: #fff;{(clickable ? " cursor: pointer;" : "")}")"
+          @onclick="HandleClick"
+          title="@(clickable ? "Click to sync this repository" : null)">
+        @text
+    </span>
+}
+
+@code {
+    [Parameter] public int RepositoryId { get; set; }
+    [Parameter] public RepoSyncStatus? Status { get; set; }
+    [Parameter] public bool IsSyncing { get; set; }
+    [Parameter] public EventCallback OnSyncClick { get; set; }
+
+    private async Task HandleClick()
+    {
+        if (Status != RepoSyncStatus.InSync && !IsSyncing)
+            await OnSyncClick.InvokeAsync();
+    }
+}

@@ -1,0 +1,106 @@
+@using Microsoft.AspNetCore.Components.Web
+
+<div class="workspace-repos-header">
+    <div class="workspace-repos-title-row">
+        <h2 class="workspace-repos-title">@(WorkspaceName ?? "Workspace")</h2>
+        <p class="text-muted mb-0 workspace-repos-subtitle">
+            <NavLink href="workspaces" class="workspaces-breadcrumb-link" style="color: var(--text-muted) !important;">workspace</NavLink><span> | </span>
+            @if (RepositoriesCount > 0)
+            {
+                var suffix = HasFilter ? " found" : "";
+                var count = HasFilter ? FilteredCount : RepositoriesCount;
+                <span class="repositories-count-link" @onclick="@(() => OnShowRepositories.InvokeAsync())" @onclick:preventDefault>
+                    @($"{count} {(count == 1 ? "repository" : "repositories")}{suffix}")
+                </span>
+            }
+            else if (WorkspaceName != null)
+            {
+                <span class="repositories-count-link" @onclick="@(() => OnShowRepositories.InvokeAsync())" @onclick:preventDefault>0 repositories</span>
+            }
+            else
+            {
+                <span>&nbsp;</span>
+            }
+        </p>
+    </div>
+    <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
+        <div class="workspace-repos-search-wrapper">
+            <div class="workspace-repos-search-input-wrap @(HasFilter ? "has-filter" : null)">
+                <input id="workspace-repos-search"
+                       class="form-control workspace-repos-search"
+                       placeholder="Search repositories..."
+                       value="@SearchTerm"
+                       @oninput="OnSearchChanged"
+                       @onkeydown="OnSearchKeyDown" />
+                @if (HasFilter)
+                {
+                    <button type="button"
+                            class="workspace-repos-search-clear"
+                            title="Clear filter"
+                            aria-label="Clear repository filter"
+                            @onclick="OnClearSearch"
+                            @onclick:stopPropagation="true">
+                        <i class="bi bi-x-circle" aria-hidden="true"></i>
+                    </button>
+                }
+            </div>
+        </div>
+        <button class="btn btn-outline-secondary"
+                @onclick="@(() => OnShowBranch.InvokeAsync())"
+                disabled="@(IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0)">
+            Branch
+        </button>
+        <button class="btn @(HasUnmatchedDependencies ? "btn-danger" : "btn-outline-secondary")"
+                @onclick="@(() => OnUpdate.InvokeAsync())"
+                disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing)">
+            Update
+        </button>
+        @if (HasIncomingCommits)
+        {
+            <button class="btn btn-danger"
+                    @onclick="@(() => OnPull.InvokeAsync())"
+                    disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || IsCommitSyncing)">
+                Pull
+            </button>
+        }
+        else
+        {
+            <button class="btn @(IsPushRecommended ? "btn-warning" : "btn-outline-secondary")"
+                    @onclick="@(() => OnPush.InvokeAsync())"
+                    disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing)">
+                Push
+            </button>
+        }
+        <button class="btn @(IsOutOfSync == true ? "btn-danger" : "btn-primary")"
+                @onclick="@(() => OnSync.InvokeAsync())"
+                disabled="@(IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0)">
+            Sync
+        </button>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string? WorkspaceName { get; set; }
+    [Parameter] public int RepositoriesCount { get; set; }
+    [Parameter] public bool HasFilter { get; set; }
+    [Parameter] public int FilteredCount { get; set; }
+    [Parameter] public string? SearchTerm { get; set; }
+    [Parameter] public bool HasUnmatchedDependencies { get; set; }
+    [Parameter] public bool IsPushRecommended { get; set; }
+    [Parameter] public bool HasIncomingCommits { get; set; }
+    [Parameter] public bool? IsOutOfSync { get; set; }
+    [Parameter] public bool IsSyncing { get; set; }
+    [Parameter] public bool IsUpdating { get; set; }
+    [Parameter] public bool IsPushing { get; set; }
+    [Parameter] public bool IsCommitSyncing { get; set; }
+
+    [Parameter] public EventCallback OnShowRepositories { get; set; }
+    [Parameter] public EventCallback OnShowBranch { get; set; }
+    [Parameter] public EventCallback OnUpdate { get; set; }
+    [Parameter] public EventCallback OnPull { get; set; }
+    [Parameter] public EventCallback OnPush { get; set; }
+    [Parameter] public EventCallback OnSync { get; set; }
+    [Parameter] public EventCallback<ChangeEventArgs> OnSearchChanged { get; set; }
+    [Parameter] public EventCallback OnClearSearch { get; set; }
+    [Parameter] public EventCallback<KeyboardEventArgs> OnSearchKeyDown { get; set; }
+}

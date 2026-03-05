@@ -1,0 +1,55 @@
+@using GrayMoon.App.Services
+@using Microsoft.AspNetCore.Components.Web
+
+<div class="divergence-container">
+    <span class="divergence-inner">
+        @if (string.IsNullOrWhiteSpace(BranchName) || (!DefaultBehind.HasValue && !DefaultAhead.HasValue))
+        {
+            @("-")
+        }
+        else
+        {
+            var behind = DefaultBehind ?? 0;
+            var ahead = DefaultAhead ?? 0;
+            var defaultBranch = DefaultBranchName ?? SyncBadgeLabels.DefaultBranchName;
+            var hasRepoUrl = !string.IsNullOrWhiteSpace(RepositoryUrl);
+            string? aheadUrl = null;
+            string? behindUrl = null;
+            if (hasRepoUrl && !string.IsNullOrWhiteSpace(BranchName))
+            {
+                var encDefault = Uri.EscapeDataString(defaultBranch);
+                var encBranch = Uri.EscapeDataString(BranchName);
+                aheadUrl = $"{RepositoryUrl}/compare/{encDefault}...{encBranch}";
+                behindUrl = $"{RepositoryUrl}/compare/{encBranch}...{encDefault}";
+            }
+            var aheadTitle = ahead == 1 ? $"This branch is 1 commit ahead of {defaultBranch}" : $"This branch is {ahead} commits ahead of {defaultBranch}";
+            var behindTitle = behind == 1 ? $"This branch is 1 commit behind {defaultBranch}" : $"This branch is {behind} commits behind {defaultBranch}";
+
+            if (!string.IsNullOrWhiteSpace(behindUrl))
+            {
+                <a href="@behindUrl" target="_blank" rel="noopener noreferrer" class="divergence-link divergence-link-behind" title="@behindTitle">@behind</a>
+            }
+            else
+            {
+                <span class="divergence-link divergence-link-behind" title="@behindTitle">@behind</span>
+            }
+            <span class="divergence-separator"> | </span>
+            if (!string.IsNullOrWhiteSpace(aheadUrl))
+            {
+                <a href="@aheadUrl" target="_blank" rel="noopener noreferrer" class="divergence-link divergence-link-ahead" title="@aheadTitle">@ahead</a>
+            }
+            else
+            {
+                <span class="divergence-link divergence-link-ahead" title="@aheadTitle">@ahead</span>
+            }
+        }
+    </span>
+</div>
+
+@code {
+    [Parameter] public int? DefaultBehind { get; set; }
+    [Parameter] public int? DefaultAhead { get; set; }
+    [Parameter] public string? BranchName { get; set; }
+    [Parameter] public string? RepositoryUrl { get; set; }
+    [Parameter] public string? DefaultBranchName { get; set; }
+}

@@ -1,0 +1,55 @@
+@using Microsoft.AspNetCore.Components.Web
+
+@if (ShowPlaceholder)
+{
+    @("-")
+}
+else
+{
+<span class="@CssClass"
+      style="@($"background-color: {BgColor}; color: {TextColor};{(Clickable ? " cursor: pointer;" : "")}")"
+      @onclick="HandleClick"
+      title="@Title">
+    @if (NotUpstreamed)
+    {
+        <span class="commits-badge-icon-up commits-badge-icon-up--black">
+            <i class="bi bi-cloud-arrow-up" aria-hidden="true"></i>
+        </span>
+    }
+    else
+    {
+        @DisplayText
+    }
+</span>
+}
+
+@code {
+    [Parameter] public int RepositoryId { get; set; }
+    [Parameter] public int? Outgoing { get; set; }
+    [Parameter] public int? Incoming { get; set; }
+    [Parameter] public bool? BranchHasUpstream { get; set; }
+    [Parameter] public string? BranchName { get; set; }
+    [Parameter] public EventCallback OnPushClick { get; set; }
+    [Parameter] public EventCallback OnPullClick { get; set; }
+
+    private int X => Outgoing ?? 0;
+    private int Y => BranchHasUpstream == false ? 0 : (Incoming ?? 0);
+    private bool NotUpstreamed => BranchHasUpstream == false;
+    private bool HasCommits => Y > 0 || X > 0;
+    private bool Clickable => HasCommits || NotUpstreamed;
+    private string BgColor => Y > 0 ? "#dc3545" : (X > 0 || NotUpstreamed ? "#ffc107" : "#198754");
+    private string TextColor => (X > 0 || NotUpstreamed) && Y == 0 ? "#000" : "#fff";
+    private string CssClass => NotUpstreamed ? "badge commits-badge commits-badge-not-upstreamed" : "badge";
+    private string DisplayText => $"↑{X} ↓{Y}";
+    private string Title => NotUpstreamed ? "Push to set upstream" : (Y > 0 ? "Click to pull" : "Click to push");
+    private bool ShowPlaceholder => !Outgoing.HasValue && !Incoming.HasValue && BranchHasUpstream != false;
+
+    private async Task HandleClick()
+    {
+        if (!Clickable) return;
+        if (NotUpstreamed || X > 0)
+            await OnPushClick.InvokeAsync();
+        else if (Y > 0)
+            await OnPullClick.InvokeAsync();
+    }
+}

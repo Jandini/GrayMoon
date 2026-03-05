@@ -61,6 +61,14 @@ a.workspaces-breadcrumb-link:hover {
     text-decoration: underline;
 }
 
+/* Repositories count (clickable, same row as workspace breadcrumb) */
+.repositories-count-link {
+    cursor: pointer;
+}
+.repositories-count-link:hover {
+    text-decoration: underline;
+}
+
 /* Buttons */
 .btn-primary,
 .btn-primary:link,
@@ -367,6 +375,32 @@ h1:focus {
 
 .grid-page-header {
     flex-shrink: 0;
+}
+
+/* Workspace repositories page: header with title row + actions row (search + buttons) */
+.workspace-repos-header .workspace-repos-title-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.workspace-repos-header .workspace-repos-title-row .workspace-repos-title {
+    margin-bottom: 0;
+}
+.workspace-repos-header .workspace-repos-title-row .workspace-repos-subtitle {
+    flex: 0 0 auto;
+}
+.workspace-repos-header .workspace-repos-header-actions {
+    flex-wrap: nowrap;
+    margin-top: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+.workspace-repos-header .workspace-repos-search-wrapper {
+    min-width: 0;
+    flex: 1 1 0%;
+}
+.workspace-repos-header .workspace-repos-search-input-wrap {
+    min-width: 0;
 }
 
 /* Keep subtitle on one line, shrink with ellipsis when space is limited */
