@@ -37,14 +37,9 @@
                         var hasFilter = !string.IsNullOrWhiteSpace(searchTerm);
                         var list = hasFilter ? FilteredWorkspaceRepositories : workspaceRepositories;
                         var count = list.Count;
-                        var selectedInList = showSelectionColumn && gridSelectedRepositoryIds.Count > 0
-                            ? list.Count(wr => gridSelectedRepositoryIds.Contains(wr.RepositoryId))
-                            : 0;
                         var suffix = hasFilter ? " found" : "";
                         <span class="repositories-count-link" @onclick="ShowRepositoriesModalAsync" @onclick:preventDefault>
-                            @(selectedInList > 0
-                                ? $"selected {selectedInList} of {count} {(count == 1 ? "repository" : "repositories")}{suffix}"
-                                : $"{count} {(count == 1 ? "repository" : "repositories")}{suffix}")
+                            @($"{count} {(count == 1 ? "repository" : "repositories")}{suffix}")
                         </span>
                     }
                     else if (workspace != null)
@@ -59,19 +54,6 @@
             </div>
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
                 <div class="workspace-repos-search-wrapper">
-                    <div role="button"
-                         tabindex="0"
-                         class="btn workspace-repos-select-btn"
-                         @onclick="ToggleSelectionModeAsync"
-                         @onkeydown="OnSelectionModeKeyDown"
-                         title="@(showSelectionColumn ? "Run commands against all repositories (selection kept)" : "Show checkboxes to run Push, Update, Branch, Sync only on selected repos")">
-                        <input type="checkbox"
-                               class="form-check-input workspace-repos-mode-checkbox @(showSelectionColumn && gridSelectedRepositoryIds.Count > 0 ? "" : "workspace-repos-mode-checkbox--all")"
-                               checked="@(showSelectionColumn && gridSelectedRepositoryIds.Count > 0)"
-                               readonly
-                               tabindex="-1"
-                               aria-hidden="true" />
-                    </div>
                     <div class="workspace-repos-search-input-wrap @(!string.IsNullOrWhiteSpace(searchTerm) ? "has-filter" : null)">
                         <input id="workspace-repos-search" class="form-control workspace-repos-search" placeholder="Search repositories..."
                                @bind="searchTerm" @bind:event="oninput"
@@ -132,24 +114,12 @@
     @if (errorMessage == null)
     {
         <div class="grid-page-body">
-            @if (_selectionStateLoaded)
-            {
-                <div class="card page-card mb-4">
+            <div class="card page-card mb-4">
                     <div class="card-body p-0">
                         <div class="table-responsive">
                             <table class="table table-striped table-hover mb-0 repositories-table resizable-columns">
                         <thead class="table-dark">
                             <tr>
-                                @if (showSelectionColumn)
-                                {
-                                    <th class="col-select no-resize">
-                                        <input type="checkbox"
-                                               class="form-check-input workspace-repo-checkbox"
-                                               checked="@(FilteredWorkspaceRepositories.Count > 0 && FilteredWorkspaceRepositories.All(wr => gridSelectedRepositoryIds.Contains(wr.RepositoryId)))"
-                                               @onchange="ToggleSelectAllFilteredAsync"
-                                               title="Select all filtered repositories" />
-                                    </th>
-                                }
                                 <th class="col-repo">Repository</th>
                                 <th class="col-version">Version</th>
                                 <th class="col-branch">Branch</th>
@@ -161,7 +131,7 @@
                         </thead>
                         <tbody>
                             @{
-                                var colSpan = showSelectionColumn ? 8 : 7;
+                                var colSpan = 7;
                             }
                             @if (isLoading)
                             {
@@ -268,26 +238,16 @@
                                                 ? $"{repoUrl}/compare/main...{Uri.EscapeDataString(wr.BranchName)}"
                                                 : null;
                                             <tr>
-                                            @if (showSelectionColumn)
-                                            {
-                                                <td class="col-select">
-                                                    <input type="checkbox"
-                                                           class="form-check-input workspace-repo-checkbox"
-                                                           checked="@gridSelectedRepositoryIds.Contains(wr.RepositoryId)"
-                                                           @onchange="() => ToggleRepositorySelection(wr.RepositoryId)"
-                                                           @onclick:stopPropagation="true" />
-                                                </td>
-                                            }
                                             <td class="col-repo">
                                                 @if (!string.IsNullOrEmpty(repoUrl))
                                                 {
                                                     <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link">
-                                                        @if (showSelectionColumn) { <span>@repo.RepositoryName</span> } else { <strong>@repo.RepositoryName</strong> }
+                                                        <strong>@repo.RepositoryName</strong>
                                                     </a>
                                                 }
                                                 else
                                                 {
-                                                    @if (showSelectionColumn) { <span>@repo.RepositoryName</span> } else { <strong>@repo.RepositoryName</strong> }
+                                                    <strong>@repo.RepositoryName</strong>
                                                 }
                                             </td>
                                             <td class="col-version">
@@ -394,23 +354,6 @@
                 </div>
             </div>
         </div>
-            }
-            else
-            {
-                <div class="card page-card mb-4">
-                    <div class="card-body p-0">
-                        <div class="table-responsive">
-                            <table class="table table-striped table-hover mb-0 repositories-table">
-                                <tbody>
-                                    <tr>
-                                        <td colspan="7" class="text-center text-muted py-4">Loading...</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            }
         </div>
     }
 </div>
@@ -568,26 +511,10 @@
     private Func<Task>? _pendingConfirmAction;
     private string searchTerm = string.Empty;
 
-    /// <summary>When true, the grid shows the checkbox column for selecting repositories. Selection is persisted per workspace.</summary>
-    private bool showSelectionColumn = false;
-    /// <summary>True after we've loaded selection from storage so we can render the grid with the correct checkbox column from the first paint.</summary>
-    private bool _selectionStateLoaded = false;
-    /// <summary>Repository IDs selected in the grid (when showSelectionColumn is true). Persisted to localStorage per workspace.</summary>
-    private HashSet<int> gridSelectedRepositoryIds = new();
-    private const string StorageKeyPrefix = "graymoon-ws-";
-    private const string StorageKeySuffix = "-selected-repos";
-    private const string StorageKeyShowSelectionSuffix = "-show-selection";
-
-    /// <summary>When any repositories are selected (and in selection mode), actions run only on these; otherwise null means all workspace repos.</summary>
-    private IReadOnlySet<int>? EffectiveActionRepositoryIds => showSelectionColumn && gridSelectedRepositoryIds.Count > 0
-        ? gridSelectedRepositoryIds
-        : null;
-
     protected override async Task OnInitializedAsync()
     {
         await LoadWorkspaceAsync();
         ApplySyncStateFromWorkspace();
-        await LoadGridSelectionFromStorageAsync();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -1302,8 +1229,6 @@
                 .Where(wr => (wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false)
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
-            if (EffectiveActionRepositoryIds != null)
-                repoIdsWithUnpushed = repoIdsWithUnpushed.Where(EffectiveActionRepositoryIds.Contains).ToHashSet();
             var toPush = payload.Where(p => repoIdsWithUnpushed.Contains(p.RepoId)).ToList();
             if (toPush.Count == 0)
             {
@@ -1341,8 +1266,6 @@
             .Where(wr => (wr.IncomingCommits ?? 0) > 0)
             .Select(wr => wr.RepositoryId)
             .ToList();
-        if (EffectiveActionRepositoryIds != null)
-            repoIdsWithIncoming = repoIdsWithIncoming.Where(EffectiveActionRepositoryIds.Contains).ToList();
         if (repoIdsWithIncoming.Count == 0)
         {
             ToastService.Show("No repositories with incoming commits to pull.");
@@ -1405,10 +1328,7 @@
         _updateCts = new CancellationTokenSource();
 
         isUpdating = true;
-        var updateCount = EffectiveActionRepositoryIds?.Count ?? 0;
-        updateProgressMessage = updateCount > 0
-            ? $"Updating {updateCount} {(updateCount == 1 ? "repository" : "repositories")}..."
-            : "Updating dependencies...";
+        updateProgressMessage = "Updating dependencies...";
         errorMessage = null;
         try
         {
@@ -1431,7 +1351,7 @@
                         repositoryErrors[repoId] = msg;
                         InvokeAsync(StateHasChanged);
                     },
-                    repoIdsToUpdate: EffectiveActionRepositoryIds,
+                    repoIdsToUpdate: null,
                     cancellationToken: _updateCts.Token);
             }
 
@@ -1640,10 +1560,7 @@
         _syncCts = new CancellationTokenSource();
 
         isSyncing = true;
-        var syncCount = EffectiveActionRepositoryIds?.Count ?? 0;
-        syncProgressMessage = syncCount > 0
-            ? $"Synchronizing {syncCount} {(syncCount == 1 ? "repository" : "repositories")}..."
-            : "Synchronizing...";
+        syncProgressMessage = "Synchronizing...";
         var isRetryAfterError = !string.IsNullOrEmpty(errorMessage);
         errorMessage = null;
         try
@@ -1673,8 +1590,8 @@
                         }
                         InvokeAsync(StateHasChanged);
                     },
-                    repositoryIds: EffectiveActionRepositoryIds != null ? EffectiveActionRepositoryIds.ToList() : null,
-                    skipDependencyLevelPersistence: EffectiveActionRepositoryIds != null || isRetryAfterError,
+                    repositoryIds: null,
+                    skipDependencyLevelPersistence: isRetryAfterError,
                     cancellationToken: _syncCts.Token);
                 repoGitInfos = results;
             }
@@ -2101,10 +2018,7 @@
         _createBranchesCts = new CancellationTokenSource();
 
         isCreatingBranches = true;
-        var branchCount = EffectiveActionRepositoryIds?.Count ?? 0;
-        createBranchesProgressMessage = branchCount > 0
-            ? $"Creating branches for {branchCount} {(branchCount == 1 ? "repository" : "repositories")}..."
-            : "Creating branches...";
+        createBranchesProgressMessage = "Creating branches...";
         errorMessage = null;
         StateHasChanged();
 
@@ -2123,7 +2037,7 @@
                         createBranchesProgressMessage = $"Created {completed} of {total} branches";
                         InvokeAsync(StateHasChanged);
                     },
-                    repositoryIds: EffectiveActionRepositoryIds,
+                    repositoryIds: null,
                     cancellationToken: _createBranchesCts.Token);
             }
             await RefreshFromSync();
@@ -2454,106 +2368,6 @@
             RepoSyncStatus.Error => "error",
             _ => "sync"
         };
-    }
-
-    private async Task LoadGridSelectionFromStorageAsync()
-    {
-        try
-        {
-            var key = StorageKeyPrefix + WorkspaceId + StorageKeySuffix;
-            var json = await JSRuntime.InvokeAsync<string?>("graymoonStorageGet", key);
-            if (string.IsNullOrWhiteSpace(json))
-            {
-                gridSelectedRepositoryIds = new HashSet<int>();
-            }
-            else
-            {
-                var list = System.Text.Json.JsonSerializer.Deserialize<List<int>>(json);
-                gridSelectedRepositoryIds = list != null ? list.ToHashSet() : new HashSet<int>();
-            }
-            
-            var showSelectionKey = StorageKeyPrefix + WorkspaceId + StorageKeyShowSelectionSuffix;
-            var showSelectionValue = await JSRuntime.InvokeAsync<string?>("graymoonStorageGet", showSelectionKey);
-            if (string.Equals(showSelectionValue, "true", StringComparison.OrdinalIgnoreCase))
-                showSelectionColumn = true;
-            else if (string.Equals(showSelectionValue, "false", StringComparison.OrdinalIgnoreCase))
-                showSelectionColumn = false;
-            else if (gridSelectedRepositoryIds.Count > 0)
-                showSelectionColumn = true;
-        }
-        catch
-        {
-            gridSelectedRepositoryIds = new HashSet<int>();
-        }
-        finally
-        {
-            _selectionStateLoaded = true;
-        }
-    }
-
-    private async Task PersistGridSelectionAsync()
-    {
-        try
-        {
-            var key = StorageKeyPrefix + WorkspaceId + StorageKeySuffix;
-            var json = System.Text.Json.JsonSerializer.Serialize(gridSelectedRepositoryIds.ToList());
-            await JSRuntime.InvokeVoidAsync("graymoonStorageSet", key, json);
-        }
-        catch
-        {
-            // ignore
-        }
-    }
-
-    private async Task ToggleSelectionModeAsync()
-    {
-        showSelectionColumn = !showSelectionColumn;
-        await PersistShowSelectionAsync();
-        StateHasChanged();
-    }
-
-    private async Task OnSelectionModeKeyDown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter" || e.Key == " ")
-        {
-            await ToggleSelectionModeAsync();
-        }
-    }
-
-    private async Task PersistShowSelectionAsync()
-    {
-        try
-        {
-            var key = StorageKeyPrefix + WorkspaceId + StorageKeyShowSelectionSuffix;
-            await JSRuntime.InvokeVoidAsync("graymoonStorageSet", key, showSelectionColumn ? "true" : "false");
-        }
-        catch
-        {
-            // ignore
-        }
-    }
-
-    private async Task ToggleSelectAllFilteredAsync(ChangeEventArgs e)
-    {
-        var checked_ = e.Value as bool? ?? false;
-        var filteredIds = FilteredWorkspaceRepositories.Select(wr => wr.RepositoryId).ToHashSet();
-        if (checked_)
-            foreach (var id in filteredIds)
-                gridSelectedRepositoryIds.Add(id);
-        else
-            gridSelectedRepositoryIds.RemoveWhere(filteredIds.Contains);
-        await PersistGridSelectionAsync();
-        StateHasChanged();
-    }
-
-    private async Task ToggleRepositorySelection(int repositoryId)
-    {
-        if (gridSelectedRepositoryIds.Contains(repositoryId))
-            gridSelectedRepositoryIds.Remove(repositoryId);
-        else
-            gridSelectedRepositoryIds.Add(repositoryId);
-        await PersistGridSelectionAsync();
-        StateHasChanged();
     }
 
     private void OnSearchKeyDown(KeyboardEventArgs e)

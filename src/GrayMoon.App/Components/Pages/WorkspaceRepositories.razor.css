@@ -32,7 +32,6 @@
     flex: 1 1 auto;
 }
 
-/* Select/Clear button + search input as one unit */
 .workspace-repos-search-wrapper {
     display: flex;
     align-items: stretch;
@@ -40,77 +39,6 @@
     width: 20rem;
     max-width: 100%;
     flex: 1 1 auto;
-}
-
-.workspace-repos-search-wrapper .workspace-repos-select-btn {
-    flex-shrink: 0;
-    width: 2.55rem;
-    min-width: 2.55rem;
-    max-width: 2.55rem;
-    border-top-right-radius: 0;
-    border-bottom-right-radius: 0;
-    border-right: none;
-    padding: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background-color: var(--bg-input);
-    border: 1px solid var(--border-input);
-    color: var(--text-secondary);
-}
-
-/* Checkbox inside button is icon-only; button handles click */
-.workspace-repos-search-wrapper .workspace-repos-mode-checkbox {
-    margin: 0;
-    pointer-events: none;
-    width: 1rem;
-    height: 1rem;
-    flex-shrink: 0;
-}
-
-.workspace-repos-search-wrapper .workspace-repos-mode-checkbox {
-    background-color: var(--bg-input) !important;
-    border-color: var(--border-light) !important;
-}
-
-.workspace-repos-search-wrapper .workspace-repos-mode-checkbox:checked {
-    background-color: var(--accent-blue) !important;
-    border-color: var(--accent-blue) !important;
-}
-
-/* When unchecked / muted: same look as grid unchecked checkbox */
-.workspace-repos-search-wrapper .workspace-repos-mode-checkbox--all,
-.workspace-repos-search-wrapper .workspace-repos-mode-checkbox--all:checked {
-    background-color: var(--bg-input) !important;
-    border-color: var(--border-light) !important;
-}
-
-.workspace-repos-search-wrapper .workspace-repos-select-btn:hover {
-    background-color: var(--bg-hover);
-    border-color: var(--border-hover);
-    color: #ffffff;
-}
-
-/* Focus: single-pixel frame like the text box (accent blue), no thick ring */
-.workspace-repos-search-wrapper .workspace-repos-select-btn:focus {
-    box-shadow: none;
-    outline: none;
-    border-color: var(--accent-blue);
-    background-color: var(--bg-input);
-    color: var(--text-secondary);
-}
-
-.workspace-repos-search-wrapper .workspace-repos-select-btn:focus:hover {
-    background-color: var(--bg-hover);
-    border-color: var(--border-hover);
-    color: #ffffff;
-}
-
-.workspace-repos-search-wrapper .workspace-repos-search {
-    border-top-left-radius: 0;
-    border-bottom-left-radius: 0;
-    flex: 1 1 auto;
-    min-width: 0;
 }
 
 /* Search input + clear button container */
@@ -153,33 +81,6 @@
     font-size: 1.25rem;
 }
 
-
-/* Checkbox column: fixed width, non-resizable */
-.col-select {
-    width: 2.5rem;
-    min-width: 2.5rem;
-    max-width: 2.5rem;
-    text-align: center;
-    vertical-align: middle;
-}
-
-.repositories-table th.col-select,
-.repositories-table td.col-select {
-    text-align: center;
-    padding-left: 0.35rem;
-    padding-right: 0.35rem;
-}
-
-/* Checkbox styling: dark gray fill, light gray frame when unselected; accent blue when selected (match WorkspaceRepositoriesModal) */
-.repositories-table .workspace-repo-checkbox {
-    background-color: var(--bg-input) !important;
-    border-color: var(--border-light) !important;
-}
-
-.repositories-table .workspace-repo-checkbox:checked {
-    background-color: var(--accent-blue) !important;
-    border-color: var(--accent-blue) !important;
-}
 
 /* Match Repositories / Workspaces: left-align all columns, status column right-aligned via col-status-badge; use global resizable-columns padding for header spacing */
 .repositories-table th,
