@@ -566,6 +566,16 @@ h1:focus {
     color: var(--text-secondary) !important;
 }
 
+/* Branch column: gray text (override .table tbody td *) */
+.repositories-table.table tbody td.col-branch,
+.repositories-table.table tbody td.col-branch *:not(a):not(.btn):not(.badge) {
+    color: #a0a0a0 !important;
+}
+.repositories-table.table tbody td.col-branch .branch-container:hover .branch-inner,
+.repositories-table.table tbody td.col-branch .branch-inner:hover {
+    color: #f8f9fa !important;
+}
+
 /* Badges */
 .badge {
     color: var(--bg-primary);

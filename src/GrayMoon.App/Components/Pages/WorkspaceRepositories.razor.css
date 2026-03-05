@@ -399,6 +399,10 @@
     min-width: 0;
 }
 
+.repositories-table td.col-branch {
+    color: var(--text-muted);
+}
+
 /* Repository links: white text, white underline on hover only */
 .repositories-table td .repo-link,
 .repositories-table td a.repo-link {
