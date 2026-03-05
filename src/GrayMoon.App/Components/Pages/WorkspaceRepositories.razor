@@ -1890,18 +1890,14 @@
                 {
                     repositoryErrors[repositoryId] = result.ErrorMessage;
                     commitSyncProgressMessage = result.MergeConflict ? "Merge conflict detected. Merge aborted." : "Commit sync completed with errors.";
-                    await Task.Delay(2000, _commitSyncCts.Token);
                 }
                 else if (result != null && result.MergeConflict)
                 {
                     commitSyncProgressMessage = "Merge conflict detected. Merge aborted.";
-                    await Task.Delay(2000, _commitSyncCts.Token);
                 }
                 else
                 {
                     repositoryErrors.Remove(repositoryId);
-                    commitSyncProgressMessage = "Commit sync completed successfully.";
-                    await Task.Delay(1000, _commitSyncCts.Token);
                 }
             }
             else
@@ -1945,7 +1941,8 @@
         _commitSyncCts = new CancellationTokenSource();
 
         isCommitSyncing = true;
-        commitSyncProgressMessage = $"Synchronizing commits for {repositoryIds.Count} {(repositoryIds.Count == 1 ? "repository" : "repositories")}...";
+        var total = repositoryIds.Count;
+        commitSyncProgressMessage = $"Synchronizing commits for {total} {(total == 1 ? "repository" : "repositories")}...";
         errorMessage = null;
         try
         {
@@ -1954,6 +1951,7 @@
 
             var httpClient = HttpClientFactory.CreateClient();
             var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var completedCount = 0;
 
             // Sync all repositories in parallel
             var syncTasks = repositoryIds.Select(async repositoryId =>
@@ -1999,14 +1997,18 @@
                     Logger.LogError(ex, "Error syncing commits for repository {RepositoryId}", repositoryId);
                     repositoryErrors[repositoryId] = "Commit sync failed. The GrayMoon Agent may be offline.";
                 }
+                finally
+                {
+                    var completed = Interlocked.Increment(ref completedCount);
+                    commitSyncProgressMessage = $"Synchronized commits {completed} of {total}";
+                    await InvokeAsync(StateHasChanged);
+                }
             });
 
             await Task.WhenAll(syncTasks);
 
             // Refresh workspace data to show updated commit counts
             await RefreshFromSync();
-            commitSyncProgressMessage = "Commit sync completed.";
-            await Task.Delay(1000, _commitSyncCts.Token);
         }
         catch (OperationCanceledException)
         {
