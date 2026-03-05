@@ -27,83 +27,28 @@
 
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
-        <div class="workspace-repos-header">
-            <div class="workspace-repos-title-row">
-                <h2 class="workspace-repos-title">@(workspace?.Name ?? "Workspace")</h2>
-                <p class="text-muted mb-0 workspace-repos-subtitle">
-                    <NavLink href="workspaces" class="workspaces-breadcrumb-link" style="color: var(--text-muted) !important;">workspace</NavLink><span> | </span>
-                    @if (workspaceRepositories.Count > 0)
-                    {
-                        var hasFilter = !string.IsNullOrWhiteSpace(searchTerm);
-                        var list = hasFilter ? FilteredWorkspaceRepositories : workspaceRepositories;
-                        var count = list.Count;
-                        var suffix = hasFilter ? " found" : "";
-                        <span class="repositories-count-link" @onclick="ShowRepositoriesModalAsync" @onclick:preventDefault>
-                            @($"{count} {(count == 1 ? "repository" : "repositories")}{suffix}")
-                        </span>
-                    }
-                    else if (workspace != null)
-                    {
-                        <span class="repositories-count-link" @onclick="ShowRepositoriesModalAsync" @onclick:preventDefault>0 repositories</span>
-                    }
-                    else
-                    {
-                        <span>&nbsp;</span>
-                    }
-                </p>
-            </div>
-            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
-                <div class="workspace-repos-search-wrapper">
-                    <div class="workspace-repos-search-input-wrap @(!string.IsNullOrWhiteSpace(searchTerm) ? "has-filter" : null)">
-                        <input id="workspace-repos-search" class="form-control workspace-repos-search" placeholder="Search repositories..."
-                               @bind="searchTerm" @bind:event="oninput"
-                               @onkeydown="OnSearchKeyDown" />
-                        @if (!string.IsNullOrWhiteSpace(searchTerm))
-                        {
-                            <button type="button"
-                                    class="workspace-repos-search-clear"
-                                    title="Clear filter"
-                                    aria-label="Clear repository filter"
-                                    @onclick="ClearSearchFilter"
-                                    @onclick:stopPropagation="true">
-                                <i class="bi bi-x-circle" aria-hidden="true"></i>
-                            </button>
-                        }
-                    </div>
-                </div>
-                <button class="btn btn-outline-secondary"
-                        @onclick="ShowBranchModalAsync"
-                        disabled="@(isSyncing || isUpdating || isPushing || workspaceRepositories.Count == 0)">
-                    Branch
-                </button>
-                <button class="btn @(hasUnmatchedDependencies ? "btn-danger" : "btn-outline-secondary")"
-                        @onclick="OnUpdateClickAsync"
-                        disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating || isPushing)">
-                    Update
-                </button>
-                @if (hasIncomingCommits)
-                {
-                    <button class="btn btn-danger"
-                            @onclick="OnPullClickAsync"
-                            disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating || isPushing || isCommitSyncing)">
-                        Pull
-                    </button>
-                }
-                else
-                {
-                    <button class="btn @(isPushRecommended ? "btn-warning" : "btn-outline-secondary")"
-                            @onclick="OnPushClickAsync"
-                            disabled="@(workspace == null || workspaceRepositories.Count == 0 || isSyncing || isUpdating || isPushing)">
-                        Push
-                    </button>
-                }
-                <button class="btn @(isOutOfSync == true ? "btn-danger" : "btn-primary")"
-                        @onclick="SyncAsync"
-                        disabled="@(isSyncing || isUpdating || isPushing || workspaceRepositories.Count == 0)">
-                    Sync
-                </button>
-            </div>
-        </div>
+        <WorkspaceRepositoriesHeader WorkspaceName="@(workspace?.Name)"
+                                    RepositoriesCount="@(workspaceRepositories.Count)"
+                                    HasFilter="@(!string.IsNullOrWhiteSpace(searchTerm))"
+                                    FilteredCount="@(FilteredWorkspaceRepositories.Count)"
+                                    SearchTerm="@searchTerm"
+                                    HasUnmatchedDependencies="@hasUnmatchedDependencies"
+                                    IsPushRecommended="@isPushRecommended"
+                                    HasIncomingCommits="@hasIncomingCommits"
+                                    IsOutOfSync="@isOutOfSync"
+                                    IsSyncing="@isSyncing"
+                                    IsUpdating="@isUpdating"
+                                    IsPushing="@isPushing"
+                                    IsCommitSyncing="@isCommitSyncing"
+                                    OnShowRepositories="ShowRepositoriesModalAsync"
+                                    OnShowBranch="ShowBranchModalAsync"
+                                    OnUpdate="OnUpdateClickAsync"
+                                    OnPull="OnPullClickAsync"
+                                    OnPush="OnPushClickAsync"
+                                    OnSync="SyncAsync"
+                                    OnSearchChanged="OnSearchChanged"
+                                    OnClearSearch="ClearSearchFilter"
+                                    OnSearchKeyDown="OnSearchKeyDown" />
         @if (errorMessage != null)
         {
             <div class="alert alert-danger">
@@ -161,15 +106,15 @@
                             {
                                 @foreach (var group in FilteredLevelGroups)
                                 {
-                                    var levelUrls = group.Select(wr => wr.Repository).Where(r => r != null).Select(r => GetRepositoryUrl(r!)).Where(u => !string.IsNullOrEmpty(u)).ToList();
+                                    var levelUrls = group.Select(wr => wr.Repository).Where(r => r != null).Select(r => RepositoryUrlHelper.GetRepositoryUrl(r!.CloneUrl)).Where(u => !string.IsNullOrEmpty(u)).ToList();
                                     var levelUrlsJson = System.Text.Json.JsonSerializer.Serialize(levelUrls);
                                     var levelPrUrls = new List<string>();
                                     foreach (var wr in group)
                                     {
                                         if (wr.Repository == null || string.IsNullOrWhiteSpace(wr.BranchName)) continue;
-                                        var repoUrl = GetRepositoryUrl(wr.Repository);
+                                        var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(wr.Repository?.CloneUrl);
                                         if (string.IsNullOrEmpty(repoUrl)) continue;
-                                        levelPrUrls.Add($"{repoUrl}/compare/main...{Uri.EscapeDataString(wr.BranchName)}");
+                                        levelPrUrls.Add($"{repoUrl}/compare/{SyncBadgeLabels.DefaultBranchName}...{Uri.EscapeDataString(wr.BranchName)}");
                                     }
                                     var levelPrUrlsJson = System.Text.Json.JsonSerializer.Serialize(levelPrUrls);
                                     <tr class="dependency-level-header">
@@ -233,9 +178,9 @@
                                         var repo = wr.Repository;
                                         @if (repo != null)
                                         {
-                                            var repoUrl = GetRepositoryUrl(repo);
+                                            var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl);
                                             var branchUrl = !string.IsNullOrEmpty(repoUrl) && !string.IsNullOrEmpty(wr.BranchName)
-                                                ? $"{repoUrl}/compare/main...{Uri.EscapeDataString(wr.BranchName)}"
+                                                ? $"{repoUrl}/compare/{SyncBadgeLabels.DefaultBranchName}...{Uri.EscapeDataString(wr.BranchName)}"
                                                 : null;
                                             <tr>
                                             <td class="col-repo">
@@ -280,12 +225,11 @@
                                                 }
                                             </td>
                                             <td class="col-divergence text-center text-nowrap">
-                                                @GetDivergenceDisplay(
-                                                    wr.DefaultBranchBehindCommits,
-                                                    wr.DefaultBranchAheadCommits,
-                                                    wr.BranchName,
-                                                    GetRepositoryUrl(repo),
-                                                    "main")
+                                                <DivergenceBadge DefaultBehind="@wr.DefaultBranchBehindCommits"
+                                                                DefaultAhead="@wr.DefaultBranchAheadCommits"
+                                                                BranchName="@wr.BranchName"
+                                                                RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
+                                                                DefaultBranchName="@SyncBadgeLabels.DefaultBranchName" />
                                             </td>
                                             <td class="col-deps col-status-badge">
                                                 @{
@@ -319,8 +263,21 @@
                                                     </span>
                                                 }
                                             </td>
-                                            <td class="col-commits">@GetCommitsBadge(repo.RepositoryId, wr.OutgoingCommits, wr.IncomingCommits, wr.BranchHasUpstream, wr.BranchName)</td>
-                                            <td class="col-sync col-status-badge">@GetRepoSyncBadge(repo.RepositoryId)</td>
+                                            <td class="col-commits">
+                                                <CommitsBadge RepositoryId="repo.RepositoryId"
+                                                              Outgoing="@wr.OutgoingCommits"
+                                                              Incoming="@wr.IncomingCommits"
+                                                              BranchHasUpstream="@wr.BranchHasUpstream"
+                                                              BranchName="@wr.BranchName"
+                                                              OnPushClick="() => OnPushBadgeClickAsync(repo.RepositoryId, wr.BranchName)"
+                                                              OnPullClick="() => OnPullBadgeClickAsync(repo.RepositoryId)" />
+                                            </td>
+                                            <td class="col-sync col-status-badge">
+                                                <RepoSyncStatusBadge RepositoryId="repo.RepositoryId"
+                                                                    Status="@(repoSyncStatus.TryGetValue(repo.RepositoryId, out var syncStatus) ? syncStatus : (RepoSyncStatus?)null)"
+                                                                    IsSyncing="isSyncing"
+                                                                    OnSyncClick="() => SyncSingleRepoAsync(repo.RepositoryId)" />
+                                            </td>
                                         </tr>
                                             @if (repositoryErrors.TryGetValue(repo.RepositoryId, out var repoError))
                                             {
@@ -460,6 +417,8 @@
             .OrderByDescending(g => g.Key ?? int.MinValue);
 
     private List<WorkspaceRepositoryLink> FilteredWorkspaceRepositories => GetFilteredWorkspaceRepositories();
+
+    private string ApiBaseUrl => NavigationManager.BaseUri.TrimEnd('/');
 
     private IEnumerable<IGrouping<int?, WorkspaceRepositoryLink>> FilteredLevelGroups =>
         FilteredWorkspaceRepositories
@@ -679,194 +638,11 @@
             .ToList();
     }
 
-    private RenderFragment GetDivergenceDisplay(
-        int? defaultBehind,
-        int? defaultAhead,
-        string? branchName,
-        string? repositoryUrl,
-        string defaultBranchName) => builder =>
+    private void OnSearchChanged(ChangeEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(branchName) || (!defaultBehind.HasValue && !defaultAhead.HasValue))
-        {
-            builder.AddContent(0, "-");
-            return;
-        }
-        var behind = defaultBehind ?? 0;
-        var ahead = defaultAhead ?? 0;
-        var hasRepoUrl = !string.IsNullOrWhiteSpace(repositoryUrl);
-
-        // Compute GitHub compare URLs when repo URL is available
-        string? aheadUrl = null;
-        string? behindUrl = null;
-        if (hasRepoUrl)
-        {
-            var encDefault = Uri.EscapeDataString(defaultBranchName);
-            var encBranch = Uri.EscapeDataString(branchName!);
-            // Ahead of default: default...branch
-            aheadUrl = $"{repositoryUrl}/compare/{encDefault}...{encBranch}";
-            // Behind default: branch...default
-            behindUrl = $"{repositoryUrl}/compare/{encBranch}...{encDefault}";
-        }
-
-        var aheadTitle = ahead == 1
-            ? $"This branch is 1 commit ahead of {defaultBranchName}"
-            : $"This branch is {ahead} commits ahead of {defaultBranchName}";
-        var behindTitle = behind == 1
-            ? $"This branch is 1 commit behind {defaultBranchName}"
-            : $"This branch is {behind} commits behind {defaultBranchName}";
-
-        builder.OpenElement(0, "div");
-        builder.AddAttribute(1, "class", "divergence-container");
-        builder.OpenElement(2, "span");
-        builder.AddAttribute(3, "class", "divergence-inner");
-
-        // Left side: behind
-        if (!string.IsNullOrWhiteSpace(behindUrl))
-        {
-            builder.OpenElement(5, "a");
-            builder.AddAttribute(6, "href", behindUrl);
-            builder.AddAttribute(7, "target", "_blank");
-            builder.AddAttribute(8, "rel", "noopener noreferrer");
-            builder.AddAttribute(9, "class", "divergence-link divergence-link-behind");
-            builder.AddAttribute(10, "title", behindTitle);
-            builder.AddContent(11, behind.ToString());
-            builder.CloseElement();
-        }
-        else
-        {
-            builder.OpenElement(5, "span");
-            builder.AddAttribute(6, "class", "divergence-link divergence-link-behind");
-            builder.AddAttribute(7, "title", behindTitle);
-            builder.AddContent(8, behind.ToString());
-            builder.CloseElement();
-        }
-
-        // Separator
-        builder.OpenElement(12, "span");
-        builder.AddAttribute(13, "class", "divergence-separator");
-        builder.AddContent(15, " | ");
-        builder.CloseElement();
-
-        // Right side: ahead
-        if (!string.IsNullOrWhiteSpace(aheadUrl))
-        {
-            builder.OpenElement(16, "a");
-            builder.AddAttribute(17, "href", aheadUrl);
-            builder.AddAttribute(18, "target", "_blank");
-            builder.AddAttribute(19, "rel", "noopener noreferrer");
-            builder.AddAttribute(20, "class", "divergence-link divergence-link-ahead");
-            builder.AddAttribute(21, "title", aheadTitle);
-            builder.AddContent(22, ahead.ToString());
-            builder.CloseElement();
-        }
-        else
-        {
-            builder.OpenElement(16, "span");
-            builder.AddAttribute(17, "class", "divergence-link divergence-link-ahead");
-            builder.AddAttribute(18, "title", aheadTitle);
-            builder.AddContent(19, ahead.ToString());
-            builder.CloseElement();
-        }
-
-        builder.CloseElement(); // divergence-inner
-        builder.CloseElement(); // divergence-container
-    };
-
-    private RenderFragment GetCommitsBadge(int repositoryId, int? outgoing, int? incoming, bool? branchHasUpstream, string? branchName) => builder =>
-    {
-        var x = outgoing ?? 0;
-        var y = branchHasUpstream == false ? 0 : (incoming ?? 0);
-        if (!outgoing.HasValue && !incoming.HasValue && branchHasUpstream != false)
-        {
-            builder.AddContent(0, "-");
-            return;
-        }
-        string bgColor;
-        string textColor = "#fff";
-        bool hasCommits = (y > 0) || (x > 0);
-        bool notUpstreamed = branchHasUpstream == false;
-        if (y > 0)
-            bgColor = "#dc3545";   // red: need to pull
-        else if (x > 0 || notUpstreamed)
-        {
-            bgColor = "#ffc107";   // yellow: need to push or new branch not upstreamed
-            textColor = "#000";
-        }
-        else
-            bgColor = "#198754";   // green: in sync (0,0)
-
-        var cssClass = notUpstreamed ? "badge commits-badge commits-badge-not-upstreamed" : "badge";
-        var clickable = hasCommits || notUpstreamed;
-        builder.OpenElement(0, "span");
-        builder.AddAttribute(1, "class", cssClass);
-        builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: {textColor};{(clickable ? " cursor: pointer;" : "")}");
-        if (clickable)
-        {
-            if (notUpstreamed)
-            {
-                builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => OnPushBadgeClickAsync(repositoryId, branchName)));
-                builder.AddAttribute(4, "title", "Push to set upstream");
-            }
-            else if (y > 0)
-            {
-                builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => OnPullBadgeClickAsync(repositoryId)));
-                builder.AddAttribute(4, "title", "Click to pull");
-            }
-            else
-            {
-                builder.AddAttribute(3, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, () => OnPushBadgeClickAsync(repositoryId, branchName)));
-                builder.AddAttribute(4, "title", "Click to push");
-            }
-        }
-        if (notUpstreamed)
-        {
-            builder.OpenElement(5, "span");
-            builder.AddAttribute(6, "class", "commits-badge-icon-up commits-badge-icon-up--black");
-            builder.OpenElement(7, "i");
-            builder.AddAttribute(8, "class", "bi bi-cloud-arrow-up");
-            builder.AddAttribute(9, "aria-hidden", "true");
-            builder.CloseElement();
-            builder.CloseElement();
-        }
-        else
-        {
-            builder.AddContent(5, $"↑{x} ↓{y}");
-        }
-        builder.CloseElement();
-    };
-
-    private RenderFragment GetRepoSyncBadge(int repositoryId) => builder =>
-    {
-        if (repoSyncStatus.TryGetValue(repositoryId, out var status))
-        {
-            var (text, bgColor) = status switch
-            {
-                // In-sync badge: match primary Sync button blue
-                RepoSyncStatus.InSync => ("in sync", "#0e639c"),
-                RepoSyncStatus.NeedsSync => ("sync", "#dc3545"),
-                RepoSyncStatus.NotCloned => ("not cloned", "#6c757d"),
-                RepoSyncStatus.VersionMismatch => ("version", "#dc3545"),
-                RepoSyncStatus.Error => ("error", "#dc3545"),
-                _ => ("sync", "#6c757d")
-            };
-            var needsSync = status != RepoSyncStatus.InSync;
-            var clickable = needsSync && !isSyncing;
-            builder.OpenElement(0, "span");
-            builder.AddAttribute(1, "class", "badge");
-            builder.AddAttribute(2, "style", $"background-color: {bgColor}; color: #fff;{(clickable ? " cursor: pointer;" : "")}");
-            if (clickable)
-            {
-                builder.AddAttribute(3, "onclick", EventCallback.Factory.Create(this, () => SyncSingleRepoAsync(repositoryId)));
-                builder.AddAttribute(4, "title", "Click to sync this repository");
-                builder.AddContent(5, text);
-            }
-            else
-            {
-                builder.AddContent(3, text);
-            }
-            builder.CloseElement();
-        }
-    };
+        searchTerm = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
 
     private void AbortSyncAsync()
     {
@@ -876,6 +652,42 @@
     private void AbortUpdateAsync()
     {
         _updateCts?.Cancel();
+    }
+
+    private void SetSyncProgress(string message)
+    {
+        syncProgressMessage = message;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void SetUpdateProgress(string message)
+    {
+        updateProgressMessage = message;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void SetPushProgress(string message)
+    {
+        pushProgressMessage = message;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void SetCommitSyncProgress(string message)
+    {
+        commitSyncProgressMessage = message;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void SetCheckoutProgress(string message)
+    {
+        checkoutProgressMessage = message;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void SetCreateBranchesProgress(string message)
+    {
+        createBranchesProgressMessage = message;
+        _ = InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
@@ -1018,8 +830,7 @@
 
     private void OnCommitDependencyProgress(int current, int total, int unused)
     {
-        updateProgressMessage = $"Committed {current} of {total}";
-        _ = InvokeAsync(StateHasChanged);
+        SetUpdateProgress($"Committed {current} of {total}");
     }
 
     private async Task OnUpdateSingleRepositoryDependenciesProceedAsync(bool commitVersionUpdate)
@@ -1034,7 +845,7 @@
         _updateCts?.Dispose();
         _updateCts = new CancellationTokenSource();
         isUpdating = true;
-        updateProgressMessage = "Updating repository...";
+        SetUpdateProgress("Updating repository...");
         repositoryErrors.Remove(repositoryId);
         try
         {
@@ -1045,14 +856,13 @@
                 await workspaceGitService.RunUpdateSingleRepositoryAsync(
                     WorkspaceId,
                     repositoryId,
-                    onProgressMessage: msg => { updateProgressMessage = msg; _ = InvokeAsync(StateHasChanged); },
+                    onProgressMessage: SetUpdateProgress,
                     onRepoError: (repoId, msg) => { repositoryErrors[repoId] = msg; _ = InvokeAsync(StateHasChanged); },
                     cancellationToken: _updateCts.Token);
 
                 if (commitVersionUpdate)
                 {
-                    updateProgressMessage = "Committing version update...";
-                    await InvokeAsync(StateHasChanged);
+                    SetUpdateProgress("Committing version update...");
                     var commitResults = await workspaceGitService.CommitDependencyUpdatesAsync(
                         WorkspaceId,
                         new[] { payloadToCommit },
@@ -1164,18 +974,18 @@
 
             if (synchronizedPush)
             {
-                pushProgressMessage = "Syncing package registries for required packages...";
+                SetPushProgress("Syncing package registries for required packages...");
                 await InvokeAsync(StateHasChanged);
                 if (requiredPackageIds.Count > 0 && scope.ServiceProvider.GetService<PackageRegistrySyncService>() is { } syncService)
                     await syncService.SyncRegistriesForPackageIdsAsync(WorkspaceId, requiredPackageIds, _pushCts.Token);
-                pushProgressMessage = "Pushing synchronized...";
+                SetPushProgress("Pushing synchronized...");
                 await InvokeAsync(StateHasChanged);
-                await workspaceGitService.RunPushAsync(WorkspaceId, repoIds, msg => { pushProgressMessage = msg; _ = InvokeAsync(StateHasChanged); }, (id, err) => ToastService.Show($"{id}: {err}"), packageRegistriesAlreadySynced: requiredPackageIds.Count > 0, _pushCts.Token);
+                await workspaceGitService.RunPushAsync(WorkspaceId, repoIds, SetPushProgress, (id, err) => ToastService.Show($"{id}: {err}"), packageRegistriesAlreadySynced: requiredPackageIds.Count > 0, _pushCts.Token);
             }
             else
             {
-                pushProgressMessage = "Pushing...";
-                await workspaceGitService.RunPushReposInLevelOrderAsync(WorkspaceId, repoIds, msg => { pushProgressMessage = msg; _ = InvokeAsync(StateHasChanged); }, (id, err) => ToastService.Show($"{id}: {err}"), _pushCts.Token);
+                SetPushProgress("Pushing...");
+                await workspaceGitService.RunPushReposInLevelOrderAsync(WorkspaceId, repoIds, SetPushProgress, (id, err) => ToastService.Show($"{id}: {err}"), _pushCts.Token);
             }
 
             await RefreshFromSync();
@@ -1206,7 +1016,7 @@
         _pushCts?.Dispose();
         _pushCts = new CancellationTokenSource();
         isPushing = true;
-        pushProgressMessage = "Setting upstream...";
+        SetPushProgress("Setting upstream...");
 
         try
         {
@@ -1216,7 +1026,7 @@
                 WorkspaceId,
                 repositoryId,
                 branchName,
-                msg => { pushProgressMessage = msg; _ = InvokeAsync(StateHasChanged); },
+                msg => SetPushProgress(msg),
                 _pushCts.Token);
 
             if (success)
@@ -1354,7 +1164,7 @@
         _updateCts = new CancellationTokenSource();
 
         isUpdating = true;
-        updateProgressMessage = "Updating dependencies...";
+        SetUpdateProgress("Updating dependencies...");
         errorMessage = null;
         try
         {
@@ -1367,11 +1177,7 @@
                 await workspaceGitService.RunUpdateAsync(
                     WorkspaceId,
                     withCommits,
-                    onProgressMessage: msg =>
-                    {
-                        updateProgressMessage = msg;
-                        InvokeAsync(StateHasChanged);
-                    },
+                    onProgressMessage: SetUpdateProgress,
                     onRepoError: (repoId, msg) =>
                     {
                         repositoryErrors[repoId] = msg;
@@ -1420,7 +1226,7 @@
         _updateCts = new CancellationTokenSource();
 
         isUpdating = true;
-        updateProgressMessage = "Updating repository...";
+        SetUpdateProgress("Updating repository...");
         errorMessage = null;
         repositoryErrors.Remove(repositoryId);
         try
@@ -1434,11 +1240,7 @@
                 await workspaceGitService.RunUpdateSingleRepositoryAsync(
                     WorkspaceId,
                     repositoryId,
-                    onProgressMessage: msg =>
-                    {
-                        updateProgressMessage = msg;
-                        InvokeAsync(StateHasChanged);
-                    },
+                    onProgressMessage: SetUpdateProgress,
                     onRepoError: (repoId, msg) =>
                     {
                         repositoryErrors[repoId] = msg;
@@ -1586,7 +1388,7 @@
         _syncCts = new CancellationTokenSource();
 
         isSyncing = true;
-        syncProgressMessage = "Synchronizing...";
+        SetSyncProgress("Synchronizing...");
         var isRetryAfterError = !string.IsNullOrEmpty(errorMessage);
         errorMessage = null;
         try
@@ -1601,7 +1403,7 @@
                     WorkspaceId,
                     onProgress: (completed, total, repoId, info) =>
                     {
-                        syncProgressMessage = $"Synchronized {completed} of {total}";
+                        SetSyncProgress($"Synchronized {completed} of {total}");
                         repoSyncStatus[repoId] = (info.Version == "-" && info.Branch == "-")
                             ? RepoSyncStatus.Error
                             : RepoSyncStatus.InSync;
@@ -1661,7 +1463,7 @@
         _syncCts = new CancellationTokenSource();
 
         isSyncing = true;
-        syncProgressMessage = $"Synchronizing {repositoryIds.Count} {(repositoryIds.Count == 1 ? "repository" : "repositories")}...";
+        SetSyncProgress($"Synchronizing {repositoryIds.Count} {(repositoryIds.Count == 1 ? "repository" : "repositories")}...");
         errorMessage = null;
         try
         {
@@ -1675,7 +1477,7 @@
                     WorkspaceId,
                     onProgress: (completed, total, repoId, info) =>
                     {
-                        syncProgressMessage = $"Synchronized {completed} of {total}";
+                        SetSyncProgress($"Synchronized {completed} of {total}");
                         repoSyncStatus[repoId] = (info.Version == "-" && info.Branch == "-")
                             ? RepoSyncStatus.Error
                             : RepoSyncStatus.InSync;
@@ -1733,7 +1535,7 @@
         _syncCts = new CancellationTokenSource();
 
         isSyncing = true;
-        syncProgressMessage = "Synchronizing repository...";
+        SetSyncProgress("Synchronizing repository...");
         errorMessage = null;
         try
         {
@@ -1747,7 +1549,7 @@
                     WorkspaceId,
                     onProgress: (completed, total, repoId, info) =>
                     {
-                        syncProgressMessage = $"Synchronized {completed} of {total}";
+                        SetSyncProgress($"Synchronized {completed} of {total}");
                         repoSyncStatus[repoId] = (info.Version == "-" && info.Branch == "-")
                             ? RepoSyncStatus.Error
                             : RepoSyncStatus.InSync;
@@ -1805,7 +1607,7 @@
         _commitSyncCts = new CancellationTokenSource();
 
         isCommitSyncing = true;
-        commitSyncProgressMessage = "Synchronizing commits...";
+        SetCommitSyncProgress("Synchronizing commits...");
         errorMessage = null;
         try
         {
@@ -1821,7 +1623,7 @@
             var json = System.Text.Json.JsonSerializer.Serialize(request);
             var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
             
-            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var baseUrl = ApiBaseUrl;
             var response = await httpClient.PostAsync($"{baseUrl}/api/commitsync", content, _commitSyncCts.Token);
 
             if (response.IsSuccessStatusCode)
@@ -1832,11 +1634,11 @@
                 if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
                 {
                     repositoryErrors[repositoryId] = result.ErrorMessage;
-                    commitSyncProgressMessage = result.MergeConflict ? "Merge conflict detected. Merge aborted." : "Commit sync completed with errors.";
+                    SetCommitSyncProgress(result.MergeConflict ? "Merge conflict detected. Merge aborted." : "Commit sync completed with errors.");
                 }
                 else if (result != null && result.MergeConflict)
                 {
-                    commitSyncProgressMessage = "Merge conflict detected. Merge aborted.";
+                    SetCommitSyncProgress("Merge conflict detected. Merge aborted.");
                 }
                 else
                 {
@@ -1846,7 +1648,7 @@
             else
             {
                 var errorText = await response.Content.ReadAsStringAsync(_commitSyncCts.Token);
-                var displayError = TryGetErrorMessageFromResponseBody(errorText) ?? $"Commit sync failed: {response.StatusCode}";
+                var displayError = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"Commit sync failed: {response.StatusCode}";
                 repositoryErrors[repositoryId] = displayError;
                 errorMessage = displayError;
                 Logger.LogError("CommitSync failed: {StatusCode}, {Error}", response.StatusCode, errorText);
@@ -1885,7 +1687,7 @@
 
         isCommitSyncing = true;
         var total = repositoryIds.Count;
-        commitSyncProgressMessage = $"Synchronizing commits for {total} {(total == 1 ? "repository" : "repositories")}...";
+        SetCommitSyncProgress($"Synchronizing commits for {total} {(total == 1 ? "repository" : "repositories")}...");
         errorMessage = null;
         try
         {
@@ -1893,7 +1695,7 @@
             await Task.Yield();
 
             var httpClient = HttpClientFactory.CreateClient();
-            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var baseUrl = ApiBaseUrl;
             var completedCount = 0;
 
             // Sync all repositories in parallel
@@ -1931,7 +1733,7 @@
                     else
                     {
                         var errorText = await response.Content.ReadAsStringAsync(_commitSyncCts.Token);
-                        repositoryErrors[repositoryId] = TryGetErrorMessageFromResponseBody(errorText) ?? $"Commit sync failed: {response.StatusCode}";
+                        repositoryErrors[repositoryId] = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"Commit sync failed: {response.StatusCode}";
                         Logger.LogError("CommitSync failed for repository {RepositoryId}: {StatusCode}, {Error}", repositoryId, response.StatusCode, errorText);
                     }
                 }
@@ -1943,7 +1745,7 @@
                 finally
                 {
                     var completed = Interlocked.Increment(ref completedCount);
-                    commitSyncProgressMessage = $"Synchronized commits {completed} of {total}";
+                    SetCommitSyncProgress($"Synchronized commits {completed} of {total}");
                     await InvokeAsync(StateHasChanged);
                 }
             });
@@ -2006,7 +1808,7 @@
             var request = new { workspaceId = WorkspaceId };
             var json = JsonSerializer.Serialize(request);
             var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var baseUrl = ApiBaseUrl;
             var response = await httpClient.PostAsync($"{baseUrl}/api/branches/common", content);
             if (response.IsSuccessStatusCode)
             {
@@ -2044,7 +1846,7 @@
         _createBranchesCts = new CancellationTokenSource();
 
         isCreatingBranches = true;
-        createBranchesProgressMessage = "Creating branches...";
+        SetCreateBranchesProgress("Creating branches...");
         errorMessage = null;
         StateHasChanged();
 
@@ -2060,7 +1862,7 @@
                     baseBranch,
                     onProgress: (completed, total) =>
                     {
-                        createBranchesProgressMessage = $"Created {completed} of {total} branches";
+                        SetCreateBranchesProgress($"Created {completed} of {total} branches");
                         InvokeAsync(StateHasChanged);
                     },
                     repositoryIds: null,
@@ -2114,7 +1916,7 @@
             };
             var json = System.Text.Json.JsonSerializer.Serialize(apiRequest);
             var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var baseUrl = ApiBaseUrl;
             var response = await httpClient.PostAsync($"{baseUrl}/api/branches/create", content);
 
             if (response.IsSuccessStatusCode)
@@ -2193,7 +1995,7 @@
             };
             var json = System.Text.Json.JsonSerializer.Serialize(apiRequest);
             var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var baseUrl = ApiBaseUrl;
             var response = await httpClient.PostAsync($"{baseUrl}/api/branches/sync-to-default", content);
 
             if (response.IsSuccessStatusCode)
@@ -2234,7 +2036,7 @@
         // Get repository name for display
         var repo = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.Repository;
         var repoName = repo?.RepositoryName ?? "repository";
-        checkoutProgressMessage = $"Checking out {branchName} for {repoName}...";
+        SetCheckoutProgress($"Checking out {branchName} for {repoName}...");
         
         errorMessage = null;
         try
@@ -2252,7 +2054,7 @@
             var json = System.Text.Json.JsonSerializer.Serialize(apiRequest);
             var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
             
-            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var baseUrl = ApiBaseUrl;
             var response = await httpClient.PostAsync($"{baseUrl}/api/branches/checkout", content, _checkoutCts.Token);
             
             if (response.IsSuccessStatusCode)
@@ -2263,13 +2065,13 @@
                 if (result != null && !result.Success)
                 {
                     repositoryErrors[repositoryId] = !string.IsNullOrWhiteSpace(result.ErrorMessage) ? result.ErrorMessage : "Failed to checkout branch.";
-                    checkoutProgressMessage = "Checkout completed with errors.";
+                    SetCheckoutProgress("Checkout completed with errors.");
                     await Task.Delay(2000, _checkoutCts.Token);
                 }
                 else
                 {
                     repositoryErrors.Remove(repositoryId);
-                    checkoutProgressMessage = "Checkout completed successfully.";
+                    SetCheckoutProgress("Checkout completed successfully.");
                     await Task.Delay(1000, _checkoutCts.Token);
                 }
             }
@@ -2311,45 +2113,6 @@
         StateHasChanged();
     }
 
-    private string? GetRepositoryUrl(Repository repo)
-    {
-        if (string.IsNullOrEmpty(repo.CloneUrl))
-            return null;
-
-        // Convert git clone URL to GitHub web URL
-        // Examples:
-        // https://github.com/org/repo.git -> https://github.com/org/repo
-        // git@github.com:org/repo.git -> https://github.com/org/repo
-        // https://github.com/org/repo -> https://github.com/org/repo (already correct)
-        
-        var url = repo.CloneUrl.Trim();
-        
-        // Handle SSH format: git@github.com:org/repo.git
-        if (url.StartsWith("git@github.com:", StringComparison.OrdinalIgnoreCase))
-        {
-            url = url.Replace("git@github.com:", "https://github.com/", StringComparison.OrdinalIgnoreCase);
-        }
-        // Handle HTTPS format: https://github.com/org/repo.git
-        else if (url.StartsWith("https://github.com/", StringComparison.OrdinalIgnoreCase) || 
-                 url.StartsWith("http://github.com/", StringComparison.OrdinalIgnoreCase))
-        {
-            // Already HTTPS/HTTP, just need to remove .git if present
-        }
-        else
-        {
-            // Unknown format, return null
-            return null;
-        }
-        
-        // Remove .git suffix if present
-        if (url.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-        {
-            url = url.Substring(0, url.Length - 4);
-        }
-        
-        return url;
-    }
-
     private async Task CopyVersionToClipboard(string version)
     {
         if (!string.IsNullOrEmpty(version))
@@ -2381,19 +2144,6 @@
     private string GetDependencyGraphUrlForLevel(int level)
     {
         return $"/workspaces/{WorkspaceId}/dependencies?level={level}";
-    }
-
-    private static string GetSyncBadgeText(RepoSyncStatus status)
-    {
-        return status switch
-        {
-            RepoSyncStatus.InSync => "in sync",
-            RepoSyncStatus.NeedsSync => "sync",
-            RepoSyncStatus.NotCloned => "not cloned",
-            RepoSyncStatus.VersionMismatch => "version",
-            RepoSyncStatus.Error => "error",
-            _ => "sync"
-        };
     }
 
     private void OnSearchKeyDown(KeyboardEventArgs e)
@@ -2428,36 +2178,10 @@
             var branchName = wr.BranchName ?? string.Empty;
             var version = wr.GitVersion ?? string.Empty;
             var levelTitle = wr.DependencyLevel == null ? "No dependencies" : $"Level {wr.DependencyLevel}";
-            var syncText = GetSyncBadgeText(repoSyncStatus.TryGetValue(wr.RepositoryId, out var s) ? s : RepoSyncStatus.NeedsSync);
+            var syncText = SyncBadgeLabels.GetSyncBadgeText(repoSyncStatus.TryGetValue(wr.RepositoryId, out var s) ? s : RepoSyncStatus.NeedsSync);
             var searchable = $"{repoName} {branchName} {version} {levelTitle} {syncText}";
             return words.All(word => searchable.Contains(word, StringComparison.OrdinalIgnoreCase));
         }).ToList();
-    }
-
-    /// <summary>Try to extract a user-facing error message from an API response body (JSON or plain text).</summary>
-    private static string? TryGetErrorMessageFromResponseBody(string? body)
-    {
-        if (string.IsNullOrWhiteSpace(body))
-            return null;
-        var trimmed = body.Trim();
-        if (trimmed.Length == 0)
-            return null;
-        try
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(trimmed);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("errorMessage", out var em) && em.ValueKind == System.Text.Json.JsonValueKind.String)
-                return em.GetString();
-            if (root.TryGetProperty("detail", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.String)
-                return d.GetString();
-            if (root.TryGetProperty("title", out var t) && t.ValueKind == System.Text.Json.JsonValueKind.String)
-                return t.GetString();
-        }
-        catch
-        {
-            // Not JSON or invalid
-        }
-        return trimmed.Length > 500 ? trimmed.Substring(0, 500) + "…" : trimmed;
     }
 
     private sealed class CreateBranchApiResult

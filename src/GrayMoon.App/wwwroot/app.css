@@ -61,6 +61,14 @@ a.workspaces-breadcrumb-link:hover {
     text-decoration: underline;
 }
 
+/* Repositories count (clickable, same row as workspace breadcrumb) */
+.repositories-count-link {
+    cursor: pointer;
+}
+.repositories-count-link:hover {
+    text-decoration: underline;
+}
+
 /* Buttons */
 .btn-primary,
 .btn-primary:link,
@@ -369,6 +377,52 @@ h1:focus {
     flex-shrink: 0;
 }
 
+/* Workspace repositories page: header with title row + actions row (search + buttons) */
+.workspace-repos-header .workspace-repos-title-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.workspace-repos-header .workspace-repos-title-row .workspace-repos-title {
+    margin-bottom: 0;
+}
+.workspace-repos-header .workspace-repos-title-row .workspace-repos-subtitle {
+    flex: 0 0 auto;
+}
+.workspace-repos-header .workspace-repos-header-actions {
+    flex-wrap: nowrap;
+    margin-top: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+.workspace-repos-header .workspace-repos-search-wrapper {
+    min-width: 0;
+    flex: 1 1 0%;
+}
+.workspace-repos-header .workspace-repos-search-input-wrap {
+    min-width: 0;
+    position: relative;
+}
+.workspace-repos-header .workspace-repos-search-input-wrap.has-filter .workspace-repos-search {
+    padding-right: 2.25rem;
+}
+.workspace-repos-header .workspace-repos-search-clear {
+    position: absolute;
+    right: 0.25rem;
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 0.2rem 0.25rem;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    line-height: 1;
+    z-index: 1;
+}
+.workspace-repos-header .workspace-repos-search-clear:hover {
+    color: var(--text-primary);
+}
+
 /* Keep subtitle on one line, shrink with ellipsis when space is limited */
 .grid-page-header .d-flex > div:first-child {
     min-width: 0;
@@ -510,6 +564,16 @@ h1:focus {
 
 .table tbody td.text-muted {
     color: var(--text-secondary) !important;
+}
+
+/* Branch column: gray text (override .table tbody td *) */
+.repositories-table.table tbody td.col-branch,
+.repositories-table.table tbody td.col-branch *:not(a):not(.btn):not(.badge) {
+    color: #a0a0a0 !important;
+}
+.repositories-table.table tbody td.col-branch .branch-container:hover .branch-inner,
+.repositories-table.table tbody td.col-branch .branch-inner:hover {
+    color: #f8f9fa !important;
 }
 
 /* Badges */
