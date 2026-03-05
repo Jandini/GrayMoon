@@ -409,10 +409,14 @@ public class WorkspaceGitService(
             {
                 var pathsToStage = repo.ProjectUpdates.Select(p => p.ProjectPath).Distinct().ToList();
                 var lines = new List<string> { "chore(deps): update package versions", "" };
+                var seen = new HashSet<(string Id, string Version)>();
                 foreach (var pu in repo.ProjectUpdates)
                 {
                     foreach (var (packageId, _, newVersion) in pu.PackageUpdates)
-                        lines.Add($"- {packageId} to {newVersion}");
+                    {
+                        if (seen.Add((packageId, newVersion)))
+                            lines.Add($"- {packageId} to {newVersion}");
+                    }
                 }
                 var commitMessage = string.Join("\r\n", lines);
 

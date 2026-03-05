@@ -58,6 +58,7 @@
     private IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> PackageLines =>
         Payload?.ProjectUpdates
             .SelectMany(p => p.PackageUpdates)
+            .Distinct()
             .ToList()
         ?? (IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>)Array.Empty<(string PackageId, string CurrentVersion, string NewVersion)>();
 
