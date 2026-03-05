@@ -35,11 +35,13 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         var args = BuildCloneArguments(cloneUrl, bearerToken);
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, workingDir, ct);
+        var (exitCode, stdout, stderr) = await CloneRetryPipeline.ExecuteAsync(
+            async (cancellationToken) => await RunProcessAsync("git", args, workingDir, cancellationToken),
+            ct);
         sw.Stop();
         if (exitCode != 0)
         {
-            logger.LogError("Git clone failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, exitCode, stdout, stderr);
+            logger.LogError("Git clone failed after retries in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, exitCode, stdout, stderr);
             return false;
         }
         logger.LogInformation("Git clone completed in {ElapsedMs}ms: {Url} -> {Dir}", sw.ElapsedMilliseconds, cloneUrl, workingDir);
@@ -94,6 +96,18 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>().HandleResult(r => r.ExitCode != 0),
                 MaxRetryAttempts = 3,
                 Delay = TimeSpan.FromMilliseconds(100),
+                BackoffType = DelayBackoffType.Exponential,
+                UseJitter = true
+            })
+            .Build();
+
+    private static readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CloneRetryPipeline =
+        new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
+            .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
+            {
+                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>().HandleResult(r => r.ExitCode != 0),
+                MaxRetryAttempts = 3,
+                Delay = TimeSpan.FromMilliseconds(500),
                 BackoffType = DelayBackoffType.Exponential,
                 UseJitter = true
             })
