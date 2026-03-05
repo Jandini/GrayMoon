@@ -251,15 +251,29 @@
                                                 }
                                                 else
                                                 {
-                                                    <span class="dependency-badge-link @(isUpdating || isSyncing ? "dependency-badge-link--disabled" : "")"
+                                                    var depLines = _mismatchedDependencyLinesByRepo.GetValueOrDefault(repo.RepositoryId) ?? Array.Empty<(string PackageId, string CurrentVersion, string NewVersion)>();
+                                                    <span class="dependency-badge-tooltip-wrap dependency-badge-link @(isUpdating || isSyncing ? "dependency-badge-link--disabled" : "") @(clickedDependencyBadges.Contains(repo.RepositoryId) ? "dependency-badge-tooltip-wrap--clicked" : "")"
                                                           role="button"
                                                           tabindex="0"
-                                                          title="@(unmatchedDeps) of @(depCount) dependencies require update. Click to update this repository only."
                                                           style="cursor: pointer;"
-                                                          @onclick="() => ShowConfirmUpdateDependenciesAsync(repo.RepositoryId, unmatchedDeps)"
+                                                          @onclick="() => OnDependencyBadgeClick(repo.RepositoryId, unmatchedDeps)"
                                                           @onclick:preventDefault
-                                                          @onkeydown="(e) => HandleDependencyBadgeKeydown(e, repo.RepositoryId, unmatchedDeps)">
+                                                          @onkeydown="(e) => HandleDependencyBadgeKeydown(e, repo.RepositoryId, unmatchedDeps)"
+                                                          @onmouseleave="() => OnDependencyBadgeMouseLeave(repo.RepositoryId)">
                                                         <span class="badge build-dep-badge build-dep-badge-mismatch">@unmatchedDeps of @depCount</span>
+                                                        @if (depLines.Count > 0)
+                                                        {
+                                                            <div class="dependency-badge-tooltip">
+                                                                <div class="dependency-badge-tooltip-title">Dependencies requiring update:</div>
+                                                                @foreach (var line in depLines)
+                                                                {
+                                                                    <div class="dependency-badge-tooltip-line">
+                                                                        <code>@line.PackageId</code> <span class="dependency-badge-tooltip-versions">@line.CurrentVersion → @line.NewVersion</span>
+                                                                    </div>
+                                                                }
+                                                                <div class="dependency-badge-tooltip-footer">Click to update this repository only.</div>
+                                                            </div>
+                                                        }
                                                     </span>
                                                 }
                                             </td>
@@ -426,6 +440,7 @@
             .OrderByDescending(g => g.Key ?? int.MinValue);
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private CancellationTokenSource? _syncCts;
+    private IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>> _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
     private bool isCommitSyncing = false;
     private string commitSyncProgressMessage = "Synchronizing commits...";
     private CancellationTokenSource? _commitSyncCts;
@@ -434,6 +449,7 @@
     private CancellationTokenSource? _checkoutCts;
     private Dictionary<int, string> repositoryErrors = new(); // repositoryId -> error message
     private HashSet<string> clickedVersions = new(); // Track clicked versions to hide hover until mouse leaves
+    private HashSet<int> clickedDependencyBadges = new(); // Track clicked dependency badges to hide tooltip immediately
     private HubConnection? _hubConnection;
     private bool showRepositoriesModal;
     private bool isSavingRepositories;
@@ -598,6 +614,7 @@
             .OrderByDescending(wr => wr.DependencyLevel ?? int.MinValue)
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
+        await LoadMismatchedDependencyLinesAsync();
     }
 
     /// <summary>Reload workspace after abort/cancel using a fresh scope. Swallows ObjectDisposedException and InvalidOperationException so abort does not cascade errors when the circuit or context is already disposed.</summary>
@@ -636,6 +653,36 @@
             .OrderByDescending(wr => wr.DependencyLevel ?? int.MinValue)
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
+        await LoadMismatchedDependencyLinesAsync();
+    }
+
+    private async Task LoadMismatchedDependencyLinesAsync()
+    {
+        if (!workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0))
+        {
+            _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+            return;
+        }
+        try
+        {
+            var (payloads, _) = await WorkspaceGitService.GetUpdatePlanAsync(WorkspaceId);
+            var dict = new Dictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>>();
+            foreach (var p in payloads ?? Array.Empty<SyncDependenciesRepoPayload>())
+            {
+                var lines = p.ProjectUpdates
+                    .SelectMany(pu => pu.PackageUpdates)
+                    .GroupBy(x => (x.PackageId.Trim(), x.CurrentVersion.Trim(), x.NewVersion.Trim()))
+                    .Select(g => (g.Key.Item1, g.Key.Item2, g.Key.Item3))
+                    .ToList();
+                dict[p.RepoId] = lines;
+            }
+            _mismatchedDependencyLinesByRepo = dict;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Could not load mismatched dependency lines for workspace {WorkspaceId}", WorkspaceId);
+            _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+        }
     }
 
     private void OnSearchChanged(ChangeEventArgs e)
@@ -2132,6 +2179,21 @@
         {
             // Clear clicked state when mouse leaves, allowing hover to work again
             clickedVersions.Remove(version);
+            StateHasChanged();
+        }
+    }
+
+    private void OnDependencyBadgeClick(int repositoryId, int unmatchedDeps)
+    {
+        clickedDependencyBadges.Add(repositoryId);
+        _ = ShowConfirmUpdateDependenciesAsync(repositoryId, unmatchedDeps);
+        StateHasChanged();
+    }
+
+    private void OnDependencyBadgeMouseLeave(int repositoryId)
+    {
+        if (clickedDependencyBadges.Remove(repositoryId))
+        {
             StateHasChanged();
         }
     }
