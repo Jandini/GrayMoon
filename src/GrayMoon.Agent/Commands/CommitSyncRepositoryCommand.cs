@@ -67,8 +67,8 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
         // Fetch first to get latest commit counts
         await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
 
-        // Get commit counts
-        var (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
+        // Get commit counts (single fetch at start; no refetch after pull/push - refs are already updated)
+        var (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);
 
         bool pullSuccess = true;
         bool mergeConflict = false;
@@ -82,12 +82,10 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
 
             if (mergeConflict)
             {
-                // Abort merge for this repo
                 await git.AbortMergeAsync(repoPath, cancellationToken);
-                
-                // Refresh commit counts after abort
+                // One refetch after abort to ensure refs are consistent
                 await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
-                (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
+                (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);
 
                 return new CommitSyncRepositoryResponse
                 {
@@ -114,9 +112,8 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
                 };
             }
 
-            // Refresh commit counts after pull
-            await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
-            (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
+            // Recompute counts from updated refs (pull already updated refs; no refetch)
+            (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);
         }
 
         // Push if there are outgoing commits
@@ -139,9 +136,8 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
                 };
             }
 
-            // Refresh commit counts after push
-            await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
-            (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
+            // Recompute counts from updated refs (push already updated refs; no refetch)
+            (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);
         }
 
         return new CommitSyncRepositoryResponse

@@ -35,11 +35,13 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         var args = BuildCloneArguments(cloneUrl, bearerToken);
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, workingDir, ct);
+        var (exitCode, stdout, stderr) = await CloneRetryPipeline.ExecuteAsync(
+            async (cancellationToken) => await RunProcessAsync("git", args, workingDir, cancellationToken),
+            ct);
         sw.Stop();
         if (exitCode != 0)
         {
-            logger.LogError("Git clone failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, exitCode, stdout, stderr);
+            logger.LogError("Git clone failed after retries in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, exitCode, stdout, stderr);
             return false;
         }
         logger.LogInformation("Git clone completed in {ElapsedMs}ms: {Url} -> {Dir}", sw.ElapsedMilliseconds, cloneUrl, workingDir);
@@ -99,6 +101,18 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             })
             .Build();
 
+    private static readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CloneRetryPipeline =
+        new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
+            .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
+            {
+                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>().HandleResult(r => r.ExitCode != 0),
+                MaxRetryAttempts = 3,
+                Delay = TimeSpan.FromMilliseconds(500),
+                BackoffType = DelayBackoffType.Exponential,
+                UseJitter = true
+            })
+            .Build();
+
     public async Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
@@ -124,6 +138,19 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         {
             return (null, $"Failed to parse dotnet-gitversion output: {ex.Message}");
         }
+    }
+
+    public async Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return null;
+
+        var (exitCode, stdout, _) = await RunProcessAsync("git", "branch --show-current", repoPath, ct);
+        if (exitCode != 0)
+            return null;
+
+        var name = (stdout ?? "").Trim();
+        return string.IsNullOrWhiteSpace(name) ? null : name;
     }
 
     public async Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct)
@@ -171,7 +198,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             logger.LogDebug("Git fetch completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
     }
 
-    public async Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, CancellationToken ct)
+    public async Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (null, null, false);
@@ -180,12 +207,11 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var originBranch = "origin/" + branchName.Trim();
 
         // Check if the remote branch exists locally (after fetch) before trying to count commits
-        // This is faster than ls-remote and works since we fetch before calling this method
         var (exitCheck, _, _) = await RunProcessAsync("git", $"rev-parse --verify {originBranch}", repoPath, ct);
         if (exitCheck != 0)
         {
             // Branch doesn't exist upstream yet - count commits ahead of the default branch instead
-            var defaultBranch = await GetDefaultBranchAsync(repoPath, ct);
+            var defaultBranch = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
             if (defaultBranch == null)
             {
                 logger.LogDebug("Remote branch {OriginBranch} does not exist upstream and no default branch found for {RepoPath}, skipping commit counts", originBranch, repoPath);
@@ -201,7 +227,6 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             }
 
             var aheadCount = int.TryParse((stdoutDefault ?? "").Trim(), out var ahead) ? ahead : (int?)null;
-            // No incoming commits for a branch that doesn't exist upstream
             sw.Stop();
             logger.LogDebug("GetCommitCounts (vs default branch) completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
             return (aheadCount, null, false);
@@ -211,7 +236,6 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var (exitOut, stdoutOut, stderrOut) = await RunProcessAsync("git", $"rev-list --count {originBranch}..HEAD", repoPath, ct);
         var (exitIn, stdoutIn, stderrIn) = await RunProcessAsync("git", $"rev-list --count HEAD..{originBranch}", repoPath, ct);
 
-        // If either command fails, return null values gracefully (don't break sync)
         if (exitOut != 0)
         {
             logger.LogWarning("Git rev-list (outgoing) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitOut, stdoutOut, stderrOut);
@@ -230,37 +254,41 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (outVal, inVal, true);
     }
 
-    public async Task<(int? DefaultBehind, int? DefaultAhead)> GetCommitCountsVsDefaultAsync(string repoPath, CancellationToken ct)
+    public async Task<(int? DefaultBehind, int? DefaultAhead, string? DefaultBranchName)> GetCommitCountsVsDefaultAsync(string repoPath, string? defaultBranchOriginRef, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
-            return (null, null);
+            return (null, null, null);
 
-        var defaultBranch = await GetDefaultBranchAsync(repoPath, ct);
+        var defaultBranch = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
         if (defaultBranch == null)
         {
             logger.LogDebug("GetCommitCountsVsDefault: no default branch for {RepoPath}", repoPath);
-            return (null, null);
+            return (null, null, null);
         }
 
-        // ahead = commits on current branch not in default; behind = commits on default not in current branch
-        var (exitAhead, stdoutAhead, stderrAhead) = await RunProcessAsync("git", $"rev-list --count {defaultBranch}..HEAD", repoPath, ct);
-        var (exitBehind, stdoutBehind, stderrBehind) = await RunProcessAsync("git", $"rev-list --count HEAD..{defaultBranch}", repoPath, ct);
+        // ahead = commits on current branch not in default; behind = commits on default not in current branch. Run both in parallel.
+        var aheadTask = RunProcessAsync("git", $"rev-list --count {defaultBranch}..HEAD", repoPath, ct);
+        var behindTask = RunProcessAsync("git", $"rev-list --count HEAD..{defaultBranch}", repoPath, ct);
+        await Task.WhenAll(aheadTask, behindTask);
+        var (exitAhead, stdoutAhead, stderrAhead) = await aheadTask;
+        var (exitBehind, stdoutBehind, stderrBehind) = await behindTask;
 
         if (exitAhead != 0)
         {
             logger.LogDebug("GetCommitCountsVsDefault (ahead) failed for {RepoPath}. ExitCode={ExitCode}", repoPath, exitAhead);
-            return (null, null);
+            return (null, null, null);
         }
         if (exitBehind != 0)
         {
             logger.LogDebug("GetCommitCountsVsDefault (behind) failed for {RepoPath}. ExitCode={ExitCode}", repoPath, exitBehind);
-            return (null, null);
+            return (null, null, null);
         }
 
         var ahead = int.TryParse((stdoutAhead ?? "").Trim(), out var a) ? a : (int?)null;
         var behind = int.TryParse((stdoutBehind ?? "").Trim(), out var b) ? b : (int?)null;
+        var defaultBranchName = defaultBranch.StartsWith("origin/") ? defaultBranch.Substring("origin/".Length) : defaultBranch;
         logger.LogDebug("GetCommitCountsVsDefault for {RepoPath}: behind={Behind}, ahead={Ahead}", repoPath, behind, ahead);
-        return (behind, ahead);
+        return (behind, ahead, defaultBranchName);
     }
 
     public async Task<(bool Success, bool MergeConflict, string? ErrorMessage)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct)
@@ -381,6 +409,31 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var branches = (stdout ?? "")
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(b => !string.IsNullOrWhiteSpace(b))
+            .OrderBy(b => b)
+            .ToList();
+
+        return branches;
+    }
+
+    public async Task<IReadOnlyList<string>> GetRemoteBranchesFromRefsAsync(string repoPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return Array.Empty<string>();
+
+        // Local refs only (no network). Use after fetch when refs/remotes/origin is up to date.
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", "for-each-ref refs/remotes/origin --format=%(refname:short)", repoPath, ct);
+        if (exitCode != 0)
+        {
+            logger.LogDebug("Git for-each-ref refs/remotes/origin failed for {RepoPath}. ExitCode={ExitCode}", repoPath, exitCode);
+            return Array.Empty<string>();
+        }
+
+        const string originPrefix = "origin/";
+        var branches = (stdout ?? "")
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(b => !string.IsNullOrWhiteSpace(b) && b.StartsWith(originPrefix, StringComparison.Ordinal))
+            .Select(b => b.Substring(originPrefix.Length))
+            .Where(b => !string.IsNullOrWhiteSpace(b) && b != "HEAD")
             .OrderBy(b => b)
             .ToList();
 
@@ -629,22 +682,15 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return defaultBranch;
     }
 
+    public Task<string?> GetDefaultBranchOriginRefAsync(string repoPath, CancellationToken ct)
+        => GetDefaultBranchAsync(repoPath, ct);
+
     /// <summary>
-    /// Finds the default branch (main or master) on origin. Returns null if neither exists.
+    /// Finds the default branch on origin (e.g. origin/main). Tries symbolic-ref first, then origin/main, then origin/master.
     /// </summary>
     private async Task<string?> GetDefaultBranchAsync(string repoPath, CancellationToken ct)
     {
-        // Try main first (most common modern default)
-        var (exitMain, _, _) = await RunProcessAsync("git", "rev-parse --verify origin/main", repoPath, ct);
-        if (exitMain == 0)
-            return "origin/main";
-
-        // Fall back to master
-        var (exitMaster, _, _) = await RunProcessAsync("git", "rev-parse --verify origin/master", repoPath, ct);
-        if (exitMaster == 0)
-            return "origin/master";
-
-        // Try to get the default branch from remote HEAD
+        // Try configured default first (single git call in common case)
         var (exitHead, stdoutHead, _) = await RunProcessAsync("git", "symbolic-ref refs/remotes/origin/HEAD", repoPath, ct);
         if (exitHead == 0 && !string.IsNullOrWhiteSpace(stdoutHead))
         {
@@ -652,11 +698,23 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             if (refName.StartsWith("refs/remotes/origin/"))
             {
                 var branch = refName.Substring("refs/remotes/origin/".Length);
-                var (exitVerify, _, _) = await RunProcessAsync("git", $"rev-parse --verify origin/{branch}", repoPath, ct);
-                if (exitVerify == 0)
-                    return $"origin/{branch}";
+                if (!string.IsNullOrEmpty(branch) && branch != "HEAD")
+                {
+                    var (exitVerify, _, _) = await RunProcessAsync("git", $"rev-parse --verify origin/{branch}", repoPath, ct);
+                    if (exitVerify == 0)
+                        return $"origin/{branch}";
+                }
             }
         }
+
+        // Fall back to origin/main then origin/master
+        var (exitMain, _, _) = await RunProcessAsync("git", "rev-parse --verify origin/main", repoPath, ct);
+        if (exitMain == 0)
+            return "origin/main";
+
+        var (exitMaster, _, _) = await RunProcessAsync("git", "rev-parse --verify origin/master", repoPath, ct);
+        if (exitMaster == 0)
+            return "origin/master";
 
         return null;
     }

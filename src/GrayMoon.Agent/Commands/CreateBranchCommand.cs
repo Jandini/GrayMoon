@@ -36,12 +36,7 @@ public sealed class CreateBranchCommand(IGitService git) : ICommandHandler<Creat
             };
         }
 
-        string? currentBranch = null;
-        var (versionResult, _) = await git.GetVersionAsync(repoPath, cancellationToken);
-        if (versionResult != null)
-        {
-            currentBranch = versionResult.BranchName ?? versionResult.EscapedBranchName;
-        }
+        var currentBranch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken);
 
         return new CreateBranchResponse
         {

@@ -28,16 +28,9 @@ public sealed class RefreshBranchesCommand(IGitService git) : ICommandHandler<Re
         await git.FetchAsync(repoPath, includeTags: true, bearerToken: null, cancellationToken);
 
         var localBranches = await git.GetLocalBranchesAsync(repoPath, cancellationToken);
-        var remoteBranches = await git.GetRemoteBranchesAsync(repoPath, cancellationToken);
+        var remoteBranches = await git.GetRemoteBranchesFromRefsAsync(repoPath, cancellationToken);
         var defaultBranch = await git.GetDefaultBranchNameAsync(repoPath, cancellationToken);
-
-        // Get current branch
-        string? currentBranch = null;
-        var (versionResult, _) = await git.GetVersionAsync(repoPath, cancellationToken);
-        if (versionResult != null)
-        {
-            currentBranch = versionResult.BranchName ?? versionResult.EscapedBranchName;
-        }
+        var currentBranch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken);
 
         return new RefreshBranchesResponse
         {

@@ -37,10 +37,11 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IHubConnectionProvi
         int? defaultAhead = null;
         if (branch != "-")
         {
-            var (o, i, _) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, cancellationToken);
+            var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
+            var (o, i, _) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, defaultRef, cancellationToken);
             outgoing = o;
             incoming = i;
-            var (db, da) = await git.GetCommitCountsVsDefaultAsync(payload.RepositoryPath, cancellationToken);
+            var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(payload.RepositoryPath, defaultRef, cancellationToken);
             defaultBehind = db;
             defaultAhead = da;
         }
@@ -48,7 +49,7 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IHubConnectionProvi
         bool? hasUpstream = null;
         if (branch != "-")
         {
-            var remoteBranches = await git.GetRemoteBranchesAsync(payload.RepositoryPath, cancellationToken);
+            var remoteBranches = await git.GetRemoteBranchesFromRefsAsync(payload.RepositoryPath, cancellationToken);
             hasUpstream = remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
         }
 

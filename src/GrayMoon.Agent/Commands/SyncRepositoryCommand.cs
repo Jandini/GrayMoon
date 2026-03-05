@@ -54,27 +54,36 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 git.WriteSyncHooks(repoPath, workspaceId, repositoryId);
             await fetchTask;
 
+            // Resolve default branch once; run commit counts and vs-default in parallel when we have a branch.
+            var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
+            int? defaultBehind = null;
+            int? defaultAhead = null;
+            string? defaultBranch = null;
+
             if (branch != "-")
             {
-                var (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
+                var countsTask = git.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
+                var vsDefaultTask = git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);
+                await Task.WhenAll(countsTask, vsDefaultTask);
+                var (outgoing, incoming, _) = await countsTask;
+                (defaultBehind, defaultAhead, defaultBranch) = await vsDefaultTask;
                 outgoingCommits = outgoing;
                 incomingCommits = incoming;
             }
+            else if (defaultRef != null)
+            {
+                (defaultBehind, defaultAhead, defaultBranch) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);
+            }
 
-            var (defaultBehind, defaultAhead) = await git.GetCommitCountsVsDefaultAsync(repoPath, cancellationToken);
-
-            // Fetch branches after fetch completes (branches are now up to date)
+            // Branch lists from local refs (no extra network after fetch)
             IReadOnlyList<string>? localBranches = null;
             IReadOnlyList<string>? remoteBranches = null;
-            string? defaultBranch = null;
             try
             {
                 var localBranchesTask = git.GetLocalBranchesAsync(repoPath, cancellationToken);
-                var remoteBranchesTask = git.GetRemoteBranchesAsync(repoPath, cancellationToken);
-                var defaultBranchTask = git.GetDefaultBranchNameAsync(repoPath, cancellationToken);
+                var remoteBranchesTask = git.GetRemoteBranchesFromRefsAsync(repoPath, cancellationToken);
                 localBranches = await localBranchesTask;
                 remoteBranches = await remoteBranchesTask;
-                defaultBranch = await defaultBranchTask;
             }
             catch
             {
