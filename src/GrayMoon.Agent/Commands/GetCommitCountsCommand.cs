@@ -18,13 +18,13 @@ public sealed class GetCommitCountsCommand(IGitService git) : ICommandHandler<Ge
         if (!git.DirectoryExists(repoPath))
             return new GetCommitCountsResponse();
 
-        var (vr, _) = await git.GetVersionAsync(repoPath, cancellationToken);
-        var branch = vr?.BranchName ?? vr?.EscapedBranchName;
+        var branch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken);
         if (string.IsNullOrWhiteSpace(branch))
             return new GetCommitCountsResponse();
 
-        var (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
-        var (defaultBehind, defaultAhead) = await git.GetCommitCountsVsDefaultAsync(repoPath, cancellationToken);
+        var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
+        var (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
+        var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);
         return new GetCommitCountsResponse
         {
             OutgoingCommits = outgoing,

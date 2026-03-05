@@ -28,10 +28,11 @@ public sealed class CommitHookSyncCommand(IGitService git, IHubConnectionProvide
         int? defaultAhead = null;
         if (branch != "-")
         {
-            var (o, i, _) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, cancellationToken);
+            var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
+            var (o, i, _) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, defaultRef, cancellationToken);
             outgoing = o;
             incoming = i;
-            var (db, da) = await git.GetCommitCountsVsDefaultAsync(payload.RepositoryPath, cancellationToken);
+            var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(payload.RepositoryPath, defaultRef, cancellationToken);
             defaultBehind = db;
             defaultAhead = da;
         }

@@ -2469,7 +2469,7 @@
                 var list = System.Text.Json.JsonSerializer.Deserialize<List<int>>(json);
                 gridSelectedRepositoryIds = list != null ? list.ToHashSet() : new HashSet<int>();
             }
-
+            
             var showSelectionKey = StorageKeyPrefix + WorkspaceId + StorageKeyShowSelectionSuffix;
             var showSelectionValue = await JSRuntime.InvokeAsync<string?>("graymoonStorageGet", showSelectionKey);
             if (string.Equals(showSelectionValue, "true", StringComparison.OrdinalIgnoreCase))

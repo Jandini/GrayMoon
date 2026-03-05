@@ -27,14 +27,19 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git) : ICommandH
                 version = vr.SemVer ?? vr.FullSemVer ?? "-";
                 branch = vr.BranchName ?? vr.EscapedBranchName ?? "-";
             }
+            int? defaultBehind = null;
+            int? defaultAhead = null;
             if (branch != "-")
             {
-                var (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, cancellationToken);
+                var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
+                var countsTask = git.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
+                var vsDefaultTask = git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);
+                await Task.WhenAll(countsTask, vsDefaultTask);
+                var (outgoing, incoming, _) = await countsTask;
+                (defaultBehind, defaultAhead, _) = await vsDefaultTask;
                 outgoingCommits = outgoing;
                 incomingCommits = incoming;
             }
-
-            var (defaultBehind, defaultAhead) = await git.GetCommitCountsVsDefaultAsync(repoPath, cancellationToken);
 
             var remoteBranches = await git.GetRemoteBranchesAsync(repoPath, cancellationToken);
             var localBranches = await git.GetLocalBranchesAsync(repoPath, cancellationToken);

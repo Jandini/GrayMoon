@@ -44,16 +44,15 @@ public sealed class PushRepositoryCommand(IGitService git) : ICommandHandler<Pus
         string? branch = request.BranchName?.Trim();
         if (string.IsNullOrEmpty(branch))
         {
-            var (versionResult, versionError) = await git.GetVersionAsync(repoPath, cancellationToken);
-            if (versionResult == null)
+            branch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken);
+            if (string.IsNullOrWhiteSpace(branch))
             {
                 return new PushRepositoryResponse
                 {
                     Success = false,
-                    ErrorMessage = versionError ?? "Could not determine repository version"
+                    ErrorMessage = "Could not determine branch name"
                 };
             }
-            branch = versionResult.BranchName ?? versionResult.EscapedBranchName;
         }
 
         if (string.IsNullOrWhiteSpace(branch))

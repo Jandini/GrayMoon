@@ -8,13 +8,15 @@ public interface IGitService
     Task<bool> CloneAsync(string workingDir, string cloneUrl, string? bearerToken, CancellationToken ct);
     Task AddSafeDirectoryAsync(string repoPath, CancellationToken ct);
     Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, CancellationToken ct);
+    /// <summary>Gets the current branch name (e.g. "main") with a single git call. Use instead of GetVersionAsync when only branch name is needed.</summary>
+    Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct);
     Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct);
     /// <summary>Fetches from origin; when <paramref name="includeTags"/> is true, fetches tags as well.</summary>
     Task FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct);
-    /// <summary>Returns (outgoing count, incoming count, hasUpstream) for the current branch vs origin/branchName. When the branch has no upstream, returns (null, null) or (aheadOfDefault, null) and hasUpstream false.</summary>
-    Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, CancellationToken ct);
-    /// <summary>Returns (behind, ahead) commit counts for the current branch vs the default branch (e.g. origin/main). Returns (null, null) when default branch cannot be resolved.</summary>
-    Task<(int? DefaultBehind, int? DefaultAhead)> GetCommitCountsVsDefaultAsync(string repoPath, CancellationToken ct);
+    /// <summary>Returns (outgoing count, incoming count, hasUpstream) for the current branch vs origin/branchName. When the branch has no upstream, returns (null, null) or (aheadOfDefault, null) and hasUpstream false. When <paramref name="defaultBranchOriginRef"/> is provided and branch has no upstream, uses it instead of resolving default again.</summary>
+    Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct);
+    /// <summary>Returns (behind, ahead, defaultBranchName) for the current branch vs the default branch. DefaultBranchName is without "origin/" prefix. When <paramref name="defaultBranchOriginRef"/> is provided, uses it instead of resolving.</summary>
+    Task<(int? DefaultBehind, int? DefaultAhead, string? DefaultBranchName)> GetCommitCountsVsDefaultAsync(string repoPath, string? defaultBranchOriginRef, CancellationToken ct);
     /// <summary>Pulls from origin. Returns (success, mergeConflict, errorMessage).</summary>
     Task<(bool Success, bool MergeConflict, string? ErrorMessage)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct);
     /// <summary>Pushes to origin. When setTracking is true, uses -u so the branch is upstreamed even when there are no commits to push. Returns (success, errorMessage).</summary>
@@ -23,7 +25,9 @@ public interface IGitService
     Task AbortMergeAsync(string repoPath, CancellationToken ct);
     /// <summary>Gets all local branch names (without 'origin/' prefix).</summary>
     Task<IReadOnlyList<string>> GetLocalBranchesAsync(string repoPath, CancellationToken ct);
-    /// <summary>Gets all remote branch names (without 'origin/' prefix).</summary>
+    /// <summary>Gets all remote branch names from local refs (refs/remotes/origin). Use after fetch to avoid ls-remote network call.</summary>
+    Task<IReadOnlyList<string>> GetRemoteBranchesFromRefsAsync(string repoPath, CancellationToken ct);
+    /// <summary>Gets all remote branch names (without 'origin/' prefix). Uses ls-remote; for post-fetch use <see cref="GetRemoteBranchesFromRefsAsync"/>.</summary>
     Task<IReadOnlyList<string>> GetRemoteBranchesAsync(string repoPath, CancellationToken ct);
     /// <summary>Checks out the specified branch. Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct);
@@ -35,6 +39,8 @@ public interface IGitService
     Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, CancellationToken ct);
     /// <summary>Gets the default branch name (e.g., "main" or "master") without "origin/" prefix.</summary>
     Task<string?> GetDefaultBranchNameAsync(string repoPath, CancellationToken ct);
+    /// <summary>Gets the default branch origin ref (e.g., "origin/main") for passing to GetCommitCountsAsync/GetCommitCountsVsDefaultAsync to avoid resolving twice.</summary>
+    Task<string?> GetDefaultBranchOriginRefAsync(string repoPath, CancellationToken ct);
     /// <summary>Stages the given paths (relative to repo root) and creates a commit with the given message. Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct);
     void CreateDirectory(string path);

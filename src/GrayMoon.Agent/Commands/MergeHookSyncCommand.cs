@@ -30,10 +30,10 @@ public sealed class MergeHookSyncCommand(IGitService git, IHubConnectionProvider
         int? defaultAhead = null;
         if (branch != "-")
         {
-            var (o, i, _) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, cancellationToken);
+            var (o, i, _) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, null, cancellationToken);
             outgoing = o;
             incoming = i;
-            var (db, da) = await git.GetCommitCountsVsDefaultAsync(payload.RepositoryPath, cancellationToken);
+            var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(payload.RepositoryPath, null, cancellationToken);
             defaultBehind = db;
             defaultAhead = da;
         }
