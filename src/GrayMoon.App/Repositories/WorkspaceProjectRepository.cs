@@ -326,6 +326,7 @@ public sealed class WorkspaceProjectRepository(
             depCountByRepo[depRepoId] = depCountByRepo.GetValueOrDefault(depRepoId, 0) + 1;
 
         var unmatchedCountByRepo = repoIdsInWorkspace.ToDictionary(id => id, _ => 0);
+        var unmatchedRepoEdges = new HashSet<(int DepRepoId, int RefRepoId)>();
         foreach (var (depId, refId, version) in uniqueEdges)
         {
             if (!byProject.TryGetValue(depId, out var depProj) || !byProject.TryGetValue(refId, out var refProj)) continue;
@@ -333,8 +334,10 @@ public sealed class WorkspaceProjectRepository(
             var depVersion = version?.Trim() ?? "";
             var refVersion = refRepoVersion?.Trim() ?? "";
             if (depVersion != refVersion)
-                unmatchedCountByRepo[depProj.RepositoryId] = unmatchedCountByRepo.GetValueOrDefault(depProj.RepositoryId, 0) + 1;
+                unmatchedRepoEdges.Add((depProj.RepositoryId, refProj.RepositoryId));
         }
+        foreach (var (depRepoId, _) in unmatchedRepoEdges)
+            unmatchedCountByRepo[depRepoId] = unmatchedCountByRepo.GetValueOrDefault(depRepoId, 0) + 1;
 
         int? dependencyLevelForRepo(int repoId)
         {
