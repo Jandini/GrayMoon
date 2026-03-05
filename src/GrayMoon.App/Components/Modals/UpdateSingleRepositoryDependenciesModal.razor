@@ -25,7 +25,7 @@
                         </ul>
                     </div>
                     <div class="form-check">
-                        <input id="update-single-commit-checkbox" type="checkbox" class="form-check-input" @bind="CommitVersionUpdate" />
+                        <input id="update-single-commit-checkbox" type="checkbox" class="form-check-input" @bind="CommitVersionUpdate" @ref="_commitCheckboxElement" />
                         <label class="form-check-label" for="update-single-commit-checkbox">Commit version update</label>
                     </div>
                     <p class="small text-muted mt-1 mb-0">
@@ -54,18 +54,33 @@
 
     private bool CommitVersionUpdate { get; set; } = true;
     private ElementReference _modalElement;
+    private ElementReference _commitCheckboxElement;
+    private bool _shouldFocusCommitCheckbox;
 
     private IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> PackageLines =>
         Payload?.ProjectUpdates
             .SelectMany(p => p.PackageUpdates)
-            .Distinct()
+            .GroupBy(x => (x.PackageId.Trim(), x.CurrentVersion.Trim(), x.NewVersion.Trim()))
+            .Select(g => (g.Key.Item1, g.Key.Item2, g.Key.Item3))
             .ToList()
         ?? (IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>)Array.Empty<(string PackageId, string CurrentVersion, string NewVersion)>();
 
     protected override void OnParametersSet()
     {
         if (IsVisible)
+        {
             CommitVersionUpdate = true;
+            _shouldFocusCommitCheckbox = true;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_shouldFocusCommitCheckbox && IsVisible)
+        {
+            _shouldFocusCommitCheckbox = false;
+            await _commitCheckboxElement.FocusAsync();
+        }
     }
 
     private async Task Proceed()
@@ -76,6 +91,12 @@
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Escape")
+        {
             await OnCancel.InvokeAsync();
+        }
+        else if (e.Key == "Enter")
+        {
+            await Proceed();
+        }
     }
 }
