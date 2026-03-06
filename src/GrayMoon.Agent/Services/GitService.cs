@@ -118,17 +118,20 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return (null, null);
 
+        var (fileName, arguments) = GetGitVersionInvocation(repoPath);
+        var toolName = fileName == "dotnet" ? "dotnet gitversion" : "dotnet-gitversion";
+
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await RunProcessAsync("dotnet-gitversion", "", repoPath, ct);
+        var (exitCode, stdout, stderr) = await RunProcessAsync(fileName, arguments, repoPath, ct);
         sw.Stop();
         if (exitCode != 0)
         {
             var error = (!string.IsNullOrWhiteSpace(stderr) ? stderr : stdout)?.Trim()
-                        ?? $"dotnet-gitversion exited with code {exitCode}";
-            logger.LogError("dotnet-gitversion failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, exitCode, stdout, stderr);
+                        ?? $"{toolName} exited with code {exitCode}";
+            logger.LogError("{ToolName} failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", toolName, sw.ElapsedMilliseconds, exitCode, stdout, stderr);
             return (null, error);
         }
-        logger.LogDebug("dotnet-gitversion completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
+        logger.LogDebug("{ToolName} completed in {ElapsedMs}ms for {RepoPath}", toolName, sw.ElapsedMilliseconds, repoPath);
 
         try
         {
@@ -136,8 +139,22 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
         catch (JsonException ex)
         {
-            return (null, $"Failed to parse dotnet-gitversion output: {ex.Message}");
+            return (null, $"Failed to parse {toolName} output: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Returns (fileName, arguments) for running GitVersion. Uses "dotnet gitversion" when a tool manifest
+    /// (dotnet-tools.json) exists in the repo root or in .config; otherwise uses "dotnet-gitversion".
+    /// </summary>
+    private static (string FileName, string Arguments) GetGitVersionInvocation(string repoPath)
+    {
+        const string manifestFileName = "dotnet-tools.json";
+        var inRoot = Path.Combine(repoPath, manifestFileName);
+        var inConfig = Path.Combine(repoPath, ".config", manifestFileName);
+        if (File.Exists(inRoot) || File.Exists(inConfig))
+            return ("dotnet", "gitversion");
+        return ("dotnet-gitversion", "");
     }
 
     public async Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct)
