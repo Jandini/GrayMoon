@@ -13,7 +13,7 @@ public sealed class SyncCommandHandler(
     IHubContext<WorkspaceSyncHub> hubContext,
     ILogger<SyncCommandHandler> logger)
 {
-    public async Task HandleAsync(int workspaceId, int repositoryId, string version, string branch, int? outgoingCommits = null, int? incomingCommits = null, bool? hasUpstream = null, int? defaultBranchBehind = null, int? defaultBranchAhead = null)
+    public async Task HandleAsync(int workspaceId, int repositoryId, string version, string branch, int? outgoingCommits = null, int? incomingCommits = null, bool? hasUpstream = null, int? defaultBranchBehind = null, int? defaultBranchAhead = null, string? errorMessage = null)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -55,6 +55,8 @@ public sealed class SyncCommandHandler(
         await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId);
 
         await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
+        if (!string.IsNullOrWhiteSpace(errorMessage))
+            await hubContext.Clients.All.SendAsync("RepositoryError", workspaceId, repositoryId, errorMessage);
         logger.LogDebug("SyncCommand persisted: workspace={WorkspaceId}, repo={RepositoryId}, version={Version}, branch={Branch}",
             workspaceId, repositoryId, version, branch);
     }

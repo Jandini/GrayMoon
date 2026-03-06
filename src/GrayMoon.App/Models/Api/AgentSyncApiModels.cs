@@ -14,6 +14,9 @@ public sealed class AgentVersionBranchResponse
     [JsonPropertyName("gitVersionError")]
     public string? GitVersionError { get; set; }
 
+    [JsonPropertyName("gitFetchError")]
+    public string? GitFetchError { get; set; }
+
     [JsonPropertyName("hasUpstream")]
     public bool? HasUpstream { get; set; }
 

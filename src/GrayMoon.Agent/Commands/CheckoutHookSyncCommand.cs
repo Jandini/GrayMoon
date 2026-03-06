@@ -29,7 +29,7 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IHubConnectionProvi
         var version = versionResult?.SemVer ?? versionResult?.FullSemVer ?? "-";
         var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
 
-        await fetchTask; // must complete before commit counts (needs up-to-date remote tracking refs)
+        var (fetchSuccess, fetchError) = await fetchTask; // must complete before commit counts (needs up-to-date remote tracking refs)
 
         int? outgoing = null;
         int? incoming = null;
@@ -56,7 +56,7 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IHubConnectionProvi
         var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)
         {
-            await connection.InvokeAsync("SyncCommand", payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream, defaultBehind, defaultAhead, cancellationToken);
+            await connection.InvokeAsync("SyncCommand", payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream, defaultBehind, defaultAhead, fetchError, cancellationToken);
             logger.LogInformation("CheckoutHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}, hasUpstream={HasUpstream}",
                 payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream);
         }

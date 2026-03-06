@@ -11,8 +11,8 @@ public interface IGitService
     /// <summary>Gets the current branch name (e.g. "main") with a single git call. Use instead of GetVersionAsync when only branch name is needed.</summary>
     Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct);
     Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct);
-    /// <summary>Fetches from origin; when <paramref name="includeTags"/> is true, fetches tags as well.</summary>
-    Task FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct);
+    /// <summary>Fetches from origin; when <paramref name="includeTags"/> is true, fetches tags as well. Returns (success, errorMessage).</summary>
+    Task<(bool Success, string? ErrorMessage)> FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct);
     /// <summary>Returns (outgoing count, incoming count, hasUpstream) for the current branch vs origin/branchName. When the branch has no upstream, returns (null, null) or (aheadOfDefault, null) and hasUpstream false. When <paramref name="defaultBranchOriginRef"/> is provided and branch has no upstream, uses it instead of resolving default again.</summary>
     Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct);
     /// <summary>Returns (behind, ahead, defaultBranchName) for the current branch vs the default branch. DefaultBranchName is without "origin/" prefix. When <paramref name="defaultBranchOriginRef"/> is provided, uses it instead of resolving.</summary>

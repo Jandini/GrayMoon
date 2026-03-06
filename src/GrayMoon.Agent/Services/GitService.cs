@@ -168,10 +168,10 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (stdout ?? "").Trim();
     }
 
-    public async Task FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct)
+    public async Task<(bool Success, string? ErrorMessage)> FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
-            return;
+            return (true, null);
 
         string args;
         if (string.IsNullOrWhiteSpace(bearerToken))
@@ -193,9 +193,19 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);
         sw.Stop();
         if (exitCode != 0)
+        {
+            var output = (stdout ?? "").Trim();
+            var errorOutput = (stderr ?? "").Trim();
+            var combinedOutput = string.IsNullOrWhiteSpace(output) ? errorOutput :
+                                 string.IsNullOrWhiteSpace(errorOutput) ? output :
+                                 $"{output}\n{errorOutput}";
+            if (string.IsNullOrWhiteSpace(combinedOutput))
+                combinedOutput = $"Git fetch failed (exit code {exitCode})";
             logger.LogError("Git fetch failed in {ElapsedMs}ms for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, repoPath, exitCode, stdout, stderr);
-        else
-            logger.LogDebug("Git fetch completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
+            return (false, combinedOutput);
+        }
+        logger.LogDebug("Git fetch completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
+        return (true, null);
     }
 
     public async Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct)

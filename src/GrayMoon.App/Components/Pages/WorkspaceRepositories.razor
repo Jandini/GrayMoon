@@ -532,6 +532,12 @@
                     }
                 }
             });
+            _hubConnection.On<int, int, string>("RepositoryError", (workspaceId, repositoryId, msg) =>
+            {
+                if (workspaceId != WorkspaceId || string.IsNullOrWhiteSpace(msg)) return;
+                repositoryErrors[repositoryId] = msg;
+                _ = InvokeAsync(StateHasChanged);
+            });
             await _hubConnection.StartAsync();
         }
     }

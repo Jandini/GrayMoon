@@ -32,6 +32,9 @@ public sealed class SyncRepositoryResponse
     [JsonPropertyName("gitVersionError")]
     public string? GitVersionError { get; set; }
 
+    [JsonPropertyName("gitFetchError")]
+    public string? GitFetchError { get; set; }
+
     [JsonPropertyName("defaultBranchBehind")]
     public int? DefaultBranchBehind { get; set; }
 

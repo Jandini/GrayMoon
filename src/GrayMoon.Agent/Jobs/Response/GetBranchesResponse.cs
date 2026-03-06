@@ -15,4 +15,7 @@ public sealed class GetBranchesResponse
 
     [JsonPropertyName("defaultBranch")]
     public string? DefaultBranch { get; set; }
+
+    [JsonPropertyName("errorMessage")]
+    public string? ErrorMessage { get; set; }
 }

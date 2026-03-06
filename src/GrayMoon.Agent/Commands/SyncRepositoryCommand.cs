@@ -34,6 +34,7 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
         int? outgoingCommits = null;
         int? incomingCommits = null;
         string? versionError = null;
+        string? fetchError = null;
         if (git.DirectoryExists(repoPath))
         {
             await git.AddSafeDirectoryAsync(repoPath, cancellationToken);
@@ -52,7 +53,8 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
             var fetchTask = git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
             if (version != "-" && branch != "-")
                 git.WriteSyncHooks(repoPath, workspaceId, repositoryId);
-            await fetchTask;
+            var (_, fetchErr) = await fetchTask;
+            fetchError = fetchErr;
 
             // Resolve default branch once; run commit counts and vs-default in parallel when we have a branch.
             var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
@@ -103,11 +105,12 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 RemoteBranches = remoteBranches,
                 DefaultBranch = defaultBranch,
                 GitVersionError = versionError,
+                GitFetchError = fetchError,
                 DefaultBranchBehind = defaultBehind,
                 DefaultBranchAhead = defaultAhead
             };
         }
 
-        return new SyncRepositoryResponse { Version = version, Branch = branch, Projects = projects, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits, GitVersionError = versionError };
+        return new SyncRepositoryResponse { Version = version, Branch = branch, Projects = projects, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits, GitVersionError = versionError, GitFetchError = fetchError };
     }
 }

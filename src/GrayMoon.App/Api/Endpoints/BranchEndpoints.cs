@@ -339,12 +339,15 @@ public static class BranchEndpoints
                 workspaceRoot
             };
             var response = await agentBridge.SendCommandAsync("RefreshBranches", args, CancellationToken.None);
-            
+
+            var refreshResponse = AgentResponseJson.DeserializeAgentResponse<BranchesResponse>(response.Data);
+            if (refreshResponse?.Success == false)
+                return Results.Problem(refreshResponse.ErrorMessage ?? "Failed to refresh branches", statusCode: 500);
+
             if (!response.Success)
                 return Results.Problem(response.Error ?? "Failed to refresh branches", statusCode: 500);
 
             // Parse response and persist branches
-            var refreshResponse = AgentResponseJson.DeserializeAgentResponse<BranchesResponse>(response.Data);
             if (refreshResponse != null)
             {
                 var localBranches = refreshResponse.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
