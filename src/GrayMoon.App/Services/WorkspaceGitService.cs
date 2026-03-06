@@ -1061,12 +1061,13 @@ public class WorkspaceGitService(
         if (!response.Success || response.Data == null)
             return new RepoGitVersionInfo { Version = "-", Branch = "-", ErrorMessage = response.Error ?? "Sync failed" };
 
-        var (version, branch, gitVersionError) = GetVersionBranch(response.Data);
+        var (version, branch, gitVersionError, gitFetchError) = GetVersionBranch(response.Data);
         var projectsCount = GetProjects(response.Data);
         var projectsDetail = GetProjectsDetail(response.Data);
         var (outgoingCommits, incomingCommits, defaultBehind, defaultAhead) = GetCommitCounts(response.Data);
         var (localBranches, remoteBranches, defaultBranch) = GetBranches(response.Data);
         var hasUpstream = ComputeHasUpstream(branch, remoteBranches);
+        var combinedError = CombineRepoErrors(gitFetchError, gitVersionError);
         return new RepoGitVersionInfo
         {
             Version = version,
@@ -1081,7 +1082,7 @@ public class WorkspaceGitService(
             LocalBranches = localBranches,
             RemoteBranches = remoteBranches,
             DefaultBranch = defaultBranch,
-            ErrorMessage = gitVersionError
+            ErrorMessage = combinedError
         };
     }
 
@@ -1097,9 +1098,10 @@ public class WorkspaceGitService(
         if (!response.Success || response.Data == null)
             return new RepoGitVersionInfo { Version = "-", Branch = "-" };
 
-        var (version, branch, gitVersionError) = GetVersionBranch(response.Data);
+        var (version, branch, gitVersionError, gitFetchError) = GetVersionBranch(response.Data);
         var (outgoingCommits, incomingCommits, defaultBehind, defaultAhead) = GetCommitCounts(response.Data);
         var (hasUpstream, remoteBranches, localBranches) = GetRefreshBranchesAndUpstream(response.Data);
+        var combinedError = CombineRepoErrors(gitFetchError, gitVersionError);
         return new RepoGitVersionInfo
         {
             Version = version,
@@ -1111,7 +1113,7 @@ public class WorkspaceGitService(
             HasUpstream = hasUpstream,
             RemoteBranches = remoteBranches,
             LocalBranches = localBranches,
-            ErrorMessage = gitVersionError
+            ErrorMessage = combinedError
         };
     }
 
@@ -1123,10 +1125,21 @@ public class WorkspaceGitService(
         return (r?.HasUpstream, remote?.Count > 0 ? remote : null, local?.Count > 0 ? local : null);
     }
 
-    private static (string version, string branch, string? gitVersionError) GetVersionBranch(object data)
+    private static (string version, string branch, string? gitVersionError, string? gitFetchError) GetVersionBranch(object data)
     {
         var r = AgentResponseJson.DeserializeAgentResponse<AgentVersionBranchResponse>(data);
-        return (r?.Version ?? "-", r?.Branch ?? "-", r?.GitVersionError);
+        return (r?.Version ?? "-", r?.Branch ?? "-", r?.GitVersionError, r?.GitFetchError);
+    }
+
+    private static string? CombineRepoErrors(string? fetchError, string? versionError)
+    {
+        if (string.IsNullOrWhiteSpace(fetchError) && string.IsNullOrWhiteSpace(versionError))
+            return null;
+        if (string.IsNullOrWhiteSpace(fetchError))
+            return versionError;
+        if (string.IsNullOrWhiteSpace(versionError))
+            return fetchError;
+        return $"{fetchError.Trim()}. {versionError.Trim()}";
     }
 
     private static int? GetProjects(object data)

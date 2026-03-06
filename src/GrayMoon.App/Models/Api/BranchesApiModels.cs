@@ -16,6 +16,13 @@ public sealed class BranchesResponse
 
     [JsonPropertyName("defaultBranch")]
     public string? DefaultBranch { get; set; }
+
+    /// <summary>Present on refresh response; when false, ErrorMessage describes the failure (e.g. fetch failed).</summary>
+    [JsonPropertyName("success")]
+    public bool? Success { get; set; }
+
+    [JsonPropertyName("errorMessage")]
+    public string? ErrorMessage { get; set; }
 }
 
 /// <summary>Response from POST /api/branches/checkout. Agent may send PascalCase; use case-insensitive deserialization.</summary>

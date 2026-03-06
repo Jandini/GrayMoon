@@ -298,10 +298,7 @@
                                                 <tr class="repo-error-row">
                                                     <td colspan="@colSpan" class="p-0">
                                                         <div class="alert alert-danger alert-dismissible mb-0 rounded-0" 
-                                                             role="alert"
-                                                             style="@(isSyncing ? "" : "cursor: pointer;")"
-                                                             @onclick="async () => { if (!isSyncing) await SyncSingleRepoAsync(repo.RepositoryId); }"
-                                                             title="@(isSyncing ? "" : "Click to sync this repository")">
+                                                             role="alert">
                                                             <div class="d-flex align-items-start">
                                                                 <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">
                                                                     <strong>Error:</strong> @repoError
@@ -309,7 +306,6 @@
                                                                 <button type="button" 
                                                                         class="btn-close ms-2" 
                                                                         aria-label="Close"
-                                                                        @onclick:stopPropagation="true"
                                                                         @onclick='() => DismissRepositoryError(repo.RepositoryId)'></button>
                                                             </div>
                                                         </div>
@@ -531,6 +527,12 @@
                         _refreshDebounceCts = null;
                     }
                 }
+            });
+            _hubConnection.On<int, int, string>("RepositoryError", (workspaceId, repositoryId, msg) =>
+            {
+                if (workspaceId != WorkspaceId || string.IsNullOrWhiteSpace(msg)) return;
+                repositoryErrors[repositoryId] = msg;
+                _ = InvokeAsync(StateHasChanged);
             });
             await _hubConnection.StartAsync();
         }
@@ -1451,9 +1453,9 @@
                     onProgress: (completed, total, repoId, info) =>
                     {
                         SetSyncProgress($"Synchronized {completed} of {total}");
-                        repoSyncStatus[repoId] = (info.Version == "-" && info.Branch == "-")
-                            ? RepoSyncStatus.Error
-                            : RepoSyncStatus.InSync;
+                        repoSyncStatus[repoId] = (!string.IsNullOrWhiteSpace(info.ErrorMessage) || info.Version != "-" || info.Branch != "-")
+                            ? RepoSyncStatus.InSync
+                            : RepoSyncStatus.Error;
                         var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
                         if (wr != null)
                         {
@@ -1525,9 +1527,9 @@
                     onProgress: (completed, total, repoId, info) =>
                     {
                         SetSyncProgress($"Synchronized {completed} of {total}");
-                        repoSyncStatus[repoId] = (info.Version == "-" && info.Branch == "-")
-                            ? RepoSyncStatus.Error
-                            : RepoSyncStatus.InSync;
+                        repoSyncStatus[repoId] = (!string.IsNullOrWhiteSpace(info.ErrorMessage) || info.Version != "-" || info.Branch != "-")
+                            ? RepoSyncStatus.InSync
+                            : RepoSyncStatus.Error;
                         var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
                         if (wr != null)
                         {
@@ -1597,9 +1599,9 @@
                     onProgress: (completed, total, repoId, info) =>
                     {
                         SetSyncProgress($"Synchronized {completed} of {total}");
-                        repoSyncStatus[repoId] = (info.Version == "-" && info.Branch == "-")
-                            ? RepoSyncStatus.Error
-                            : RepoSyncStatus.InSync;
+                        repoSyncStatus[repoId] = (!string.IsNullOrWhiteSpace(info.ErrorMessage) || info.Version != "-" || info.Branch != "-")
+                            ? RepoSyncStatus.InSync
+                            : RepoSyncStatus.Error;
                         var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
                         if (wr != null)
                         {

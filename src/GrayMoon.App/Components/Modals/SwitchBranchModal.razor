@@ -1062,7 +1062,7 @@
             else
             {
                 var errorText = await response.Content.ReadAsStringAsync();
-                errorMessage = $"Failed to refresh branches: {response.StatusCode}";
+                errorMessage = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"Failed to refresh branches: {response.StatusCode}";
                 Logger.LogError("Failed to refresh branches: {StatusCode}, {Error}", response.StatusCode, errorText);
             }
         }

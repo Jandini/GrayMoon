@@ -65,7 +65,17 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
         var version = versionResult.SemVer ?? versionResult.FullSemVer ?? "-";
 
         // Fetch first to get latest commit counts
-        await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
+        var (fetchSuccess, fetchError) = await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
+        if (!fetchSuccess)
+        {
+            return new CommitSyncRepositoryResponse
+            {
+                Success = false,
+                Version = version,
+                Branch = branch,
+                ErrorMessage = fetchError ?? "Fetch failed"
+            };
+        }
 
         // Get commit counts (single fetch at start; no refetch after pull/push - refs are already updated)
         var (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);
@@ -84,7 +94,11 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
             {
                 await git.AbortMergeAsync(repoPath, cancellationToken);
                 // One refetch after abort to ensure refs are consistent
-                await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
+                var (refetchOk, _) = await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
+                if (!refetchOk)
+                {
+                    // Refetch failed; still return merge conflict with pull error
+                }
                 (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);
 
                 return new CommitSyncRepositoryResponse
