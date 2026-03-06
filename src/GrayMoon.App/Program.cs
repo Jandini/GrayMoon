@@ -68,9 +68,14 @@ builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(keyRingDir));
 
 var app = builder.Build();
+//var version = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+    var version = typeof(Program).Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+        .InformationalVersion
+        ?? "unknown";
 
-var version = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
-app.Logger.LogInformation("Starting GrayMoon {Version}...", version);
+
+    app.Logger.LogInformation("Starting GrayMoon {Version}...", version);
 
 // Ensure the db directory and Data Protection key directory exist (for both local dev and container volume mounts)
 var dbPath = GetDatabasePath(connectionString);

@@ -1,9 +1,11 @@
 mode: ContinuousDeployment
 assembly-versioning-scheme: MajorMinorPatch
-assembly-file-versioning-scheme: MajorMinorPatchTag
-assembly-informational-format: '{SemVer}'
-continuous-delivery-fallback-tag: main
+assembly-informational-format: '{MajorMinorPatch}-{EscapedBranchName:l}.{VersionSourceDistance}'
+increment: Patch
 
 branches:
-  master:
-    regex: main
+  main:
+    regex: ^main$
+
+  unknown:
+    regex: ^(?<BranchName>.+)$
