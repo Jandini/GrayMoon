@@ -2,6 +2,7 @@ mode: ContinuousDeployment
 assembly-versioning-scheme: MajorMinorPatch
 assembly-informational-format: '{MajorMinorPatch}-{EscapedBranchName:l}.{VersionSourceDistance}'
 increment: Patch
+next-version: 0.1.0
 
 branches:
   main:
