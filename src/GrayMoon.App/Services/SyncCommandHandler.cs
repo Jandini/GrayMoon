@@ -34,7 +34,8 @@ public sealed class SyncCommandHandler(
         if (hasUpstream.HasValue) wr.BranchHasUpstream = hasUpstream.Value;
         if (defaultBranchBehind.HasValue) wr.DefaultBranchBehindCommits = defaultBranchBehind;
         if (defaultBranchAhead.HasValue) wr.DefaultBranchAheadCommits = defaultBranchAhead;
-        wr.SyncStatus = (version == "-" || branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
+        // When there is an error message (e.g. fetch failed), keep status InSync so the UI does not show "retry"; the error is shown in the error badge only.
+        wr.SyncStatus = !string.IsNullOrWhiteSpace(errorMessage) ? RepoSyncStatus.InSync : ((version == "-" || branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync);
 
         await dbContext.SaveChangesAsync();
 
