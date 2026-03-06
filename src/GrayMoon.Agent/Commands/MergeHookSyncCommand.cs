@@ -21,7 +21,7 @@ public sealed class MergeHookSyncCommand(IGitService git, IHubConnectionProvider
         }
 
         var (versionResult, _) = await git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
-        var version = versionResult?.SemVer ?? versionResult?.FullSemVer ?? "-";
+        var version = versionResult?.InformationalVersion ?? "-";
         var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
 
         int? outgoing = null;

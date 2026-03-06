@@ -62,7 +62,7 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
             };
         }
 
-        var version = versionResult.SemVer ?? versionResult.FullSemVer ?? "-";
+        var version = versionResult.InformationalVersion ?? "-";
 
         // Fetch first to get latest commit counts
         var (fetchSuccess, fetchError) = await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);

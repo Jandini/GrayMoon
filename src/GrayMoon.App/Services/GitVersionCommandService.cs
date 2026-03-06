@@ -65,8 +65,8 @@ public class GitVersionCommandService(ILogger<GitVersionCommandService> logger)
             var result = ParseGitVersionJson(stdout);
             if (result != null)
             {
-                logger.LogInformation("GitVersion for {Path}: {SemVer} ({Branch})", repositoryPath,
-                    result.SemVer ?? result.FullSemVer ?? "-", result.BranchName ?? result.EscapedBranchName ?? "-");
+                logger.LogInformation("GitVersion for {Path}: {InformationalVersion} ({Branch})", repositoryPath,
+                    result.InformationalVersion ?? "-", result.BranchName ?? result.EscapedBranchName ?? "-");
             }
             return result;
         }
