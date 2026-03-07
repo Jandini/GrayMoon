@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using GrayMoon.App.Models;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services;
 
@@ -9,9 +11,11 @@ namespace GrayMoon.App.Services;
 public class SyncBackgroundService(
     IServiceScopeFactory scopeFactory,
     ILogger<SyncBackgroundService> logger,
-    IConfiguration configuration) : BackgroundService
+    IConfiguration configuration,
+    IOptions<WorkspaceOptions> workspaceOptions) : BackgroundService
 {
-    private readonly int _maxConcurrency = configuration.GetValue<int?>("Sync:MaxConcurrency") ?? 16;
+    private readonly int _maxConcurrency = configuration.GetValue<int?>("Sync:MaxConcurrency")
+        ?? Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
     private readonly bool _enableDeduplication = configuration.GetValue<bool?>("Sync:EnableDeduplication") ?? true;
     private readonly Channel<SyncRequestItem> _channel = Channel.CreateUnbounded<SyncRequestItem>(new UnboundedChannelOptions
     {

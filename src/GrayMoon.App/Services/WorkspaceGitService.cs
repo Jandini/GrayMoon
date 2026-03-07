@@ -32,7 +32,7 @@ public class WorkspaceGitService(
     private readonly WorkspaceProjectRepository _workspaceProjectRepository = workspaceProjectRepository ?? throw new ArgumentNullException(nameof(workspaceProjectRepository));
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly ILogger<WorkspaceGitService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxConcurrentGitOperations ?? 8);
+    private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 16);
     private readonly IHubContext<WorkspaceSyncHub>? _hubContext = hubContext;
     private readonly PackageRegistrySyncService? _packageRegistrySyncService = packageRegistrySyncService;
     private readonly NuGetService? _nuGetService = nuGetService;
@@ -165,7 +165,7 @@ public class WorkspaceGitService(
             await semaphore.WaitAsync(cancellationToken);
             try
             {
-                var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot };
+                var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot, maxParallelOperations = _maxConcurrent };
                 var response = await _agentBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
                 if (!response.Success)
                 {
@@ -216,7 +216,7 @@ public class WorkspaceGitService(
             throw new InvalidOperationException($"Repository {repositoryId} not found in workspace.");
 
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
-        var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot };
+        var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot, maxParallelOperations = _maxConcurrent };
         var response = await _agentBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
         if (!response.Success)
         {
@@ -399,9 +399,8 @@ public class WorkspaceGitService(
 
         var total = reposToCommit.Count;
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
-        const int maxParallelCommit = 8;
         var completed = 0;
-        var semaphore = new SemaphoreSlim(maxParallelCommit);
+        var semaphore = new SemaphoreSlim(_maxConcurrent);
 
         var tasks = reposToCommit.Select(async repo =>
         {
@@ -527,10 +526,9 @@ public class WorkspaceGitService(
                 if (hadError)
                     break;
 
-                const int maxParallelRefresh = 16;
                 var totalRefresh = reposAtLevel.Count;
                 var completedRefresh = 0;
-                var refreshSemaphore = new SemaphoreSlim(maxParallelRefresh);
+                var refreshSemaphore = new SemaphoreSlim(_maxConcurrent);
                 var refreshTasks = reposAtLevel.Select(async repo =>
                 {
                     await refreshSemaphore.WaitAsync(cancellationToken);
@@ -572,10 +570,9 @@ public class WorkspaceGitService(
             }
             if (!hadError && payload.Count > 0)
             {
-                const int maxParallelRefresh = 16;
                 var totalRefresh = payload.Count;
                 var completedRefresh = 0;
-                var refreshSemaphore = new SemaphoreSlim(maxParallelRefresh);
+                var refreshSemaphore = new SemaphoreSlim(_maxConcurrent);
                 var refreshTasks = payload.Select(async repo =>
                 {
                     await refreshSemaphore.WaitAsync(cancellationToken);
@@ -691,7 +688,6 @@ public class WorkspaceGitService(
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
                 var linkedToken = linkedCts.Token;
                 var deadline = DateTime.UtcNow + totalTimeout;
-                const int maxParallelChecks = 8;
                 var foundByIndex = new bool[totalDeps];
                 var foundLock = new object();
                 int getFoundCount()
@@ -729,7 +725,7 @@ public class WorkspaceGitService(
                         }
                         if (toCheck.Length > 0)
                         {
-                            foreach (var chunk in toCheck.Chunk(maxParallelChecks))
+                            foreach (var chunk in toCheck.Chunk(_maxConcurrent))
                             {
                                 await Task.WhenAll(chunk.Select(async i =>
                                 {

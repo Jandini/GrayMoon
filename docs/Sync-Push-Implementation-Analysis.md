@@ -103,7 +103,7 @@ So the UI only pushes repos that have unpushed commits (and optionally only sele
 ### 4.5 Pushing a batch of repos
 
 - **`PushReposAsync`** (private):
-  - For each repo in the list, acquires a semaphore (`_maxConcurrent` from `WorkspaceOptions.MaxConcurrentGitOperations`, default 8), then:
+  - For each repo in the list, acquires a semaphore (`_maxConcurrent` from `WorkspaceOptions.MaxParallelOperations`, default 16), then:
     - Builds args: `workspaceName`, `repositoryId`, `repositoryName`, `bearerToken`, `workspaceId`, `workspaceRoot`.
     - Sends agent command **`PushRepository`** via `_agentBridge.SendCommandAsync("PushRepository", args, cancellationToken)`.
     - Parses response as `PushRepositoryResponse`; on failure calls `onRepoError(repoId, message)`.
@@ -159,7 +159,7 @@ So the UI only pushes repos that have unpushed commits (and optionally only sele
 
 - **`WorkspaceOptions`** (e.g. `Workspace` config section):
   - `PushWaitDependencyTimeoutMinutesPerDependency`: minutes per required dependency when waiting for packages in registry (default 1.0). Total wait per level = this × number of distinct required packages at that level.
-  - `MaxConcurrentGitOperations`: used as `_maxConcurrent` in `WorkspaceGitService` for limiting parallel push (default 8).
+  - `MaxParallelOperations`: used as `_maxConcurrent` in `WorkspaceGitService` for limiting parallel push (default 16).
 
 ---
 
@@ -169,7 +169,7 @@ So the UI only pushes repos that have unpushed commits (and optionally only sele
 2. App: sync package registries → get push plan → filter by `repoIdsToPush`.
 3. If all required packages have matched connectors and NuGet/connector services exist: for each dependency level (low to high):
    - Wait (with timeout) until all required packages for that level are present in their registries (`PackageVersionExistsAsync`).
-   - Push all repos at that level in parallel via agent `PushRepository` (throttled by `MaxConcurrentGitOperations`).
+   - Push all repos at that level in parallel via agent `PushRepository` (throttled by `MaxParallelOperations`).
    - Refresh version for those repos (`RefreshRepositoryVersion`).
 4. If synchronized push not possible: push all repos in one batch, then refresh versions.
 5. Broadcast `WorkspaceSynced`; UI refreshes.

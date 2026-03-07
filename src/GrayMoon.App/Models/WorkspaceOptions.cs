@@ -2,7 +2,8 @@ namespace GrayMoon.App.Models;
 
 public class WorkspaceOptions
 {
-    public int MaxConcurrentGitOperations { get; set; } = 16;
+    /// <summary>Maximum number of parallel operations for workspace-level work (Git, project discovery, package registry lookups, etc.). Used app-wide and passed to the agent for commands that do parallel work. Default 16.</summary>
+    public int MaxParallelOperations { get; set; } = 16;
 
     /// <summary>Base URL of the app (e.g. https://graymoon.example.com). If set, post-commit hooks will be created to POST WorkflowId and RepoId to /api/sync after each commit. Leave empty to use PostCommitHookPort with 127.0.0.1.</summary>
     public string? PostCommitHookBaseUrl { get; set; }

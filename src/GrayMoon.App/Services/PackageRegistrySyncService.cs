@@ -9,10 +9,9 @@ public sealed class PackageRegistrySyncService(
     ConnectorRepository connectorRepository,
     WorkspaceProjectRepository workspaceProjectRepository,
     NuGetService nuGetService,
+    Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<PackageRegistrySyncService> logger)
 {
-    private const int MaxParallelPackageLookups = 8;
-
     /// <summary>For each package in the workspace, checks all active NuGet connectors in parallel and sets MatchedConnectorId to the first registry that contains the package (by ID; no particular version required). Up to 8 packages are checked in parallel.</summary>
     public async Task SyncWorkspacePackageRegistriesAsync(
         int workspaceId,
@@ -44,9 +43,10 @@ public sealed class PackageRegistrySyncService(
         var total = packages.Count;
         var completed = 0;
 
+        var maxParallel = Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
         var options = new ParallelOptions
         {
-            MaxDegreeOfParallelism = MaxParallelPackageLookups,
+            MaxDegreeOfParallelism = maxParallel,
             CancellationToken = cancellationToken
         };
 
@@ -117,7 +117,8 @@ public sealed class PackageRegistrySyncService(
         var projectIdToConnectorId = new ConcurrentDictionary<int, int?>();
         var total = packages.Count;
         var completed = 0;
-        var options = new ParallelOptions { MaxDegreeOfParallelism = MaxParallelPackageLookups, CancellationToken = cancellationToken };
+        var maxParallel = Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
+        var options = new ParallelOptions { MaxDegreeOfParallelism = maxParallel, CancellationToken = cancellationToken };
 
         await Parallel.ForEachAsync(packages, options, async (p, ct) =>
         {
