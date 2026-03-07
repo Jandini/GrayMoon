@@ -2049,19 +2049,20 @@
 
             if (response.IsSuccessStatusCode)
             {
+                repositoryErrors.Remove(repositoryId);
                 await RefreshFromSync();
             }
             else
             {
                 var errorText = await response.Content.ReadAsStringAsync();
-                errorMessage = $"Failed to sync to default branch: {response.StatusCode}";
+                repositoryErrors[repositoryId] = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"Failed to sync to default branch: {response.StatusCode}";
                 Logger.LogError("SyncToDefault failed: {StatusCode}, {Error}", response.StatusCode, errorText);
             }
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error syncing to default branch for repository {RepositoryId}", repositoryId);
-            errorMessage = "An error occurred while syncing to default branch.";
+            repositoryErrors[repositoryId] = "An error occurred while syncing to default branch. The GrayMoon Agent may be offline.";
         }
         finally
         {
@@ -2102,10 +2103,10 @@
             };
             var json = System.Text.Json.JsonSerializer.Serialize(apiRequest);
             var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            
+
             var baseUrl = ApiBaseUrl;
             var response = await httpClient.PostAsync($"{baseUrl}/api/branches/checkout", content, _checkoutCts.Token);
-            
+
             if (response.IsSuccessStatusCode)
             {
                 var responseContent = await response.Content.ReadAsStringAsync(_checkoutCts.Token);
@@ -2114,20 +2115,16 @@
                 if (result != null && !result.Success)
                 {
                     repositoryErrors[repositoryId] = !string.IsNullOrWhiteSpace(result.ErrorMessage) ? result.ErrorMessage : "Failed to checkout branch.";
-                    SetCheckoutProgress("Checkout completed with errors.");
-                    await Task.Delay(2000, _checkoutCts.Token);
                 }
                 else
                 {
                     repositoryErrors.Remove(repositoryId);
-                    SetCheckoutProgress("Checkout completed successfully.");
-                    await Task.Delay(1000, _checkoutCts.Token);
                 }
             }
             else
             {
                 var errorText = await response.Content.ReadAsStringAsync(_checkoutCts.Token);
-                repositoryErrors[repositoryId] = $"Failed to checkout branch: {response.StatusCode}";
+                repositoryErrors[repositoryId] = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"Failed to checkout branch: {response.StatusCode}";
                 Logger.LogError("Checkout failed: {StatusCode}, {Error}", response.StatusCode, errorText);
             }
 

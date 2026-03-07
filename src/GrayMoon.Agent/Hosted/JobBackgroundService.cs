@@ -69,9 +69,26 @@ public sealed class JobBackgroundService(
         var sw = Stopwatch.StartNew();
         var result = await dispatcher.ExecuteAsync(job.Command, job.Request, ct);
         sw.Stop();
+        var (success, error) = GetCommandSuccessAndError(result);
         logger.LogInformation("ResponseCommand {RequestId} completed ({Command}) in {ElapsedMs}ms", job.RequestId, job.Command, sw.ElapsedMilliseconds);
         logger.LogTrace("ResponseCommand {RequestId} response content: {@ResponseBody}", job.RequestId, result);
-        await SendResponseAsync(job.RequestId, true, result, null);
+        await SendResponseAsync(job.RequestId, success, result, error);
+    }
+
+    /// <summary>If result has a Success property that is false, return (false, ErrorMessage); otherwise (true, null).</summary>
+    private static (bool success, string? error) GetCommandSuccessAndError(object? result)
+    {
+        if (result == null) return (true, null);
+        var type = result.GetType();
+        var successProp = type.GetProperty("Success", typeof(bool));
+        if (successProp?.GetValue(result) is true) return (true, null);
+        if (successProp?.GetValue(result) is false)
+        {
+            var errorProp = type.GetProperty("ErrorMessage", typeof(string));
+            var msg = errorProp?.GetValue(result) as string;
+            return (false, !string.IsNullOrWhiteSpace(msg) ? msg : "Command failed.");
+        }
+        return (true, null);
     }
 
     private async Task SendResponseAsync(string requestId, bool success, object? data, string? error)
