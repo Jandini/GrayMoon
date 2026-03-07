@@ -13,28 +13,35 @@
                     <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-2 small">
-                        <strong>@(RepoName ?? Info.PayloadForRepo.RepoName)</strong> @(IsMultipleRepos ? "have" : "has") package dependencies. Push will include @(IsMultipleRepos ? "these repositories" : "this repository") and @(IsMultipleRepos ? "their" : "its") dependency path@(IsMultipleRepos ? "s" : "").
-                    </p>
-                    <p class="mb-1 small text-muted">Required packages:</p>
-                    <div class="push-deps-modal-packages-scroll small mb-3">
-                        @foreach (var group in PackagesByLevel)
-                        {
-                            <div class="push-deps-modal-level-group">
-                                <div class="push-deps-modal-level-first-line">
-                                    <div class="push-deps-modal-package-line">
-                                        @{ var first = group.Packages[0]; }
-                                        <code>@first.PackageId</code> <span class="push-deps-modal-version">@first.Version</span>
+                    @if (HasRequiredPackages)
+                    {
+                        <p class="mb-2 small">
+                            <strong>@(RepoName ?? Info.PayloadForRepo.RepoName)</strong> @(IsMultipleRepos ? "have" : "has") package dependencies. Push will include @(IsMultipleRepos ? "these repositories" : "this repository") and @(IsMultipleRepos ? "their" : "its") dependency path@(IsMultipleRepos ? "s" : "").
+                        </p>
+                        <p class="mb-1 small text-muted">Required packages:</p>
+                        <div class="push-deps-modal-packages-scroll small mb-3">
+                            @foreach (var group in PackagesByLevel)
+                            {
+                                <div class="push-deps-modal-level-group">
+                                    <div class="push-deps-modal-level-first-line">
+                                        <div class="push-deps-modal-package-line">
+                                            @{ var first = group.Packages[0]; }
+                                            <code>@first.PackageId</code> <span class="push-deps-modal-version">@first.Version</span>
+                                        </div>
+                                        <span class="push-deps-modal-level-label">Level @(group.Level == int.MaxValue ? "unknown" : group.Level.ToString())</span>
                                     </div>
-                                    <span class="push-deps-modal-level-label">Level @(group.Level == int.MaxValue ? "unknown" : group.Level.ToString())</span>
+                                    @foreach (var pkg in group.Packages.Skip(1))
+                                    {
+                                        <div class="push-deps-modal-package-line"><code>@pkg.PackageId</code> <span class="push-deps-modal-version">@pkg.Version</span></div>
+                                    }
                                 </div>
-                                @foreach (var pkg in group.Packages.Skip(1))
-                                {
-                                    <div class="push-deps-modal-package-line"><code>@pkg.PackageId</code> <span class="push-deps-modal-version">@pkg.Version</span></div>
-                                }
-                            </div>
-                        }
-                    </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="mb-2 small text-muted">No package dependency details available.</p>
+                    }
                     <div class="form-check">
                         <input id="push-sync-checkbox" type="checkbox" class="form-check-input" @bind="SynchronizedPush" />
                         <label class="form-check-label" for="push-sync-checkbox">Synchronized Push</label>
@@ -73,6 +80,7 @@
     private bool SynchronizedPush { get; set; } = true;
     private ElementReference _modalElement;
 
+    private bool HasRequiredPackages => Info?.PayloadForRepo.RequiredPackages?.Count > 0;
     private bool IsMultipleRepos => (Info?.PayloadForRepo.RepoName?.Contains("repositories") == true) && (Info?.PayloadForRepo.RepoName != "1 repository");
 
     /// <summary>Required packages grouped by dependency level (level order), for display.</summary>
