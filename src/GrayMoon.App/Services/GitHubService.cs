@@ -180,6 +180,63 @@ public class GitHubService : IConnectorService
         return (organizations.Count, repositories.Count);
     }
 
+    /// <summary>Gets the pull request for the given branch in the repo, if any. Uses GET /repos/{owner}/{repo}/pulls?state=all&amp;head=owner:branch&amp;per_page=1. Returns null when no PR or API error.</summary>
+    public async Task<GitHubPullRequestDto?> GetPullRequestForBranchAsync(Connector connector, string owner, string repo, string branch, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+        if (string.IsNullOrWhiteSpace(branch))
+            return null;
+
+        EnsureConnectorConfigured(connector);
+
+        var head = $"{owner}:{Uri.EscapeDataString(branch)}";
+        var requestUri = $"repos/{owner}/{repo}/pulls?state=all&head={head}&per_page=1";
+
+        try
+        {
+            var list = await GetAsync<List<GitHubPullRequestDto>>(connector, requestUri, cancellationToken);
+            var pr = list?.FirstOrDefault();
+            if (pr == null)
+                return null;
+            if (pr.Head != null && !string.Equals(pr.Head.Ref, branch, StringComparison.OrdinalIgnoreCase))
+                return null;
+            return pr;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "GitHub API get PR for branch failed. Owner={Owner}, Repo={Repo}, Branch={Branch}", owner, repo, branch);
+            return null;
+        }
+    }
+
+    /// <summary>Gets a single pull request by number. Uses GET /repos/{owner}/{repo}/pulls/{pull_number}. Returns null on API error.</summary>
+    public async Task<GitHubPullRequestDto?> GetPullRequestByNumberAsync(Connector connector, string owner, string repo, int pullNumber, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+        if (pullNumber <= 0)
+            return null;
+
+        EnsureConnectorConfigured(connector);
+
+        var requestUri = $"repos/{owner}/{repo}/pulls/{pullNumber}";
+
+        try
+        {
+            return await GetAsync<GitHubPullRequestDto>(connector, requestUri, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "GitHub API get PR by number failed. Owner={Owner}, Repo={Repo}, PullNumber={PullNumber}", owner, repo, pullNumber);
+            return null;
+        }
+    }
+
     private void EnsureConfigured()
     {
         if (string.IsNullOrWhiteSpace(_options.PersonalAccessToken))
