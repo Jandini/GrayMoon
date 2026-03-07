@@ -1,5 +1,6 @@
 using System.Text.Json;
 using GrayMoon.App.Hubs;
+using GrayMoon.Abstractions.Agent;
 using Microsoft.AspNetCore.SignalR;
 
 namespace GrayMoon.App.Services;
@@ -31,7 +32,7 @@ public sealed class AgentBridge(
 
         try
         {
-            await hubContext.Clients.Client(connectionId).SendAsync("RequestCommand", requestId, command, argsJson, cancellationToken);
+            await hubContext.Clients.Client(connectionId).SendAsync(AgentHubMethods.RequestCommand, requestId, command, argsJson, cancellationToken);
             logger.LogDebug("Sent RequestCommand: {RequestId}, {Command}", requestId, command);
             return await task;
         }

@@ -1,3 +1,4 @@
+using GrayMoon.Abstractions.Agent;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Services;
 using Microsoft.AspNetCore.SignalR;
@@ -40,9 +41,9 @@ public sealed class AgentHub(AgentConnectionTracker connectionTracker, SyncComma
     }
 
     /// <summary>Invoked by the agent when it completes a command. Delivers the response to the waiting caller.</summary>
-    public Task ResponseCommand(string requestId, bool success, object? data, string? error)
+    public Task ResponseCommand(string requestId, AgentCommandResponse response)
     {
-        AgentResponseDelivery.Complete(requestId, success, data, error);
+        AgentResponseDelivery.Complete(requestId, response);
         return Task.CompletedTask;
     }
 

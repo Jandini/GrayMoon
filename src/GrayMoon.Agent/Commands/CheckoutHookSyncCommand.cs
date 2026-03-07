@@ -1,6 +1,7 @@
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Hub;
 using GrayMoon.Agent.Services;
+using GrayMoon.Abstractions.Agent;
 using GrayMoon.Abstractions.Notifications;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
@@ -70,7 +71,7 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IHubConnectionProvi
                 DefaultBranchAhead = defaultAhead,
                 ErrorMessage = fetchError
             };
-            await connection.InvokeAsync("SyncCommand", notification, cancellationToken);
+            await connection.InvokeAsync(AgentHubMethods.SyncCommand, notification, cancellationToken);
             logger.LogInformation("CheckoutHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}, hasUpstream={HasUpstream}",
                 payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream);
         }
