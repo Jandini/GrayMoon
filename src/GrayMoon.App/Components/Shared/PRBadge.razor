@@ -8,7 +8,9 @@
 }
 else if (PullRequest != null && string.Equals(PullRequest.State, "open", StringComparison.OrdinalIgnoreCase))
 {
-    <a href="@PullRequest.HtmlUrl" target="_blank" rel="noopener noreferrer" class="badge pr-badge pr-badge-open" title="Open PR #@PullRequest.Number">#@PullRequest.Number</a>
+    var openClass = GetOpenPrMergeabilityClass(PullRequest);
+    var openTitle = GetOpenPrMergeabilityTitle(PullRequest);
+    <a href="@PullRequest.HtmlUrl" target="_blank" rel="noopener noreferrer" class="badge pr-badge pr-badge-open @openClass" title="@openTitle">#@PullRequest.Number</a>
 }
 else if ((PullRequest == null || !string.Equals(PullRequest.State, "open", StringComparison.OrdinalIgnoreCase)) && (DefaultBranchAheadCommits ?? 0) > 0)
 {
@@ -30,4 +32,32 @@ else
     [Parameter] public PullRequestInfo? PullRequest { get; set; }
     [Parameter] public int? DefaultBranchAheadCommits { get; set; }
     [Parameter] public string? CreatePrUrl { get; set; }
+
+    private static string GetOpenPrMergeabilityClass(PullRequestInfo pr)
+    {
+        var state = pr.MergeableState ?? string.Empty;
+        if (pr.Mergeable == null || string.Equals(state, "unknown", StringComparison.OrdinalIgnoreCase))
+            return "pr-badge-open-unknown";
+        if (pr.Mergeable == false || string.Equals(state, "dirty", StringComparison.OrdinalIgnoreCase))
+            return "pr-badge-open-conflict";
+        if (string.Equals(state, "unstable", StringComparison.OrdinalIgnoreCase))
+            return "pr-badge-open-checks";
+        if (pr.Mergeable == true || string.Equals(state, "clean", StringComparison.OrdinalIgnoreCase))
+            return "pr-badge-open-mergeable";
+        return "pr-badge-open-unknown";
+    }
+
+    private static string GetOpenPrMergeabilityTitle(PullRequestInfo pr)
+    {
+        var state = pr.MergeableState ?? string.Empty;
+        if (pr.Mergeable == null || string.Equals(state, "unknown", StringComparison.OrdinalIgnoreCase))
+            return "Open PR #" + pr.Number + " – mergeability unknown";
+        if (pr.Mergeable == false || string.Equals(state, "dirty", StringComparison.OrdinalIgnoreCase))
+            return "Open PR #" + pr.Number + " – merge conflicts";
+        if (string.Equals(state, "unstable", StringComparison.OrdinalIgnoreCase))
+            return "Open PR #" + pr.Number + " – checks running or failing";
+        if (pr.Mergeable == true || string.Equals(state, "clean", StringComparison.OrdinalIgnoreCase))
+            return "Open PR #" + pr.Number + " – mergeable";
+        return "Open PR #" + pr.Number;
+    }
 }

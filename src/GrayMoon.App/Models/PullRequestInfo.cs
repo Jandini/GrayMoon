@@ -8,4 +8,8 @@ public sealed class PullRequestInfo
     public bool IsMerged => MergedAt.HasValue;
     public DateTimeOffset? MergedAt { get; set; }
     public string HtmlUrl { get; set; } = string.Empty;
+    /// <summary>True = mergeable, false = conflict, null = unknown.</summary>
+    public bool? Mergeable { get; set; }
+    /// <summary>e.g. unknown, clean, dirty, unstable, blocked.</summary>
+    public string? MergeableState { get; set; }
 }

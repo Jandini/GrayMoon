@@ -115,6 +115,12 @@ public class GitHubPullRequestDto
 
     [JsonPropertyName("head")]
     public GitHubPullRequestHeadDto? Head { get; set; }
+
+    [JsonPropertyName("mergeable")]
+    public bool? Mergeable { get; set; }
+
+    [JsonPropertyName("mergeable_state")]
+    public string? MergeableState { get; set; }
 }
 
 public class GitHubPullRequestHeadDto

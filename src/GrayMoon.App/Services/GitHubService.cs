@@ -212,6 +212,31 @@ public class GitHubService : IConnectorService
         }
     }
 
+    /// <summary>Gets a single pull request by number. Uses GET /repos/{owner}/{repo}/pulls/{pull_number}. Returns null on API error.</summary>
+    public async Task<GitHubPullRequestDto?> GetPullRequestByNumberAsync(Connector connector, string owner, string repo, int pullNumber, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+        if (pullNumber <= 0)
+            return null;
+
+        EnsureConnectorConfigured(connector);
+
+        var requestUri = $"repos/{owner}/{repo}/pulls/{pullNumber}";
+
+        try
+        {
+            return await GetAsync<GitHubPullRequestDto>(connector, requestUri, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "GitHub API get PR by number failed. Owner={Owner}, Repo={Repo}, PullNumber={PullNumber}", owner, repo, pullNumber);
+            return null;
+        }
+    }
+
     private void EnsureConfigured()
     {
         if (string.IsNullOrWhiteSpace(_options.PersonalAccessToken))

@@ -25,12 +25,29 @@ public sealed class GitHubPullRequestService(
             var dto = await gitHubService.GetPullRequestForBranchAsync(connector, owner, repo, branchName, cancellationToken);
             if (dto == null)
                 return null;
+
+            var mergeable = dto.Mergeable;
+            var mergeableState = dto.MergeableState;
+
+            if (string.Equals(dto.State, "open", StringComparison.OrdinalIgnoreCase) &&
+                (mergeable == null || string.Equals(mergeableState, "unknown", StringComparison.OrdinalIgnoreCase)))
+            {
+                var fullPr = await gitHubService.GetPullRequestByNumberAsync(connector, owner, repo, dto.Number, cancellationToken);
+                if (fullPr != null)
+                {
+                    mergeable = fullPr.Mergeable;
+                    mergeableState = fullPr.MergeableState;
+                }
+            }
+
             return new PullRequestInfo
             {
                 Number = dto.Number,
                 State = dto.State ?? string.Empty,
                 MergedAt = dto.MergedAt,
-                HtmlUrl = dto.HtmlUrl ?? string.Empty
+                HtmlUrl = dto.HtmlUrl ?? string.Empty,
+                Mergeable = mergeable,
+                MergeableState = mergeableState
             };
         }
         catch (Exception ex)
