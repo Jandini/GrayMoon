@@ -1,6 +1,7 @@
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Repositories;
+using GrayMoon.Abstractions.Notifications;
 using Microsoft.AspNetCore.SignalR;
 using GrayMoon.App.Models;
 using Microsoft.EntityFrameworkCore;
@@ -13,39 +14,39 @@ public sealed class SyncCommandHandler(
     IHubContext<WorkspaceSyncHub> hubContext,
     ILogger<SyncCommandHandler> logger)
 {
-    public async Task HandleAsync(int workspaceId, int repositoryId, string version, string branch, int? outgoingCommits = null, int? incomingCommits = null, bool? hasUpstream = null, int? defaultBranchBehind = null, int? defaultBranchAhead = null, string? errorMessage = null)
+    public async Task HandleAsync(RepositorySyncNotification n)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var workspaceProjectRepository = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
 
         var wr = await dbContext.WorkspaceRepositories
-            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId);
+            .FirstOrDefaultAsync(wr => wr.WorkspaceId == n.WorkspaceId && wr.RepositoryId == n.RepositoryId);
         if (wr == null)
         {
-            logger.LogWarning("SyncCommand: workspace {WorkspaceId} repo {RepositoryId} not found", workspaceId, repositoryId);
+            logger.LogWarning("SyncCommand: workspace {WorkspaceId} repo {RepositoryId} not found", n.WorkspaceId, n.RepositoryId);
             return;
         }
 
-        wr.GitVersion = version == "-" ? null : version;
-        wr.BranchName = branch == "-" ? null : branch;
-        if (outgoingCommits.HasValue) wr.OutgoingCommits = outgoingCommits;
-        if (incomingCommits.HasValue) wr.IncomingCommits = incomingCommits;
-        if (hasUpstream.HasValue) wr.BranchHasUpstream = hasUpstream.Value;
-        if (defaultBranchBehind.HasValue) wr.DefaultBranchBehindCommits = defaultBranchBehind;
-        if (defaultBranchAhead.HasValue) wr.DefaultBranchAheadCommits = defaultBranchAhead;
+        wr.GitVersion = n.Version == "-" ? null : n.Version;
+        wr.BranchName = n.Branch == "-" ? null : n.Branch;
+        if (n.OutgoingCommits.HasValue) wr.OutgoingCommits = n.OutgoingCommits;
+        if (n.IncomingCommits.HasValue) wr.IncomingCommits = n.IncomingCommits;
+        if (n.HasUpstream.HasValue) wr.BranchHasUpstream = n.HasUpstream.Value;
+        if (n.DefaultBranchBehind.HasValue) wr.DefaultBranchBehindCommits = n.DefaultBranchBehind;
+        if (n.DefaultBranchAhead.HasValue) wr.DefaultBranchAheadCommits = n.DefaultBranchAhead;
         // When there is an error message (e.g. fetch failed), keep status InSync so the UI does not show "retry"; the error is shown in the error badge only.
-        wr.SyncStatus = !string.IsNullOrWhiteSpace(errorMessage) ? RepoSyncStatus.InSync : ((version == "-" || branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync);
+        wr.SyncStatus = !string.IsNullOrWhiteSpace(n.ErrorMessage) ? RepoSyncStatus.InSync : ((n.Version == "-" || n.Branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync);
 
         await dbContext.SaveChangesAsync();
 
         var allLinks = await dbContext.WorkspaceRepositories
-            .Where(w => w.WorkspaceId == workspaceId)
+            .Where(w => w.WorkspaceId == n.WorkspaceId)
             .Select(w => w.SyncStatus)
             .ToListAsync();
         var isInSync = allLinks.Count > 0 && allLinks.All(s => s == RepoSyncStatus.InSync);
 
-        var workspace = await dbContext.Workspaces.FindAsync(workspaceId);
+        var workspace = await dbContext.Workspaces.FindAsync(n.WorkspaceId);
         if (workspace != null)
         {
             workspace.LastSyncedAt = DateTime.UtcNow;
@@ -53,12 +54,12 @@ public sealed class SyncCommandHandler(
             await dbContext.SaveChangesAsync();
         }
 
-        await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId);
+        await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(n.WorkspaceId);
 
-        await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
-        if (!string.IsNullOrWhiteSpace(errorMessage))
-            await hubContext.Clients.All.SendAsync("RepositoryError", workspaceId, repositoryId, errorMessage);
+        await hubContext.Clients.All.SendAsync("WorkspaceSynced", n.WorkspaceId);
+        if (!string.IsNullOrWhiteSpace(n.ErrorMessage))
+            await hubContext.Clients.All.SendAsync("RepositoryError", n.WorkspaceId, n.RepositoryId, n.ErrorMessage);
         logger.LogDebug("SyncCommand persisted: workspace={WorkspaceId}, repo={RepositoryId}, version={Version}, branch={Branch}",
-            workspaceId, repositoryId, version, branch);
+            n.WorkspaceId, n.RepositoryId, n.Version, n.Branch);
     }
 }
