@@ -48,7 +48,7 @@ public sealed class MergeHookSyncCommand(IGitService git, IHubConnectionProvider
         var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)
         {
-            await connection.InvokeAsync("SyncCommand", payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream, defaultBehind, defaultAhead, cancellationToken);
+            await connection.InvokeAsync("SyncCommand", payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream, defaultBehind, defaultAhead, (string?)null, cancellationToken);
             logger.LogInformation("MergeHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}, hasUpstream={HasUpstream}",
                 payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream);
         }
