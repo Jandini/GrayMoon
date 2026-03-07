@@ -23,7 +23,7 @@ public sealed class GetRepositoryVersionCommand(IGitService git) : ICommandHandl
             var (vr, _) = await git.GetVersionAsync(repoPath, cancellationToken);
             if (vr != null)
             {
-                version = vr.SemVer ?? vr.FullSemVer;
+                version = vr.InformationalVersion;
                 branch = vr.BranchName ?? vr.EscapedBranchName;
             }
         }

@@ -45,7 +45,7 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
             (vr, versionError) = await git.GetVersionAsync(repoPath, cancellationToken);
             if (vr != null)
             {
-                version = vr.SemVer ?? vr.FullSemVer ?? "-";
+                version = vr.InformationalVersion ?? "-";
                 branch = vr.BranchName ?? vr.EscapedBranchName ?? "-";
             }
 
