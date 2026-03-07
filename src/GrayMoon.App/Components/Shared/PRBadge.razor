@@ -12,7 +12,7 @@ else if (PullRequest != null && string.Equals(PullRequest.State, "open", StringC
     var openTitle = GetOpenPrMergeabilityTitle(PullRequest);
     <a href="@PullRequest.HtmlUrl" target="_blank" rel="noopener noreferrer" class="badge pr-badge pr-badge-open @openClass" title="@openTitle">#@PullRequest.Number</a>
 }
-else if ((PullRequest == null || !string.Equals(PullRequest.State, "open", StringComparison.OrdinalIgnoreCase)) && (DefaultBranchAheadCommits ?? 0) > 0)
+else if (IsPrVerified && (PullRequest == null || !string.Equals(PullRequest.State, "open", StringComparison.OrdinalIgnoreCase)) && (DefaultBranchAheadCommits ?? 0) > 0)
 {
     @if (CreatePrUrl != null)
     {
@@ -32,6 +32,8 @@ else
     [Parameter] public PullRequestInfo? PullRequest { get; set; }
     [Parameter] public int? DefaultBranchAheadCommits { get; set; }
     [Parameter] public string? CreatePrUrl { get; set; }
+    /// <summary>When false, never show "create"; show "none" until PR state has been verified via API.</summary>
+    [Parameter] public bool IsPrVerified { get; set; }
 
     private static string GetOpenPrMergeabilityClass(PullRequestInfo pr)
     {

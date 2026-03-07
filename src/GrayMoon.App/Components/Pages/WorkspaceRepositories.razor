@@ -236,6 +236,7 @@
                                             <td class="col-pr text-center text-nowrap">
                                                 <PRBadge PullRequest="@(prByRepositoryId.TryGetValue(repo.RepositoryId, out var prInfo) ? prInfo : null)"
                                                         DefaultBranchAheadCommits="@wr.DefaultBranchAheadCommits"
+                                                        IsPrVerified="@prByRepositoryId.ContainsKey(repo.RepositoryId)"
                                                         CreatePrUrl="@(string.IsNullOrEmpty(repoUrl) ? null : $"{repoUrl}/compare/{SyncBadgeLabels.DefaultBranchName}...{Uri.EscapeDataString(wr.BranchName ?? "")}")" />
                                             </td>
                                             <td class="col-deps col-status-badge">
