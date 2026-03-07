@@ -1,13 +1,8 @@
 @using GrayMoon.App.Models
-@using GrayMoon.App.Services
 @using Microsoft.AspNetCore.Components.Web
 
-@* PR column badge: none (dark gray), create (yellow), #number (green), merged (purple). All with white text. *@
-@if (PullRequest == null && !DefaultBranchAheadCommits.HasValue && !IsLoaded)
-{
-    <span class="badge pr-badge pr-badge-loading" title="Loading PR...">-</span>
-}
-else if (PullRequest != null && PullRequest.IsMerged)
+@* PR column badge: none (dark gray), create (yellow, black text), #number (green), merged (purple). Default "none" until data loads. *@
+@if (PullRequest != null && PullRequest.IsMerged)
 {
     <a href="@PullRequest.HtmlUrl" target="_blank" rel="noopener noreferrer" class="badge pr-badge pr-badge-merged" title="PR #@PullRequest.Number merged">merged</a>
 }
@@ -34,6 +29,5 @@ else
 @code {
     [Parameter] public PullRequestInfo? PullRequest { get; set; }
     [Parameter] public int? DefaultBranchAheadCommits { get; set; }
-    [Parameter] public bool IsLoaded { get; set; } = true;
     [Parameter] public string? CreatePrUrl { get; set; }
 }
