@@ -1099,7 +1099,7 @@
         }
     }
 
-    /// <summary>Push button click: get push plan; filter to repos with unpushed commits or no upstream branch; if selection active filter to selected; if more than one repo show confirmation modal; else run push directly.</summary>
+    /// <summary>Push button click: get push plan; filter to repos with unpushed commits or no upstream branch; if no package dependencies push immediately; otherwise show confirmation modal with dependency info.</summary>
     private async Task OnPushClickAsync()
     {
         if (workspace == null || workspaceRepositories.Count == 0 || isPushing || isSyncing || isUpdating)
@@ -1131,6 +1131,14 @@
             pushWithDependenciesRepoIdsToPush = pushPlanRepoIds;
             pushWithDependenciesRepoId = 0;
             pushWithDependenciesRepoName = null;
+
+            // When there are no package dependencies, push immediately without showing the dialog.
+            if (depInfo.PayloadForRepo.RequiredPackages.Count == 0 && depInfo.DependencyRepoIds.Count == 0)
+            {
+                await OnPushWithDependenciesProceedAsync(synchronizedPush: false);
+                return;
+            }
+
             showPushWithDependenciesModal = true;
             await InvokeAsync(StateHasChanged);
         }
