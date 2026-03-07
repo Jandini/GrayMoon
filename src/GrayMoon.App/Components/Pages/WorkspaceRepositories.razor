@@ -1744,7 +1744,7 @@
 
         isCommitSyncing = true;
         var total = repositoryIds.Count;
-        SetCommitSyncProgress($"Synchronizing commits for {total} {(total == 1 ? "repository" : "repositories")}...");
+        SetCommitSyncProgress("Synchronizing commits...");
         errorMessage = null;
         try
         {
