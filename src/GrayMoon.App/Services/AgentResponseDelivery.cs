@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using GrayMoon.Abstractions.Agent;
 
 namespace GrayMoon.App.Services;
 
@@ -19,11 +20,9 @@ public static class AgentResponseDelivery
         return tcs.Task;
     }
 
-    public static void Complete(string requestId, bool success, object? data, string? error)
+    public static void Complete(string requestId, AgentCommandResponse response)
     {
         if (Pending.TryRemove(requestId, out var tcs))
-            tcs.TrySetResult(new AgentCommandResponse(success, data, error));
+            tcs.TrySetResult(response);
     }
 }
-
-public sealed record AgentCommandResponse(bool Success, object? Data, string? Error);

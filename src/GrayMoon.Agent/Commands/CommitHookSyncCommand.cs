@@ -1,4 +1,5 @@
 using GrayMoon.Agent.Abstractions;
+using GrayMoon.Abstractions.Agent;
 using GrayMoon.Abstractions.Notifications;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
@@ -61,7 +62,7 @@ public sealed class CommitHookSyncCommand(IGitService git, IHubConnectionProvide
                 DefaultBranchAhead = defaultAhead,
                 ErrorMessage = null
             };
-            await connection.InvokeAsync("SyncCommand", notification, cancellationToken);
+            await connection.InvokeAsync(AgentHubMethods.SyncCommand, notification, cancellationToken);
             logger.LogInformation("CommitHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}, hasUpstream={HasUpstream}",
                 payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream);
         }

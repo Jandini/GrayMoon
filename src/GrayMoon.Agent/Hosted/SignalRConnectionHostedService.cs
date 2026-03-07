@@ -6,6 +6,7 @@ using GrayMoon.Agent.Hub;
 using GrayMoon.Agent.Jobs;
 using GrayMoon.Agent.Queue;
 using GrayMoon.Agent.Services;
+using GrayMoon.Abstractions.Agent;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -46,7 +47,7 @@ public sealed class SignalRConnectionHostedService(
 
         try
         {
-            await _connection.InvokeAsync("ReportSemVer", agentSemVer, cancellationToken);
+            await _connection.InvokeAsync(AgentHubMethods.ReportSemVer, agentSemVer, cancellationToken);
             logger.LogInformation("Reported agent SemVer: {SemVer}", agentSemVer);
         }
         catch (Exception ex)
@@ -67,7 +68,7 @@ public sealed class SignalRConnectionHostedService(
             })
             .Build();
 
-        _connection.On<string, string, JsonElement?>("RequestCommand", async (requestId, command, args) =>
+        _connection.On<string, string, JsonElement?>(AgentHubMethods.RequestCommand, async (requestId, command, args) =>
         {
             logger.LogDebug("RequestCommand {RequestId} received: {Command}", requestId, command);
             logger.LogTrace("RequestCommand {RequestId} request content: {Args}", requestId, args.HasValue ? args.Value.GetRawText() : "null");

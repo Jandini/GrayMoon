@@ -4,6 +4,7 @@ using GrayMoon.Agent.Hub;
 using GrayMoon.Agent.Jobs;
 using GrayMoon.Agent.Queue;
 using GrayMoon.Agent.Services;
+using GrayMoon.Abstractions.Agent;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -58,7 +59,7 @@ public sealed class JobBackgroundService(
                     var errorBody = new { Success = false, Error = ex.Message };
                     logger.LogInformation("ResponseCommand {RequestId} failed: {Error}", envelope.CommandJob.RequestId, ex.Message);
                     logger.LogTrace("ResponseCommand {RequestId} response content: {@ResponseBody}", envelope.CommandJob.RequestId, errorBody);
-                    await SendResponseAsync(envelope.CommandJob.RequestId, false, null, ex.Message);
+                    await SendResponseAsync(envelope.CommandJob.RequestId, new AgentCommandResponse(false, null, ex.Message));
                 }
             }
         }
@@ -72,7 +73,7 @@ public sealed class JobBackgroundService(
         var (success, error) = GetCommandSuccessAndError(result);
         logger.LogInformation("ResponseCommand {RequestId} completed ({Command}) in {ElapsedMs}ms", job.RequestId, job.Command, sw.ElapsedMilliseconds);
         logger.LogTrace("ResponseCommand {RequestId} response content: {@ResponseBody}", job.RequestId, result);
-        await SendResponseAsync(job.RequestId, success, result, error);
+        await SendResponseAsync(job.RequestId, new AgentCommandResponse(success, result, error));
     }
 
     /// <summary>If result has a Success property that is false, return (false, ErrorMessage); otherwise (true, null).</summary>
@@ -91,11 +92,11 @@ public sealed class JobBackgroundService(
         return (true, null);
     }
 
-    private async Task SendResponseAsync(string requestId, bool success, object? data, string? error)
+    private async Task SendResponseAsync(string requestId, AgentCommandResponse response)
     {
         var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)
-            await connection.InvokeAsync("ResponseCommand", requestId, success, data, error);
+            await connection.InvokeAsync(AgentHubMethods.ResponseCommand, requestId, response);
         else
         {
             logger.LogWarning("Hub not connected, cannot send ResponseCommand for {RequestId}", requestId);

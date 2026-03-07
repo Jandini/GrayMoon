@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using GrayMoon.Abstractions.Agent;
 using GrayMoon.App.Data;
 using Microsoft.AspNetCore.SignalR;
 using GrayMoon.App.Hubs;
@@ -842,7 +843,7 @@ public class WorkspaceGitService(
         var repo = link.Repository;
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
 
-        onProgressMessage?.Invoke("Pushing upstream...");
+        onProgressMessage?.Invoke(link.BranchHasUpstream == true ? "Pushing..." : "Pushing upstream...");
 
         var args = new
         {
