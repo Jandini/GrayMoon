@@ -842,7 +842,7 @@ public class WorkspaceGitService(
         var repo = link.Repository;
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
 
-        onProgressMessage?.Invoke("Pushing to set upstream...");
+        onProgressMessage?.Invoke("Pushing upstream...");
 
         var args = new
         {
