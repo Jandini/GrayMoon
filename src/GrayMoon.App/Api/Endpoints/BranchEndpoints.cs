@@ -266,9 +266,14 @@ public static class BranchEndpoints
                 workspaceRoot
             };
             var response = await agentBridge.SendCommandAsync("SyncToDefaultBranch", args, CancellationToken.None);
-            
-            if (!response.Success)
-                return Results.Problem(response.Error ?? "Failed to sync to default branch", statusCode: 500);
+
+            // Agent sends success=true when command completes without throwing; actual success is in response.Data
+            var syncResponse = AgentResponseJson.DeserializeAgentResponse<SyncToDefaultBranchResponse>(response.Data);
+            var commandSuccess = syncResponse?.Success ?? response.Success;
+            var errorMessage = syncResponse?.ErrorMessage ?? response.Error ?? "Failed to sync to default branch";
+
+            if (!commandSuccess)
+                return Results.Problem(errorMessage, statusCode: 500);
 
             // Sync prunes the previous local branch; remove it from persistence
             var toRemove = await dbContext.RepositoryBranches
