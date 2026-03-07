@@ -1949,7 +1949,7 @@
 
         CloseSwitchBranchModal();
         isCreatingBranch = true;
-        createBranchMessage = $"Creating {newBranchName} for {repositoryName ?? "repository"}...";
+        createBranchMessage = $"Creating {newBranchName}...";
         errorMessage = null;
         await InvokeAsync(StateHasChanged);
 
@@ -2029,7 +2029,7 @@
 
         CloseSwitchBranchModal();
         isSyncingToDefault = true;
-        syncToDefaultMessage = $"Syncing to {defaultBranch} for {repositoryName ?? "repository"}...";
+        syncToDefaultMessage = $"Syncing to {defaultBranch}...";
         errorMessage = null;
         await InvokeAsync(StateHasChanged);
 
@@ -2082,12 +2082,9 @@
         _checkoutCts = new CancellationTokenSource();
 
         isCheckingOut = true;
-        
-        // Get repository name for display
-        var repo = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.Repository;
-        var repoName = repo?.RepositoryName ?? "repository";
-        SetCheckoutProgress($"Checking out {branchName} for {repoName}...");
-        
+
+        SetCheckoutProgress($"Checking out {branchName}...");
+
         errorMessage = null;
         try
         {
