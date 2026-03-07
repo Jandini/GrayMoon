@@ -18,7 +18,8 @@ public sealed class RefreshRepositoryProjectsCommand(IGitService git, ICsProjFil
         if (!git.DirectoryExists(repoPath))
             return new RefreshRepositoryProjectsResponse { Projects = [] };
 
-        var projects = await csProjFileService.FindAsync(repoPath, cancellationToken);
+        var maxParallel = request.MaxParallelOperations is > 0 ? request.MaxParallelOperations : null;
+        var projects = await csProjFileService.FindAsync(repoPath, cancellationToken, maxParallel);
         return new RefreshRepositoryProjectsResponse { Projects = projects };
     }
 }

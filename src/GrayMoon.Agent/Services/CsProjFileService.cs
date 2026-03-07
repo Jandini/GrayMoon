@@ -5,17 +5,17 @@ namespace GrayMoon.Agent.Services;
 
 public sealed class CsProjFileService(ICsProjFileParser parser) : ICsProjFileService
 {
-    private const int MaxConcurrentSubdirSearches = 8;
-    private const int MaxConcurrentParses = 8;
+    private const int DefaultMaxParallel = 8;
 
-    public async Task<IReadOnlyList<CsProjFileInfo>> FindAsync(string repoPath, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<CsProjFileInfo>> FindAsync(string repoPath, CancellationToken cancellationToken = default, int? maxParallel = null)
     {
-        var paths = await GetProjectPathsAsync(repoPath, cancellationToken);
+        var paths = await GetProjectPathsAsync(repoPath, cancellationToken, maxParallel);
         if (paths.Count == 0)
             return [];
 
+        var limit = Math.Max(1, maxParallel ?? DefaultMaxParallel);
         var results = new List<CsProjFileInfo>();
-        using var semaphore = new SemaphoreSlim(MaxConcurrentParses);
+        using var semaphore = new SemaphoreSlim(limit);
         var tasks = paths.Select(async path =>
         {
             await semaphore.WaitAsync(cancellationToken);
@@ -56,11 +56,12 @@ public sealed class CsProjFileService(ICsProjFileParser parser) : ICsProjFileSer
         return results;
     }
 
-    public async Task<IReadOnlyList<string>> GetProjectPathsAsync(string repoPath, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<string>> GetProjectPathsAsync(string repoPath, CancellationToken cancellationToken = default, int? maxParallel = null)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return [];
 
+        var limit = Math.Max(1, maxParallel ?? DefaultMaxParallel);
         try
         {
             var rootPaths = EnumerateCsprojInDirectory(repoPath, topLevelOnly: true);
@@ -72,7 +73,7 @@ public sealed class CsProjFileService(ICsProjFileParser parser) : ICsProjFileSer
             if (subdirs.Count == 0)
                 return rootPaths;
 
-            using var semaphore = new SemaphoreSlim(MaxConcurrentSubdirSearches);
+            using var semaphore = new SemaphoreSlim(limit);
             var subdirPaths = await Task.WhenAll(subdirs.Select(async subdir =>
             {
                 await semaphore.WaitAsync(cancellationToken);

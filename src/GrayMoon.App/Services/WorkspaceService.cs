@@ -4,7 +4,7 @@ using GrayMoon.App.Repositories;
 
 namespace GrayMoon.App.Services;
 
-public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService> logger, AppSettingRepository appSettingRepository)
+public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService> logger, AppSettingRepository appSettingRepository, Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions)
 {
     private string? _cachedRootPath;
     private readonly SemaphoreSlim _cacheLock = new(1, 1);
@@ -90,7 +90,8 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
             return 0;
 
         var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
-        var response = await agentBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName, workspaceRoot = root }, cancellationToken);
+        var maxParallel = Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
+        var response = await agentBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName, workspaceRoot = root, maxParallelOperations = maxParallel }, cancellationToken);
         if (!response.Success || response.Data == null)
             return 0;
 
@@ -107,7 +108,8 @@ public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService
             return Array.Empty<(string, string?)>();
 
         var root = !string.IsNullOrWhiteSpace(rootOverride) ? rootOverride : await GetRootPathAsync(cancellationToken);
-        var response = await agentBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName, workspaceRoot = root }, cancellationToken);
+        var maxParallel = Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
+        var response = await agentBridge.SendCommandAsync("GetWorkspaceRepositories", new { workspaceName, workspaceRoot = root, maxParallelOperations = maxParallel }, cancellationToken);
         if (!response.Success || response.Data == null)
             return Array.Empty<(string, string?)>();
 

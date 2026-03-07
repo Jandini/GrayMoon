@@ -7,7 +7,7 @@ namespace GrayMoon.Agent.Commands;
 
 public sealed class GetWorkspaceRepositoriesCommand(IGitService git) : ICommandHandler<GetWorkspaceRepositoriesRequest, GetWorkspaceRepositoriesResponse>
 {
-    private const int MaxConcurrentRepos = 8;
+    private const int DefaultMaxConcurrentRepos = 8;
 
     public async Task<GetWorkspaceRepositoriesResponse> ExecuteAsync(GetWorkspaceRepositoriesRequest request, CancellationToken cancellationToken = default)
     {
@@ -24,8 +24,9 @@ public sealed class GetWorkspaceRepositoriesCommand(IGitService git) : ICommandH
             };
         }
 
+        var maxConcurrent = request.MaxParallelOperations is > 0 ? request.MaxParallelOperations.Value : DefaultMaxConcurrentRepos;
         var infos = new WorkspaceRepositoryInfo[repositories.Length];
-        using var semaphore = new SemaphoreSlim(MaxConcurrentRepos);
+        using var semaphore = new SemaphoreSlim(maxConcurrent);
 
         var tasks = repositories
             .Select((name, index) => FetchInfoAsync(index, name, path, infos, cancellationToken))
