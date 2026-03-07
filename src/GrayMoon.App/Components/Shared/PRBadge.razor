@@ -1,0 +1,39 @@
+@using GrayMoon.App.Models
+@using GrayMoon.App.Services
+@using Microsoft.AspNetCore.Components.Web
+
+@* PR column badge: none (dark gray), create (yellow), #number (green), merged (purple). All with white text. *@
+@if (PullRequest == null && !DefaultBranchAheadCommits.HasValue && !IsLoaded)
+{
+    <span class="badge pr-badge pr-badge-loading" title="Loading PR...">-</span>
+}
+else if (PullRequest != null && PullRequest.IsMerged)
+{
+    <a href="@PullRequest.HtmlUrl" target="_blank" rel="noopener noreferrer" class="badge pr-badge pr-badge-merged" title="PR #@PullRequest.Number merged">merged</a>
+}
+else if (PullRequest != null && string.Equals(PullRequest.State, "open", StringComparison.OrdinalIgnoreCase))
+{
+    <a href="@PullRequest.HtmlUrl" target="_blank" rel="noopener noreferrer" class="badge pr-badge pr-badge-open" title="Open PR #@PullRequest.Number">#@PullRequest.Number</a>
+}
+else if ((PullRequest == null || !string.Equals(PullRequest.State, "open", StringComparison.OrdinalIgnoreCase)) && (DefaultBranchAheadCommits ?? 0) > 0)
+{
+    @if (CreatePrUrl != null)
+    {
+        <a href="@CreatePrUrl" target="_blank" rel="noopener noreferrer" class="badge pr-badge pr-badge-create" title="Create pull request">create</a>
+    }
+    else
+    {
+        <span class="badge pr-badge pr-badge-create" title="Create pull request">create</span>
+    }
+}
+else
+{
+    <span class="badge pr-badge pr-badge-none" title="No pull request">none</span>
+}
+
+@code {
+    [Parameter] public PullRequestInfo? PullRequest { get; set; }
+    [Parameter] public int? DefaultBranchAheadCommits { get; set; }
+    [Parameter] public bool IsLoaded { get; set; } = true;
+    [Parameter] public string? CreatePrUrl { get; set; }
+}

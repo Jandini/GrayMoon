@@ -48,6 +48,7 @@ builder.Services.AddScoped<WorkspaceService>();
 builder.Services.AddScoped<WorkspaceGitService>();
 builder.Services.AddScoped<GitHubRepositoryService>();
 builder.Services.AddScoped<GitHubActionsService>();
+builder.Services.AddScoped<GitHubPullRequestService>();
 builder.Services.AddScoped<PackageRegistrySyncService>();
 builder.Services.AddScoped<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
     builder.Services.AddScoped<WorkspaceFileVersionService>();

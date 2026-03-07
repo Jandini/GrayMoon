@@ -21,6 +21,7 @@
 @inject IJSRuntime JSRuntime
 @inject IToastService ToastService
 @inject WorkspaceFileVersionService FileVersionService
+@inject GitHubPullRequestService GitHubPullRequestService
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
 <PageTitle>@(workspace?.Name ?? "Workspace")</PageTitle>
@@ -69,6 +70,7 @@
                                 <th class="col-version">Version</th>
                                 <th class="col-branch">Branch</th>
                                 <th class="col-divergence text-center">Divergence</th>
+                                <th class="col-pr text-center">PR</th>
                                 <th class="col-deps">Dependencies</th>
                                 <th class="col-commits">Commits</th>
                                 <th class="col-sync col-status-badge">Status</th>
@@ -76,7 +78,7 @@
                         </thead>
                         <tbody>
                             @{
-                                var colSpan = 7;
+                                var colSpan = 8;
                             }
                             @if (isLoading)
                             {
@@ -230,6 +232,12 @@
                                                                 BranchName="@wr.BranchName"
                                                                 RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
                                                                 DefaultBranchName="@SyncBadgeLabels.DefaultBranchName" />
+                                            </td>
+                                            <td class="col-pr text-center text-nowrap">
+                                                <PRBadge PullRequest="@(prByRepositoryId.TryGetValue(repo.RepositoryId, out var prInfo) ? prInfo : null)"
+                                                        DefaultBranchAheadCommits="@wr.DefaultBranchAheadCommits"
+                                                        IsLoaded="@(isLoading == false)"
+                                                        CreatePrUrl="@(string.IsNullOrEmpty(repoUrl) ? null : $"{repoUrl}/compare/{SyncBadgeLabels.DefaultBranchName}...{Uri.EscapeDataString(wr.BranchName ?? "")}")" />
                                             </td>
                                             <td class="col-deps col-status-badge">
                                                 @{
@@ -398,6 +406,7 @@
 
     private WorkspaceModel? workspace;
     private List<WorkspaceRepositoryLink> workspaceRepositories = new();
+    private IReadOnlyDictionary<int, PullRequestInfo?> prByRepositoryId = new Dictionary<int, PullRequestInfo?>();
     private IReadOnlyDictionary<int, RepoGitVersionInfo> repoGitInfos = new Dictionary<int, RepoGitVersionInfo>();
     private string? errorMessage;
     private bool isLoading = true;
@@ -616,6 +625,7 @@
             .OrderByDescending(wr => wr.DependencyLevel ?? int.MinValue)
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
+        prByRepositoryId = await GitHubPullRequestService.GetPullRequestsForWorkspaceAsync(workspaceRepositories);
         await LoadMismatchedDependencyLinesAsync();
     }
 
@@ -655,6 +665,7 @@
             .OrderByDescending(wr => wr.DependencyLevel ?? int.MinValue)
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
+        prByRepositoryId = await GitHubPullRequestService.GetPullRequestsForWorkspaceAsync(workspaceRepositories);
         await LoadMismatchedDependencyLinesAsync();
     }
 

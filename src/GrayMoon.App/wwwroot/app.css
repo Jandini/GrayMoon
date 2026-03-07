@@ -923,3 +923,25 @@ table.resizable-columns th:hover .resize-handle::after {
     border-color: #495057;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
+
+/* PR column badges – all white text */
+.repositories-table td.col-pr .pr-badge {
+    color: #fff !important;
+    font-weight: 400;
+}
+.repositories-table td.col-pr .pr-badge-none {
+    background-color: #495057;
+}
+.repositories-table td.col-pr .pr-badge-create {
+    background-color: #ffc107;
+}
+.repositories-table td.col-pr .pr-badge-open {
+    background-color: #198754;
+}
+.repositories-table td.col-pr .pr-badge-merged {
+    background-color: #8957e5;
+}
+.repositories-table td.col-pr .pr-badge-loading {
+    background-color: var(--bg-tertiary);
+    color: var(--text-muted) !important;
+}

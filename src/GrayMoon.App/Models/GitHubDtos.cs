@@ -94,3 +94,31 @@ public class GitHubWorkflowRunsResponse
     [JsonPropertyName("workflow_runs")]
     public List<GitHubWorkflowRunDto> WorkflowRuns { get; set; } = new();
 }
+
+/// <summary>Pull request list item from GET /repos/{owner}/{repo}/pulls.</summary>
+public class GitHubPullRequestDto
+{
+    [JsonPropertyName("number")]
+    public int Number { get; set; }
+
+    [JsonPropertyName("state")]
+    public string State { get; set; } = string.Empty;
+
+    [JsonPropertyName("merged_at")]
+    public DateTimeOffset? MergedAt { get; set; }
+
+    [JsonPropertyName("html_url")]
+    public string HtmlUrl { get; set; } = string.Empty;
+
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
+
+    [JsonPropertyName("head")]
+    public GitHubPullRequestHeadDto? Head { get; set; }
+}
+
+public class GitHubPullRequestHeadDto
+{
+    [JsonPropertyName("ref")]
+    public string Ref { get; set; } = string.Empty;
+}
