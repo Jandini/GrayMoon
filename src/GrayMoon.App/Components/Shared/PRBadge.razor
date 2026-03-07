@@ -53,13 +53,13 @@ else
     {
         var state = pr.MergeableState ?? string.Empty;
         if (pr.Mergeable == null || string.Equals(state, "unknown", StringComparison.OrdinalIgnoreCase))
-            return "Open PR #" + pr.Number + " – mergeability unknown";
+            return "PR #" + pr.Number + " – mergeability unknown";
         if (pr.Mergeable == false || string.Equals(state, "dirty", StringComparison.OrdinalIgnoreCase))
-            return "Open PR #" + pr.Number + " – merge conflicts";
+            return "PR #" + pr.Number + " – merge conflicts";
         if (string.Equals(state, "unstable", StringComparison.OrdinalIgnoreCase))
-            return "Open PR #" + pr.Number + " – checks running or failing";
+            return "PR #" + pr.Number + " – checks running";
         if (pr.Mergeable == true || string.Equals(state, "clean", StringComparison.OrdinalIgnoreCase))
-            return "Open PR #" + pr.Number + " – mergeable";
-        return "Open PR #" + pr.Number;
+            return "PR #" + pr.Number + " – mergeable";
+        return "PR #" + pr.Number;
     }
 }

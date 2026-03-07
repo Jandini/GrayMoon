@@ -944,7 +944,7 @@ table.resizable-columns th:hover .resize-handle::after {
     background-color: #495057;
 }
 .repositories-table td.col-pr .pr-badge-open-mergeable {
-    background-color: #198754;
+    background-color: #238636;
 }
 .repositories-table td.col-pr .pr-badge-open-conflict {
     background-color: #dc3545;
