@@ -27,6 +27,8 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
             .Include(workspace => workspace.Repositories)
             .ThenInclude(link => link.Repository)
             .ThenInclude(repository => repository!.Connector)
+            .Include(workspace => workspace.Repositories)
+            .ThenInclude(link => link.PullRequest)
             .FirstOrDefaultAsync(workspace => workspace.WorkspaceId == workspaceId);
     }
 

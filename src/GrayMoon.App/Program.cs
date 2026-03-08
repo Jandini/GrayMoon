@@ -49,6 +49,8 @@ builder.Services.AddScoped<WorkspaceGitService>();
 builder.Services.AddScoped<GitHubRepositoryService>();
 builder.Services.AddScoped<GitHubActionsService>();
 builder.Services.AddScoped<GitHubPullRequestService>();
+builder.Services.AddScoped<WorkspacePullRequestRepository>();
+builder.Services.AddScoped<WorkspacePullRequestService>();
 builder.Services.AddScoped<PackageRegistrySyncService>();
 builder.Services.AddScoped<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
     builder.Services.AddScoped<WorkspaceFileVersionService>();
@@ -112,6 +114,7 @@ using (var scope = app.Services.CreateScope())
     await MigrateWorkspaceFileVersionConfigsAsync(dbContext);
     await MigrateSettingsAsync(dbContext);
     await MigrateWorkspaceRootPathAsync(dbContext);
+    await MigrateWorkspaceRepositoryPullRequestsAsync(dbContext);
 }
 
 static async Task MigrateWorkspaceProjectsMatchedConnectorAsync(AppDbContext dbContext)
@@ -682,6 +685,43 @@ static async Task MigrateWorkspaceRootPathAsync(AppDbContext dbContext)
             if (count == 0)
             {
                 cmd.CommandText = "ALTER TABLE Workspaces ADD COLUMN RootPath TEXT";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
+    catch
+    {
+        // Migration may already be applied or table doesn't exist yet
+    }
+}
+
+static async Task MigrateWorkspaceRepositoryPullRequestsAsync(AppDbContext dbContext)
+{
+    try
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceRepositoryPullRequests'";
+            var tableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+
+            if (!tableExists)
+            {
+                cmd.CommandText = @"
+                    CREATE TABLE WorkspaceRepositoryPullRequests (
+                        WorkspaceRepositoryId INTEGER PRIMARY KEY,
+                        PullRequestNumber INTEGER,
+                        State TEXT,
+                        Mergeable INTEGER,
+                        MergeableState TEXT,
+                        HtmlUrl TEXT,
+                        MergedAt TEXT,
+                        LastCheckedAt TEXT NOT NULL,
+                        FOREIGN KEY (WorkspaceRepositoryId) REFERENCES WorkspaceRepositories(WorkspaceRepositoryId) ON DELETE CASCADE
+                    )";
                 await cmd.ExecuteNonQueryAsync();
             }
         }

@@ -56,4 +56,7 @@ public class WorkspaceRepositoryLink
 
     /// <summary>Number of those dependencies whose version does not match the referenced repo's GitVersion. Set when dependencies are merged. Used for badge (same logic as build).</summary>
     public int? UnmatchedDeps { get; set; }
+
+    /// <summary>Persisted pull request state for this workspace–repo link. 1:1 optional.</summary>
+    public WorkspaceRepositoryPullRequest? PullRequest { get; set; }
 }
