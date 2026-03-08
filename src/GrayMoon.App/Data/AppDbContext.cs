@@ -9,6 +9,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Repository> Repositories => Set<Repository>();
     public DbSet<Workspace> Workspaces => Set<Workspace>();
     public DbSet<WorkspaceRepositoryLink> WorkspaceRepositories => Set<WorkspaceRepositoryLink>();
+    public DbSet<WorkspaceRepositoryPullRequest> WorkspaceRepositoryPullRequests => Set<WorkspaceRepositoryPullRequest>();
     public DbSet<WorkspaceProject> WorkspaceProjects => Set<WorkspaceProject>();
     public DbSet<ProjectDependency> ProjectDependencies => Set<ProjectDependency>();
     public DbSet<RepositoryBranch> RepositoryBranches => Set<RepositoryBranch>();
@@ -128,6 +129,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany()
                 .HasForeignKey(wr => wr.RepositoryId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(wr => wr.PullRequest)
+                .WithOne(pr => pr.WorkspaceRepository)
+                .HasForeignKey<WorkspaceRepositoryPullRequest>(pr => pr.WorkspaceRepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WorkspaceRepositoryPullRequest>(entity =>
+        {
+            entity.ToTable("WorkspaceRepositoryPullRequests");
+            entity.HasKey(pr => pr.WorkspaceRepositoryId);
+
+            entity.Property(pr => pr.State).HasMaxLength(20);
+            entity.Property(pr => pr.MergeableState).HasMaxLength(50);
+            entity.Property(pr => pr.HtmlUrl).HasMaxLength(500);
         });
 
         modelBuilder.Entity<WorkspaceProject>(entity =>

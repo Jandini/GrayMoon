@@ -22,6 +22,7 @@
 @inject IToastService ToastService
 @inject WorkspaceFileVersionService FileVersionService
 @inject GitHubPullRequestService GitHubPullRequestService
+@inject WorkspacePullRequestService WorkspacePullRequestService
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
 <PageTitle>@(workspace?.Name ?? "Workspace")</PageTitle>
@@ -598,6 +599,7 @@
             isLoading = true;
             errorMessage = null;
             await ReloadWorkspaceDataAsync();
+            _ = RefreshPullRequestsInBackgroundAndReloadAsync();
         }
         catch (Exception ex)
         {
@@ -625,27 +627,32 @@
             .OrderByDescending(wr => wr.DependencyLevel ?? int.MinValue)
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
-        prByRepositoryId = new Dictionary<int, PullRequestInfo?>();
-        _ = LoadPullRequestsInBackgroundAsync(workspaceRepositories);
+        prByRepositoryId = BuildPrByRepositoryIdFromLinks(workspaceRepositories);
         await LoadMismatchedDependencyLinesAsync();
     }
 
-    /// <summary>Fetches PR data in the background and updates the grid when ready. No blocking; badges start as "none".</summary>
-    private async Task LoadPullRequestsInBackgroundAsync(List<WorkspaceRepositoryLink> links)
+    private static IReadOnlyDictionary<int, PullRequestInfo?> BuildPrByRepositoryIdFromLinks(List<WorkspaceRepositoryLink> links)
+    {
+        var dict = new Dictionary<int, PullRequestInfo?>();
+        foreach (var wr in links.Where(wr => wr.PullRequest != null))
+            dict[wr.RepositoryId] = wr.PullRequest!.PullRequestNumber.HasValue ? wr.PullRequest.ToPullRequestInfo() : null;
+        return dict;
+    }
+
+    /// <summary>Optional: refresh PR from API then reload workspace data so grid shows updated badges.</summary>
+    private async Task RefreshPullRequestsInBackgroundAndReloadAsync()
     {
         try
         {
-            var result = await GitHubPullRequestService.GetPullRequestsForWorkspaceAsync(links);
-            prByRepositoryId = result;
+            await WorkspacePullRequestService.RefreshPullRequestsForWorkspaceAsync(WorkspaceId);
+            await ReloadWorkspaceDataAsync();
             await InvokeAsync(StateHasChanged);
         }
-        catch (ObjectDisposedException)
-        { /* Component disposed, ignore */ }
-        catch (InvalidOperationException)
-        { /* Circuit disposed, ignore */ }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
         catch (Exception ex)
         {
-            Logger.LogDebug(ex, "Background PR fetch failed for workspace {WorkspaceId}", WorkspaceId);
+            Logger.LogDebug(ex, "Background PR refresh failed for workspace {WorkspaceId}", WorkspaceId);
         }
     }
 
@@ -685,8 +692,7 @@
             .OrderByDescending(wr => wr.DependencyLevel ?? int.MinValue)
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
-        prByRepositoryId = new Dictionary<int, PullRequestInfo?>();
-        _ = LoadPullRequestsInBackgroundAsync(workspaceRepositories);
+        prByRepositoryId = BuildPrByRepositoryIdFromLinks(workspaceRepositories);
         await LoadMismatchedDependencyLinesAsync();
     }
 

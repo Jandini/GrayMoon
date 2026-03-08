@@ -17,6 +17,7 @@ public class WorkspaceGitService(
     WorkspaceRepository workspaceRepository,
     GitHubRepositoryRepository repositoryRepository,
     WorkspaceProjectRepository workspaceProjectRepository,
+    WorkspacePullRequestService workspacePullRequestService,
     AppDbContext dbContext,
     Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<WorkspaceGitService> logger,
@@ -30,6 +31,7 @@ public class WorkspaceGitService(
     private readonly WorkspaceRepository _workspaceRepository = workspaceRepository ?? throw new ArgumentNullException(nameof(workspaceRepository));
     private readonly GitHubRepositoryRepository _repositoryRepository = repositoryRepository ?? throw new ArgumentNullException(nameof(repositoryRepository));
     private readonly WorkspaceProjectRepository _workspaceProjectRepository = workspaceProjectRepository ?? throw new ArgumentNullException(nameof(workspaceProjectRepository));
+    private readonly WorkspacePullRequestService _workspacePullRequestService = workspacePullRequestService ?? throw new ArgumentNullException(nameof(workspacePullRequestService));
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly ILogger<WorkspaceGitService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 16);
@@ -1241,6 +1243,8 @@ public class WorkspaceGitService(
 
         var syncResults = resultList.Select(r => (r.RepoId, r.info.ProjectsDetail)).ToList();
         await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, syncResults, persistDependencyLevel, cancellationToken);
+
+        await _workspacePullRequestService.RefreshPullRequestsAsync(workspaceId, repoIds, cancellationToken);
 
         _logger.LogInformation("Persistence: saved WorkspaceRepository link versions. WorkspaceId={WorkspaceId}, RepoCount={RepoCount}",
             workspaceId, resultList.Count);
