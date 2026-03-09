@@ -11,19 +11,31 @@
         {
             var behind = DefaultBehind ?? 0;
             var ahead = DefaultAhead ?? 0;
-            var defaultBranch = DefaultBranchName ?? SyncBadgeLabels.DefaultBranchName;
             var hasRepoUrl = !string.IsNullOrWhiteSpace(RepositoryUrl);
+            var hasDefaultBranch = !string.IsNullOrWhiteSpace(DefaultBranchName);
             string? aheadUrl = null;
             string? behindUrl = null;
-            if (hasRepoUrl && !string.IsNullOrWhiteSpace(BranchName))
+            if (hasRepoUrl && hasDefaultBranch && !string.IsNullOrWhiteSpace(BranchName))
             {
-                var encDefault = Uri.EscapeDataString(defaultBranch);
+                var encDefault = Uri.EscapeDataString(DefaultBranchName!);
                 var encBranch = Uri.EscapeDataString(BranchName);
                 aheadUrl = $"{RepositoryUrl}/compare/{encDefault}...{encBranch}";
                 behindUrl = $"{RepositoryUrl}/compare/{encBranch}...{encDefault}";
             }
-            var aheadTitle = ahead == 1 ? $"This branch is 1 commit ahead of {defaultBranch}" : $"This branch is {ahead} commits ahead of {defaultBranch}";
-            var behindTitle = behind == 1 ? $"This branch is 1 commit behind {defaultBranch}" : $"This branch is {behind} commits behind {defaultBranch}";
+            var aheadTitle = hasDefaultBranch
+                ? (ahead == 1
+                    ? $"This branch is 1 commit ahead of {DefaultBranchName}"
+                    : $"This branch is {ahead} commits ahead of {DefaultBranchName}")
+                : (ahead == 1
+                    ? "This branch is 1 commit ahead of the default branch"
+                    : $"This branch is {ahead} commits ahead of the default branch");
+            var behindTitle = hasDefaultBranch
+                ? (behind == 1
+                    ? $"This branch is 1 commit behind {DefaultBranchName}"
+                    : $"This branch is {behind} commits behind {DefaultBranchName}")
+                : (behind == 1
+                    ? "This branch is 1 commit behind the default branch"
+                    : $"This branch is {behind} commits behind the default branch");
 
             if (!string.IsNullOrWhiteSpace(behindUrl))
             {

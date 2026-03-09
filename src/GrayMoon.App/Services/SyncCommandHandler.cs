@@ -35,8 +35,19 @@ public sealed class SyncCommandHandler(
         if (n.HasUpstream.HasValue) wr.BranchHasUpstream = n.HasUpstream.Value;
         if (n.DefaultBranchBehind.HasValue) wr.DefaultBranchBehindCommits = n.DefaultBranchBehind;
         if (n.DefaultBranchAhead.HasValue) wr.DefaultBranchAheadCommits = n.DefaultBranchAhead;
+        var hasValidVersion = n.Version != "-" && n.Branch != "-";
+        var hasDefaultBranch = !string.IsNullOrWhiteSpace(wr.DefaultBranchName);
         // When there is an error message (e.g. fetch failed), keep status InSync so the UI does not show "retry"; the error is shown in the error badge only.
-        wr.SyncStatus = !string.IsNullOrWhiteSpace(n.ErrorMessage) ? RepoSyncStatus.InSync : ((n.Version == "-" || n.Branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync);
+        if (!string.IsNullOrWhiteSpace(n.ErrorMessage))
+        {
+            wr.SyncStatus = RepoSyncStatus.InSync;
+        }
+        else
+        {
+            wr.SyncStatus = !hasValidVersion
+                ? RepoSyncStatus.Error
+                : (hasDefaultBranch ? RepoSyncStatus.InSync : RepoSyncStatus.NeedsSync);
+        }
 
         await dbContext.SaveChangesAsync();
 

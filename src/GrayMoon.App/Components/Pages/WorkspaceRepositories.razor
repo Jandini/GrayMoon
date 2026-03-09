@@ -184,8 +184,8 @@
                                         @if (repo != null)
                                         {
                                             var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl);
-                                            var defaultBranch = string.IsNullOrWhiteSpace(wr.DefaultBranchName) ? SyncBadgeLabels.DefaultBranchName : wr.DefaultBranchName;
-                                            var branchUrl = !string.IsNullOrEmpty(repoUrl) && !string.IsNullOrEmpty(wr.BranchName)
+                                            var defaultBranch = wr.DefaultBranchName;
+                                            var branchUrl = !string.IsNullOrEmpty(repoUrl) && !string.IsNullOrEmpty(wr.BranchName) && !string.IsNullOrEmpty(defaultBranch)
                                                 ? $"{repoUrl}/compare/{defaultBranch}...{Uri.EscapeDataString(wr.BranchName)}"
                                                 : null;
                                             <tr>
@@ -235,13 +235,13 @@
                                                                 DefaultAhead="@wr.DefaultBranchAheadCommits"
                                                                 BranchName="@wr.BranchName"
                                                                 RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
-                                                                DefaultBranchName="@(string.IsNullOrWhiteSpace(wr.DefaultBranchName) ? SyncBadgeLabels.DefaultBranchName : wr.DefaultBranchName)" />
+                                                                DefaultBranchName="@wr.DefaultBranchName" />
                                             </td>
                                             <td class="col-pr text-center text-nowrap">
                                                 <PRBadge PullRequest="@(prByRepositoryId.TryGetValue(repo.RepositoryId, out var prInfo) ? prInfo : null)"
                                                         DefaultBranchAheadCommits="@wr.DefaultBranchAheadCommits"
                                                         IsPrVerified="@prByRepositoryId.ContainsKey(repo.RepositoryId)"
-                                                        CreatePrUrl="@(string.IsNullOrEmpty(repoUrl) ? null : $"{repoUrl}/compare/{(string.IsNullOrWhiteSpace(wr.DefaultBranchName) ? SyncBadgeLabels.DefaultBranchName : wr.DefaultBranchName)}...{Uri.EscapeDataString(wr.BranchName ?? "")}")" />
+                                                        CreatePrUrl="@(string.IsNullOrEmpty(repoUrl) || string.IsNullOrEmpty(wr.DefaultBranchName) ? null : $"{repoUrl}/compare/{wr.DefaultBranchName}...{Uri.EscapeDataString(wr.BranchName ?? "")}")" />
                                             </td>
                                             <td class="col-deps col-status-badge">
                                                 @{
@@ -905,8 +905,10 @@
             }
             else if ((wr.DefaultBranchAheadCommits ?? 0) > 0)
             {
-                var defaultBranch = string.IsNullOrWhiteSpace(wr.DefaultBranchName) ? SyncBadgeLabels.DefaultBranchName : wr.DefaultBranchName;
-                toOpen.Add($"{repoUrl}/compare/{defaultBranch}...{Uri.EscapeDataString(wr.BranchName)}");
+                if (!string.IsNullOrWhiteSpace(wr.DefaultBranchName))
+                {
+                    toOpen.Add($"{repoUrl}/compare/{wr.DefaultBranchName}...{Uri.EscapeDataString(wr.BranchName)}");
+                }
             }
         }
         if (toOpen.Count == 0)
@@ -952,10 +954,9 @@
             {
                 if (wr == null || string.IsNullOrWhiteSpace(wr.BranchName))
                     return false;
-                var defaultBranch = string.IsNullOrWhiteSpace(wr.DefaultBranchName)
-                    ? SyncBadgeLabels.DefaultBranchName
-                    : wr.DefaultBranchName;
-                return !string.Equals(wr.BranchName, defaultBranch, StringComparison.Ordinal);
+                if (string.IsNullOrWhiteSpace(wr.DefaultBranchName))
+                    return true;
+                return !string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal);
             })
             .Select(wr => wr!.RepositoryId)
             .Distinct()

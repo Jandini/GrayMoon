@@ -1306,7 +1306,11 @@ public class WorkspaceGitService(
                 if (info.HasUpstream.HasValue) wr.BranchHasUpstream = info.HasUpstream.Value;
                 if (info.DefaultBranchBehindCommits.HasValue) wr.DefaultBranchBehindCommits = info.DefaultBranchBehindCommits;
                 if (info.DefaultBranchAheadCommits.HasValue) wr.DefaultBranchAheadCommits = info.DefaultBranchAheadCommits;
-                wr.SyncStatus = (info.Version == "-" || info.Branch == "-") ? RepoSyncStatus.Error : RepoSyncStatus.InSync;
+                var hasValidVersion = info.Version != "-" && info.Branch != "-";
+                var hasDefaultBranch = !string.IsNullOrWhiteSpace(wr.DefaultBranchName);
+                wr.SyncStatus = !hasValidVersion
+                    ? RepoSyncStatus.Error
+                    : (hasDefaultBranch ? RepoSyncStatus.InSync : RepoSyncStatus.NeedsSync);
             }
 
             if (info.ProjectsDetail is { Count: > 0 })
