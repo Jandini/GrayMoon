@@ -814,7 +814,7 @@ public class WorkspaceGitService(
     }
 
     /// <summary>Pushes a single repository's current branch with upstream (-u). Used when user clicks the not-upstreamed badge. Branch name is provided by the app; when null or empty, the agent resolves it via GitVersion.
-    /// After success we call Refresh (SyncSingleRepositoryAsync) to persist BranchHasUpstream and the new remote branch. An alternative would be for PushRepository to return hasUpstream and for the app to persist it directly—we use Refresh so one code path (RefreshRepositoryVersion) provides version, commit counts, branches, and hasUpstream, and so the new remote branch is added to RepositoryBranches.</summary>
+    /// After success we update persistence (add remote branch, commit counts, BranchHasUpstream) without calling refresh branches.</summary>
     public async Task<(bool Success, string? ErrorMessage)> PushSingleRepositoryWithUpstreamAsync(
         int workspaceId,
         int repositoryId,
@@ -862,7 +862,9 @@ public class WorkspaceGitService(
             return (false, err);
         }
 
-        await SyncSingleRepositoryAsync(repositoryId, workspaceId, cancellationToken);
+        await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId,
+            [new PushRepoPayload(repositoryId, repo.RepositoryName, link.DependencyLevel, [])],
+            cancellationToken);
         return (true, null);
     }
 
@@ -913,12 +915,40 @@ public class WorkspaceGitService(
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
 
-    /// <summary>After push: fetches commit counts and hasUpstream from the agent for the pushed repos, then updates WorkspaceRepositories (OutgoingCommits, IncomingCommits, BranchHasUpstream) and broadcasts. Does not refresh GitVersion or branch lists.</summary>
+    /// <summary>After push: fetches commit counts and hasUpstream from the agent for the pushed repos, then updates WorkspaceRepositories (OutgoingCommits, IncomingCommits, BranchHasUpstream) and broadcasts. Also adds the pushed branch as remote to persistence so it appears in branch lists without calling refresh branches.</summary>
     private async Task UpdateCommitCountsAndUpstreamAfterPushAsync(int workspaceId, IReadOnlyList<PushRepoPayload> repos, CancellationToken cancellationToken)
     {
         if (repos.Count == 0) return;
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return;
+
+        var repoIds = repos.Select(r => r.RepoId).ToHashSet();
+        var links = await _dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.RepositoryId))
+            .ToListAsync(cancellationToken);
+
+        // Persist the remote branch for each pushed repo so it appears in Remotes without calling refresh branches
+        var now = DateTime.UtcNow;
+        foreach (var wr in links)
+        {
+            if (string.IsNullOrWhiteSpace(wr.BranchName))
+                continue;
+            var remoteBranchName = wr.BranchName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? wr.BranchName : "origin/" + wr.BranchName;
+            var exists = await _dbContext.RepositoryBranches
+                .AnyAsync(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsRemote && rb.BranchName == remoteBranchName, cancellationToken);
+            if (!exists)
+            {
+                _dbContext.RepositoryBranches.Add(new RepositoryBranch
+                {
+                    WorkspaceRepositoryId = wr.WorkspaceRepositoryId,
+                    BranchName = remoteBranchName,
+                    IsRemote = true,
+                    LastSeenAt = now,
+                    IsDefault = false
+                });
+            }
+            wr.BranchHasUpstream = true;
+        }
 
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
 
@@ -944,10 +974,6 @@ public class WorkspaceGitService(
             }
         }));
 
-        var repoIds = repos.Select(r => r.RepoId).ToHashSet();
-        var links = await _dbContext.WorkspaceRepositories
-            .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.RepositoryId))
-            .ToListAsync(cancellationToken);
         var resultByRepo = results.ToDictionary(r => r.RepoId);
         foreach (var wr in links)
         {
@@ -1422,6 +1448,33 @@ public class WorkspaceGitService(
             LastSeenAt = DateTime.UtcNow,
             IsDefault = false
         });
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>Adds the given branch as a remote branch to persistence and sets BranchHasUpstream on the workspace repository link. Used after a successful push so the branch appears in Remotes without calling refresh branches.</summary>
+    public async Task EnsureRemoteBranchPersistedAsync(int workspaceId, int repositoryId, string branchName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(branchName))
+            return;
+        var wr = await _dbContext.WorkspaceRepositories
+            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
+        if (wr == null)
+            return;
+        var remoteBranchName = branchName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? branchName : "origin/" + branchName;
+        var exists = await _dbContext.RepositoryBranches
+            .AnyAsync(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsRemote && rb.BranchName == remoteBranchName, cancellationToken);
+        if (!exists)
+        {
+            _dbContext.RepositoryBranches.Add(new RepositoryBranch
+            {
+                WorkspaceRepositoryId = wr.WorkspaceRepositoryId,
+                BranchName = remoteBranchName,
+                IsRemote = true,
+                LastSeenAt = DateTime.UtcNow,
+                IsDefault = false
+            });
+        }
+        wr.BranchHasUpstream = true;
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 }
