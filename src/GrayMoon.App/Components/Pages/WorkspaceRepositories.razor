@@ -837,15 +837,22 @@
         foreach (var wr in group)
         {
             if (wr.Repository == null || string.IsNullOrWhiteSpace(wr.BranchName)) continue;
-            if ((wr.DefaultBranchAheadCommits ?? 0) <= 0) continue;
-            if (wr.PullRequest != null && string.Equals(wr.PullRequest.State, "open", StringComparison.OrdinalIgnoreCase)) continue;
             var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(wr.Repository.CloneUrl);
             if (string.IsNullOrEmpty(repoUrl)) continue;
-            toOpen.Add($"{repoUrl}/compare/{defaultBranch}...{Uri.EscapeDataString(wr.BranchName)}");
+
+            var hasOpenPr = wr.PullRequest != null && string.Equals(wr.PullRequest.State, "open", StringComparison.OrdinalIgnoreCase);
+            if (hasOpenPr && !string.IsNullOrEmpty(wr.PullRequest!.HtmlUrl))
+            {
+                toOpen.Add(wr.PullRequest.HtmlUrl);
+            }
+            else if ((wr.DefaultBranchAheadCommits ?? 0) > 0)
+            {
+                toOpen.Add($"{repoUrl}/compare/{defaultBranch}...{Uri.EscapeDataString(wr.BranchName)}");
+            }
         }
         if (toOpen.Count == 0)
         {
-            ToastService.Show("No repositories found that have ahead commits and don't already have an open pull request.");
+            ToastService.Show("No repositories found that have an open pull request or ahead commits to open in GitHub.");
             return;
         }
         async Task OpenPrAsync()
