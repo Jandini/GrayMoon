@@ -184,8 +184,9 @@
                                         @if (repo != null)
                                         {
                                             var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl);
-                                            var branchUrl = !string.IsNullOrEmpty(repoUrl) && !string.IsNullOrEmpty(wr.BranchName)
-                                                ? $"{repoUrl}/compare/{SyncBadgeLabels.DefaultBranchName}...{Uri.EscapeDataString(wr.BranchName)}"
+                                            var defaultBranch = wr.DefaultBranchName;
+                                            var branchUrl = !string.IsNullOrEmpty(repoUrl) && !string.IsNullOrEmpty(wr.BranchName) && !string.IsNullOrEmpty(defaultBranch)
+                                                ? $"{repoUrl}/compare/{defaultBranch}...{Uri.EscapeDataString(wr.BranchName)}"
                                                 : null;
                                             <tr>
                                             <td class="col-repo">
@@ -234,13 +235,13 @@
                                                                 DefaultAhead="@wr.DefaultBranchAheadCommits"
                                                                 BranchName="@wr.BranchName"
                                                                 RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
-                                                                DefaultBranchName="@SyncBadgeLabels.DefaultBranchName" />
+                                                                DefaultBranchName="@wr.DefaultBranchName" />
                                             </td>
                                             <td class="col-pr text-center text-nowrap">
                                                 <PRBadge PullRequest="@(prByRepositoryId.TryGetValue(repo.RepositoryId, out var prInfo) ? prInfo : null)"
                                                         DefaultBranchAheadCommits="@wr.DefaultBranchAheadCommits"
                                                         IsPrVerified="@prByRepositoryId.ContainsKey(repo.RepositoryId)"
-                                                        CreatePrUrl="@(string.IsNullOrEmpty(repoUrl) ? null : $"{repoUrl}/compare/{SyncBadgeLabels.DefaultBranchName}...{Uri.EscapeDataString(wr.BranchName ?? "")}")" />
+                                                        CreatePrUrl="@(string.IsNullOrEmpty(repoUrl) || string.IsNullOrEmpty(wr.DefaultBranchName) ? null : $"{repoUrl}/compare/{wr.DefaultBranchName}...{Uri.EscapeDataString(wr.BranchName ?? "")}")" />
                                             </td>
                                             <td class="col-deps col-status-badge">
                                                 @{
@@ -890,7 +891,6 @@
     private void ShowConfirmOpenPr(IEnumerable<WorkspaceRepositoryLink> group)
     {
         const int confirmThreshold = 10;
-        var defaultBranch = SyncBadgeLabels.DefaultBranchName;
         var toOpen = new List<string>();
         foreach (var wr in group)
         {
@@ -905,7 +905,10 @@
             }
             else if ((wr.DefaultBranchAheadCommits ?? 0) > 0)
             {
-                toOpen.Add($"{repoUrl}/compare/{defaultBranch}...{Uri.EscapeDataString(wr.BranchName)}");
+                if (!string.IsNullOrWhiteSpace(wr.DefaultBranchName))
+                {
+                    toOpen.Add($"{repoUrl}/compare/{wr.DefaultBranchName}...{Uri.EscapeDataString(wr.BranchName)}");
+                }
             }
         }
         if (toOpen.Count == 0)
@@ -942,7 +945,30 @@
 
     private void ShowConfirmSyncToDefaultLevel(List<int> repositoryIds)
     {
-        _ = CheckBranchesAndConfirmSyncToDefaultLevelAsync(repositoryIds);
+        if (workspace == null || repositoryIds == null || repositoryIds.Count == 0)
+            return;
+
+        var nonDefaultRepoIds = repositoryIds
+            .Select(id => workspaceRepositories.FirstOrDefault(w => w.RepositoryId == id))
+            .Where(wr =>
+            {
+                if (wr == null || string.IsNullOrWhiteSpace(wr.BranchName))
+                    return false;
+                if (string.IsNullOrWhiteSpace(wr.DefaultBranchName))
+                    return true;
+                return !string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal);
+            })
+            .Select(wr => wr!.RepositoryId)
+            .Distinct()
+            .ToList();
+
+        if (nonDefaultRepoIds.Count == 0)
+        {
+            ToastService.Show("All repositories in this level are already on the default branch.");
+            return;
+        }
+
+        _ = CheckBranchesAndConfirmSyncToDefaultLevelAsync(nonDefaultRepoIds);
     }
 
     private async Task CheckBranchesAndConfirmSyncToDefaultLevelAsync(List<int> repositoryIds)
@@ -951,25 +977,20 @@
             return;
 
         isCheckingBranchesForSyncToDefault = true;
-        checkingBranchesMessage = "Checking branches...";
+        checkingBranchesMessage = "Preparing...";
         _syncToDefaultCheckResults = null;
         await InvokeAsync(StateHasChanged);
 
         try
         {
-            await using var scope = ServiceScopeFactory.CreateAsyncScope();
-            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            var repos = repositoryIds
-                .Select(id => (id, workspaceRepositories.FirstOrDefault(w => w.RepositoryId == id)?.Repository?.RepositoryName ?? ""))
-                .Where(t => !string.IsNullOrEmpty(t.Item2))
-                .Select(t => (t.id, t.Item2))
+            // Use persisted workspace link state (updated by hooks); no agent GetCommitCounts call.
+            var checkResults = repositoryIds
+                .Select(repoId =>
+                {
+                    var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
+                    return (RepoId: repoId, DefaultAhead: wr?.DefaultBranchAheadCommits, HasUpstream: wr?.BranchHasUpstream);
+                })
                 .ToList();
-            if (repos.Count == 0)
-            {
-                ToastService.Show("No repositories to check.");
-                return;
-            }
-            var checkResults = await workspaceGitService.GetCommitCountsForReposAsync(WorkspaceId, repos);
             var safeRepoIds = checkResults
                 .Where(r => (r.DefaultAhead ?? 0) == 0 || IsPrMergedForRepo(r.RepoId))
                 .Select(r => r.RepoId)
@@ -1001,7 +1022,7 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error checking branches for sync to default");
-            ToastService.Show("Failed to check branches. The GrayMoon Agent may be offline.");
+            ToastService.Show("Failed to prepare sync to default.");
         }
         finally
         {
@@ -2226,30 +2247,27 @@
 
         CloseSwitchBranchModal();
         isCheckingBranchesForSyncToDefault = true;
-        checkingBranchesMessage = "Checking branches...";
+        checkingBranchesMessage = "Preparing...";
         await InvokeAsync(StateHasChanged);
 
         try
         {
-            await using var scope = ServiceScopeFactory.CreateAsyncScope();
-            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            var repos = new List<(int RepoId, string RepoName)> { (repositoryId, repositoryName) };
-            var checkResults = await workspaceGitService.GetCommitCountsForReposAsync(WorkspaceId, repos);
-            var result = checkResults.FirstOrDefault(r => r.RepoId == repositoryId);
+            // Use persisted workspace link state (updated by hooks); no agent GetCommitCounts call.
+            var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repositoryId);
+            var defaultAhead = wr?.DefaultBranchAheadCommits ?? 0;
+            var hasUpstream = wr?.BranchHasUpstream == true;
 
-            if ((result.DefaultAhead ?? 0) > 0 && !IsPrMergedForRepo(repositoryId))
+            if (defaultAhead > 0 && !IsPrMergedForRepo(repositoryId))
             {
                 ToastService.Show("Skipped sync to default: commits ahead of default branch and PR is not merged.");
                 return;
             }
-            var hasUpstream = result.HasUpstream == true;
-            // From Switch Branch modal: no confirmation, proceed directly
             await SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, hasUpstream, defaultBranch);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error checking branches for sync to default (repository {RepositoryId})", repositoryId);
-            ToastService.Show("Failed to check branches. The GrayMoon Agent may be offline.");
+            Logger.LogError(ex, "Error preparing sync to default (repository {RepositoryId})", repositoryId);
+            ToastService.Show("Failed to prepare sync to default.");
         }
         finally
         {
@@ -2264,7 +2282,7 @@
             return;
 
         isSyncingToDefault = true;
-        syncToDefaultMessage = string.IsNullOrWhiteSpace(defaultBranchName) ? "Syncing to default branch..." : $"Syncing to {defaultBranchName}...";
+        syncToDefaultMessage = string.IsNullOrWhiteSpace(defaultBranchName) ? "Synchronizing to default branch..." : $"Synchronizing to {defaultBranchName}...";
         errorMessage = null;
         await InvokeAsync(StateHasChanged);
 
@@ -2326,12 +2344,13 @@
 
         isSyncingToDefault = true;
         var total = repositoryIds.Count;
-        syncToDefaultMessage = total > 1 ? "Syncing to default branch..." : "Syncing to default branch...";
+        syncToDefaultMessage = total > 1 ? "Synchronizing to default branch..." : "Synchronizing to default branch...";
         errorMessage = null;
         await InvokeAsync(StateHasChanged);
 
         var maxParallel = Math.Max(1, WorkspaceOptions?.Value?.MaxParallelOperations ?? 16);
         var resultByRepo = checkResults?.ToDictionary(r => r.RepoId) ?? new Dictionary<int, (int RepoId, int? DefaultAhead, bool? HasUpstream)>();
+        var completedCount = 0;
 
         try
         {
@@ -2344,7 +2363,15 @@
                 var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repositoryId);
                 var currentBranchName = wr?.BranchName;
                 if (string.IsNullOrWhiteSpace(currentBranchName))
+                {
+                    var c = Interlocked.Increment(ref completedCount);
+                    if (total > 1)
+                    {
+                        syncToDefaultMessage = $"Synchronized {c} of {total} to default branch";
+                        await InvokeAsync(StateHasChanged);
+                    }
                     return (repositoryId, Success: true, ErrorMsg: (string?)null);
+                }
 
                 await semaphore.WaitAsync();
                 try
@@ -2377,17 +2404,22 @@
                 finally
                 {
                     semaphore.Release();
+                    var c = Interlocked.Increment(ref completedCount);
+                    if (total > 1)
+                    {
+                        syncToDefaultMessage = $"Synchronized {c} of {total} to default branch";
+                        await InvokeAsync(StateHasChanged);
+                    }
                 }
             });
 
             var results = await Task.WhenAll(tasks);
-            var completed = 0;
+            var successCount = results.Count(r => r.Success);
             foreach (var (repoId, success, errMsg) in results)
             {
                 if (success)
                 {
                     repositoryErrors.Remove(repoId);
-                    completed++;
                 }
                 else if (errMsg != null)
                 {
@@ -2397,7 +2429,7 @@
                 }
             }
             if (total > 1)
-                syncToDefaultMessage = $"Synced {completed} of {total} to default branch";
+                syncToDefaultMessage = $"Synchronized {successCount} of {total} to default branch";
             await InvokeAsync(StateHasChanged);
             await RefreshFromSync();
         }

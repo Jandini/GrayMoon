@@ -2,11 +2,9 @@ using GrayMoon.App.Models;
 
 namespace GrayMoon.App.Services;
 
-/// <summary>Display text for RepoSyncStatus badges.</summary>
+/// <summary>Display text for RepoSyncStatus badges and search.</summary>
 public static class SyncBadgeLabels
 {
-    public const string DefaultBranchName = "main";
-
     public static string GetSyncBadgeText(RepoSyncStatus status)
     {
         return status switch
@@ -20,3 +18,4 @@ public static class SyncBadgeLabels
         };
     }
 }
+
