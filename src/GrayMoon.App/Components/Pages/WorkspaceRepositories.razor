@@ -402,6 +402,7 @@
 <LoadingOverlay IsVisible="@isCreatingBranches" Message="@createBranchesProgressMessage" />
 <LoadingOverlay IsVisible="@isCreatingBranch" Message="@createBranchMessage" />
 <LoadingOverlay IsVisible="@isSyncingToDefault" Message="@syncToDefaultMessage" />
+<LoadingOverlay IsVisible="@isCheckingBranchesForSyncToDefault" Message="@checkingBranchesMessage" />
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
@@ -482,6 +483,9 @@
     private string createBranchMessage = "";
     private bool isSyncingToDefault = false;
     private string syncToDefaultMessage = "";
+    private bool isCheckingBranchesForSyncToDefault = false;
+    private string checkingBranchesMessage = "Checking branches...";
+    private IReadOnlyList<(int RepoId, int? DefaultAhead, bool? HasUpstream)>? _syncToDefaultCheckResults = null;
     private bool showUpdateModal = false;
     private bool showUpdateSingleRepoDependenciesModal = false;
     private SyncDependenciesRepoPayload? updateSingleRepoDependenciesPayload = null;
@@ -933,10 +937,54 @@
 
     private void ShowConfirmSyncToDefaultLevel(List<int> repositoryIds)
     {
-        if (repositoryIds.Count <= 1)
-            _ = SyncToDefaultLevelAsync(repositoryIds);
-        else
-            ShowConfirm($"Do you want to sync to default branch for {repositoryIds.Count} repositories in this level?", () => SyncToDefaultLevelAsync(repositoryIds));
+        _ = CheckBranchesAndConfirmSyncToDefaultLevelAsync(repositoryIds);
+    }
+
+    private async Task CheckBranchesAndConfirmSyncToDefaultLevelAsync(List<int> repositoryIds)
+    {
+        if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || isCheckingBranchesForSyncToDefault || isSyncingToDefault)
+            return;
+
+        isCheckingBranchesForSyncToDefault = true;
+        checkingBranchesMessage = "Checking branches...";
+        _syncToDefaultCheckResults = null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+            var repos = repositoryIds
+                .Select(id => (id, workspaceRepositories.FirstOrDefault(w => w.RepositoryId == id)?.Repository?.RepositoryName ?? ""))
+                .Where(t => !string.IsNullOrEmpty(t.Item2))
+                .Select(t => (t.id, t.Item2))
+                .ToList();
+            if (repos.Count == 0)
+            {
+                ToastService.Show("No repositories to check.");
+                return;
+            }
+            var checkResults = await workspaceGitService.GetCommitCountsForReposAsync(WorkspaceId, repos);
+            _syncToDefaultCheckResults = checkResults;
+
+            var anyAhead = checkResults.Any(r => (r.DefaultAhead ?? 0) > 0);
+            if (anyAhead)
+            {
+                ToastService.Show("There are commits ahead of default branch. You cannot perform sync to default.");
+                return;
+            }
+            ShowConfirm("There are no commits ahead of default branch. You can perform sync to default.", () => SyncToDefaultLevelAsync(repositoryIds));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error checking branches for sync to default");
+            ToastService.Show("Failed to check branches. The GrayMoon Agent may be offline.");
+        }
+        finally
+        {
+            isCheckingBranchesForSyncToDefault = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private void ShowConfirmOpenGitHub(int count, IReadOnlyList<string?> urls)
@@ -2142,27 +2190,72 @@
     private async Task SyncToDefaultFromModalAsync((int RepositoryId, string? RepositoryName, string CurrentBranchName, string DefaultBranch) request)
     {
         var (repositoryId, repositoryName, currentBranchName, defaultBranch) = request;
-        if (workspace == null || isSyncingToDefault || isSyncing || isUpdating)
+        if (workspace == null || isSyncingToDefault || isSyncing || isUpdating || isCheckingBranchesForSyncToDefault)
+            return;
+        if (string.IsNullOrWhiteSpace(repositoryName))
             return;
 
         CloseSwitchBranchModal();
+        isCheckingBranchesForSyncToDefault = true;
+        checkingBranchesMessage = "Checking branches...";
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+            var repos = new List<(int RepoId, string RepoName)> { (repositoryId, repositoryName) };
+            var checkResults = await workspaceGitService.GetCommitCountsForReposAsync(WorkspaceId, repos);
+            var result = checkResults.FirstOrDefault(r => r.RepoId == repositoryId);
+
+            if ((result.DefaultAhead ?? 0) > 0)
+            {
+                ToastService.Show("There are commits ahead of default branch. You cannot perform sync to default.");
+                return;
+            }
+            var hasUpstream = result.HasUpstream == true;
+            ShowConfirm("There are no commits ahead of default branch. You can perform sync to default.", () => SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, hasUpstream));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error checking branches for sync to default (repository {RepositoryId})", repositoryId);
+            ToastService.Show("Failed to check branches. The GrayMoon Agent may be offline.");
+        }
+        finally
+        {
+            isCheckingBranchesForSyncToDefault = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task SyncToDefaultSingleRepoAfterCheckAsync(int repositoryId, string repositoryName, string currentBranchName, bool deleteRemoteFirst)
+    {
+        if (workspace == null || isSyncingToDefault || isSyncing || isUpdating)
+            return;
+
         isSyncingToDefault = true;
-        syncToDefaultMessage = $"Syncing to {defaultBranch}...";
+        syncToDefaultMessage = $"Syncing to default branch...";
         errorMessage = null;
         await InvokeAsync(StateHasChanged);
 
         try
         {
             var httpClient = HttpClientFactory.CreateClient();
-            var apiRequest = new
+            var baseUrl = ApiBaseUrl;
+
+            if (deleteRemoteFirst)
             {
-                workspaceId = WorkspaceId,
-                repositoryId,
-                currentBranchName
-            };
+                var deleteRequest = new { workspaceId = WorkspaceId, repositoryId, branchName = currentBranchName, isRemote = true };
+                var deleteJson = System.Text.Json.JsonSerializer.Serialize(deleteRequest);
+                var deleteContent = new System.Net.Http.StringContent(deleteJson, System.Text.Encoding.UTF8, "application/json");
+                var deleteResponse = await httpClient.PostAsync($"{baseUrl}/api/branches/delete", deleteContent);
+                if (!deleteResponse.IsSuccessStatusCode)
+                    Logger.LogWarning("Delete remote branch failed for repo {RepositoryId}: {StatusCode}", repositoryId, deleteResponse.StatusCode);
+            }
+
+            var apiRequest = new { workspaceId = WorkspaceId, repositoryId, currentBranchName };
             var json = System.Text.Json.JsonSerializer.Serialize(apiRequest);
             var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            var baseUrl = ApiBaseUrl;
             var response = await httpClient.PostAsync($"{baseUrl}/api/branches/sync-to-default", content);
 
             if (response.IsSuccessStatusCode)
@@ -2194,6 +2287,9 @@
         if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || isSyncingToDefault || isSyncing || isUpdating)
             return;
 
+        var checkResults = _syncToDefaultCheckResults;
+        _syncToDefaultCheckResults = null;
+
         isSyncingToDefault = true;
         syncToDefaultMessage = $"Syncing to default branch...";
         errorMessage = null;
@@ -2205,14 +2301,28 @@
             var baseUrl = ApiBaseUrl;
             var completed = 0;
             var total = repositoryIds.Count;
+            var resultByRepo = checkResults?.ToDictionary(r => r.RepoId) ?? new Dictionary<int, (int RepoId, int? DefaultAhead, bool? HasUpstream)>();
+
             foreach (var repositoryId in repositoryIds)
             {
                 var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repositoryId);
                 var currentBranchName = wr?.BranchName;
                 if (string.IsNullOrWhiteSpace(currentBranchName))
                     continue;
+
                 syncToDefaultMessage = $"Syncing to default branch... ({completed + 1} of {total})";
                 await InvokeAsync(StateHasChanged);
+
+                if (resultByRepo.TryGetValue(repositoryId, out var r) && r.HasUpstream == true)
+                {
+                    var deleteRequest = new { workspaceId = WorkspaceId, repositoryId, branchName = currentBranchName, isRemote = true };
+                    var deleteJson = System.Text.Json.JsonSerializer.Serialize(deleteRequest);
+                    var deleteContent = new System.Net.Http.StringContent(deleteJson, System.Text.Encoding.UTF8, "application/json");
+                    var deleteResponse = await httpClient.PostAsync($"{baseUrl}/api/branches/delete", deleteContent);
+                    if (!deleteResponse.IsSuccessStatusCode)
+                        Logger.LogWarning("Delete remote branch failed for repo {RepositoryId}: {StatusCode}", repositoryId, deleteResponse.StatusCode);
+                }
+
                 var apiRequest = new { workspaceId = WorkspaceId, repositoryId, currentBranchName };
                 var json = System.Text.Json.JsonSerializer.Serialize(apiRequest);
                 var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");

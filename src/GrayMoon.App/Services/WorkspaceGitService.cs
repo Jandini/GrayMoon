@@ -995,6 +995,50 @@ public class WorkspaceGitService(
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
 
+    /// <summary>Runs GetCommitCounts (agent) for each repo and returns DefaultBranchAhead and HasUpstream per repo. Used to check if sync-to-default is safe (no commits ahead of default).</summary>
+    public async Task<IReadOnlyList<(int RepoId, int? DefaultAhead, bool? HasUpstream)>> GetCommitCountsForReposAsync(
+        int workspaceId,
+        IReadOnlyList<(int RepoId, string RepoName)> repos,
+        CancellationToken cancellationToken = default)
+    {
+        if (repos.Count == 0)
+            return Array.Empty<(int, int?, bool?)>();
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            return Array.Empty<(int, int?, bool?)>();
+
+        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var results = new List<(int RepoId, int? DefaultAhead, bool? HasUpstream)>();
+
+        foreach (var (repoId, repoName) in repos)
+        {
+            try
+            {
+                var response = await _agentBridge.SendCommandAsync("GetCommitCounts", new
+                {
+                    workspaceName = workspace.Name,
+                    repositoryName = repoName,
+                    workspaceRoot
+                }, cancellationToken);
+                if (!response.Success || response.Data == null)
+                {
+                    results.Add((repoId, null, null));
+                    continue;
+                }
+                var data = AgentResponseJson.DeserializeAgentResponse<AgentCommitCountsResponse>(response.Data);
+                results.Add((repoId, data?.DefaultBranchAhead, data?.HasUpstream));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "GetCommitCounts failed for repo {RepoId} ({RepoName})", repoId, repoName);
+                results.Add((repoId, null, null));
+            }
+        }
+
+        return results;
+    }
+
     /// <summary>Refreshes version for a single repo and persists. Returns (success, errorMessage) for caller to report and optionally stop workflow.</summary>
     public async Task<(bool Success, string? ErrorMessage)> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
     {
