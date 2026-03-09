@@ -35,3 +35,5 @@ The app runs in a container and does not run git or access your workspace filesy
 2. **Run on the host** — Run the agent on the same machine (or network) as your repositories, e.g. as a console app or Windows/Linux service.
 
 When the agent is connected, the app shows an **online** badge; sync and repo operations use the agent. When it’s offline, sync fails with a clear message. 
+
+
