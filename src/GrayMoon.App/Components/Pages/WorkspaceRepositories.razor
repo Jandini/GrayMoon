@@ -967,13 +967,13 @@
             var checkResults = await workspaceGitService.GetCommitCountsForReposAsync(WorkspaceId, repos);
             _syncToDefaultCheckResults = checkResults;
 
-            var anyAhead = checkResults.Any(r => (r.DefaultAhead ?? 0) > 0);
-            if (anyAhead)
+            var anyBlocked = checkResults.Any(r => (r.DefaultAhead ?? 0) > 0 && !IsPrMergedForRepo(r.RepoId));
+            if (anyBlocked)
             {
-                ToastService.Show("There are commits ahead of default branch. You cannot perform sync to default.");
+                ToastService.Show("There are commits ahead of default branch and the PR is not merged. You cannot perform sync to default.");
                 return;
             }
-            ShowConfirm("There are no commits ahead of default branch. You can perform sync to default.", () => SyncToDefaultLevelAsync(repositoryIds));
+            ShowConfirm("There are no commits ahead of default branch. You can perform sync to default. If you have used \"Squash merge\" this is safe to proceed.", () => SyncToDefaultLevelAsync(repositoryIds));
         }
         catch (Exception ex)
         {
@@ -998,6 +998,12 @@
             _ = OpenGitHubAsync();
         else
             ShowConfirm($"Do you want to open GitHub page for {count} repositories?", OpenGitHubAsync);
+    }
+
+    /// <summary>True if the workspace has a merged PR for this repository's current branch (from prByRepositoryId).</summary>
+    private bool IsPrMergedForRepo(int repositoryId)
+    {
+        return prByRepositoryId.TryGetValue(repositoryId, out var pr) && pr?.IsMerged == true;
     }
 
     private async Task ShowConfirmUpdateDependenciesAsync(int repositoryId, int unmatchedCount)
@@ -2208,13 +2214,13 @@
             var checkResults = await workspaceGitService.GetCommitCountsForReposAsync(WorkspaceId, repos);
             var result = checkResults.FirstOrDefault(r => r.RepoId == repositoryId);
 
-            if ((result.DefaultAhead ?? 0) > 0)
+            if ((result.DefaultAhead ?? 0) > 0 && !IsPrMergedForRepo(repositoryId))
             {
-                ToastService.Show("There are commits ahead of default branch. You cannot perform sync to default.");
+                ToastService.Show("There are commits ahead of default branch and the PR is not merged. You cannot perform sync to default.");
                 return;
             }
             var hasUpstream = result.HasUpstream == true;
-            ShowConfirm("There are no commits ahead of default branch. You can perform sync to default.", () => SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, hasUpstream));
+            ShowConfirm("There are no commits ahead of default branch. You can perform sync to default. If you have used \"Squash merge\" this is safe to proceed.", () => SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, hasUpstream, defaultBranch));
         }
         catch (Exception ex)
         {
@@ -2228,13 +2234,13 @@
         }
     }
 
-    private async Task SyncToDefaultSingleRepoAfterCheckAsync(int repositoryId, string repositoryName, string currentBranchName, bool deleteRemoteFirst)
+    private async Task SyncToDefaultSingleRepoAfterCheckAsync(int repositoryId, string repositoryName, string currentBranchName, bool deleteRemoteFirst, string? defaultBranchName = null)
     {
         if (workspace == null || isSyncingToDefault || isSyncing || isUpdating)
             return;
 
         isSyncingToDefault = true;
-        syncToDefaultMessage = $"Syncing to default branch...";
+        syncToDefaultMessage = string.IsNullOrWhiteSpace(defaultBranchName) ? "Syncing to default branch..." : $"Syncing to {defaultBranchName}...";
         errorMessage = null;
         await InvokeAsync(StateHasChanged);
 
@@ -2250,7 +2256,11 @@
                 var deleteContent = new System.Net.Http.StringContent(deleteJson, System.Text.Encoding.UTF8, "application/json");
                 var deleteResponse = await httpClient.PostAsync($"{baseUrl}/api/branches/delete", deleteContent);
                 if (!deleteResponse.IsSuccessStatusCode)
-                    Logger.LogWarning("Delete remote branch failed for repo {RepositoryId}: {StatusCode}", repositoryId, deleteResponse.StatusCode);
+                {
+                    var deleteError = await deleteResponse.Content.ReadAsStringAsync();
+                    if (deleteError.IndexOf("not exist", StringComparison.OrdinalIgnoreCase) < 0 && deleteError.IndexOf("not found", StringComparison.OrdinalIgnoreCase) < 0)
+                        Logger.LogWarning("Delete remote branch failed for repo {RepositoryId}: {StatusCode}", repositoryId, deleteResponse.StatusCode);
+                }
             }
 
             var apiRequest = new { workspaceId = WorkspaceId, repositoryId, currentBranchName };
@@ -2291,7 +2301,8 @@
         _syncToDefaultCheckResults = null;
 
         isSyncingToDefault = true;
-        syncToDefaultMessage = $"Syncing to default branch...";
+        var total = repositoryIds.Count;
+        syncToDefaultMessage = total > 1 ? "Syncing to default branch..." : "Syncing to default branch...";
         errorMessage = null;
         await InvokeAsync(StateHasChanged);
 
@@ -2300,7 +2311,6 @@
             var httpClient = HttpClientFactory.CreateClient();
             var baseUrl = ApiBaseUrl;
             var completed = 0;
-            var total = repositoryIds.Count;
             var resultByRepo = checkResults?.ToDictionary(r => r.RepoId) ?? new Dictionary<int, (int RepoId, int? DefaultAhead, bool? HasUpstream)>();
 
             foreach (var repositoryId in repositoryIds)
@@ -2310,7 +2320,6 @@
                 if (string.IsNullOrWhiteSpace(currentBranchName))
                     continue;
 
-                syncToDefaultMessage = $"Syncing to default branch... ({completed + 1} of {total})";
                 await InvokeAsync(StateHasChanged);
 
                 if (resultByRepo.TryGetValue(repositoryId, out var r) && r.HasUpstream == true)
@@ -2320,7 +2329,11 @@
                     var deleteContent = new System.Net.Http.StringContent(deleteJson, System.Text.Encoding.UTF8, "application/json");
                     var deleteResponse = await httpClient.PostAsync($"{baseUrl}/api/branches/delete", deleteContent);
                     if (!deleteResponse.IsSuccessStatusCode)
-                        Logger.LogWarning("Delete remote branch failed for repo {RepositoryId}: {StatusCode}", repositoryId, deleteResponse.StatusCode);
+                    {
+                        var deleteError = await deleteResponse.Content.ReadAsStringAsync();
+                        if (deleteError.IndexOf("not exist", StringComparison.OrdinalIgnoreCase) < 0 && deleteError.IndexOf("not found", StringComparison.OrdinalIgnoreCase) < 0)
+                            Logger.LogWarning("Delete remote branch failed for repo {RepositoryId}: {StatusCode}", repositoryId, deleteResponse.StatusCode);
+                    }
                 }
 
                 var apiRequest = new { workspaceId = WorkspaceId, repositoryId, currentBranchName };
@@ -2336,6 +2349,9 @@
                     Logger.LogError("SyncToDefault failed for repo {RepositoryId}: {StatusCode}, {Error}", repositoryId, response.StatusCode, errorText);
                 }
                 completed++;
+                if (total > 1)
+                    syncToDefaultMessage = $"Synced {completed} of {total} to default branch";
+                await InvokeAsync(StateHasChanged);
             }
             await RefreshFromSync();
         }
