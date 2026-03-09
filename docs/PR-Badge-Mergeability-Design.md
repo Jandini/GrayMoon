@@ -57,7 +57,7 @@ GitHub’s REST API reference marks **`mergeable_state`** as a required string b
 | `unstable` | Mergeable from a conflict perspective but has failing or pending status/CI checks |
 | `blocked`  | Cannot merge (e.g. branch protection, required reviews)        |
 
-So the API **does deliver** something we can use for “conflict” (dirty / mergeable false), “mergeable” (clean / mergeable true), and “don’t know” (unknown / mergeable null). For “checks running”, we interpret **`unstable`** (and possibly `blocked`) as “checks or other requirements in progress / not satisfied”, and map that to a “checks running” badge (#d29922) in the UI. **`blocked`** is implemented as a separate state: orange badge (#e67700) with tooltip “approval required (code review)”.
+So the API **does deliver** something we can use for “conflict” (dirty / mergeable false), “mergeable” (clean / mergeable true), and “don’t know” (unknown / mergeable null). For “checks running”, we interpret **`unstable`** (and possibly `blocked`) as “checks or other requirements in progress / not satisfied”, and map that to a “checks running” badge (#d29922) in the UI. **`blocked`** is implemented as a separate state: orange badge (#e67700) with tooltip “Awaiting approval”.
 
 ---
 
@@ -120,7 +120,7 @@ Apply only when the badge is **open PR** (`#{number}`). Other badges (none, crea
 | `mergeable == null` or `mergeable_state == "unknown"` | Gray       | “Mergeability unknown” / “Checking…” |
 | `mergeable == false` or `mergeable_state == "dirty"`  | Red        | “Merge conflicts” |
 | `mergeable_state == "unstable"` (or “checks”)         | #d29922    | “Checks running” or “Failing checks” |
-| `mergeable_state == "blocked"`                      | Orange (#e67700) | “Approval required (code review)” |
+| `mergeable_state == "blocked"`                      | Orange (#e67700) | “Awaiting approval” |
 | `mergeable == true` or `mergeable_state == "clean"`   | Green      | “Mergeable”       |
 | Any other (e.g. `blocked`)                            | Gray       | “Unknown”         |
 
