@@ -1,4 +1,5 @@
 using GrayMoon.App.Data;
+using GrayMoon.App.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App;
@@ -18,6 +19,7 @@ public static class Migrations
         await MigrateWorkspaceRepositoriesDependencyLevelAndDependenciesAsync(dbContext);
         await MigrateWorkspaceRepositoriesDefaultBranchDivergenceAsync(dbContext);
         await MigrateWorkspaceRepositoriesDefaultBranchNameAsync(dbContext);
+        await MigrateWorkspaceRepositoriesSyncStatusWhenDefaultBranchMissingAsync(dbContext);
         await MigrateWorkspaceProjectsMatchedConnectorAsync(dbContext);
         await MigrateRepositoryBranchesAsync(dbContext);
         await MigrateRepositoryBranchesIsDefaultAsync(dbContext);
@@ -365,6 +367,33 @@ public static class Migrations
                     cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN DefaultBranchName TEXT";
                     await cmd.ExecuteNonQueryAsync();
                 }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Set SyncStatus to NeedsSync for any link where DefaultBranchName is null or empty, so existing data shows "sync" until a full sync persists the default branch.</summary>
+    public static async Task MigrateWorkspaceRepositoriesSyncStatusWhenDefaultBranchMissingAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='DefaultBranchName'";
+                var hasColumn = Convert.ToInt32(await cmd.ExecuteScalarAsync()) != 0;
+                if (!hasColumn)
+                    return;
+
+                var needsSyncValue = (int)RepoSyncStatus.NeedsSync;
+                cmd.CommandText = $"UPDATE WorkspaceRepositories SET SyncStatus = {needsSyncValue} WHERE (DefaultBranchName IS NULL OR trim(DefaultBranchName) = '')";
+                await cmd.ExecuteNonQueryAsync();
             }
         }
         catch
