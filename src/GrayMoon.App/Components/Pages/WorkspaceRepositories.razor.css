@@ -302,7 +302,6 @@
 /* Dependencies column: same badge logic as build (green = all match, red = any unmatched) */
 .repositories-table .build-dep-badge {
     font-weight: 400;
-    min-width: 2.5rem;
 }
 
 .repositories-table .build-dep-badge-none {
@@ -423,6 +422,16 @@
     text-overflow: clip;
 }
 
+.repositories-table td.col-pr {
+    overflow: visible;
+    text-overflow: clip;
+}
+
+.repositories-table td.col-divergence {
+    overflow: visible;
+    text-overflow: clip;
+}
+
 /* Commits badge: yellow when new branch not upstreamed (see GetCommitsBadge) */
 .repositories-table .commits-badge.commits-badge-not-upstreamed {
     background-color: #ffc107 !important;
@@ -458,6 +467,11 @@
 .col-version {
     width: auto;
     min-width: 0;
+}
+
+.repositories-table td.col-version {
+    overflow: none;
+    text-overflow: none;
 }
 
 @media (max-width: 640.98px) {
