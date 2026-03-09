@@ -351,7 +351,8 @@
                                         class="btn btn-warning" 
                                         @onclick="SyncToDefaultAsync"
                                         disabled="@isRefreshing">
-                                    Sync to @(string.Equals(defaultBranch, "main", StringComparison.OrdinalIgnoreCase) ? "Main" : defaultBranch)
+                                    <i class="bi bi-rewind me-1" aria-hidden="true"></i>
+                                    Sync to @defaultBranch
                                 </button>
                             }
                         }
