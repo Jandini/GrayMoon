@@ -44,6 +44,8 @@ else
             return "pr-badge-open-conflict";
         if (string.Equals(state, "unstable", StringComparison.OrdinalIgnoreCase))
             return "pr-badge-open-checks";
+        if (string.Equals(state, "blocked", StringComparison.OrdinalIgnoreCase))
+            return "pr-badge-open-blocked";
         if (pr.Mergeable == true || string.Equals(state, "clean", StringComparison.OrdinalIgnoreCase))
             return "pr-badge-open-mergeable";
         return "pr-badge-open-unknown";
@@ -58,6 +60,8 @@ else
             return "PR #" + pr.Number + " – merge conflicts";
         if (string.Equals(state, "unstable", StringComparison.OrdinalIgnoreCase))
             return "PR #" + pr.Number + " – checks running";
+        if (string.Equals(state, "blocked", StringComparison.OrdinalIgnoreCase))
+            return "PR #" + pr.Number + " – Cannot merge (review or requirements)";
         if (pr.Mergeable == true || string.Equals(state, "clean", StringComparison.OrdinalIgnoreCase))
             return "PR #" + pr.Number + " – mergeable";
         return "PR #" + pr.Number;

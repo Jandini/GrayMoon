@@ -55,9 +55,9 @@ GitHub’s REST API reference marks **`mergeable_state`** as a required string b
 | `clean`    | No conflicts; can be merged (accompanies `mergeable: true`)     |
 | `dirty`    | Merge conflicts (accompanies `mergeable: false`)               |
 | `unstable` | Mergeable from a conflict perspective but has failing or pending status/CI checks |
-| `blocked`  | Cannot merge (e.g. branch protection, required reviews)        |
+| `blocked`  | Cannot merge (branch protection: required reviews, changes requested, unsigned commits, etc.)        |
 
-So the API **does deliver** something we can use for “conflict” (dirty / mergeable false), “mergeable” (clean / mergeable true), and “don’t know” (unknown / mergeable null). For “checks running”, we have to interpret **`unstable`** (and possibly `blocked`) as “checks or other requirements in progress / not satisfied”, and map that to a “checks running” badge (#d29922) in the UI.
+So the API **does deliver** something we can use for “conflict” (dirty / mergeable false), “mergeable” (clean / mergeable true), and “don’t know” (unknown / mergeable null). For “checks running”, we interpret **`unstable`** (and possibly `blocked`) as “checks or other requirements in progress / not satisfied”, and map that to a “checks running” badge (#d29922) in the UI. **`blocked`** is a catch-all (approval not met, changes requested, or other branch protection); we show orange badge (#e67700) with tooltip “Cannot merge (review or requirements)”.
 
 ---
 
@@ -120,6 +120,7 @@ Apply only when the badge is **open PR** (`#{number}`). Other badges (none, crea
 | `mergeable == null` or `mergeable_state == "unknown"` | Gray       | “Mergeability unknown” / “Checking…” |
 | `mergeable == false` or `mergeable_state == "dirty"`  | Red        | “Merge conflicts” |
 | `mergeable_state == "unstable"` (or “checks”)         | #d29922    | “Checks running” or “Failing checks” |
+| `mergeable_state == "blocked"`                      | Orange (#e67700) | “Cannot merge (review or requirements)” |
 | `mergeable == true` or `mergeable_state == "clean"`   | Green      | “Mergeable”       |
 | Any other (e.g. `blocked`)                            | Gray       | “Unknown”         |
 
@@ -129,8 +130,8 @@ So:
 - **Green:** Mergeable (clean, no conflict).
 - **Red:** Conflict (dirty or mergeable false).
 - **#d29922:** Checks (unstable = checks running or failing).
-
----
+- **Orange:** Blocked (review or branch protection requirements not met).
+- **Gray:** Any other or unmapped `mergeable_state` falls back to unknown.
 
 ## 5. Null / “unknown” and Retries
 

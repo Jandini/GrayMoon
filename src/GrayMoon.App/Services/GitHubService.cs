@@ -1,6 +1,9 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using GrayMoon.App.Models;
+using Polly;
+using Polly.Retry;
 
 namespace GrayMoon.App.Services;
 
@@ -44,6 +47,28 @@ public class GitHubService : IConnectorService
                 new AuthenticationHeaderValue("Bearer", _options.PersonalAccessToken);
         }
     }
+
+    private static readonly ResiliencePipeline<HttpResponseMessage> GitHubGetRetryPipeline =
+        new ResiliencePipelineBuilder<HttpResponseMessage>()
+            .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
+            {
+                ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                    .HandleResult(r => r.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable)
+                    .Handle<HttpRequestException>()
+                    .Handle<TaskCanceledException>(),
+                // 3 quick retries with short backoff, then fail
+                MaxRetryAttempts = 3,
+                Delay = TimeSpan.FromSeconds(1),
+                BackoffType = DelayBackoffType.Exponential,
+                UseJitter = true,
+                OnRetry = static args =>
+                {
+                    if (args.Outcome.Result is HttpResponseMessage prev)
+                        prev.Dispose();
+                    return ValueTask.CompletedTask;
+                }
+            })
+            .Build();
 
     public async Task<List<GitHubOrganizationDto>> GetOrganizationsAsync()
     {
@@ -258,6 +283,28 @@ public class GitHubService : IConnectorService
         }
     }
 
+    private static HttpRequestMessage CreateGetRequest(Connector connector, string requestUri)
+    {
+        var baseUrl = string.IsNullOrWhiteSpace(connector.ApiBaseUrl)
+            ? "https://api.github.com/"
+            : connector.ApiBaseUrl.TrimEnd('/') + "/";
+        var request = new HttpRequestMessage(HttpMethod.Get, new Uri(new Uri(baseUrl), requestUri));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        request.Headers.UserAgent.ParseAdd("GrayMoon");
+        request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", connector.UserToken);
+        return request;
+    }
+
+    private async Task<HttpResponseMessage> GetResponseAsync(Connector connector, string requestUri, CancellationToken cancellationToken)
+    {
+        return await GitHubGetRetryPipeline.ExecuteAsync(async (ct) =>
+        {
+            using var request = CreateGetRequest(connector, requestUri);
+            return await _httpClient.SendAsync(request, ct);
+        }, cancellationToken);
+    }
+
     private async Task<T?> GetAsync<T>(string requestUri)
     {
         var response = await _httpClient.GetAsync(requestUri);
@@ -276,28 +323,18 @@ public class GitHubService : IConnectorService
 
     private async Task<T?> GetAsync<T>(Connector connector, string requestUri, CancellationToken cancellationToken = default)
     {
-        var baseUrl = string.IsNullOrWhiteSpace(connector.ApiBaseUrl)
-            ? "https://api.github.com/"
-            : connector.ApiBaseUrl.TrimEnd('/') + "/";
-
-        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(new Uri(baseUrl), requestUri));
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
-        request.Headers.UserAgent.ParseAdd("GrayMoon");
-        request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", connector.UserToken);
-
-        var response = await _httpClient.SendAsync(request, cancellationToken);
+        using var response = await GetResponseAsync(connector, requestUri, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            var errorContent = await response.Content.ReadAsStringAsync();
+            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
             _logger.LogError("GitHub API call failed. Status: {StatusCode}, URL: {Url}, Response: {Response}",
                 response.StatusCode,
-                new Uri(new Uri(baseUrl), requestUri),
+                response.RequestMessage?.RequestUri,
                 errorContent);
             response.EnsureSuccessStatusCode();
         }
 
-        return await response.Content.ReadFromJsonAsync<T>(_jsonOptions);
+        return await response.Content.ReadFromJsonAsync<T>(_jsonOptions, cancellationToken);
     }
 
     private async Task PostAsync(Connector connector, string requestUri, string? payload = null)

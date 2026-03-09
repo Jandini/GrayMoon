@@ -1,14 +1,16 @@
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services;
 
 /// <summary>Resolves pull request for a workspace repo's current branch via GitHub API.</summary>
 public sealed class GitHubPullRequestService(
     GitHubService gitHubService,
+    IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<GitHubPullRequestService> logger)
 {
-    private const int MaxConcurrency = 4;
+    private int MaxConcurrency => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
 
     /// <summary>Fetches PR info for the given repo and branch using the repo's connector. Returns null when not GitHub, connector invalid, or no PR.</summary>
     public async Task<PullRequestInfo?> GetPullRequestForBranchAsync(Repository repository, Connector? connector, string? branchName, CancellationToken cancellationToken = default)
