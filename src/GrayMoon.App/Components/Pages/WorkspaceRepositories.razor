@@ -122,6 +122,16 @@
                                                             <i class="bi bi-diagram-3" aria-hidden="true"></i>
                                                         </a>
                                                     }
+                                                    <span class="dependency-level-sync-to-default-link"
+                                                          role="button"
+                                                          tabindex="0"
+                                                          title="Sync to default branch..."
+                                                          style="cursor: pointer;"
+                                                          @onclick="() => ShowConfirmSyncToDefaultLevel(group.Select(wr => wr.RepositoryId).ToList())"
+                                                          @onclick:preventDefault
+                                                          aria-label="Sync to default branch">
+                                                        <i class="bi bi-rewind" aria-hidden="true"></i>
+                                                    </span>
                                                     <span class="dependency-level-sync-commits-link"
                                                           role="button"
                                                           tabindex="0"
@@ -919,6 +929,14 @@
             _ = SyncLevelAsync(repositoryIds);
         else
             ShowConfirm($"Do you want to sync (refresh version, branch, commits) for {repositoryIds.Count} repositories in this level?", () => SyncLevelAsync(repositoryIds));
+    }
+
+    private void ShowConfirmSyncToDefaultLevel(List<int> repositoryIds)
+    {
+        if (repositoryIds.Count <= 1)
+            _ = SyncToDefaultLevelAsync(repositoryIds);
+        else
+            ShowConfirm($"Do you want to sync to default branch for {repositoryIds.Count} repositories in this level?", () => SyncToDefaultLevelAsync(repositoryIds));
     }
 
     private void ShowConfirmOpenGitHub(int count, IReadOnlyList<string?> urls)
@@ -2163,6 +2181,58 @@
         {
             Logger.LogError(ex, "Error syncing to default branch for repository {RepositoryId}", repositoryId);
             repositoryErrors[repositoryId] = "An error occurred while syncing to default branch. The GrayMoon Agent may be offline.";
+        }
+        finally
+        {
+            isSyncingToDefault = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task SyncToDefaultLevelAsync(List<int> repositoryIds)
+    {
+        if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || isSyncingToDefault || isSyncing || isUpdating)
+            return;
+
+        isSyncingToDefault = true;
+        syncToDefaultMessage = $"Syncing to default branch...";
+        errorMessage = null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            var baseUrl = ApiBaseUrl;
+            var completed = 0;
+            var total = repositoryIds.Count;
+            foreach (var repositoryId in repositoryIds)
+            {
+                var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repositoryId);
+                var currentBranchName = wr?.BranchName;
+                if (string.IsNullOrWhiteSpace(currentBranchName))
+                    continue;
+                syncToDefaultMessage = $"Syncing to default branch... ({completed + 1} of {total})";
+                await InvokeAsync(StateHasChanged);
+                var apiRequest = new { workspaceId = WorkspaceId, repositoryId, currentBranchName };
+                var json = System.Text.Json.JsonSerializer.Serialize(apiRequest);
+                var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                var response = await httpClient.PostAsync($"{baseUrl}/api/branches/sync-to-default", content);
+                if (response.IsSuccessStatusCode)
+                    repositoryErrors.Remove(repositoryId);
+                else
+                {
+                    var errorText = await response.Content.ReadAsStringAsync();
+                    repositoryErrors[repositoryId] = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"Failed to sync to default branch: {response.StatusCode}";
+                    Logger.LogError("SyncToDefault failed for repo {RepositoryId}: {StatusCode}, {Error}", repositoryId, response.StatusCode, errorText);
+                }
+                completed++;
+            }
+            await RefreshFromSync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error syncing to default branch for level");
+            errorMessage = "An error occurred while syncing to default branch. The GrayMoon Agent may be offline.";
         }
         finally
         {
