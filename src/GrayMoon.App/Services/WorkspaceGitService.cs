@@ -1298,6 +1298,8 @@ public class WorkspaceGitService(
             {
                 wr.GitVersion = info.Version == "-" ? null : info.Version;
                 wr.BranchName = info.Branch == "-" ? null : info.Branch;
+                if (!string.IsNullOrWhiteSpace(info.DefaultBranch))
+                    wr.DefaultBranchName = info.DefaultBranch;
                 if (info.Projects.HasValue) wr.Projects = info.Projects;
                 if (info.OutgoingCommits.HasValue) wr.OutgoingCommits = info.OutgoingCommits;
                 if (info.IncomingCommits.HasValue) wr.IncomingCommits = info.IncomingCommits;

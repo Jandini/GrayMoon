@@ -27,6 +27,10 @@ public class WorkspaceRepositoryLink
     [MaxLength(200)]
     public string? BranchName { get; set; }
 
+    /// <summary>Repository's default branch name (e.g. main, master, develop). Set during sync from agent and reused for divergence / PR URLs and sync-to-default logic.</summary>
+    [MaxLength(200)]
+    public string? DefaultBranchName { get; set; }
+
     /// <summary>Number of .csproj projects in the repository (excludes .git). Set during sync.</summary>
     public int? Projects { get; set; }
 

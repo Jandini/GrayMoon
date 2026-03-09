@@ -184,8 +184,9 @@
                                         @if (repo != null)
                                         {
                                             var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl);
+                                            var defaultBranch = string.IsNullOrWhiteSpace(wr.DefaultBranchName) ? SyncBadgeLabels.DefaultBranchName : wr.DefaultBranchName;
                                             var branchUrl = !string.IsNullOrEmpty(repoUrl) && !string.IsNullOrEmpty(wr.BranchName)
-                                                ? $"{repoUrl}/compare/{SyncBadgeLabels.DefaultBranchName}...{Uri.EscapeDataString(wr.BranchName)}"
+                                                ? $"{repoUrl}/compare/{defaultBranch}...{Uri.EscapeDataString(wr.BranchName)}"
                                                 : null;
                                             <tr>
                                             <td class="col-repo">
@@ -234,13 +235,13 @@
                                                                 DefaultAhead="@wr.DefaultBranchAheadCommits"
                                                                 BranchName="@wr.BranchName"
                                                                 RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
-                                                                DefaultBranchName="@SyncBadgeLabels.DefaultBranchName" />
+                                                                DefaultBranchName="@(string.IsNullOrWhiteSpace(wr.DefaultBranchName) ? SyncBadgeLabels.DefaultBranchName : wr.DefaultBranchName)" />
                                             </td>
                                             <td class="col-pr text-center text-nowrap">
                                                 <PRBadge PullRequest="@(prByRepositoryId.TryGetValue(repo.RepositoryId, out var prInfo) ? prInfo : null)"
                                                         DefaultBranchAheadCommits="@wr.DefaultBranchAheadCommits"
                                                         IsPrVerified="@prByRepositoryId.ContainsKey(repo.RepositoryId)"
-                                                        CreatePrUrl="@(string.IsNullOrEmpty(repoUrl) ? null : $"{repoUrl}/compare/{SyncBadgeLabels.DefaultBranchName}...{Uri.EscapeDataString(wr.BranchName ?? "")}")" />
+                                                        CreatePrUrl="@(string.IsNullOrEmpty(repoUrl) ? null : $"{repoUrl}/compare/{(string.IsNullOrWhiteSpace(wr.DefaultBranchName) ? SyncBadgeLabels.DefaultBranchName : wr.DefaultBranchName)}...{Uri.EscapeDataString(wr.BranchName ?? "")}")" />
                                             </td>
                                             <td class="col-deps col-status-badge">
                                                 @{
@@ -890,7 +891,6 @@
     private void ShowConfirmOpenPr(IEnumerable<WorkspaceRepositoryLink> group)
     {
         const int confirmThreshold = 10;
-        var defaultBranch = SyncBadgeLabels.DefaultBranchName;
         var toOpen = new List<string>();
         foreach (var wr in group)
         {
@@ -905,6 +905,7 @@
             }
             else if ((wr.DefaultBranchAheadCommits ?? 0) > 0)
             {
+                var defaultBranch = string.IsNullOrWhiteSpace(wr.DefaultBranchName) ? SyncBadgeLabels.DefaultBranchName : wr.DefaultBranchName;
                 toOpen.Add($"{repoUrl}/compare/{defaultBranch}...{Uri.EscapeDataString(wr.BranchName)}");
             }
         }
@@ -942,7 +943,31 @@
 
     private void ShowConfirmSyncToDefaultLevel(List<int> repositoryIds)
     {
-        _ = CheckBranchesAndConfirmSyncToDefaultLevelAsync(repositoryIds);
+        if (workspace == null || repositoryIds == null || repositoryIds.Count == 0)
+            return;
+
+        var nonDefaultRepoIds = repositoryIds
+            .Select(id => workspaceRepositories.FirstOrDefault(w => w.RepositoryId == id))
+            .Where(wr =>
+            {
+                if (wr == null || string.IsNullOrWhiteSpace(wr.BranchName))
+                    return false;
+                var defaultBranch = string.IsNullOrWhiteSpace(wr.DefaultBranchName)
+                    ? SyncBadgeLabels.DefaultBranchName
+                    : wr.DefaultBranchName;
+                return !string.Equals(wr.BranchName, defaultBranch, StringComparison.Ordinal);
+            })
+            .Select(wr => wr!.RepositoryId)
+            .Distinct()
+            .ToList();
+
+        if (nonDefaultRepoIds.Count == 0)
+        {
+            ToastService.Show("All repositories in this level are already on the default branch.");
+            return;
+        }
+
+        _ = CheckBranchesAndConfirmSyncToDefaultLevelAsync(nonDefaultRepoIds);
     }
 
     private async Task CheckBranchesAndConfirmSyncToDefaultLevelAsync(List<int> repositoryIds)
