@@ -2290,7 +2290,7 @@
             return;
 
         isSyncingToDefault = true;
-        syncToDefaultMessage = string.IsNullOrWhiteSpace(defaultBranchName) ? "Syncing to default branch..." : $"Syncing to {defaultBranchName}...";
+        syncToDefaultMessage = string.IsNullOrWhiteSpace(defaultBranchName) ? "Synchronizing to default branch..." : $"Synchronizing to {defaultBranchName}...";
         errorMessage = null;
         await InvokeAsync(StateHasChanged);
 
@@ -2352,12 +2352,13 @@
 
         isSyncingToDefault = true;
         var total = repositoryIds.Count;
-        syncToDefaultMessage = total > 1 ? "Syncing to default branch..." : "Syncing to default branch...";
+        syncToDefaultMessage = total > 1 ? "Synchronizing to default branch..." : "Synchronizing to default branch...";
         errorMessage = null;
         await InvokeAsync(StateHasChanged);
 
         var maxParallel = Math.Max(1, WorkspaceOptions?.Value?.MaxParallelOperations ?? 16);
         var resultByRepo = checkResults?.ToDictionary(r => r.RepoId) ?? new Dictionary<int, (int RepoId, int? DefaultAhead, bool? HasUpstream)>();
+        var completedCount = 0;
 
         try
         {
@@ -2370,7 +2371,15 @@
                 var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repositoryId);
                 var currentBranchName = wr?.BranchName;
                 if (string.IsNullOrWhiteSpace(currentBranchName))
+                {
+                    var c = Interlocked.Increment(ref completedCount);
+                    if (total > 1)
+                    {
+                        syncToDefaultMessage = $"Synchronized {c} of {total} to default branch";
+                        await InvokeAsync(StateHasChanged);
+                    }
                     return (repositoryId, Success: true, ErrorMsg: (string?)null);
+                }
 
                 await semaphore.WaitAsync();
                 try
@@ -2403,17 +2412,22 @@
                 finally
                 {
                     semaphore.Release();
+                    var c = Interlocked.Increment(ref completedCount);
+                    if (total > 1)
+                    {
+                        syncToDefaultMessage = $"Synchronized {c} of {total} to default branch";
+                        await InvokeAsync(StateHasChanged);
+                    }
                 }
             });
 
             var results = await Task.WhenAll(tasks);
-            var completed = 0;
+            var successCount = results.Count(r => r.Success);
             foreach (var (repoId, success, errMsg) in results)
             {
                 if (success)
                 {
                     repositoryErrors.Remove(repoId);
-                    completed++;
                 }
                 else if (errMsg != null)
                 {
@@ -2423,7 +2437,7 @@
                 }
             }
             if (total > 1)
-                syncToDefaultMessage = $"Synced {completed} of {total} to default branch";
+                syncToDefaultMessage = $"Synchronized {successCount} of {total} to default branch";
             await InvokeAsync(StateHasChanged);
             await RefreshFromSync();
         }
