@@ -157,7 +157,7 @@
                                                     <span class="dependency-level-sync-link"
                                                           role="button"
                                                           tabindex="0"
-                                                          title="Sync (refresh version, branch, commits) for all repositories in this level..."
+                                                          title="Synchronize all repositories in this level..."
                                                           style="cursor: pointer;"
                                                           @onclick="() => ShowConfirmSyncLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                           @onclick:preventDefault
@@ -933,10 +933,11 @@
 
     private void ShowConfirmSyncLevel(List<int> repositoryIds)
     {
-        if (repositoryIds.Count <= 1)
+        const int confirmThreshold = 10;
+        if (repositoryIds.Count < confirmThreshold)
             _ = SyncLevelAsync(repositoryIds);
         else
-            ShowConfirm($"Do you want to sync (refresh version, branch, commits) for {repositoryIds.Count} repositories in this level?", () => SyncLevelAsync(repositoryIds));
+            ShowConfirm($"Do you want to sync {repositoryIds.Count} repositories in this level?", () => SyncLevelAsync(repositoryIds));
     }
 
     private void ShowConfirmSyncToDefaultLevel(List<int> repositoryIds)
