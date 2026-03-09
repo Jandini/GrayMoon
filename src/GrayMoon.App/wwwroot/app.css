@@ -953,6 +953,10 @@ table.resizable-columns th:hover .resize-handle::after {
     background-color: #d29922;
     color: #000 !important;
 }
+.repositories-table td.col-pr .pr-badge-open-blocked {
+    background-color: #e67700;
+    color: #fff !important;
+}
 .repositories-table td.col-pr .pr-badge-merged {
     background-color: #8957e5;
     color: #fff !important;
