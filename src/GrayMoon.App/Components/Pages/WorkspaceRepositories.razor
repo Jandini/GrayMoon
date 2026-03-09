@@ -977,25 +977,20 @@
             return;
 
         isCheckingBranchesForSyncToDefault = true;
-        checkingBranchesMessage = "Checking branches...";
+        checkingBranchesMessage = "Preparing...";
         _syncToDefaultCheckResults = null;
         await InvokeAsync(StateHasChanged);
 
         try
         {
-            await using var scope = ServiceScopeFactory.CreateAsyncScope();
-            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            var repos = repositoryIds
-                .Select(id => (id, workspaceRepositories.FirstOrDefault(w => w.RepositoryId == id)?.Repository?.RepositoryName ?? ""))
-                .Where(t => !string.IsNullOrEmpty(t.Item2))
-                .Select(t => (t.id, t.Item2))
+            // Use persisted workspace link state (updated by hooks); no agent GetCommitCounts call.
+            var checkResults = repositoryIds
+                .Select(repoId =>
+                {
+                    var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
+                    return (RepoId: repoId, DefaultAhead: wr?.DefaultBranchAheadCommits, HasUpstream: wr?.BranchHasUpstream);
+                })
                 .ToList();
-            if (repos.Count == 0)
-            {
-                ToastService.Show("No repositories to check.");
-                return;
-            }
-            var checkResults = await workspaceGitService.GetCommitCountsForReposAsync(WorkspaceId, repos);
             var safeRepoIds = checkResults
                 .Where(r => (r.DefaultAhead ?? 0) == 0 || IsPrMergedForRepo(r.RepoId))
                 .Select(r => r.RepoId)
@@ -1027,7 +1022,7 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error checking branches for sync to default");
-            ToastService.Show("Failed to check branches. The GrayMoon Agent may be offline.");
+            ToastService.Show("Failed to prepare sync to default.");
         }
         finally
         {
@@ -2252,30 +2247,27 @@
 
         CloseSwitchBranchModal();
         isCheckingBranchesForSyncToDefault = true;
-        checkingBranchesMessage = "Checking branches...";
+        checkingBranchesMessage = "Preparing...";
         await InvokeAsync(StateHasChanged);
 
         try
         {
-            await using var scope = ServiceScopeFactory.CreateAsyncScope();
-            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            var repos = new List<(int RepoId, string RepoName)> { (repositoryId, repositoryName) };
-            var checkResults = await workspaceGitService.GetCommitCountsForReposAsync(WorkspaceId, repos);
-            var result = checkResults.FirstOrDefault(r => r.RepoId == repositoryId);
+            // Use persisted workspace link state (updated by hooks); no agent GetCommitCounts call.
+            var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repositoryId);
+            var defaultAhead = wr?.DefaultBranchAheadCommits ?? 0;
+            var hasUpstream = wr?.BranchHasUpstream == true;
 
-            if ((result.DefaultAhead ?? 0) > 0 && !IsPrMergedForRepo(repositoryId))
+            if (defaultAhead > 0 && !IsPrMergedForRepo(repositoryId))
             {
                 ToastService.Show("Skipped sync to default: commits ahead of default branch and PR is not merged.");
                 return;
             }
-            var hasUpstream = result.HasUpstream == true;
-            // From Switch Branch modal: no confirmation, proceed directly
             await SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, hasUpstream, defaultBranch);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error checking branches for sync to default (repository {RepositoryId})", repositoryId);
-            ToastService.Show("Failed to check branches. The GrayMoon Agent may be offline.");
+            Logger.LogError(ex, "Error preparing sync to default (repository {RepositoryId})", repositoryId);
+            ToastService.Show("Failed to prepare sync to default.");
         }
         finally
         {
