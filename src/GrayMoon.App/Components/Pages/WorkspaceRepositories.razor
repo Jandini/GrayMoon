@@ -111,15 +111,6 @@
                                 {
                                     var levelUrls = group.Select(wr => wr.Repository).Where(r => r != null).Select(r => RepositoryUrlHelper.GetRepositoryUrl(r!.CloneUrl)).Where(u => !string.IsNullOrEmpty(u)).ToList();
                                     var levelUrlsJson = System.Text.Json.JsonSerializer.Serialize(levelUrls);
-                                    var levelPrUrls = new List<string>();
-                                    foreach (var wr in group)
-                                    {
-                                        if (wr.Repository == null || string.IsNullOrWhiteSpace(wr.BranchName)) continue;
-                                        var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(wr.Repository?.CloneUrl);
-                                        if (string.IsNullOrEmpty(repoUrl)) continue;
-                                        levelPrUrls.Add($"{repoUrl}/compare/{SyncBadgeLabels.DefaultBranchName}...{Uri.EscapeDataString(wr.BranchName)}");
-                                    }
-                                    var levelPrUrlsJson = System.Text.Json.JsonSerializer.Serialize(levelPrUrls);
                                     <tr class="dependency-level-header">
                                         <td colspan="@colSpan" class="dependency-level-header-cell">
                                             <span class="dependency-level-title @(group.Key == null ? "dependency-level-no-projects" : "")">@(group.Key == null ? "No dependencies" : $"Level {group.Key}")</span>
@@ -144,9 +135,9 @@
                                                     <span class="dependency-level-pr-link"
                                                           role="button"
                                                           tabindex="0"
-                                                          title="Open Pull Request (current branch to main)..."
+                                                          title="Open Pull Request in GitHub..."
                                                           style="cursor: pointer;"
-                                                          @onclick="() => ShowConfirmOpenPr(group.Count(), levelPrUrls)"
+                                                          @onclick="() => ShowConfirmOpenPr(group)"
                                                           @onclick:preventDefault
                                                           @onclick:stopPropagation
                                                           aria-label="Open Pull Request">
@@ -838,17 +829,40 @@
         StateHasChanged();
     }
 
-    private void ShowConfirmOpenPr(int count, IReadOnlyList<string?> urls)
+    private void ShowConfirmOpenPr(IEnumerable<WorkspaceRepositoryLink> group)
     {
+        const int confirmThreshold = 10;
+        var defaultBranch = SyncBadgeLabels.DefaultBranchName;
+        var toOpen = new List<string>();
+        foreach (var wr in group)
+        {
+            if (wr.Repository == null || string.IsNullOrWhiteSpace(wr.BranchName)) continue;
+            var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(wr.Repository.CloneUrl);
+            if (string.IsNullOrEmpty(repoUrl)) continue;
+
+            var hasOpenPr = wr.PullRequest != null && string.Equals(wr.PullRequest.State, "open", StringComparison.OrdinalIgnoreCase);
+            if (hasOpenPr && !string.IsNullOrEmpty(wr.PullRequest!.HtmlUrl))
+            {
+                toOpen.Add(wr.PullRequest.HtmlUrl);
+            }
+            else if ((wr.DefaultBranchAheadCommits ?? 0) > 0)
+            {
+                toOpen.Add($"{repoUrl}/compare/{defaultBranch}...{Uri.EscapeDataString(wr.BranchName)}");
+            }
+        }
+        if (toOpen.Count == 0)
+        {
+            ToastService.Show("No repositories found that have an open pull request or ahead commits to open in GitHub.");
+            return;
+        }
         async Task OpenPrAsync()
         {
-            var list = urls.Where(u => !string.IsNullOrEmpty(u)).Cast<string>().ToList();
-            await JSRuntime.InvokeVoidAsync("graymoonOpenUrls", list);
+            await JSRuntime.InvokeVoidAsync("graymoonOpenUrls", toOpen);
         }
-        if (count <= 1)
+        if (toOpen.Count < confirmThreshold)
             _ = OpenPrAsync();
         else
-            ShowConfirm($"Do you want to open pull request for {count} repositories?", OpenPrAsync);
+            ShowConfirm($"Do you want to open pull request for {toOpen.Count} repositories?", OpenPrAsync);
     }
 
     private void ShowConfirmSyncCommitsLevel(List<int> repositoryIds)
