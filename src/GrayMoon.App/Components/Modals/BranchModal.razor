@@ -47,10 +47,6 @@
                                 </div>
                                 <div class="d-flex gap-2 mt-2">
                                     <button type="button" class="btn btn-warning" @onclick="ProceedWithCreateAsync" disabled="@isCreating">
-                                        @if (isCreating)
-                                        {
-                                            <span class="spinner-border spinner-border-sm me-2"></span>
-                                        }
                                         Proceed
                                     </button>
                                     <button type="button" class="btn btn-outline-secondary" @onclick="DismissBranchExistsConfirmation" disabled="@isCreating">Cancel</button>
@@ -113,10 +109,6 @@
                     @if (activeTab == "newbranch" && !showBranchExistsConfirmation)
                     {
                         <button type="button" class="btn btn-primary" @onclick="CreateAsync" disabled="@(string.IsNullOrWhiteSpace(newBranchName) || isCreating)">
-                            @if (isCreating)
-                            {
-                                <span class="spinner-border spinner-border-sm me-2"></span>
-                            }
                             Create
                         </button>
                     }
