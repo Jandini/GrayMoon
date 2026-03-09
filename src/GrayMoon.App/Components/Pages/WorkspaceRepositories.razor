@@ -630,13 +630,30 @@
         return dict;
     }
 
-    /// <summary>Optional: refresh PR from API then reload workspace data so grid shows updated badges.</summary>
+    /// <summary>Optional: refresh PR from API then reload workspace data so grid shows updated badges. When a PR becomes merged, runs branch fetch for that repo (same as Switch Branch Fetch) so remote branch list is updated.</summary>
     private async Task RefreshPullRequestsInBackgroundAndReloadAsync()
     {
+        var previouslyMergedRepoIds = prByRepositoryId
+            .Where(kv => kv.Value?.IsMerged == true)
+            .Select(kv => kv.Key)
+            .ToHashSet();
+
         try
         {
             await WorkspacePullRequestService.RefreshPullRequestsForWorkspaceAsync(WorkspaceId);
             await ReloadWorkspaceDataAsync();
+
+            var newlyMergedRepoIds = prByRepositoryId
+                .Where(kv => kv.Value?.IsMerged == true)
+                .Select(kv => kv.Key)
+                .Where(id => !previouslyMergedRepoIds.Contains(id))
+                .ToList();
+
+            foreach (var repositoryId in newlyMergedRepoIds)
+            {
+                await RefreshBranchesForRepositoryAsync(repositoryId);
+            }
+
             await InvokeAsync(StateHasChanged);
         }
         catch (ObjectDisposedException) { }
@@ -644,6 +661,29 @@
         catch (Exception ex)
         {
             Logger.LogDebug(ex, "Background PR refresh failed for workspace {WorkspaceId}", WorkspaceId);
+        }
+    }
+
+    /// <summary>Calls the same branch refresh API as Switch Branch Fetch (fetch + persist) for the given repo.</summary>
+    private async Task RefreshBranchesForRepositoryAsync(int repositoryId)
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            var request = new { workspaceId = WorkspaceId, repositoryId };
+            var json = JsonSerializer.Serialize(request);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
+            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/refresh", content);
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorText = await response.Content.ReadAsStringAsync();
+                Logger.LogDebug("Branch refresh after PR merge failed for RepositoryId={RepositoryId}: {StatusCode}, {Error}", repositoryId, response.StatusCode, errorText);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Branch refresh after PR merge failed for RepositoryId={RepositoryId}", repositoryId);
         }
     }
 
