@@ -2,6 +2,7 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services;
 
@@ -10,9 +11,10 @@ public sealed class WorkspacePullRequestService(
     WorkspacePullRequestRepository pullRequestRepository,
     GitHubPullRequestService gitHubPullRequestService,
     AppDbContext dbContext,
+    IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<WorkspacePullRequestService> logger)
 {
-    private const int MaxConcurrency = 4;
+    private int MaxConcurrency => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
 
     /// <summary>Returns persisted PR state for the workspace keyed by RepositoryId. Used when building grid from cache.</summary>
     public async Task<IReadOnlyDictionary<int, PullRequestInfo?>> GetPersistedPullRequestsForWorkspaceAsync(int workspaceId, CancellationToken cancellationToken = default)
