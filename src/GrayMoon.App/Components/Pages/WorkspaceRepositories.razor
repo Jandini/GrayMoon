@@ -388,7 +388,7 @@
 
 <ConfirmModal IsVisible="@showConfirmModal"
               Message="@confirmModalMessage"
-              ConfirmButtonText="Yes"
+              ConfirmButtonText="@confirmModalButtonText"
               OnConfirm="@OnConfirmModalYesAsync"
               OnCancel="@CloseConfirmModal" />
 
@@ -494,6 +494,7 @@
     private bool updatePlanIsMultiLevel = false;
     private bool showConfirmModal = false;
     private string confirmModalMessage = "";
+    private string confirmModalButtonText = "Yes";
     private Func<Task>? _pendingConfirmAction;
     private string searchTerm = string.Empty;
 
@@ -863,6 +864,7 @@
     private void CloseConfirmModal()
     {
         showConfirmModal = false;
+        confirmModalButtonText = "Yes";
         _pendingConfirmAction = null;
         StateHasChanged();
     }
@@ -875,9 +877,10 @@
             await action();
     }
 
-    private void ShowConfirm(string message, Func<Task> onConfirm)
+    private void ShowConfirm(string message, Func<Task> onConfirm, string confirmButtonText = "Yes")
     {
         confirmModalMessage = message;
+        confirmModalButtonText = confirmButtonText;
         _pendingConfirmAction = onConfirm;
         showConfirmModal = true;
         StateHasChanged();
@@ -965,15 +968,33 @@
                 return;
             }
             var checkResults = await workspaceGitService.GetCommitCountsForReposAsync(WorkspaceId, repos);
-            _syncToDefaultCheckResults = checkResults;
+            var safeRepoIds = checkResults
+                .Where(r => (r.DefaultAhead ?? 0) == 0 || IsPrMergedForRepo(r.RepoId))
+                .Select(r => r.RepoId)
+                .ToList();
+            var blocked = checkResults
+                .Where(r => (r.DefaultAhead ?? 0) > 0 && !IsPrMergedForRepo(r.RepoId))
+                .ToList();
 
-            var anyBlocked = checkResults.Any(r => (r.DefaultAhead ?? 0) > 0 && !IsPrMergedForRepo(r.RepoId));
-            if (anyBlocked)
+            foreach (var r in blocked)
             {
-                ToastService.Show("There are commits ahead of default branch and the PR is not merged. You cannot perform sync to default.");
+                var name = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == r.RepoId)?.Repository?.RepositoryName ?? r.RepoId.ToString();
+                ToastService.Show($"{name}: skipped sync to default (commits ahead of default, PR not merged).");
+            }
+
+            if (safeRepoIds.Count == 0)
+            {
+                if (blocked.Count == 0)
+                    ToastService.Show("No repositories to sync.");
                 return;
             }
-            ShowConfirm("There are no commits ahead of default branch. You can perform sync to default. If you have used \"Squash merge\" this is safe to proceed.", () => SyncToDefaultLevelAsync(repositoryIds));
+
+            _syncToDefaultCheckResults = checkResults.Where(r => safeRepoIds.Contains(r.RepoId)).ToList();
+            var safeCount = safeRepoIds.Count;
+            var message = safeCount == 1
+                ? "This will checkout the default branch, remove the current branch locally, and pull the latest. If the branch had an upstream, the remote branch may be deleted. Uncommitted local changes can block checkout."
+                : $"This will sync {safeCount} repositories to their default branch: checkout default, remove the current branch locally, and pull. If a branch had an upstream, the remote branch may be deleted. Uncommitted local changes can block checkout for that repo.";
+            ShowConfirm(message, () => SyncToDefaultLevelAsync(safeRepoIds), "Proceed");
         }
         catch (Exception ex)
         {
@@ -2216,11 +2237,12 @@
 
             if ((result.DefaultAhead ?? 0) > 0 && !IsPrMergedForRepo(repositoryId))
             {
-                ToastService.Show("There are commits ahead of default branch and the PR is not merged. You cannot perform sync to default.");
+                ToastService.Show("Skipped sync to default: commits ahead of default branch and PR is not merged.");
                 return;
             }
             var hasUpstream = result.HasUpstream == true;
-            ShowConfirm("There are no commits ahead of default branch. You can perform sync to default. If you have used \"Squash merge\" this is safe to proceed.", () => SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, hasUpstream, defaultBranch));
+            // From Switch Branch modal: no confirmation, proceed directly
+            await SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, hasUpstream, defaultBranch);
         }
         catch (Exception ex)
         {
@@ -2345,8 +2367,11 @@
                 else
                 {
                     var errorText = await response.Content.ReadAsStringAsync();
-                    repositoryErrors[repositoryId] = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"Failed to sync to default branch: {response.StatusCode}";
+                    var errMsg = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"Failed to sync to default branch: {response.StatusCode}";
+                    repositoryErrors[repositoryId] = errMsg;
                     Logger.LogError("SyncToDefault failed for repo {RepositoryId}: {StatusCode}, {Error}", repositoryId, response.StatusCode, errorText);
+                    var repoName = wr?.Repository?.RepositoryName ?? repositoryId.ToString();
+                    ToastService.Show($"{repoName}: {errMsg}");
                 }
                 completed++;
                 if (total > 1)
