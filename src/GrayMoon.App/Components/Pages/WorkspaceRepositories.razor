@@ -23,6 +23,7 @@
 @inject WorkspaceFileVersionService FileVersionService
 @inject GitHubPullRequestService GitHubPullRequestService
 @inject WorkspacePullRequestService WorkspacePullRequestService
+@inject Microsoft.Extensions.Options.IOptions<GrayMoon.App.Models.WorkspaceOptions> WorkspaceOptions
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
 <PageTitle>@(workspace?.Name ?? "Workspace")</PageTitle>
@@ -156,7 +157,7 @@
                                                     <span class="dependency-level-sync-link"
                                                           role="button"
                                                           tabindex="0"
-                                                          title="Sync (refresh version, branch, commits) for all repositories in this level..."
+                                                          title="Synchronize all repositories in this level..."
                                                           style="cursor: pointer;"
                                                           @onclick="() => ShowConfirmSyncLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                           @onclick:preventDefault
@@ -932,10 +933,11 @@
 
     private void ShowConfirmSyncLevel(List<int> repositoryIds)
     {
-        if (repositoryIds.Count <= 1)
+        const int confirmThreshold = 10;
+        if (repositoryIds.Count < confirmThreshold)
             _ = SyncLevelAsync(repositoryIds);
         else
-            ShowConfirm($"Do you want to sync (refresh version, branch, commits) for {repositoryIds.Count} repositories in this level?", () => SyncLevelAsync(repositoryIds));
+            ShowConfirm($"Do you want to sync {repositoryIds.Count} repositories in this level?", () => SyncLevelAsync(repositoryIds));
     }
 
     private void ShowConfirmSyncToDefaultLevel(List<int> repositoryIds)
@@ -2328,56 +2330,75 @@
         errorMessage = null;
         await InvokeAsync(StateHasChanged);
 
+        var maxParallel = Math.Max(1, WorkspaceOptions?.Value?.MaxParallelOperations ?? 16);
+        var resultByRepo = checkResults?.ToDictionary(r => r.RepoId) ?? new Dictionary<int, (int RepoId, int? DefaultAhead, bool? HasUpstream)>();
+
         try
         {
+            using var semaphore = new SemaphoreSlim(maxParallel, maxParallel);
             var httpClient = HttpClientFactory.CreateClient();
             var baseUrl = ApiBaseUrl;
-            var completed = 0;
-            var resultByRepo = checkResults?.ToDictionary(r => r.RepoId) ?? new Dictionary<int, (int RepoId, int? DefaultAhead, bool? HasUpstream)>();
 
-            foreach (var repositoryId in repositoryIds)
+            var tasks = repositoryIds.Select(async repositoryId =>
             {
                 var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repositoryId);
                 var currentBranchName = wr?.BranchName;
                 if (string.IsNullOrWhiteSpace(currentBranchName))
-                    continue;
+                    return (repositoryId, Success: true, ErrorMsg: (string?)null);
 
-                await InvokeAsync(StateHasChanged);
-
-                if (resultByRepo.TryGetValue(repositoryId, out var r) && r.HasUpstream == true)
+                await semaphore.WaitAsync();
+                try
                 {
-                    var deleteRequest = new { workspaceId = WorkspaceId, repositoryId, branchName = currentBranchName, isRemote = true };
-                    var deleteJson = System.Text.Json.JsonSerializer.Serialize(deleteRequest);
-                    var deleteContent = new System.Net.Http.StringContent(deleteJson, System.Text.Encoding.UTF8, "application/json");
-                    var deleteResponse = await httpClient.PostAsync($"{baseUrl}/api/branches/delete", deleteContent);
-                    if (!deleteResponse.IsSuccessStatusCode)
+                    if (resultByRepo.TryGetValue(repositoryId, out var r) && r.HasUpstream == true)
                     {
-                        var deleteError = await deleteResponse.Content.ReadAsStringAsync();
-                        if (deleteError.IndexOf("not exist", StringComparison.OrdinalIgnoreCase) < 0 && deleteError.IndexOf("not found", StringComparison.OrdinalIgnoreCase) < 0)
-                            Logger.LogWarning("Delete remote branch failed for repo {RepositoryId}: {StatusCode}", repositoryId, deleteResponse.StatusCode);
+                        var deleteRequest = new { workspaceId = WorkspaceId, repositoryId, branchName = currentBranchName, isRemote = true };
+                        var deleteJson = System.Text.Json.JsonSerializer.Serialize(deleteRequest);
+                        var deleteContent = new System.Net.Http.StringContent(deleteJson, System.Text.Encoding.UTF8, "application/json");
+                        var deleteResponse = await httpClient.PostAsync($"{baseUrl}/api/branches/delete", deleteContent);
+                        if (!deleteResponse.IsSuccessStatusCode)
+                        {
+                            var deleteError = await deleteResponse.Content.ReadAsStringAsync();
+                            if (deleteError.IndexOf("not exist", StringComparison.OrdinalIgnoreCase) < 0 && deleteError.IndexOf("not found", StringComparison.OrdinalIgnoreCase) < 0)
+                                Logger.LogWarning("Delete remote branch failed for repo {RepositoryId}: {StatusCode}", repositoryId, deleteResponse.StatusCode);
+                        }
                     }
-                }
 
-                var apiRequest = new { workspaceId = WorkspaceId, repositoryId, currentBranchName };
-                var json = System.Text.Json.JsonSerializer.Serialize(apiRequest);
-                var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-                var response = await httpClient.PostAsync($"{baseUrl}/api/branches/sync-to-default", content);
-                if (response.IsSuccessStatusCode)
-                    repositoryErrors.Remove(repositoryId);
-                else
-                {
+                    var apiRequest = new { workspaceId = WorkspaceId, repositoryId, currentBranchName };
+                    var json = System.Text.Json.JsonSerializer.Serialize(apiRequest);
+                    var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                    var response = await httpClient.PostAsync($"{baseUrl}/api/branches/sync-to-default", content);
+                    if (response.IsSuccessStatusCode)
+                        return (repositoryId, Success: true, ErrorMsg: (string?)null);
                     var errorText = await response.Content.ReadAsStringAsync();
                     var errMsg = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"Failed to sync to default branch: {response.StatusCode}";
-                    repositoryErrors[repositoryId] = errMsg;
                     Logger.LogError("SyncToDefault failed for repo {RepositoryId}: {StatusCode}, {Error}", repositoryId, response.StatusCode, errorText);
-                    var repoName = wr?.Repository?.RepositoryName ?? repositoryId.ToString();
+                    return (repositoryId, Success: false, ErrorMsg: errMsg);
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            var results = await Task.WhenAll(tasks);
+            var completed = 0;
+            foreach (var (repoId, success, errMsg) in results)
+            {
+                if (success)
+                {
+                    repositoryErrors.Remove(repoId);
+                    completed++;
+                }
+                else if (errMsg != null)
+                {
+                    repositoryErrors[repoId] = errMsg;
+                    var repoName = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId)?.Repository?.RepositoryName ?? repoId.ToString();
                     ToastService.Show($"{repoName}: {errMsg}");
                 }
-                completed++;
-                if (total > 1)
-                    syncToDefaultMessage = $"Synced {completed} of {total} to default branch";
-                await InvokeAsync(StateHasChanged);
             }
+            if (total > 1)
+                syncToDefaultMessage = $"Synced {completed} of {total} to default branch";
+            await InvokeAsync(StateHasChanged);
             await RefreshFromSync();
         }
         catch (Exception ex)

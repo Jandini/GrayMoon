@@ -995,7 +995,7 @@ public class WorkspaceGitService(
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
 
-    /// <summary>Runs GetCommitCounts (agent) for each repo and returns DefaultBranchAhead and HasUpstream per repo. Used to check if sync-to-default is safe (no commits ahead of default).</summary>
+    /// <summary>Runs GetCommitCounts (agent) for each repo and returns DefaultBranchAhead and HasUpstream per repo. Used to check if sync-to-default is safe (no commits ahead of default). Respects MaxParallelOperations.</summary>
     public async Task<IReadOnlyList<(int RepoId, int? DefaultAhead, bool? HasUpstream)>> GetCommitCountsForReposAsync(
         int workspaceId,
         IReadOnlyList<(int RepoId, string RepoName)> repos,
@@ -1009,34 +1009,42 @@ public class WorkspaceGitService(
             return Array.Empty<(int, int?, bool?)>();
 
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
-        var results = new List<(int RepoId, int? DefaultAhead, bool? HasUpstream)>();
+        var maxParallel = _maxConcurrent;
 
-        foreach (var (repoId, repoName) in repos)
+        using var semaphore = new SemaphoreSlim(maxParallel, maxParallel);
+        var tasks = repos.Select(async tuple =>
         {
+            var (repoId, repoName) = tuple;
+            await semaphore.WaitAsync(cancellationToken);
             try
             {
-                var response = await _agentBridge.SendCommandAsync("GetCommitCounts", new
+                try
                 {
-                    workspaceName = workspace.Name,
-                    repositoryName = repoName,
-                    workspaceRoot
-                }, cancellationToken);
-                if (!response.Success || response.Data == null)
-                {
-                    results.Add((repoId, null, null));
-                    continue;
+                    var response = await _agentBridge.SendCommandAsync("GetCommitCounts", new
+                    {
+                        workspaceName = workspace.Name,
+                        repositoryName = repoName,
+                        workspaceRoot
+                    }, cancellationToken);
+                    if (!response.Success || response.Data == null)
+                        return (RepoId: repoId, DefaultAhead: (int?)null, HasUpstream: (bool?)null);
+                    var data = AgentResponseJson.DeserializeAgentResponse<AgentCommitCountsResponse>(response.Data);
+                    return (RepoId: repoId, DefaultAhead: data?.DefaultBranchAhead, HasUpstream: data?.HasUpstream);
                 }
-                var data = AgentResponseJson.DeserializeAgentResponse<AgentCommitCountsResponse>(response.Data);
-                results.Add((repoId, data?.DefaultBranchAhead, data?.HasUpstream));
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "GetCommitCounts failed for repo {RepoId} ({RepoName})", repoId, repoName);
+                    return (RepoId: repoId, DefaultAhead: (int?)null, HasUpstream: (bool?)null);
+                }
             }
-            catch (Exception ex)
+            finally
             {
-                _logger.LogWarning(ex, "GetCommitCounts failed for repo {RepoId} ({RepoName})", repoId, repoName);
-                results.Add((repoId, null, null));
+                semaphore.Release();
             }
-        }
+        });
 
-        return results;
+        var results = await Task.WhenAll(tasks);
+        return results.ToList();
     }
 
     /// <summary>Refreshes version for a single repo and persists. Returns (success, errorMessage) for caller to report and optionally stop workflow.</summary>
