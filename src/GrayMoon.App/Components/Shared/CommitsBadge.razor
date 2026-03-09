@@ -47,9 +47,9 @@ else
     private async Task HandleClick()
     {
         if (!Clickable) return;
-        if (NotUpstreamed || X > 0)
-            await OnPushClick.InvokeAsync();
-        else if (Y > 0)
+        if (Y > 0)
             await OnPullClick.InvokeAsync();
+        else if (NotUpstreamed || X > 0)
+            await OnPushClick.InvokeAsync();
     }
 }
