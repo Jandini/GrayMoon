@@ -61,7 +61,7 @@ else
         if (string.Equals(state, "unstable", StringComparison.OrdinalIgnoreCase))
             return "PR #" + pr.Number + " – checks running";
         if (string.Equals(state, "blocked", StringComparison.OrdinalIgnoreCase))
-            return "PR #" + pr.Number + " – Awaiting approval";
+            return "PR #" + pr.Number + " – Cannot merge (review or requirements)";
         if (pr.Mergeable == true || string.Equals(state, "clean", StringComparison.OrdinalIgnoreCase))
             return "PR #" + pr.Number + " – mergeable";
         return "PR #" + pr.Number;
