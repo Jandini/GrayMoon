@@ -1,0 +1,40 @@
+/* Label above the scrollable file list in ConfirmModal */
+.confirm-modal-files-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #868e96;
+}
+
+/* Dark box for file paths, with dark border and scroll */
+.confirm-modal-files-box {
+    max-height: 200px;
+    overflow-y: auto;
+    background-color: #2a2a2a;
+    border: 1px solid #474747;
+    border-radius: 0.25rem;
+}
+
+.confirm-modal-files-box::-webkit-scrollbar {
+    width: 6px;
+}
+
+.confirm-modal-files-box::-webkit-scrollbar-track {
+    background: #2a2a2a;
+}
+
+.confirm-modal-files-box::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 3px;
+}
+
+.confirm-modal-files-box::-webkit-scrollbar-thumb:hover {
+    background: #888;
+}
+
+/* Monospace file list text */
+.confirm-modal-files-pre {
+    font-size: 0.75rem;
+    background-color: transparent;
+    color: #dee2e6;
+}
+

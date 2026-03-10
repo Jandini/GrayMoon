@@ -846,6 +846,27 @@
         }
     }
 
+    /// <summary>Runs file version update without toasts; returns the list of updated files (repo, path) for commit or confirm dialog. Caller handles commit vs dialog.</summary>
+    private async Task<IReadOnlyList<(int RepositoryId, string RepoName, string FilePath)>?> RunFileVersionUpdateAndGetUpdatedFilesAsync()
+    {
+        try
+        {
+            var (_, _, error, updatedFiles) = await FileVersionService.UpdateAllVersionsAsync(
+                WorkspaceId,
+                selectedRepositoryIds: null,
+                onFileUpdated: null,
+                cancellationToken: default);
+            if (error != null && !error.Contains("No version configurations"))
+                Logger.LogWarning("File-version update: {Error}", error);
+            return updatedFiles?.Count > 0 ? updatedFiles : null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "File-version update failed for workspace {WorkspaceId}", WorkspaceId);
+            return null;
+        }
+    }
+
     private void AbortPushAsync()
     {
         _pushCts?.Cancel();
@@ -1122,8 +1143,25 @@
                         ToastService.Show(err);
                 }
             }
-            await TryUpdateFileVersionsAsync();
+            var updatedFiles = await RunFileVersionUpdateAndGetUpdatedFilesAsync();
             await RefreshFromSync();
+            if (updatedFiles is { Count: > 0 })
+            {
+                var byRepo = updatedFiles
+                    .GroupBy(x => (x.RepositoryId, x.RepoName))
+                    .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
+                    .ToList();
+                var repoCount = byRepo.Count;
+                var distinctFiles = updatedFiles.Select(x => x.FilePath).Distinct().ToList();
+                var filesForDisplay = distinctFiles.Count <= 5
+                    ? distinctFiles
+                    : distinctFiles.Take(5).Concat(new[] { $"... and {distinctFiles.Count - 5} more" }).ToList();
+                var prefix = repoCount == 1
+                    ? "Commit the updated version files in this repository?"
+                    : $"Commit all updated version files in all {repoCount} repositories?";
+                var message = prefix + "\r\nUpdated files\r\n" + string.Join("\r\n", filesForDisplay);
+                ShowConfirm(message, () => CommitFileVersionUpdatesAsync(byRepo), "Commit");
+            }
         }
         catch (OperationCanceledException)
         {
@@ -1469,6 +1507,7 @@
                         InvokeAsync(StateHasChanged);
                     },
                     repoIdsToUpdate: null,
+                    payloadFromModal: withCommits ? _updatePlanPayloadForUpdateOnly : null,
                     cancellationToken: _updateCts.Token);
 
                 if (!withCommits)
@@ -1477,17 +1516,63 @@
 
             isUpdating = false;
             await InvokeAsync(StateHasChanged);
-            await TryUpdateFileVersionsAsync();
+            var updatedFiles = await RunFileVersionUpdateAndGetUpdatedFilesAsync();
             await RefreshFromSync();
 
-            if (!withCommits && payloadForCommit is { Count: > 0 } payloadToCommit)
+            if (withCommits && updatedFiles is { Count: > 0 })
+            {
+                var byRepo = updatedFiles
+                    .GroupBy(x => (x.RepositoryId, x.RepoName))
+                    .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
+                    .ToList();
+                await CommitFileVersionUpdatesAsync(byRepo);
+            }
+            else if (!withCommits && payloadForCommit is { Count: > 0 } payloadToCommit)
             {
                 var repoCount = payloadToCommit.Count;
                 var message = repoCount == 1
                     ? "Commit the updated version files in this repository?"
                     : $"Commit all updated version files in all {repoCount} repositories?";
                 var captured = payloadToCommit;
-                ShowConfirm(message, () => CommitPayloadAfterUpdateOnlyAsync(captured), "Commit");
+                var fileVersionByRepo = updatedFiles is { Count: > 0 }
+                    ? updatedFiles
+                        .GroupBy(x => (x.RepositoryId, x.RepoName))
+                        .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
+                        .ToList()
+                    : null;
+                ShowConfirm(message, async () =>
+                {
+                    await CommitPayloadAfterUpdateOnlyAsync(captured);
+                    if (fileVersionByRepo is { Count: > 0 })
+                    {
+                        var distinctFiles = updatedFiles!.Select(x => x.FilePath).Distinct().ToList();
+                        var filesForDisplay = distinctFiles.Count <= 5
+                            ? distinctFiles
+                            : distinctFiles.Take(5).Concat(new[] { $"... and {distinctFiles.Count - 5} more" }).ToList();
+                        var prefix = fileVersionByRepo.Count == 1
+                            ? "Commit the updated version files in this repository?"
+                            : $"Commit all updated version files in all {fileVersionByRepo.Count} repositories?";
+                        var msg = prefix + "\r\nUpdated files\r\n" + string.Join("\r\n", filesForDisplay);
+                        ShowConfirm(msg, () => CommitFileVersionUpdatesAsync(fileVersionByRepo), "Commit");
+                    }
+                }, "Commit");
+            }
+            else if (!withCommits && updatedFiles is { Count: > 0 })
+            {
+                var byRepo = updatedFiles
+                    .GroupBy(x => (x.RepositoryId, x.RepoName))
+                    .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
+                    .ToList();
+                var repoCount = byRepo.Count;
+                var distinctFiles = updatedFiles.Select(x => x.FilePath).Distinct().ToList();
+                var filesForDisplay = distinctFiles.Count <= 5
+                    ? distinctFiles
+                    : distinctFiles.Take(5).Concat(new[] { $"... and {distinctFiles.Count - 5} more" }).ToList();
+                var prefix = repoCount == 1
+                    ? "Commit the updated version files in this repository?"
+                    : $"Commit all updated version files in all {repoCount} repositories?";
+                var message = prefix + "\r\nUpdated files\r\n" + string.Join("\r\n", filesForDisplay);
+                ShowConfirm(message, () => CommitFileVersionUpdatesAsync(byRepo), "Commit");
             }
         }
         catch (OperationCanceledException)

@@ -12,7 +12,30 @@
                     <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-0">@Message</p>
+                    @if (Message != null && Message.Contains('\n'))
+                    {
+                        var lines = Message.Split('\n');
+                        var firstLine = lines[0].TrimEnd('\r');
+                        var remaining = lines.Skip(1).Select(l => l.TrimEnd('\r')).ToList();
+                        if (remaining.Count >= 2 && string.Equals(remaining[0], "Updated files", StringComparison.OrdinalIgnoreCase))
+                        {
+                            <p class="mb-2">@firstLine</p>
+                            <div class="confirm-modal-files-label mb-1">Files:</div>
+                            <div class="confirm-modal-files-box">
+                                <pre class="confirm-modal-files-pre mb-0 font-monospace p-2">
+@string.Join("\n", remaining.Skip(1))
+                                </pre>
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="mb-0" style="white-space: pre-line;">@Message</p>
+                        }
+                    }
+                    else
+                    {
+                        <p class="mb-0">@Message</p>
+                    }
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-primary" @onclick="OnConfirm">
