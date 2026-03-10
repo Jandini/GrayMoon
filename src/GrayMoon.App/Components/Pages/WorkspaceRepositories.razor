@@ -1514,7 +1514,6 @@
                         InvokeAsync(StateHasChanged);
                     },
                     repoIdsToUpdate: null,
-                    payloadFromModal: withCommits ? _updatePlanPayloadForUpdateOnly : null,
                     cancellationToken: _updateCts.Token);
 
                 if (!withCommits)

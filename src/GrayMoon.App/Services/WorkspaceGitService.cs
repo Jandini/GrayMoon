@@ -304,13 +304,12 @@ public class WorkspaceGitService(
         return await _workspaceProjectRepository.GetPushDependencyInfoForRepoSetAsync(workspaceId, repoIds, cancellationToken);
     }
 
-    /// <summary>Syncs dependency versions in .csproj files to match the current version of each referenced package source. Only repos with at least one mismatched dependency are updated. When <paramref name="repoIdsToSync"/> is set, only those repos are synced. When <paramref name="usePayload"/> is provided, that list is used as the repos to sync (instead of querying DB); use for "Proceed with commits" so sync runs even when post-refresh plan would be empty.</summary>
+    /// <summary>Syncs dependency versions in .csproj files to match the current version of each referenced package source. Only repos with at least one mismatched dependency are updated. When <paramref name="repoIdsToSync"/> is set, only those repos are synced.</summary>
     public async Task<int> SyncDependenciesAsync(
         int workspaceId,
         Action<int, int, int>? onProgress = null,
         Action<int, string>? onRepoError = null,
         IReadOnlySet<int>? repoIdsToSync = null,
-        IReadOnlyList<SyncDependenciesRepoPayload>? usePayload = null,
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
@@ -320,20 +319,10 @@ public class WorkspaceGitService(
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        List<SyncDependenciesRepoPayload> toSync;
-        if (usePayload is { Count: > 0 })
-        {
-            toSync = repoIdsToSync is { Count: > 0 }
-                ? usePayload.Where(p => repoIdsToSync.Contains(p.RepoId)).ToList()
-                : usePayload.ToList();
-        }
-        else
-        {
-            var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, cancellationToken);
-            toSync = payloads
-                .Where(p => p.ProjectUpdates.Count > 0 && (repoIdsToSync == null || repoIdsToSync.Contains(p.RepoId)))
-                .ToList();
-        }
+        var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, cancellationToken);
+        var toSync = payloads
+            .Where(p => p.ProjectUpdates.Count > 0 && (repoIdsToSync == null || repoIdsToSync.Contains(p.RepoId)))
+            .ToList();
 
         if (toSync.Count == 0)
         {
@@ -519,14 +508,13 @@ public class WorkspaceGitService(
         return reposAndPaths.Select(r => (r.RepoId, ErrorMessage: byRepo[r.RepoId])).ToList();
     }
 
-    /// <summary>Runs full update (refresh projects, sync deps, optional commits). Stops on first error and reports it via onRepoError (message under the repo). When <paramref name="repoIdsToUpdate"/> is set, only those repos are updated. When <paramref name="withCommits"/> is false and dependencies were synced, returns the list of repos that were updated so the caller may offer to commit. When <paramref name="payloadFromModal"/> is provided and <paramref name="withCommits"/> is true, that payload is used after refresh for sync and commit (avoids empty plan after refresh); the modal already let the user choose to commit.</summary>
+    /// <summary>Runs full update (refresh projects, sync deps, optional commits). Stops on first error and reports it via onRepoError (message under the repo). When <paramref name="repoIdsToUpdate"/> is set, only those repos are updated. When <paramref name="withCommits"/> is false and dependencies were synced, returns the list of repos that were updated so the caller may offer to commit.</summary>
     public async Task<IReadOnlyList<SyncDependenciesRepoPayload>?> RunUpdateAsync(
         int workspaceId,
         bool withCommits,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
         IReadOnlySet<int>? repoIdsToUpdate = null,
-        IReadOnlyList<SyncDependenciesRepoPayload>? payloadFromModal = null,
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
@@ -553,21 +541,7 @@ public class WorkspaceGitService(
         if (hadError)
             return null;
 
-        IReadOnlyList<SyncDependenciesRepoPayload> payload;
-        bool isMultiLevel;
-        if (withCommits && payloadFromModal is { Count: > 0 })
-        {
-            payload = repoIdsToUpdate is { Count: > 0 }
-                ? payloadFromModal.Where(p => repoIdsToUpdate.Contains(p.RepoId)).ToList()
-                : payloadFromModal;
-            isMultiLevel = payload.Select(p => p.DependencyLevel ?? 0).Distinct().Count() > 1;
-        }
-        else
-        {
-            var (planPayload, planMultiLevel) = await GetUpdatePlanAsync(workspaceId, repoIdsToUpdate, cancellationToken);
-            payload = planPayload;
-            isMultiLevel = planMultiLevel;
-        }
+        var (payload, isMultiLevel) = await GetUpdatePlanAsync(workspaceId, repoIdsToUpdate, cancellationToken);
 
         if (payload.Count == 0)
         {
@@ -598,7 +572,7 @@ public class WorkspaceGitService(
 
                 var repoIds = reposAtLevel.Select(r => r.RepoId).ToHashSet();
                 onProgressMessage?.Invoke($"Updating {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
-                await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Syncing {c} of {t}"), onRepoError: OnRepoError, repoIdsToSync: repoIds, usePayload: reposAtLevel, cancellationToken: cancellationToken);
+                await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Syncing {c} of {t}"), onRepoError: OnRepoError, repoIdsToSync: repoIds, cancellationToken: cancellationToken);
                 if (hadError)
                     break;
 
@@ -644,7 +618,7 @@ public class WorkspaceGitService(
         else
         {
             onProgressMessage?.Invoke("Syncing dependencies...");
-            await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: OnRepoError, repoIdsToSync: repoIdsToUpdate, usePayload: payload, cancellationToken: cancellationToken);
+            await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: OnRepoError, repoIdsToSync: repoIdsToUpdate, cancellationToken: cancellationToken);
             if (hadError)
                 return null;
             onProgressMessage?.Invoke("Committing updates...");
