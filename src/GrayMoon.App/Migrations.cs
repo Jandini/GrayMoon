@@ -13,6 +13,7 @@ public static class Migrations
         await MigrateConnectorUserNameAsync(dbContext);
         await MigrateConnectorTypeAndTokenAsync(dbContext);
         await MigrateConnectorUserTokenEncryptionAsync(dbContext);
+        await MigrateConnectorTokenHealthAsync(dbContext);
         await MigrateWorkspaceRepositoriesSyncStatusAsync(dbContext);
         await MigrateWorkspaceRepositoriesProjectsAsync(dbContext);
         await MigrateWorkspaceRepositoriesCommitsAsync(dbContext);
@@ -116,6 +117,53 @@ public static class Migrations
 
             if (changed > 0)
                 await dbContext.SaveChangesAsync();
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds TokenHealth, TokenHealthError, and IsHealthy columns to Connectors for tracking token status.</summary>
+    public static async Task MigrateConnectorTokenHealthAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='Connectors'";
+                var tableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!tableExists)
+                    return;
+
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Connectors') WHERE name='TokenHealth'";
+                var hasTokenHealth = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!hasTokenHealth)
+                {
+                    cmd.CommandText = "ALTER TABLE Connectors ADD COLUMN TokenHealth TEXT";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Connectors') WHERE name='TokenHealthError'";
+                var hasTokenHealthError = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!hasTokenHealthError)
+                {
+                    cmd.CommandText = "ALTER TABLE Connectors ADD COLUMN TokenHealthError TEXT";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Connectors') WHERE name='IsHealthy'";
+                var hasIsHealthy = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!hasIsHealthy)
+                {
+                    cmd.CommandText = "ALTER TABLE Connectors ADD COLUMN IsHealthy INTEGER NOT NULL DEFAULT 0";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
         }
         catch
         {

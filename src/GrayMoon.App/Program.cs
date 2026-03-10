@@ -7,6 +7,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Security;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
@@ -56,9 +57,14 @@ builder.Services.AddScoped<PackageRegistrySyncService>();
 builder.Services.AddScoped<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
     builder.Services.AddScoped<WorkspaceFileVersionService>();
 
-// Background sync service with controlled parallelism
+// Token protection
+builder.Services.AddSingleton<ITokenEncryptionKeyProvider, TokenEncryptionKeyProvider>();
+builder.Services.AddSingleton<ITokenProtector, AesGcmTokenProtector>();
+
+// Background services
 builder.Services.AddSingleton<SyncBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SyncBackgroundService>());
+builder.Services.AddHostedService<TokenHealthBackgroundService>();
 
 // Connector services
 builder.Services.AddHttpClient<GitHubService>();
@@ -96,7 +102,13 @@ if (!string.IsNullOrEmpty(dbPath))
 // Ensure the local SQLite database is created and migrate schema if needed
 using (var scope = app.Services.CreateScope())
 {
-    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var services = scope.ServiceProvider;
+    var dbContext = services.GetRequiredService<AppDbContext>();
+    var tokenProtector = services.GetRequiredService<ITokenProtector>();
+
+    // Initialize static helper to use configured token protector
+    ConnectorHelpers.InitializeTokenProtector(tokenProtector);
+
     dbContext.Database.EnsureCreated();
     await Migrations.RunAllAsync(dbContext);
 }

@@ -34,4 +34,7 @@ public class Connector
 
     [MaxLength(1000)]
     public string? LastError { get; set; }
+
+    /// <summary>Convenience flag indicating whether the connector is currently healthy (token present, decryptable, and validated).</summary>
+    public bool IsHealthy { get; set; } = false;
 }
