@@ -1,7 +1,12 @@
+using System.Text;
+using GrayMoon.App.Services.Security;
+
 namespace GrayMoon.App.Models;
 
 public static class ConnectorHelpers
 {
+    private static ITokenProtector? _tokenProtector;
+
     public static bool RequiresToken(ConnectorType connectorType, string apiBaseUrl)
     {
         if (string.IsNullOrWhiteSpace(apiBaseUrl))
@@ -79,5 +84,49 @@ public static class ConnectorHelpers
             return false; // Never show for NuGet.org
 
         return true; // Show for GitHub, NuGet (non-NuGet.org)
+    }
+
+    /// <summary>Initializes the token protector used by ProtectToken/UnprotectToken. Called once at app startup.</summary>
+    public static void InitializeTokenProtector(ITokenProtector tokenProtector)
+    {
+        _tokenProtector = tokenProtector ?? throw new ArgumentNullException(nameof(tokenProtector));
+    }
+
+    /// <summary>Protects a token for persistence. Uses AES-GCM via ITokenProtector when available, otherwise falls back to Base64 (Level 1).</summary>
+    public static string? ProtectToken(string? plainToken)
+    {
+        if (string.IsNullOrWhiteSpace(plainToken))
+            return null;
+
+        var trimmed = plainToken.Trim();
+
+        if (_tokenProtector != null)
+            return _tokenProtector.Protect(trimmed);
+
+        // Legacy fallback: Base64 obfuscation when no protector has been initialized.
+        return Convert.ToBase64String(Encoding.UTF8.GetBytes(trimmed));
+    }
+
+    /// <summary>Returns the plain-text token from a persisted value. Uses AES-GCM via ITokenProtector when available, otherwise supports Base64 or legacy plain text.</summary>
+    public static string? UnprotectToken(string? storedToken)
+    {
+        if (string.IsNullOrWhiteSpace(storedToken))
+            return null;
+
+        var trimmed = storedToken.Trim();
+
+        if (_tokenProtector != null)
+            return _tokenProtector.Unprotect(trimmed);
+
+        // Legacy fallback: try Base64, otherwise treat as plain text.
+        try
+        {
+            var bytes = Convert.FromBase64String(trimmed);
+            return Encoding.UTF8.GetString(bytes);
+        }
+        catch (FormatException)
+        {
+            return trimmed;
+        }
     }
 }

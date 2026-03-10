@@ -74,7 +74,7 @@ public static class CommitSyncEndpoints
                 workspaceName = workspace.Name,
                 repositoryId = repo.RepositoryId,
                 repositoryName = repo.RepositoryName,
-                bearerToken = repo.Connector?.UserToken,
+                bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                 workspaceId,
                 workspaceRoot
             };
