@@ -90,11 +90,11 @@
     text-overflow: ellipsis;
 }
 
-/* Dependency level header: 3 columns — 30% level (left) | 60% icons (right) | 10% count (right) */
+/* Dependency level header: 3 columns — level | icons | count (last track max-content = cannot shrink) */
 .repositories-table .dependency-level-header td.dependency-level-header-cell {
     display: grid;
-    /* 30% | 60% | remainder (~10%) */
-    grid-template-columns: 20% 74% 1fr;
+    /* Third track max-content: column width is at least full text width, never shrinks */
+    grid-template-columns: minmax(0, 20%) minmax(0, 1fr) max-content;    
     align-items: center;
     width: 100%;
     box-sizing: border-box;
@@ -106,23 +106,30 @@
     padding: 0.5rem 0.6rem;
     border: none;
     border-bottom: 1px solid var(--border-color);
-    column-gap: 0.5rem;
+    column-gap: 0.1rem;
 }
 
-/* Column 1: Level — left */
+/* Column 1: Level + graph icon side by side */
 .repositories-table .dependency-level-header .dependency-level-header-col-level {
     min-width: 0;
     display: flex;
     align-items: center;
     justify-content: flex-start;
     text-align: left;
+    gap: 0.5rem;
 }
 
 .repositories-table .dependency-level-header .dependency-level-header-col-level .dependency-level-title {
     min-width: 0;
+    flex: 0 1 auto;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* Graph link stays visible next to level; does not shrink away */
+.repositories-table .dependency-level-header .dependency-level-header-col-level .dependency-level-graph-link {
+    flex-shrink: 0;
 }
 
 /* Column 2: Icons — right-aligned within 60% */
@@ -134,20 +141,19 @@
     text-align: right;
 }
 
-/* Column 3: x repositories — right; takes remainder after 30%+60% if grid shrink, else ~10% via fr */
+/* Column 3: x repositories — must not shrink (grid track max-content + item min-width) */
 .repositories-table .dependency-level-header .dependency-level-header-col-count {
-    min-width: 0;
+    min-width: max-content;
+    width: max-content;
     display: flex;
     align-items: center;
     justify-content: flex-end;
     text-align: right;
+    flex-shrink: 0;
 }
 
 .repositories-table .dependency-level-header .dependency-level-header-col-count .dependency-level-count {
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
 }
 
 .repositories-table .dependency-level-header:hover td.dependency-level-header-cell {

@@ -114,19 +114,19 @@
                                     var levelUrlsJson = System.Text.Json.JsonSerializer.Serialize(levelUrls);
                                     <tr class="dependency-level-header">
                                         <td colspan="@colSpan" class="dependency-level-header-cell">
-                                            @* Column 1: 30% – Level, left *@
+                                            @* Column 1: Level + graph icon (graph next to level) *@
                                             <div class="dependency-level-header-col dependency-level-header-col-level">
                                                 <span class="dependency-level-title @(group.Key == null ? "dependency-level-no-projects" : "")">@(group.Key == null ? "No dependencies" : $"Level {group.Key}")</span>
+                                                @if (group.Key.HasValue)
+                                                {
+                                                    <a href="@GetDependencyGraphUrlForLevel(group.Key!.Value)" class="dependency-level-graph-link" title="View dependency graph for this level" aria-label="Dependency graph">
+                                                        <i class="bi bi-diagram-3" aria-hidden="true"></i>
+                                                    </a>
+                                                }
                                             </div>
-                                            @* Column 2: 60% – Icons, right *@
+                                            @* Column 2: Icons (right-aligned), graph excluded *@
                                             <div class="dependency-level-header-col dependency-level-header-col-icons">
                                                 <span class="dependency-level-icons">
-                                                    @if (group.Key.HasValue)
-                                                    {
-                                                        <a href="@GetDependencyGraphUrlForLevel(group.Key!.Value)" class="dependency-level-graph-link" title="View dependency graph for this level" aria-label="Dependency graph">
-                                                            <i class="bi bi-diagram-3" aria-hidden="true"></i>
-                                                        </a>
-                                                    }
                                                     <span class="dependency-level-sync-to-default-link"
                                                           role="button"
                                                           tabindex="0"
