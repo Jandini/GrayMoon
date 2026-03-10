@@ -383,6 +383,12 @@
                           OnProceed="@OnUpdateSingleRepositoryDependenciesProceedAsync"
                           OnCancel="@CloseUpdateSingleRepositoryDependenciesModal" />
 
+<VersionFilesCommitModal IsVisible="@showVersionFilesCommitModal"
+                         Message="@versionFilesCommitMessage"
+                         Files="@versionFilesCommitList"
+                         OnProceed="@OnVersionFilesCommitProceedAsync"
+                         OnCancel="@CloseVersionFilesCommitModal" />
+
 <PushWithDependenciesModal IsVisible="@showPushWithDependenciesModal"
           Info="@pushWithDependenciesInfo"
           RepoName="@pushWithDependenciesRepoName"
@@ -492,6 +498,10 @@
     private int updateSingleRepoDependenciesRepositoryId;
     private string? updateSingleRepoDependenciesRepoName;
     private bool updatePlanIsMultiLevel = false;
+    private bool showVersionFilesCommitModal = false;
+    private string versionFilesCommitMessage = "";
+    private IReadOnlyList<string> versionFilesCommitList = Array.Empty<string>();
+    private IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)>? versionFilesByRepoToCommit;
     /// <summary>Cached update plan payload from the last header-level Update click. Used to know which repos had dependency updates when offering post-update commits.</summary>
     private IReadOnlyList<SyncDependenciesRepoPayload>? _updatePlanPayloadForUpdateOnly = null;
     private bool showConfirmModal = false;
@@ -1159,8 +1169,7 @@
                 var prefix = repoCount == 1
                     ? "Commit the updated version files in this repository?"
                     : $"Commit all updated version files in all {repoCount} repositories?";
-                var message = prefix + "\r\nUpdated files\r\n" + string.Join("\r\n", filesForDisplay);
-                ShowConfirm(message, () => CommitFileVersionUpdatesAsync(byRepo), "Commit");
+                OpenVersionFilesCommitModal(prefix, byRepo, filesForDisplay);
             }
         }
         catch (OperationCanceledException)
@@ -1438,12 +1447,10 @@
                     var filesForDisplay = distinctFiles.Count <= 5
                         ? distinctFiles
                         : distinctFiles.Take(5).Concat(new[] { $"... and {distinctFiles.Count - 5} more" }).ToList();
-                    var filesBlock = string.Join("\r\n- ", filesForDisplay);
                     var prefix = repoCount == 1
                         ? "Commit the updated version files in this repository?"
                         : $"Commit all updated version files in all {repoCount} repositories?";
-                    var message = $"{prefix}\r\n\r\nFiles:\r\n- {filesBlock}";
-                    ShowConfirm(message, () => CommitFileVersionUpdatesAsync(byRepo), "Commit");
+                    OpenVersionFilesCommitModal(prefix, byRepo, filesForDisplay);
                 }
                 else
                 {
@@ -1549,11 +1556,10 @@
                         var filesForDisplay = distinctFiles.Count <= 5
                             ? distinctFiles
                             : distinctFiles.Take(5).Concat(new[] { $"... and {distinctFiles.Count - 5} more" }).ToList();
-                        var prefix = fileVersionByRepo.Count == 1
+                        var prefix2 = fileVersionByRepo.Count == 1
                             ? "Commit the updated version files in this repository?"
                             : $"Commit all updated version files in all {fileVersionByRepo.Count} repositories?";
-                        var msg = prefix + "\r\nUpdated files\r\n" + string.Join("\r\n", filesForDisplay);
-                        ShowConfirm(msg, () => CommitFileVersionUpdatesAsync(fileVersionByRepo), "Commit");
+                        OpenVersionFilesCommitModal(prefix2, fileVersionByRepo, filesForDisplay);
                     }
                 }, "Commit");
             }
@@ -1571,8 +1577,7 @@
                 var prefix = repoCount == 1
                     ? "Commit the updated version files in this repository?"
                     : $"Commit all updated version files in all {repoCount} repositories?";
-                var message = prefix + "\r\nUpdated files\r\n" + string.Join("\r\n", filesForDisplay);
-                ShowConfirm(message, () => CommitFileVersionUpdatesAsync(byRepo), "Commit");
+                OpenVersionFilesCommitModal(prefix, byRepo, filesForDisplay);
             }
         }
         catch (OperationCanceledException)
@@ -1666,6 +1671,36 @@
             isUpdating = false;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    /// <summary>Opens the dedicated version-files commit modal with message and file list.</summary>
+    private void OpenVersionFilesCommitModal(
+        string message,
+        IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)> byRepo,
+        IReadOnlyList<string> filesForDisplay)
+    {
+        versionFilesCommitMessage = message;
+        versionFilesByRepoToCommit = byRepo;
+        versionFilesCommitList = filesForDisplay;
+        showVersionFilesCommitModal = true;
+        StateHasChanged();
+    }
+
+    private void CloseVersionFilesCommitModal()
+    {
+        showVersionFilesCommitModal = false;
+        versionFilesByRepoToCommit = null;
+        versionFilesCommitList = Array.Empty<string>();
+        StateHasChanged();
+    }
+
+    private async Task OnVersionFilesCommitProceedAsync()
+    {
+        var byRepo = versionFilesByRepoToCommit;
+        CloseVersionFilesCommitModal();
+        if (byRepo == null || byRepo.Count == 0)
+            return;
+        await CommitFileVersionUpdatesAsync(byRepo);
     }
 
     private async Task HandleDependencyBadgeKeydown(KeyboardEventArgs e, int repositoryId, int unmatchedDeps)
