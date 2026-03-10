@@ -492,6 +492,8 @@
     private int updateSingleRepoDependenciesRepositoryId;
     private string? updateSingleRepoDependenciesRepoName;
     private bool updatePlanIsMultiLevel = false;
+    /// <summary>Cached update plan payload from the last header-level Update click. Used to know which repos had dependency updates when offering post-update commits.</summary>
+    private IReadOnlyList<SyncDependenciesRepoPayload>? _updatePlanPayloadForUpdateOnly = null;
     private bool showConfirmModal = false;
     private string confirmModalMessage = "";
     private string confirmModalButtonText = "Yes";
@@ -831,7 +833,7 @@
     {
         try
         {
-            var (_, _, error) = await FileVersionService.UpdateAllVersionsAsync(
+            var (_, _, error, _) = await FileVersionService.UpdateAllVersionsAsync(
                 WorkspaceId,
                 selectedRepositoryIds: null,
                 onFileUpdated: filePath => ToastService.Show($"File {filePath} updated."));
@@ -1382,9 +1384,27 @@
             if (payload.Count == 0)
             {
                 ToastService.Show("No dependency updates required.");
-                await TryUpdateFileVersionsAsync();
+                var (_, _, fileError, updatedFiles) = await FileVersionService.UpdateAllVersionsAsync(
+                    WorkspaceId,
+                    selectedRepositoryIds: null,
+                    onFileUpdated: filePath => ToastService.Show($"File {filePath} updated."));
+                if (fileError != null && !fileError.Contains("No version configurations"))
+                    Logger.LogWarning("Auto file-version update: {Error}", fileError);
+                if (updatedFiles != null && updatedFiles.Count > 0)
+                {
+                    var byRepo = updatedFiles
+                        .GroupBy(x => (x.RepositoryId, x.RepoName))
+                        .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
+                        .ToList();
+                    var repoCount = byRepo.Count;
+                    var message = repoCount == 1
+                        ? "Commit the updated version files in this repository?"
+                        : $"Commit all updated version files in all {repoCount} repositories?";
+                    ShowConfirm(message, () => CommitFileVersionUpdatesAsync(byRepo), "Commit");
+                }
                 return;
             }
+            _updatePlanPayloadForUpdateOnly = payload;
             updatePlanIsMultiLevel = isMultiLevel;
             showUpdateModal = true;
             await InvokeAsync(StateHasChanged);
@@ -1426,10 +1446,11 @@
             StateHasChanged();
             await Task.Yield();
 
+            IReadOnlyList<SyncDependenciesRepoPayload>? payloadForCommit = null;
             await using (var scope = ServiceScopeFactory.CreateAsyncScope())
             {
                 var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-                await workspaceGitService.RunUpdateAsync(
+                var syncedPayload = await workspaceGitService.RunUpdateAsync(
                     WorkspaceId,
                     withCommits,
                     onProgressMessage: SetUpdateProgress,
@@ -1440,12 +1461,25 @@
                     },
                     repoIdsToUpdate: null,
                     cancellationToken: _updateCts.Token);
+
+                if (!withCommits)
+                    payloadForCommit = syncedPayload ?? _updatePlanPayloadForUpdateOnly;
             }
 
             isUpdating = false;
             await InvokeAsync(StateHasChanged);
             await TryUpdateFileVersionsAsync();
             await RefreshFromSync();
+
+            if (!withCommits && payloadForCommit is { Count: > 0 } payloadToCommit)
+            {
+                var repoCount = payloadToCommit.Count;
+                var message = repoCount == 1
+                    ? "Commit the updated version files in this repository?"
+                    : $"Commit all updated version files in all {repoCount} repositories?";
+                var captured = payloadToCommit;
+                ShowConfirm(message, () => CommitPayloadAfterUpdateOnlyAsync(captured), "Commit");
+            }
         }
         catch (OperationCanceledException)
         {
@@ -1456,6 +1490,82 @@
         {
             Logger.LogError(ex, "Error updating dependencies for workspace {WorkspaceId}", WorkspaceId);
             errorMessage = "Update failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+        }
+        finally
+        {
+            isUpdating = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Commit version files after user chose "Update only" and confirmed in the modal. Reuses CommitDependencyUpdatesAsync (agent StageAndCommit).</summary>
+    private async Task CommitPayloadAfterUpdateOnlyAsync(IReadOnlyList<SyncDependenciesRepoPayload> payload)
+    {
+        if (payload == null || payload.Count == 0)
+            return;
+
+        _updateCts?.Cancel();
+        _updateCts?.Dispose();
+        _updateCts = new CancellationTokenSource();
+        isUpdating = true;
+        SetUpdateProgress("Committing updated versions...");
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
+            {
+                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                var commitResults = await workspaceGitService.CommitDependencyUpdatesAsync(
+                    WorkspaceId,
+                    payload,
+                    onProgress: OnCommitDependencyProgress,
+                    cancellationToken: _updateCts.Token);
+                foreach (var (repoId, errMsg) in commitResults)
+                {
+                    if (!string.IsNullOrEmpty(errMsg))
+                        repositoryErrors[repoId] = errMsg;
+                }
+            }
+            await TryUpdateFileVersionsAsync();
+            await RefreshFromSync();
+        }
+        finally
+        {
+            isUpdating = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Commit file-version updates (no dependency updates path). Stages and commits the given paths per repo via agent StageAndCommit.</summary>
+    private async Task CommitFileVersionUpdatesAsync(IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)> byRepo)
+    {
+        if (byRepo == null || byRepo.Count == 0)
+            return;
+
+        _updateCts?.Cancel();
+        _updateCts?.Dispose();
+        _updateCts = new CancellationTokenSource();
+        isUpdating = true;
+        SetUpdateProgress("Committing updated versions...");
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
+            {
+                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                var commitResults = await workspaceGitService.CommitFilePathsAsync(
+                    WorkspaceId,
+                    byRepo,
+                    onProgress: OnCommitDependencyProgress,
+                    cancellationToken: _updateCts.Token);
+                foreach (var (repoId, errMsg) in commitResults)
+                {
+                    if (!string.IsNullOrEmpty(errMsg))
+                        repositoryErrors[repoId] = errMsg;
+                }
+            }
+            await TryUpdateFileVersionsAsync();
+            await RefreshFromSync();
         }
         finally
         {

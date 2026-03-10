@@ -390,7 +390,7 @@ public class WorkspaceGitService(
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
 
-    /// <summary>Stages updated .csproj paths and commits with message "Update dependencies" plus one line per package (name version). Runs up to 8 commits in parallel.</summary>
+    /// <summary>Stages updated .csproj paths and commits with message "chore(deps): update package versions" plus the full list of packages (one line per package: "- {packageId} to {version}"). Runs up to 8 commits in parallel.</summary>
     public async Task<IReadOnlyList<(int RepoId, string? ErrorMessage)>> CommitDependencyUpdatesAsync(
         int workspaceId,
         IReadOnlyList<SyncDependenciesRepoPayload> reposToCommit,
@@ -453,8 +453,62 @@ public class WorkspaceGitService(
         return reposToCommit.Select(r => (r.RepoId, ErrorMessage: byRepo[r.RepoId])).ToList();
     }
 
-    /// <summary>Runs full update (refresh projects, sync deps, optional commits). Stops on first error and reports it via onRepoError (message under the repo). When <paramref name="repoIdsToUpdate"/> is set, only those repos are updated.</summary>
-    public async Task RunUpdateAsync(
+    /// <summary>Stages the given file paths per repo and commits with message "chore(deps): update versions (N)" where N is the path count for that repo. Uses the same agent StageAndCommit command.</summary>
+    public async Task<IReadOnlyList<(int RepoId, string? ErrorMessage)>> CommitFilePathsAsync(
+        int workspaceId,
+        IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)> reposAndPaths,
+        Action<int, int, int>? onProgress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_agentBridge.IsAgentConnected || reposAndPaths.Count == 0)
+            return Array.Empty<(int, string?)>();
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            return reposAndPaths.Select(r => (r.RepoId, (string?)"Workspace not found.")).ToList();
+
+        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var total = reposAndPaths.Count;
+        var completed = 0;
+        var semaphore = new SemaphoreSlim(_maxConcurrent);
+
+        var tasks = reposAndPaths.Select(async repo =>
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                var pathsToStage = repo.FilePaths.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p!.Trim()).Distinct().ToList();
+                if (pathsToStage.Count == 0)
+                    return (RepoId: repo.RepoId, ErrorMessage: (string?)"No paths to stage.");
+                var commitMessage = $"chore(deps): update versions ({pathsToStage.Count})";
+                var args = new
+                {
+                    workspaceName = workspace.Name,
+                    repositoryName = repo.RepoName,
+                    commitMessage,
+                    pathsToStage,
+                    workspaceRoot
+                };
+                var response = await _agentBridge.SendCommandAsync("StageAndCommit", args, cancellationToken);
+                var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data) is { Success: true };
+                var err = success ? null : (response.Error ?? AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data!)?.ErrorMessage ?? "Commit failed");
+                var c = Interlocked.Increment(ref completed);
+                onProgress?.Invoke(c, total, repo.RepoId);
+                return (RepoId: repo.RepoId, ErrorMessage: err);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        var completedResults = await Task.WhenAll(tasks);
+        var byRepo = completedResults.ToDictionary(x => x.RepoId, x => x.ErrorMessage);
+        return reposAndPaths.Select(r => (r.RepoId, ErrorMessage: byRepo[r.RepoId])).ToList();
+    }
+
+    /// <summary>Runs full update (refresh projects, sync deps, optional commits). Stops on first error and reports it via onRepoError (message under the repo). When <paramref name="repoIdsToUpdate"/> is set, only those repos are updated. When <paramref name="withCommits"/> is false and dependencies were synced, returns the list of repos that were updated so the caller may offer to commit.</summary>
+    public async Task<IReadOnlyList<SyncDependenciesRepoPayload>?> RunUpdateAsync(
         int workspaceId,
         bool withCommits,
         Action<string>? onProgressMessage = null,
@@ -484,13 +538,13 @@ public class WorkspaceGitService(
             repositoryIds: repoIdsToUpdate,
             cancellationToken);
         if (hadError)
-            return;
+            return null;
 
         var (payload, isMultiLevel) = await GetUpdatePlanAsync(workspaceId, repoIdsToUpdate, cancellationToken);
         if (payload.Count == 0)
         {
             await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
-            return;
+            return null;
         }
 
         if (!withCommits)
@@ -498,9 +552,9 @@ public class WorkspaceGitService(
             onProgressMessage?.Invoke("Syncing dependencies...");
             await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: OnRepoError, repoIdsToSync: repoIdsToUpdate, cancellationToken: cancellationToken);
             if (hadError)
-                return;
+                return null;
             await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
-            return;
+            return payload;
         }
 
         if (isMultiLevel)
@@ -564,7 +618,7 @@ public class WorkspaceGitService(
             onProgressMessage?.Invoke("Syncing dependencies...");
             await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: OnRepoError, repoIdsToSync: repoIdsToUpdate, cancellationToken: cancellationToken);
             if (hadError)
-                return;
+                return null;
             onProgressMessage?.Invoke("Committing updates...");
             var commitResults = await CommitDependencyUpdatesAsync(workspaceId, payload, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Committed {c} of {t}"), cancellationToken: cancellationToken);
             foreach (var (repoId, errMsg) in commitResults)
@@ -606,6 +660,7 @@ public class WorkspaceGitService(
 
         if (!hadError)
             await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+        return null;
     }
 
     /// <summary>Runs dependency-synchronized push: sync package registries (unless already done by caller), then push by level (lowest first). For each level, waits until required packages are in registry (or pushes all at once if not possible), then pushes all repos at that level in parallel. Ensures branch is upstreamed even when there are no commits to push. When <paramref name="repoIdsToPush"/> is set, only those repos are pushed. Set <paramref name="packageRegistriesAlreadySynced"/> to true when the caller already synced required packages (e.g. via SyncRegistriesForPackageIdsAsync) to avoid syncing twice.</summary>

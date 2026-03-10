@@ -15,20 +15,20 @@ public sealed class WorkspaceFileVersionService(
     ///   1. Resolves the current version for each repo from the workspace's repository links (DB state); no GitVersion is run.
     ///   2. Calls UpdateFileVersions on the agent with those versions in the request to perform the in-place substitution.
     /// When <paramref name="selectedRepositoryIds"/> is set, only repositories in that set are included: pattern lines are filtered to tokens matching selected repo names, and only files in selected repos are updated.
-    /// Returns (updatedLineCount, failedFileCount, fatalError).
+    /// Returns (updatedLineCount, failedFileCount, fatalError, list of (RepositoryId, RepoName, FilePath) for each file that was updated).
     /// </summary>
-    public async Task<(int Updated, int Failed, string? Error)> UpdateAllVersionsAsync(
+    public async Task<(int Updated, int Failed, string? Error, IReadOnlyList<(int RepositoryId, string RepoName, string FilePath)> UpdatedFiles)> UpdateAllVersionsAsync(
         int workspaceId,
         IReadOnlySet<int>? selectedRepositoryIds = null,
         Action<string>? onFileUpdated = null,
         CancellationToken cancellationToken = default)
     {
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
-        if (workspace == null) return (0, 0, "Workspace not found.");
-        if (!agentBridge.IsAgentConnected) return (0, 0, "Agent is not connected.");
+        if (workspace == null) return (0, 0, "Workspace not found.", []);
+        if (!agentBridge.IsAgentConnected) return (0, 0, "Agent is not connected.", []);
 
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
-        if (configs.Count == 0) return (0, 0, "No version configurations found. Use Configure on a file first.");
+        if (configs.Count == 0) return (0, 0, "No version configurations found. Use Configure on a file first.", []);
 
         HashSet<string>? selectedRepoNames = null;
         if (selectedRepositoryIds != null && selectedRepositoryIds.Count > 0)
@@ -39,7 +39,7 @@ public sealed class WorkspaceFileVersionService(
                 if (link.RepositoryId != 0 && selectedRepositoryIds.Contains(link.RepositoryId) && !string.IsNullOrEmpty(link.Repository?.RepositoryName))
                     selectedRepoNames.Add(link.Repository.RepositoryName);
             }
-            if (selectedRepoNames.Count == 0) return (0, 0, "No selected repositories.");
+            if (selectedRepoNames.Count == 0) return (0, 0, "No selected repositories.", []);
         }
 
         // Collect all unique repo-name tokens used across all patterns
@@ -70,6 +70,7 @@ public sealed class WorkspaceFileVersionService(
         // Update each configured file
         var totalUpdated = 0;
         var totalFailed = 0;
+        var updatedFiles = new List<(int RepositoryId, string RepoName, string FilePath)>();
 
         foreach (var cfg in configs)
         {
@@ -105,8 +106,12 @@ public sealed class WorkspaceFileVersionService(
                     var result = AgentResponseJson.DeserializeAgentResponse<AgentUpdateFileVersionsResponse>(resp.Data);
                     var updatedForFile = result?.UpdatedCount ?? 0;
                     totalUpdated += updatedForFile;
-                    if (updatedForFile > 0 && onFileUpdated != null && file.FilePath != null)
-                        onFileUpdated(file.FilePath);
+                    if (updatedForFile > 0 && file.FilePath != null)
+                    {
+                        if (onFileUpdated != null)
+                            onFileUpdated(file.FilePath);
+                        updatedFiles.Add((file.RepositoryId, file.Repository.RepositoryName ?? "", file.FilePath));
+                    }
                     if (result?.ErrorMessage != null)
                         logger.LogWarning("UpdateFileVersions warning for {FilePath}: {Msg}", file.FilePath, result.ErrorMessage);
                 }
@@ -124,7 +129,7 @@ public sealed class WorkspaceFileVersionService(
             }
         }
 
-        return (totalUpdated, totalFailed, null);
+        return (totalUpdated, totalFailed, null, updatedFiles);
     }
 
     /// <summary>Extracts all {token} names from a version pattern string.</summary>
