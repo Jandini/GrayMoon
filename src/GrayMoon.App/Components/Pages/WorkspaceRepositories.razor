@@ -111,18 +111,19 @@
                                 @foreach (var group in FilteredLevelGroups)
                                 {
                                     var levelUrls = group.Select(wr => wr.Repository).Where(r => r != null).Select(r => RepositoryUrlHelper.GetRepositoryUrl(r!.CloneUrl)).Where(u => !string.IsNullOrEmpty(u)).ToList();
-                                    var levelUrlsJson = System.Text.Json.JsonSerializer.Serialize(levelUrls);
                                     <tr class="dependency-level-header">
                                         <td colspan="@colSpan" class="dependency-level-header-cell">
-                                            <span class="dependency-level-title @(group.Key == null ? "dependency-level-no-projects" : "")">@(group.Key == null ? "No dependencies" : $"Level {group.Key}")</span>
-                                            <span class="dependency-level-links">
+                                            <div class="dependency-level-header-start">
+                                                <span class="dependency-level-title @(group.Key == null ? "dependency-level-no-projects" : "")">@(group.Key == null ? "No dependencies" : $"Level {group.Key}")</span>
+                                                @if (group.Key.HasValue)
+                                                {
+                                                    <a href="@GetDependencyGraphUrlForLevel(group.Key!.Value)" class="dependency-level-graph-link" title="View dependency graph for this level" aria-label="Dependency graph">
+                                                        <i class="bi bi-diagram-3" aria-hidden="true"></i>
+                                                    </a>
+                                                }
+                                            </div>
+                                            <div class="dependency-level-header-end">
                                                 <span class="dependency-level-icons">
-                                                    @if (group.Key.HasValue)
-                                                    {
-                                                        <a href="@GetDependencyGraphUrlForLevel(group.Key!.Value)" class="dependency-level-graph-link" title="View dependency graph for this level" aria-label="Dependency graph">
-                                                            <i class="bi bi-diagram-3" aria-hidden="true"></i>
-                                                        </a>
-                                                    }
                                                     <span class="dependency-level-sync-to-default-link"
                                                           role="button"
                                                           tabindex="0"
@@ -175,7 +176,7 @@
                                                       @onclick:stopPropagation>
                                                     <span class="dependency-level-count-num">@group.Count()</span> @(group.Count() == 1 ? "repository" : "repositories")
                                                 </span>
-                                            </span>
+                                            </div>
                                         </td>
                                     </tr>
                                     @foreach (var wr in group)
@@ -404,7 +405,6 @@
 <LoadingOverlay IsVisible="@isCreatingBranches" Message="@createBranchesProgressMessage" />
 <LoadingOverlay IsVisible="@isCreatingBranch" Message="@createBranchMessage" />
 <LoadingOverlay IsVisible="@isSyncingToDefault" Message="@syncToDefaultMessage" />
-<LoadingOverlay IsVisible="@isCheckingBranchesForSyncToDefault" Message="@checkingBranchesMessage" />
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
@@ -485,8 +485,6 @@
     private string createBranchMessage = "";
     private bool isSyncingToDefault = false;
     private string syncToDefaultMessage = "";
-    private bool isCheckingBranchesForSyncToDefault = false;
-    private string checkingBranchesMessage = "Checking branches...";
     private IReadOnlyList<(int RepoId, int? DefaultAhead, bool? HasUpstream)>? _syncToDefaultCheckResults = null;
     private bool showUpdateModal = false;
     private bool showUpdateSingleRepoDependenciesModal = false;
@@ -968,18 +966,15 @@
             return;
         }
 
-        _ = CheckBranchesAndConfirmSyncToDefaultLevelAsync(nonDefaultRepoIds);
+        CheckBranchesAndConfirmSyncToDefaultLevel(nonDefaultRepoIds);
     }
 
-    private async Task CheckBranchesAndConfirmSyncToDefaultLevelAsync(List<int> repositoryIds)
+    private void CheckBranchesAndConfirmSyncToDefaultLevel(List<int> repositoryIds)
     {
-        if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || isCheckingBranchesForSyncToDefault || isSyncingToDefault)
+        if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || isSyncingToDefault)
             return;
 
-        isCheckingBranchesForSyncToDefault = true;
-        checkingBranchesMessage = "Preparing...";
         _syncToDefaultCheckResults = null;
-        await InvokeAsync(StateHasChanged);
 
         try
         {
@@ -1023,11 +1018,6 @@
         {
             Logger.LogError(ex, "Error checking branches for sync to default");
             ToastService.Show("Failed to prepare sync to default.");
-        }
-        finally
-        {
-            isCheckingBranchesForSyncToDefault = false;
-            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -2240,15 +2230,12 @@
     private async Task SyncToDefaultFromModalAsync((int RepositoryId, string? RepositoryName, string CurrentBranchName, string DefaultBranch) request)
     {
         var (repositoryId, repositoryName, currentBranchName, defaultBranch) = request;
-        if (workspace == null || isSyncingToDefault || isSyncing || isUpdating || isCheckingBranchesForSyncToDefault)
+        if (workspace == null || isSyncingToDefault || isSyncing || isUpdating)
             return;
         if (string.IsNullOrWhiteSpace(repositoryName))
             return;
 
         CloseSwitchBranchModal();
-        isCheckingBranchesForSyncToDefault = true;
-        checkingBranchesMessage = "Preparing...";
-        await InvokeAsync(StateHasChanged);
 
         try
         {
@@ -2268,11 +2255,6 @@
         {
             Logger.LogError(ex, "Error preparing sync to default (repository {RepositoryId})", repositoryId);
             ToastService.Show("Failed to prepare sync to default.");
-        }
-        finally
-        {
-            isCheckingBranchesForSyncToDefault = false;
-            await InvokeAsync(StateHasChanged);
         }
     }
 
