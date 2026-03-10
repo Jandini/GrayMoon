@@ -1718,7 +1718,7 @@
         }
     }
 
-    /// <summary>Sync (refresh version, branch, commits) for the given repositories in a level. Same overlay and error handling as SyncAsync.</summary>
+    /// <summary>Sync (refresh version, branch, commits) for the given repositories in a level. Uses skipDependencyLevelPersistence so merge does not persist with partial edges; PersistVersionsAsync then recomputes levels from full DB. Same overlay and error handling as SyncAsync.</summary>
     private async Task SyncLevelAsync(List<int> repositoryIds)
     {
         if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || isSyncing)
@@ -1790,7 +1790,7 @@
         }
     }
 
-    /// <summary>Sync a single repository (same as Sync button but for one repo).</summary>
+    /// <summary>Sync a single repository (same as Sync button but for one repo). Levels are recomputed after persist via full DB graph (see PersistVersionsAsync when skipDependencyLevelPersistence).</summary>
     private async Task SyncSingleRepoAsync(int repositoryId)
     {
         if (workspace == null || workspaceRepositories.Count == 0 || isSyncing)

@@ -131,7 +131,7 @@ public sealed class WorkspaceProjectRepository(
             workspaceId, repositoryId, toRemove.Count, byName.Count);
     }
 
-    /// <summary>Replaces project dependencies for workspace projects from sync results. Only dependencies where the referenced package is a workspace project are persisted. When <paramref name="persistDependencyLevel"/> is false, DependencyLevel/Dependencies/UnmatchedDeps are not recomputed (e.g. when syncing only selected repos or retrying after error).</summary>
+    /// <summary>Replaces project dependencies for workspace projects from sync results. Only dependencies where the referenced package is a workspace project are persisted. When <paramref name="persistDependencyLevel"/> is false, this method does not persist levels (avoids partial uniqueEdges); callers such as <c>WorkspaceGitService.PersistVersionsAsync</c> follow with <c>RecomputeAndPersistRepositoryDependencyStatsAsync</c> so levels are recomputed from the full DB graph.</summary>
     public async Task MergeWorkspaceProjectDependenciesAsync(
         int workspaceId,
         IReadOnlyList<(int RepoId, IReadOnlyList<SyncProjectInfo>? ProjectsDetail)> syncResults,

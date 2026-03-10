@@ -1328,6 +1328,12 @@ public class WorkspaceGitService(
         var syncResults = resultList.Select(r => (r.RepoId, r.info.ProjectsDetail)).ToList();
         await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, syncResults, persistDependencyLevel, cancellationToken);
 
+        // Partial sync (single repo or whole level): merge uses persistDependencyLevel false so Persist is not
+        // called with a partial uniqueEdges graph. Recompute from full ProjectDependencies in DB so every
+        // WorkspaceRepositoryLink gets correct DependencyLevel/Dependencies/UnmatchedDeps without syncing other repos.
+        if (!persistDependencyLevel)
+            await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+
         await _workspacePullRequestService.RefreshPullRequestsAsync(workspaceId, repoIds, cancellationToken);
 
         _logger.LogInformation("Persistence: saved WorkspaceRepository link versions. WorkspaceId={WorkspaceId}, RepoCount={RepoCount}",
