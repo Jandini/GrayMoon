@@ -90,11 +90,14 @@
     text-overflow: ellipsis;
 }
 
-/* Dependency level section header: near-black background, reduced height, bottom border only */
+/* Dependency level header: 3 columns — 30% level (left) | 60% icons (right) | 10% count (right) */
 .repositories-table .dependency-level-header td.dependency-level-header-cell {
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    /* 30% | 60% | remainder (~10%) */
+    grid-template-columns: 20% 74% 1fr;
     align-items: center;
+    width: 100%;
+    box-sizing: border-box;
     background-color: #0d0d0d;
     color: var(--text-secondary);
     font-weight: 600;
@@ -103,6 +106,48 @@
     padding: 0.5rem 0.6rem;
     border: none;
     border-bottom: 1px solid var(--border-color);
+    column-gap: 0.5rem;
+}
+
+/* Column 1: Level — left */
+.repositories-table .dependency-level-header .dependency-level-header-col-level {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    text-align: left;
+}
+
+.repositories-table .dependency-level-header .dependency-level-header-col-level .dependency-level-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Column 2: Icons — right-aligned within 60% */
+.repositories-table .dependency-level-header .dependency-level-header-col-icons {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    text-align: right;
+}
+
+/* Column 3: x repositories — right; takes remainder after 30%+60% if grid shrink, else ~10% via fr */
+.repositories-table .dependency-level-header .dependency-level-header-col-count {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    text-align: right;
+}
+
+.repositories-table .dependency-level-header .dependency-level-header-col-count .dependency-level-count {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
 }
 
 .repositories-table .dependency-level-header:hover td.dependency-level-header-cell {
@@ -129,23 +174,12 @@
     color: var(--text-muted);
 }
 
-/* Fixed total width so icons stay in same column; count at end of header; 100 repositories can shift */
-.repositories-table .dependency-level-header .dependency-level-links {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    min-width: 9.5rem;
-    
-    flex-shrink: 0;
-}
-
-/* Icons at start of fixed-width block so they align vertically across rows */
+/* Icons row: consistent gap; alignment comes from header-left grid */
 .repositories-table .dependency-level-header .dependency-level-icons {
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
     flex-shrink: 0;
-    margin-right: 0.5rem;
 }
 
 /* No dependencies: gray, not bold */
