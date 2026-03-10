@@ -30,7 +30,7 @@ public sealed class DeleteBranchCommand(IGitService git) : ICommandHandler<Delet
 
         try
         {
-            var (success, errorMessage) = await git.DeleteBranchAsync(repoPath, branchName, request.IsRemote, cancellationToken);
+            var (success, errorMessage) = await git.DeleteBranchAsync(repoPath, branchName, request.IsRemote, request.Force, cancellationToken);
             return new DeleteBranchResponse
             {
                 Success = success,

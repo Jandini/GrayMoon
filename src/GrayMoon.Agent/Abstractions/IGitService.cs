@@ -35,8 +35,8 @@ public interface IGitService
     Task<(bool Success, string? ErrorMessage)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct);
     /// <summary>Deletes a local branch. Returns true if successful. Only deletes if branch is not current and is merged or force flag is set.</summary>
     Task<bool> DeleteLocalBranchAsync(string repoPath, string branchName, bool force, CancellationToken ct);
-    /// <summary>Deletes a local or remote branch. Returns (success, errorMessage). For remote, runs git push origin --delete.</summary>
-    Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, CancellationToken ct);
+    /// <summary>Deletes a local or remote branch. Returns (success, errorMessage). For remote, runs git push origin --delete. For local, when <paramref name="force"/> is true, uses git branch -D.</summary>
+    Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct);
     /// <summary>Gets the default branch name (e.g., "main" or "master") without "origin/" prefix.</summary>
     Task<string?> GetDefaultBranchNameAsync(string repoPath, CancellationToken ct);
     /// <summary>Gets the default branch origin ref (e.g., "origin/main") for passing to GetCommitCountsAsync/GetCommitCountsVsDefaultAsync to avoid resolving twice.</summary>
