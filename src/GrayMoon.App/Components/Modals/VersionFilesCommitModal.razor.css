@@ -1,0 +1,40 @@
+/* Label above the scrollable file list */
+.version-files-commit-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #868e96;
+}
+
+/* Dark box for file paths, with dark border and scroll (matches other dependency lists) */
+.version-files-commit-box {
+    max-height: 200px;
+    overflow-y: auto;
+    background-color: #2a2a2a;
+    border: 1px solid #474747;
+    border-radius: 0.25rem;
+}
+
+.version-files-commit-box::-webkit-scrollbar {
+    width: 6px;
+}
+
+.version-files-commit-box::-webkit-scrollbar-track {
+    background: #2a2a2a;
+}
+
+.version-files-commit-box::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 3px;
+}
+
+.version-files-commit-box::-webkit-scrollbar-thumb:hover {
+    background: #888;
+}
+
+/* Monospace file list text */
+.version-files-commit-pre {
+    font-size: 0.75rem;
+    background-color: transparent;
+    color: #dee2e6;
+}
+

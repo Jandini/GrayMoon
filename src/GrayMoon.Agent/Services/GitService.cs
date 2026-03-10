@@ -113,6 +113,19 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             })
             .Build();
 
+    private static readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> FetchRetryPipeline =
+        new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
+            .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
+            {
+                // Retry any non-zero exit code from git fetch (e.g., transient network failures).
+                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>().HandleResult(r => r.ExitCode != 0),
+                MaxRetryAttempts = 3,
+                Delay = TimeSpan.FromSeconds(2),
+                BackoffType = DelayBackoffType.Exponential,
+                UseJitter = true
+            })
+            .Build();
+
     public async Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
@@ -207,7 +220,9 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             args = $"-c \"http.extraHeader={escaped}\" {fetchCmd}";
         }
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);
+        var (exitCode, stdout, stderr) = await FetchRetryPipeline.ExecuteAsync(
+            async cancellationToken => await RunProcessAsync("git", args, repoPath, cancellationToken),
+            ct);
         sw.Stop();
         if (exitCode != 0)
         {
