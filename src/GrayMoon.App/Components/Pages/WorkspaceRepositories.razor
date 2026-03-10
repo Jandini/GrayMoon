@@ -111,11 +111,9 @@
                                 @foreach (var group in FilteredLevelGroups)
                                 {
                                     var levelUrls = group.Select(wr => wr.Repository).Where(r => r != null).Select(r => RepositoryUrlHelper.GetRepositoryUrl(r!.CloneUrl)).Where(u => !string.IsNullOrEmpty(u)).ToList();
-                                    var levelUrlsJson = System.Text.Json.JsonSerializer.Serialize(levelUrls);
                                     <tr class="dependency-level-header">
                                         <td colspan="@colSpan" class="dependency-level-header-cell">
-                                            @* Column 1: Level + graph icon (graph next to level) *@
-                                            <div class="dependency-level-header-col dependency-level-header-col-level">
+                                            <div class="dependency-level-header-start">
                                                 <span class="dependency-level-title @(group.Key == null ? "dependency-level-no-projects" : "")">@(group.Key == null ? "No dependencies" : $"Level {group.Key}")</span>
                                                 @if (group.Key.HasValue)
                                                 {
@@ -124,8 +122,7 @@
                                                     </a>
                                                 }
                                             </div>
-                                            @* Column 2: Icons (right-aligned), graph excluded *@
-                                            <div class="dependency-level-header-col dependency-level-header-col-icons">
+                                            <div class="dependency-level-header-end">
                                                 <span class="dependency-level-icons">
                                                     <span class="dependency-level-sync-to-default-link"
                                                           role="button"
@@ -169,9 +166,6 @@
                                                         <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
                                                     </span>
                                                 </span>
-                                            </div>
-                                            @* Column 3: 10% / remainder – x repositories, right *@
-                                            <div class="dependency-level-header-col dependency-level-header-col-count">
                                                 <span class="dependency-level-count dependency-level-count-link"
                                                       role="button"
                                                       tabindex="0"
