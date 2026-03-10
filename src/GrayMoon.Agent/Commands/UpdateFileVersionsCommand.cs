@@ -24,7 +24,7 @@ public sealed class UpdateFileVersionsCommand(IGitService git) : ICommandHandler
         if (!File.Exists(fullFilePath))
             return new UpdateFileVersionsResponse { UpdatedCount = 0, ErrorMessage = $"File not found: {filePath}" };
 
-        // Parse pattern lines: each is PREFIX={reponame} — extract (prefix, repoName) tuples
+        // Parse pattern lines: each is PREFIX={reponame}SUFFIX — extract (prefix, repoName, suffix) tuples
         var patternEntries = ParsePatternLines(versionPattern);
         if (patternEntries.Count == 0)
             return new UpdateFileVersionsResponse { UpdatedCount = 0 };
@@ -36,12 +36,18 @@ public sealed class UpdateFileVersionsCommand(IGitService git) : ICommandHandler
         for (var i = 0; i < fileLines.Length; i++)
         {
             var line = fileLines[i];
-            foreach (var (prefix, repoName) in patternEntries)
-            {
-                if (!line.StartsWith(prefix, StringComparison.Ordinal)) continue;
-                if (!repoVersions.TryGetValue(repoName, out var version)) continue;
+            var (leadingWhitespace, contentStart) = GetLeadingWhitespace(line);
+            var trimmedLine = contentStart >= line.Length ? "" : line[contentStart..];
 
-                var newLine = prefix + version;
+            foreach (var (prefix, repoName, suffix) in patternEntries)
+            {
+                if (!trimmedLine.StartsWith(prefix, StringComparison.Ordinal)) continue;
+                if (!repoVersions.TryGetValue(repoName, out var version)) continue;
+                // Require line to end with suffix (if any) so we only replace the token value and preserve the rest
+                if (suffix.Length > 0 && (trimmedLine.Length < prefix.Length + suffix.Length || !trimmedLine.EndsWith(suffix, StringComparison.Ordinal)))
+                    continue;
+
+                var newLine = leadingWhitespace + prefix + version + suffix;
                 if (newLine != line)
                 {
                     fileLines[i] = newLine;
@@ -59,13 +65,14 @@ public sealed class UpdateFileVersionsCommand(IGitService git) : ICommandHandler
     }
 
     /// <summary>
-    /// Parses pattern text into (prefix, repoName) tuples.
-    /// Each non-empty line must contain exactly one {token}; the prefix is everything up to and
-    /// including the character before '{'. Example: "KEY={repo}" → prefix="KEY=", repoName="repo".
+    /// Parses pattern text into (prefix, repoName, suffix) tuples.
+    /// Each non-empty line must contain exactly one {token}; the prefix is everything before '{',
+    /// the suffix is everything after '}'. Example: "KEY={repo}" → prefix="KEY=", repoName="repo", suffix="".
+    /// Example: "Version=\"{repo}\" />" → prefix="Version=\"", repoName="repo", suffix="\" />".
     /// </summary>
-    private static List<(string Prefix, string RepoName)> ParsePatternLines(string pattern)
+    private static List<(string Prefix, string RepoName, string Suffix)> ParsePatternLines(string pattern)
     {
-        var result = new List<(string, string)>();
+        var result = new List<(string, string, string)>();
         foreach (var raw in pattern.Split('\n'))
         {
             var line = raw.Trim().TrimEnd('\r');
@@ -75,12 +82,21 @@ public sealed class UpdateFileVersionsCommand(IGitService git) : ICommandHandler
             var end = line.IndexOf('}', start >= 0 ? start : 0);
             if (start < 1 || end <= start) continue; // need at least one char before '{'
 
-            var prefix = line[..start];          // e.g. "KEY="
-            var repoName = line[(start + 1)..end]; // e.g. "repo"
+            var prefix = line[..start];              // e.g. "KEY=" or "Version=\""
+            var repoName = line[(start + 1)..end];   // e.g. "repo"
+            var suffix = end + 1 < line.Length ? line[(end + 1)..] : ""; // e.g. "" or "\" />"
             if (string.IsNullOrEmpty(prefix) || string.IsNullOrEmpty(repoName)) continue;
 
-            result.Add((prefix, repoName));
+            result.Add((prefix, repoName, suffix));
         }
         return result;
+    }
+
+    /// <summary>Returns the leading whitespace substring and the index of the first non-whitespace character (or line length if all whitespace).</summary>
+    private static (string LeadingWhitespace, int ContentStart) GetLeadingWhitespace(string line)
+    {
+        var i = 0;
+        while (i < line.Length && char.IsWhiteSpace(line[i])) i++;
+        return (line[..i], i);
     }
 }

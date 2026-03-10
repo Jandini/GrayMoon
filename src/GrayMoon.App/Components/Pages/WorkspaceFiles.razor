@@ -262,8 +262,9 @@
             }
             else
             {
-                await VersionConfigRepository.UpsertAsync(configuringFile.FileId, pattern);
-                fileVersionConfigs[configuringFile.FileId] = pattern;
+                var normalized = WorkspaceFileVersionService.NormalizePatternLeadingWhitespace(pattern);
+                await VersionConfigRepository.UpsertAsync(configuringFile.FileId, normalized);
+                fileVersionConfigs[configuringFile.FileId] = normalized;
             }
             CloseVersionConfigModal();
         }
