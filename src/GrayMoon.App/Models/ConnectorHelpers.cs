@@ -98,25 +98,12 @@ public static class ConnectorHelpers
         if (string.IsNullOrWhiteSpace(plainToken))
             return null;
 
-        if (_tokenProtector != null)
-            return _tokenProtector.Protect(plainToken.Trim());
-
         var trimmed = plainToken.Trim();
-        // If it already looks like Base64 and round-trips, assume it's protected.
-        if (IsLikelyBase64(trimmed))
-        {
-            try
-            {
-                var bytes = Convert.FromBase64String(trimmed);
-                _ = Encoding.UTF8.GetString(bytes);
-                return trimmed;
-            }
-            catch (FormatException)
-            {
-                // Fall through and treat as plain text.
-            }
-        }
 
+        if (_tokenProtector != null)
+            return _tokenProtector.Protect(trimmed);
+
+        // Legacy fallback: Base64 obfuscation when no protector has been initialized.
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(trimmed));
     }
 
@@ -126,10 +113,12 @@ public static class ConnectorHelpers
         if (string.IsNullOrWhiteSpace(storedToken))
             return null;
 
-        if (_tokenProtector != null)
-            return _tokenProtector.Unprotect(storedToken.Trim());
-
         var trimmed = storedToken.Trim();
+
+        if (_tokenProtector != null)
+            return _tokenProtector.Unprotect(trimmed);
+
+        // Legacy fallback: try Base64, otherwise treat as plain text.
         try
         {
             var bytes = Convert.FromBase64String(trimmed);
@@ -137,22 +126,7 @@ public static class ConnectorHelpers
         }
         catch (FormatException)
         {
-            // Not Base64; treat as legacy plain-text token.
             return trimmed;
         }
-    }
-
-    private static bool IsLikelyBase64(string value)
-    {
-        if (value.Length == 0 || value.Length % 4 != 0)
-            return false;
-
-        foreach (var c in value)
-        {
-            if (!(char.IsLetterOrDigit(c) || c == '+' || c == '/' || c == '='))
-                return false;
-        }
-
-        return true;
     }
 }

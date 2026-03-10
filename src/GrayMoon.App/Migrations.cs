@@ -12,7 +12,8 @@ public static class Migrations
         await MigrateWorkspaceSyncMetadataAsync(dbContext);
         await MigrateConnectorUserNameAsync(dbContext);
         await MigrateConnectorTypeAndTokenAsync(dbContext);
-        await MigrateConnectorUserTokenBase64Async(dbContext);
+        await MigrateConnectorUserTokenEncryptionAsync(dbContext);
+        await MigrateConnectorTokenHealthAsync(dbContext);
         await MigrateWorkspaceRepositoriesSyncStatusAsync(dbContext);
         await MigrateWorkspaceRepositoriesProjectsAsync(dbContext);
         await MigrateWorkspaceRepositoriesCommitsAsync(dbContext);
@@ -56,8 +57,11 @@ public static class Migrations
         }
     }
 
-    /// <summary>One-time migration to store existing connector UserToken values as Base64 instead of plain text. Idempotent: re-running will not double-encode.</summary>
-    public static async Task MigrateConnectorUserTokenBase64Async(AppDbContext dbContext)
+    /// <summary>
+    /// One-time migration to protect existing connector UserToken values using the current token protector (AES-GCM).
+    /// Idempotent: skips values that already use the v2: scheme.
+    /// </summary>
+    public static async Task MigrateConnectorUserTokenEncryptionAsync(AppDbContext dbContext)
     {
         try
         {
@@ -65,7 +69,7 @@ public static class Migrations
             if (conn.State != System.Data.ConnectionState.Open)
                 await conn.OpenAsync();
 
-            // Ensure Connectors table and UserToken column exist
+            // Ensure Connectors table and UserToken column exist before using EF.
             await using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='Connectors'";
@@ -79,7 +83,6 @@ public static class Migrations
                     return;
             }
 
-            // Load connectors with a non-empty token and protect them using Base64.
             var connectors = await dbContext.Connectors
                 .Where(c => !string.IsNullOrWhiteSpace(c.UserToken))
                 .ToListAsync();
@@ -90,9 +93,22 @@ public static class Migrations
             var changed = 0;
             foreach (var connector in connectors)
             {
-                var original = connector.UserToken;
-                var protectedToken = ConnectorHelpers.ProtectToken(original);
-                if (!string.Equals(original, protectedToken, StringComparison.Ordinal))
+                var current = connector.UserToken;
+                if (string.IsNullOrWhiteSpace(current))
+                    continue;
+
+                var trimmed = current.Trim();
+                // Skip tokens that already use the v2: scheme (AES-GCM format).
+                if (trimmed.StartsWith("v2:", StringComparison.Ordinal))
+                    continue;
+
+                // Normalize any legacy/plain/Base64 token to plaintext, then protect with the current scheme.
+                var plain = ConnectorHelpers.UnprotectToken(current);
+                if (string.IsNullOrWhiteSpace(plain))
+                    continue;
+
+                var protectedToken = ConnectorHelpers.ProtectToken(plain);
+                if (!string.Equals(current, protectedToken, StringComparison.Ordinal))
                 {
                     connector.UserToken = protectedToken;
                     changed++;
@@ -101,6 +117,53 @@ public static class Migrations
 
             if (changed > 0)
                 await dbContext.SaveChangesAsync();
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds TokenHealth, TokenHealthError, and IsHealthy columns to Connectors for tracking token status.</summary>
+    public static async Task MigrateConnectorTokenHealthAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='Connectors'";
+                var tableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!tableExists)
+                    return;
+
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Connectors') WHERE name='TokenHealth'";
+                var hasTokenHealth = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!hasTokenHealth)
+                {
+                    cmd.CommandText = "ALTER TABLE Connectors ADD COLUMN TokenHealth TEXT";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Connectors') WHERE name='TokenHealthError'";
+                var hasTokenHealthError = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!hasTokenHealthError)
+                {
+                    cmd.CommandText = "ALTER TABLE Connectors ADD COLUMN TokenHealthError TEXT";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Connectors') WHERE name='IsHealthy'";
+                var hasIsHealthy = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!hasIsHealthy)
+                {
+                    cmd.CommandText = "ALTER TABLE Connectors ADD COLUMN IsHealthy INTEGER NOT NULL DEFAULT 0";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
         }
         catch
         {

@@ -294,6 +294,8 @@ public class GitHubService : IConnectorService
         request.Headers.UserAgent.ParseAdd("GrayMoon");
         request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
         var token = ConnectorHelpers.UnprotectToken(connector.UserToken);
+        if (string.IsNullOrWhiteSpace(token))
+            throw new InvalidOperationException("Connector token is not configured.");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return request;
     }
@@ -358,6 +360,8 @@ public class GitHubService : IConnectorService
         request.Headers.UserAgent.ParseAdd("GrayMoon");
         request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
         var token = ConnectorHelpers.UnprotectToken(connector.UserToken);
+        if (string.IsNullOrWhiteSpace(token))
+            throw new InvalidOperationException("Connector token is not configured.");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         var response = await _httpClient.SendAsync(request);

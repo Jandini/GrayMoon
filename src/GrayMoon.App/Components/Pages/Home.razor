@@ -6,7 +6,7 @@
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
 @inject AgentConnectionTracker AgentConnectionTracker
-@inject ConnectorHealthTracker ConnectorHealthTracker
+@inject ConnectorHealthService ConnectorHealthService
 <PageTitle>Home - GrayMoon</PageTitle>
 
 @if (!showHome)
@@ -102,6 +102,7 @@ else
 @code {
     private const string DefaultWorkspaceRedirectKey = "defaultWorkspaceRedirected";
     private bool showHome;
+    private bool anyUsedConnectorUnhealthy;
 
     private string AgentButtonText => AgentConnectionTracker.State switch
     {
@@ -112,7 +113,12 @@ else
 
     private string AgentButtonClass => AgentConnectionTracker.State == AgentConnectionState.Online ? "btn-primary" : "btn-danger";
 
-    private string ConnectorButtonClass => ConnectorHealthTracker.HasTokenDecryptionErrors ? "btn-danger" : "btn-primary";
+    private string ConnectorButtonClass => anyUsedConnectorUnhealthy ? "btn-danger" : "btn-primary";
+
+    protected override async Task OnInitializedAsync()
+    {
+        anyUsedConnectorUnhealthy = await ConnectorHealthService.AnyUsedConnectorUnhealthyAsync();
+    }
 
     protected override void OnAfterRender(bool firstRender)
     {

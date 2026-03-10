@@ -28,6 +28,7 @@ public static class CommitSyncEndpoints
         WorkspaceRepository workspaceRepository,
         AppDbContext dbContext,
         IHubContext<WorkspaceSyncHub> hubContext,
+        ConnectorHealthService connectorHealthService,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.CommitSync");
@@ -68,13 +69,15 @@ public static class CommitSyncEndpoints
 
         try
         {
+            await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, CancellationToken.None);
+
             var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, CancellationToken.None);
             var args = new
             {
                 workspaceName = workspace.Name,
                 repositoryId = repo.RepositoryId,
                 repositoryName = repo.RepositoryName,
-                bearerToken = repo.Connector?.UserToken,
+                bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                 workspaceId,
                 workspaceRoot
             };

@@ -48,6 +48,7 @@ builder.Services.AddScoped<SyncCommandHandler>();
 builder.Services.AddScoped<IAgentBridge, AgentBridge>();
 builder.Services.AddScoped<WorkspaceService>();
 builder.Services.AddScoped<WorkspaceGitService>();
+builder.Services.AddScoped<ConnectorHealthService>();
 builder.Services.AddScoped<GitHubRepositoryService>();
 builder.Services.AddScoped<GitHubActionsService>();
 builder.Services.AddScoped<GitHubPullRequestService>();
@@ -57,14 +58,14 @@ builder.Services.AddScoped<PackageRegistrySyncService>();
 builder.Services.AddScoped<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
     builder.Services.AddScoped<WorkspaceFileVersionService>();
 
-// Token protection and connector health
+// Token protection
 builder.Services.AddSingleton<ITokenEncryptionKeyProvider, TokenEncryptionKeyProvider>();
 builder.Services.AddSingleton<ITokenProtector, AesGcmTokenProtector>();
-builder.Services.AddSingleton<ConnectorHealthTracker>();
 
-// Background sync service with controlled parallelism
+// Background services
 builder.Services.AddSingleton<SyncBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SyncBackgroundService>());
+builder.Services.AddHostedService<TokenHealthBackgroundService>();
 
 // Connector services
 builder.Services.AddHttpClient<GitHubService>();
@@ -105,49 +106,12 @@ using (var scope = app.Services.CreateScope())
     var services = scope.ServiceProvider;
     var dbContext = services.GetRequiredService<AppDbContext>();
     var tokenProtector = services.GetRequiredService<ITokenProtector>();
-    var connectorHealth = services.GetRequiredService<ConnectorHealthTracker>();
-    var logger = services.GetRequiredService<ILogger<Program>>();
 
     // Initialize static helper to use configured token protector
     ConnectorHelpers.InitializeTokenProtector(tokenProtector);
 
     dbContext.Database.EnsureCreated();
     await Migrations.RunAllAsync(dbContext);
-
-    // Verify that all stored connector tokens are decryptable; flag health if not.
-    try
-    {
-        var connectors = await dbContext.Connectors
-            .AsNoTracking()
-            .ToListAsync();
-
-        var hadError = false;
-        foreach (var connector in connectors)
-        {
-            if (string.IsNullOrWhiteSpace(connector.UserToken))
-                continue;
-
-            try
-            {
-                _ = tokenProtector.Unprotect(connector.UserToken);
-            }
-            catch (Exception ex)
-            {
-                hadError = true;
-                logger.LogWarning(ex, "Failed to decrypt connector token. ConnectorId={ConnectorId}, Name={ConnectorName}", connector.ConnectorId, connector.ConnectorName);
-            }
-        }
-
-        connectorHealth.HasTokenDecryptionErrors = hadError;
-        if (hadError)
-        {
-            logger.LogWarning("One or more connector tokens could not be decrypted. Check TokenKey configuration before using connectors.");
-        }
-    }
-    catch (Exception ex)
-    {
-        logger.LogWarning(ex, "Connector token decryption health check failed.");
-    }
 }
 
 static string? GetDatabasePath(string connectionString)
