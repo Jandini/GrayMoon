@@ -15,4 +15,8 @@ public sealed class DeleteBranchRequest : WorkspaceCommandRequest
 
     [JsonPropertyName("isRemote")]
     public bool IsRemote { get; set; }
+
+    /// <summary>When true and deleting a local branch, uses git branch -D after -d failed (not fully merged).</summary>
+    [JsonPropertyName("force")]
+    public bool Force { get; set; }
 }

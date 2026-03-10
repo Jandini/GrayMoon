@@ -629,7 +629,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return true;
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, CancellationToken ct)
+    public async Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (false, "Invalid repository path or branch name");
@@ -681,6 +681,20 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         {
             logger.LogWarning("Cannot delete current branch {Branch} in {RepoPath}", localName, repoPath);
             return (false, "Cannot delete the current branch. Check out another branch first.");
+        }
+
+        // Force delete: git branch -D (user confirmed after -d reported not fully merged)
+        if (force)
+        {
+            var (exitForce, stdoutForce, stderrForce) = await RunProcessAsync("git", $"branch -D {localName}", repoPath, ct);
+            if (exitForce != 0)
+            {
+                var combinedForce = CombineOutput(stdoutForce, stderrForce);
+                logger.LogWarning("Git branch force delete failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}", repoPath, localName, exitForce);
+                return (false, combinedForce);
+            }
+            logger.LogInformation("Git branch force deleted for {RepoPath}. Branch={Branch}", repoPath, localName);
+            return (true, null);
         }
 
         var args = $"branch -d {localName}";

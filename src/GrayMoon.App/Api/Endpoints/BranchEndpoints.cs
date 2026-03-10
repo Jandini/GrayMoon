@@ -571,6 +571,7 @@ public static class BranchEndpoints
         var repositoryId = body.RepositoryId;
         var branchName = body.BranchName?.Trim();
         var isRemote = body.IsRemote;
+        var force = body.Force;
 
         if (workspaceId <= 0 || repositoryId <= 0 || string.IsNullOrWhiteSpace(branchName))
             return Results.BadRequest("workspaceId, repositoryId, and branchName are required.");
@@ -607,6 +608,7 @@ public static class BranchEndpoints
                 repositoryName = repo.RepositoryName,
                 branchName,
                 isRemote,
+                force,
                 workspaceRoot
             };
             var response = await agentBridge.SendCommandAsync("DeleteBranch", args, CancellationToken.None);
@@ -802,5 +804,7 @@ public sealed class DeleteBranchApiRequest
     public int RepositoryId { get; set; }
     public string? BranchName { get; set; }
     public bool IsRemote { get; set; }
+    /// <summary>When true, local delete uses git branch -D (after user confirmed not-fully-merged warning).</summary>
+    public bool Force { get; set; }
 }
 
