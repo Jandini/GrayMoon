@@ -12,6 +12,7 @@ public static class Migrations
         await MigrateWorkspaceSyncMetadataAsync(dbContext);
         await MigrateConnectorUserNameAsync(dbContext);
         await MigrateConnectorTypeAndTokenAsync(dbContext);
+        await MigrateConnectorUserTokenEncryptionAsync(dbContext);
         await MigrateWorkspaceRepositoriesSyncStatusAsync(dbContext);
         await MigrateWorkspaceRepositoriesProjectsAsync(dbContext);
         await MigrateWorkspaceRepositoriesCommitsAsync(dbContext);
@@ -48,6 +49,73 @@ public static class Migrations
                     await cmd.ExecuteNonQueryAsync();
                 }
             }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>
+    /// One-time migration to protect existing connector UserToken values using the current token protector (AES-GCM).
+    /// Idempotent: skips values that already use the v2: scheme.
+    /// </summary>
+    public static async Task MigrateConnectorUserTokenEncryptionAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            // Ensure Connectors table and UserToken column exist before using EF.
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='Connectors'";
+                var tableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!tableExists)
+                    return;
+
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Connectors') WHERE name='UserToken'";
+                var hasUserToken = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!hasUserToken)
+                    return;
+            }
+
+            var connectors = await dbContext.Connectors
+                .Where(c => !string.IsNullOrWhiteSpace(c.UserToken))
+                .ToListAsync();
+
+            if (connectors.Count == 0)
+                return;
+
+            var changed = 0;
+            foreach (var connector in connectors)
+            {
+                var current = connector.UserToken;
+                if (string.IsNullOrWhiteSpace(current))
+                    continue;
+
+                var trimmed = current.Trim();
+                // Skip tokens that already use the v2: scheme (AES-GCM format).
+                if (trimmed.StartsWith("v2:", StringComparison.Ordinal))
+                    continue;
+
+                // Normalize any legacy/plain/Base64 token to plaintext, then protect with the current scheme.
+                var plain = ConnectorHelpers.UnprotectToken(current);
+                if (string.IsNullOrWhiteSpace(plain))
+                    continue;
+
+                var protectedToken = ConnectorHelpers.ProtectToken(plain);
+                if (!string.Equals(current, protectedToken, StringComparison.Ordinal))
+                {
+                    connector.UserToken = protectedToken;
+                    changed++;
+                }
+            }
+
+            if (changed > 0)
+                await dbContext.SaveChangesAsync();
         }
         catch
         {
