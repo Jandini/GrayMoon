@@ -277,7 +277,8 @@ public class GitHubService : IConnectorService
             throw new InvalidOperationException($"Connector type {connector.ConnectorType} is not supported by GitHubService.");
         }
 
-        if (string.IsNullOrWhiteSpace(connector.UserToken))
+        var token = ConnectorHelpers.UnprotectToken(connector.UserToken);
+        if (string.IsNullOrWhiteSpace(token))
         {
             throw new InvalidOperationException("Connector token is not configured.");
         }
@@ -292,7 +293,8 @@ public class GitHubService : IConnectorService
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         request.Headers.UserAgent.ParseAdd("GrayMoon");
         request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", connector.UserToken);
+        var token = ConnectorHelpers.UnprotectToken(connector.UserToken);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return request;
     }
 
@@ -355,7 +357,8 @@ public class GitHubService : IConnectorService
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         request.Headers.UserAgent.ParseAdd("GrayMoon");
         request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", connector.UserToken);
+        var token = ConnectorHelpers.UnprotectToken(connector.UserToken);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         var response = await _httpClient.SendAsync(request);
         if (!response.IsSuccessStatusCode)

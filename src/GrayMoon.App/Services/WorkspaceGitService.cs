@@ -86,7 +86,7 @@ public class WorkspaceGitService(
                     repositoryId = repo.RepositoryId,
                     repositoryName = repo.RepositoryName,
                     cloneUrl = repo.CloneUrl,
-                    bearerToken = repo.Connector?.UserToken,
+                    bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                     workspaceId,
                     workspaceRoot
                 };
@@ -645,7 +645,11 @@ public class WorkspaceGitService(
             .ThenInclude(r => r!.Connector)
             .Where(wr => wr.WorkspaceId == workspaceId)
             .ToListAsync(cancellationToken);
-        var bearerByRepoId = links.Where(wr => wr.Repository != null).ToDictionary(wr => wr.RepositoryId, wr => wr.Repository!.Connector?.UserToken);
+        var bearerByRepoId = links
+            .Where(wr => wr.Repository != null)
+            .ToDictionary(
+                wr => wr.RepositoryId,
+                wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
 
         bool synchronizedPushPossible = payload.All(p => p.RequiredPackages.All(r => r.MatchedConnectorId.HasValue));
         if (!synchronizedPushPossible && payload.Any(p => p.RequiredPackages.Count > 0))
@@ -848,7 +852,7 @@ public class WorkspaceGitService(
             workspaceName = workspace.Name,
             repositoryId = repo.RepositoryId,
             repositoryName = repo.RepositoryName,
-            bearerToken = repo.Connector?.UserToken,
+            bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
             workspaceId,
             workspaceRoot,
             branchName = string.IsNullOrWhiteSpace(branchName) ? null : branchName.Trim()
@@ -897,7 +901,11 @@ public class WorkspaceGitService(
             .ThenInclude(r => r!.Connector)
             .Where(wr => wr.WorkspaceId == workspaceId)
             .ToListAsync(cancellationToken);
-        var bearerByRepoId = links.Where(wr => wr.Repository != null).ToDictionary(wr => wr.RepositoryId, wr => wr.Repository!.Connector?.UserToken);
+        var bearerByRepoId = links
+            .Where(wr => wr.Repository != null)
+            .ToDictionary(
+                wr => wr.RepositoryId,
+                wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
 
         var levelsAsc = payload.Select(p => p.DependencyLevel ?? 0).Distinct().OrderBy(x => x).ToList();
         foreach (var level in levelsAsc)
