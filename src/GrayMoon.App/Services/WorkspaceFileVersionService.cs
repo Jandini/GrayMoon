@@ -143,6 +143,16 @@ public sealed class WorkspaceFileVersionService(
         return tokens;
     }
 
+    /// <summary>Removes leading whitespace from each line of the version pattern. Use when saving so stored patterns match without requiring leading spaces.</summary>
+    public static string NormalizePatternLeadingWhitespace(string? pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern)) return pattern ?? "";
+        var lines = pattern.Split('\n')
+            .Select(l => l.TrimEnd('\r').TrimStart())
+            .ToList();
+        return string.Join("\n", lines);
+    }
+
     /// <summary>Returns version pattern with only lines whose {repositoryName} token is in <paramref name="allowedRepoNames"/>.</summary>
     public static string FilterPatternLinesToRepos(string? versionPattern, IReadOnlySet<string> allowedRepoNames)
     {
