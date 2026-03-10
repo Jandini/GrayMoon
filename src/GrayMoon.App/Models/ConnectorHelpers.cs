@@ -1,9 +1,12 @@
 using System.Text;
+using GrayMoon.App.Services.Security;
 
 namespace GrayMoon.App.Models;
 
 public static class ConnectorHelpers
 {
+    private static ITokenProtector? _tokenProtector;
+
     public static bool RequiresToken(ConnectorType connectorType, string apiBaseUrl)
     {
         if (string.IsNullOrWhiteSpace(apiBaseUrl))
@@ -83,11 +86,20 @@ public static class ConnectorHelpers
         return true; // Show for GitHub, NuGet (non-NuGet.org)
     }
 
-    /// <summary>Protects a token for persistence using Base64 (Level 1). Idempotent for already-protected tokens when they are valid Base64.</summary>
+    /// <summary>Initializes the token protector used by ProtectToken/UnprotectToken. Called once at app startup.</summary>
+    public static void InitializeTokenProtector(ITokenProtector tokenProtector)
+    {
+        _tokenProtector = tokenProtector ?? throw new ArgumentNullException(nameof(tokenProtector));
+    }
+
+    /// <summary>Protects a token for persistence. Uses AES-GCM via ITokenProtector when available, otherwise falls back to Base64 (Level 1).</summary>
     public static string? ProtectToken(string? plainToken)
     {
         if (string.IsNullOrWhiteSpace(plainToken))
             return null;
+
+        if (_tokenProtector != null)
+            return _tokenProtector.Protect(plainToken.Trim());
 
         var trimmed = plainToken.Trim();
         // If it already looks like Base64 and round-trips, assume it's protected.
@@ -108,11 +120,14 @@ public static class ConnectorHelpers
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(trimmed));
     }
 
-    /// <summary>Returns the plain-text token from a persisted value (Base64 or legacy plain text).</summary>
+    /// <summary>Returns the plain-text token from a persisted value. Uses AES-GCM via ITokenProtector when available, otherwise supports Base64 or legacy plain text.</summary>
     public static string? UnprotectToken(string? storedToken)
     {
         if (string.IsNullOrWhiteSpace(storedToken))
             return null;
+
+        if (_tokenProtector != null)
+            return _tokenProtector.Unprotect(storedToken.Trim());
 
         var trimmed = storedToken.Trim();
         try
