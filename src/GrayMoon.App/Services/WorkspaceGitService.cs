@@ -24,7 +24,8 @@ public class WorkspaceGitService(
     IHubContext<WorkspaceSyncHub>? hubContext = null,
     PackageRegistrySyncService? packageRegistrySyncService = null,
     NuGetService? nuGetService = null,
-    ConnectorRepository? connectorRepository = null)
+    ConnectorRepository? connectorRepository = null,
+    ConnectorHealthService? connectorHealthService = null)
 {
     private readonly IAgentBridge _agentBridge = agentBridge ?? throw new ArgumentNullException(nameof(agentBridge));
     private readonly WorkspaceService _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
@@ -39,6 +40,7 @@ public class WorkspaceGitService(
     private readonly PackageRegistrySyncService? _packageRegistrySyncService = packageRegistrySyncService;
     private readonly NuGetService? _nuGetService = nuGetService;
     private readonly ConnectorRepository? _connectorRepository = connectorRepository;
+    private readonly ConnectorHealthService? _connectorHealthService = connectorHealthService;
 
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
@@ -80,6 +82,9 @@ public class WorkspaceGitService(
             await semaphore.WaitAsync(cancellationToken);
             try
             {
+                if (_connectorHealthService != null)
+                    await _connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
+
                 var args = new
                 {
                     workspaceName = workspace.Name,
@@ -790,6 +795,9 @@ public class WorkspaceGitService(
             await semaphore.WaitAsync(cancellationToken);
             try
             {
+                if (_connectorHealthService != null)
+                    await _connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepoId, cancellationToken);
+
                 var args = new
                 {
                     workspaceName = workspace.Name,
@@ -846,6 +854,9 @@ public class WorkspaceGitService(
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
 
         onProgressMessage?.Invoke(link.BranchHasUpstream == true ? "Pushing..." : "Pushing upstream...");
+
+        if (_connectorHealthService != null)
+            await _connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
 
         var args = new
         {

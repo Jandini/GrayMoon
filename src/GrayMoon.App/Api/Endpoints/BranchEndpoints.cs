@@ -225,6 +225,7 @@ public static class BranchEndpoints
         GitHubRepositoryRepository repoRepository,
         AppDbContext dbContext,
         IHubContext<WorkspaceSyncHub> hubContext,
+        ConnectorHealthService connectorHealthService,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.Branches");
@@ -256,6 +257,8 @@ public static class BranchEndpoints
 
         try
         {
+            await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, CancellationToken.None);
+
             var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, CancellationToken.None);
             var args = new
             {

@@ -48,6 +48,7 @@ builder.Services.AddScoped<SyncCommandHandler>();
 builder.Services.AddScoped<IAgentBridge, AgentBridge>();
 builder.Services.AddScoped<WorkspaceService>();
 builder.Services.AddScoped<WorkspaceGitService>();
+builder.Services.AddScoped<ConnectorHealthService>();
 builder.Services.AddScoped<GitHubRepositoryService>();
 builder.Services.AddScoped<GitHubActionsService>();
 builder.Services.AddScoped<GitHubPullRequestService>();

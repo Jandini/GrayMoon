@@ -8,6 +8,7 @@ namespace GrayMoon.App.Services;
 /// <summary>
 /// Background task that runs on startup to validate connector tokens (decrypt + remote check)
 /// and set Connector.IsHealthy / Connector.LastError accordingly.
+/// Uses the same TestConnectionAsync flow as the Connectors page.
 /// </summary>
 public sealed class TokenHealthBackgroundService(
     IServiceScopeFactory scopeFactory,
@@ -25,8 +26,7 @@ public sealed class TokenHealthBackgroundService(
             await using var scope = scopeFactory.CreateAsyncScope();
             var services = scope.ServiceProvider;
             var dbContext = services.GetRequiredService<AppDbContext>();
-            var gitHubService = services.GetService<GitHubService>();
-            var nuGetService = services.GetService<NuGetService>();
+            var serviceFactory = services.GetRequiredService<ConnectorServiceFactory>();
 
             var connectors = await dbContext.Connectors.ToListAsync(stoppingToken);
             if (connectors.Count == 0)
@@ -69,30 +69,18 @@ public sealed class TokenHealthBackgroundService(
                         return;
                     }
 
-                    // Build a shallow copy with plaintext token for outbound calls,
-                    // so we don't mutate the stored (protected) token.
-                    var runtimeConnector = new Connector
-                    {
-                        ConnectorId = connector.ConnectorId,
-                        ConnectorName = connector.ConnectorName,
-                        ConnectorType = connector.ConnectorType,
-                        ApiBaseUrl = connector.ApiBaseUrl,
-                        UserName = connector.UserName,
-                        UserToken = plainToken,
-                        IsActive = connector.IsActive
-                    };
-
-                    var healthy = connector.ConnectorType switch
-                    {
-                        ConnectorType.GitHub when gitHubService != null
-                            => await gitHubService.TestConnectionAsync(runtimeConnector),
-                        ConnectorType.NuGet when nuGetService != null
-                            => await nuGetService.TestConnectionAsync(runtimeConnector),
-                        _ => true // For unsupported types, assume healthy if token present
-                    };
+                    // Use the same connector-service pattern as the Connectors page.
+                    // GitHubService/NuGetService will handle decrypted token usage.
+                    var svc = serviceFactory.GetService(connector.ConnectorType);
+                    var healthy = await svc.TestConnectionAsync(connector);
 
                     connector.IsHealthy = healthy;
                     connector.LastError = healthy ? null : "Remote service rejected the token. Update the connector token.";
+                    if (healthy)
+                    {
+                        logger.LogDebug("Token health check succeeded for connector {ConnectorId} ({ConnectorName}).",
+                            connector.ConnectorId, connector.ConnectorName);
+                    }
                 }
                 catch (OperationCanceledException)
                 {
