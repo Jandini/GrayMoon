@@ -45,6 +45,7 @@ public class ConnectorRepository(AppDbContext dbContext, ILogger<ConnectorReposi
             throw new InvalidOperationException($"Connector name '{connector.ConnectorName}' already exists.");
         }
 
+        connector.UserToken = ConnectorHelpers.ProtectToken(connector.UserToken);
         connector.Status = string.IsNullOrWhiteSpace(connector.Status) ? "Unknown" : connector.Status;
         connector.LastError = string.IsNullOrWhiteSpace(connector.LastError) ? null : connector.LastError;
 
@@ -73,7 +74,7 @@ public class ConnectorRepository(AppDbContext dbContext, ILogger<ConnectorReposi
         existing.ConnectorType = connector.ConnectorType;
         existing.ApiBaseUrl = connector.ApiBaseUrl;
         existing.UserName = connector.UserName;
-        existing.UserToken = connector.UserToken;
+        existing.UserToken = ConnectorHelpers.ProtectToken(connector.UserToken);
         existing.Status = string.IsNullOrWhiteSpace(connector.Status) ? "Unknown" : connector.Status;
         existing.IsActive = connector.IsActive;
         existing.LastError = string.IsNullOrWhiteSpace(connector.LastError) ? null : connector.LastError;
