@@ -1,7 +1,12 @@
+using System.Text;
+using GrayMoon.App.Services.Security;
+
 namespace GrayMoon.App.Models;
 
 public static class ConnectorHelpers
 {
+    private static ITokenProtector? _tokenProtector;
+
     public static bool RequiresToken(ConnectorType connectorType, string apiBaseUrl)
     {
         if (string.IsNullOrWhiteSpace(apiBaseUrl))
@@ -79,5 +84,75 @@ public static class ConnectorHelpers
             return false; // Never show for NuGet.org
 
         return true; // Show for GitHub, NuGet (non-NuGet.org)
+    }
+
+    /// <summary>Initializes the token protector used by ProtectToken/UnprotectToken. Called once at app startup.</summary>
+    public static void InitializeTokenProtector(ITokenProtector tokenProtector)
+    {
+        _tokenProtector = tokenProtector ?? throw new ArgumentNullException(nameof(tokenProtector));
+    }
+
+    /// <summary>Protects a token for persistence. Uses AES-GCM via ITokenProtector when available, otherwise falls back to Base64 (Level 1).</summary>
+    public static string? ProtectToken(string? plainToken)
+    {
+        if (string.IsNullOrWhiteSpace(plainToken))
+            return null;
+
+        if (_tokenProtector != null)
+            return _tokenProtector.Protect(plainToken.Trim());
+
+        var trimmed = plainToken.Trim();
+        // If it already looks like Base64 and round-trips, assume it's protected.
+        if (IsLikelyBase64(trimmed))
+        {
+            try
+            {
+                var bytes = Convert.FromBase64String(trimmed);
+                _ = Encoding.UTF8.GetString(bytes);
+                return trimmed;
+            }
+            catch (FormatException)
+            {
+                // Fall through and treat as plain text.
+            }
+        }
+
+        return Convert.ToBase64String(Encoding.UTF8.GetBytes(trimmed));
+    }
+
+    /// <summary>Returns the plain-text token from a persisted value. Uses AES-GCM via ITokenProtector when available, otherwise supports Base64 or legacy plain text.</summary>
+    public static string? UnprotectToken(string? storedToken)
+    {
+        if (string.IsNullOrWhiteSpace(storedToken))
+            return null;
+
+        if (_tokenProtector != null)
+            return _tokenProtector.Unprotect(storedToken.Trim());
+
+        var trimmed = storedToken.Trim();
+        try
+        {
+            var bytes = Convert.FromBase64String(trimmed);
+            return Encoding.UTF8.GetString(bytes);
+        }
+        catch (FormatException)
+        {
+            // Not Base64; treat as legacy plain-text token.
+            return trimmed;
+        }
+    }
+
+    private static bool IsLikelyBase64(string value)
+    {
+        if (value.Length == 0 || value.Length % 4 != 0)
+            return false;
+
+        foreach (var c in value)
+        {
+            if (!(char.IsLetterOrDigit(c) || c == '+' || c == '/' || c == '='))
+                return false;
+        }
+
+        return true;
     }
 }

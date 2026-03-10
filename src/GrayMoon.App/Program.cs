@@ -7,6 +7,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Security;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
@@ -56,6 +57,11 @@ builder.Services.AddScoped<PackageRegistrySyncService>();
 builder.Services.AddScoped<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
     builder.Services.AddScoped<WorkspaceFileVersionService>();
 
+// Token protection and connector health
+builder.Services.AddSingleton<ITokenEncryptionKeyProvider, TokenEncryptionKeyProvider>();
+builder.Services.AddSingleton<ITokenProtector, AesGcmTokenProtector>();
+builder.Services.AddSingleton<ConnectorHealthTracker>();
+
 // Background sync service with controlled parallelism
 builder.Services.AddSingleton<SyncBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SyncBackgroundService>());
@@ -96,9 +102,52 @@ if (!string.IsNullOrEmpty(dbPath))
 // Ensure the local SQLite database is created and migrate schema if needed
 using (var scope = app.Services.CreateScope())
 {
-    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var services = scope.ServiceProvider;
+    var dbContext = services.GetRequiredService<AppDbContext>();
+    var tokenProtector = services.GetRequiredService<ITokenProtector>();
+    var connectorHealth = services.GetRequiredService<ConnectorHealthTracker>();
+    var logger = services.GetRequiredService<ILogger<Program>>();
+
+    // Initialize static helper to use configured token protector
+    ConnectorHelpers.InitializeTokenProtector(tokenProtector);
+
     dbContext.Database.EnsureCreated();
     await Migrations.RunAllAsync(dbContext);
+
+    // Verify that all stored connector tokens are decryptable; flag health if not.
+    try
+    {
+        var connectors = await dbContext.Connectors
+            .AsNoTracking()
+            .ToListAsync();
+
+        var hadError = false;
+        foreach (var connector in connectors)
+        {
+            if (string.IsNullOrWhiteSpace(connector.UserToken))
+                continue;
+
+            try
+            {
+                _ = tokenProtector.Unprotect(connector.UserToken);
+            }
+            catch (Exception ex)
+            {
+                hadError = true;
+                logger.LogWarning(ex, "Failed to decrypt connector token. ConnectorId={ConnectorId}, Name={ConnectorName}", connector.ConnectorId, connector.ConnectorName);
+            }
+        }
+
+        connectorHealth.HasTokenDecryptionErrors = hadError;
+        if (hadError)
+        {
+            logger.LogWarning("One or more connector tokens could not be decrypted. Check TokenKey configuration before using connectors.");
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Connector token decryption health check failed.");
+    }
 }
 
 static string? GetDatabasePath(string connectionString)

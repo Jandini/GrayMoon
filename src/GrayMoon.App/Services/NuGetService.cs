@@ -140,7 +140,7 @@ public class NuGetService : IConnectorService
         if (ConnectorHelpers.IsGitHubPackages(connector.ApiBaseUrl))
         {
             // GitHub Packages NuGet requires Basic auth with username and token
-            var token = connector.UserToken?.Trim();
+            var token = ConnectorHelpers.UnprotectToken(connector.UserToken)?.Trim();
             var username = connector.UserName?.Trim();
             if (!string.IsNullOrEmpty(token))
             {
@@ -152,9 +152,10 @@ public class NuGetService : IConnectorService
             else
                 _logger.LogTrace("CreateRequest: GitHub Packages connector {ConnectorName} has no UserToken; request will be unauthenticated.", connector.ConnectorName);
         }
-        else if (ConnectorHelpers.IsProGet(connector.ApiBaseUrl) && !string.IsNullOrWhiteSpace(connector.UserToken))
+        else if (ConnectorHelpers.IsProGet(connector.ApiBaseUrl) && !string.IsNullOrWhiteSpace(ConnectorHelpers.UnprotectToken(connector.UserToken)))
         {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", connector.UserToken);
+            var token = ConnectorHelpers.UnprotectToken(connector.UserToken);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         }
 
         return request;
@@ -184,7 +185,7 @@ public class NuGetService : IConnectorService
         }
 
         // Other registries require token
-        if (string.IsNullOrWhiteSpace(connector.UserToken))
+        if (string.IsNullOrWhiteSpace(ConnectorHelpers.UnprotectToken(connector.UserToken)))
         {
             throw new InvalidOperationException("Connector token is required for this NuGet registry.");
         }
@@ -230,20 +231,21 @@ public class NuGetService : IConnectorService
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-            if (!string.IsNullOrWhiteSpace(connector.UserToken))
+            var token = ConnectorHelpers.UnprotectToken(connector.UserToken);
+            if (!string.IsNullOrWhiteSpace(token))
             {
                 if (ConnectorHelpers.IsGitHubPackages(connector.ApiBaseUrl))
                 {
                     // GitHub Packages uses Basic auth with username:token
                     var username = connector.UserName ?? "USER";
                     var credentials = Convert.ToBase64String(
-                        System.Text.Encoding.ASCII.GetBytes($"{username}:{connector.UserToken}"));
+                        System.Text.Encoding.ASCII.GetBytes($"{username}:{token}"));
                     request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
                 }
                 else if (ConnectorHelpers.IsProGet(connector.ApiBaseUrl))
                 {
                     // ProGet uses API key in header or Basic auth
-                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", connector.UserToken);
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                 }
             }
 

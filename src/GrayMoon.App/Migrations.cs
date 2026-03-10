@@ -12,6 +12,7 @@ public static class Migrations
         await MigrateWorkspaceSyncMetadataAsync(dbContext);
         await MigrateConnectorUserNameAsync(dbContext);
         await MigrateConnectorTypeAndTokenAsync(dbContext);
+        await MigrateConnectorUserTokenBase64Async(dbContext);
         await MigrateWorkspaceRepositoriesSyncStatusAsync(dbContext);
         await MigrateWorkspaceRepositoriesProjectsAsync(dbContext);
         await MigrateWorkspaceRepositoriesCommitsAsync(dbContext);
@@ -48,6 +49,58 @@ public static class Migrations
                     await cmd.ExecuteNonQueryAsync();
                 }
             }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>One-time migration to store existing connector UserToken values as Base64 instead of plain text. Idempotent: re-running will not double-encode.</summary>
+    public static async Task MigrateConnectorUserTokenBase64Async(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            // Ensure Connectors table and UserToken column exist
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='Connectors'";
+                var tableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!tableExists)
+                    return;
+
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Connectors') WHERE name='UserToken'";
+                var hasUserToken = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!hasUserToken)
+                    return;
+            }
+
+            // Load connectors with a non-empty token and protect them using Base64.
+            var connectors = await dbContext.Connectors
+                .Where(c => !string.IsNullOrWhiteSpace(c.UserToken))
+                .ToListAsync();
+
+            if (connectors.Count == 0)
+                return;
+
+            var changed = 0;
+            foreach (var connector in connectors)
+            {
+                var original = connector.UserToken;
+                var protectedToken = ConnectorHelpers.ProtectToken(original);
+                if (!string.Equals(original, protectedToken, StringComparison.Ordinal))
+                {
+                    connector.UserToken = protectedToken;
+                    changed++;
+                }
+            }
+
+            if (changed > 0)
+                await dbContext.SaveChangesAsync();
         }
         catch
         {

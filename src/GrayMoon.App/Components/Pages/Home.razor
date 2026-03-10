@@ -6,6 +6,7 @@
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
 @inject AgentConnectionTracker AgentConnectionTracker
+@inject ConnectorHealthTracker ConnectorHealthTracker
 <PageTitle>Home - GrayMoon</PageTitle>
 
 @if (!showHome)
@@ -72,7 +73,7 @@ else
                     <p class="card-text">
                         Configure access to GitHub and NuGet registries and manage connector tokens.
                     </p>
-                    <a class="btn btn-primary" href="/connectors">
+                    <a class="btn @ConnectorButtonClass" href="/connectors">
                         Manage Connectors
                     </a>
                 </div>
@@ -110,6 +111,8 @@ else
     };
 
     private string AgentButtonClass => AgentConnectionTracker.State == AgentConnectionState.Online ? "btn-primary" : "btn-danger";
+
+    private string ConnectorButtonClass => ConnectorHealthTracker.HasTokenDecryptionErrors ? "btn-danger" : "btn-primary";
 
     protected override void OnAfterRender(bool firstRender)
     {
