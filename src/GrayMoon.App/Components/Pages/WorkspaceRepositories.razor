@@ -24,6 +24,7 @@
 @inject WorkspacePullRequestService WorkspacePullRequestService
 @inject Microsoft.Extensions.Options.IOptions<GrayMoon.App.Models.WorkspaceOptions> WorkspaceOptions
 @inject WorkspaceCommitSyncHandler WorkspaceCommitSyncHandler
+@inject WorkspaceSyncHandler WorkspaceSyncHandler
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
 <PageTitle>@(workspace?.Name ?? "Workspace")</PageTitle>
@@ -1382,38 +1383,31 @@
             StateHasChanged();
             await Task.Yield();
 
-            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
-            {
-                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-                var results = await workspaceGitService.SyncAsync(
-                    WorkspaceId,
-                    onProgress: (completed, total, repoId, info) =>
+            repoGitInfos = await WorkspaceSyncHandler.RunSyncAsync(
+                WorkspaceId,
+                repositoryIds: null,
+                skipDependencyLevelPersistence: isRetryAfterError,
+                cancellationToken: _syncCts.Token,
+                setProgress: SetSyncProgress,
+                updateRepoGitInfo: (repoId, info) =>
+                {
+                    var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
+                    if (wr != null)
                     {
-                        SetSyncProgress($"Synchronized {completed} of {total}");
-                        repoSyncStatus[repoId] = (!string.IsNullOrWhiteSpace(info.ErrorMessage) || info.Version != "-" || info.Branch != "-")
-                            ? RepoSyncStatus.InSync
-                            : RepoSyncStatus.Error;
-                        var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
-                        if (wr != null)
-                        {
-                            wr.GitVersion = info.Version == "-" ? null : info.Version;
-                            wr.BranchName = info.Branch == "-" ? null : info.Branch;
-                            wr.Projects = info.Projects;
-                            wr.OutgoingCommits = info.OutgoingCommits;
-                            wr.IncomingCommits = info.IncomingCommits;
-                        }
-                        InvokeAsync(StateHasChanged);
-                    },
-                    repositoryIds: null,
-                    skipDependencyLevelPersistence: isRetryAfterError,
-                    cancellationToken: _syncCts.Token);
-                repoGitInfos = results;
-            }
+                        wr.GitVersion = info.Version == "-" ? null : info.Version;
+                        wr.BranchName = info.Branch == "-" ? null : info.Branch;
+                        wr.Projects = info.Projects;
+                        wr.OutgoingCommits = info.OutgoingCommits;
+                        wr.IncomingCommits = info.IncomingCommits;
+                    }
+                    _ = InvokeAsync(StateHasChanged);
+                },
+                setRepoSyncStatus: (repoId, status) => repoSyncStatus[repoId] = status);
+
             await ReloadWorkspaceDataAsync();
             ApplySyncStateFromWorkspace();
             isOutOfSync = repoSyncStatus.Values.Any(v => v != RepoSyncStatus.InSync);
 
-            // Set per-repo errors from sync results (same pattern as commit sync and checkout)
             foreach (var (repoId, info) in repoGitInfos)
             {
                 if (!string.IsNullOrWhiteSpace(info.ErrorMessage))
@@ -1424,7 +1418,6 @@
         }
         catch (OperationCanceledException)
         {
-            // Sync was cancelled - reload workspace to restore pre-sync data (onProgress may have partially updated in-memory state)
             await ReloadWorkspaceDataAfterCancelAsync();
         }
         catch (Exception ex)
@@ -1456,33 +1449,27 @@
             StateHasChanged();
             await Task.Yield();
 
-            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
-            {
-                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-                var results = await workspaceGitService.SyncAsync(
-                    WorkspaceId,
-                    onProgress: (completed, total, repoId, info) =>
+            repoGitInfos = await WorkspaceSyncHandler.RunSyncAsync(
+                WorkspaceId,
+                repositoryIds,
+                skipDependencyLevelPersistence: true,
+                cancellationToken: _syncCts.Token,
+                setProgress: SetSyncProgress,
+                updateRepoGitInfo: (repoId, info) =>
+                {
+                    var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
+                    if (wr != null)
                     {
-                        SetSyncProgress($"Synchronized {completed} of {total}");
-                        repoSyncStatus[repoId] = (!string.IsNullOrWhiteSpace(info.ErrorMessage) || info.Version != "-" || info.Branch != "-")
-                            ? RepoSyncStatus.InSync
-                            : RepoSyncStatus.Error;
-                        var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
-                        if (wr != null)
-                        {
-                            wr.GitVersion = info.Version == "-" ? null : info.Version;
-                            wr.BranchName = info.Branch == "-" ? null : info.Branch;
-                            wr.Projects = info.Projects;
-                            wr.OutgoingCommits = info.OutgoingCommits;
-                            wr.IncomingCommits = info.IncomingCommits;
-                        }
-                        InvokeAsync(StateHasChanged);
-                    },
-                    repositoryIds: repositoryIds,
-                    skipDependencyLevelPersistence: true,
-                    cancellationToken: _syncCts.Token);
-                repoGitInfos = results;
-            }
+                        wr.GitVersion = info.Version == "-" ? null : info.Version;
+                        wr.BranchName = info.Branch == "-" ? null : info.Branch;
+                        wr.Projects = info.Projects;
+                        wr.OutgoingCommits = info.OutgoingCommits;
+                        wr.IncomingCommits = info.IncomingCommits;
+                    }
+                    _ = InvokeAsync(StateHasChanged);
+                },
+                setRepoSyncStatus: (repoId, status) => repoSyncStatus[repoId] = status);
+
             await ReloadWorkspaceDataAsync();
             ApplySyncStateFromWorkspace();
             isOutOfSync = repoSyncStatus.Values.Any(v => v != RepoSyncStatus.InSync);
@@ -1528,33 +1515,26 @@
             StateHasChanged();
             await Task.Yield();
 
-            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
-            {
-                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-                var results = await workspaceGitService.SyncAsync(
-                    WorkspaceId,
-                    onProgress: (completed, total, repoId, info) =>
+            repoGitInfos = await WorkspaceSyncHandler.RunSyncAsync(
+                WorkspaceId,
+                new[] { repositoryId },
+                skipDependencyLevelPersistence: true,
+                cancellationToken: _syncCts.Token,
+                setProgress: SetSyncProgress,
+                updateRepoGitInfo: (repoId, info) =>
+                {
+                    var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
+                    if (wr != null)
                     {
-                        SetSyncProgress($"Synchronized {completed} of {total}");
-                        repoSyncStatus[repoId] = (!string.IsNullOrWhiteSpace(info.ErrorMessage) || info.Version != "-" || info.Branch != "-")
-                            ? RepoSyncStatus.InSync
-                            : RepoSyncStatus.Error;
-                        var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
-                        if (wr != null)
-                        {
-                            wr.GitVersion = info.Version == "-" ? null : info.Version;
-                            wr.BranchName = info.Branch == "-" ? null : info.Branch;
-                            wr.Projects = info.Projects;
-                            wr.OutgoingCommits = info.OutgoingCommits;
-                            wr.IncomingCommits = info.IncomingCommits;
-                        }
-                        InvokeAsync(StateHasChanged);
-                    },
-                    repositoryIds: new[] { repositoryId },
-                    skipDependencyLevelPersistence: true,
-                    cancellationToken: _syncCts.Token);
-                repoGitInfos = results;
-            }
+                        wr.GitVersion = info.Version == "-" ? null : info.Version;
+                        wr.BranchName = info.Branch == "-" ? null : info.Branch;
+                        wr.Projects = info.Projects;
+                        wr.OutgoingCommits = info.OutgoingCommits;
+                        wr.IncomingCommits = info.IncomingCommits;
+                    }
+                    _ = InvokeAsync(StateHasChanged);
+                },
+                setRepoSyncStatus: (repoId, status) => repoSyncStatus[repoId] = status);
             await ReloadWorkspaceDataAsync();
             ApplySyncStateFromWorkspace();
             isOutOfSync = repoSyncStatus.Values.Any(v => v != RepoSyncStatus.InSync);

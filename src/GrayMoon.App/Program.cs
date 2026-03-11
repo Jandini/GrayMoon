@@ -58,6 +58,7 @@ builder.Services.AddScoped<PackageRegistrySyncService>();
 builder.Services.AddScoped<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
     builder.Services.AddScoped<WorkspaceFileVersionService>();
 builder.Services.AddScoped<WorkspaceCommitSyncHandler>();
+builder.Services.AddScoped<WorkspaceSyncHandler>();
 
 // Token protection
 builder.Services.AddSingleton<ITokenEncryptionKeyProvider, TokenEncryptionKeyProvider>();
