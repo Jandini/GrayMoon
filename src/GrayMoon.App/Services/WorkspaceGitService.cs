@@ -991,6 +991,48 @@ public class WorkspaceGitService(
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
 
+    /// <summary>Pushes a set of repos in parallel (up to MaxParallelOperations concurrency), without dependency ordering or waiting for packages. Used when user did not select Synchronized Push or when there is no need to wait for dependencies.</summary>
+    public async Task RunPushReposParallelAsync(
+        int workspaceId,
+        IReadOnlySet<int> repoIds,
+        Action<string>? onProgressMessage = null,
+        Action<int, string>? onRepoError = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_agentBridge.IsAgentConnected)
+            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to push.");
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            throw new InvalidOperationException($"Workspace {workspaceId} not found.");
+
+        var fullPayload = await _workspaceProjectRepository.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var payload = fullPayload.Where(p => repoIds.Contains(p.RepoId)).ToList();
+        if (payload.Count == 0)
+        {
+            onProgressMessage?.Invoke("No repositories to push.");
+            return;
+        }
+
+        var links = await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .ThenInclude(r => r!.Connector)
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+        var bearerByRepoId = links
+            .Where(wr => wr.Repository != null)
+            .ToDictionary(
+                wr => wr.RepositoryId,
+                wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
+
+        onProgressMessage?.Invoke($"Pushing {payload.Count} {(payload.Count == 1 ? "repository" : "repositories")}...");
+        await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
+        await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
+        if (_hubContext != null)
+            await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
+    }
+
     /// <summary>After push: fetches commit counts and hasUpstream from the agent for the pushed repos, then updates WorkspaceRepositories (OutgoingCommits, IncomingCommits, BranchHasUpstream) and broadcasts. Also adds the pushed branch as remote to persistence so it appears in branch lists without calling refresh branches.</summary>
     private async Task UpdateCommitCountsAndUpstreamAfterPushAsync(int workspaceId, IReadOnlyList<PushRepoPayload> repos, CancellationToken cancellationToken)
     {
