@@ -26,6 +26,7 @@
 @inject WorkspaceCommitSyncHandler WorkspaceCommitSyncHandler
 @inject WorkspaceSyncHandler WorkspaceSyncHandler
 @inject WorkspaceUpdateHandler WorkspaceUpdateHandler
+@inject WorkspacePushHandler WorkspacePushHandler
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
 <PageTitle>@(workspace?.Name ?? "Workspace")</PageTitle>
@@ -704,9 +705,10 @@
 
         try
         {
-            await using var scope = ServiceScopeFactory.CreateAsyncScope();
-            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            var depInfo = await workspaceGitService.GetPushDependencyInfoForRepoAsync(WorkspaceId, repositoryId);
+            var depInfo = await WorkspacePushHandler.GetPushDependenciesForRepoAsync(
+                WorkspaceId,
+                repositoryId,
+                CancellationToken.None);
 
             if (depInfo == null || depInfo.DependencyRepoIds.Count == 0)
             {
@@ -760,35 +762,19 @@
 
         try
         {
-            await using var scope = ServiceScopeFactory.CreateAsyncScope();
-            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-
-            if (synchronizedPush)
-            {
-                SetPushProgress("Syncing package registries for required packages...");
-                await InvokeAsync(StateHasChanged);
-                if (requiredPackageIds.Count > 0 && scope.ServiceProvider.GetService<PackageRegistrySyncService>() is { } syncService)
-                    await syncService.SyncRegistriesForPackageIdsAsync(WorkspaceId, requiredPackageIds, _pushCts.Token);
-                SetPushProgress("Pushing synchronized...");
-                await InvokeAsync(StateHasChanged);
-                await workspaceGitService.RunPushAsync(WorkspaceId, repoIds, SetPushProgress, (id, err) => ToastService.Show($"{id}: {err}"), packageRegistriesAlreadySynced: requiredPackageIds.Count > 0, _pushCts.Token);
-            }
-            else
-            {
-                SetPushProgress("Pushing...");
-                await workspaceGitService.RunPushReposParallelAsync(WorkspaceId, repoIds, SetPushProgress, (id, err) => ToastService.Show($"{id}: {err}"), _pushCts.Token);
-            }
-
-            await RefreshFromSync();
+            await WorkspacePushHandler.RunPushWithDependenciesAsync(
+                WorkspaceId,
+                repoIds,
+                synchronizedPush,
+                requiredPackageIds,
+                SetPushProgress,
+                RefreshFromSync,
+                ToastService.Show,
+                _pushCts.Token);
         }
         catch (OperationCanceledException)
         {
             ToastService.Show("Push cancelled.");
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Push with dependencies failed");
-            ToastService.Show(ex.Message);
         }
         finally
         {
@@ -811,13 +797,11 @@
 
         try
         {
-            await using var scope = ServiceScopeFactory.CreateAsyncScope();
-            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            var (success, errorMessage) = await workspaceGitService.PushSingleRepositoryWithUpstreamAsync(
+            var (success, errorMessage) = await WorkspacePushHandler.PushSingleRepositoryWithUpstreamAsync(
                 WorkspaceId,
                 repositoryId,
                 branchName,
-                msg => SetPushProgress(msg),
+                SetPushProgress,
                 _pushCts.Token);
 
             if (success)
@@ -849,28 +833,30 @@
 
         try
         {
-            await using var scope = ServiceScopeFactory.CreateAsyncScope();
-            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            var (payload, _) = await workspaceGitService.GetPushPlanAsync(WorkspaceId);
-            var repoIdsWithUnpushed = workspaceRepositories
-                .Where(wr => (wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false)
-                .Select(wr => wr.RepositoryId)
-                .ToHashSet();
-            var toPush = payload.Where(p => repoIdsWithUnpushed.Contains(p.RepoId)).ToList();
-            if (toPush.Count == 0)
+            var (payload, hasUnpushed) = await WorkspacePushHandler.GetPushPlanAsync(
+                WorkspaceId,
+                workspaceRepositories,
+                CancellationToken.None);
+            if (!hasUnpushed)
             {
                 ToastService.Show("No repositories to push.");
                 return;
             }
+
+            var repoIdsWithUnpushed = payload.Select(p => p.RepoId).ToHashSet();
             pushPlanRepoIds = repoIdsWithUnpushed;
-            var depInfo = await workspaceGitService.GetPushDependencyInfoForRepoSetAsync(WorkspaceId, pushPlanRepoIds);
+
+            var depInfo = await WorkspacePushHandler.GetPushDependenciesForPlanAsync(
+                WorkspaceId,
+                repoIdsWithUnpushed,
+                CancellationToken.None);
             if (depInfo == null)
             {
                 ToastService.Show("Could not load push plan. Try again.");
                 return;
             }
             pushWithDependenciesInfo = depInfo;
-            pushWithDependenciesRepoIdsToPush = pushPlanRepoIds;
+            pushWithDependenciesRepoIdsToPush = repoIdsWithUnpushed;
             pushWithDependenciesRepoId = 0;
             pushWithDependenciesRepoName = null;
 
