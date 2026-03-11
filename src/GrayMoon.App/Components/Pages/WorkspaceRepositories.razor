@@ -25,6 +25,7 @@
 @inject Microsoft.Extensions.Options.IOptions<GrayMoon.App.Models.WorkspaceOptions> WorkspaceOptions
 @inject WorkspaceCommitSyncHandler WorkspaceCommitSyncHandler
 @inject WorkspaceSyncHandler WorkspaceSyncHandler
+@inject WorkspaceUpdateHandler WorkspaceUpdateHandler
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
 <PageTitle>@(workspace?.Name ?? "Workspace")</PageTitle>
@@ -994,25 +995,17 @@
             StateHasChanged();
             await Task.Yield();
 
-            IReadOnlyList<SyncDependenciesRepoPayload>? payloadForCommit = null;
-            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
-            {
-                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-                var syncedPayload = await workspaceGitService.RunUpdateAsync(
-                    WorkspaceId,
-                    withCommits,
-                    onProgressMessage: SetUpdateProgress,
-                    onRepoError: (repoId, msg) =>
-                    {
-                        repositoryErrors[repoId] = msg;
-                        InvokeAsync(StateHasChanged);
-                    },
-                    repoIdsToUpdate: null,
-                    cancellationToken: _updateCts.Token);
-
-                if (!withCommits)
-                    payloadForCommit = syncedPayload ?? _updatePlanPayloadForUpdateOnly;
-            }
+            var payloadForCommit = await WorkspaceUpdateHandler.RunUpdateAsync(
+                WorkspaceId,
+                withCommits,
+                _updatePlanPayloadForUpdateOnly,
+                _updateCts.Token,
+                SetUpdateProgress,
+                (repoId, msg) =>
+                {
+                    repositoryErrors[repoId] = msg;
+                    _ = InvokeAsync(StateHasChanged);
+                });
 
             isUpdating = false;
             await InvokeAsync(StateHasChanged);
