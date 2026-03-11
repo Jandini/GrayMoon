@@ -342,60 +342,60 @@
     }
 </div>
 
-<WorkspaceRepositoriesModal IsVisible="@showRepositoriesModal"
+<WorkspaceRepositoriesModal IsVisible="@_repositoriesModal.IsVisible"
                             Title="@($"Repositories for {workspace?.Name ?? "Workspace"}")"
-                            Repositories="@repositoriesModalRepositories"
-                            SelectedRepositoryIds="@selectedRepositoryIds"
-                            HasConnectors="@hasConnectors"
-                            IsSaving="@isSavingRepositories"
-                            IsFetching="@isPersisting"
-                            ErrorMessage="@repositoriesModalErrorMessage"
+                            Repositories="@_repositoriesModal.Repositories"
+                            SelectedRepositoryIds="@_repositoriesModal.SelectedRepositoryIds"
+                            HasConnectors="@_repositoriesModal.HasConnectors"
+                            IsSaving="@_repositoriesModal.IsSaving"
+                            IsFetching="@_repositoriesModal.IsFetching"
+                            ErrorMessage="@_repositoriesModal.ErrorMessage"
                             OnSave="@SaveRepositoriesAsync"
                             OnCancel="@CloseRepositoriesModal"
                             OnFetchRepositories="@FetchRepositoriesAsync" />
 
-<BranchModal IsVisible="@showBranchModal"
+<BranchModal IsVisible="@_branchModal.IsVisible"
                    WorkspaceName="@(workspace?.Name)"
                    WorkspaceId="@WorkspaceId"
-                   CommonBranchNames="@branchModalCommonBranches"
-                   DefaultDisplayText="@branchModalDefaultDisplayText"
+                   CommonBranchNames="@_branchModal.CommonBranchNames"
+                   DefaultDisplayText="@_branchModal.DefaultDisplayText"
                    OnCancel="@CloseBranchModal"
                    OnCreateBranch="@CreateBranchesAsync" />
 
-<SwitchBranchModal IsVisible="@showSwitchBranchModal"
+<SwitchBranchModal IsVisible="@_switchBranchModal.IsVisible"
                    WorkspaceId="@WorkspaceId"
-                   RepositoryId="@switchBranchRepositoryId"
-                   RepositoryName="@switchBranchRepositoryName"
-                   CurrentBranch="@switchBranchCurrentBranch"
-                   RepositoryUrl="@switchBranchRepositoryUrl"
+                   RepositoryId="@_switchBranchModal.RepositoryId"
+                   RepositoryName="@_switchBranchModal.RepositoryName"
+                   CurrentBranch="@_switchBranchModal.CurrentBranch"
+                   RepositoryUrl="@_switchBranchModal.RepositoryUrl"
                    OnCancel="@CloseSwitchBranchModal"
                    OnBranchChanged="@OnBranchChangedAsync"
                    OnCheckoutBranch="@CheckoutBranchAsync"
                    OnSyncToDefault="@SyncToDefaultFromModalAsync"
                    OnCreateBranch="@CreateSingleBranchAsync" />
 
-<UpdateDependenciesModal IsVisible="@showUpdateModal"
-                          IsMultiLevel="@updatePlanIsMultiLevel"
+<UpdateDependenciesModal IsVisible="@_updateModal.IsVisible"
+                          IsMultiLevel="@_updateModal.IsMultiLevel"
                           IsBusy="@isUpdating"
                           OnProceed="@OnUpdateProceedAsync"
                           OnUpdateOnly="@OnUpdateOnlyAsync"
                           OnCancel="@CloseUpdateModal" />
 
-<UpdateSingleRepositoryDependenciesModal IsVisible="@showUpdateSingleRepoDependenciesModal"
-                          Payload="@updateSingleRepoDependenciesPayload"
-                          RepoName="@updateSingleRepoDependenciesRepoName"
+<UpdateSingleRepositoryDependenciesModal IsVisible="@_updateSingleRepoModal.IsVisible"
+                          Payload="@_updateSingleRepoModal.Payload"
+                          RepoName="@_updateSingleRepoModal.RepoName"
                           OnProceed="@OnUpdateSingleRepositoryDependenciesProceedAsync"
                           OnCancel="@CloseUpdateSingleRepositoryDependenciesModal" />
 
-<VersionFilesCommitModal IsVisible="@showVersionFilesCommitModal"
-                         Message="@versionFilesCommitMessage"
-                         Files="@versionFilesCommitList"
+<VersionFilesCommitModal IsVisible="@_versionFilesCommitModal.IsVisible"
+                         Message="@_versionFilesCommitModal.Message"
+                         Files="@_versionFilesCommitModal.Files"
                          OnProceed="@OnVersionFilesCommitProceedAsync"
                          OnCancel="@CloseVersionFilesCommitModal" />
 
-<PushWithDependenciesModal IsVisible="@showPushWithDependenciesModal"
-          Info="@pushWithDependenciesInfo"
-          RepoName="@pushWithDependenciesRepoName"
+<PushWithDependenciesModal IsVisible="@_pushWithDependenciesModal.IsVisible"
+          Info="@_pushWithDependenciesModal.Info"
+          RepoName="@_pushWithDependenciesModal.RepoName"
           OnProceed="@OnPushWithDependenciesProceedAsync"
           OnCancel="@ClosePushWithDependenciesModal" />
 
@@ -411,7 +411,7 @@
 <LoadingOverlay IsVisible="@isUpdating" Message="@updateProgressMessage" OnAbort="AbortUpdateAsync" />
 <LoadingOverlay IsVisible="@isCommitSyncing" Message="@commitSyncProgressMessage" OnAbort="AbortCommitSyncAsync" />
 <LoadingOverlay IsVisible="@isCheckingOut" Message="@checkoutProgressMessage" OnAbort="AbortCheckoutAsync" />
-<LoadingOverlay IsVisible="@(showRepositoriesModal && isPersisting)" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}")" OnAbort="AbortFetchRepositories" />
+<LoadingOverlay IsVisible="@(_repositoriesModal.IsVisible && _repositoriesModal.IsFetching)" Message="@(_repositoriesModal.FetchedRepositoryCount is null || _repositoriesModal.FetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {_repositoriesModal.FetchedRepositoryCount} {(_repositoriesModal.FetchedRepositoryCount == 1 ? "repository" : "repositories")}")" OnAbort="AbortFetchRepositories" />
 <LoadingOverlay IsVisible="@isCreatingBranches" Message="@createBranchesProgressMessage" />
 <LoadingOverlay IsVisible="@isCreatingBranch" Message="@createBranchMessage" />
 
@@ -586,10 +586,13 @@
             }
             var repoPayload = payload[0];
             var repoName = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.Repository?.RepositoryName;
-            updateSingleRepoDependenciesPayload = repoPayload;
-            updateSingleRepoDependenciesRepositoryId = repositoryId;
-            updateSingleRepoDependenciesRepoName = repoName;
-            showUpdateSingleRepoDependenciesModal = true;
+            _updateSingleRepoModal = _updateSingleRepoModal with
+            {
+                IsVisible = true,
+                Payload = repoPayload,
+                RepositoryId = repositoryId,
+                RepoName = repoName
+            };
             await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex)
@@ -601,8 +604,7 @@
 
     private void CloseUpdateSingleRepositoryDependenciesModal()
     {
-        showUpdateSingleRepoDependenciesModal = false;
-        updateSingleRepoDependenciesPayload = null;
+        _updateSingleRepoModal = _updateSingleRepoModal with { IsVisible = false, Payload = null };
     }
 
     private void OnCommitDependencyProgress(int current, int total, int unused)
@@ -612,10 +614,10 @@
 
     private async Task OnUpdateSingleRepositoryDependenciesProceedAsync(bool commitVersionUpdate)
     {
-        if (updateSingleRepoDependenciesPayload == null)
+        if (_updateSingleRepoModal.Payload == null)
             return;
-        var repositoryId = updateSingleRepoDependenciesRepositoryId;
-        var payloadToCommit = updateSingleRepoDependenciesPayload;
+        var repositoryId = _updateSingleRepoModal.RepositoryId;
+        var payloadToCommit = _updateSingleRepoModal.Payload;
         CloseUpdateSingleRepositoryDependenciesModal();
 
         _updateCts?.Cancel();
@@ -718,12 +720,15 @@
             }
 
             var repoName = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.Repository?.RepositoryName;
-            pushWithDependenciesInfo = depInfo;
-            pushWithDependenciesRepoIdsToPush = null;
-            pushWithDependenciesRepoId = repositoryId;
-            pushWithDependenciesBranchName = branchName;
-            pushWithDependenciesRepoName = repoName;
-            showPushWithDependenciesModal = true;
+            _pushWithDependenciesModal = _pushWithDependenciesModal with
+            {
+                IsVisible = true,
+                Info = depInfo,
+                RepoIdsToPush = null,
+                RepoId = repositoryId,
+                BranchName = branchName,
+                RepoName = repoName
+            };
             await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex)
@@ -735,21 +740,19 @@
 
     private void ClosePushWithDependenciesModal()
     {
-        showPushWithDependenciesModal = false;
-        pushWithDependenciesInfo = null;
-        pushWithDependenciesRepoIdsToPush = null;
+        _pushWithDependenciesModal = _pushWithDependenciesModal with { IsVisible = false, Info = null, RepoIdsToPush = null };
     }
 
     /// <summary>Proceed from PushWithDependencies modal: synchronized push = sync registries then level-order push with wait; otherwise push all repos in parallel (MaxParallelOperations).</summary>
     private async Task OnPushWithDependenciesProceedAsync(bool synchronizedPush)
     {
-        if (pushWithDependenciesInfo == null || workspace == null)
+        if (_pushWithDependenciesModal.Info == null || workspace == null)
             return;
 
-        var repoIds = pushWithDependenciesRepoIdsToPush != null
-            ? pushWithDependenciesRepoIdsToPush
-            : pushWithDependenciesInfo.DependencyRepoIds.Concat(new[] { pushWithDependenciesRepoId }).ToHashSet();
-        var requiredPackageIds = pushWithDependenciesInfo.PayloadForRepo.RequiredPackages
+        var repoIds = _pushWithDependenciesModal.RepoIdsToPush != null
+            ? _pushWithDependenciesModal.RepoIdsToPush
+            : _pushWithDependenciesModal.Info.DependencyRepoIds.Concat(new[] { _pushWithDependenciesModal.RepoId }).ToHashSet();
+        var requiredPackageIds = _pushWithDependenciesModal.Info.PayloadForRepo.RequiredPackages
             .Select(r => r.PackageId?.Trim())
             .Where(id => !string.IsNullOrEmpty(id))
             .Cast<string>()
@@ -856,10 +859,13 @@
                 ToastService.Show("Could not load push plan. Try again.");
                 return;
             }
-            pushWithDependenciesInfo = depInfo;
-            pushWithDependenciesRepoIdsToPush = repoIdsWithUnpushed;
-            pushWithDependenciesRepoId = 0;
-            pushWithDependenciesRepoName = null;
+            _pushWithDependenciesModal = _pushWithDependenciesModal with
+            {
+                Info = depInfo,
+                RepoIdsToPush = repoIdsWithUnpushed,
+                RepoId = 0,
+                RepoName = null
+            };
 
             // When there are no package dependencies, push immediately without showing the dialog.
             if (depInfo.PayloadForRepo.RequiredPackages.Count == 0 && depInfo.DependencyRepoIds.Count == 0)
@@ -868,7 +874,7 @@
                 return;
             }
 
-            showPushWithDependenciesModal = true;
+            _pushWithDependenciesModal = _pushWithDependenciesModal with { IsVisible = true };
             await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex)
@@ -940,9 +946,12 @@
                 }
                 return;
             }
-            _updatePlanPayloadForUpdateOnly = payload;
-            updatePlanIsMultiLevel = isMultiLevel;
-            showUpdateModal = true;
+            _updateModal = _updateModal with
+            {
+                IsVisible = true,
+                IsMultiLevel = isMultiLevel,
+                PlanPayloadForUpdateOnly = payload
+            };
             await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex)
@@ -985,7 +994,7 @@
             var payloadForCommit = await WorkspaceUpdateHandler.RunUpdateAsync(
                 WorkspaceId,
                 withCommits,
-                _updatePlanPayloadForUpdateOnly,
+                _updateModal.PlanPayloadForUpdateOnly,
                 _updateCts.Token,
                 SetUpdateProgress,
                 (repoId, msg) =>
@@ -1152,24 +1161,30 @@
         IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)> byRepo,
         IReadOnlyList<string> filesForDisplay)
     {
-        versionFilesCommitMessage = message;
-        versionFilesByRepoToCommit = byRepo;
-        versionFilesCommitList = filesForDisplay;
-        showVersionFilesCommitModal = true;
+        _versionFilesCommitModal = _versionFilesCommitModal with
+        {
+            IsVisible = true,
+            Message = message,
+            ByRepoToCommit = byRepo,
+            Files = filesForDisplay
+        };
         StateHasChanged();
     }
 
     private void CloseVersionFilesCommitModal()
     {
-        showVersionFilesCommitModal = false;
-        versionFilesByRepoToCommit = null;
-        versionFilesCommitList = Array.Empty<string>();
+        _versionFilesCommitModal = _versionFilesCommitModal with
+        {
+            IsVisible = false,
+            ByRepoToCommit = null,
+            Files = Array.Empty<string>()
+        };
         StateHasChanged();
     }
 
     private async Task OnVersionFilesCommitProceedAsync()
     {
-        var byRepo = versionFilesByRepoToCommit;
+        var byRepo = _versionFilesCommitModal.ByRepoToCommit;
         CloseVersionFilesCommitModal();
         if (byRepo == null || byRepo.Count == 0)
             return;
@@ -1244,47 +1259,47 @@
         {
             return;
         }
-        repositoriesModalErrorMessage = null;
-        selectedRepositoryIds = workspace.Repositories
+        _repositoriesModal.ErrorMessage = null;
+        _repositoriesModal.SelectedRepositoryIds = workspace.Repositories
             .Select(link => link.RepositoryId)
             .ToHashSet();
         await EnsureRepositoriesForModalAsync();
-        showRepositoriesModal = true;
+        _repositoriesModal.IsVisible = true;
     }
 
     private async Task EnsureRepositoriesForModalAsync()
     {
         var connectors = await ConnectorRepository.GetAllAsync();
-        hasConnectors = connectors.Count > 0;
-        if (repositoriesModalRepositories == null && hasConnectors)
+        _repositoriesModal.HasConnectors = connectors.Count > 0;
+        if (_repositoriesModal.Repositories == null && _repositoriesModal.HasConnectors)
         {
-            repositoriesModalRepositories = await RepositoryService.GetPersistedRepositoriesAsync();
+            _repositoriesModal.Repositories = await RepositoryService.GetPersistedRepositoriesAsync();
         }
     }
 
     private void CloseRepositoriesModal()
     {
-        showRepositoriesModal = false;
-        repositoriesModalErrorMessage = null;
+        _repositoriesModal.IsVisible = false;
+        _repositoriesModal.ErrorMessage = null;
     }
 
     private async Task SaveRepositoriesAsync()
     {
-        if (workspace == null || isSavingRepositories)
+        if (workspace == null || _repositoriesModal.IsSaving)
         {
             return;
         }
-        if (selectedRepositoryIds.Count == 0)
+        if (_repositoriesModal.SelectedRepositoryIds.Count == 0)
         {
-            repositoriesModalErrorMessage = "Select at least one repository.";
+            _repositoriesModal.ErrorMessage = "Select at least one repository.";
             return;
         }
-        isSavingRepositories = true;
-        repositoriesModalErrorMessage = null;
+        _repositoriesModal.IsSaving = true;
+        _repositoriesModal.ErrorMessage = null;
         await InvokeAsync(StateHasChanged);
         try
         {
-            await WorkspaceRepository.UpdateAsync(WorkspaceId, workspace.Name, selectedRepositoryIds);
+            await WorkspaceRepository.UpdateAsync(WorkspaceId, workspace.Name, _repositoriesModal.SelectedRepositoryIds);
             CloseRepositoriesModal();
             await ReloadWorkspaceDataAsync();
             ApplySyncStateFromWorkspace();
@@ -1292,11 +1307,11 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error saving repositories for workspace {WorkspaceId}", WorkspaceId);
-            repositoriesModalErrorMessage = ex.Message;
+            _repositoriesModal.ErrorMessage = ex.Message;
         }
         finally
         {
-            isSavingRepositories = false;
+            _repositoriesModal.IsSaving = false;
         }
     }
 
@@ -1307,7 +1322,7 @@
 
     private async Task FetchRepositoriesAsync()
     {
-        if (!hasConnectors || isPersisting)
+        if (!_repositoriesModal.HasConnectors || _repositoriesModal.IsFetching)
         {
             return;
         }
@@ -1315,31 +1330,31 @@
         _fetchRepositoriesCts = new CancellationTokenSource();
         try
         {
-            isPersisting = true;
-            fetchedRepositoryCount = null;
-            repositoriesModalErrorMessage = null;
+            _repositoriesModal.IsFetching = true;
+            _repositoriesModal.FetchedRepositoryCount = null;
+            _repositoriesModal.ErrorMessage = null;
             await InvokeAsync(StateHasChanged);
             var progress = new Progress<int>(count =>
             {
-                fetchedRepositoryCount = count;
+                _repositoriesModal.FetchedRepositoryCount = count;
                 _ = InvokeAsync(StateHasChanged);
             });
             var result = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
-            repositoriesModalRepositories = result.Repositories.ToList();
+            _repositoriesModal.Repositories = result.Repositories.ToList();
         }
         catch (OperationCanceledException)
         {
-            repositoriesModalRepositories = await RepositoryService.GetPersistedRepositoriesAsync();
+            _repositoriesModal.Repositories = await RepositoryService.GetPersistedRepositoriesAsync();
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error fetching repositories");
-            repositoriesModalErrorMessage = "Failed to fetch repositories. Please try again later.";
-            repositoriesModalRepositories = new List<GitHubRepositoryEntry>();
+            _repositoriesModal.ErrorMessage = "Failed to fetch repositories. Please try again later.";
+            _repositoriesModal.Repositories = new List<GitHubRepositoryEntry>();
         }
         finally
         {
-            isPersisting = false;
+            _repositoriesModal.IsFetching = false;
         }
     }
 
@@ -1649,22 +1664,27 @@
         if (repo == null)
             return;
 
-        switchBranchRepositoryId = repositoryId;
-        switchBranchRepositoryName = repo.RepositoryName;
-        switchBranchCurrentBranch = currentBranch;
-        // Use cloneUrl if provided, otherwise try to get from repo
-        switchBranchRepositoryUrl = cloneUrl ?? repo.CloneUrl;
-        showSwitchBranchModal = true;
+        _switchBranchModal = _switchBranchModal with
+        {
+            IsVisible = true,
+            RepositoryId = repositoryId,
+            RepositoryName = repo.RepositoryName,
+            CurrentBranch = currentBranch,
+            RepositoryUrl = cloneUrl ?? repo.CloneUrl
+        };
         StateHasChanged();
     }
 
     private void CloseSwitchBranchModal()
     {
-        showSwitchBranchModal = false;
-        switchBranchRepositoryId = 0;
-        switchBranchRepositoryName = null;
-        switchBranchCurrentBranch = null;
-        switchBranchRepositoryUrl = null;
+        _switchBranchModal = _switchBranchModal with
+        {
+            IsVisible = false,
+            RepositoryId = 0,
+            RepositoryName = null,
+            CurrentBranch = null,
+            RepositoryUrl = null
+        };
     }
 
     private async Task ShowBranchModalAsync()
@@ -1679,21 +1699,24 @@
                 CancellationToken.None);
             if (data != null)
             {
-                branchModalCommonBranches = data.CommonBranchNames ?? new List<string>();
-                branchModalDefaultDisplayText = data.DefaultDisplayText ?? "multiple";
+                _branchModal = _branchModal with
+                {
+                    CommonBranchNames = data.CommonBranchNames ?? new List<string>(),
+                    DefaultDisplayText = data.DefaultDisplayText ?? "multiple"
+                };
             }
         }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Could not load common branches for branch modal");
         }
-        showBranchModal = true;
+        _branchModal = _branchModal with { IsVisible = true };
         StateHasChanged();
     }
 
     private void CloseBranchModal()
     {
-        showBranchModal = false;
+        _branchModal = _branchModal with { IsVisible = false };
     }
 
     private async Task CreateBranchesAsync((string NewBranchName, string BaseBranch) args)
@@ -1901,7 +1924,7 @@
                         syncToDefaultMessage = $"Synchronized {c} of {total} to default branch";
                         await InvokeAsync(StateHasChanged);
                     }
-                    return (repositoryId, Success: true, ErrorMsg: (string?)null);
+                    return (repositoryId, true, (string?)null);
                 }
 
                 await semaphore.WaitAsync();

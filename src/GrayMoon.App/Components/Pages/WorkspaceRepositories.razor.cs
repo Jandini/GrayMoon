@@ -28,12 +28,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private bool isPushing = false;
     private string pushProgressMessage = "Pushing...";
     private CancellationTokenSource? _pushCts;
-    private bool showPushWithDependenciesModal = false;
-    private PushDependencyInfoForRepo? pushWithDependenciesInfo = null;
-    private IReadOnlySet<int>? pushWithDependenciesRepoIdsToPush = null;
-    private int pushWithDependenciesRepoId;
-    private string? pushWithDependenciesBranchName;
-    private string? pushWithDependenciesRepoName;
     private IReadOnlySet<int>? pushPlanRepoIds = null;
     private bool? isOutOfSync = null;
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0);
@@ -66,23 +60,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private HashSet<string> clickedVersions = new(); // Track clicked versions to hide hover until mouse leaves
     private HashSet<int> clickedDependencyBadges = new(); // Track clicked dependency badges to hide tooltip immediately
     private HubConnection? _hubConnection;
-    private bool showRepositoriesModal;
-    private bool isSavingRepositories;
-    private bool isPersisting;
-    private bool hasConnectors;
-    private string? repositoriesModalErrorMessage;
-    private List<GitHubRepositoryEntry>? repositoriesModalRepositories;
-    private HashSet<int> selectedRepositoryIds = new();
-    private int? fetchedRepositoryCount;
     private CancellationTokenSource? _fetchRepositoriesCts;
-    private bool showSwitchBranchModal = false;
-    private int switchBranchRepositoryId;
-    private string? switchBranchRepositoryName;
-    private string? switchBranchCurrentBranch;
-    private string? switchBranchRepositoryUrl;
-    private bool showBranchModal = false;
-    private IReadOnlyList<string> branchModalCommonBranches = Array.Empty<string>();
-    private string branchModalDefaultDisplayText = "multiple";
+    private RepositoriesModalState _repositoriesModal = new();
+    private SwitchBranchModalState _switchBranchModal = new();
+    private BranchModalState _branchModal = new();
     private bool isCreatingBranches = false;
     private string createBranchesProgressMessage = "Creating branches...";
     private CancellationTokenSource? _createBranchesCts;
@@ -91,19 +72,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private bool isSyncingToDefault = false;
     private string syncToDefaultMessage = "";
     private IReadOnlyList<(int RepoId, int? DefaultAhead, bool? HasUpstream)>? _syncToDefaultCheckResults = null;
-    private bool showUpdateModal = false;
-    private bool showUpdateSingleRepoDependenciesModal = false;
-    private SyncDependenciesRepoPayload? updateSingleRepoDependenciesPayload = null;
-    private int updateSingleRepoDependenciesRepositoryId;
-    private string? updateSingleRepoDependenciesRepoName;
-    private bool updatePlanIsMultiLevel = false;
-    private bool showVersionFilesCommitModal = false;
-    private string versionFilesCommitMessage = "";
-    private IReadOnlyList<string> versionFilesCommitList = Array.Empty<string>();
-    private IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)>? versionFilesByRepoToCommit;
-    /// <summary>Cached update plan payload from the last header-level Update click. Used to know which repos had dependency updates when offering post-update commits.</summary>
-    private IReadOnlyList<SyncDependenciesRepoPayload>? _updatePlanPayloadForUpdateOnly = null;
-
+    private UpdateModalState _updateModal = new();
+    private UpdateSingleRepoDependenciesModalState _updateSingleRepoModal = new();
+    private VersionFilesCommitModalState _versionFilesCommitModal = new();
+    private PushWithDependenciesModalState _pushWithDependenciesModal = new();
     private ConfirmModalState _confirmModal = new();
     private string searchTerm = string.Empty;
 
@@ -489,7 +461,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     private void CloseUpdateModal()
     {
-        showUpdateModal = false;
+        _updateModal = _updateModal with { IsVisible = false };
         StateHasChanged();
     }
 
@@ -530,6 +502,67 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public string Message { get; init; } = "";
         public string ButtonText { get; init; } = "Yes";
         public Func<Task>? PendingAction { get; init; }
+    }
+
+    private sealed class RepositoriesModalState
+    {
+        public bool IsVisible { get; set; }
+        public string? ErrorMessage { get; set; }
+        public List<GitHubRepositoryEntry>? Repositories { get; set; }
+        public HashSet<int> SelectedRepositoryIds { get; set; } = new();
+        public bool IsSaving { get; set; }
+        public bool IsFetching { get; set; }
+        public int? FetchedRepositoryCount { get; set; }
+        public bool HasConnectors { get; set; }
+    }
+
+    private sealed record BranchModalState
+    {
+        public bool IsVisible { get; init; }
+        public IReadOnlyList<string> CommonBranchNames { get; init; } = Array.Empty<string>();
+        public string DefaultDisplayText { get; init; } = "multiple";
+    }
+
+    private sealed record SwitchBranchModalState
+    {
+        public bool IsVisible { get; init; }
+        public int RepositoryId { get; init; }
+        public string? RepositoryName { get; init; }
+        public string? CurrentBranch { get; init; }
+        public string? RepositoryUrl { get; init; }
+    }
+
+    private sealed record UpdateModalState
+    {
+        public bool IsVisible { get; init; }
+        public bool IsMultiLevel { get; init; }
+        public IReadOnlyList<SyncDependenciesRepoPayload>? PlanPayloadForUpdateOnly { get; init; }
+    }
+
+    private sealed record UpdateSingleRepoDependenciesModalState
+    {
+        public bool IsVisible { get; init; }
+        public SyncDependenciesRepoPayload? Payload { get; init; }
+        public int RepositoryId { get; init; }
+        public string? RepoName { get; init; }
+    }
+
+    private sealed record VersionFilesCommitModalState
+    {
+        public bool IsVisible { get; init; }
+        public string Message { get; init; } = "";
+        public IReadOnlyList<string> Files { get; init; } = Array.Empty<string>();
+        public IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)>? ByRepoToCommit { get; init; }
+    }
+
+    private sealed record PushWithDependenciesModalState
+    {
+        public bool IsVisible { get; init; }
+        public PushDependencyInfoForRepo? Info { get; init; }
+        public IReadOnlySet<int>? RepoIdsToPush { get; init; }
+        public int RepoId { get; init; }
+        public string? BranchName { get; init; }
+        public string? RepoName { get; init; }
     }
 }
 
