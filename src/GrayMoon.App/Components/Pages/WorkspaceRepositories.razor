@@ -813,8 +813,11 @@
 
     private void SetPushProgress(string message)
     {
-        pushProgressMessage = message;
-        _ = InvokeAsync(StateHasChanged);
+        _ = InvokeAsync(() =>
+        {
+            pushProgressMessage = message;
+            StateHasChanged();
+        });
     }
 
     private void SetCommitSyncProgress(string message)
