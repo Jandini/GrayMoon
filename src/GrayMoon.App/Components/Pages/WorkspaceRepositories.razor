@@ -23,6 +23,7 @@
 @inject GitHubPullRequestService GitHubPullRequestService
 @inject WorkspacePullRequestService WorkspacePullRequestService
 @inject Microsoft.Extensions.Options.IOptions<GrayMoon.App.Models.WorkspaceOptions> WorkspaceOptions
+@inject WorkspaceCommitSyncHandler WorkspaceCommitSyncHandler
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
 <PageTitle>@(workspace?.Name ?? "Workspace")</PageTitle>
@@ -1599,60 +1600,30 @@
             StateHasChanged();
             await Task.Yield();
 
-            var httpClient = HttpClientFactory.CreateClient();
-            var request = new
-            {
+            await WorkspaceCommitSyncHandler.CommitSyncAsync(
+                WorkspaceId,
                 repositoryId,
-                workspaceId = WorkspaceId
-            };
-            var json = System.Text.Json.JsonSerializer.Serialize(request);
-            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            
-            var baseUrl = ApiBaseUrl;
-            var response = await httpClient.PostAsync($"{baseUrl}/api/commitsync", content, _commitSyncCts.Token);
-
-            if (response.IsSuccessStatusCode)
-            {
-                var responseContent = await response.Content.ReadAsStringAsync(_commitSyncCts.Token);
-                var result = System.Text.Json.JsonSerializer.Deserialize<CommitSyncResponse>(responseContent, AgentResponseJson.Options);
-
-                if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
+                ApiBaseUrl,
+                _commitSyncCts.Token,
+                async message =>
                 {
-                    repositoryErrors[repositoryId] = result.ErrorMessage;
-                    SetCommitSyncProgress(result.MergeConflict ? "Merge conflict detected. Merge aborted." : "Commit sync completed with errors.");
-                }
-                else if (result != null && result.MergeConflict)
+                    SetCommitSyncProgress(message);
+                    await Task.CompletedTask;
+                },
+                (id, err) =>
                 {
-                    SetCommitSyncProgress("Merge conflict detected. Merge aborted.");
-                }
-                else
-                {
-                    repositoryErrors.Remove(repositoryId);
-                }
-            }
-            else
-            {
-                var errorText = await response.Content.ReadAsStringAsync(_commitSyncCts.Token);
-                var displayError = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"Commit sync failed: {response.StatusCode}";
-                repositoryErrors[repositoryId] = displayError;
-                errorMessage = displayError;
-                Logger.LogError("CommitSync failed: {StatusCode}, {Error}", response.StatusCode, errorText);
-            }
+                    if (err is null)
+                        repositoryErrors.Remove(id);
+                    else
+                        repositoryErrors[id] = err;
+                },
+                msg => errorMessage = msg);
 
-            // Refresh workspace data to show updated commit counts
             await RefreshFromSync();
         }
         catch (OperationCanceledException)
         {
-            // Operation was cancelled
             await ReloadWorkspaceDataAfterCancelAsync();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Error syncing commits for repository {RepositoryId}", repositoryId);
-            var errorMsg = "Commit sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
-            repositoryErrors[repositoryId] = errorMsg;
-            errorMessage = errorMsg;
         }
         finally
         {
@@ -1671,7 +1642,6 @@
         _commitSyncCts = new CancellationTokenSource();
 
         isCommitSyncing = true;
-        var total = repositoryIds.Count;
         SetCommitSyncProgress("Synchronizing commits...");
         errorMessage = null;
         try
@@ -1679,76 +1649,30 @@
             StateHasChanged();
             await Task.Yield();
 
-            var httpClient = HttpClientFactory.CreateClient();
-            var baseUrl = ApiBaseUrl;
-            var completedCount = 0;
-
-            // Sync all repositories in parallel
-            var syncTasks = repositoryIds.Select(async repositoryId =>
-            {
-                try
+            await WorkspaceCommitSyncHandler.CommitSyncLevelAsync(
+                WorkspaceId,
+                repositoryIds,
+                ApiBaseUrl,
+                _commitSyncCts.Token,
+                async (completed, total) =>
                 {
-                    var request = new
-                    {
-                        repositoryId,
-                        workspaceId = WorkspaceId
-                    };
-                    var json = System.Text.Json.JsonSerializer.Serialize(request);
-                    var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-                    var response = await httpClient.PostAsync($"{baseUrl}/api/commitsync", content, _commitSyncCts.Token);
-
-                    if (response.IsSuccessStatusCode)
-                    {
-                        var responseContent = await response.Content.ReadAsStringAsync(_commitSyncCts.Token);
-                        var result = System.Text.Json.JsonSerializer.Deserialize<CommitSyncResponse>(responseContent, AgentResponseJson.Options);
-
-                        if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
-                        {
-                            repositoryErrors[repositoryId] = result.ErrorMessage;
-                        }
-                        else if (result != null && result.MergeConflict)
-                        {
-                            repositoryErrors[repositoryId] = "Merge conflict detected. Merge aborted.";
-                        }
-                        else
-                        {
-                            repositoryErrors.Remove(repositoryId);
-                        }
-                    }
-                    else
-                    {
-                        var errorText = await response.Content.ReadAsStringAsync(_commitSyncCts.Token);
-                        repositoryErrors[repositoryId] = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"Commit sync failed: {response.StatusCode}";
-                        Logger.LogError("CommitSync failed for repository {RepositoryId}: {StatusCode}, {Error}", repositoryId, response.StatusCode, errorText);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError(ex, "Error syncing commits for repository {RepositoryId}", repositoryId);
-                    repositoryErrors[repositoryId] = "Commit sync failed. The GrayMoon Agent may be offline.";
-                }
-                finally
-                {
-                    var completed = Interlocked.Increment(ref completedCount);
                     SetCommitSyncProgress($"Synchronized commits {completed} of {total}");
                     await InvokeAsync(StateHasChanged);
-                }
-            });
+                },
+                (id, err) =>
+                {
+                    if (err is null)
+                        repositoryErrors.Remove(id);
+                    else
+                        repositoryErrors[id] = err;
+                },
+                msg => errorMessage = msg);
 
-            await Task.WhenAll(syncTasks);
-
-            // Refresh workspace data to show updated commit counts
             await RefreshFromSync();
         }
         catch (OperationCanceledException)
         {
-            // Operation was cancelled
             await ReloadWorkspaceDataAfterCancelAsync();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Error syncing commits for level");
-            errorMessage = "Commit sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
         }
         finally
         {
