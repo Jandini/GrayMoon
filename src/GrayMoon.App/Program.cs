@@ -61,6 +61,7 @@ builder.Services.AddScoped<WorkspaceCommitSyncHandler>();
 builder.Services.AddScoped<WorkspaceSyncHandler>();
 builder.Services.AddScoped<WorkspaceUpdateHandler>();
 builder.Services.AddScoped<WorkspacePushHandler>();
+builder.Services.AddScoped<WorkspaceBranchHandler>();
 
 // Token protection
 builder.Services.AddSingleton<ITokenEncryptionKeyProvider, TokenEncryptionKeyProvider>();

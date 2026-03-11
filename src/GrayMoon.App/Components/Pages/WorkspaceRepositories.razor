@@ -27,6 +27,7 @@
 @inject WorkspaceSyncHandler WorkspaceSyncHandler
 @inject WorkspaceUpdateHandler WorkspaceUpdateHandler
 @inject WorkspacePushHandler WorkspacePushHandler
+@inject WorkspaceBranchHandler WorkspaceBranchHandler
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
 <PageTitle>@(workspace?.Name ?? "Workspace")</PageTitle>
@@ -1672,21 +1673,14 @@
             return;
         try
         {
-            var httpClient = HttpClientFactory.CreateClient();
-            var request = new { workspaceId = WorkspaceId };
-            var json = JsonSerializer.Serialize(request);
-            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            var baseUrl = ApiBaseUrl;
-            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/common", content);
-            if (response.IsSuccessStatusCode)
+            var data = await WorkspaceBranchHandler.GetCommonBranchesAsync(
+                WorkspaceId,
+                ApiBaseUrl,
+                CancellationToken.None);
+            if (data != null)
             {
-                var responseContent = await response.Content.ReadAsStringAsync();
-                var data = JsonSerializer.Deserialize<CommonBranchesApiResult>(responseContent, AgentResponseJson.Options);
-                if (data != null)
-                {
-                    branchModalCommonBranches = data.CommonBranchNames ?? new List<string>();
-                    branchModalDefaultDisplayText = data.DefaultDisplayText ?? "multiple";
-                }
+                branchModalCommonBranches = data.CommonBranchNames ?? new List<string>();
+                branchModalDefaultDisplayText = data.DefaultDisplayText ?? "multiple";
             }
         }
         catch (Exception ex)
@@ -1721,21 +1715,16 @@
         try
         {
             await Task.Yield();
-            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
-            {
-                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-                await workspaceGitService.CreateBranchesAsync(
-                    WorkspaceId,
-                    newBranchName,
-                    baseBranch,
-                    onProgress: (completed, total) =>
-                    {
-                        SetCreateBranchesProgress($"Created {completed} of {total} branches");
-                        InvokeAsync(StateHasChanged);
-                    },
-                    repositoryIds: null,
-                    cancellationToken: _createBranchesCts.Token);
-            }
+            await WorkspaceBranchHandler.CreateBranchesAsync(
+                WorkspaceId,
+                newBranchName,
+                baseBranch,
+                (completed, total) =>
+                {
+                    SetCreateBranchesProgress($"Created {completed} of {total} branches");
+                    _ = InvokeAsync(StateHasChanged);
+                },
+                _createBranchesCts.Token);
             await RefreshFromSync();
         }
         catch (OperationCanceledException)
@@ -1774,58 +1763,23 @@
 
         try
         {
-            var httpClient = HttpClientFactory.CreateClient();
-            var apiRequest = new
-            {
-                workspaceId = WorkspaceId,
+            var (success, err) = await WorkspaceBranchHandler.CreateSingleBranchAsync(
+                WorkspaceId,
                 repositoryId,
                 newBranchName,
-                baseBranch
-            };
-            var json = System.Text.Json.JsonSerializer.Serialize(apiRequest);
-            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            var baseUrl = ApiBaseUrl;
-            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/create", content);
-
-            if (response.IsSuccessStatusCode)
+                baseBranch,
+                setUpstream,
+                ApiBaseUrl,
+                CancellationToken.None);
+            if (!success)
             {
-                var responseContent = await response.Content.ReadAsStringAsync();
-                var result = System.Text.Json.JsonSerializer.Deserialize<GrayMoon.App.Models.Api.CreateBranchApiResult>(responseContent, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                if (result != null && result.Success)
-                {
-                    if (setUpstream)
-                    {
-                        var upstreamRequest = new
-                        {
-                            workspaceId = WorkspaceId,
-                            repositoryId,
-                            branchName = newBranchName
-                        };
-                        var upstreamJson = System.Text.Json.JsonSerializer.Serialize(upstreamRequest);
-                        var upstreamContent = new System.Net.Http.StringContent(upstreamJson, System.Text.Encoding.UTF8, "application/json");
-                        var upstreamResponse = await httpClient.PostAsync($"{baseUrl}/api/branches/set-upstream", upstreamContent);
-                        if (upstreamResponse.IsSuccessStatusCode)
-                        {
-                            var upstreamResponseContent = await upstreamResponse.Content.ReadAsStringAsync();
-                            var upstreamResult = System.Text.Json.JsonSerializer.Deserialize<GrayMoon.App.Models.Api.CreateBranchApiResult>(upstreamResponseContent, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                            if (upstreamResult != null && !upstreamResult.Success)
-                                errorMessage = upstreamResult.Error ?? "Branch created but failed to set upstream.";
-                        }
-                        else
-                            errorMessage = "Branch created but failed to set upstream.";
-                    }
-                    await RefreshFromSync();
-                }
-                else
-                {
-                    errorMessage = result?.Error ?? "Failed to create branch.";
-                }
+                errorMessage = err ?? "Create branch failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
             }
             else
             {
-                var errorText = await response.Content.ReadAsStringAsync();
-                errorMessage = $"Failed to create branch: {response.StatusCode}";
-                Logger.LogError("CreateBranch failed: {StatusCode}, {Error}", response.StatusCode, errorText);
+                if (err != null)
+                    errorMessage = err;
+                await RefreshFromSync();
             }
         }
         catch (Exception ex)
@@ -1883,38 +1837,22 @@
 
         try
         {
-            var httpClient = HttpClientFactory.CreateClient();
-            var baseUrl = ApiBaseUrl;
+            var (success, errMsg) = await WorkspaceBranchHandler.SyncToDefaultSingleAsync(
+                WorkspaceId,
+                repositoryId,
+                currentBranchName,
+                deleteRemoteFirst,
+                ApiBaseUrl,
+                CancellationToken.None);
 
-            if (deleteRemoteFirst)
-            {
-                var deleteRequest = new { workspaceId = WorkspaceId, repositoryId, branchName = currentBranchName, isRemote = true };
-                var deleteJson = System.Text.Json.JsonSerializer.Serialize(deleteRequest);
-                var deleteContent = new System.Net.Http.StringContent(deleteJson, System.Text.Encoding.UTF8, "application/json");
-                var deleteResponse = await httpClient.PostAsync($"{baseUrl}/api/branches/delete", deleteContent);
-                if (!deleteResponse.IsSuccessStatusCode)
-                {
-                    var deleteError = await deleteResponse.Content.ReadAsStringAsync();
-                    if (deleteError.IndexOf("not exist", StringComparison.OrdinalIgnoreCase) < 0 && deleteError.IndexOf("not found", StringComparison.OrdinalIgnoreCase) < 0)
-                        Logger.LogWarning("Delete remote branch failed for repo {RepositoryId}: {StatusCode}", repositoryId, deleteResponse.StatusCode);
-                }
-            }
-
-            var apiRequest = new { workspaceId = WorkspaceId, repositoryId, currentBranchName };
-            var json = System.Text.Json.JsonSerializer.Serialize(apiRequest);
-            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/sync-to-default", content);
-
-            if (response.IsSuccessStatusCode)
+            if (success)
             {
                 repositoryErrors.Remove(repositoryId);
                 await RefreshFromSync();
             }
-            else
+            else if (errMsg != null)
             {
-                var errorText = await response.Content.ReadAsStringAsync();
-                repositoryErrors[repositoryId] = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"Failed to sync to default branch: {response.StatusCode}";
-                Logger.LogError("SyncToDefault failed: {StatusCode}, {Error}", response.StatusCode, errorText);
+                repositoryErrors[repositoryId] = errMsg;
             }
         }
         catch (Exception ex)
@@ -1950,8 +1888,6 @@
         try
         {
             using var semaphore = new SemaphoreSlim(maxParallel, maxParallel);
-            var httpClient = HttpClientFactory.CreateClient();
-            var baseUrl = ApiBaseUrl;
 
             var tasks = repositoryIds.Select(async repositoryId =>
             {
@@ -1971,30 +1907,17 @@
                 await semaphore.WaitAsync();
                 try
                 {
-                    if (resultByRepo.TryGetValue(repositoryId, out var r) && r.HasUpstream == true)
-                    {
-                        var deleteRequest = new { workspaceId = WorkspaceId, repositoryId, branchName = currentBranchName, isRemote = true };
-                        var deleteJson = System.Text.Json.JsonSerializer.Serialize(deleteRequest);
-                        var deleteContent = new System.Net.Http.StringContent(deleteJson, System.Text.Encoding.UTF8, "application/json");
-                        var deleteResponse = await httpClient.PostAsync($"{baseUrl}/api/branches/delete", deleteContent);
-                        if (!deleteResponse.IsSuccessStatusCode)
-                        {
-                            var deleteError = await deleteResponse.Content.ReadAsStringAsync();
-                            if (deleteError.IndexOf("not exist", StringComparison.OrdinalIgnoreCase) < 0 && deleteError.IndexOf("not found", StringComparison.OrdinalIgnoreCase) < 0)
-                                Logger.LogWarning("Delete remote branch failed for repo {RepositoryId}: {StatusCode}", repositoryId, deleteResponse.StatusCode);
-                        }
-                    }
+                    var hasUpstream = resultByRepo.TryGetValue(repositoryId, out var r) && r.HasUpstream == true;
 
-                    var apiRequest = new { workspaceId = WorkspaceId, repositoryId, currentBranchName };
-                    var json = System.Text.Json.JsonSerializer.Serialize(apiRequest);
-                    var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-                    var response = await httpClient.PostAsync($"{baseUrl}/api/branches/sync-to-default", content);
-                    if (response.IsSuccessStatusCode)
-                        return (repositoryId, Success: true, ErrorMsg: (string?)null);
-                    var errorText = await response.Content.ReadAsStringAsync();
-                    var errMsg = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"Failed to sync to default branch: {response.StatusCode}";
-                    Logger.LogError("SyncToDefault failed for repo {RepositoryId}: {StatusCode}, {Error}", repositoryId, response.StatusCode, errorText);
-                    return (repositoryId, Success: false, ErrorMsg: errMsg);
+                    var (success, errMsg) = await WorkspaceBranchHandler.SyncToDefaultSingleAsync(
+                        WorkspaceId,
+                        repositoryId,
+                        currentBranchName,
+                        hasUpstream,
+                        ApiBaseUrl,
+                        CancellationToken.None);
+
+                    return (repositoryId, success, errMsg);
                 }
                 finally
                 {
@@ -2009,7 +1932,7 @@
             });
 
             var results = await Task.WhenAll(tasks);
-            var successCount = results.Count(r => r.Success);
+            var successCount = results.Count(r => r.Item2);
             foreach (var (repoId, success, errMsg) in results)
             {
                 if (success)
@@ -2060,46 +1983,26 @@
             StateHasChanged();
             await Task.Yield();
 
-            var httpClient = HttpClientFactory.CreateClient();
-            var apiRequest = new
-            {
+            var (success, errMsg) = await WorkspaceBranchHandler.CheckoutBranchAsync(
+                WorkspaceId,
                 repositoryId,
-                workspaceId = WorkspaceId,
-                branchName
-            };
-            var json = System.Text.Json.JsonSerializer.Serialize(apiRequest);
-            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                branchName,
+                ApiBaseUrl,
+                _checkoutCts.Token);
 
-            var baseUrl = ApiBaseUrl;
-            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/checkout", content, _checkoutCts.Token);
-
-            if (response.IsSuccessStatusCode)
+            if (success)
             {
-                var responseContent = await response.Content.ReadAsStringAsync(_checkoutCts.Token);
-                var result = System.Text.Json.JsonSerializer.Deserialize<CheckoutBranchResponse>(responseContent, AgentResponseJson.Options);
-
-                if (result != null && !result.Success)
-                {
-                    repositoryErrors[repositoryId] = !string.IsNullOrWhiteSpace(result.ErrorMessage) ? result.ErrorMessage : "Failed to checkout branch.";
-                }
-                else
-                {
-                    repositoryErrors.Remove(repositoryId);
-                }
+                repositoryErrors.Remove(repositoryId);
             }
             else
             {
-                var errorText = await response.Content.ReadAsStringAsync(_checkoutCts.Token);
-                repositoryErrors[repositoryId] = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"Failed to checkout branch: {response.StatusCode}";
-                Logger.LogError("Checkout failed: {StatusCode}, {Error}", response.StatusCode, errorText);
+                repositoryErrors[repositoryId] = errMsg ?? "Failed to checkout branch.";
             }
 
-            // Refresh workspace data to show updated branch (same as CommitSyncAsync)
             await RefreshFromSync();
         }
         catch (OperationCanceledException)
         {
-            // Operation was cancelled
             await ReloadWorkspaceDataAfterCancelAsync();
         }
         catch (Exception ex)
