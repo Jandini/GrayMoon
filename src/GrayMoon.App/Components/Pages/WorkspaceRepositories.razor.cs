@@ -103,10 +103,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)>? versionFilesByRepoToCommit;
     /// <summary>Cached update plan payload from the last header-level Update click. Used to know which repos had dependency updates when offering post-update commits.</summary>
     private IReadOnlyList<SyncDependenciesRepoPayload>? _updatePlanPayloadForUpdateOnly = null;
-    private bool showConfirmModal = false;
-    private string confirmModalMessage = "";
-    private string confirmModalButtonText = "Yes";
-    private Func<Task>? _pendingConfirmAction;
+
+    private ConfirmModalState _confirmModal = new();
     private string searchTerm = string.Empty;
 
     private const int RefreshDebounceMs = 200;
@@ -497,15 +495,18 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     private void CloseConfirmModal()
     {
-        showConfirmModal = false;
-        confirmModalButtonText = "Yes";
-        _pendingConfirmAction = null;
+        _confirmModal = _confirmModal with
+        {
+            IsVisible = false,
+            ButtonText = "Yes",
+            PendingAction = null,
+        };
         StateHasChanged();
     }
 
     private async Task OnConfirmModalYesAsync()
     {
-        var action = _pendingConfirmAction;
+        var action = _confirmModal.PendingAction;
         CloseConfirmModal();
         if (action != null)
             await action();
@@ -513,11 +514,22 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     private void ShowConfirm(string message, Func<Task> onConfirm, string confirmButtonText = "Yes")
     {
-        confirmModalMessage = message;
-        confirmModalButtonText = confirmButtonText;
-        _pendingConfirmAction = onConfirm;
-        showConfirmModal = true;
+        _confirmModal = _confirmModal with
+        {
+            IsVisible = true,
+            Message = message,
+            ButtonText = confirmButtonText,
+            PendingAction = onConfirm,
+        };
         StateHasChanged();
+    }
+
+    private sealed record ConfirmModalState
+    {
+        public bool IsVisible { get; init; }
+        public string Message { get; init; } = "";
+        public string ButtonText { get; init; } = "Yes";
+        public Func<Task>? PendingAction { get; init; }
     }
 }
 
