@@ -117,7 +117,7 @@
                                                 <span class="dependency-level-title @(group.Key == null ? "dependency-level-no-projects" : "")">@(group.Key == null ? "No dependencies" : $"Level {group.Key}")</span>
                                                 @if (group.Key.HasValue)
                                                 {
-                                                    <a href="@GetDependencyGraphUrlForLevel(group.Key!.Value)" class="dependency-level-graph-link" title="View dependency graph for this level" aria-label="Dependency graph">
+                                                    <a href="@WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, level: group.Key!.Value)" class="dependency-level-graph-link" title="View dependency graph for this level" aria-label="Dependency graph">
                                                         <i class="bi bi-diagram-3" aria-hidden="true"></i>
                                                     </a>
                                                 }
@@ -248,7 +248,7 @@
                                                 @{
                                                     var depCount = wr.Dependencies ?? 0;
                                                     var unmatchedDeps = wr.UnmatchedDeps ?? 0;
-                                                    var graphUrl = GetDependencyGraphUrl(repo.RepositoryId);
+                                                    var graphUrl = WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, repositoryId: repo.RepositoryId);
                                                 }
                                                 @if (depCount == 0)
                                                 {
@@ -2418,7 +2418,7 @@
             if (response.IsSuccessStatusCode)
             {
                 var responseContent = await response.Content.ReadAsStringAsync();
-                var result = System.Text.Json.JsonSerializer.Deserialize<CreateBranchApiResult>(responseContent, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                var result = System.Text.Json.JsonSerializer.Deserialize<GrayMoon.App.Models.Api.CreateBranchApiResult>(responseContent, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                 if (result != null && result.Success)
                 {
                     if (setUpstream)
@@ -2435,7 +2435,7 @@
                         if (upstreamResponse.IsSuccessStatusCode)
                         {
                             var upstreamResponseContent = await upstreamResponse.Content.ReadAsStringAsync();
-                            var upstreamResult = System.Text.Json.JsonSerializer.Deserialize<CreateBranchApiResult>(upstreamResponseContent, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                            var upstreamResult = System.Text.Json.JsonSerializer.Deserialize<GrayMoon.App.Models.Api.CreateBranchApiResult>(upstreamResponseContent, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                             if (upstreamResult != null && !upstreamResult.Success)
                                 errorMessage = upstreamResult.Error ?? "Branch created but failed to set upstream.";
                         }
@@ -2791,16 +2791,6 @@
         }
     }
 
-    private string GetDependencyGraphUrl(int repositoryId)
-    {
-        return $"/workspaces/{WorkspaceId}/dependencies?repo={repositoryId}";
-    }
-
-    private string GetDependencyGraphUrlForLevel(int level)
-    {
-        return $"/workspaces/{WorkspaceId}/dependencies?level={level}";
-    }
-
     private void OnSearchKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Escape")
@@ -2839,9 +2829,4 @@
         }).ToList();
     }
 
-    private sealed class CreateBranchApiResult
-    {
-        public bool Success { get; set; }
-        public string? Error { get; set; }
-    }
 }
