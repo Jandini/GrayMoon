@@ -1,6 +1,5 @@
 using System.Text.Json;
 using GrayMoon.App.Models;
-using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
 using Microsoft.AspNetCore.Components;
@@ -47,6 +46,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
         FilteredWorkspaceRepositories
             .GroupBy(wr => wr.DependencyLevel)
             .OrderByDescending(g => g.Key ?? int.MinValue);
+    private bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
+    private string PageTitleText => workspace?.Name ?? "Workspace";
+    private string RepositoriesModalTitle => $"Repositories for {PageTitleText}";
+    private bool ShowRepositoriesFetchOverlay => _repositoriesModal.IsVisible && _repositoriesModal.IsFetching;
+    private string RepositoriesFetchOverlayMessage => _repositoriesModal.FetchedRepositoryCount is null || _repositoriesModal.FetchedRepositoryCount == 0
+        ? "Fetching repositories..."
+        : $"Fetched {_repositoriesModal.FetchedRepositoryCount} {(_repositoriesModal.FetchedRepositoryCount == 1 ? "repository" : "repositories")}";
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private CancellationTokenSource? _syncCts;
     private IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>> _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
@@ -643,6 +649,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
             _ = OpenGitHubAsync();
         else
             ShowConfirm($"Do you want to open GitHub page for {count} repositories?", OpenGitHubAsync);
+    }
+
+    private void HandleOpenGitHubFromLevel((int count, IReadOnlyList<string?> urls) args)
+    {
+        ShowConfirmOpenGitHub(args.count, args.urls);
     }
 
     /// <summary>True if the workspace has a merged PR for this repository's current branch (from prByRepositoryId).</summary>
@@ -2183,6 +2194,28 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         searchTerm = string.Empty;
         StateHasChanged();
+    }
+
+    private const int TableColSpan = 8;
+
+    private PullRequestInfo? GetPrInfoForRepository(int repositoryId)
+    {
+        return prByRepositoryId.TryGetValue(repositoryId, out var pr) ? pr : null;
+    }
+
+    private string? GetRepositoryError(int repositoryId)
+    {
+        return repositoryErrors.TryGetValue(repositoryId, out var err) ? err : null;
+    }
+
+    private RepoSyncStatus? GetRepoSyncStatus(int repositoryId)
+    {
+        return repoSyncStatus.TryGetValue(repositoryId, out var status) ? status : (RepoSyncStatus?)null;
+    }
+
+    private IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> GetMismatchedDependencyLines(int repositoryId)
+    {
+        return _mismatchedDependencyLinesByRepo.GetValueOrDefault(repositoryId) ?? Array.Empty<(string PackageId, string CurrentVersion, string NewVersion)>();
     }
 
     private List<WorkspaceRepositoryLink> GetFilteredWorkspaceRepositories()

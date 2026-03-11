@@ -30,13 +30,13 @@
 @inject WorkspaceBranchHandler WorkspaceBranchHandler
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
-<PageTitle>@(workspace?.Name ?? "Workspace")</PageTitle>
+<PageTitle>@PageTitleText</PageTitle>
 
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
         <WorkspaceRepositoriesHeader WorkspaceName="@(workspace?.Name)"
                                     RepositoriesCount="@(workspaceRepositories.Count)"
-                                    HasFilter="@(!string.IsNullOrWhiteSpace(searchTerm))"
+                                    HasFilter="@HasSearchFilter"
                                     FilteredCount="@(FilteredWorkspaceRepositories.Count)"
                                     SearchTerm="@searchTerm"
                                     HasUnmatchedDependencies="@hasUnmatchedDependencies"
@@ -83,13 +83,10 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @{
-                                var colSpan = 8;
-                            }
                             @if (isLoading)
                             {
                                 <tr>
-                                    <td colspan="@colSpan" class="text-center text-muted py-4">
+                                    <td colspan="@TableColSpan" class="text-center text-muted py-4">
                                         Loading workspace...
                                     </td>
                                 </tr>
@@ -97,7 +94,7 @@
                             else if (workspaceRepositories.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="@colSpan" class="text-center text-muted py-4">
+                                    <td colspan="@TableColSpan" class="text-center text-muted py-4">
                                         No repositories assigned to this workspace.
                                     </td>
                                 </tr>
@@ -105,7 +102,7 @@
                             else if (FilteredWorkspaceRepositories.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="@colSpan" class="text-center text-muted py-4">
+                                    <td colspan="@TableColSpan" class="text-center text-muted py-4">
                                         No repositories match your search.
                                     </td>
                                 </tr>
@@ -114,222 +111,39 @@
                             {
                                 @foreach (var group in FilteredLevelGroups)
                                 {
-                                    var levelUrls = group.Select(wr => wr.Repository).Where(r => r != null).Select(r => RepositoryUrlHelper.GetRepositoryUrl(r!.CloneUrl)).Where(u => !string.IsNullOrEmpty(u)).ToList();
-                                    <tr class="dependency-level-header">
-                                        <td colspan="@colSpan" class="dependency-level-header-cell">
-                                            <div class="dependency-level-header-start">
-                                                <span class="dependency-level-title @(group.Key == null ? "dependency-level-no-projects" : "")">@(group.Key == null ? "No dependencies" : $"Level {group.Key}")</span>
-                                                @if (group.Key.HasValue)
-                                                {
-                                                    <a href="@WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, level: group.Key!.Value)" class="dependency-level-graph-link" title="View dependency graph for this level" aria-label="Dependency graph">
-                                                        <i class="bi bi-diagram-3" aria-hidden="true"></i>
-                                                    </a>
-                                                }
-                                            </div>
-                                            <div class="dependency-level-header-end">
-                                                <span class="dependency-level-icons">
-                                                    <span class="dependency-level-sync-to-default-link"
-                                                          role="button"
-                                                          tabindex="0"
-                                                          title="Sync to default branch..."
-                                                          style="cursor: pointer;"
-                                                          @onclick="() => ShowConfirmSyncToDefaultLevel(group.Select(wr => wr.RepositoryId).ToList())"
-                                                          @onclick:preventDefault
-                                                          aria-label="Sync to default branch">
-                                                        <i class="bi bi-rewind" aria-hidden="true"></i>
-                                                    </span>
-                                                    <span class="dependency-level-sync-commits-link"
-                                                          role="button"
-                                                          tabindex="0"
-                                                          title="Sync commits for all repositories in this level"
-                                                          style="cursor: pointer;"
-                                                          @onclick="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
-                                                          @onclick:preventDefault
-                                                          aria-label="Sync commits">
-                                                        <i class="bi bi-arrow-down-up" aria-hidden="true"></i>
-                                                    </span>
-                                                    <span class="dependency-level-pr-link"
-                                                          role="button"
-                                                          tabindex="0"
-                                                          title="Open Pull Request in GitHub..."
-                                                          style="cursor: pointer;"
-                                                          @onclick="() => ShowConfirmOpenPr(group)"
-                                                          @onclick:preventDefault
-                                                          @onclick:stopPropagation
-                                                          aria-label="Open Pull Request">
-                                                        <i class="bi bi-git" aria-hidden="true"></i>
-                                                    </span>
-                                                    <span class="dependency-level-sync-link"
-                                                          role="button"
-                                                          tabindex="0"
-                                                          title="Synchronize all repositories in this level..."
-                                                          style="cursor: pointer;"
-                                                          @onclick="() => ShowConfirmSyncLevel(group.Select(wr => wr.RepositoryId).ToList())"
-                                                          @onclick:preventDefault
-                                                          aria-label="Sync level">
-                                                        <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
-                                                    </span>
-                                                </span>
-                                                <span class="dependency-level-count dependency-level-count-link"
-                                                      role="button"
-                                                      tabindex="0"
-                                                      title="Open in GitHub..."
-                                                      style="cursor: pointer;"
-                                                      @onclick="() => ShowConfirmOpenGitHub(group.Count(), levelUrls)"
-                                                      @onclick:preventDefault
-                                                      @onclick:stopPropagation>
-                                                    <span class="dependency-level-count-num">@group.Count()</span> @(group.Count() == 1 ? "repository" : "repositories")
-                                                </span>
-                                            </div>
-                                        </td>
-                                    </tr>
+                                    <WorkspaceRepositoriesLevelHeader WorkspaceId="@WorkspaceId"
+                                                                       LevelKey="@group.Key"
+                                                                       ColSpan="@TableColSpan"
+                                                                       Group="@group"
+                                                                       OnSyncToDefault="() => ShowConfirmSyncToDefaultLevel(group.Select(wr => wr.RepositoryId).ToList())"
+                                                                       OnSyncCommits="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
+                                                                       OnOpenPr="() => ShowConfirmOpenPr(group)"
+                                                                       OnSyncLevel="() => ShowConfirmSyncLevel(group.Select(wr => wr.RepositoryId).ToList())"
+                                                                       OnOpenGitHub="HandleOpenGitHubFromLevel" />
                                     @foreach (var wr in group)
                                     {
-                                        var repo = wr.Repository;
-                                        @if (repo != null)
-                                        {
-                                            var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl);
-                                            var defaultBranch = wr.DefaultBranchName;
-                                            var branchUrl = !string.IsNullOrEmpty(repoUrl) && !string.IsNullOrEmpty(wr.BranchName) && !string.IsNullOrEmpty(defaultBranch)
-                                                ? $"{repoUrl}/compare/{defaultBranch}...{Uri.EscapeDataString(wr.BranchName)}"
-                                                : null;
-                                            <tr>
-                                            <td class="col-repo">
-                                                @if (!string.IsNullOrEmpty(repoUrl))
-                                                {
-                                                    <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link">
-                                                        <strong>@repo.RepositoryName</strong>
-                                                    </a>
-                                                }
-                                                else
-                                                {
-                                                    <strong>@repo.RepositoryName</strong>
-                                                }
-                                            </td>
-                                            <td class="col-version">
-                                                @if (!string.IsNullOrEmpty(wr.GitVersion))
-                                                {
-                                                    <div class="version-container @(clickedVersions.Contains(wr.GitVersion) ? "version-clicked" : "")"
-                                                         @onmouseleave='() => OnVersionMouseLeave(wr.GitVersion)'>
-                                                        <span class="version-inner text-muted"
-                                                              @onclick='() => CopyVersionToClipboard(wr.GitVersion)'
-                                                              title="Click to copy version">@wr.GitVersion</span>
-                                                    </div>
-                                                }
-                                                else
-                                                {
-                                                    <span class="text-muted">-</span>
-                                                }
-                                            </td>
-                                            <td class="col-branch">
-                                                @if (!string.IsNullOrEmpty(wr.BranchName))
-                                                {
-                                                    <div class="branch-container">
-                                                        <span class="branch-inner"
-                                                              @onclick='() => ShowSwitchBranchModal(repo.RepositoryId, wr.BranchName, repo.CloneUrl)'
-                                                              title="Click to switch branch">@wr.BranchName</span>
-                                                    </div>
-                                                }
-                                                else
-                                                {
-                                                    <span>-</span>
-                                                }
-                                            </td>
-                                            <td class="col-divergence text-center text-nowrap">
-                                                <DivergenceBadge DefaultBehind="@wr.DefaultBranchBehindCommits"
-                                                                DefaultAhead="@wr.DefaultBranchAheadCommits"
-                                                                BranchName="@wr.BranchName"
-                                                                RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
-                                                                DefaultBranchName="@wr.DefaultBranchName" />
-                                            </td>
-                                            <td class="col-pr text-center text-nowrap">
-                                                <PRBadge PullRequest="@(prByRepositoryId.TryGetValue(repo.RepositoryId, out var prInfo) ? prInfo : null)"
-                                                        DefaultBranchAheadCommits="@wr.DefaultBranchAheadCommits"
-                                                        IsPrVerified="@prByRepositoryId.ContainsKey(repo.RepositoryId)"
-                                                        CreatePrUrl="@(string.IsNullOrEmpty(repoUrl) || string.IsNullOrEmpty(wr.DefaultBranchName) ? null : $"{repoUrl}/compare/{wr.DefaultBranchName}...{Uri.EscapeDataString(wr.BranchName ?? "")}")" />
-                                            </td>
-                                            <td class="col-deps col-status-badge">
-                                                @{
-                                                    var depCount = wr.Dependencies ?? 0;
-                                                    var unmatchedDeps = wr.UnmatchedDeps ?? 0;
-                                                    var graphUrl = WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, repositoryId: repo.RepositoryId);
-                                                }
-                                                @if (depCount == 0)
-                                                {
-                                                    <a href="@graphUrl" class="dependency-badge-link" title="View dependency graph for this repository">
-                                                        <span class="badge build-dep-badge build-dep-badge-none">0</span>
-                                                    </a>
-                                                }
-                                                else if (unmatchedDeps == 0)
-                                                {
-                                                    <a href="@graphUrl" class="dependency-badge-link" title="View dependency graph for this repository">
-                                                        <span class="badge build-dep-badge build-dep-badge-ok">@depCount</span>
-                                                    </a>
-                                                }
-                                                else
-                                                {
-                                                    var depLines = _mismatchedDependencyLinesByRepo.GetValueOrDefault(repo.RepositoryId) ?? Array.Empty<(string PackageId, string CurrentVersion, string NewVersion)>();
-                                                    <span class="dependency-badge-tooltip-wrap dependency-badge-link @(isUpdating || isSyncing ? "dependency-badge-link--disabled" : "") @(clickedDependencyBadges.Contains(repo.RepositoryId) ? "dependency-badge-tooltip-wrap--clicked" : "")"
-                                                          role="button"
-                                                          tabindex="0"
-                                                          style="cursor: pointer;"
-                                                          @onclick="() => OnDependencyBadgeClick(repo.RepositoryId, unmatchedDeps)"
-                                                          @onclick:preventDefault
-                                                          @onkeydown="(e) => HandleDependencyBadgeKeydown(e, repo.RepositoryId, unmatchedDeps)"
-                                                          @onmouseleave="() => OnDependencyBadgeMouseLeave(repo.RepositoryId)">
-                                                        <span class="badge build-dep-badge build-dep-badge-mismatch">@unmatchedDeps of @depCount</span>
-                                                        @if (depLines.Count > 0)
-                                                        {
-                                                            <div class="dependency-badge-tooltip">
-                                                                <div class="dependency-badge-tooltip-title">Dependencies requiring update:</div>
-                                                                @foreach (var line in depLines)
-                                                                {
-                                                                    <div class="dependency-badge-tooltip-line">
-                                                                        <code>@line.PackageId</code> <span class="dependency-badge-tooltip-versions">@line.CurrentVersion → @line.NewVersion</span>
-                                                                    </div>
-                                                                }
-                                                                <div class="dependency-badge-tooltip-footer">Click to update this repository only.</div>
-                                                            </div>
-                                                        }
-                                                    </span>
-                                                }
-                                            </td>
-                                            <td class="col-commits">
-                                                <CommitsBadge RepositoryId="repo.RepositoryId"
-                                                              Outgoing="@wr.OutgoingCommits"
-                                                              Incoming="@wr.IncomingCommits"
-                                                              BranchHasUpstream="@wr.BranchHasUpstream"
-                                                              BranchName="@wr.BranchName"
-                                                              OnPushClick="() => OnPushBadgeClickAsync(repo.RepositoryId, wr.BranchName)"
-                                                              OnPullClick="() => OnPullBadgeClickAsync(repo.RepositoryId)" />
-                                            </td>
-                                            <td class="col-sync col-status-badge">
-                                                <RepoSyncStatusBadge RepositoryId="repo.RepositoryId"
-                                                                    Status="@(repoSyncStatus.TryGetValue(repo.RepositoryId, out var syncStatus) ? syncStatus : (RepoSyncStatus?)null)"
-                                                                    IsSyncing="isSyncing"
-                                                                    OnSyncClick="() => SyncSingleRepoAsync(repo.RepositoryId)" />
-                                            </td>
-                                        </tr>
-                                            @if (repositoryErrors.TryGetValue(repo.RepositoryId, out var repoError))
-                                            {
-                                                <tr class="repo-error-row">
-                                                    <td colspan="@colSpan" class="p-0">
-                                                        <div class="alert alert-danger alert-dismissible mb-0 rounded-0" 
-                                                             role="alert">
-                                                            <div class="d-flex align-items-start">
-                                                                <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">
-                                                                    <strong>Error:</strong> @repoError
-                                                                </div>
-                                                                <button type="button" 
-                                                                        class="btn-close ms-2" 
-                                                                        aria-label="Close"
-                                                                        @onclick='() => DismissRepositoryError(repo.RepositoryId)'></button>
-                                                            </div>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            }
-                                        }
+                                        <WorkspaceRepositoriesRow WorkspaceId="@WorkspaceId"
+                                                                  Link="@wr"
+                                                                  PrInfo="@GetPrInfoForRepository(wr.RepositoryId)"
+                                                                  IsPrVerified="@prByRepositoryId.ContainsKey(wr.RepositoryId)"
+                                                                  RepoSyncStatus="@GetRepoSyncStatus(wr.RepositoryId)"
+                                                                  MismatchedDependencyLines="@GetMismatchedDependencyLines(wr.RepositoryId)"
+                                                                  IsVersionClicked="@(wr.GitVersion != null && clickedVersions.Contains(wr.GitVersion))"
+                                                                  IsDependencyBadgeClicked="@clickedDependencyBadges.Contains(wr.RepositoryId)"
+                                                                  RepositoryError="@GetRepositoryError(wr.RepositoryId)"
+                                                                  IsSyncing="@isSyncing"
+                                                                  IsUpdating="@isUpdating"
+                                                                  ColSpan="@TableColSpan"
+                                                                  OnVersionClick="() => CopyVersionToClipboard(wr.GitVersion!)"
+                                                                  OnVersionMouseLeave="() => OnVersionMouseLeave(wr.GitVersion)"
+                                                                  OnBranchClick="() => ShowSwitchBranchModal(wr.RepositoryId, wr.BranchName, wr.Repository?.CloneUrl)"
+                                                                  OnDependencyBadgeClick="() => OnDependencyBadgeClick(wr.RepositoryId, wr.UnmatchedDeps ?? 0)"
+                                                                  OnDependencyBadgeKeydown="(e) => HandleDependencyBadgeKeydown(e, wr.RepositoryId, wr.UnmatchedDeps ?? 0)"
+                                                                  OnDependencyBadgeMouseLeave="() => OnDependencyBadgeMouseLeave(wr.RepositoryId)"
+                                                                  OnPushBadgeClick="() => OnPushBadgeClickAsync(wr.RepositoryId, wr.BranchName)"
+                                                                  OnPullBadgeClick="() => OnPullBadgeClickAsync(wr.RepositoryId)"
+                                                                  OnSyncClick="() => SyncSingleRepoAsync(wr.RepositoryId)"
+                                                                  OnDismissError="() => DismissRepositoryError(wr.RepositoryId)" />
                                     }
                                 }
                             }
@@ -343,7 +157,7 @@
 </div>
 
 <WorkspaceRepositoriesModal IsVisible="@_repositoriesModal.IsVisible"
-                            Title="@($"Repositories for {workspace?.Name ?? "Workspace"}")"
+                            Title="@RepositoriesModalTitle"
                             Repositories="@_repositoriesModal.Repositories"
                             SelectedRepositoryIds="@_repositoriesModal.SelectedRepositoryIds"
                             HasConnectors="@_repositoriesModal.HasConnectors"
@@ -411,6 +225,6 @@
 <LoadingOverlay IsVisible="@isUpdating" Message="@updateProgressMessage" OnAbort="AbortUpdateAsync" />
 <LoadingOverlay IsVisible="@isCommitSyncing" Message="@commitSyncProgressMessage" OnAbort="AbortCommitSyncAsync" />
 <LoadingOverlay IsVisible="@isCheckingOut" Message="@checkoutProgressMessage" OnAbort="AbortCheckoutAsync" />
-<LoadingOverlay IsVisible="@(_repositoriesModal.IsVisible && _repositoriesModal.IsFetching)" Message="@(_repositoriesModal.FetchedRepositoryCount is null || _repositoriesModal.FetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {_repositoriesModal.FetchedRepositoryCount} {(_repositoriesModal.FetchedRepositoryCount == 1 ? "repository" : "repositories")}")" OnAbort="AbortFetchRepositories" />
+<LoadingOverlay IsVisible="@ShowRepositoriesFetchOverlay" Message="@RepositoriesFetchOverlayMessage" OnAbort="AbortFetchRepositories" />
 <LoadingOverlay IsVisible="@isCreatingBranches" Message="@createBranchesProgressMessage" />
 <LoadingOverlay IsVisible="@isCreatingBranch" Message="@createBranchMessage" />

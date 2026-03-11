@@ -1,0 +1,173 @@
+@using GrayMoon.App.Models
+@using GrayMoon.App.Services
+@using GrayMoon.App.Components.Shared
+@using Microsoft.AspNetCore.Components.Web
+
+@if (Link?.Repository != null)
+{
+    var repo = Link.Repository;
+    var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl);
+    var defaultBranch = Link.DefaultBranchName;
+    var branchUrl = !string.IsNullOrEmpty(repoUrl) && !string.IsNullOrEmpty(Link.BranchName) && !string.IsNullOrEmpty(defaultBranch)
+        ? $"{repoUrl}/compare/{defaultBranch}...{Uri.EscapeDataString(Link.BranchName)}"
+        : null;
+    var depCount = Link.Dependencies ?? 0;
+    var unmatchedDeps = Link.UnmatchedDeps ?? 0;
+    var graphUrl = WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, repositoryId: repo.RepositoryId);
+
+    <tr>
+        <td class="col-repo">
+            @if (!string.IsNullOrEmpty(repoUrl))
+            {
+                <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link">
+                    <strong>@repo.RepositoryName</strong>
+                </a>
+            }
+            else
+            {
+                <strong>@repo.RepositoryName</strong>
+            }
+        </td>
+        <td class="col-version">
+            @if (!string.IsNullOrEmpty(Link.GitVersion))
+            {
+                <div class="version-container @(IsVersionClicked ? "version-clicked" : "")"
+                     @onmouseleave="OnVersionMouseLeave">
+                    <span class="version-inner text-muted"
+                          @onclick="OnVersionClick"
+                          title="Click to copy version">@Link.GitVersion</span>
+                </div>
+            }
+            else
+            {
+                <span class="text-muted">-</span>
+            }
+        </td>
+        <td class="col-branch">
+            @if (!string.IsNullOrEmpty(Link.BranchName))
+            {
+                <div class="branch-container">
+                    <span class="branch-inner"
+                          @onclick="OnBranchClick"
+                          title="Click to switch branch">@Link.BranchName</span>
+                </div>
+            }
+            else
+            {
+                <span>-</span>
+            }
+        </td>
+        <td class="col-divergence text-center text-nowrap">
+            <DivergenceBadge DefaultBehind="@Link.DefaultBranchBehindCommits"
+                            DefaultAhead="@Link.DefaultBranchAheadCommits"
+                            BranchName="@Link.BranchName"
+                            RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
+                            DefaultBranchName="@Link.DefaultBranchName" />
+        </td>
+        <td class="col-pr text-center text-nowrap">
+            <PRBadge PullRequest="@PrInfo"
+                    DefaultBranchAheadCommits="@Link.DefaultBranchAheadCommits"
+                    IsPrVerified="@IsPrVerified"
+                    CreatePrUrl="@(string.IsNullOrEmpty(repoUrl) || string.IsNullOrEmpty(Link.DefaultBranchName) ? null : $"{repoUrl}/compare/{Link.DefaultBranchName}...{Uri.EscapeDataString(Link.BranchName ?? "")}")" />
+        </td>
+        <td class="col-deps col-status-badge">
+            @if (depCount == 0)
+            {
+                <a href="@graphUrl" class="dependency-badge-link" title="View dependency graph for this repository">
+                    <span class="badge build-dep-badge build-dep-badge-none">0</span>
+                </a>
+            }
+            else if (unmatchedDeps == 0)
+            {
+                <a href="@graphUrl" class="dependency-badge-link" title="View dependency graph for this repository">
+                    <span class="badge build-dep-badge build-dep-badge-ok">@depCount</span>
+                </a>
+            }
+            else
+            {
+                <span class="dependency-badge-tooltip-wrap dependency-badge-link @(IsUpdating || IsSyncing ? "dependency-badge-link--disabled" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
+                      role="button"
+                      tabindex="0"
+                      style="cursor: pointer;"
+                      @onclick="OnDependencyBadgeClick"
+                      @onclick:preventDefault
+                      @onkeydown="OnDependencyBadgeKeydown"
+                      @onmouseleave="OnDependencyBadgeMouseLeave">
+                    <span class="badge build-dep-badge build-dep-badge-mismatch">@unmatchedDeps of @depCount</span>
+                    @if (MismatchedDependencyLines.Count > 0)
+                    {
+                        <div class="dependency-badge-tooltip">
+                            <div class="dependency-badge-tooltip-title">Dependencies requiring update:</div>
+                            @foreach (var line in MismatchedDependencyLines)
+                            {
+                                <div class="dependency-badge-tooltip-line">
+                                    <code>@line.PackageId</code> <span class="dependency-badge-tooltip-versions">@line.CurrentVersion → @line.NewVersion</span>
+                                </div>
+                            }
+                            <div class="dependency-badge-tooltip-footer">Click to update this repository only.</div>
+                        </div>
+                    }
+                </span>
+            }
+        </td>
+        <td class="col-commits">
+            <CommitsBadge RepositoryId="repo.RepositoryId"
+                          Outgoing="@Link.OutgoingCommits"
+                          Incoming="@Link.IncomingCommits"
+                          BranchHasUpstream="@Link.BranchHasUpstream"
+                          BranchName="@Link.BranchName"
+                          OnPushClick="OnPushBadgeClick"
+                          OnPullClick="OnPullBadgeClick" />
+        </td>
+        <td class="col-sync col-status-badge">
+            <RepoSyncStatusBadge RepositoryId="repo.RepositoryId"
+                                Status="@RepoSyncStatus"
+                                IsSyncing="@IsSyncing"
+                                OnSyncClick="OnSyncClick" />
+        </td>
+    </tr>
+    @if (RepositoryError != null)
+    {
+        <tr class="repo-error-row">
+            <td colspan="@ColSpan" class="p-0">
+                <div class="alert alert-danger alert-dismissible mb-0 rounded-0" role="alert">
+                    <div class="d-flex align-items-start">
+                        <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">
+                            <strong>Error:</strong> @RepositoryError
+                        </div>
+                        <button type="button"
+                                class="btn-close ms-2"
+                                aria-label="Close"
+                                @onclick="OnDismissError"></button>
+                    </div>
+                </div>
+            </td>
+        </tr>
+    }
+}
+
+@code {
+    [Parameter] public int WorkspaceId { get; set; }
+    [Parameter] public WorkspaceRepositoryLink? Link { get; set; }
+    [Parameter] public PullRequestInfo? PrInfo { get; set; }
+    [Parameter] public bool IsPrVerified { get; set; }
+    [Parameter] public RepoSyncStatus? RepoSyncStatus { get; set; }
+    [Parameter] public IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> MismatchedDependencyLines { get; set; } = Array.Empty<(string, string, string)>();
+    [Parameter] public bool IsVersionClicked { get; set; }
+    [Parameter] public bool IsDependencyBadgeClicked { get; set; }
+    [Parameter] public string? RepositoryError { get; set; }
+    [Parameter] public bool IsSyncing { get; set; }
+    [Parameter] public bool IsUpdating { get; set; }
+    [Parameter] public int ColSpan { get; set; } = 8;
+
+    [Parameter] public EventCallback OnVersionClick { get; set; }
+    [Parameter] public EventCallback OnVersionMouseLeave { get; set; }
+    [Parameter] public EventCallback OnBranchClick { get; set; }
+    [Parameter] public EventCallback OnDependencyBadgeClick { get; set; }
+    [Parameter] public EventCallback<KeyboardEventArgs> OnDependencyBadgeKeydown { get; set; }
+    [Parameter] public EventCallback OnDependencyBadgeMouseLeave { get; set; }
+    [Parameter] public EventCallback OnPushBadgeClick { get; set; }
+    [Parameter] public EventCallback OnPullBadgeClick { get; set; }
+    [Parameter] public EventCallback OnSyncClick { get; set; }
+    [Parameter] public EventCallback OnDismissError { get; set; }
+}
