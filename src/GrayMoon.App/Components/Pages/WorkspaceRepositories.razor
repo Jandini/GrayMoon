@@ -1242,7 +1242,7 @@
         pushWithDependenciesRepoIdsToPush = null;
     }
 
-    /// <summary>Proceed from PushWithDependencies modal: either level-order push (no sync) or synchronized push (sync registries then level-order push with wait).</summary>
+    /// <summary>Proceed from PushWithDependencies modal: synchronized push = sync registries then level-order push with wait; otherwise push all repos in parallel (MaxParallelOperations).</summary>
     private async Task OnPushWithDependenciesProceedAsync(bool synchronizedPush)
     {
         if (pushWithDependenciesInfo == null || workspace == null)
@@ -1281,7 +1281,7 @@
             else
             {
                 SetPushProgress("Pushing...");
-                await workspaceGitService.RunPushReposInLevelOrderAsync(WorkspaceId, repoIds, SetPushProgress, (id, err) => ToastService.Show($"{id}: {err}"), _pushCts.Token);
+                await workspaceGitService.RunPushReposParallelAsync(WorkspaceId, repoIds, SetPushProgress, (id, err) => ToastService.Show($"{id}: {err}"), _pushCts.Token);
             }
 
             await RefreshFromSync();
