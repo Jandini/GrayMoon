@@ -90,8 +90,9 @@
     text-overflow: ellipsis;
 }
 
-/* Dependency level header: left [level + graph] … right [icons + count] */
-.repositories-table .dependency-level-header td.dependency-level-header-cell {
+/* Dependency level header: left [level + graph] … right [icons + count]
+   Use ::deep so styles apply into child components. */
+::deep .repositories-table .dependency-level-header td.dependency-level-header-cell {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -108,57 +109,57 @@
     border-bottom: 1px solid var(--border-color);
 }
 
-.repositories-table .dependency-level-header .dependency-level-header-start {
+::deep .repositories-table .dependency-level-header .dependency-level-header-start {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     min-width: 0;
 }
 
-.repositories-table .dependency-level-header .dependency-level-header-start .dependency-level-title {
+::deep .repositories-table .dependency-level-header .dependency-level-header-start .dependency-level-title {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.repositories-table .dependency-level-header .dependency-level-header-start .dependency-level-graph-link {
+::deep .repositories-table .dependency-level-header .dependency-level-header-start .dependency-level-graph-link {
     flex-shrink: 0;
 }
 
-.repositories-table .dependency-level-header .dependency-level-header-end {
+::deep .repositories-table .dependency-level-header .dependency-level-header-end {
     display: flex;
     align-items: center;
     gap: 0.75rem;
     flex-shrink: 0;
 }
 
-.repositories-table .dependency-level-header:hover td.dependency-level-header-cell {
+::deep .repositories-table .dependency-level-header:hover td.dependency-level-header-cell {
     background-color: #0d0d0d;
 }
 
-.repositories-table .dependency-level-header .dependency-level-count {
+::deep .repositories-table .dependency-level-header .dependency-level-count {
     color: var(--text-muted);
     font-weight: 400;
     white-space: nowrap;
 }
 
 /* Fixed-width number (left-pad): number right-aligned so "1" and "11" line up */
-.repositories-table .dependency-level-header .dependency-level-count-num {
+::deep .repositories-table .dependency-level-header .dependency-level-count-num {
     display: inline-block;
     min-width: 3ch;
     text-align: right;
 }
 
-.repositories-table .dependency-level-header .dependency-level-count-link {
+::deep .repositories-table .dependency-level-header .dependency-level-count-link {
     cursor: pointer;
 }
 
-.repositories-table .dependency-level-header .dependency-level-count-link:hover {
+::deep .repositories-table .dependency-level-header .dependency-level-count-link:hover {
     color: var(--text-muted);
 }
 
-.repositories-table .dependency-level-header .dependency-level-icons {
+::deep .repositories-table .dependency-level-header .dependency-level-icons {
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
@@ -166,14 +167,14 @@
 }
 
 /* No dependencies: gray, not bold */
-.repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-title.dependency-level-no-projects {
+::deep .repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-title.dependency-level-no-projects {
     color: #6a6a6a !important;
     font-weight: 400;
 }
 
 /* Pull Request icon: dark gray */
-.repositories-table .dependency-level-header .dependency-level-pr-link,
-.repositories-table .dependency-level-header .dependency-level-pr-link i {
+::deep .repositories-table .dependency-level-header .dependency-level-pr-link,
+::deep .repositories-table .dependency-level-header .dependency-level-pr-link i {
     color: #505050 !important;
     cursor: pointer;
     font-weight: 400;
@@ -181,18 +182,18 @@
     align-items: center;
 }
 
-.repositories-table .dependency-level-header .dependency-level-pr-link i {
+::deep .repositories-table .dependency-level-header .dependency-level-pr-link i {
     font-size: 1.1rem;
 }
 
-.repositories-table .dependency-level-header .dependency-level-pr-link:hover,
-.repositories-table .dependency-level-header .dependency-level-pr-link:hover i {
+::deep .repositories-table .dependency-level-header .dependency-level-pr-link:hover,
+::deep .repositories-table .dependency-level-header .dependency-level-pr-link:hover i {
     color: #707070 !important;
 }
 
 /* Sync Commits icon: dark gray */
-.repositories-table .dependency-level-header .dependency-level-sync-to-default-link,
-.repositories-table .dependency-level-header .dependency-level-sync-to-default-link i {
+::deep .repositories-table .dependency-level-header .dependency-level-sync-to-default-link,
+::deep .repositories-table .dependency-level-header .dependency-level-sync-to-default-link i {
     color: #505050 !important;
     cursor: pointer;
     font-weight: 400;
@@ -200,18 +201,18 @@
     align-items: center;
 }
 
-.repositories-table .dependency-level-header .dependency-level-sync-to-default-link i {
+::deep .repositories-table .dependency-level-header .dependency-level-sync-to-default-link i {
     font-size: 1.1rem;
 }
 
-.repositories-table .dependency-level-header .dependency-level-sync-to-default-link:hover,
-.repositories-table .dependency-level-header .dependency-level-sync-to-default-link:hover i {
+::deep .repositories-table .dependency-level-header .dependency-level-sync-to-default-link:hover,
+::deep .repositories-table .dependency-level-header .dependency-level-sync-to-default-link:hover i {
     color: #707070 !important;
 }
 
 /* Sync Commits icon: dark gray */
-.repositories-table .dependency-level-header .dependency-level-sync-commits-link,
-.repositories-table .dependency-level-header .dependency-level-sync-commits-link i {
+::deep .repositories-table .dependency-level-header .dependency-level-sync-commits-link,
+::deep .repositories-table .dependency-level-header .dependency-level-sync-commits-link i {
     color: #505050 !important;
     cursor: pointer;
     font-weight: 400;
@@ -219,18 +220,18 @@
     align-items: center;
 }
 
-.repositories-table .dependency-level-header .dependency-level-sync-commits-link i {
+::deep .repositories-table .dependency-level-header .dependency-level-sync-commits-link i {
     font-size: 1.1rem;
 }
 
-.repositories-table .dependency-level-header .dependency-level-sync-commits-link:hover,
-.repositories-table .dependency-level-header .dependency-level-sync-commits-link:hover i {
+::deep .repositories-table .dependency-level-header .dependency-level-sync-commits-link:hover,
+::deep .repositories-table .dependency-level-header .dependency-level-sync-commits-link:hover i {
     color: #707070 !important;
 }
 
 /* Sync (level) icon: same style as PR/sync-commits */
-.repositories-table .dependency-level-header .dependency-level-sync-link,
-.repositories-table .dependency-level-header .dependency-level-sync-link i {
+::deep .repositories-table .dependency-level-header .dependency-level-sync-link,
+::deep .repositories-table .dependency-level-header .dependency-level-sync-link i {
     color: #505050 !important;
     cursor: pointer;
     font-weight: 400;
@@ -238,18 +239,18 @@
     align-items: center;
 }
 
-.repositories-table .dependency-level-header .dependency-level-sync-link i {
+::deep .repositories-table .dependency-level-header .dependency-level-sync-link i {
     font-size: 1.1rem;
 }
 
-.repositories-table .dependency-level-header .dependency-level-sync-link:hover,
-.repositories-table .dependency-level-header .dependency-level-sync-link:hover i {
+::deep .repositories-table .dependency-level-header .dependency-level-sync-link:hover,
+::deep .repositories-table .dependency-level-header .dependency-level-sync-link:hover i {
     color: #707070 !important;
 }
 
 /* Graph icon link: same style as PR/sync icons */
-.repositories-table .dependency-level-header .dependency-level-graph-link,
-.repositories-table .dependency-level-header .dependency-level-graph-link i {
+::deep .repositories-table .dependency-level-header .dependency-level-graph-link,
+::deep .repositories-table .dependency-level-header .dependency-level-graph-link i {
     color: #505050 !important;
     cursor: pointer;
     font-weight: 400;
@@ -258,12 +259,12 @@
     text-decoration: none;
 }
 
-.repositories-table .dependency-level-header .dependency-level-graph-link i {
+::deep .repositories-table .dependency-level-header .dependency-level-graph-link i {
     font-size: 1.1rem;
 }
 
-.repositories-table .dependency-level-header .dependency-level-graph-link:hover,
-.repositories-table .dependency-level-header .dependency-level-graph-link:hover i {
+::deep .repositories-table .dependency-level-header .dependency-level-graph-link:hover,
+::deep .repositories-table .dependency-level-header .dependency-level-graph-link:hover i {
     color: #707070 !important;
 }
 
@@ -296,87 +297,87 @@
     min-height: 0;
 }
 
-.col-repo {
+::deep .col-repo {
     width: 50%;
     min-width: 0;
 }
 
-.col-sync {
+::deep .col-sync {
     width: 100px;
     min-width: 100px;
     max-width: 100px;
     text-align: center;
 }
 
-.repositories-table th.col-sync,
-.repositories-table td.col-sync {
+::deep .repositories-table th.col-sync,
+::deep .repositories-table td.col-sync {
     text-align: center;
 }
 
-.repositories-table td.col-sync {
+::deep .repositories-table td.col-sync {
     overflow: visible;
     text-overflow: clip;
 }
 
-.col-deps {
+::deep .col-deps {
     width: 8rem;
     min-width: 8rem;
     max-width: 8rem;
     text-align: center;
 }
 
-.repositories-table th.col-deps,
-.repositories-table td.col-deps {
+::deep .repositories-table th.col-deps,
+::deep .repositories-table td.col-deps {
     text-align: center;
 }
 
-.repositories-table td.col-deps {
+::deep .repositories-table td.col-deps {
     overflow: visible;
     text-overflow: clip;
 }
 
 /* Dependencies column: same badge logic as build (green = all match, red = any unmatched) */
-.repositories-table .build-dep-badge {
+::deep .repositories-table .build-dep-badge {
     font-weight: 400;
 }
 
-.repositories-table .build-dep-badge-none {
+::deep .repositories-table .build-dep-badge-none {
     background-color: var(--bs-secondary);
     color: var(--bs-light);
 }
 
-.repositories-table .build-dep-badge-ok {
+::deep .repositories-table .build-dep-badge-ok {
     background-color: #198754;
     color: #fff;
 }
 
-.repositories-table .build-dep-badge-mismatch {
+::deep .repositories-table .build-dep-badge-mismatch {
     background-color: #dc3545;
     color: #fff;
 }
 
 /* Clickable dependency badge: link to Graph page with repo filter */
-.repositories-table .dependency-badge-link {
+::deep .repositories-table .dependency-badge-link {
     text-decoration: none;
     cursor: pointer;
 }
 
-.repositories-table .dependency-badge-link:hover .build-dep-badge {
+::deep .repositories-table .dependency-badge-link:hover .build-dep-badge {
     filter: brightness(1.1);
 }
 
-.repositories-table .dependency-badge-link--disabled {
+::deep .repositories-table .dependency-badge-link--disabled {
     pointer-events: none;
     opacity: 0.7;
 }
 
 /* Rich tooltip for dependency badge (mismatch): list of packages requiring update */
-.repositories-table .dependency-badge-tooltip-wrap {
+::deep .repositories-table .dependency-badge-tooltip-wrap {
     position: relative;
     display: inline-block;
 }
 
-.repositories-table .dependency-badge-tooltip {
+::deep .repositories-table .dependency-badge-tooltip {
     display: block;
     position: absolute;
     right: 0;
@@ -403,26 +404,26 @@
     transition: opacity 0.15s ease 0.4s;
 }
 
-.repositories-table .dependency-badge-tooltip-title {
+::deep .repositories-table .dependency-badge-tooltip-title {
     color: #aaa;
     margin-bottom: 0.25rem;
     font-family: var(--bs-body-font-family);
 }
 
-.repositories-table .dependency-badge-tooltip-line {
+::deep .repositories-table .dependency-badge-tooltip-line {
     margin-bottom: 0.15rem;
 }
 
-.repositories-table .dependency-badge-tooltip-line:last-of-type {
+::deep .repositories-table .dependency-badge-tooltip-line:last-of-type {
     margin-bottom: 0;
 }
 
-.repositories-table .dependency-badge-tooltip-versions {
+::deep .repositories-table .dependency-badge-tooltip-versions {
     color: #aaa;
     font-size: 0.72rem;
 }
 
-.repositories-table .dependency-badge-tooltip-footer {
+::deep .repositories-table .dependency-badge-tooltip-footer {
     color: #888;
     font-size: 0.72rem;
     margin-top: 0.35rem;
@@ -431,115 +432,115 @@
     font-family: var(--bs-body-font-family);
 }
 
-.repositories-table .dependency-badge-tooltip-wrap:hover .dependency-badge-tooltip {
+::deep .repositories-table .dependency-badge-tooltip-wrap:hover .dependency-badge-tooltip {
     opacity: 1;
     pointer-events: auto;
 }
 
-.repositories-table .dependency-badge-tooltip-wrap.dependency-badge-tooltip-wrap--clicked .dependency-badge-tooltip {
+::deep .repositories-table .dependency-badge-tooltip-wrap.dependency-badge-tooltip-wrap--clicked .dependency-badge-tooltip {
     opacity: 0 !important;
     pointer-events: none !important;
     transition: none !important;
 }
 
-.col-commits {
+::deep .col-commits {
     width: auto;
     max-width: 80px;
     text-align: center;
 }
 
-.repositories-table th.col-commits,
-.repositories-table td.col-commits {
+::deep .repositories-table th.col-commits,
+::deep .repositories-table td.col-commits {
     text-align: center;
 }
 
-.repositories-table td.col-commits {
+::deep .repositories-table td.col-commits {
     overflow: visible;
     text-overflow: clip;
 }
 
-.repositories-table td.col-pr {
+::deep .repositories-table td.col-pr {
     overflow: visible;
     text-overflow: clip;
 }
 
-.repositories-table td.col-divergence {
+::deep .repositories-table td.col-divergence {
     overflow: visible;
     text-overflow: clip;
 }
 
 /* Commits badge: yellow when new branch not upstreamed (see GetCommitsBadge) */
-.repositories-table .commits-badge.commits-badge-not-upstreamed {
+::deep .repositories-table .commits-badge.commits-badge-not-upstreamed {
     background-color: #ffc107 !important;
     color: #000 !important;
 }
 
 /* Force black icon (Bootstrap Icons use ::before; color must apply to .bi and its ::before) */
-.repositories-table .commits-badge.commits-badge-not-upstreamed .bi,
-.repositories-table .commits-badge.commits-badge-not-upstreamed .bi::before {
+::deep .repositories-table .commits-badge.commits-badge-not-upstreamed .bi,
+::deep .repositories-table .commits-badge.commits-badge-not-upstreamed .bi::before {
     color: #000 !important;
     -webkit-text-fill-color: #000 !important;
 }
 
 /* Cloud-arrow-up icon when branch needs to be upstreamed: icon only, same height as badge */
-.repositories-table .commits-badge-icon-up {
+::deep .repositories-table .commits-badge-icon-up {
     display: inline-flex;
     align-items: center;
     line-height: 1;
     font-size: 0.95em;
 }
-.repositories-table .commits-badge-icon-up .bi {
+::deep .repositories-table .commits-badge-icon-up .bi {
     font-size: 1em;
 }
-.repositories-table .commits-badge-icon-up--black {
+::deep .repositories-table .commits-badge-icon-up--black {
     color: #000 !important;
 }
-.repositories-table .commits-badge-icon-up--black .bi,
-.repositories-table .commits-badge-icon-up--black .bi::before {
+::deep .repositories-table .commits-badge-icon-up--black .bi,
+::deep .repositories-table .commits-badge-icon-up--black .bi::before {
     color: #000 !important;
     -webkit-text-fill-color: #000 !important;
 }
 
-.col-version {
+::deep .col-version {
     width: auto;
     min-width: 0;
 }
 
-.repositories-table td.col-version {
+::deep .repositories-table td.col-version {
     overflow: none;
     text-overflow: none;
 }
 
 @media (max-width: 640.98px) {
-    .repositories-table .col-version {
+    ::deep .repositories-table .col-version {
         display: none;
     }
 }
 
-.col-branch {
+::deep .col-branch {
     width: auto;
     min-width: 0;
 }
 
-.repositories-table td.col-branch {
+::deep .repositories-table td.col-branch {
     color: var(--text-muted);
 }
 
 /* Repository links: white text, white underline on hover only */
-.repositories-table td .repo-link,
-.repositories-table td a.repo-link {
+::deep .repositories-table td .repo-link,
+::deep .repositories-table td a.repo-link {
     text-decoration: none !important;
     color: inherit !important;
 }
 
-.repositories-table td .repo-link:hover,
-.repositories-table td a.repo-link:hover {
+::deep .repositories-table td .repo-link:hover,
+::deep .repositories-table td a.repo-link:hover {
     text-decoration: underline !important;
 }
 
 /* Shared highlight look for version and branch (single element, no swap) */
-.repositories-table .version-inner,
-.repositories-table .branch-inner {
+::deep .repositories-table .version-inner,
+::deep .repositories-table .branch-inner {
     display: inline-flex;
     align-items: center;
     height: calc(1.5rem + 4px);
@@ -552,43 +553,43 @@
     transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
 }
 
-.repositories-table .version-inner {
+::deep .repositories-table .version-inner {
     padding-left: calc(1px + 0.3rem);
 }
 
-.repositories-table .branch-inner {
+::deep .repositories-table .branch-inner {
     padding-left: calc(1px + 0.5rem);
 }
 
 /* Branch container */
-.repositories-table .branch-container {
+::deep .repositories-table .branch-container {
     display: inline-flex;
     align-items: center;
     height: calc(1.5rem + 4px);
     cursor: pointer;
 }
 
-.repositories-table .branch-container:hover .branch-inner {
+::deep .repositories-table .branch-container:hover .branch-inner {
     background-color: #212529;
     color: #f8f9fa;
     border-color: #495057;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
-.repositories-table .branch-inner:hover {
+::deep .repositories-table .branch-inner:hover {
     background-color: #2c3136;
     border-color: #5a6268;
 }
 
 /* Version container with hover effect */
-.repositories-table .version-container {
+::deep .repositories-table .version-container {
     display: inline-flex;
     align-items: center;
     height: calc(1.5rem + 4px);
     cursor: pointer;
 }
 
-.repositories-table .version-container:hover .version-inner {
+::deep .repositories-table .version-container:hover .version-inner {
     background-color: #212529;
     color: #f8f9fa;
     border-color: #495057;
@@ -596,14 +597,14 @@
 }
 
 /* No highlight when just clicked (until mouse leaves) */
-.repositories-table .version-container.version-clicked:hover .version-inner {
+::deep .repositories-table .version-container.version-clicked:hover .version-inner {
     background-color: transparent;
     color: var(--text-muted, #6a6a6a);
     border-color: transparent;
     box-shadow: none;
 }
 
-.repositories-table .version-inner:hover {
+::deep .repositories-table .version-inner:hover {
     background-color: #2c3136;
     border-color: #5a6268;
 }
