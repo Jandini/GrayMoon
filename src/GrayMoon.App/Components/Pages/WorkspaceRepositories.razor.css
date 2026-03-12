@@ -83,8 +83,8 @@
 
 
 /* Match Repositories / Workspaces: left-align all columns, status column right-aligned via col-status-badge; use global resizable-columns padding for header spacing */
-.repositories-table th,
-.repositories-table td {
+::deep .repositories-table th,
+::deep .repositories-table td {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
