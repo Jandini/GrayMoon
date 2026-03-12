@@ -96,10 +96,11 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: nowrap;
     gap: 1rem;
     width: 100%;
     box-sizing: border-box;
-    background-color: #0d0d0d;
+    background-color: #0d0d0d !important;
     color: var(--text-secondary);
     font-weight: 600;
     font-size: 0.875rem;
@@ -107,6 +108,7 @@
     padding: 0.5rem 0.6rem;
     border: none;
     border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
 }
 
 ::deep .repositories-table .dependency-level-header .dependency-level-header-start {
