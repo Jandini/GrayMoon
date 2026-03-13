@@ -3,7 +3,8 @@ using System.Text.Json.Serialization;
 namespace GrayMoon.Agent.Jobs.Response;
 
 public sealed class GetHostInfoResponse
-{    [JsonPropertyName("dotnetVersion")]
+{
+    [JsonPropertyName("dotnetVersion")]
     public string? DotnetVersion { get; set; }
 
     [JsonPropertyName("gitVersion")]

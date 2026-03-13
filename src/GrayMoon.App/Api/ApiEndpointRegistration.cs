@@ -1,5 +1,4 @@
 using GrayMoon.App.Api.Endpoints;
-using Microsoft.AspNetCore.Routing;
 
 namespace GrayMoon.App.Api;
 

@@ -1,7 +1,6 @@
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
-using GrayMoon.Agent.Models;
 
 namespace GrayMoon.Agent.Commands;
 
@@ -136,7 +135,7 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
         {
             var (success, pushError) = await git.PushAsync(repoPath, branch, bearerToken, setTracking: false, ct: cancellationToken);
             pushSuccess = success;
-            
+
             if (!pushSuccess)
             {
                 return new CommitSyncRepositoryResponse

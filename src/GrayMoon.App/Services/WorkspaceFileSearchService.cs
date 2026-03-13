@@ -1,6 +1,5 @@
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
-using GrayMoon.App.Services;
 
 namespace GrayMoon.App.Services;
 

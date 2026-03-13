@@ -1,6 +1,6 @@
 using System.Text.Json;
-using GrayMoon.App.Hubs;
 using GrayMoon.Abstractions.Agent;
+using GrayMoon.App.Hubs;
 using Microsoft.AspNetCore.SignalR;
 
 namespace GrayMoon.App.Services;

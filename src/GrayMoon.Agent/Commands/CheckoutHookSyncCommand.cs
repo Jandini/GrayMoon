@@ -1,8 +1,6 @@
-using GrayMoon.Agent.Abstractions;
-using GrayMoon.Agent.Hub;
-using GrayMoon.Agent.Services;
 using GrayMoon.Abstractions.Agent;
 using GrayMoon.Abstractions.Notifications;
+using GrayMoon.Agent.Abstractions;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 

@@ -3,7 +3,6 @@ using System.Text.Json;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs;
 using GrayMoon.Agent.Models;
-using GrayMoon.Agent.Queue;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -58,9 +57,9 @@ public sealed class HookListenerHostedService(
         var hookKind = path.ToLowerInvariant() switch
         {
             "/hook/checkout" => (NotifyHookKind?)NotifyHookKind.Checkout,
-            "/hook/commit"   => NotifyHookKind.Commit,
-            "/hook/merge"    => NotifyHookKind.Merge,
-            _                => null
+            "/hook/commit" => NotifyHookKind.Commit,
+            "/hook/merge" => NotifyHookKind.Merge,
+            _ => null
         };
 
         if (context.Request.HttpMethod != "POST" || hookKind == null)

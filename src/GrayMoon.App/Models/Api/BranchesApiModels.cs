@@ -97,6 +97,16 @@ public sealed class DeleteBranchApiResult
     public string? Error { get; set; }
 }
 
+/// <summary>API response for POST /api/branches/create and /api/branches/set-upstream (camelCase).</summary>
+public sealed class CreateBranchApiResult
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+}
+
 /// <summary>Agent StageAndCommit response (camelCase).</summary>
 public sealed class StageAndCommitResponse
 {

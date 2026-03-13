@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Reflection;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Commands;
@@ -13,7 +12,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
-using Serilog.Sinks.File;
 using Serilog.Sinks.SystemConsole.Themes;
 
 namespace GrayMoon.Agent.Cli;

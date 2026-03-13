@@ -1,11 +1,9 @@
-using GrayMoon.App.Api;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
-using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
@@ -119,7 +117,8 @@ public static class CommitSyncEndpoints
             var mergeConflict = commitSyncResponse?.MergeConflict ?? false;
             var errorMessage = commitSyncResponse?.ErrorMessage;
 
-            return Results.Ok(new {
+            return Results.Ok(new
+            {
                 success = commitSyncResponse?.Success ?? false,
                 mergeConflict,
                 errorMessage

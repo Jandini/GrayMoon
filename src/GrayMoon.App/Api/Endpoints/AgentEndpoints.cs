@@ -39,27 +39,27 @@ public static class AgentEndpoints
         var baseUrl = $"{httpContext.Request.Scheme}://{httpContext.Request.Host}";
         var downloadUrl = $"{baseUrl}/api/agent/download?platform=windows";
         var hubUrl = $"{baseUrl}/hub/agent";
-        
+
         try
         {
             var assembly = Assembly.GetExecutingAssembly();
             var resourceName = "GrayMoon.App.Resources.install-agent.ps1";
-            
+
             using var stream = assembly.GetManifestResourceStream(resourceName);
             if (stream == null)
             {
                 logger.LogError("Embedded resource {ResourceName} not found", resourceName);
                 return Results.NotFound("Installation script not found");
             }
-            
+
             using var reader = new StreamReader(stream);
             var script = reader.ReadToEnd();
-            
+
             // Replace placeholders
             script = script.Replace("{DOWNLOAD_URL}", downloadUrl);
             script = script.Replace("{BASE_URL}", baseUrl);
             script = script.Replace("{HUB_URL}", hubUrl);
-            
+
             return Results.Content(script, "text/plain; charset=utf-8");
         }
         catch (Exception ex)
@@ -72,22 +72,22 @@ public static class AgentEndpoints
     private static IResult UninstallAgent(IWebHostEnvironment env, ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.Agent");
-        
+
         try
         {
             var assembly = Assembly.GetExecutingAssembly();
             var resourceName = "GrayMoon.App.Resources.uninstall-agent.ps1";
-            
+
             using var stream = assembly.GetManifestResourceStream(resourceName);
             if (stream == null)
             {
                 logger.LogError("Embedded resource {ResourceName} not found", resourceName);
                 return Results.NotFound("Uninstallation script not found");
             }
-            
+
             using var reader = new StreamReader(stream);
             var script = reader.ReadToEnd();
-            
+
             return Results.Content(script, "text/plain; charset=utf-8");
         }
         catch (Exception ex)
