@@ -2196,7 +2196,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         StateHasChanged();
     }
 
-    private const int TableColSpan = 8;
+    private const int TableColSpan = 4;
 
     private PullRequestInfo? GetPrInfoForRepository(int repositoryId)
     {
