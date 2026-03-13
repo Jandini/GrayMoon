@@ -57,73 +57,77 @@
                 <span>-</span>
             }
         </td>
-        <td class="col-divergence text-center text-nowrap">
-            <DivergenceBadge DefaultBehind="@Link.DefaultBranchBehindCommits"
-                            DefaultAhead="@Link.DefaultBranchAheadCommits"
-                            BranchName="@Link.BranchName"
-                            RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
-                            DefaultBranchName="@Link.DefaultBranchName" />
-        </td>
-        <td class="col-pr text-center text-nowrap">
-            <PRBadge PullRequest="@PrInfo"
-                    DefaultBranchAheadCommits="@Link.DefaultBranchAheadCommits"
-                    IsPrVerified="@IsPrVerified"
-                    CreatePrUrl="@(string.IsNullOrEmpty(repoUrl) || string.IsNullOrEmpty(Link.DefaultBranchName) ? null : $"{repoUrl}/compare/{Link.DefaultBranchName}...{Uri.EscapeDataString(Link.BranchName ?? "")}")" />
-        </td>
-        <td class="col-deps col-status-badge">
-            @if (depCount == 0)
-            {
-                <a href="@graphUrl" class="dependency-badge-link" title="View dependency graph for this repository">
-                    <span class="badge build-dep-badge build-dep-badge-none">0</span>
-                </a>
-            }
-            else if (unmatchedDeps == 0)
-            {
-                <a href="@graphUrl" class="dependency-badge-link" title="View dependency graph for this repository">
-                    <span class="badge build-dep-badge build-dep-badge-ok">@depCount</span>
-                </a>
-            }
-            else
-            {
-                <span class="dependency-badge-tooltip-wrap dependency-badge-link @(IsUpdating || IsSyncing ? "dependency-badge-link--disabled" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
-                      role="button"
-                      tabindex="0"
-                      style="cursor: pointer;"
-                      @onclick="OnDependencyBadgeClick"
-                      @onclick:preventDefault
-                      @onkeydown="OnDependencyBadgeKeydown"
-                      @onmouseleave="OnDependencyBadgeMouseLeave">
-                    <span class="badge build-dep-badge build-dep-badge-mismatch">@unmatchedDeps of @depCount</span>
-                    @if (MismatchedDependencyLines.Count > 0)
+        <td class="col-metrics col-divergence col-pr text-center">
+            <div class="metrics-grid">
+                <span class="metrics-block metrics-divergence text-nowrap">
+                    <DivergenceBadge DefaultBehind="@Link.DefaultBranchBehindCommits"
+                                    DefaultAhead="@Link.DefaultBranchAheadCommits"
+                                    BranchName="@Link.BranchName"
+                                    RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
+                                    DefaultBranchName="@Link.DefaultBranchName" />
+                </span>
+                <span class="metrics-block metrics-pr text-nowrap">
+                    <PRBadge PullRequest="@PrInfo"
+                            DefaultBranchAheadCommits="@Link.DefaultBranchAheadCommits"
+                            IsPrVerified="@IsPrVerified"
+                            CreatePrUrl="@(string.IsNullOrEmpty(repoUrl) || string.IsNullOrEmpty(Link.DefaultBranchName) ? null : $"{repoUrl}/compare/{Link.DefaultBranchName}...{Uri.EscapeDataString(Link.BranchName ?? "")}")" />
+                </span>
+                <span class="metrics-block metrics-deps">
+                    @if (depCount == 0)
                     {
-                        <div class="dependency-badge-tooltip">
-                            <div class="dependency-badge-tooltip-title">Dependencies requiring update:</div>
-                            @foreach (var line in MismatchedDependencyLines)
+                        <a href="@graphUrl" class="dependency-badge-link" title="View dependency graph for this repository">
+                            <span class="badge build-dep-badge build-dep-badge-none">0</span>
+                        </a>
+                    }
+                    else if (unmatchedDeps == 0)
+                    {
+                        <a href="@graphUrl" class="dependency-badge-link" title="View dependency graph for this repository">
+                            <span class="badge build-dep-badge build-dep-badge-ok">@depCount</span>
+                        </a>
+                    }
+                    else
+                    {
+                        <span class="dependency-badge-tooltip-wrap dependency-badge-link @(IsUpdating || IsSyncing ? "dependency-badge-link--disabled" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
+                              role="button"
+                              tabindex="0"
+                              style="cursor: pointer;"
+                              @onclick="OnDependencyBadgeClick"
+                              @onclick:preventDefault
+                              @onkeydown="OnDependencyBadgeKeydown"
+                              @onmouseleave="OnDependencyBadgeMouseLeave">
+                            <span class="badge build-dep-badge build-dep-badge-mismatch">@unmatchedDeps of @depCount</span>
+                            @if (MismatchedDependencyLines.Count > 0)
                             {
-                                <div class="dependency-badge-tooltip-line">
-                                    <code>@line.PackageId</code> <span class="dependency-badge-tooltip-versions">@line.CurrentVersion → @line.NewVersion</span>
+                                <div class="dependency-badge-tooltip">
+                                    <div class="dependency-badge-tooltip-title">Dependencies requiring update:</div>
+                                    @foreach (var line in MismatchedDependencyLines)
+                                    {
+                                        <div class="dependency-badge-tooltip-line">
+                                            <code>@line.PackageId</code> <span class="dependency-badge-tooltip-versions">@line.CurrentVersion → @line.NewVersion</span>
+                                        </div>
+                                    }
+                                    <div class="dependency-badge-tooltip-footer">Click to update this repository only.</div>
                                 </div>
                             }
-                            <div class="dependency-badge-tooltip-footer">Click to update this repository only.</div>
-                        </div>
+                        </span>
                     }
                 </span>
-            }
-        </td>
-        <td class="col-commits">
-            <CommitsBadge RepositoryId="repo.RepositoryId"
-                          Outgoing="@Link.OutgoingCommits"
-                          Incoming="@Link.IncomingCommits"
-                          BranchHasUpstream="@Link.BranchHasUpstream"
-                          BranchName="@Link.BranchName"
-                          OnPushClick="OnPushBadgeClick"
-                          OnPullClick="OnPullBadgeClick" />
-        </td>
-        <td class="col-sync col-status-badge">
-            <RepoSyncStatusBadge RepositoryId="repo.RepositoryId"
-                                Status="@RepoSyncStatus"
-                                IsSyncing="@IsSyncing"
-                                OnSyncClick="OnSyncClick" />
+                <span class="metrics-block metrics-commits">
+                    <CommitsBadge RepositoryId="repo.RepositoryId"
+                                  Outgoing="@Link.OutgoingCommits"
+                                  Incoming="@Link.IncomingCommits"
+                                  BranchHasUpstream="@Link.BranchHasUpstream"
+                                  BranchName="@Link.BranchName"
+                                  OnPushClick="OnPushBadgeClick"
+                                  OnPullClick="OnPullBadgeClick" />
+                </span>
+                <span class="metrics-block metrics-status">
+                    <RepoSyncStatusBadge RepositoryId="repo.RepositoryId"
+                                        Status="@RepoSyncStatus"
+                                        IsSyncing="@IsSyncing"
+                                        OnSyncClick="OnSyncClick" />
+                </span>
+            </div>
         </td>
     </tr>
     @if (RepositoryError != null)
@@ -158,7 +162,7 @@
     [Parameter] public string? RepositoryError { get; set; }
     [Parameter] public bool IsSyncing { get; set; }
     [Parameter] public bool IsUpdating { get; set; }
-    [Parameter] public int ColSpan { get; set; } = 8;
+    [Parameter] public int ColSpan { get; set; } = 4;
 
     [Parameter] public EventCallback OnVersionClick { get; set; }
     [Parameter] public EventCallback OnVersionMouseLeave { get; set; }
