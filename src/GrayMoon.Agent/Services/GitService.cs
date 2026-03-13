@@ -89,7 +89,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (false, isDubious);
     }
 
-    private static readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> SafeDirectoryRetryPipeline =
+    private readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> SafeDirectoryRetryPipeline =
         new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
             .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
             {
@@ -97,32 +97,50 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 MaxRetryAttempts = 3,
                 Delay = TimeSpan.FromMilliseconds(100),
                 BackoffType = DelayBackoffType.Exponential,
-                UseJitter = true
+                UseJitter = true,
+                OnRetry = args =>
+                {
+                    var exitCode = args.Outcome.Result.ExitCode;
+                    logger.LogWarning("Git safe-directory retry {Attempt} (ExitCode={ExitCode})", args.AttemptNumber, exitCode);
+                    return ValueTask.CompletedTask;
+                }
             })
             .Build();
 
-    private static readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CloneRetryPipeline =
+    private readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CloneRetryPipeline =
         new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
             .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
             {
                 ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>().HandleResult(r => r.ExitCode != 0),
                 MaxRetryAttempts = 3,
-                Delay = TimeSpan.FromMilliseconds(500),
+                Delay = TimeSpan.FromMilliseconds(200),
                 BackoffType = DelayBackoffType.Exponential,
-                UseJitter = true
+                UseJitter = true,
+                OnRetry = args =>
+                {
+                    var exitCode = args.Outcome.Result.ExitCode;
+                    logger.LogWarning("Git clone retry {Attempt} (ExitCode={ExitCode})", args.AttemptNumber, exitCode);
+                    return ValueTask.CompletedTask;
+                }
             })
             .Build();
 
-    private static readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> FetchRetryPipeline =
+    private readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> FetchRetryPipeline =
         new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
             .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
             {
                 // Retry any non-zero exit code from git fetch (e.g., transient network failures).
                 ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>().HandleResult(r => r.ExitCode != 0),
                 MaxRetryAttempts = 3,
-                Delay = TimeSpan.FromSeconds(2),
+                Delay = TimeSpan.FromMilliseconds(200),
                 BackoffType = DelayBackoffType.Exponential,
-                UseJitter = true
+                UseJitter = true,
+                OnRetry = args =>
+                {
+                    var exitCode = args.Outcome.Result.ExitCode;
+                    logger.LogWarning("Git fetch retry {Attempt} (ExitCode={ExitCode})", args.AttemptNumber, exitCode);
+                    return ValueTask.CompletedTask;
+                }
             })
             .Build();
 
@@ -233,10 +251,10 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                                  $"{output}\n{errorOutput}";
             if (string.IsNullOrWhiteSpace(combinedOutput))
                 combinedOutput = $"Git fetch failed (exit code {exitCode})";
-            logger.LogError("Git fetch failed in {ElapsedMs}ms for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, repoPath, exitCode, stdout, stderr);
+            logger.LogError("Git fetch failed in {ElapsedMs}ms for {RepoPath}. Args={Args}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, repoPath, args, exitCode, stdout, stderr);
             return (false, combinedOutput);
         }
-        logger.LogDebug("Git fetch completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
+        logger.LogDebug("Git fetch completed in {ElapsedMs}ms for {RepoPath}. Args={Args}", sw.ElapsedMilliseconds, repoPath, args);
         return (true, null);
     }
 
@@ -245,13 +263,32 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return (true, null);
 
+        logger.LogDebug("Git minimal fetch starting for {RepoPath}. InputBranch={Branch}, DefaultBranchOriginRef={DefaultRef}, HasBearer={HasBearer}",
+            repoPath,
+            branchName,
+            defaultBranchOriginRef,
+            !string.IsNullOrWhiteSpace(bearerToken));
+
         var refsToFetch = new List<string>();
 
-        var trimmedBranch = (branchName ?? "").Trim();
-        if (!string.IsNullOrWhiteSpace(trimmedBranch))
-            refsToFetch.Add(trimmedBranch);
+        // Resolve the upstream ref (e.g. origin/main) and use that as the fetch target for the
+        // current branch rather than the branch name itself. This avoids fetching non-upstreamed
+        // local branches and ensures we are always fetching the configured remote tracking ref.
+        var upstreamRef = await GetUpstreamRefAsync(repoPath, ct);
+        logger.LogDebug("Git minimal fetch upstream ref for {RepoPath}: {UpstreamRef}", repoPath, upstreamRef ?? "<none>");
+
+        if (!string.IsNullOrWhiteSpace(upstreamRef))
+        {
+            var upstream = upstreamRef!;
+            if (upstream.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
+                upstream = upstream.Substring("origin/".Length);
+            if (!string.IsNullOrWhiteSpace(upstream))
+                refsToFetch.Add(upstream);
+        }
 
         var defaultRef = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
+        logger.LogDebug("Git minimal fetch default branch ref for {RepoPath}: {DefaultRef}", repoPath, defaultRef ?? "<none>");
+
         if (!string.IsNullOrWhiteSpace(defaultRef))
         {
             var def = defaultRef!;
@@ -262,7 +299,10 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
 
         if (refsToFetch.Count == 0)
+        {
+            logger.LogDebug("Git minimal fetch skipping for {RepoPath}: no refs to fetch.", repoPath);
             return (true, null);
+        }
 
         var refArgs = string.Join(" ", refsToFetch);
 
@@ -280,11 +320,14 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             args = $"-c \"http.extraHeader={escaped}\" fetch origin {refArgs}";
         }
 
+        logger.LogDebug("Git minimal fetch invoking git for {RepoPath}. Args={Args}, Refs={Refs}", repoPath, args, string.Join(", ", refsToFetch));
+
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await FetchRetryPipeline.ExecuteAsync(
-            async cancellationToken => await RunProcessAsync("git", args, repoPath, cancellationToken),
-            ct);
+        // Minimal fetch does not use the retry pipeline: failures like "couldn't find remote ref"
+        // are handled explicitly below and should not be retried with exponential backoff.
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);
         sw.Stop();
+        logger.LogDebug("Git minimal fetch git process completed for {RepoPath} in {ElapsedMs}ms. ExitCode={ExitCode}", repoPath, sw.ElapsedMilliseconds, exitCode);
         if (exitCode != 0)
         {
             var output = (stdout ?? "").Trim();
@@ -300,7 +343,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             if (!string.IsNullOrWhiteSpace(combinedOutput) &&
                 combinedOutput.Contains("couldn't find remote ref", StringComparison.OrdinalIgnoreCase))
             {
-                logger.LogDebug("Git minimal fetch completed with missing remote ref for {RepoPath}. Refs={Refs}, Output={Output}", repoPath, string.Join(", ", refsToFetch), combinedOutput);
+                logger.LogDebug("Git minimal fetch completed with missing remote ref in {ElapsedMs}ms for {RepoPath}. Refs={Refs}, Output={Output}", sw.ElapsedMilliseconds, repoPath, string.Join(", ", refsToFetch), combinedOutput);
                 return (true, null);
             }
 
@@ -320,12 +363,11 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return (null, null, false);
 
         var sw = Stopwatch.StartNew();
-        var originBranch = "origin/" + branchName.Trim();
 
-        // Fast-path: if the current branch has no configured upstream (e.g., not pushed with -u),
-        // skip origin branch lookup and fall back directly to default-branch comparison.
-        var hasConfiguredUpstream = await HasConfiguredUpstreamAsync(repoPath, ct);
-        if (!hasConfiguredUpstream)
+        // Resolve upstream ref (e.g. origin/main) once for this branch. When there is no upstream
+        // configured we fall back to comparing against the default branch only.
+        var upstreamRef = await GetUpstreamRefAsync(repoPath, ct);
+        if (string.IsNullOrWhiteSpace(upstreamRef))
         {
             var defaultBranch = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
             if (defaultBranch == null)
@@ -346,6 +388,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             logger.LogDebug("GetCommitCounts (vs default branch, no upstream) completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
             return (aheadCount, null, false);
         }
+
+        var originBranch = upstreamRef!;
 
         // Branch has an upstream configured - verify the remote-tracking ref exists locally before comparing.
         var (exitCheck, _, _) = await RunProcessAsync("git", $"rev-parse --verify {originBranch}", repoPath, ct);
@@ -405,6 +449,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return (null, null, null);
         }
 
+        var sw = Stopwatch.StartNew();
+
         // ahead = commits on current branch not in default; behind = commits on default not in current branch. Run both in parallel.
         var aheadTask = RunProcessAsync("git", $"rev-list --count {defaultBranch}..HEAD", repoPath, ct);
         var behindTask = RunProcessAsync("git", $"rev-list --count HEAD..{defaultBranch}", repoPath, ct);
@@ -426,7 +472,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var ahead = int.TryParse((stdoutAhead ?? "").Trim(), out var a) ? a : (int?)null;
         var behind = int.TryParse((stdoutBehind ?? "").Trim(), out var b) ? b : (int?)null;
         var defaultBranchName = defaultBranch.StartsWith("origin/") ? defaultBranch.Substring("origin/".Length) : defaultBranch;
-        logger.LogDebug("GetCommitCountsVsDefault for {RepoPath}: behind={Behind}, ahead={Ahead}", repoPath, behind, ahead);
+        sw.Stop();
+        logger.LogDebug("GetCommitCountsVsDefault completed in {ElapsedMs}ms for {RepoPath}: behind={Behind}, ahead={Ahead}", sw.ElapsedMilliseconds, repoPath, behind, ahead);
         return (behind, ahead, defaultBranchName);
     }
 
@@ -881,11 +928,10 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
     }
 
     /// <summary>
-    /// Returns true when the current HEAD has a configured upstream (e.g. origin/main) by using
-    /// `git rev-parse --abbrev-ref --symbolic-full-name @{u}`. This is a single, fast check that
-    /// avoids unnecessary origin lookups when the branch is not upstreamed.
+    /// Returns the configured upstream ref for the current HEAD (e.g. "origin/main") by using
+    /// `git rev-parse --abbrev-ref --symbolic-full-name @{u}`. Returns null when no upstream is configured.
     /// </summary>
-    private async Task<bool> HasConfiguredUpstreamAsync(string repoPath, CancellationToken ct)
+    private async Task<string?> GetUpstreamRefAsync(string repoPath, CancellationToken ct)
     {
         var (exitCode, stdout, _) = await RunProcessAsync(
             "git",
@@ -894,10 +940,10 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             ct);
 
         if (exitCode != 0)
-            return false;
+            return null;
 
         var name = (stdout ?? "").Trim();
-        return !string.IsNullOrWhiteSpace(name);
+        return string.IsNullOrWhiteSpace(name) ? null : name;
     }
 
     public async Task<(bool Success, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct)
