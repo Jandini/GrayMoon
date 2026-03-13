@@ -248,19 +248,18 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var sw = Stopwatch.StartNew();
         var originBranch = "origin/" + branchName.Trim();
 
-        // Check if the remote branch exists locally (after fetch) before trying to count commits
-        var (exitCheck, _, _) = await RunProcessAsync("git", $"rev-parse --verify {originBranch}", repoPath, ct);
-        if (exitCheck != 0)
+        // Fast-path: if the current branch has no configured upstream (e.g., not pushed with -u),
+        // skip origin branch lookup and fall back directly to default-branch comparison.
+        var hasConfiguredUpstream = await HasConfiguredUpstreamAsync(repoPath, ct);
+        if (!hasConfiguredUpstream)
         {
-            // Branch doesn't exist upstream yet - count commits ahead of the default branch instead
             var defaultBranch = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
             if (defaultBranch == null)
             {
-                logger.LogDebug("Remote branch {OriginBranch} does not exist upstream and no default branch found for {RepoPath}, skipping commit counts", originBranch, repoPath);
+                logger.LogDebug("No configured upstream for branch {Branch} and no default branch found for {RepoPath}, skipping commit counts", branchName, repoPath);
                 return (null, null, false);
             }
 
-            // Count commits ahead of the default branch
             var (exitDefault, stdoutDefault, stderrDefault) = await RunProcessAsync("git", $"rev-list --count {defaultBranch}..HEAD", repoPath, ct);
             if (exitDefault != 0)
             {
@@ -270,7 +269,31 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
             var aheadCount = int.TryParse((stdoutDefault ?? "").Trim(), out var ahead) ? ahead : (int?)null;
             sw.Stop();
-            logger.LogDebug("GetCommitCounts (vs default branch) completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
+            logger.LogDebug("GetCommitCounts (vs default branch, no upstream) completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
+            return (aheadCount, null, false);
+        }
+
+        // Branch has an upstream configured - verify the remote-tracking ref exists locally before comparing.
+        var (exitCheck, _, _) = await RunProcessAsync("git", $"rev-parse --verify {originBranch}", repoPath, ct);
+        if (exitCheck != 0)
+        {
+            var defaultBranch = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
+            if (defaultBranch == null)
+            {
+                logger.LogDebug("Configured upstream for {Branch}, but remote {OriginBranch} not found and no default branch for {RepoPath}, skipping commit counts", branchName, originBranch, repoPath);
+                return (null, null, false);
+            }
+
+            var (exitDefault, stdoutDefault, stderrDefault) = await RunProcessAsync("git", $"rev-list --count {defaultBranch}..HEAD", repoPath, ct);
+            if (exitDefault != 0)
+            {
+                logger.LogWarning("Git rev-list (outgoing vs default branch) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitDefault, stdoutDefault, stderrDefault);
+                return (null, null, false);
+            }
+
+            var aheadCount = int.TryParse((stdoutDefault ?? "").Trim(), out var ahead) ? ahead : (int?)null;
+            sw.Stop();
+            logger.LogDebug("GetCommitCounts (vs default branch, missing remote upstream) completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
             return (aheadCount, null, false);
         }
 
@@ -773,6 +796,26 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return "origin/master";
 
         return null;
+    }
+
+    /// <summary>
+    /// Returns true when the current HEAD has a configured upstream (e.g. origin/main) by using
+    /// `git rev-parse --abbrev-ref --symbolic-full-name @{u}`. This is a single, fast check that
+    /// avoids unnecessary origin lookups when the branch is not upstreamed.
+    /// </summary>
+    private async Task<bool> HasConfiguredUpstreamAsync(string repoPath, CancellationToken ct)
+    {
+        var (exitCode, stdout, _) = await RunProcessAsync(
+            "git",
+            "rev-parse --abbrev-ref --symbolic-full-name @{u}",
+            repoPath,
+            ct);
+
+        if (exitCode != 0)
+            return false;
+
+        var name = (stdout ?? "").Trim();
+        return !string.IsNullOrWhiteSpace(name);
     }
 
     public async Task<(bool Success, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct)
