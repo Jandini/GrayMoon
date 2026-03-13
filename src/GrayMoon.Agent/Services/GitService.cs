@@ -1033,9 +1033,10 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var jsonPayload = JsonSerializer.Serialize(new { repositoryId, workspaceId, repositoryPath = repoPath });
         var escapedPayload = jsonPayload.Replace("'", "'\\'' ");
         var header = "-H \"Content-Type: application/json\"";
-        var commitCurl = $"curl -s -X POST \"http://127.0.0.1:{_listenPort}/hook/commit\"   {header} -d '{escapedPayload}'";
-        var checkoutCurl = $"curl -s -X POST \"http://127.0.0.1:{_listenPort}/hook/checkout\" {header} -d '{escapedPayload}'";
-        var mergeCurl = $"curl -s -X POST \"http://127.0.0.1:{_listenPort}/hook/merge\"    {header} -d '{escapedPayload}'";
+        var curlFlags = "-s --connect-timeout 1 --max-time 2";
+        var commitCurl = $"curl {curlFlags} -X POST \"http://127.0.0.1:{_listenPort}/hook/commit\"   {header} -d '{escapedPayload}' || true";
+        var checkoutCurl = $"curl {curlFlags} -X POST \"http://127.0.0.1:{_listenPort}/hook/checkout\" {header} -d '{escapedPayload}' || true";
+        var mergeCurl = $"curl {curlFlags} -X POST \"http://127.0.0.1:{_listenPort}/hook/merge\"    {header} -d '{escapedPayload}' || true";
 
         var utf8 = new UTF8Encoding(false);
         var comment = $"# Created by GrayMoon.Agent at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}Z\n";
