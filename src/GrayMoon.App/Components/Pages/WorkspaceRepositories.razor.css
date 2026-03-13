@@ -682,13 +682,12 @@
 }
 
 ::deep .repositories-table th.col-metrics {
-    text-align: center;
+    text-align: center;    
 }
 
 
 ::deep .repositories-table td.col-metrics {
-    text-align: center;
-    padding-left: 0.75rem;
+    text-align: center;    
 }
 
 ::deep .repositories-table td.col-metrics {
