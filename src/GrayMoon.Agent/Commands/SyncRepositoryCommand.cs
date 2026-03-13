@@ -41,6 +41,10 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
             // FindAsync only reads .csproj files; safe to run in parallel with git operations.
             var findProjectsTask = csProjFileService.FindAsync(repoPath, cancellationToken);
 
+            // Ensure fetch completes before running GitVersion (which is invoked with /nofetch).
+            var (fetchOk, fetchErr) = await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
+            fetchError = fetchErr;
+
             GitVersionResult? vr;
             (vr, versionError) = await git.GetVersionAsync(repoPath, cancellationToken);
             if (vr != null)
@@ -49,12 +53,8 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 branch = vr.BranchName ?? vr.EscapedBranchName ?? "-";
             }
 
-            // Fetch and WriteSyncHooks touch different .git subdirs (refs/objects vs hooks); safe in parallel.
-            var fetchTask = git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
             if (version != "-" && branch != "-")
                 git.WriteSyncHooks(repoPath, workspaceId, repositoryId);
-            var (_, fetchErr) = await fetchTask;
-            fetchError = fetchErr;
 
             // Resolve default branch once; run commit counts and vs-default in parallel when we have a branch.
             var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);

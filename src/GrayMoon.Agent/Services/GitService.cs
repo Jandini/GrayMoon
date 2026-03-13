@@ -145,11 +145,14 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             .Build();
 
     public async Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, CancellationToken ct)
+        => await GetVersionAsync(repoPath, nonNormalize: false, ct);
+
+    public async Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return (null, null);
 
-        var (fileName, arguments) = GetGitVersionInvocation(repoPath);
+        var (fileName, arguments) = GetGitVersionInvocation(repoPath, nonNormalize);
         var toolName = fileName == "dotnet" ? "dotnet gitversion" : "dotnet-gitversion";
 
         var sw = Stopwatch.StartNew();
@@ -177,15 +180,19 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
     /// <summary>
     /// Returns (fileName, arguments) for running GitVersion. Uses "dotnet gitversion" when a tool manifest
     /// (dotnet-tools.json) exists in the repo root or in .config; otherwise uses "dotnet-gitversion".
+    /// Always passes /output json, /nofetch and /verbosity quiet; when <paramref name="nonNormalize"/> is true, also passes /nonormalize.
     /// </summary>
-    private static (string FileName, string Arguments) GetGitVersionInvocation(string repoPath)
+    private static (string FileName, string Arguments) GetGitVersionInvocation(string repoPath, bool nonNormalize)
     {
         const string manifestFileName = "dotnet-tools.json";
         var inRoot = Path.Combine(repoPath, manifestFileName);
         var inConfig = Path.Combine(repoPath, ".config", manifestFileName);
+        var commonArgs = "/output json /nofetch /verbosity quiet";
+        if (nonNormalize)
+            commonArgs += " /nonormalize";
         if (File.Exists(inRoot) || File.Exists(inConfig))
-            return ("dotnet", "gitversion");
-        return ("dotnet-gitversion", "");
+            return ("dotnet", "gitversion " + commonArgs);
+        return ("dotnet-gitversion", commonArgs);
     }
 
     public async Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct)

@@ -26,11 +26,12 @@ public class GitVersionCommandService(ILogger<GitVersionCommandService> logger)
     {
         logger.LogDebug("Running dotnet-gitversion in {Path}", repositoryPath);
 
-        // Use dotnet-gitversion (in PATH from dotnet tool install -g) for Docker compatibility
+        // Use dotnet-gitversion (in PATH from dotnet tool install -g) for Docker compatibility.
+        // Pass /output json, /nofetch and /verbosity quiet; callers are responsible for performing any required fetch.
         var startInfo = new System.Diagnostics.ProcessStartInfo
         {
             FileName = "dotnet-gitversion",
-            Arguments = "",
+            Arguments = "/output json /nofetch /verbosity quiet",
             WorkingDirectory = repositoryPath,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

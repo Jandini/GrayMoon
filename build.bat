@@ -1,8 +1,8 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM Ensure GitVersion.Tool is available and get SemVer
-for /f "delims=" %%i in ('dotnet gitversion /output json /showvariable SemVer') do set GITVERSION_SEMVER=%%i
+REM Ensure GitVersion.Tool is available and get SemVer (no fetch; assume repo already fetched)
+for /f "delims=" %%i in ('dotnet gitversion /output json /nofetch /verbosity quiet /showvariable SemVer') do set GITVERSION_SEMVER=%%i
 
 if "%GITVERSION_SEMVER%"=="" set GITVERSION_SEMVER=0.0.0
 

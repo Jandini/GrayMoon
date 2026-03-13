@@ -40,7 +40,18 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
             };
         }
 
-        // Get current branch
+        // Fetch first to get latest commit counts
+        var (fetchSuccess, fetchError) = await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
+        if (!fetchSuccess)
+        {
+            return new CommitSyncRepositoryResponse
+            {
+                Success = false,
+                ErrorMessage = fetchError ?? "Fetch failed"
+            };
+        }
+
+        // Get current branch after fetch (GitVersion is invoked with /nofetch).
         var (versionResult, versionError) = await git.GetVersionAsync(repoPath, cancellationToken);
         if (versionResult == null)
         {
@@ -62,19 +73,6 @@ public sealed class CommitSyncRepositoryCommand(IGitService git) : ICommandHandl
         }
 
         var version = versionResult.InformationalVersion ?? "-";
-
-        // Fetch first to get latest commit counts
-        var (fetchSuccess, fetchError) = await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
-        if (!fetchSuccess)
-        {
-            return new CommitSyncRepositoryResponse
-            {
-                Success = false,
-                Version = version,
-                Branch = branch,
-                ErrorMessage = fetchError ?? "Fetch failed"
-            };
-        }
 
         // Get commit counts (single fetch at start; no refetch after pull/push - refs are already updated)
         var (outgoing, incoming, _) = await git.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);

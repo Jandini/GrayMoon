@@ -8,6 +8,12 @@ public interface IGitService
     Task<bool> CloneAsync(string workingDir, string cloneUrl, string? bearerToken, CancellationToken ct);
     Task AddSafeDirectoryAsync(string repoPath, CancellationToken ct);
     Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, CancellationToken ct);
+    /// <summary>
+    /// Runs GitVersion with /output json and /nofetch. When <paramref name="nonNormalize"/> is true,
+    /// passes /nonormalize to disable commit graph normalization for faster execution in flows that
+    /// have already ensured fetch ordering (e.g. minimal fetch).
+    /// </summary>
+    Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, CancellationToken ct);
     /// <summary>Gets the current branch name (e.g. "main") with a single git call. Use instead of GetVersionAsync when only branch name is needed.</summary>
     Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct);
     Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct);

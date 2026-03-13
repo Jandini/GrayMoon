@@ -25,7 +25,7 @@ jobs:
       - name: Determine version
         id: gitversion
         run: |
-          VERSION=$(dotnet gitversion /showvariable InformationalVersion)
+          VERSION=$(dotnet gitversion /nofetch /verbosity quiet /showvariable InformationalVersion)
           echo "SemVer=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Log in to Docker Hub

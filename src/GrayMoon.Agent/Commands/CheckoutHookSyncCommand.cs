@@ -22,10 +22,6 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IAgentTokenProvider
             return;
         }
 
-        var (versionResult, _) = await git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
-        var version = versionResult?.InformationalVersion ?? "-";
-        var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
-
         // Resolve default origin ref once so minimal fetch and commit-count calls share it.
         var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
 
@@ -38,10 +34,16 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IAgentTokenProvider
         }
         else
         {
-            var (fetchSuccess, err) = await git.FetchMinimalAsync(payload.RepositoryPath, branch, defaultRef, token, cancellationToken);
+            // Use minimal fetch before running GitVersion; GitVersion is invoked with /nofetch.
+            var (fetchSuccess, err) = await git.FetchMinimalAsync(payload.RepositoryPath, "-", defaultRef, token, cancellationToken);
             if (!fetchSuccess)
                 fetchError = err;
         }
+
+        // Run GitVersion after minimal fetch, with /nofetch and /nonormalize for faster execution.
+        var (versionResult, _) = await git.GetVersionAsync(payload.RepositoryPath, nonNormalize: true, cancellationToken);
+        var version = versionResult?.InformationalVersion ?? "-";
+        var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
 
         int? outgoing = null;
         int? incoming = null;
