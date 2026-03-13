@@ -670,28 +670,35 @@
 /* Combined metrics column (divergence, PR, deps, commits, status) */
 ::deep .col-metrics {
     width: auto;
-    min-width: 14rem;
+    min-width: 15rem;    
+    max-width: 15rem;
     text-align: center;
 }
 
-::deep .repositories-table th.col-metrics,
-::deep .repositories-table td.col-metrics {
+::deep .repositories-table th.col-metrics {
     text-align: center;
 }
 
+
 ::deep .repositories-table td.col-metrics {
-    overflow: visible;
-    text-overflow: clip;
+    text-align: center;
+    padding-left: 1.25rem;
 }
 
-/* Within the single metrics column, lay out 5 equal-width blocks and center their content */
+::deep .repositories-table td.col-metrics {
+    overflow: hidden;    
+}
+
+/* Within the single metrics column, lay out 5 equal-width blocks and center their content.
+   Full width so header icons align exactly over the body metrics blocks. */
 ::deep .repositories-table .metrics-grid,
 ::deep .repositories-table .metrics-grid-header {
     display: inline-grid;
+    width: 100%;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     column-gap: 0.35rem;
     align-items: center;
-    justify-content: center;
+    box-sizing: border-box;
 }
 
 ::deep .repositories-table .metrics-block {
