@@ -90,6 +90,11 @@
     text-overflow: ellipsis;
 }
 
+/* Header icons: block so they align consistently in centered columns */
+::deep .repositories-table thead th .header-icon {
+    display: block;    
+}
+
 /* Dependency level header: left [level + graph] … right [icons + count]
    Use ::deep so styles apply into child components. */
 ::deep .repositories-table .dependency-level-header td.dependency-level-header-cell {
