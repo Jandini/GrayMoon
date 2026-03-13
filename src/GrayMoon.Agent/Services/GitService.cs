@@ -676,13 +676,21 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                  : $"{outStr}\n{errStr}";
         }
 
-        // Ensure we're on the base branch (checkout base first)
-        var (checkoutSuccess, checkoutError) = await CheckoutBranchAsync(repoPath, baseBranchName, ct);
-        if (!checkoutSuccess)
-            return (false, checkoutError ?? "Failed to checkout base branch");
+        // Determine the start point for the new branch without performing an extra checkout:
+        // prefer origin/<baseBranchName> when it exists, otherwise fall back to the local baseBranchName.
+        var trimmedBase = baseBranchName.Trim();
+        var startPoint = trimmedBase;
+        var remoteCandidate = trimmedBase.StartsWith("origin/", StringComparison.OrdinalIgnoreCase)
+            ? trimmedBase
+            : "origin/" + trimmedBase;
 
-        // Create and checkout new branch from current HEAD
-        var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"checkout -b {newBranchName}", repoPath, ct);
+        var (exitRemote, _, _) = await RunProcessAsync("git", $"rev-parse --verify {remoteCandidate}", repoPath, ct);
+        if (exitRemote == 0)
+            startPoint = remoteCandidate;
+
+        // Create and checkout new branch from the chosen start point in a single checkout, so we only
+        // trigger one post-checkout hook instead of first checking out the base branch and then the new branch.
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"checkout -b {newBranchName} {startPoint}", repoPath, ct);
         if (exitCode != 0)
         {
             // Branch may already exist (e.g. persistence out of date); try checkout existing
