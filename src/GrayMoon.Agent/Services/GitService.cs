@@ -240,6 +240,80 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, null);
     }
 
+    public async Task<(bool Success, string? ErrorMessage)> FetchMinimalAsync(string repoPath, string branchName, string? defaultBranchOriginRef, string? bearerToken, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return (true, null);
+
+        var refsToFetch = new List<string>();
+
+        var trimmedBranch = (branchName ?? "").Trim();
+        if (!string.IsNullOrWhiteSpace(trimmedBranch))
+            refsToFetch.Add(trimmedBranch);
+
+        var defaultRef = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
+        if (!string.IsNullOrWhiteSpace(defaultRef))
+        {
+            var def = defaultRef!;
+            if (def.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
+                def = def.Substring("origin/".Length);
+            if (!string.IsNullOrWhiteSpace(def) && !refsToFetch.Contains(def, StringComparer.OrdinalIgnoreCase))
+                refsToFetch.Add(def);
+        }
+
+        if (refsToFetch.Count == 0)
+            return (true, null);
+
+        var refArgs = string.Join(" ", refsToFetch);
+
+        string args;
+        if (string.IsNullOrWhiteSpace(bearerToken))
+        {
+            args = $"fetch origin {refArgs}";
+        }
+        else
+        {
+            var credentials = "x-access-token:" + bearerToken;
+            var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
+            var headerValue = "Authorization: Basic " + base64;
+            var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            args = $"-c \"http.extraHeader={escaped}\" fetch origin {refArgs}";
+        }
+
+        var sw = Stopwatch.StartNew();
+        var (exitCode, stdout, stderr) = await FetchRetryPipeline.ExecuteAsync(
+            async cancellationToken => await RunProcessAsync("git", args, repoPath, cancellationToken),
+            ct);
+        sw.Stop();
+        if (exitCode != 0)
+        {
+            var output = (stdout ?? "").Trim();
+            var errorOutput = (stderr ?? "").Trim();
+            var combinedOutput = string.IsNullOrWhiteSpace(output) ? errorOutput :
+                                 string.IsNullOrWhiteSpace(errorOutput) ? output :
+                                 $"{output}\n{errorOutput}";
+
+            // When fetching a branch that does not yet exist on origin (e.g. new local branch with no upstream),
+            // git returns "couldn't find remote ref <name>". Treat this as a non-fatal condition for minimal fetch,
+            // since other refs (like the default branch) may still have been updated and commit counts logic already
+            // handles the "no upstream" case.
+            if (!string.IsNullOrWhiteSpace(combinedOutput) &&
+                combinedOutput.Contains("couldn't find remote ref", StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogDebug("Git minimal fetch completed with missing remote ref for {RepoPath}. Refs={Refs}, Output={Output}", repoPath, string.Join(", ", refsToFetch), combinedOutput);
+                return (true, null);
+            }
+
+            if (string.IsNullOrWhiteSpace(combinedOutput))
+                combinedOutput = $"Git fetch (minimal) failed (exit code {exitCode})";
+            logger.LogError("Git minimal fetch failed in {ElapsedMs}ms for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, repoPath, exitCode, stdout, stderr);
+            return (false, combinedOutput);
+        }
+
+        logger.LogDebug("Git minimal fetch completed in {ElapsedMs}ms for {RepoPath}. Refs={Refs}", sw.ElapsedMilliseconds, repoPath, string.Join(", ", refsToFetch));
+        return (true, null);
+    }
+
     public async Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))

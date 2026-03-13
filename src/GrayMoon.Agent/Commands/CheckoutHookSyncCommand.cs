@@ -7,8 +7,10 @@ using Microsoft.Extensions.Logging;
 namespace GrayMoon.Agent.Commands;
 
 /// <summary>
-/// Handles post-checkout hooks: runs GitVersion and git fetch in parallel, then gets commit counts.
-/// Fetch is required here because a branch switch may reveal new remote commits.
+/// Handles post-checkout hooks: runs GitVersion, then performs a minimal git fetch for the current
+/// branch and default origin branch before computing commit counts. This keeps commit counts and
+/// upstream/default comparisons correct without paying the cost of a full fetch of all branches
+/// and tags (full fetch is done by Sync and branch list flows).
 /// </summary>
 public sealed class CheckoutHookSyncCommand(IGitService git, IHubConnectionProvider hubProvider, ILogger<CheckoutHookSyncCommand> logger)
 {
@@ -20,16 +22,15 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IHubConnectionProvi
             return;
         }
 
-        // GetVersionAsync (dotnet-gitversion) reads local history; FetchAsync writes refs/remotes/ atomically.
-        // Both are safe to run in parallel. GetCommitCountsAsync reads origin/{branch} so must wait for fetch.
-        var versionTask = git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
-        var fetchTask = git.FetchAsync(payload.RepositoryPath, includeTags: true, bearerToken: null, cancellationToken);
-
-        var (versionResult, _) = await versionTask;
+        var (versionResult, _) = await git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
         var version = versionResult?.InformationalVersion ?? "-";
         var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
 
-        var (fetchSuccess, fetchError) = await fetchTask; // must complete before commit counts (needs up-to-date remote tracking refs)
+        // Resolve default origin ref once so minimal fetch and commit-count calls share it.
+        var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
+
+        // Minimal fetch: only current branch and default branch, not all branches/tags.
+        var (fetchSuccess, fetchError) = await git.FetchMinimalAsync(payload.RepositoryPath, branch, defaultRef, null, cancellationToken);
 
         int? outgoing = null;
         int? incoming = null;
@@ -37,7 +38,6 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IHubConnectionProvi
         int? defaultAhead = null;
         if (branch != "-")
         {
-            var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
             var (o, i, _) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, defaultRef, cancellationToken);
             outgoing = o;
             incoming = i;
