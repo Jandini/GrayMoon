@@ -39,8 +39,8 @@ try
     builder.Services.AddScoped<ConnectorRepository>();
     builder.Services.AddScoped<GitHubRepositoryRepository>();
     builder.Services.AddScoped<WorkspaceProjectRepository>();
-    builder.Services.AddScoped<WorkspaceFileRepository>(); 
-    builder.Services.AddScoped<WorkspaceFileVersionConfigRepository>(); 
+    builder.Services.AddScoped<WorkspaceFileRepository>();
+    builder.Services.AddScoped<WorkspaceFileVersionConfigRepository>();
     builder.Services.AddScoped<WorkspaceRepository>();
     builder.Services.AddScoped<AppSettingRepository>();
     builder.Services.AddSingleton<AgentConnectionTracker>();
