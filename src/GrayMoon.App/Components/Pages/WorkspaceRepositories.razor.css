@@ -671,7 +671,6 @@
 ::deep .col-metrics {
     width: auto;
     min-width: 15rem;    
-    max-width: 15rem;
     text-align: center;
 }
 
