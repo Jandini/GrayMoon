@@ -9,19 +9,12 @@
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.AspNetCore.SignalR.Client
 @using System.Text.Json
-@inject WorkspaceRepository WorkspaceRepository
-@inject WorkspaceGitService WorkspaceGitService
+@inject IWorkspacePageService WorkspacePageService
 @inject IServiceScopeFactory ServiceScopeFactory
-@inject ConnectorRepository ConnectorRepository
-@inject GitHubRepositoryService RepositoryService
 @inject NavigationManager NavigationManager
 @inject ILogger<WorkspaceRepositories> Logger
-@inject IHttpClientFactory HttpClientFactory
 @inject IJSRuntime JSRuntime
 @inject IToastService ToastService
-@inject WorkspaceFileVersionService FileVersionService
-@inject GitHubPullRequestService GitHubPullRequestService
-@inject WorkspacePullRequestService WorkspacePullRequestService
 @inject Microsoft.Extensions.Options.IOptions<GrayMoon.App.Models.WorkspaceOptions> WorkspaceOptions
 @inject WorkspaceCommitSyncHandler WorkspaceCommitSyncHandler
 @inject WorkspaceSyncHandler WorkspaceSyncHandler

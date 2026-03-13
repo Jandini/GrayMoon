@@ -208,7 +208,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     private async Task ReloadWorkspaceDataAsync()
     {
-        workspace = await WorkspaceRepository.GetByIdAsync(WorkspaceId);
+        workspace = await WorkspacePageService.WorkspaceRepository.GetByIdAsync(WorkspaceId);
         if (workspace == null)
         {
             errorMessage = "Workspace not found.";
@@ -242,7 +242,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
         try
         {
-            await WorkspacePullRequestService.RefreshPullRequestsForWorkspaceAsync(WorkspaceId);
+            await WorkspacePageService.WorkspacePullRequestService.RefreshPullRequestsForWorkspaceAsync(WorkspaceId);
             await ReloadWorkspaceDataAsync();
 
             var newlyMergedRepoIds = prByRepositoryId
@@ -271,7 +271,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         try
         {
-            var httpClient = HttpClientFactory.CreateClient();
+            var httpClient = WorkspacePageService.HttpClientFactory.CreateClient();
             var request = new { workspaceId = WorkspaceId, repositoryId };
             var json = JsonSerializer.Serialize(request);
             var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
@@ -338,7 +338,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
         try
         {
-            var (payloads, _) = await WorkspaceGitService.GetUpdatePlanAsync(WorkspaceId);
+            var (payloads, _) = await WorkspacePageService.WorkspaceGitService.GetUpdatePlanAsync(WorkspaceId);
             var dict = new Dictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>>();
             foreach (var p in payloads ?? Array.Empty<SyncDependenciesRepoPayload>())
             {
@@ -421,7 +421,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         try
         {
-            var (_, _, error, _) = await FileVersionService.UpdateAllVersionsAsync(
+            var (_, _, error, _) = await WorkspacePageService.FileVersionService.UpdateAllVersionsAsync(
                 WorkspaceId,
                 selectedRepositoryIds: null,
                 onFileUpdated: filePath => ToastService.Show($"File {filePath} updated."));
@@ -439,7 +439,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         try
         {
-            var (_, _, error, updatedFiles) = await FileVersionService.UpdateAllVersionsAsync(
+            var (_, _, error, updatedFiles) = await WorkspacePageService.FileVersionService.UpdateAllVersionsAsync(
                 WorkspaceId,
                 selectedRepositoryIds: null,
                 onFileUpdated: null,
@@ -1010,7 +1010,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             var (payload, isMultiLevel) = await workspaceGitService.GetUpdatePlanAsync(WorkspaceId);
             if (payload.Count == 0)
             {
-                var (_, _, fileError, updatedFiles) = await FileVersionService.UpdateAllVersionsAsync(
+                var (_, _, fileError, updatedFiles) = await WorkspacePageService.FileVersionService.UpdateAllVersionsAsync(
                     WorkspaceId,
                     selectedRepositoryIds: null,
                     onFileUpdated: null);
@@ -1361,11 +1361,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     private async Task EnsureRepositoriesForModalAsync()
     {
-        var connectors = await ConnectorRepository.GetAllAsync();
+        var connectors = await WorkspacePageService.ConnectorRepository.GetAllAsync();
         _repositoriesModal.HasConnectors = connectors.Count > 0;
         if (_repositoriesModal.Repositories == null && _repositoriesModal.HasConnectors)
         {
-            _repositoriesModal.Repositories = await RepositoryService.GetPersistedRepositoriesAsync();
+            _repositoriesModal.Repositories = await WorkspacePageService.RepositoryService.GetPersistedRepositoriesAsync();
         }
     }
 
@@ -1391,7 +1391,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         await InvokeAsync(StateHasChanged);
         try
         {
-            await WorkspaceRepository.UpdateAsync(WorkspaceId, workspace.Name, _repositoriesModal.SelectedRepositoryIds);
+            await WorkspacePageService.WorkspaceRepository.UpdateAsync(WorkspaceId, workspace.Name, _repositoriesModal.SelectedRepositoryIds);
             CloseRepositoriesModal();
             await ReloadWorkspaceDataAsync();
             ApplySyncStateFromWorkspace();
@@ -1431,12 +1431,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 _repositoriesModal.FetchedRepositoryCount = count;
                 _ = InvokeAsync(StateHasChanged);
             });
-            var result = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
+            var result = await WorkspacePageService.RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
             _repositoriesModal.Repositories = result.Repositories.ToList();
         }
         catch (OperationCanceledException)
         {
-            _repositoriesModal.Repositories = await RepositoryService.GetPersistedRepositoriesAsync();
+            _repositoriesModal.Repositories = await WorkspacePageService.RepositoryService.GetPersistedRepositoriesAsync();
         }
         catch (Exception ex)
         {

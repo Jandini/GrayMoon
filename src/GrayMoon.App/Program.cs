@@ -64,6 +64,7 @@ try
     builder.Services.AddScoped<WorkspaceUpdateHandler>();
     builder.Services.AddScoped<WorkspacePushHandler>();
     builder.Services.AddScoped<WorkspaceBranchHandler>();
+    builder.Services.AddScoped<IWorkspacePageService, WorkspacePageService>();
 
     // Token protection
     builder.Services.AddSingleton<ITokenEncryptionKeyProvider, TokenEncryptionKeyProvider>();
