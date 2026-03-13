@@ -12,7 +12,7 @@ public sealed class HookSyncDispatcher(
         => payload.HookKind switch
         {
             NotifyHookKind.Checkout => checkoutHandler.ExecuteAsync(payload, cancellationToken),
-            NotifyHookKind.Merge    => mergeHandler.ExecuteAsync(payload, cancellationToken),
-            _                       => commitHandler.ExecuteAsync(payload, cancellationToken),
+            NotifyHookKind.Merge => mergeHandler.ExecuteAsync(payload, cancellationToken),
+            _ => commitHandler.ExecuteAsync(payload, cancellationToken),
         };
 }

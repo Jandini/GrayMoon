@@ -353,27 +353,27 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
 
         var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);
-        
+
         if (exitCode != 0)
         {
             // Combine stdout and stderr for error message
             var output = (stdout ?? "").Trim();
             var errorOutput = (stderr ?? "").Trim();
-            var combinedOutput = string.IsNullOrWhiteSpace(output) ? errorOutput : 
-                                 string.IsNullOrWhiteSpace(errorOutput) ? output : 
+            var combinedOutput = string.IsNullOrWhiteSpace(output) ? errorOutput :
+                                 string.IsNullOrWhiteSpace(errorOutput) ? output :
                                  $"{output}\n{errorOutput}";
-            
+
             // Check if it's a merge conflict
             var isMergeConflict = combinedOutput.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase) ||
                                   combinedOutput.Contains("merge conflict", StringComparison.OrdinalIgnoreCase) ||
                                   combinedOutput.Contains("Automatic merge failed", StringComparison.OrdinalIgnoreCase);
-            
+
             if (isMergeConflict)
             {
                 logger.LogWarning("Git pull merge conflict detected for {RepoPath}. Branch={Branch}", repoPath, branchName);
                 return (false, true, combinedOutput);
             }
-            
+
             logger.LogError("Git pull failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
             return (false, false, combinedOutput);
         }
@@ -408,10 +408,10 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             // Combine stdout and stderr for error message
             var output = (stdout ?? "").Trim();
             var errorOutput = (stderr ?? "").Trim();
-            var combinedOutput = string.IsNullOrWhiteSpace(output) ? errorOutput : 
-                                 string.IsNullOrWhiteSpace(errorOutput) ? output : 
+            var combinedOutput = string.IsNullOrWhiteSpace(output) ? errorOutput :
+                                 string.IsNullOrWhiteSpace(errorOutput) ? output :
                                  $"{output}\n{errorOutput}";
-            
+
             logger.LogError("Git push failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
             return (false, combinedOutput);
         }
@@ -835,17 +835,17 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var jsonPayload = JsonSerializer.Serialize(new { repositoryId, workspaceId, repositoryPath = repoPath });
         var escapedPayload = jsonPayload.Replace("'", "'\\'' ");
         var header = "-H \"Content-Type: application/json\"";
-        var commitCurl   = $"curl -s -X POST \"http://127.0.0.1:{_listenPort}/hook/commit\"   {header} -d '{escapedPayload}'";
+        var commitCurl = $"curl -s -X POST \"http://127.0.0.1:{_listenPort}/hook/commit\"   {header} -d '{escapedPayload}'";
         var checkoutCurl = $"curl -s -X POST \"http://127.0.0.1:{_listenPort}/hook/checkout\" {header} -d '{escapedPayload}'";
-        var mergeCurl    = $"curl -s -X POST \"http://127.0.0.1:{_listenPort}/hook/merge\"    {header} -d '{escapedPayload}'";
+        var mergeCurl = $"curl -s -X POST \"http://127.0.0.1:{_listenPort}/hook/merge\"    {header} -d '{escapedPayload}'";
 
         var utf8 = new UTF8Encoding(false);
         var comment = $"# Created by GrayMoon.Agent at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}Z\n";
 
-        WriteHookFile(Path.Combine(hooksDir, "post-commit"),   "#!/bin/sh\n" + comment + commitCurl + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "post-checkout"),  "#!/bin/sh\n" + comment + "[ \"$3\" = \"1\" ] && " + checkoutCurl.TrimEnd() + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "post-merge"),     "#!/bin/sh\n" + comment + mergeCurl + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "post-update"),    "#!/bin/sh\n" + comment + commitCurl + "\n", utf8);
+        WriteHookFile(Path.Combine(hooksDir, "post-commit"), "#!/bin/sh\n" + comment + commitCurl + "\n", utf8);
+        WriteHookFile(Path.Combine(hooksDir, "post-checkout"), "#!/bin/sh\n" + comment + "[ \"$3\" = \"1\" ] && " + checkoutCurl.TrimEnd() + "\n", utf8);
+        WriteHookFile(Path.Combine(hooksDir, "post-merge"), "#!/bin/sh\n" + comment + mergeCurl + "\n", utf8);
+        WriteHookFile(Path.Combine(hooksDir, "post-update"), "#!/bin/sh\n" + comment + commitCurl + "\n", utf8);
         logger.LogDebug("Sync hooks written for repo {RepoId} in workspace {WorkspaceId}", repositoryId, workspaceId);
     }
 

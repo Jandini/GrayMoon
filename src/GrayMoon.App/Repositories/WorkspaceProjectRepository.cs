@@ -381,9 +381,9 @@ public sealed class WorkspaceProjectRepository(
             .ToListAsync(cancellationToken);
 
         var repoIds = projects.Select(p => p.RepositoryId).Distinct().ToList();
-        var repoToProjectUpdates = new Dictionary<int, Dictionary<string, Dictionary<string, (string Current, string New)>>> (repoIds.Count);
+        var repoToProjectUpdates = new Dictionary<int, Dictionary<string, Dictionary<string, (string Current, string New)>>>(repoIds.Count);
         foreach (var repoId in repoIds)
-            repoToProjectUpdates[repoId] = new Dictionary<string, Dictionary<string, (string Current, string New)> >(StringComparer.OrdinalIgnoreCase);
+            repoToProjectUpdates[repoId] = new Dictionary<string, Dictionary<string, (string Current, string New)>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var d in dependencies)
         {

@@ -1,5 +1,4 @@
 using GrayMoon.App.Models;
-using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.App.Services;
 

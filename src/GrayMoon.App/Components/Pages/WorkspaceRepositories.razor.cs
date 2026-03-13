@@ -1752,7 +1752,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         var wr = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId);
         var repo = wr?.Repository;
-        
+
         if (repo == null)
             return;
 
@@ -2149,7 +2149,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", version);
             ToastService.Show($"{version} copied to the clipboard");
-            
+
             // Hide highlight after click (like a button)
             clickedVersions.Add(version);
             StateHasChanged();

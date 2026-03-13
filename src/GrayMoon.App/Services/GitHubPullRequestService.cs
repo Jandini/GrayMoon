@@ -1,5 +1,4 @@
 using GrayMoon.App.Models;
-using GrayMoon.App.Repositories;
 using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services;

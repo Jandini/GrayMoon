@@ -1,7 +1,6 @@
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
-using GrayMoon.Agent.Models;
 
 namespace GrayMoon.Agent.Commands;
 

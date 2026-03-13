@@ -1,12 +1,10 @@
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using GrayMoon.Abstractions.Agent;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Hub;
-using GrayMoon.Agent.Jobs;
-using GrayMoon.Agent.Queue;
 using GrayMoon.Agent.Services;
-using GrayMoon.Abstractions.Agent;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -21,8 +19,8 @@ internal sealed class FiveSecondRetryPolicy : IRetryPolicy
     public TimeSpan? NextRetryDelay(RetryContext retryContext)
     {
         // First retry immediately, then every 5 seconds
-        return retryContext.PreviousRetryCount == 0 
-            ? TimeSpan.Zero 
+        return retryContext.PreviousRetryCount == 0
+            ? TimeSpan.Zero
             : TimeSpan.FromSeconds(5);
     }
 }
@@ -109,7 +107,7 @@ public sealed class SignalRConnectionHostedService(
             try
             {
                 if (_connection == null) break;
-                
+
                 var state = _connection.State;
                 if (state == HubConnectionState.Connected)
                 {

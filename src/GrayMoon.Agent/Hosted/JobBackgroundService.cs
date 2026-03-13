@@ -1,10 +1,7 @@
 using System.Diagnostics;
-using GrayMoon.Agent.Abstractions;
-using GrayMoon.Agent.Hub;
-using GrayMoon.Agent.Jobs;
-using GrayMoon.Agent.Queue;
-using GrayMoon.Agent.Services;
 using GrayMoon.Abstractions.Agent;
+using GrayMoon.Agent.Abstractions;
+using GrayMoon.Agent.Jobs;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;

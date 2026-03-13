@@ -1,10 +1,5 @@
-using System.Net.Http;
 using System.Text.Json;
-using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
-using GrayMoon.App.Repositories;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.App.Services;
 
