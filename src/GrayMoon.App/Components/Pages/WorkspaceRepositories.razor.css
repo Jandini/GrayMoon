@@ -691,7 +691,7 @@
 }
 
 ::deep .repositories-table td.col-metrics {
-    overflow: hidden;    
+    overflow: visible;
 }
 
 /* Within the single metrics column, lay out 5 equal-width blocks and center their content.
