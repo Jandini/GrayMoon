@@ -9,4 +9,7 @@ public sealed class GetBranchesRequest : WorkspaceCommandRequest
 
     [JsonPropertyName("repositoryName")]
     public string? RepositoryName { get; set; }
+
+    [JsonPropertyName("repositoryId")]
+    public int RepositoryId { get; set; }
 }

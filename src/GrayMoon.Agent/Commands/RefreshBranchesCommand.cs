@@ -4,7 +4,7 @@ using GrayMoon.Agent.Jobs.Response;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class RefreshBranchesCommand(IGitService git) : ICommandHandler<RefreshBranchesRequest, RefreshBranchesResponse>
+public sealed class RefreshBranchesCommand(IGitService git, IAgentTokenProvider tokenProvider) : ICommandHandler<RefreshBranchesRequest, RefreshBranchesResponse>
 {
     public async Task<RefreshBranchesResponse> ExecuteAsync(RefreshBranchesRequest request, CancellationToken cancellationToken = default)
     {
@@ -23,17 +23,24 @@ public sealed class RefreshBranchesCommand(IGitService git) : ICommandHandler<Re
             };
         }
 
-        // Fetch to ensure remote branches are up to date
-        var (fetchSuccess, fetchError) = await git.FetchAsync(repoPath, includeTags: true, bearerToken: null, cancellationToken);
-        if (!fetchSuccess)
+        // Fetch to ensure remote branches are up to date. When a token is unavailable we skip the
+        // remote fetch rather than contacting the remote without authentication.
+        string? token = request.RepositoryId > 0
+            ? await tokenProvider.GetTokenForRepositoryAsync(request.RepositoryId, cancellationToken)
+            : null;
+        if (token != null)
         {
-            return new RefreshBranchesResponse
+            var (fetchSuccess, fetchError) = await git.FetchAsync(repoPath, includeTags: true, bearerToken: token, cancellationToken);
+            if (!fetchSuccess)
             {
-                Success = false,
-                ErrorMessage = fetchError ?? "Fetch failed",
-                LocalBranches = Array.Empty<string>(),
-                RemoteBranches = Array.Empty<string>()
-            };
+                return new RefreshBranchesResponse
+                {
+                    Success = false,
+                    ErrorMessage = fetchError ?? "Fetch failed",
+                    LocalBranches = Array.Empty<string>(),
+                    RemoteBranches = Array.Empty<string>()
+                };
+            }
         }
 
         var localBranches = await git.GetLocalBranchesAsync(repoPath, cancellationToken);

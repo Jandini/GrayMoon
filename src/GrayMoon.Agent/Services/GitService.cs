@@ -222,10 +222,12 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return (true, null);
 
         string args;
+        var logArgs = "";
         if (string.IsNullOrWhiteSpace(bearerToken))
         {
             // Use --prune to remove stale remote-tracking branches
             args = includeTags ? "fetch origin --prune --tags" : "fetch origin --prune";
+            logArgs = args;
         }
         else
         {
@@ -236,6 +238,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             // Use --prune to remove stale remote-tracking branches
             var fetchCmd = includeTags ? "fetch origin --prune --tags" : "fetch origin --prune";
             args = $"-c \"http.extraHeader={escaped}\" {fetchCmd}";
+            logArgs = "<redacted>";
         }
         var sw = Stopwatch.StartNew();
         var (exitCode, stdout, stderr) = await FetchRetryPipeline.ExecuteAsync(
@@ -251,10 +254,10 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                                  $"{output}\n{errorOutput}";
             if (string.IsNullOrWhiteSpace(combinedOutput))
                 combinedOutput = $"Git fetch failed (exit code {exitCode})";
-            logger.LogError("Git fetch failed in {ElapsedMs}ms for {RepoPath}. Args={Args}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, repoPath, args, exitCode, stdout, stderr);
+            logger.LogError("Git fetch failed in {ElapsedMs}ms for {RepoPath}. Args={Args}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, repoPath, logArgs, exitCode, stdout, stderr);
             return (false, combinedOutput);
         }
-        logger.LogDebug("Git fetch completed in {ElapsedMs}ms for {RepoPath}. Args={Args}", sw.ElapsedMilliseconds, repoPath, args);
+        logger.LogDebug("Git fetch completed in {ElapsedMs}ms for {RepoPath}. Args={Args}", sw.ElapsedMilliseconds, repoPath, logArgs);
         return (true, null);
     }
 
@@ -307,9 +310,11 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var refArgs = string.Join(" ", refsToFetch);
 
         string args;
+        var logArgs = "";
         if (string.IsNullOrWhiteSpace(bearerToken))
         {
             args = $"fetch origin {refArgs}";
+            logArgs = args;
         }
         else
         {
@@ -318,9 +323,10 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             var headerValue = "Authorization: Basic " + base64;
             var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
             args = $"-c \"http.extraHeader={escaped}\" fetch origin {refArgs}";
+            logArgs = "<redacted>";
         }
 
-        logger.LogDebug("Git minimal fetch invoking git for {RepoPath}. Args={Args}, Refs={Refs}", repoPath, args, string.Join(", ", refsToFetch));
+        logger.LogDebug("Git minimal fetch invoking git for {RepoPath}. Args={Args}, Refs={Refs}", repoPath, logArgs, string.Join(", ", refsToFetch));
 
         var sw = Stopwatch.StartNew();
         // Minimal fetch does not use the retry pipeline: failures like "couldn't find remote ref"
@@ -626,14 +632,28 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return branches;
     }
 
-    public async Task<IReadOnlyList<string>> GetRemoteBranchesAsync(string repoPath, CancellationToken ct)
+    public async Task<IReadOnlyList<string>> GetRemoteBranchesAsync(string repoPath, string? bearerToken, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return Array.Empty<string>();
 
+        string args;
+        if (string.IsNullOrWhiteSpace(bearerToken))
+        {
+            args = "ls-remote --heads origin";
+        }
+        else
+        {
+            var credentials = "x-access-token:" + bearerToken;
+            var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
+            var headerValue = "Authorization: Basic " + base64;
+            var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            args = $"-c \"http.extraHeader={escaped}\" ls-remote --heads origin";
+        }
+
         // Use ls-remote to query the actual remote branches (not local remote-tracking refs)
         // This ensures we only see branches that actually exist on origin, not stale local references
-        var (exitCode, stdout, stderr) = await RunProcessAsync("git", "ls-remote --heads origin", repoPath, ct);
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);
         if (exitCode != 0)
         {
             logger.LogWarning("Git ls-remote failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);

@@ -10,7 +10,7 @@ namespace GrayMoon.Agent.Commands;
 /// Handles post-commit and post-update hooks: re-runs GitVersion and gets commit counts.
 /// No git fetch — uses the existing remote tracking refs from the last checkout/sync.
 /// </summary>
-public sealed class CommitHookSyncCommand(IGitService git, IHubConnectionProvider hubProvider, ILogger<CommitHookSyncCommand> logger)
+public sealed class CommitHookSyncCommand(IGitService git, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<CommitHookSyncCommand> logger)
 {
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
@@ -42,8 +42,16 @@ public sealed class CommitHookSyncCommand(IGitService git, IHubConnectionProvide
         bool? hasUpstream = null;
         if (branch != "-")
         {
-            var remoteBranches = await git.GetRemoteBranchesAsync(payload.RepositoryPath, cancellationToken);
-            hasUpstream = remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
+            string? token = await tokenProvider.GetTokenForRepositoryAsync(payload.RepositoryId, cancellationToken);
+            if (token == null)
+            {
+                logger.LogDebug("CommitHookSync: no token available for repo {RepositoryId}; skipping remote branch query.", payload.RepositoryId);
+            }
+            else
+            {
+                var remoteBranches = await git.GetRemoteBranchesAsync(payload.RepositoryPath, token, cancellationToken);
+                hasUpstream = remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
+            }
         }
 
         var connection = hubProvider.Connection;

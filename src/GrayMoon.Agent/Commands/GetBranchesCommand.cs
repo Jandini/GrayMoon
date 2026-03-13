@@ -4,7 +4,7 @@ using GrayMoon.Agent.Jobs.Response;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class GetBranchesCommand(IGitService git) : ICommandHandler<GetBranchesRequest, GetBranchesResponse>
+public sealed class GetBranchesCommand(IGitService git, IAgentTokenProvider tokenProvider) : ICommandHandler<GetBranchesRequest, GetBranchesResponse>
 {
     public async Task<GetBranchesResponse> ExecuteAsync(GetBranchesRequest request, CancellationToken cancellationToken = default)
     {
@@ -23,16 +23,23 @@ public sealed class GetBranchesCommand(IGitService git) : ICommandHandler<GetBra
             };
         }
 
-        // Fetch to ensure remote branches are up to date
-        var (fetchSuccess, fetchError) = await git.FetchAsync(repoPath, includeTags: true, bearerToken: null, cancellationToken);
-        if (!fetchSuccess)
+        // Fetch to ensure remote branches are up to date. When a token is unavailable we skip the
+        // remote fetch rather than contacting the remote without authentication.
+        string? token = request.RepositoryId > 0
+            ? await tokenProvider.GetTokenForRepositoryAsync(request.RepositoryId, cancellationToken)
+            : null;
+        if (token != null)
         {
-            return new GetBranchesResponse
+            var (fetchSuccess, fetchError) = await git.FetchAsync(repoPath, includeTags: true, bearerToken: token, cancellationToken);
+            if (!fetchSuccess)
             {
-                LocalBranches = Array.Empty<string>(),
-                RemoteBranches = Array.Empty<string>(),
-                ErrorMessage = fetchError ?? "Fetch failed"
-            };
+                return new GetBranchesResponse
+                {
+                    LocalBranches = Array.Empty<string>(),
+                    RemoteBranches = Array.Empty<string>(),
+                    ErrorMessage = fetchError ?? "Fetch failed"
+                };
+            }
         }
 
         var localBranches = await git.GetLocalBranchesAsync(repoPath, cancellationToken);

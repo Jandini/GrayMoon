@@ -4,7 +4,7 @@ using GrayMoon.Agent.Jobs.Response;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class RefreshRepositoryVersionCommand(IGitService git) : ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse>
+public sealed class RefreshRepositoryVersionCommand(IGitService git, IAgentTokenProvider tokenProvider) : ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse>
 {
     public async Task<RefreshRepositoryVersionResponse> ExecuteAsync(RefreshRepositoryVersionRequest request, CancellationToken cancellationToken = default)
     {
@@ -40,7 +40,13 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git) : ICommandH
                 incomingCommits = incoming;
             }
 
-            var remoteBranches = await git.GetRemoteBranchesAsync(repoPath, cancellationToken);
+            string? token = null;
+            if (request.RepositoryId > 0)
+                token = await tokenProvider.GetTokenForRepositoryAsync(request.RepositoryId, cancellationToken);
+
+            var remoteBranches = token == null
+                ? Array.Empty<string>()
+                : await git.GetRemoteBranchesAsync(repoPath, token, cancellationToken);
             var localBranches = await git.GetLocalBranchesAsync(repoPath, cancellationToken);
             bool? hasUpstream = null;
             if (branch != "-" && remoteBranches.Count > 0)

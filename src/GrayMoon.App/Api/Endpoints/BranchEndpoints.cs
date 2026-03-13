@@ -178,6 +178,7 @@ public static class BranchEndpoints
             var args = new
             {
                 workspaceName = workspace.Name,
+                repositoryId = repo.RepositoryId,
                 repositoryName = repo.RepositoryName,
                 branchName,
                 workspaceRoot
@@ -341,6 +342,7 @@ public static class BranchEndpoints
             var args = new
             {
                 workspaceName = workspace.Name,
+                repositoryId = repo.RepositoryId,
                 repositoryName = repo.RepositoryName,
                 workspaceRoot
             };

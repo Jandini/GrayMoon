@@ -12,7 +12,7 @@ namespace GrayMoon.Agent.Commands;
 /// upstream/default comparisons correct without paying the cost of a full fetch of all branches
 /// and tags (full fetch is done by Sync and branch list flows).
 /// </summary>
-public sealed class CheckoutHookSyncCommand(IGitService git, IHubConnectionProvider hubProvider, ILogger<CheckoutHookSyncCommand> logger)
+public sealed class CheckoutHookSyncCommand(IGitService git, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<CheckoutHookSyncCommand> logger)
 {
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
@@ -30,7 +30,18 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IHubConnectionProvi
         var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
 
         // Minimal fetch: only current branch and default branch, not all branches/tags.
-        var (fetchSuccess, fetchError) = await git.FetchMinimalAsync(payload.RepositoryPath, branch, defaultRef, null, cancellationToken);
+        string? token = await tokenProvider.GetTokenForRepositoryAsync(payload.RepositoryId, cancellationToken);
+        string? fetchError = null;
+        if (token == null)
+        {
+            logger.LogDebug("CheckoutHookSync: no token available for repo {RepositoryId}; skipping minimal fetch.", payload.RepositoryId);
+        }
+        else
+        {
+            var (fetchSuccess, err) = await git.FetchMinimalAsync(payload.RepositoryPath, branch, defaultRef, token, cancellationToken);
+            if (!fetchSuccess)
+                fetchError = err;
+        }
 
         int? outgoing = null;
         int? incoming = null;

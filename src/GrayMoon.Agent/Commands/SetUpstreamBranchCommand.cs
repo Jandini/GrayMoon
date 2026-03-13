@@ -4,7 +4,7 @@ using GrayMoon.Agent.Jobs.Response;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class SetUpstreamBranchCommand(IGitService git) : ICommandHandler<SetUpstreamBranchRequest, SetUpstreamBranchResponse>
+public sealed class SetUpstreamBranchCommand(IGitService git, IAgentTokenProvider tokenProvider) : ICommandHandler<SetUpstreamBranchRequest, SetUpstreamBranchResponse>
 {
     public async Task<SetUpstreamBranchResponse> ExecuteAsync(SetUpstreamBranchRequest request, CancellationToken cancellationToken = default)
     {
@@ -24,7 +24,19 @@ public sealed class SetUpstreamBranchCommand(IGitService git) : ICommandHandler<
             };
         }
 
-        var (success, errorMessage) = await git.PushAsync(repoPath, branchName, null, setTracking: true, cancellationToken);
+        string? token = request.RepositoryId > 0
+            ? await tokenProvider.GetTokenForRepositoryAsync(request.RepositoryId, cancellationToken)
+            : null;
+        if (token == null)
+        {
+            return new SetUpstreamBranchResponse
+            {
+                Success = false,
+                ErrorMessage = "Connector token not available."
+            };
+        }
+
+        var (success, errorMessage) = await git.PushAsync(repoPath, branchName, token, setTracking: true, cancellationToken);
         if (!success)
         {
             return new SetUpstreamBranchResponse
