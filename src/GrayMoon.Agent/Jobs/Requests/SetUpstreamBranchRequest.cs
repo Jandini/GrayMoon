@@ -12,4 +12,7 @@ public sealed class SetUpstreamBranchRequest : WorkspaceCommandRequest
 
     [JsonPropertyName("branchName")]
     public string? BranchName { get; set; }
+
+    [JsonPropertyName("repositoryId")]
+    public int RepositoryId { get; set; }
 }

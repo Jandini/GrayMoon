@@ -10,7 +10,7 @@ namespace GrayMoon.Agent.Commands;
 /// Handles post-merge hooks: re-runs GitVersion and gets commit counts.
 /// No git fetch — the merge already brought remote changes in; existing remote tracking refs are current enough.
 /// </summary>
-public sealed class MergeHookSyncCommand(IGitService git, IHubConnectionProvider hubProvider, ILogger<MergeHookSyncCommand> logger)
+public sealed class MergeHookSyncCommand(IGitService git, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<MergeHookSyncCommand> logger)
 {
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
@@ -41,8 +41,16 @@ public sealed class MergeHookSyncCommand(IGitService git, IHubConnectionProvider
         bool? hasUpstream = null;
         if (branch != "-")
         {
-            var remoteBranches = await git.GetRemoteBranchesAsync(payload.RepositoryPath, cancellationToken);
-            hasUpstream = remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
+            string? token = await tokenProvider.GetTokenForRepositoryAsync(payload.RepositoryId, cancellationToken);
+            if (token == null)
+            {
+                logger.LogDebug("MergeHookSync: no token available for repo {RepositoryId}; skipping remote branch query.", payload.RepositoryId);
+            }
+            else
+            {
+                var remoteBranches = await git.GetRemoteBranchesAsync(payload.RepositoryPath, token, cancellationToken);
+                hasUpstream = remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
+            }
         }
 
         var connection = hubProvider.Connection;

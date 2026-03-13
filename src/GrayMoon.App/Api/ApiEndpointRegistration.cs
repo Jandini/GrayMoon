@@ -10,6 +10,7 @@ public static class ApiEndpointRegistration
         routes.MapAgentEndpoints();
         routes.MapSyncEndpoints();
         routes.MapCommitSyncEndpoints();
+        routes.MapConnectorEndpoints();
         routes.MapBranchEndpoints();
         routes.MapWorkspaceEndpoints();
         return routes;

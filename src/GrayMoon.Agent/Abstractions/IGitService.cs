@@ -33,7 +33,7 @@ public interface IGitService
     /// <summary>Gets all remote branch names from local refs (refs/remotes/origin). Use after fetch to avoid ls-remote network call.</summary>
     Task<IReadOnlyList<string>> GetRemoteBranchesFromRefsAsync(string repoPath, CancellationToken ct);
     /// <summary>Gets all remote branch names (without 'origin/' prefix). Uses ls-remote; for post-fetch use <see cref="GetRemoteBranchesFromRefsAsync"/>.</summary>
-    Task<IReadOnlyList<string>> GetRemoteBranchesAsync(string repoPath, CancellationToken ct);
+    Task<IReadOnlyList<string>> GetRemoteBranchesAsync(string repoPath, string? bearerToken, CancellationToken ct);
     /// <summary>Checks out the specified branch. Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct);
     /// <summary>Creates a new branch from the given base branch and checks it out. Returns (success, errorMessage).</summary>

@@ -35,9 +35,29 @@ internal static class RunCommandHandler
 
         var builder = Host.CreateApplicationBuilder(args: Array.Empty<string>());
         builder.Configuration.Sources.Insert(0, new ChainedConfigurationSource { Configuration = appConfig });
+
+        // Derive a default AppApiBaseUrl from AppHubUrl when not explicitly configured.
+        // Example: AppHubUrl = "http://host.docker.internal:8384/hub/agent"
+        // -> AppApiBaseUrl = "http://host.docker.internal:8384"
+        string? defaultAppApiBaseUrl = null;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(options.AppHubUrl))
+            {
+                var hubUri = new Uri(options.AppHubUrl, UriKind.Absolute);
+                var builderUri = new UriBuilder(hubUri.Scheme, hubUri.Host, hubUri.Port);
+                defaultAppApiBaseUrl = builderUri.Uri.ToString().TrimEnd('/');
+            }
+        }
+        catch
+        {
+            // Fallback: leave AppApiBaseUrl unset; token provider will log and skip remote calls when missing.
+        }
+
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             [$"{AgentOptions.SectionName}:{nameof(AgentOptions.AppHubUrl)}"] = options.AppHubUrl,
+            [$"{AgentOptions.SectionName}:{nameof(AgentOptions.AppApiBaseUrl)}"] = defaultAppApiBaseUrl,
             [$"{AgentOptions.SectionName}:{nameof(AgentOptions.ListenPort)}"] = options.ListenPort.ToString(),
             [$"{AgentOptions.SectionName}:{nameof(AgentOptions.MaxConcurrentCommands)}"] = options.MaxConcurrentCommands.ToString(),
         });
@@ -66,6 +86,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<IHubConnectionProvider, HubConnectionProvider>();
         builder.Services.AddSingleton<IJobQueue, JobQueue>();
         builder.Services.AddSingleton<IGitService, GitService>();
+        builder.Services.AddSingleton<IAgentTokenProvider, AgentTokenProvider>();
         builder.Services.AddSingleton<ICsProjFileParser, CsProjFileParser>();
         builder.Services.AddSingleton<ICsProjFileService, CsProjFileService>();
         builder.Services.AddSingleton<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
