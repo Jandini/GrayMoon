@@ -369,6 +369,13 @@
     cursor: pointer;
 }
 
+/* In metrics grid, align dependency badge with other blocks (avoid baseline/1px drop) */
+::deep .repositories-table .metrics-block.metrics-deps .dependency-badge-link,
+::deep .repositories-table .metrics-block.metrics-deps .dependency-badge-tooltip-wrap {
+    display: inline-flex;
+    align-items: center;
+}
+
 ::deep .repositories-table .dependency-badge-link:hover .build-dep-badge {
     filter: brightness(1.1);
 }
@@ -681,7 +688,7 @@
 
 ::deep .repositories-table td.col-metrics {
     text-align: center;
-    padding-left: 1.25rem;
+    padding-left: 0.75rem;
 }
 
 ::deep .repositories-table td.col-metrics {
