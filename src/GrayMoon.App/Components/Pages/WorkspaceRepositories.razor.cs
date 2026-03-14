@@ -85,6 +85,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private ConfirmModalState _confirmModal = new();
     private string searchTerm = string.Empty;
 
+    private bool _syncAwaitingAgentTasks;
+    private bool _pushAwaitingAgentTasks;
+    private bool _updateAwaitingAgentTasks;
+    private bool _commitSyncAwaitingAgentTasks;
+    private bool _syncToDefaultAwaitingAgentTasks;
+    private bool _creatingBranchesAwaitingAgentTasks;
+
     private int AgentTasksPendingCount => AgentQueueStateService.GetPendingCountForWorkspace(WorkspaceId);
 
     private const int RefreshDebounceMs = 200;
@@ -417,6 +424,15 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         createBranchesProgressMessage = message;
         _ = InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Returns "Running x tasks..." when overlay is visible, workflow set the awaiting flag, and agent tasks are pending; otherwise returns progressMessage.</summary>
+    private string GetOverlayMessage(string progressMessage, bool overlayVisible, bool awaitingAgentTasks)
+    {
+        if (!overlayVisible) return progressMessage;
+        if (!awaitingAgentTasks) return progressMessage;
+        if (AgentTasksPendingCount == 0) return progressMessage;
+        return AgentTasksPendingCount == 1 ? "Running 1 task..." : $"Running {AgentTasksPendingCount} tasks...";
     }
 
     /// <summary>
@@ -876,6 +892,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 SetPushProgress,
                 RefreshFromSync,
                 ToastService.Show,
+                onAppSideComplete: () => _pushAwaitingAgentTasks = true,
                 _pushCts.Token);
         }
         catch (OperationCanceledException)
@@ -884,6 +901,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
         finally
         {
+            _pushAwaitingAgentTasks = false;
             isPushing = false;
             await InvokeAsync(StateHasChanged);
         }
@@ -1108,7 +1126,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 {
                     repositoryErrors[repoId] = msg;
                     _ = InvokeAsync(StateHasChanged);
-                });
+                },
+                onAppSideComplete: () => _updateAwaitingAgentTasks = true);
 
             isUpdating = false;
             await InvokeAsync(StateHasChanged);
@@ -1181,6 +1200,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
         finally
         {
+            _updateAwaitingAgentTasks = false;
             isUpdating = false;
             await InvokeAsync(StateHasChanged);
         }
@@ -1504,7 +1524,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     }
                     _ = InvokeAsync(StateHasChanged);
                 },
-                setRepoSyncStatus: (repoId, status) => repoSyncStatus[repoId] = status);
+                setRepoSyncStatus: (repoId, status) => repoSyncStatus[repoId] = status,
+                onAppSideComplete: () => _syncAwaitingAgentTasks = true);
 
             await ReloadWorkspaceDataAsync();
             ApplySyncStateFromWorkspace();
@@ -1529,6 +1550,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
         finally
         {
+            _syncAwaitingAgentTasks = false;
             isSyncing = false;
             await InvokeAsync(StateHasChanged);
         }
@@ -1570,7 +1592,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     }
                     _ = InvokeAsync(StateHasChanged);
                 },
-                setRepoSyncStatus: (repoId, status) => repoSyncStatus[repoId] = status);
+                setRepoSyncStatus: (repoId, status) => repoSyncStatus[repoId] = status,
+                onAppSideComplete: () => _syncAwaitingAgentTasks = true);
 
             await ReloadWorkspaceDataAsync();
             ApplySyncStateFromWorkspace();
@@ -1595,6 +1618,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
         finally
         {
+            _syncAwaitingAgentTasks = false;
             isSyncing = false;
             await InvokeAsync(StateHasChanged);
         }
@@ -1636,7 +1660,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     }
                     _ = InvokeAsync(StateHasChanged);
                 },
-                setRepoSyncStatus: (repoId, status) => repoSyncStatus[repoId] = status);
+                setRepoSyncStatus: (repoId, status) => repoSyncStatus[repoId] = status,
+                onAppSideComplete: () => _syncAwaitingAgentTasks = true);
             await ReloadWorkspaceDataAsync();
             ApplySyncStateFromWorkspace();
             isOutOfSync = repoSyncStatus.Values.Any(v => v != RepoSyncStatus.InSync);
@@ -1660,6 +1685,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
         finally
         {
+            _syncAwaitingAgentTasks = false;
             isSyncing = false;
             await InvokeAsync(StateHasChanged);
         }
@@ -1739,6 +1765,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 async (completed, total) =>
                 {
                     SetCommitSyncProgress($"Synchronized commits {completed} of {total}");
+                    if (completed == total)
+                        _commitSyncAwaitingAgentTasks = true;
                     await InvokeAsync(StateHasChanged);
                 },
                 (id, err) =>
@@ -1758,6 +1786,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
         finally
         {
+            _commitSyncAwaitingAgentTasks = false;
             isCommitSyncing = false;
             await InvokeAsync(StateHasChanged);
         }
@@ -1852,6 +1881,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 (completed, total) =>
                 {
                     SetCreateBranchesProgress($"Created {completed} of {total} branches");
+                    if (completed == total)
+                        _creatingBranchesAwaitingAgentTasks = true;
                     _ = InvokeAsync(StateHasChanged);
                 },
                 _createBranchesCts.Token);
@@ -1868,6 +1899,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
         finally
         {
+            _creatingBranchesAwaitingAgentTasks = false;
             isCreatingBranches = false;
             await InvokeAsync(StateHasChanged);
         }
@@ -1992,6 +2024,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
         finally
         {
+            _syncToDefaultAwaitingAgentTasks = false;
             isSyncingToDefault = false;
             await InvokeAsync(StateHasChanged);
         }
@@ -2029,6 +2062,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     if (total > 1)
                     {
                         syncToDefaultMessage = $"Synchronized {c} of {total} to default branch";
+                        if (c == total)
+                            _syncToDefaultAwaitingAgentTasks = true;
                         await InvokeAsync(StateHasChanged);
                     }
                     return (repositoryId, true, (string?)null);
@@ -2056,6 +2091,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     if (total > 1)
                     {
                         syncToDefaultMessage = $"Synchronized {c} of {total} to default branch";
+                        if (c == total)
+                            _syncToDefaultAwaitingAgentTasks = true;
                         await InvokeAsync(StateHasChanged);
                     }
                 }
@@ -2077,7 +2114,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 }
             }
             if (total > 1)
+            {
                 syncToDefaultMessage = $"Synchronized {successCount} of {total} to default branch";
+                if (successCount == total)
+                    _syncToDefaultAwaitingAgentTasks = true;
+            }
             await InvokeAsync(StateHasChanged);
             await RefreshFromSync();
         }
@@ -2088,6 +2129,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
         finally
         {
+            _syncToDefaultAwaitingAgentTasks = false;
             isSyncingToDefault = false;
             await InvokeAsync(StateHasChanged);
         }
