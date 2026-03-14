@@ -43,6 +43,7 @@
                                     IsPushing="@isPushing"
                                     IsCommitSyncing="@isCommitSyncing"
                                     AgentTasksPendingCount="@AgentTasksPendingCount"
+                                    IsOverlayVisible="@(isLoading || isSyncing || isPushing || isUpdating || isCommitSyncing || isCheckingOut || isCreatingBranches || isCreatingBranch || isSyncingToDefault || ShowRepositoriesFetchOverlay)"
                                     OnShowRepositories="ShowRepositoriesModalAsync"
                                     OnShowBranch="ShowBranchModalAsync"
                                     OnUpdate="OnUpdateClickAsync"
@@ -125,6 +126,7 @@
                                                                        LevelKey="@group.Key"
                                                                        ColSpan="@TableColSpan"
                                                                        Group="@group"
+                                                                       ActionsDisabled="@(AgentTasksPendingCount > 0)"
                                                                        OnSyncToDefault="() => ShowConfirmSyncToDefaultLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                                        OnSyncCommits="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                                        OnOpenPr="() => ShowConfirmOpenPr(group)"
@@ -143,6 +145,7 @@
                                                                   RepositoryError="@GetRepositoryError(wr.RepositoryId)"
                                                                   IsSyncing="@isSyncing"
                                                                   IsUpdating="@isUpdating"
+                                                                  ActionsDisabled="@(AgentTasksPendingCount > 0)"
                                                                   ColSpan="@TableColSpan"
                                                                   OnVersionClick="() => CopyVersionToClipboard(wr.GitVersion!)"
                                                                   OnVersionMouseLeave="() => OnVersionMouseLeave(wr.GitVersion)"
@@ -230,12 +233,31 @@
               OnCancel="@CloseConfirmModal" />
 
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
-<LoadingOverlay IsVisible="@isSyncing" Message="@syncProgressMessage" OnAbort="AbortSyncAsync" />
-<LoadingOverlay IsVisible="@isPushing" Message="@pushProgressMessage" OnAbort="AbortPushAsync" />
-<LoadingOverlay IsVisible="@isUpdating" Message="@updateProgressMessage" OnAbort="AbortUpdateAsync" />
-<LoadingOverlay IsVisible="@isCommitSyncing" Message="@commitSyncProgressMessage" OnAbort="AbortCommitSyncAsync" />
-<LoadingOverlay IsVisible="@isCheckingOut" Message="@checkoutProgressMessage" OnAbort="AbortCheckoutAsync" />
+<LoadingOverlay IsVisible="@isSyncing"
+                Message="@GetOverlayMessage(syncProgressMessage, isSyncing, _syncAwaitingAgentTasks)"
+                PendingAgentTasksCount="@AgentTasksPendingCount"
+                OnAbort="AbortSyncAsync" />
+<LoadingOverlay IsVisible="@isPushing"
+                Message="@GetOverlayMessage(pushProgressMessage, isPushing, _pushAwaitingAgentTasks)"
+                PendingAgentTasksCount="@AgentTasksPendingCount"
+                OnAbort="AbortPushAsync" />
+<LoadingOverlay IsVisible="@isUpdating"
+                Message="@GetOverlayMessage(updateProgressMessage, isUpdating, _updateAwaitingAgentTasks)"
+                PendingAgentTasksCount="@AgentTasksPendingCount"
+                OnAbort="AbortUpdateAsync" />
+<LoadingOverlay IsVisible="@isCommitSyncing"
+                Message="@GetOverlayMessage(commitSyncProgressMessage, isCommitSyncing, _commitSyncAwaitingAgentTasks)"
+                PendingAgentTasksCount="@AgentTasksPendingCount"
+                OnAbort="AbortCommitSyncAsync" />
+<LoadingOverlay IsVisible="@isCheckingOut"
+                Message="@checkoutProgressMessage"
+                PendingAgentTasksCount="@AgentTasksPendingCount"
+                OnAbort="AbortCheckoutAsync" />
 <LoadingOverlay IsVisible="@ShowRepositoriesFetchOverlay" Message="@RepositoriesFetchOverlayMessage" OnAbort="AbortFetchRepositories" />
-<LoadingOverlay IsVisible="@isCreatingBranches" Message="@createBranchesProgressMessage" />
+<LoadingOverlay IsVisible="@isCreatingBranches"
+                Message="@GetOverlayMessage(createBranchesProgressMessage, isCreatingBranches, _creatingBranchesAwaitingAgentTasks)"
+                PendingAgentTasksCount="@AgentTasksPendingCount" />
 <LoadingOverlay IsVisible="@isCreatingBranch" Message="@createBranchMessage" />
-<LoadingOverlay IsVisible="@isSyncingToDefault" Message="@syncToDefaultMessage" />
+<LoadingOverlay IsVisible="@isSyncingToDefault"
+                Message="@GetOverlayMessage(syncToDefaultMessage, isSyncingToDefault, _syncToDefaultAwaitingAgentTasks)"
+                PendingAgentTasksCount="@AgentTasksPendingCount" />

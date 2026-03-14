@@ -35,7 +35,8 @@ public sealed class WorkspacePushHandler(
         Action<string> setProgress,
         Func<Task> refresh,
         Action<string> showToast,
-        CancellationToken cancellationToken)
+        Action? onAppSideComplete = null,
+        CancellationToken cancellationToken = default)
     {
         await using var scope = serviceScopeFactory.CreateAsyncScope();
         var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
@@ -53,6 +54,7 @@ public sealed class WorkspacePushHandler(
                     repoIds,
                     setProgress,
                     (id, err) => showToast($"{id}: {err}"),
+                    onAppSideComplete,
                     packageRegistriesAlreadySynced: requiredPackageIds.Count > 0,
                     cancellationToken: cancellationToken);
             }
@@ -64,6 +66,7 @@ public sealed class WorkspacePushHandler(
                     repoIds,
                     setProgress,
                     (id, err) => showToast($"{id}: {err}"),
+                    onAppSideComplete,
                     cancellationToken);
             }
 

@@ -13,7 +13,7 @@
         _ => ("sync", "#6c757d")
     };
     var needsSync = Status.Value != RepoSyncStatus.InSync;
-    var clickable = needsSync && !IsSyncing;
+    var clickable = needsSync && !IsSyncing && !Disabled;
 
     <span class="badge"
           style="@($"background-color: {bgColor}; color: #fff;{(clickable ? " cursor: pointer;" : "")}")"
@@ -27,11 +27,12 @@
     [Parameter] public int RepositoryId { get; set; }
     [Parameter] public RepoSyncStatus? Status { get; set; }
     [Parameter] public bool IsSyncing { get; set; }
+    [Parameter] public bool Disabled { get; set; }
     [Parameter] public EventCallback OnSyncClick { get; set; }
 
     private async Task HandleClick()
     {
-        if (Status != RepoSyncStatus.InSync && !IsSyncing)
+        if (!Disabled && Status != RepoSyncStatus.InSync && !IsSyncing)
             await OnSyncClick.InvokeAsync();
     }
 }

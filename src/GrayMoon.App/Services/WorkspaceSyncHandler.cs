@@ -15,7 +15,8 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
         CancellationToken cancellationToken,
         Action<string> setProgress,
         Action<int, RepoGitVersionInfo> updateRepoGitInfo,
-        Action<int, RepoSyncStatus> setRepoSyncStatus)
+        Action<int, RepoSyncStatus> setRepoSyncStatus,
+        Action? onAppSideComplete = null)
     {
         await using var scope = serviceScopeFactory.CreateAsyncScope();
         var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
@@ -33,6 +34,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
                     setRepoSyncStatus(repoId, status);
                     updateRepoGitInfo(repoId, info);
                 },
+                onAppSideComplete: onAppSideComplete,
                 repositoryIds: repositoryIds,
                 skipDependencyLevelPersistence: skipDependencyLevelPersistence,
                 cancellationToken: cancellationToken);

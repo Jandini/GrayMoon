@@ -18,7 +18,8 @@ public sealed class WorkspaceUpdateHandler(WorkspaceGitService workspaceGitServi
         IReadOnlyList<SyncDependenciesRepoPayload>? updatePlanPayloadForUpdateOnly,
         CancellationToken cancellationToken,
         Action<string> setProgress,
-        Action<int, string> setRepositoryError)
+        Action<int, string> setRepositoryError,
+        Action? onAppSideComplete = null)
     {
         try
         {
@@ -27,6 +28,7 @@ public sealed class WorkspaceUpdateHandler(WorkspaceGitService workspaceGitServi
                 withCommits,
                 onProgressMessage: setProgress,
                 onRepoError: (repoId, msg) => setRepositoryError(repoId, msg),
+                onAppSideComplete: onAppSideComplete,
                 repoIdsToUpdate: null,
                 cancellationToken: cancellationToken);
 

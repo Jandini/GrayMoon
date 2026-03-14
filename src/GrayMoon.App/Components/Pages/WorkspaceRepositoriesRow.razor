@@ -47,8 +47,8 @@
             @if (!string.IsNullOrEmpty(Link.BranchName))
             {
                 <div class="branch-container">
-                    <span class="branch-inner"
-                          @onclick="OnBranchClick"
+                    <span class="branch-inner @(ActionsDisabled ? "branch-inner--disabled" : "")"
+                          @onclick="HandleBranchClick"
                           title="Click to switch branch">@Link.BranchName</span>
                 </div>
             }
@@ -87,11 +87,11 @@
                     }
                     else
                     {
-                        <span class="dependency-badge-tooltip-wrap dependency-badge-link @(IsUpdating || IsSyncing ? "dependency-badge-link--disabled" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
+                        <span class="dependency-badge-tooltip-wrap dependency-badge-link @(IsUpdating || IsSyncing || ActionsDisabled ? "dependency-badge-link--disabled" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
                               role="button"
                               tabindex="0"
                               style="cursor: pointer;"
-                              @onclick="OnDependencyBadgeClick"
+                              @onclick="HandleDependencyBadgeClick"
                               @onclick:preventDefault
                               @onkeydown="OnDependencyBadgeKeydown"
                               @onmouseleave="OnDependencyBadgeMouseLeave">
@@ -118,6 +118,7 @@
                                   Incoming="@Link.IncomingCommits"
                                   BranchHasUpstream="@Link.BranchHasUpstream"
                                   BranchName="@Link.BranchName"
+                                  Disabled="@ActionsDisabled"
                                   OnPushClick="OnPushBadgeClick"
                                   OnPullClick="OnPullBadgeClick" />
                 </span>
@@ -125,6 +126,7 @@
                     <RepoSyncStatusBadge RepositoryId="repo.RepositoryId"
                                         Status="@RepoSyncStatus"
                                         IsSyncing="@IsSyncing"
+                                        Disabled="@ActionsDisabled"
                                         OnSyncClick="OnSyncClick" />
                 </span>
             </div>
@@ -162,6 +164,7 @@
     [Parameter] public string? RepositoryError { get; set; }
     [Parameter] public bool IsSyncing { get; set; }
     [Parameter] public bool IsUpdating { get; set; }
+    [Parameter] public bool ActionsDisabled { get; set; }
     [Parameter] public int ColSpan { get; set; } = 4;
 
     [Parameter] public EventCallback OnVersionClick { get; set; }
@@ -174,4 +177,14 @@
     [Parameter] public EventCallback OnPullBadgeClick { get; set; }
     [Parameter] public EventCallback OnSyncClick { get; set; }
     [Parameter] public EventCallback OnDismissError { get; set; }
+
+    private async Task HandleBranchClick()
+    {
+        if (!ActionsDisabled) await OnBranchClick.InvokeAsync();
+    }
+
+    private async Task HandleDependencyBadgeClick()
+    {
+        if (!ActionsDisabled) await OnDependencyBadgeClick.InvokeAsync();
+    }
 }

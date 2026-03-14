@@ -46,6 +46,7 @@ public class WorkspaceGitService(
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
         Action<int, int, int, RepoGitVersionInfo>? onProgress = null,
+        Action? onAppSideComplete = null,
         IReadOnlyList<int>? repositoryIds = null,
         bool skipDependencyLevelPersistence = false,
         CancellationToken cancellationToken = default)
@@ -100,6 +101,8 @@ public class WorkspaceGitService(
                 var info = ParseSyncRepositoryResponse(response);
                 var count = Interlocked.Increment(ref completedCount);
                 onProgress?.Invoke(count, totalCount, repo.RepositoryId, info);
+                if (count == totalCount)
+                    onAppSideComplete?.Invoke();
                 return (repo.RepositoryId, info);
             }
             finally
@@ -503,6 +506,7 @@ public class WorkspaceGitService(
         bool withCommits,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
+        Action? onAppSideComplete = null,
         IReadOnlySet<int>? repoIdsToUpdate = null,
         CancellationToken cancellationToken = default)
     {
@@ -534,6 +538,7 @@ public class WorkspaceGitService(
 
         if (payload.Count == 0)
         {
+            onAppSideComplete?.Invoke();
             await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
             return null;
         }
@@ -544,6 +549,7 @@ public class WorkspaceGitService(
             await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: OnRepoError, repoIdsToSync: repoIdsToUpdate, cancellationToken: cancellationToken);
             if (hadError)
                 return null;
+            onAppSideComplete?.Invoke();
             await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
             return payload;
         }
@@ -566,7 +572,12 @@ public class WorkspaceGitService(
                     break;
 
                 onProgressMessage?.Invoke($"Committing...");
-                var commitResults = await CommitDependencyUpdatesAsync(workspaceId, reposAtLevel, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Committed {c} of {t}"), cancellationToken: cancellationToken);
+                var commitResults = await CommitDependencyUpdatesAsync(workspaceId, reposAtLevel, onProgress: (c, t, _) =>
+                {
+                    onProgressMessage?.Invoke($"Committed {c} of {t}");
+                    if (c == t)
+                        onAppSideComplete?.Invoke();
+                }, cancellationToken: cancellationToken);
                 foreach (var (repoId, errMsg) in commitResults)
                 {
                     if (!string.IsNullOrEmpty(errMsg))
@@ -589,6 +600,8 @@ public class WorkspaceGitService(
                         var (refreshSuccess, refreshError) = await SyncSingleRepositoryAsync(repo.RepoId, workspaceId, cancellationToken);
                         var c = Interlocked.Increment(ref completedRefresh);
                         onProgressMessage?.Invoke($"Updating version {c} of {totalRefresh}...");
+                        if (c == totalRefresh)
+                            onAppSideComplete?.Invoke();
                         return (repo.RepoId, refreshSuccess, refreshError);
                     }
                     finally
@@ -611,7 +624,12 @@ public class WorkspaceGitService(
             if (hadError)
                 return null;
             onProgressMessage?.Invoke("Committing updates...");
-            var commitResults = await CommitDependencyUpdatesAsync(workspaceId, payload, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Committed {c} of {t}"), cancellationToken: cancellationToken);
+            var commitResults = await CommitDependencyUpdatesAsync(workspaceId, payload, onProgress: (c, t, _) =>
+            {
+                onProgressMessage?.Invoke($"Committed {c} of {t}");
+                if (c == t)
+                    onAppSideComplete?.Invoke();
+            }, cancellationToken: cancellationToken);
             foreach (var (repoId, errMsg) in commitResults)
             {
                 if (!string.IsNullOrEmpty(errMsg))
@@ -633,6 +651,8 @@ public class WorkspaceGitService(
                         var (refreshSuccess, refreshError) = await SyncSingleRepositoryAsync(repo.RepoId, workspaceId, cancellationToken);
                         var c = Interlocked.Increment(ref completedRefresh);
                         onProgressMessage?.Invoke($"Updating version {c} of {totalRefresh}...");
+                        if (c == totalRefresh)
+                            onAppSideComplete?.Invoke();
                         return (repo.RepoId, refreshSuccess, refreshError);
                     }
                     finally
@@ -650,7 +670,10 @@ public class WorkspaceGitService(
         }
 
         if (!hadError)
+        {
+            onAppSideComplete?.Invoke();
             await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+        }
         return null;
     }
 
@@ -660,6 +683,7 @@ public class WorkspaceGitService(
         IReadOnlySet<int>? repoIdsToPush = null,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
+        Action? onAppSideComplete = null,
         bool packageRegistriesAlreadySynced = false,
         CancellationToken cancellationToken = default)
     {
@@ -711,7 +735,7 @@ public class WorkspaceGitService(
         if (!synchronizedPushPossible || _nuGetService == null || _connectorRepository == null)
         {
             onProgressMessage?.Invoke("Pushing all repositories...");
-            await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
+            await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken);
             await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
             if (_hubContext != null)
                 await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
@@ -815,7 +839,7 @@ public class WorkspaceGitService(
             }
 
             onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
-            await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
+            await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken);
             await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
         }
 
@@ -830,7 +854,8 @@ public class WorkspaceGitService(
         IReadOnlyDictionary<int, string?> bearerByRepoId,
         Action<string>? onProgressMessage,
         Action<int, string>? onRepoError,
-        CancellationToken cancellationToken)
+        Action? onAppSideComplete = null,
+        CancellationToken cancellationToken = default)
     {
         var completed = 0;
         var total = repos.Count;
@@ -862,6 +887,8 @@ public class WorkspaceGitService(
                 }
                 var c = Interlocked.Increment(ref completed);
                 onProgressMessage?.Invoke($"Pushed {c} of {total}");
+                if (c == total)
+                    onAppSideComplete?.Invoke();
             }
             finally
             {
@@ -971,7 +998,7 @@ public class WorkspaceGitService(
             var reposAtLevel = payload.Where(p => (p.DependencyLevel ?? 0) == level).ToList();
             if (reposAtLevel.Count == 0) continue;
             onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
-            await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
+            await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete: null, cancellationToken);
             await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
         }
 
@@ -986,6 +1013,7 @@ public class WorkspaceGitService(
         IReadOnlySet<int> repoIds,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
+        Action? onAppSideComplete = null,
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
@@ -1016,7 +1044,7 @@ public class WorkspaceGitService(
                 wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
 
         onProgressMessage?.Invoke($"Pushing {payload.Count} {(payload.Count == 1 ? "repository" : "repositories")}...");
-        await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, cancellationToken);
+        await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken);
         await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);

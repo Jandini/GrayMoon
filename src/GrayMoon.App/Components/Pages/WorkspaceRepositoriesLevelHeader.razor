@@ -14,46 +14,50 @@
             }
         </div>
         <div class="dependency-level-header-end">
-            <span class="dependency-level-icons">
+            <span class="dependency-level-icons @(ActionsDisabled ? "dependency-level-icons--disabled" : "")">
                 <span class="dependency-level-sync-to-default-link"
                       role="button"
-                      tabindex="0"
+                      tabindex="@(ActionsDisabled ? -1 : 0)"
                       title="Sync to default branch..."
-                      style="cursor: pointer;"
-                      @onclick="OnSyncToDefault"
+                      style="cursor: @(ActionsDisabled ? "not-allowed" : "pointer");"
+                      @onclick="HandleSyncToDefault"
                       @onclick:preventDefault
-                      aria-label="Sync to default branch">
+                      aria-label="Sync to default branch"
+                      aria-disabled="@ActionsDisabled">
                     <i class="bi bi-rewind" aria-hidden="true"></i>
                 </span>
                 <span class="dependency-level-sync-commits-link"
                       role="button"
-                      tabindex="0"
+                      tabindex="@(ActionsDisabled ? -1 : 0)"
                       title="Sync commits for all repositories in this level"
-                      style="cursor: pointer;"
-                      @onclick="OnSyncCommits"
+                      style="cursor: @(ActionsDisabled ? "not-allowed" : "pointer");"
+                      @onclick="HandleSyncCommits"
                       @onclick:preventDefault
-                      aria-label="Sync commits">
+                      aria-label="Sync commits"
+                      aria-disabled="@ActionsDisabled">
                     <i class="bi bi-arrow-down-up" aria-hidden="true"></i>
                 </span>
                 <span class="dependency-level-pr-link"
                       role="button"
-                      tabindex="0"
+                      tabindex="@(ActionsDisabled ? -1 : 0)"
                       title="Open Pull Request in GitHub..."
-                      style="cursor: pointer;"
-                      @onclick="OnOpenPr"
+                      style="cursor: @(ActionsDisabled ? "not-allowed" : "pointer");"
+                      @onclick="HandleOpenPr"
                       @onclick:preventDefault
                       @onclick:stopPropagation
-                      aria-label="Open Pull Request">
+                      aria-label="Open Pull Request"
+                      aria-disabled="@ActionsDisabled">
                     <i class="bi bi-git" aria-hidden="true"></i>
                 </span>
                 <span class="dependency-level-sync-link"
                       role="button"
-                      tabindex="0"
+                      tabindex="@(ActionsDisabled ? -1 : 0)"
                       title="Synchronize all repositories in this level..."
-                      style="cursor: pointer;"
-                      @onclick="OnSyncLevel"
+                      style="cursor: @(ActionsDisabled ? "not-allowed" : "pointer");"
+                      @onclick="HandleSyncLevel"
                       @onclick:preventDefault
-                      aria-label="Sync level">
+                      aria-label="Sync level"
+                      aria-disabled="@ActionsDisabled">
                     <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
                 </span>
             </span>
@@ -76,6 +80,7 @@
     [Parameter] public int? LevelKey { get; set; }
     [Parameter] public int ColSpan { get; set; } = 8;
     [Parameter] public IEnumerable<WorkspaceRepositoryLink>? Group { get; set; }
+    [Parameter] public bool ActionsDisabled { get; set; }
     [Parameter] public EventCallback OnSyncToDefault { get; set; }
     [Parameter] public EventCallback OnSyncCommits { get; set; }
     [Parameter] public EventCallback OnOpenPr { get; set; }
@@ -83,6 +88,26 @@
     [Parameter] public EventCallback<(int count, IReadOnlyList<string?> urls)> OnOpenGitHub { get; set; }
 
     private int RepositoryCount => Group?.Count() ?? 0;
+
+    private async Task HandleSyncToDefault()
+    {
+        if (!ActionsDisabled) await OnSyncToDefault.InvokeAsync();
+    }
+
+    private async Task HandleSyncCommits()
+    {
+        if (!ActionsDisabled) await OnSyncCommits.InvokeAsync();
+    }
+
+    private async Task HandleOpenPr()
+    {
+        if (!ActionsDisabled) await OnOpenPr.InvokeAsync();
+    }
+
+    private async Task HandleSyncLevel()
+    {
+        if (!ActionsDisabled) await OnSyncLevel.InvokeAsync();
+    }
 
     private async Task HandleOpenGitHubClick()
     {

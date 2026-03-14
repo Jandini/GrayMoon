@@ -21,9 +21,9 @@
             <div class="spinner-border" role="status">
                 <span class="visually-hidden">Loading...</span>
             </div>
-            @if (IsVisible && PendingAgentTasksCount > 0)
+            @if (IsVisible && ShowTaskCountInSpinner && DisplayTaskCount > 0)
             {
-                <span class="loading-overlay-spinner-count" aria-hidden="true">@PendingAgentTasksCount</span>
+                <span class="loading-overlay-spinner-count" aria-hidden="true">@DisplayTaskCount</span>
             }
         </div>
         @if (!string.IsNullOrEmpty(Message))
@@ -50,7 +50,13 @@
     [Parameter] public string? Message { get; set; }
     [Parameter] public EventCallback OnAbort { get; set; }
 
-    private int PendingAgentTasksCount => IsVisible ? AgentQueueStateService.GetTotalPendingCount() : 0;
+    /// <summary>When set, used for spinner count (e.g. workspace-scoped). When null, fall back to total pending.</summary>
+    [Parameter] public int? PendingAgentTasksCount { get; set; }
+
+    /// <summary>When true, show task count inside spinner. Default false.</summary>
+    [Parameter] public bool ShowTaskCountInSpinner { get; set; } = false;
+
+    private int DisplayTaskCount => !IsVisible ? 0 : (PendingAgentTasksCount ?? AgentQueueStateService.GetTotalPendingCount());
 
     /// <summary>Dim strength 0..100 (matrix mode only).</summary>
     [Parameter] public int DimOpacityPercent { get; set; } = 45;
