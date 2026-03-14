@@ -58,19 +58,19 @@
         </div>
         <button class="btn btn-outline-secondary"
                 @onclick="@(() => OnShowBranch.InvokeAsync())"
-                disabled="@(IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0)">
+                disabled="@(IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0 || AgentTasksPendingCount > 0)">
             Branch
         </button>
         <button class="btn @(HasUnmatchedDependencies ? "btn-danger" : "btn-outline-secondary")"
                 @onclick="@(() => OnUpdate.InvokeAsync())"
-                disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing)">
+                disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)">
             Update
         </button>
         @if (HasIncomingCommits)
         {
             <button class="btn btn-danger"
                     @onclick="@(() => OnPull.InvokeAsync())"
-                    disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || IsCommitSyncing)">
+                    disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || IsCommitSyncing || AgentTasksPendingCount > 0)">
                 Pull
             </button>
         }
@@ -78,13 +78,13 @@
         {
             <button class="btn @(IsPushRecommended ? "btn-warning" : "btn-outline-secondary")"
                     @onclick="@(() => OnPush.InvokeAsync())"
-                    disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing)">
+                    disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)">
                 Push
             </button>
         }
         <button class="btn @(IsOutOfSync == true ? "btn-danger" : "btn-primary")"
                 @onclick="@(() => OnSync.InvokeAsync())"
-                disabled="@(IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0)">
+                disabled="@(IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0 || AgentTasksPendingCount > 0)">
             Sync
         </button>
     </div>
