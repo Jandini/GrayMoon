@@ -1,5 +1,6 @@
 @inject IJSRuntime JS
 @inject MatrixOverlayPreferenceService MatrixPreference
+@inject AgentQueueStateService AgentQueueStateService
 @implements IAsyncDisposable
 @implements IDisposable
 
@@ -16,8 +17,14 @@
         </span>
     </div>
     <div class="loading-overlay-content">
-        <div class="spinner-border" role="status">
-            <span class="visually-hidden">Loading...</span>
+        <div class="loading-overlay-spinner-wrap">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            @if (IsVisible && PendingAgentTasksCount > 0)
+            {
+                <span class="loading-overlay-spinner-count" aria-hidden="true">@PendingAgentTasksCount</span>
+            }
         </div>
         @if (!string.IsNullOrEmpty(Message))
         {
@@ -43,6 +50,8 @@
     [Parameter] public string? Message { get; set; }
     [Parameter] public EventCallback OnAbort { get; set; }
 
+    private int PendingAgentTasksCount => IsVisible ? AgentQueueStateService.GetTotalPendingCount() : 0;
+
     /// <summary>Dim strength 0..100 (matrix mode only).</summary>
     [Parameter] public int DimOpacityPercent { get; set; } = 45;
 
@@ -64,7 +73,10 @@
     protected override void OnInitialized()
     {
         MatrixPreference.UseMatrixEffectChanged += OnMatrixPreferenceChanged;
+        AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
     }
+
+    private void OnQueueStateChanged(object? sender, EventArgs e) => _ = InvokeAsync(StateHasChanged);
 
     private void OnMatrixPreferenceChanged(object? sender, EventArgs e)
     {
@@ -113,6 +125,7 @@
     public void Dispose()
     {
         MatrixPreference.UseMatrixEffectChanged -= OnMatrixPreferenceChanged;
+        AgentQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
     }
 
     public async ValueTask DisposeAsync()
