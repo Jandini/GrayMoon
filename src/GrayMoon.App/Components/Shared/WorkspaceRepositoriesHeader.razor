@@ -26,7 +26,10 @@
         @if (AgentTasksPendingCount > 0)
         {
             <span class="workspace-repos-agent-tasks text-muted d-inline-flex align-items-center gap-1">
-                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                @if (!IsOverlayVisible)
+                {
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                }
                 @AgentTasksPendingCount task@(AgentTasksPendingCount == 1 ? "" : "s") pending
             </span>
         }
@@ -102,6 +105,7 @@
     [Parameter] public bool IsPushing { get; set; }
     [Parameter] public bool IsCommitSyncing { get; set; }
     [Parameter] public int AgentTasksPendingCount { get; set; }
+    [Parameter] public bool IsOverlayVisible { get; set; }
 
     [Parameter] public EventCallback OnShowRepositories { get; set; }
     [Parameter] public EventCallback OnShowBranch { get; set; }
