@@ -16,4 +16,7 @@ public static class AgentHubMethods
 
     /// <summary>Agent → App: report agent SemVer on connect/reconnect.</summary>
     public const string ReportSemVer = "ReportSemVer";
+
+    /// <summary>Agent → App: report agent job queue status (total pending, per-workspace counts).</summary>
+    public const string ReportQueueStatus = "ReportQueueStatus";
 }

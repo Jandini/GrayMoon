@@ -44,6 +44,7 @@ try
     builder.Services.AddScoped<WorkspaceRepository>();
     builder.Services.AddScoped<AppSettingRepository>();
     builder.Services.AddSingleton<AgentConnectionTracker>();
+    builder.Services.AddSingleton<AgentQueueStateService>();
     builder.Services.AddSingleton<IToastService, ToastService>();
     builder.Services.AddSingleton<MatrixOverlayPreferenceService>();
     builder.Services.AddScoped<SyncCommandHandler>();

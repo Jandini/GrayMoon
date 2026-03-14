@@ -21,6 +21,14 @@
     text-overflow: ellipsis;
     min-width: 0;
 }
+.workspace-repos-title-spacer {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.workspace-repos-agent-tasks {
+    flex-shrink: 0;
+    margin-left: auto;
+}
 .workspace-repos-header-actions {
     flex-wrap: wrap;
     width: 100%;

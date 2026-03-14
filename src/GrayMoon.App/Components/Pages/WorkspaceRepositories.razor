@@ -21,6 +21,7 @@
 @inject WorkspaceUpdateHandler WorkspaceUpdateHandler
 @inject WorkspacePushHandler WorkspacePushHandler
 @inject WorkspaceBranchHandler WorkspaceBranchHandler
+@inject AgentQueueStateService AgentQueueStateService
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
 <PageTitle>@PageTitleText</PageTitle>
@@ -40,6 +41,7 @@
                                     IsUpdating="@isUpdating"
                                     IsPushing="@isPushing"
                                     IsCommitSyncing="@isCommitSyncing"
+                                    AgentTasksPendingCount="@AgentTasksPendingCount"
                                     OnShowRepositories="ShowRepositoriesModalAsync"
                                     OnShowBranch="ShowBranchModalAsync"
                                     OnUpdate="OnUpdateClickAsync"

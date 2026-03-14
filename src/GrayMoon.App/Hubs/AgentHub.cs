@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.SignalR;
 
 namespace GrayMoon.App.Hubs;
 
-public sealed class AgentHub(AgentConnectionTracker connectionTracker, SyncCommandHandler syncCommandHandler, IServiceScopeFactory scopeFactory) : Hub
+public sealed class AgentHub(AgentConnectionTracker connectionTracker, AgentQueueStateService agentQueueStateService, SyncCommandHandler syncCommandHandler, IServiceScopeFactory scopeFactory) : Hub
 {
     public override async Task OnConnectedAsync()
     {
@@ -32,6 +32,7 @@ public sealed class AgentHub(AgentConnectionTracker connectionTracker, SyncComma
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         connectionTracker.OnAgentDisconnected(Context.ConnectionId);
+        agentQueueStateService.Clear();
         // Clear cached workspace root when agent disconnects.
         // WorkspaceService is scoped, so resolve it from a fresh scope.
         await using var scope = scopeFactory.CreateAsyncScope();
@@ -57,6 +58,22 @@ public sealed class AgentHub(AgentConnectionTracker connectionTracker, SyncComma
     public Task ReportSemVer(string semVer)
     {
         connectionTracker.ReportAgentSemVer(Context.ConnectionId, semVer);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Invoked by the agent when its job queue status changes (total pending, per-workspace counts). JSON keys are strings.</summary>
+    public Task ReportQueueStatus(int total, IReadOnlyDictionary<string, int>? byWorkspace)
+    {
+        IReadOnlyDictionary<int, int>? byWorkspaceInt = null;
+        if (byWorkspace != null && byWorkspace.Count > 0)
+        {
+            var dict = new Dictionary<int, int>();
+            foreach (var kv in byWorkspace)
+                if (int.TryParse(kv.Key, out var wid) && kv.Value > 0)
+                    dict[wid] = kv.Value;
+            byWorkspaceInt = dict;
+        }
+        agentQueueStateService.ReportQueueStatus(total, byWorkspaceInt);
         return Task.CompletedTask;
     }
 }

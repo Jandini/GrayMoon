@@ -85,14 +85,19 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private ConfirmModalState _confirmModal = new();
     private string searchTerm = string.Empty;
 
+    private int AgentTasksPendingCount => AgentQueueStateService.GetPendingCountForWorkspace(WorkspaceId);
+
     private const int RefreshDebounceMs = 200;
     private CancellationTokenSource? _refreshDebounceCts;
 
     protected override async Task OnInitializedAsync()
     {
+        AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         await LoadWorkspaceAsync();
         ApplySyncStateFromWorkspace();
     }
+
+    private void OnQueueStateChanged(object? sender, EventArgs e) => _ = InvokeAsync(StateHasChanged);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -156,6 +161,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     public void Dispose()
     {
+        AgentQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
         _refreshDebounceCts?.Cancel();
         _refreshDebounceCts?.Dispose();
         _refreshDebounceCts = null;
