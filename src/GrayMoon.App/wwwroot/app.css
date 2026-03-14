@@ -499,6 +499,11 @@ h1:focus {
     border-bottom-color: var(--border-color);
 }
 
+/* When tbody has a vertical scrollbar, add matching padding to last header cell so metrics column stays aligned (JS sets --scrollbar-width) */
+    .grid-page-body .table thead th:last-child {
+        padding-right: calc(0.75rem + var(--scrollbar-width, 0px));
+    }
+
 /* Only the table body scrolls; scrollbar visible only when overflow (confined to tbody) */
 .grid-page-body .table tbody {
     flex: 1 1 auto;       /* take remaining space (flex-basis 0) so height is constrained and overflow scrolls */
