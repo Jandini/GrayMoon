@@ -1,5 +1,6 @@
 @using GrayMoon.App.Services
 @inject AgentConnectionTracker AgentConnectionTracker
+@inject AgentQueueStateService AgentQueueStateService
 @rendermode @(new InteractiveServerRenderMode(prerender: true))
 
 <a href="/agent" class="@BadgeClassFull" 
@@ -8,6 +9,8 @@
     @StateLabel
 </a>
 
+@implements IDisposable
+
 @code {
     private AgentConnectionState State => AgentConnectionTracker.State;
     private string? AgentSemVer => AgentConnectionTracker.AgentSemVer;
@@ -15,7 +18,10 @@
     protected override void OnInitialized()
     {
         AgentConnectionTracker.OnStateChanged((state) => { _ = InvokeAsync(StateHasChanged); });
+        AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
     }
+
+    private void OnQueueStateChanged(object? sender, EventArgs e) => _ = InvokeAsync(StateHasChanged);
 
     private string BadgeClass => State switch
     {
@@ -30,7 +36,7 @@
 
     private string StateLabel => State switch
     {
-        AgentConnectionState.Online => "online",
+        AgentConnectionState.Online => AgentQueueStateService.GetTotalPendingCount() > 0 ? "running" : "online",
         AgentConnectionState.Offline => "offline",
         AgentConnectionState.Connecting => "connecting",
         AgentConnectionState.VersionMismatch => "update",
@@ -40,9 +46,11 @@
     private string TitleText => State switch
     {
         AgentConnectionState.VersionMismatch => $"Agent version mismatch. Agent version: {AgentSemVer ?? "unknown"}. Click to update.",
-        AgentConnectionState.Online => "Agent connection status: online",
+        AgentConnectionState.Online => AgentQueueStateService.GetTotalPendingCount() > 0 ? "Agent is running tasks" : "Agent connection status: online",
         AgentConnectionState.Offline => "Agent connection status: offline",
         AgentConnectionState.Connecting => "Agent connection status: connecting",
         _ => "Agent connection status: unknown"
     };
+
+    public void Dispose() => AgentQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
 }

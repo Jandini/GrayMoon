@@ -84,7 +84,9 @@ internal static class RunCommandHandler
             .CreateLogger(), dispose: true);
 
         builder.Services.AddSingleton<IHubConnectionProvider, HubConnectionProvider>();
-        builder.Services.AddSingleton<IJobQueue, JobQueue>();
+        builder.Services.AddSingleton<TrackedJobQueue>();
+        builder.Services.AddSingleton<IJobQueue>(sp => sp.GetRequiredService<TrackedJobQueue>());
+        builder.Services.AddSingleton<IAgentQueueTracker>(sp => sp.GetRequiredService<TrackedJobQueue>());
         builder.Services.AddSingleton<IGitService, GitService>();
         builder.Services.AddSingleton<IAgentTokenProvider, AgentTokenProvider>();
         builder.Services.AddSingleton<ICsProjFileParser, CsProjFileParser>();

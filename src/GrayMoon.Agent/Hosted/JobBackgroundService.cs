@@ -11,6 +11,7 @@ namespace GrayMoon.Agent.Hosted;
 
 public sealed class JobBackgroundService(
     IJobQueue jobQueue,
+    IAgentQueueTracker queueTracker,
     ICommandDispatcher dispatcher,
     INotifySyncHandler notifySyncHandler,
     IHubConnectionProvider hubProvider,
@@ -58,6 +59,10 @@ public sealed class JobBackgroundService(
                     logger.LogTrace("ResponseCommand {RequestId} response content: {@ResponseBody}", envelope.CommandJob.RequestId, errorBody);
                     await SendResponseAsync(envelope.CommandJob.RequestId, new AgentCommandResponse(false, null, ex.Message));
                 }
+            }
+            finally
+            {
+                queueTracker.ReportJobCompleted(envelope);
             }
         }
     }
