@@ -98,6 +98,31 @@
         });
 
         syncBodyColumnWidths(table, ths);
+        if (table.closest('.grid-page-body')) {
+            alignHeaderScrollbar(table);
+            setupHeaderScrollbarObserver(table);
+        }
+    }
+
+    function alignHeaderScrollbar(table) {
+        const gridBody = table.closest('.grid-page-body');
+        if (!gridBody) return;
+        const tbody = table.querySelector('tbody');
+        if (!tbody) return;
+        const hasScroll = tbody.scrollHeight > tbody.clientHeight;
+        const scrollbarWidth = hasScroll ? (tbody.offsetWidth - tbody.clientWidth) : 0;
+        table.style.setProperty('--scrollbar-width', scrollbarWidth + 'px');
+    }
+
+    function setupHeaderScrollbarObserver(table) {
+        const gridBody = table.closest('.grid-page-body');
+        if (!gridBody) return;
+        const tbody = table.querySelector('tbody');
+        if (!tbody) return;
+        const ro = new ResizeObserver(() => alignHeaderScrollbar(table));
+        ro.observe(tbody);
+        if (table.dataset.scrollbarObserver) return;
+        table.dataset.scrollbarObserver = '1';
     }
 
     function syncBodyColumnWidths(table, ths) {
@@ -176,6 +201,10 @@
 
     function runInit() {
         document.querySelectorAll('table.resizable-columns').forEach(initTable);
+        document.querySelectorAll('.grid-page-body .table').forEach(tbl => {
+            alignHeaderScrollbar(tbl);
+            setupHeaderScrollbarObserver(tbl);
+        });
     }
 
     if (document.readyState === 'loading') {
@@ -235,6 +264,7 @@
                 syncBodyColumnWidths(tbl, ths);
             }
         });
+        document.querySelectorAll('.grid-page-body .table').forEach(alignHeaderScrollbar);
     });
 
     observer.observe(document.body, { childList: true, subtree: true });
