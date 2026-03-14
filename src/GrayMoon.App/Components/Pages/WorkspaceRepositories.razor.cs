@@ -2105,7 +2105,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
         isCheckingOut = true;
 
-        SetCheckoutProgress($"Checking out {branchName}...");
+        SetCheckoutProgress("Checking out branch...");
 
         errorMessage = null;
         try
