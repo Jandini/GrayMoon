@@ -27,26 +27,6 @@ public sealed class WorkspacePushHandler(
         return (toPush, toPush.Count > 0);
     }
 
-    public async Task<PushDependencyInfoForRepo?> GetPushDependenciesForPlanAsync(
-        int workspaceId,
-        IReadOnlySet<int> repoIds,
-        CancellationToken cancellationToken)
-    {
-        await using var scope = serviceScopeFactory.CreateAsyncScope();
-        var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-        return await workspaceGitService.GetPushDependencyInfoForRepoSetAsync(workspaceId, repoIds);
-    }
-
-    public async Task<PushDependencyInfoForRepo?> GetPushDependenciesForRepoAsync(
-        int workspaceId,
-        int repositoryId,
-        CancellationToken cancellationToken)
-    {
-        await using var scope = serviceScopeFactory.CreateAsyncScope();
-        var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-        return await workspaceGitService.GetPushDependencyInfoForRepoAsync(workspaceId, repositoryId);
-    }
-
     public async Task RunPushWithDependenciesAsync(
         int workspaceId,
         IReadOnlySet<int> repoIds,

@@ -798,7 +798,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         ShowConfirm("Do you want to pull for this repository?", () => CommitSyncAsync(repositoryId));
     }
 
-    /// <summary>When user clicks the not-upstreamed badge: check dependencies. No deps = push directly; has deps = show modal with dependency list and Synchronized Push option.</summary>
+    /// <summary>When user clicks the not-upstreamed badge: check dependencies. Show modal only if at least one dependency repo needs push; otherwise push directly.</summary>
     private async Task OnPushBadgeClickAsync(int repositoryId, string? branchName)
     {
         if (workspace == null || isPushing || isSyncing || isUpdating)
@@ -806,12 +806,16 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
         try
         {
-            var depInfo = await WorkspacePushHandler.GetPushDependenciesForRepoAsync(
+            var repoIdsThatNeedPush = workspaceRepositories
+                .Where(wr => (wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false)
+                .Select(wr => wr.RepositoryId)
+                .ToHashSet();
+            var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoAsync(
                 WorkspaceId,
                 repositoryId,
                 CancellationToken.None);
 
-            if (depInfo == null || depInfo.DependencyRepoIds.Count == 0)
+            if (depInfo == null || !WorkspaceDependencyService.ShouldShowSynchronizedPushModal(depInfo, repoIdsThatNeedPush))
             {
                 await PushSingleRepositoryWithUpstreamAsync(repositoryId, branchName);
                 return;
@@ -927,7 +931,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    /// <summary>Push button click: get push plan; filter to repos with unpushed commits or no upstream branch; if no package dependencies push immediately; otherwise show confirmation modal with dependency info.</summary>
+    /// <summary>Push button click: get push plan; filter to repos with unpushed commits or no upstream branch; show modal only if at least one dependency repo needs push; otherwise push immediately.</summary>
     private async Task OnPushClickAsync()
     {
         if (workspace == null || workspaceRepositories.Count == 0 || isPushing || isSyncing || isUpdating)
@@ -948,7 +952,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
             var repoIdsWithUnpushed = payload.Select(p => p.RepoId).ToHashSet();
             pushPlanRepoIds = repoIdsWithUnpushed;
 
-            var depInfo = await WorkspacePushHandler.GetPushDependenciesForPlanAsync(
+            var repoIdsThatNeedPush = workspaceRepositories
+                .Where(wr => (wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false)
+                .Select(wr => wr.RepositoryId)
+                .ToHashSet();
+            var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoSetAsync(
                 WorkspaceId,
                 repoIdsWithUnpushed,
                 CancellationToken.None);
@@ -965,8 +973,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 RepoName = null
             };
 
-            // When there are no package dependencies, push immediately without showing the dialog.
-            if (depInfo.PayloadForRepo.RequiredPackages.Count == 0 && depInfo.DependencyRepoIds.Count == 0)
+            // Push immediately without dialog when there are no deps, or when no dependency repo needs push.
+            if ((depInfo.PayloadForRepo.RequiredPackages.Count == 0 && depInfo.DependencyRepoIds.Count == 0)
+                || !WorkspaceDependencyService.ShouldShowSynchronizedPushModal(depInfo, repoIdsThatNeedPush))
             {
                 await OnPushWithDependenciesProceedAsync(synchronizedPush: false);
                 return;

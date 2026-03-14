@@ -16,6 +16,7 @@ public class WorkspaceGitService(
     WorkspaceRepository workspaceRepository,
     GitHubRepositoryRepository repositoryRepository,
     WorkspaceProjectRepository workspaceProjectRepository,
+    WorkspaceDependencyService workspaceDependencyService,
     WorkspacePullRequestService workspacePullRequestService,
     AppDbContext dbContext,
     Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions,
@@ -31,6 +32,7 @@ public class WorkspaceGitService(
     private readonly WorkspaceRepository _workspaceRepository = workspaceRepository ?? throw new ArgumentNullException(nameof(workspaceRepository));
     private readonly GitHubRepositoryRepository _repositoryRepository = repositoryRepository ?? throw new ArgumentNullException(nameof(repositoryRepository));
     private readonly WorkspaceProjectRepository _workspaceProjectRepository = workspaceProjectRepository ?? throw new ArgumentNullException(nameof(workspaceProjectRepository));
+    private readonly WorkspaceDependencyService _workspaceDependencyService = workspaceDependencyService ?? throw new ArgumentNullException(nameof(workspaceDependencyService));
     private readonly WorkspacePullRequestService _workspacePullRequestService = workspacePullRequestService ?? throw new ArgumentNullException(nameof(workspacePullRequestService));
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly ILogger<WorkspaceGitService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -283,24 +285,12 @@ public class WorkspaceGitService(
     /// <summary>Gets push plan: all workspace repos by dependency level. Used to show multi-level dialog and run dependency-synchronized push.</summary>
     public async Task<(IReadOnlyList<PushRepoPayload> Payload, bool IsMultiLevel)> GetPushPlanAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
-        var payload = await _workspaceProjectRepository.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var payload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
         if (payload.Count == 0)
             return (payload, false);
         var levels = payload.Select(p => p.DependencyLevel ?? 0).Distinct().ToList();
         var isMultiLevel = levels.Count > 1;
         return (payload, isMultiLevel);
-    }
-
-    /// <summary>Gets dependency path and levels for a single repo (e.g. when user clicks the not-upstreamed badge). Returns null if repo not in workspace.</summary>
-    public async Task<PushDependencyInfoForRepo?> GetPushDependencyInfoForRepoAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
-    {
-        return await _workspaceProjectRepository.GetPushDependencyInfoForRepoAsync(workspaceId, repositoryId, cancellationToken);
-    }
-
-    /// <summary>Gets push dependency info for a set of repos (merged required packages and dependency path). Used for main Push button.</summary>
-    public async Task<PushDependencyInfoForRepo?> GetPushDependencyInfoForRepoSetAsync(int workspaceId, IReadOnlySet<int> repoIds, CancellationToken cancellationToken = default)
-    {
-        return await _workspaceProjectRepository.GetPushDependencyInfoForRepoSetAsync(workspaceId, repoIds, cancellationToken);
     }
 
     /// <summary>Syncs dependency versions in .csproj files to match the current version of each referenced package source. Only repos with at least one mismatched dependency are updated. When <paramref name="repoIdsToSync"/> is set, only those repos are synced.</summary>
@@ -690,7 +680,7 @@ public class WorkspaceGitService(
                 await _packageRegistrySyncService.SyncWorkspacePackageRegistriesAsync(workspaceId, cancellationToken: cancellationToken);
         }
 
-        var fullPayload = await _workspaceProjectRepository.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var fullPayload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
         var payload = repoIdsToPush is { Count: > 0 }
             ? fullPayload.Where(p => repoIdsToPush.Contains(p.RepoId)).ToList()
             : fullPayload;
@@ -954,7 +944,7 @@ public class WorkspaceGitService(
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var fullPayload = await _workspaceProjectRepository.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var fullPayload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
         var payload = fullPayload.Where(p => repoIds.Contains(p.RepoId)).ToList();
         if (payload.Count == 0)
         {
@@ -1005,7 +995,7 @@ public class WorkspaceGitService(
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var fullPayload = await _workspaceProjectRepository.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
+        var fullPayload = await _workspaceDependencyService.GetPushPlanPayloadAsync(workspaceId, cancellationToken);
         var payload = fullPayload.Where(p => repoIds.Contains(p.RepoId)).ToList();
         if (payload.Count == 0)
         {
