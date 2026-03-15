@@ -1,39 +1,39 @@
-using System.Diagnostics;
+using GrayMoon.Common;
 
 namespace GrayMoon.Agent.Cli;
 
 internal static class UninstallCommandHandler
 {
-    public static async Task<int> UninstallAsync(CancellationToken cancellationToken = default)
+    public static async Task<int> UninstallAsync(CancellationToken cancellationToken, ICommandLineService commandLine)
     {
         if (OperatingSystem.IsWindows())
-            return await UninstallWindowsAsync(cancellationToken).ConfigureAwait(false);
+            return await UninstallWindowsAsync(cancellationToken, commandLine).ConfigureAwait(false);
         if (OperatingSystem.IsLinux())
-            return await UninstallSystemdAsync(cancellationToken).ConfigureAwait(false);
+            return await UninstallSystemdAsync(cancellationToken, commandLine).ConfigureAwait(false);
 
         Console.Error.WriteLine("Uninstall is supported only on Windows and Linux.");
         return 1;
     }
 
-    private static async Task<int> UninstallWindowsAsync(CancellationToken cancellationToken)
+    private static async Task<int> UninstallWindowsAsync(CancellationToken cancellationToken, ICommandLineService commandLine)
     {
-        var (exitCode, _, stderr) = await RunProcessAsync("sc", $"delete {InstallCommandHandler.ServiceName}", cancellationToken).ConfigureAwait(false);
-        if (exitCode != 0)
+        var result = await commandLine.RunAsync("sc", $"delete {InstallCommandHandler.ServiceName}", null, null, cancellationToken).ConfigureAwait(false);
+        if (result.ExitCode != 0)
         {
-            Console.Error.WriteLine($"Failed to delete Windows service: {stderr?.TrimEnd() ?? "unknown"}");
-            return exitCode;
+            Console.Error.WriteLine($"Failed to delete Windows service: {result.Stderr?.TrimEnd() ?? "unknown"}");
+            return result.ExitCode;
         }
         Console.WriteLine($"Windows service '{InstallCommandHandler.ServiceName}' removed.");
         return 0;
     }
 
-    private static async Task<int> UninstallSystemdAsync(CancellationToken cancellationToken)
+    private static async Task<int> UninstallSystemdAsync(CancellationToken cancellationToken, ICommandLineService commandLine)
     {
-        var (exitCode, _, stderr) = await RunProcessAsync("systemctl", $"disable {InstallCommandHandler.ServiceName}.service --now", cancellationToken).ConfigureAwait(false);
-        if (exitCode != 0)
+        var result = await commandLine.RunAsync("systemctl", $"disable {InstallCommandHandler.ServiceName}.service --now", null, null, cancellationToken).ConfigureAwait(false);
+        if (result.ExitCode != 0)
         {
-            Console.Error.WriteLine($"Failed to disable service: {stderr?.TrimEnd()}");
-            return exitCode;
+            Console.Error.WriteLine($"Failed to disable service: {result.Stderr?.TrimEnd()}");
+            return result.ExitCode;
         }
 
         var unitPath = $"/etc/systemd/system/{InstallCommandHandler.ServiceName}.service";
@@ -50,32 +50,8 @@ internal static class UninstallCommandHandler
             }
         }
 
-        await RunProcessAsync("systemctl", "daemon-reload", cancellationToken).ConfigureAwait(false);
+        await commandLine.RunAsync("systemctl", "daemon-reload", null, null, cancellationToken).ConfigureAwait(false);
         Console.WriteLine($"systemd unit '{InstallCommandHandler.ServiceName}' removed.");
         return 0;
-    }
-
-    private static async Task<(int ExitCode, string? Stdout, string? Stderr)> RunProcessAsync(string fileName, string arguments, CancellationToken cancellationToken)
-    {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = fileName,
-                Arguments = arguments,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                LoadUserProfile = false,
-            }
-        };
-        process.Start();
-        var outTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var errTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        var stdout = await outTask.ConfigureAwait(false);
-        var stderr = await errTask.ConfigureAwait(false);
-        return (process.ExitCode, stdout, stderr);
     }
 }

@@ -1,6 +1,6 @@
 using System.CommandLine;
-using System.Diagnostics;
 using System.Text;
+using GrayMoon.Common;
 
 namespace GrayMoon.Agent.Cli;
 
@@ -8,7 +8,7 @@ internal static class InstallCommandHandler
 {
     public const string ServiceName = "GrayMoonAgent";
 
-    public static async Task<int> InstallAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
+    public static async Task<int> InstallAsync(ParseResult parseResult, CancellationToken cancellationToken, ICommandLineService commandLine)
     {
         var exePath = Environment.ProcessPath;
         if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
@@ -19,28 +19,28 @@ internal static class InstallCommandHandler
 
         var runArgs = AgentCliOptions.BuildRunArguments(parseResult);
         if (OperatingSystem.IsWindows())
-            return await InstallWindowsAsync(exePath, runArgs, cancellationToken).ConfigureAwait(false);
+            return await InstallWindowsAsync(exePath, runArgs, cancellationToken, commandLine).ConfigureAwait(false);
         if (OperatingSystem.IsLinux())
-            return await InstallSystemdAsync(exePath, runArgs, cancellationToken).ConfigureAwait(false);
+            return await InstallSystemdAsync(exePath, runArgs, cancellationToken, commandLine).ConfigureAwait(false);
 
         Console.Error.WriteLine("Install is supported only on Windows and Linux.");
         return 1;
     }
 
-    private static async Task<int> InstallWindowsAsync(string exePath, string runArgs, CancellationToken cancellationToken)
+    private static async Task<int> InstallWindowsAsync(string exePath, string runArgs, CancellationToken cancellationToken, ICommandLineService commandLine)
     {
         var binPath = $"{exePath} {runArgs}".TrimEnd();
-        var (exitCode, stdout, stderr) = await RunProcessAsync("sc", $"create {ServiceName} binPath= \"{binPath}\" start= auto", cancellationToken).ConfigureAwait(false);
-        if (exitCode != 0)
+        var result = await commandLine.RunAsync("sc", $"create {ServiceName} binPath= \"{binPath}\" start= auto", null, null, cancellationToken).ConfigureAwait(false);
+        if (result.ExitCode != 0)
         {
-            Console.Error.WriteLine($"Failed to create Windows service: {stderr?.TrimEnd() ?? stdout?.TrimEnd() ?? "unknown"}");
-            return exitCode;
+            Console.Error.WriteLine($"Failed to create Windows service: {result.Stderr?.TrimEnd() ?? result.Stdout?.TrimEnd() ?? "unknown"}");
+            return result.ExitCode;
         }
         Console.WriteLine($"Windows service '{ServiceName}' installed. Start with: sc start {ServiceName}");
         return 0;
     }
 
-    private static async Task<int> InstallSystemdAsync(string exePath, string runArgs, CancellationToken cancellationToken)
+    private static async Task<int> InstallSystemdAsync(string exePath, string runArgs, CancellationToken cancellationToken, ICommandLineService commandLine)
     {
         var unitPath = $"/etc/systemd/system/{ServiceName}.service";
         var unitContent = new StringBuilder();
@@ -66,45 +66,21 @@ internal static class InstallCommandHandler
             return 1;
         }
 
-        var (exitCode, _, stderr) = await RunProcessAsync("systemctl", "daemon-reload", cancellationToken).ConfigureAwait(false);
-        if (exitCode != 0)
+        var result = await commandLine.RunAsync("systemctl", "daemon-reload", null, null, cancellationToken).ConfigureAwait(false);
+        if (result.ExitCode != 0)
         {
-            Console.Error.WriteLine($"daemon-reload failed: {stderr?.TrimEnd()}");
-            return exitCode;
+            Console.Error.WriteLine($"daemon-reload failed: {result.Stderr?.TrimEnd()}");
+            return result.ExitCode;
         }
 
-        (exitCode, _, stderr) = await RunProcessAsync("systemctl", $"enable {ServiceName}.service", cancellationToken).ConfigureAwait(false);
-        if (exitCode != 0)
+        result = await commandLine.RunAsync("systemctl", $"enable {ServiceName}.service", null, null, cancellationToken).ConfigureAwait(false);
+        if (result.ExitCode != 0)
         {
-            Console.Error.WriteLine($"Failed to enable service: {stderr?.TrimEnd()}");
-            return exitCode;
+            Console.Error.WriteLine($"Failed to enable service: {result.Stderr?.TrimEnd()}");
+            return result.ExitCode;
         }
 
         Console.WriteLine($"systemd unit installed: {unitPath}. Start with: sudo systemctl start {ServiceName}");
         return 0;
-    }
-
-    private static async Task<(int ExitCode, string? Stdout, string? Stderr)> RunProcessAsync(string fileName, string arguments, CancellationToken cancellationToken)
-    {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = fileName,
-                Arguments = arguments,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                LoadUserProfile = false,
-            }
-        };
-        process.Start();
-        var outTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var errTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        var stdout = await outTask.ConfigureAwait(false);
-        var stderr = await errTask.ConfigureAwait(false);
-        return (process.ExitCode, stdout, stderr);
     }
 }
