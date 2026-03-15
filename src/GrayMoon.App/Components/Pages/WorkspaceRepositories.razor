@@ -155,6 +155,7 @@
                                                                   OnDependencyBadgeMouseLeave="() => OnDependencyBadgeMouseLeave(wr.RepositoryId)"
                                                                   OnPushBadgeClick="() => OnPushBadgeClickAsync(wr.RepositoryId, wr.BranchName)"
                                                                   OnPullBadgeClick="() => OnPullBadgeClickAsync(wr.RepositoryId)"
+                                                                  OnPrBadgeMouseEnter="() => RefreshPrOnBadgeEnterAsync(wr.RepositoryId)"
                                                                   OnSyncClick="() => SyncSingleRepoAsync(wr.RepositoryId)"
                                                                   OnDismissError="() => DismissRepositoryError(wr.RepositoryId)" />
                                     }

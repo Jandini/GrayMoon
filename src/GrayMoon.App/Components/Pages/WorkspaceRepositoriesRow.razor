@@ -66,7 +66,8 @@
                                     RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
                                     DefaultBranchName="@Link.DefaultBranchName" />
                 </span>
-                <span class="metrics-block metrics-pr text-nowrap">
+                <span class="metrics-block metrics-pr text-nowrap"
+                      @onmouseenter="HandlePrBadgeMouseEnter">
                     <PRBadge PullRequest="@PrInfo"
                             DefaultBranchAheadCommits="@Link.DefaultBranchAheadCommits"
                             IsPrVerified="@IsPrVerified"
@@ -177,6 +178,13 @@
     [Parameter] public EventCallback OnPullBadgeClick { get; set; }
     [Parameter] public EventCallback OnSyncClick { get; set; }
     [Parameter] public EventCallback OnDismissError { get; set; }
+    [Parameter] public EventCallback OnPrBadgeMouseEnter { get; set; }
+
+    private async Task HandlePrBadgeMouseEnter()
+    {
+        if (PrInfo?.IsMerged == true) return;
+        await OnPrBadgeMouseEnter.InvokeAsync();
+    }
 
     private async Task HandleBranchClick()
     {

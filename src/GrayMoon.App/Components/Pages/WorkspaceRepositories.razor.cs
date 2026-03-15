@@ -16,6 +16,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private Workspace? workspace;
     private List<WorkspaceRepositoryLink> workspaceRepositories = new();
     private IReadOnlyDictionary<int, PullRequestInfo?> prByRepositoryId = new Dictionary<int, PullRequestInfo?>();
+    private readonly Dictionary<int, DateTime> _lastPrRefreshByRepoId = new();
+    private static readonly TimeSpan PrRefreshThrottle = TimeSpan.FromSeconds(10);
     private IReadOnlyDictionary<int, RepoGitVersionInfo> repoGitInfos = new Dictionary<int, RepoGitVersionInfo>();
     private string? errorMessage;
     private bool isLoading = true;
@@ -276,6 +278,29 @@ public sealed partial class WorkspaceRepositories : IDisposable
         catch (Exception ex)
         {
             Logger.LogDebug(ex, "Background PR refresh failed for workspace {WorkspaceId}", WorkspaceId);
+        }
+    }
+
+    /// <summary>Refreshes PR for one repository when user enters the PR badge. Only runs if PR is not merged and throttle allows.</summary>
+    private async Task RefreshPrOnBadgeEnterAsync(int repositoryId)
+    {
+        if (prByRepositoryId.TryGetValue(repositoryId, out var pr) && pr?.IsMerged == true)
+            return;
+        if (_lastPrRefreshByRepoId.TryGetValue(repositoryId, out var last) && DateTime.UtcNow - last < PrRefreshThrottle)
+            return;
+        try
+        {
+            await WorkspacePageService.WorkspacePullRequestService.RefreshPullRequestsAsync(WorkspaceId, new[] { repositoryId });
+            _lastPrRefreshByRepoId[repositoryId] = DateTime.UtcNow;
+            await ReloadWorkspaceDataFromFreshScopeAsync();
+            ApplySyncStateFromWorkspace();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "PR refresh on badge enter failed for RepositoryId={RepositoryId}", repositoryId);
         }
     }
 
