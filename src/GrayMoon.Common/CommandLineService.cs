@@ -1,11 +1,10 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Common;
 
 /// <summary>
-/// Single place for process execution and DEBUG logging (safe parameters, elapsed ms, exit code).
+/// Single place for process execution and DEBUG logging (safe parameters, elapsed ms, exit code, split timings).
 /// </summary>
 public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICommandLineService
 {
@@ -18,25 +17,31 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
     {
         arguments ??= "";
         var sw = Stopwatch.StartNew();
+        var resolvedWorkingDir = !string.IsNullOrWhiteSpace(workingDirectory) ? workingDirectory : Environment.CurrentDirectory;
         var startInfo = new ProcessStartInfo
         {
             FileName = fileName,
             Arguments = arguments,
-            WorkingDirectory = workingDirectory ?? "",
+            WorkingDirectory = resolvedWorkingDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             RedirectStandardInput = stdin != null,
             UseShellExecute = false,
             CreateNoWindow = true
         };
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            startInfo.LoadUserProfile = false;
 
+        var beforeStart = sw.ElapsedMilliseconds;
         using var process = Process.Start(startInfo);
+        var afterStart = sw.ElapsedMilliseconds;
+        var startCallMs = afterStart - beforeStart;
+
         if (process == null)
         {
-            sw.Stop();
-            logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode=-1)", fileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds);
+            logger.LogDebug(
+                "Command {Executable} {Parameters} failed to start. StartCall={StartCallMs}ms",
+                fileName,
+                LogSafe.ForLog(arguments),
+                startCallMs);
             return new CommandLineResult(-1, null, "Failed to start process");
         }
 
@@ -48,12 +53,29 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
 
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-        sw.Stop();
+        var afterReadSetup = sw.ElapsedMilliseconds;
 
-        logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode={ExitCode})", fileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds, process.ExitCode);
+        await Task.WhenAll(stdoutTask, stderrTask, process.WaitForExitAsync(cancellationToken));
+        var afterExit = sw.ElapsedMilliseconds;
+
+        var stdout = await stdoutTask;
+        var afterStdout = sw.ElapsedMilliseconds;
+        var stderr = await stderrTask;
+        var afterStderr = sw.ElapsedMilliseconds;
+        var totalCommandTimeMs = afterStderr;
+
+        logger.LogDebug(
+            "Command {Executable} {Parameters} timings: StartCall={StartCallMs}ms, ReadSetup={ReadSetupMs}ms, WaitForExit={WaitForExitMs}ms, StdoutDone={StdoutDoneMs}ms, StderrDone={StderrDoneMs}ms, TotalCommandTime={TotalCommandTimeMs}ms, ExitCode={ExitCode}",
+            fileName,
+            LogSafe.ForLog(arguments),
+            startCallMs,
+            afterReadSetup - afterStart,
+            afterExit - afterReadSetup,
+            afterStdout - afterExit,
+            afterStderr - afterStdout,
+            totalCommandTimeMs,
+            process.ExitCode);
+
         return new CommandLineResult(process.ExitCode, stdout, stderr);
     }
 }
