@@ -29,9 +29,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
             UseShellExecute = false,
             CreateNoWindow = true
         };
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            startInfo.LoadUserProfile = false;
-
+     
         using var process = Process.Start(startInfo);
         if (process == null)
         {
