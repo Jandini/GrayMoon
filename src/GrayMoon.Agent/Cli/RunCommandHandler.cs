@@ -137,18 +137,6 @@ internal static class RunCommandHandler
 
         var host = builder.Build();
 
-        // One-time environment log at Debug for VDI vs laptop comparison (PATH length, current dir, USERPROFILE).
-        var envLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("GrayMoon.Agent.Env");
-        var pathEnv = Environment.GetEnvironmentVariable("PATH");
-        var pathLen = pathEnv?.Length ?? 0;
-        var pathFirst = pathEnv is { Length: > 0 } ? pathEnv.AsSpan(0, Math.Min(80, pathEnv.Length)).ToString() + (pathEnv.Length > 80 ? "..." : "") : "";
-        envLogger.LogDebug(
-            "Process env: CurrentDirectory={CurrentDirectory}, PATH length={PathLength}, PATH first={PathFirst}, USERPROFILE={UserProfile}",
-            Environment.CurrentDirectory,
-            pathLen,
-            pathFirst,
-            Environment.GetEnvironmentVariable("USERPROFILE") ?? "");
-
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         Console.CancelKeyPress += (_, e) =>
         {
