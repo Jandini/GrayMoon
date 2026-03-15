@@ -15,4 +15,8 @@ public sealed class SyncToDefaultBranchRequest : WorkspaceCommandRequest
 
     [JsonPropertyName("bearerToken")]
     public string? BearerToken { get; set; }
+
+    /// <summary>When true, delete the previous local branch with -D (force). Set from PR merged status by the App.</summary>
+    [JsonPropertyName("forceDeleteLocalBranch")]
+    public bool ForceDeleteLocalBranch { get; set; }
 }
