@@ -42,4 +42,3 @@ The app runs in a container and does not run git or access your workspace filesy
 
 When the agent is connected, the app shows an **online** badge; sync and repo operations use the agent. When it’s offline, sync fails with a clear message. 
 
-
