@@ -163,7 +163,7 @@ public class GitCommandService(ILogger<GitCommandService> logger)
         var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
         var headerValue = "Authorization: Basic " + base64;
         var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
-        return $"-c \"http.extraHeader={escaped}\" clone \"{cloneUrl}\"";
+        return $"-c core.askpass=true -c credential.helper= -c \"http.extraHeader={escaped}\" clone \"{cloneUrl}\"";
     }
 
     public async Task<string?> GetHeadShaAsync(string repositoryPath, CancellationToken cancellationToken = default)

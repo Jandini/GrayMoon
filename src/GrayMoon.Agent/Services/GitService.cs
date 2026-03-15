@@ -244,7 +244,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
             // Use --prune to remove stale remote-tracking branches
             var fetchCmd = includeTags ? "fetch origin --prune --tags" : "fetch origin --prune";
-            args = $"-c \"http.extraHeader={escaped}\" {fetchCmd}";
+            args = $"-c core.askpass=true -c credential.helper= -c \"http.extraHeader={escaped}\" {fetchCmd}";
             logArgs = "<redacted>";
         }
         var sw = Stopwatch.StartNew();
@@ -329,7 +329,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
             var headerValue = "Authorization: Basic " + base64;
             var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
-            args = $"-c \"http.extraHeader={escaped}\" fetch origin {refArgs}";
+            args = $"-c core.askpass=true -c credential.helper= -c \"http.extraHeader={escaped}\" fetch origin {refArgs}";
             logArgs = "<redacted>";
         }
 
@@ -506,7 +506,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
             var headerValue = "Authorization: Basic " + base64;
             var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
-            args = $"-c \"http.extraHeader={escaped}\" pull origin {branchName}";
+            args = $"-c core.askpass=true -c credential.helper= -c \"http.extraHeader={escaped}\" pull origin {branchName}";
         }
 
         var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);
@@ -556,7 +556,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
             var headerValue = "Authorization: Basic " + base64;
             var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
-            args = $"-c \"http.extraHeader={escaped}\" push {pushOpts}origin {branchName}";
+            args = $"-c core.askpass=true -c credential.helper= -c \"http.extraHeader={escaped}\" push {pushOpts}origin {branchName}";
         }
 
         var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);
@@ -655,7 +655,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
             var headerValue = "Authorization: Basic " + base64;
             var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
-            args = $"-c \"http.extraHeader={escaped}\" ls-remote --heads origin";
+            args = $"-c core.askpass=true -c credential.helper= -c \"http.extraHeader={escaped}\" ls-remote --heads origin";
         }
 
         // Use ls-remote to query the actual remote branches (not local remote-tracking refs)
@@ -1064,7 +1064,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
         var headerValue = "Authorization: Basic " + base64;
         var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
-        return $"-c \"http.extraHeader={escaped}\" clone \"{cloneUrl}\"";
+        return $"-c core.askpass=true -c credential.helper= -c \"http.extraHeader={escaped}\" clone \"{cloneUrl}\"";
     }
 
     private static string SanitizeDirectoryName(string name)
