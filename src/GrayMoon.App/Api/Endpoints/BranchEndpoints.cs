@@ -522,7 +522,8 @@ public static class BranchEndpoints
                 workspaceName = workspace.Name,
                 repositoryName = repo.RepositoryName,
                 branchName,
-                workspaceRoot
+                workspaceRoot,
+                repositoryId
             };
             var response = await agentBridge.SendCommandAsync("SetUpstreamBranch", args, CancellationToken.None);
 
