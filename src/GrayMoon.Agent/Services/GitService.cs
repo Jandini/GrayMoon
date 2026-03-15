@@ -1092,7 +1092,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            LoadUserProfile = false
         };
 
         using var process = Process.Start(startInfo);
@@ -1131,7 +1132,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            LoadUserProfile = false
         };
 
         using var process = Process.Start(startInfo);

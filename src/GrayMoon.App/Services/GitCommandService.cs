@@ -35,7 +35,8 @@ public class GitCommandService(ILogger<GitCommandService> logger)
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            LoadUserProfile = false
         };
 
         try
@@ -148,7 +149,8 @@ public class GitCommandService(ILogger<GitCommandService> logger)
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            LoadUserProfile = false
         };
         using var process = System.Diagnostics.Process.Start(startInfo);
         if (process == null)

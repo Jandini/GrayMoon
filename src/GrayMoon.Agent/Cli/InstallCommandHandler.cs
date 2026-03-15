@@ -96,6 +96,7 @@ internal static class InstallCommandHandler
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
+                LoadUserProfile = false,
             }
         };
         process.Start();
