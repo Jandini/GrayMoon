@@ -1038,6 +1038,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var commitCurl = $"curl {curlFlags} -X POST \"http://127.0.0.1:{_listenPort}/hook/commit\"   {header} -d '{escapedPayload}' || true";
         var checkoutCurl = $"curl {curlFlags} -X POST \"http://127.0.0.1:{_listenPort}/hook/checkout\" {header} -d '{escapedPayload}' || true";
         var mergeCurl = $"curl {curlFlags} -X POST \"http://127.0.0.1:{_listenPort}/hook/merge\"    {header} -d '{escapedPayload}' || true";
+        var pushCurl = $"curl {curlFlags} -X POST \"http://127.0.0.1:{_listenPort}/hook/push\"     {header} -d '{escapedPayload}' || true";
 
         var utf8 = new UTF8Encoding(false);
         var comment = $"# Created by GrayMoon.Agent at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}Z\n";
@@ -1046,6 +1047,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         WriteHookFile(Path.Combine(hooksDir, "post-checkout"), "#!/bin/sh\n" + comment + "[ \"$3\" = \"1\" ] && " + checkoutCurl.TrimEnd() + "\n", utf8);
         WriteHookFile(Path.Combine(hooksDir, "post-merge"), "#!/bin/sh\n" + comment + mergeCurl + "\n", utf8);
         WriteHookFile(Path.Combine(hooksDir, "post-update"), "#!/bin/sh\n" + comment + commitCurl + "\n", utf8);
+        WriteHookFile(Path.Combine(hooksDir, "pre-push"), "#!/bin/sh\n" + comment + pushCurl + "\n", utf8);
         logger.LogDebug("Sync hooks written for repo {RepoId} in workspace {WorkspaceId}", repositoryId, workspaceId);
     }
 
