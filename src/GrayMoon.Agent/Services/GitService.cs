@@ -406,7 +406,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var originBranch = upstreamRef!;
 
         // Branch has an upstream configured - verify the remote-tracking ref exists locally before comparing.
-        var (exitCheck, _, _) = await RunProcessAsync("git", $"rev-parse --verify {originBranch}", repoPath, ct);
+        var (exitCheck, _, _) = await RunProcessAsync("git", $"rev-parse --verify --quiet {originBranch}", repoPath, ct);
         if (exitCheck != 0)
         {
             var defaultBranch = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
@@ -703,7 +703,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
 
         // First check if it's a remote branch that needs to be tracked locally
-        var (exitCheckRemote, _, _) = await RunProcessAsync("git", $"rev-parse --verify origin/{branchName}", repoPath, ct);
+        var (exitCheckRemote, _, _) = await RunProcessAsync("git", $"rev-parse --verify --quiet origin/{branchName}", repoPath, ct);
         if (exitCheckRemote == 0)
         {
             // Remote branch exists, checkout with tracking
@@ -759,7 +759,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             ? trimmedBase
             : "origin/" + trimmedBase;
 
-        var (exitRemote, _, _) = await RunProcessAsync("git", $"rev-parse --verify {remoteCandidate}", repoPath, ct);
+        var (exitRemote, _, _) = await RunProcessAsync("git", $"rev-parse --verify --quiet {remoteCandidate}", repoPath, ct);
         if (exitRemote == 0)
             startPoint = remoteCandidate;
 
@@ -769,7 +769,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (exitCode != 0)
         {
             // Branch may already exist (e.g. persistence out of date); try checkout existing
-            var (verifyExit, _, _) = await RunProcessAsync("git", $"rev-parse --verify refs/heads/{newBranchName}", repoPath, ct);
+            var (verifyExit, _, _) = await RunProcessAsync("git", $"rev-parse --verify --quiet refs/heads/{newBranchName}", repoPath, ct);
             if (verifyExit == 0)
             {
                 logger.LogWarning("Branch {Branch} already exists in {RepoPath}; checking out existing branch.", newBranchName, repoPath);
@@ -797,7 +797,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return false;
 
         // Check if branch exists
-        var (exitCheck, _, _) = await RunProcessAsync("git", $"rev-parse --verify {branchName}", repoPath, ct);
+        var (exitCheck, _, _) = await RunProcessAsync("git", $"rev-parse --verify --quiet {branchName}", repoPath, ct);
         if (exitCheck != 0)
         {
             logger.LogWarning("Branch {Branch} does not exist in {RepoPath}", branchName, repoPath);
@@ -864,7 +864,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (string.IsNullOrWhiteSpace(localName))
             return (false, "Invalid branch name");
 
-        var (exitCheck, _, _) = await RunProcessAsync("git", $"rev-parse --verify refs/heads/{localName}", repoPath, ct);
+        var (exitCheck, _, _) = await RunProcessAsync("git", $"rev-parse --verify --quiet refs/heads/{localName}", repoPath, ct);
         if (exitCheck != 0)
         {
             logger.LogWarning("Branch {Branch} does not exist in {RepoPath}", localName, repoPath);
@@ -936,7 +936,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 var branch = refName.Substring("refs/remotes/origin/".Length);
                 if (!string.IsNullOrEmpty(branch) && branch != "HEAD")
                 {
-                    var (exitVerify, _, _) = await RunProcessAsync("git", $"rev-parse --verify origin/{branch}", repoPath, ct);
+                    var (exitVerify, _, _) = await RunProcessAsync("git", $"rev-parse --verify --quiet origin/{branch}", repoPath, ct);
                     if (exitVerify == 0)
                         return $"origin/{branch}";
                 }
@@ -944,11 +944,11 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
 
         // Fall back to origin/main then origin/master
-        var (exitMain, _, _) = await RunProcessAsync("git", "rev-parse --verify origin/main", repoPath, ct);
+        var (exitMain, _, _) = await RunProcessAsync("git", "rev-parse --verify --quiet origin/main", repoPath, ct);
         if (exitMain == 0)
             return "origin/main";
 
-        var (exitMaster, _, _) = await RunProcessAsync("git", "rev-parse --verify origin/master", repoPath, ct);
+        var (exitMaster, _, _) = await RunProcessAsync("git", "rev-parse --verify --quiet origin/master", repoPath, ct);
         if (exitMaster == 0)
             return "origin/master";
 
