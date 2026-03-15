@@ -1,11 +1,11 @@
-using System.Diagnostics;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
+using GrayMoon.Common;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class GetHostInfoCommand : ICommandHandler<GetHostInfoRequest, GetHostInfoResponse>
+public sealed class GetHostInfoCommand(ICommandLineService commandLine) : ICommandHandler<GetHostInfoRequest, GetHostInfoResponse>
 {
     public async Task<GetHostInfoResponse> ExecuteAsync(GetHostInfoRequest request, CancellationToken cancellationToken = default)
     {
@@ -21,34 +21,15 @@ public sealed class GetHostInfoCommand : ICommandHandler<GetHostInfoRequest, Get
         };
     }
 
-    private static async Task<string?> GetVersionAsync(string fileName, string arguments, string? workingDirectory, CancellationToken cancellationToken)
+    private async Task<string?> GetVersionAsync(string fileName, string arguments, string? workingDirectory, CancellationToken cancellationToken)
     {
         try
         {
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = fileName,
-                Arguments = arguments,
-                WorkingDirectory = workingDirectory ?? "",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                LoadUserProfile = false
-            };
-
-            using var process = Process.Start(startInfo);
-            if (process == null)
+            var result = await commandLine.RunAsync(fileName, arguments, workingDirectory, null, cancellationToken);
+            if (result.ExitCode != 0)
                 return null;
 
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
-            var stdout = await stdoutTask;
-
-            if (process.ExitCode != 0)
-                return null;
-
-            var line = stdout?.Trim().Split('\n', '\r').FirstOrDefault()?.Trim();
+            var line = result.Stdout?.Trim().Split('\n', '\r').FirstOrDefault()?.Trim();
             if (string.IsNullOrWhiteSpace(line))
                 return null;
 

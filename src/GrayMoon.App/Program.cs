@@ -8,6 +8,7 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.Security;
+using GrayMoon.Common;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
@@ -67,6 +68,8 @@ try
     builder.Services.AddScoped<WorkspaceDependencyService>();
     builder.Services.AddScoped<WorkspaceBranchHandler>();
     builder.Services.AddScoped<IWorkspacePageService, WorkspacePageService>();
+
+    builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
 
     // Token protection
     builder.Services.AddSingleton<ITokenEncryptionKeyProvider, TokenEncryptionKeyProvider>();

@@ -1,5 +1,8 @@
 using System.CommandLine;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using GrayMoon.Common;
 
 namespace GrayMoon.Agent.Cli;
 
@@ -46,11 +49,21 @@ internal static class AgentCli
 
     private static async Task<int> InstallAsync(ParseResult parseResult, CancellationToken cancellationToken)
     {
-        return await InstallCommandHandler.InstallAsync(parseResult, cancellationToken).ConfigureAwait(false);
+        var services = new ServiceCollection()
+            .AddLogging(b => b.AddConsole().SetMinimumLevel(LogLevel.Warning))
+            .AddSingleton<ICommandLineService, CommandLineService>()
+            .BuildServiceProvider();
+        var commandLine = services.GetRequiredService<ICommandLineService>();
+        return await InstallCommandHandler.InstallAsync(parseResult, cancellationToken, commandLine).ConfigureAwait(false);
     }
 
     private static async Task<int> UninstallAsync(ParseResult parseResult, CancellationToken cancellationToken)
     {
-        return await UninstallCommandHandler.UninstallAsync(cancellationToken).ConfigureAwait(false);
+        var services = new ServiceCollection()
+            .AddLogging(b => b.AddConsole().SetMinimumLevel(LogLevel.Warning))
+            .AddSingleton<ICommandLineService, CommandLineService>()
+            .BuildServiceProvider();
+        var commandLine = services.GetRequiredService<ICommandLineService>();
+        return await UninstallCommandHandler.UninstallAsync(cancellationToken, commandLine).ConfigureAwait(false);
     }
 }

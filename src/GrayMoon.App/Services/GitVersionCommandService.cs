@@ -1,9 +1,10 @@
 using System.Text.Json;
 using GrayMoon.App.Models;
+using GrayMoon.Common;
 
 namespace GrayMoon.App.Services;
 
-public class GitVersionCommandService(ILogger<GitVersionCommandService> logger)
+public class GitVersionCommandService(ILogger<GitVersionCommandService> logger, ICommandLineService commandLine)
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
@@ -24,53 +25,31 @@ public class GitVersionCommandService(ILogger<GitVersionCommandService> logger)
 
     private async Task<GitVersionResult?> RunDotNetGitVersionAsync(string repositoryPath, CancellationToken cancellationToken)
     {
-        logger.LogDebug("Running dotnet-gitversion in {Path}", repositoryPath);
-
-        // Use dotnet-gitversion (in PATH from dotnet tool install -g) for Docker compatibility.
-        // Pass /output json, /nofetch and /verbosity quiet; callers are responsible for performing any required fetch.
-        var startInfo = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = "dotnet-gitversion",
-            Arguments = "/output json /nofetch /verbosity quiet",
-            WorkingDirectory = repositoryPath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            LoadUserProfile = false
-        };
-
         try
         {
-            using var process = System.Diagnostics.Process.Start(startInfo);
-            if (process == null)
+            var result = await commandLine.RunAsync("dotnet-gitversion", "/output json /nofetch /verbosity quiet", repositoryPath, null, cancellationToken);
+
+            if (result.ExitCode == -1)
             {
                 logger.LogWarning("Failed to start dotnet gitversion process for {Path}", repositoryPath);
                 return null;
             }
-
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
-
-            if (process.ExitCode != 0)
+            if (result.ExitCode != 0)
             {
                 logger.LogWarning("dotnet-gitversion failed with exit code {ExitCode} in {Path}. Stdout: {Stdout} Stderr: {Stderr}",
-                    process.ExitCode, repositoryPath,
-                    string.IsNullOrWhiteSpace(stdout) ? "(none)" : stdout.Trim(),
-                    string.IsNullOrWhiteSpace(stderr) ? "(none)" : stderr.Trim());
+                    result.ExitCode, repositoryPath,
+                    string.IsNullOrWhiteSpace(result.Stdout) ? "(none)" : result.Stdout.Trim(),
+                    string.IsNullOrWhiteSpace(result.Stderr) ? "(none)" : result.Stderr.Trim());
                 return null;
             }
 
-            var result = ParseGitVersionJson(stdout);
-            if (result != null)
+            var parsed = ParseGitVersionJson(result.Stdout);
+            if (parsed != null)
             {
                 logger.LogInformation("GitVersion for {Path}: {InformationalVersion} ({Branch})", repositoryPath,
-                    result.InformationalVersion ?? "-", result.BranchName ?? result.EscapedBranchName ?? "-");
+                    parsed.InformationalVersion ?? "-", parsed.BranchName ?? parsed.EscapedBranchName ?? "-");
             }
-            return result;
+            return parsed;
         }
         catch (Exception ex)
         {

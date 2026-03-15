@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using GrayMoon.Common;
 using Polly;
@@ -6,7 +5,7 @@ using Polly.Retry;
 
 namespace GrayMoon.App.Services;
 
-public class GitCommandService(ILogger<GitCommandService> logger)
+public class GitCommandService(ILogger<GitCommandService> logger, ICommandLineService commandLine)
 {
     public async Task<bool> CloneAsync(string workingDirectory, string cloneUrl, string? bearerToken = null, CancellationToken cancellationToken = default)
     {
@@ -26,45 +25,22 @@ public class GitCommandService(ILogger<GitCommandService> logger)
         }
 
         var arguments = BuildCloneArguments(cloneUrl, bearerToken);
-        var sw = Stopwatch.StartNew();
-        var startInfo = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = "git",
-            Arguments = arguments,
-            WorkingDirectory = workingDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            LoadUserProfile = false
-        };
 
         try
         {
-            using var process = System.Diagnostics.Process.Start(startInfo);
-            if (process == null)
+            var result = await commandLine.RunAsync("git", arguments, workingDirectory, null, cancellationToken);
+
+            if (result.ExitCode == -1)
             {
-                sw.Stop();
-                logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode=-1)", startInfo.FileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds);
                 logger.LogError("Failed to start git process.");
                 return false;
             }
-
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
-            sw.Stop();
-
-            logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode={ExitCode})", startInfo.FileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds, process.ExitCode);
-
-            if (process.ExitCode != 0)
+            if (result.ExitCode != 0)
             {
                 logger.LogWarning("Git clone failed with exit code {ExitCode}. Stdout: {Stdout} Stderr: {Stderr}",
-                    process.ExitCode,
-                    string.IsNullOrWhiteSpace(stdout) ? "(none)" : stdout.Trim(),
-                    string.IsNullOrWhiteSpace(stderr) ? "(none)" : stderr.Trim());
+                    result.ExitCode,
+                    string.IsNullOrWhiteSpace(result.Stdout) ? "(none)" : result.Stdout.Trim(),
+                    string.IsNullOrWhiteSpace(result.Stderr) ? "(none)" : result.Stderr.Trim());
                 return false;
             }
 
@@ -73,8 +49,6 @@ public class GitCommandService(ILogger<GitCommandService> logger)
         }
         catch (Exception ex)
         {
-            sw.Stop();
-            logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode=-1)", startInfo.FileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds);
             logger.LogError(ex, "Error running git clone for {Url}", cloneUrl);
             throw;
         }
@@ -137,37 +111,10 @@ public class GitCommandService(ILogger<GitCommandService> logger)
             })
             .Build();
 
-    /// <summary>Runs a git command with DEBUG logging once after completion (safe parameters, elapsed ms). Tokens are not logged.</summary>
     private async Task<(int ExitCode, string? Stdout, string? Stderr)> RunGitAsync(string fileName, string arguments, string? workingDirectory, CancellationToken cancellationToken)
     {
-        var sw = Stopwatch.StartNew();
-        var startInfo = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = fileName,
-            Arguments = arguments,
-            WorkingDirectory = workingDirectory ?? "",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            LoadUserProfile = false
-        };
-        using var process = System.Diagnostics.Process.Start(startInfo);
-        if (process == null)
-        {
-            sw.Stop();
-            logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode=-1)", startInfo.FileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds);
-            return (-1, null, "Failed to start process");
-        }
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-        sw.Stop();
-
-        logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode={ExitCode})", fileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds, process.ExitCode);
-        return (process.ExitCode, stdout, stderr);
+        var result = await commandLine.RunAsync(fileName, arguments, workingDirectory, null, cancellationToken);
+        return (result.ExitCode, result.Stdout, result.Stderr);
     }
 
     /// <summary>
