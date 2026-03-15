@@ -26,31 +26,28 @@ public static class LogSafe
 
     private static string RedactHttpExtraHeader(string s)
     {
-        var extraHeaderStart = s.IndexOf("http.extraHeader=", StringComparison.OrdinalIgnoreCase);
-        while (extraHeaderStart >= 0)
+        const string cQuote = "-c \"";
+        var i = 0;
+        while (true)
         {
-            var valueStart = extraHeaderStart + "http.extraHeader=".Length;
-            if (valueStart <= s.Length && s[valueStart - 1] == '=')
+            var cStart = s.IndexOf(cQuote, i, StringComparison.Ordinal);
+            if (cStart < 0) break;
+            var contentStart = cStart + cQuote.Length;
+            var contentEnd = contentStart;
+            while (contentEnd < s.Length && s[contentEnd] != '"')
             {
-                var quote = valueStart < s.Length && s[valueStart] == '"';
-                var start = quote ? valueStart + 1 : valueStart;
-                var end = start;
-                if (quote)
-                {
-                    while (end < s.Length && s[end] != '"')
-                    {
-                        if (s[end] == '\\' && end + 1 < s.Length) end++;
-                        end++;
-                    }
-                    if (end < s.Length) end++;
-                }
-                else
-                {
-                    while (end < s.Length && s[end] != ' ' && s[end] != '\t') end++;
-                }
-                s = s.Substring(0, start) + Replacement + (quote ? "\"" : "") + (end < s.Length ? s.Substring(end) : "");
+                if (s[contentEnd] == '\\' && contentEnd + 1 < s.Length) contentEnd++;
+                contentEnd++;
             }
-            extraHeaderStart = s.IndexOf("http.extraHeader=", extraHeaderStart + 1, StringComparison.OrdinalIgnoreCase);
+            if (contentEnd < s.Length)
+            {
+                var content = s.Substring(contentStart, contentEnd - contentStart);
+                if (content.StartsWith("http.extraHeader=", StringComparison.OrdinalIgnoreCase))
+                    s = s.Substring(0, contentStart) + Replacement + s.Substring(contentEnd);
+                i = contentEnd + 1;
+            }
+            else
+                break;
         }
         return s;
     }
