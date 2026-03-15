@@ -9,6 +9,7 @@ public static class LogSafe
 
     /// <summary>
     /// Returns a copy of <paramref name="text"/> with bearer tokens and URL credentials replaced by ***.
+    /// Only the token value is removed; labels like "Bearer" are kept as "Bearer ***".
     /// Safe to call on null or empty; does minimal work when no secrets are present.
     /// </summary>
     public static string ForLog(string? text)
@@ -17,11 +18,42 @@ public static class LogSafe
             return text ?? string.Empty;
 
         var s = text;
+        if (s.IndexOf("Bearer ", StringComparison.OrdinalIgnoreCase) >= 0)
+            s = RedactBearerToken(s);
         if (s.IndexOf("http.extraHeader=", StringComparison.OrdinalIgnoreCase) >= 0)
             s = RedactHttpExtraHeader(s);
         if (s.IndexOf("https://", StringComparison.OrdinalIgnoreCase) >= 0 || s.IndexOf("http://", StringComparison.OrdinalIgnoreCase) >= 0)
             s = RedactUrlCredentials(s);
         return s;
+    }
+
+    /// <summary>Redacts the token value after "Bearer " (case-insensitive), leaving "Bearer ***".</summary>
+    private static string RedactBearerToken(string s)
+    {
+        var bearer = "Bearer ";
+        var i = 0;
+        while (true)
+        {
+            i = s.IndexOf(bearer, i, StringComparison.OrdinalIgnoreCase);
+            if (i < 0) break;
+            var tokenStart = i + bearer.Length;
+            var tokenEnd = tokenStart;
+            while (tokenEnd < s.Length && IsBearerTokenChar(s[tokenEnd]))
+                tokenEnd++;
+            if (tokenEnd > tokenStart)
+            {
+                s = s.Substring(0, tokenStart) + Replacement + s.Substring(tokenEnd);
+                i = tokenStart + Replacement.Length;
+            }
+            else
+                i = tokenStart;
+        }
+        return s;
+    }
+
+    private static bool IsBearerTokenChar(char c)
+    {
+        return char.IsLetterOrDigit(c) || c == '_' || c == '-' || c == '.';
     }
 
     private static string RedactHttpExtraHeader(string s)
@@ -46,7 +78,13 @@ public static class LogSafe
                 }
                 else
                 {
-                    while (end < s.Length && s[end] != ' ' && s[end] != '\t') end++;
+                    // Unquoted value: redact until next " -c " or end of string
+                    while (end < s.Length)
+                    {
+                        if (end + 3 <= s.Length && s[end] == ' ' && s[end + 1] == '-' && s[end + 2] == 'c')
+                            break;
+                        end++;
+                    }
                 }
                 s = s.Substring(0, start) + Replacement + (quote ? "\"" : "") + (end < s.Length ? s.Substring(end) : "");
             }

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Common;
@@ -30,8 +29,6 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
             UseShellExecute = false,
             CreateNoWindow = true
         };
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            startInfo.LoadUserProfile = false;
 
         var beforeStart = sw.ElapsedMilliseconds;
         using var process = Process.Start(startInfo);
@@ -65,9 +62,10 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
         var afterStdout = sw.ElapsedMilliseconds;
         var stderr = await stderrTask;
         var afterStderr = sw.ElapsedMilliseconds;
+        var totalCommandTimeMs = afterStderr;
 
         logger.LogDebug(
-            "Command {Executable} {Parameters} timings: StartCall={StartCallMs}ms, ReadSetup={ReadSetupMs}ms, WaitForExit={WaitForExitMs}ms, StdoutDone={StdoutDoneMs}ms, StderrDone={StderrDoneMs}ms, ExitCode={ExitCode}",
+            "Command {Executable} {Parameters} timings: StartCall={StartCallMs}ms, ReadSetup={ReadSetupMs}ms, WaitForExit={WaitForExitMs}ms, StdoutDone={StdoutDoneMs}ms, StderrDone={StderrDoneMs}ms, TotalCommandTime={TotalCommandTimeMs}ms, ExitCode={ExitCode}",
             fileName,
             LogSafe.ForLog(arguments),
             startCallMs,
@@ -75,6 +73,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
             afterExit - afterReadSetup,
             afterStdout - afterExit,
             afterStderr - afterStdout,
+            totalCommandTimeMs,
             process.ExitCode);
 
         return new CommandLineResult(process.ExitCode, stdout, stderr);
