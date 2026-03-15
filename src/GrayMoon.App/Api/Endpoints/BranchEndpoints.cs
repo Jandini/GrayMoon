@@ -222,6 +222,7 @@ public static class BranchEndpoints
         WorkspaceService workspaceService,
         WorkspaceRepository workspaceRepository,
         GitHubRepositoryRepository repoRepository,
+        WorkspacePullRequestRepository workspacePullRequestRepository,
         AppDbContext dbContext,
         IHubContext<WorkspaceSyncHub> hubContext,
         ConnectorHealthService connectorHealthService,
@@ -258,6 +259,9 @@ public static class BranchEndpoints
         {
             await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, CancellationToken.None);
 
+            var prByRepo = await workspacePullRequestRepository.GetByWorkspaceIdAsync(workspaceId, CancellationToken.None);
+            var forceDeleteLocalBranch = prByRepo.TryGetValue(repositoryId, out var pr) && pr?.IsMerged == true;
+
             var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, CancellationToken.None);
             var args = new
             {
@@ -265,7 +269,8 @@ public static class BranchEndpoints
                 repositoryName = repo.RepositoryName,
                 currentBranchName,
                 bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
-                workspaceRoot
+                workspaceRoot,
+                forceDeleteLocalBranch
             };
             var response = await agentBridge.SendCommandAsync("SyncToDefaultBranch", args, CancellationToken.None);
 
