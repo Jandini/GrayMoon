@@ -1,43 +1,33 @@
-using GrayMoon.App.Models;
-
 namespace GrayMoon.App.Services;
 
 /// <summary>
-/// Handles dependency update operations for a workspace by delegating to WorkspaceGitService.
+/// Handles dependency update operations for a workspace by delegating to DependencyUpdateOrchestrator.
 /// Stateless; the caller owns all UI state and file-version handling.
 /// </summary>
-public sealed class WorkspaceUpdateHandler(WorkspaceGitService workspaceGitService, ILogger<WorkspaceUpdateHandler> logger)
+public sealed class WorkspaceUpdateHandler(
+    DependencyUpdateOrchestrator dependencyUpdateOrchestrator,
+    ILogger<WorkspaceUpdateHandler> logger)
 {
     /// <summary>
-    /// Runs the core update flow (refresh, sync deps, optional commits) via WorkspaceGitService.RunUpdateAsync.
-    /// Returns a payload to commit when running in "Update only" mode.
+    /// Runs the full update flow (refresh, sync deps, commit per level, refresh version) via the orchestrator.
     /// </summary>
-    public async Task<IReadOnlyList<SyncDependenciesRepoPayload>?> RunUpdateAsync(
+    public async Task RunUpdateAsync(
         int workspaceId,
-        bool withCommits,
-        IReadOnlyList<SyncDependenciesRepoPayload>? updatePlanPayloadForUpdateOnly,
         CancellationToken cancellationToken,
         Action<string> setProgress,
         Action<int, string> setRepositoryError,
-        Action? onAppSideComplete = null)
+        Action? onAppSideComplete = null,
+        IReadOnlySet<int>? repoIdsToUpdate = null)
     {
         try
         {
-            var syncedPayload = await workspaceGitService.RunUpdateAsync(
+            await dependencyUpdateOrchestrator.RunAsync(
                 workspaceId,
-                withCommits,
-                onProgressMessage: setProgress,
-                onRepoError: (repoId, msg) => setRepositoryError(repoId, msg),
-                onAppSideComplete: onAppSideComplete,
-                repoIdsToUpdate: null,
-                cancellationToken: cancellationToken);
-
-            if (!withCommits)
-            {
-                return syncedPayload ?? updatePlanPayloadForUpdateOnly;
-            }
-
-            return null;
+                cancellationToken,
+                setProgress,
+                setRepositoryError,
+                onAppSideComplete,
+                repoIdsToUpdate);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

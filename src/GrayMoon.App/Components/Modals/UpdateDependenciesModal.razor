@@ -16,16 +16,13 @@
                             Repositories with dependency updates span multiple levels. Committing from lowest to highest ensures each level uses the latest versions before the next level is updated.
                         </p>
                         <p class="mb-0 mt-2">
-                            <strong>Proceed</strong> with dependency update and commits, or <strong>Update only</strong>.
+                            <strong>Proceed</strong> to update .csproj files and commit each level in order.
                         </p>
                     }
                     else
                     {
                         <p class="mb-0">
-                            Create update commits for the modified project files?
-                        </p>
-                        <p class="mb-0 mt-2 text-muted small">
-                            <strong>Proceed</strong> = update .csproj files and commit; <strong>Update only</strong> = update files without committing.
+                            Update .csproj files and create commits for the modified project files?
                         </p>
                     }
                 </div>
@@ -36,9 +33,6 @@
                             <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
                         }
                         Proceed
-                    </button>
-                    <button type="button" class="btn btn-primary" @onclick="OnUpdateOnly" disabled="@IsBusy">
-                        Update only
                     </button>
                     <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel" disabled="@IsBusy">
                         Cancel
@@ -54,7 +48,6 @@
     [Parameter] public bool IsMultiLevel { get; set; }
     [Parameter] public bool IsBusy { get; set; }
     [Parameter] public EventCallback OnProceed { get; set; }
-    [Parameter] public EventCallback OnUpdateOnly { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
 
     private ElementReference modalElement;
