@@ -67,6 +67,7 @@ internal static class UninstallCommandHandler
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
+                LoadUserProfile = false,
             }
         };
         process.Start();

@@ -33,7 +33,8 @@ public sealed class GetHostInfoCommand : ICommandHandler<GetHostInfoRequest, Get
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
-                CreateNoWindow = true
+                CreateNoWindow = true,
+                LoadUserProfile = false
             };
 
             using var process = Process.Start(startInfo);

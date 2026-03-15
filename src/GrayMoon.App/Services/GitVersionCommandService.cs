@@ -36,7 +36,8 @@ public class GitVersionCommandService(ILogger<GitVersionCommandService> logger)
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            LoadUserProfile = false
         };
 
         try
