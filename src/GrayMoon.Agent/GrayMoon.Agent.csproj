@@ -21,6 +21,7 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\GrayMoon.Abstractions\GrayMoon.Abstractions.csproj" />
+		<ProjectReference Include="..\GrayMoon.Common\GrayMoon.Common.csproj" />
 		<Compile Remove="Example\**\*" />
 	</ItemGroup>
 	<ItemGroup>

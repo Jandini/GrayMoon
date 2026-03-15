@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Models;
+using GrayMoon.Common;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Polly;
@@ -245,7 +246,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             // Use --prune to remove stale remote-tracking branches
             var fetchCmd = includeTags ? "fetch origin --prune --tags" : "fetch origin --prune";
             args = $"-c core.askpass=true -c credential.helper= -c \"http.extraHeader={escaped}\" {fetchCmd}";
-            logArgs = "<redacted>";
+            logArgs = "***";
         }
         var sw = Stopwatch.StartNew();
         var (exitCode, stdout, stderr) = await FetchRetryPipeline.ExecuteAsync(
@@ -330,7 +331,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             var headerValue = "Authorization: Basic " + base64;
             var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
             args = $"-c core.askpass=true -c credential.helper= -c \"http.extraHeader={escaped}\" fetch origin {refArgs}";
-            logArgs = "<redacted>";
+            logArgs = "***";
         }
 
         logger.LogDebug("Git minimal fetch invoking git for {RepoPath}. Args={Args}, Refs={Refs}", repoPath, logArgs, string.Join(", ", refsToFetch));
@@ -1076,12 +1077,13 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return string.IsNullOrWhiteSpace(sanitized) ? "workspace" : sanitized;
     }
 
-    private static async Task<(int ExitCode, string? Stdout, string? Stderr)> RunProcessAsync(
+    private async Task<(int ExitCode, string? Stdout, string? Stderr)> RunProcessAsync(
         string fileName,
         string arguments,
         string? workingDirectory,
         CancellationToken ct)
     {
+        var sw = Stopwatch.StartNew();
         var startInfo = new ProcessStartInfo
         {
             FileName = fileName,
@@ -1095,23 +1097,31 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         using var process = Process.Start(startInfo);
         if (process == null)
+        {
+            sw.Stop();
+            logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode=-1)", fileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds);
             return (-1, null, "Failed to start process");
+        }
 
         var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
         var stderrTask = process.StandardError.ReadToEndAsync(ct);
         await process.WaitForExitAsync(ct);
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
+        sw.Stop();
+
+        logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode={ExitCode})", fileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds, process.ExitCode);
         return (process.ExitCode, stdout, stderr);
     }
 
-    private static async Task<(int ExitCode, string? Stdout, string? Stderr)> RunProcessWithStdinAsync(
+    private async Task<(int ExitCode, string? Stdout, string? Stderr)> RunProcessWithStdinAsync(
         string fileName,
         string arguments,
         string? workingDirectory,
         string stdinContent,
         CancellationToken ct)
     {
+        var sw = Stopwatch.StartNew();
         var startInfo = new ProcessStartInfo
         {
             FileName = fileName,
@@ -1126,7 +1136,11 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         using var process = Process.Start(startInfo);
         if (process == null)
+        {
+            sw.Stop();
+            logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode=-1)", fileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds);
             return (-1, null, "Failed to start process");
+        }
 
         await process.StandardInput.WriteAsync(stdinContent.AsMemory(), ct);
         process.StandardInput.Close();
@@ -1136,6 +1150,9 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         await process.WaitForExitAsync(ct);
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
+        sw.Stop();
+
+        logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode={ExitCode})", fileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds, process.ExitCode);
         return (process.ExitCode, stdout, stderr);
     }
 }

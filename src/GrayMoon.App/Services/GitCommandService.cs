@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Text;
+using GrayMoon.Common;
 using Polly;
 using Polly.Retry;
 
@@ -24,7 +26,7 @@ public class GitCommandService(ILogger<GitCommandService> logger)
         }
 
         var arguments = BuildCloneArguments(cloneUrl, bearerToken);
-
+        var sw = Stopwatch.StartNew();
         var startInfo = new System.Diagnostics.ProcessStartInfo
         {
             FileName = "git",
@@ -41,6 +43,8 @@ public class GitCommandService(ILogger<GitCommandService> logger)
             using var process = System.Diagnostics.Process.Start(startInfo);
             if (process == null)
             {
+                sw.Stop();
+                logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode=-1)", startInfo.FileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds);
                 logger.LogError("Failed to start git process.");
                 return false;
             }
@@ -50,6 +54,9 @@ public class GitCommandService(ILogger<GitCommandService> logger)
             await process.WaitForExitAsync(cancellationToken);
             var stdout = await stdoutTask;
             var stderr = await stderrTask;
+            sw.Stop();
+
+            logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode={ExitCode})", startInfo.FileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds, process.ExitCode);
 
             if (process.ExitCode != 0)
             {
@@ -65,6 +72,8 @@ public class GitCommandService(ILogger<GitCommandService> logger)
         }
         catch (Exception ex)
         {
+            sw.Stop();
+            logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode=-1)", startInfo.FileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds);
             logger.LogError(ex, "Error running git clone for {Url}", cloneUrl);
             throw;
         }
@@ -93,7 +102,7 @@ public class GitCommandService(ILogger<GitCommandService> logger)
 
         var arguments = $"config --local --add safe.directory \"{pathForGit.Replace("\"", "\\\"")}\"";
         var (exitCode, _, stderr) = await SafeDirectoryRetryPipeline.ExecuteAsync(
-            async (ct) => await RunGitConfigAsync(arguments, ct, repositoryPath),
+            async (ct) => await RunGitAsync("git", arguments, repositoryPath, ct),
             cancellationToken);
 
         if (exitCode == 0)
@@ -105,9 +114,9 @@ public class GitCommandService(ILogger<GitCommandService> logger)
     /// <summary>
     /// Uses git rev-parse --is-inside-work-tree: exit 0 = repo is safe, exit 128 with dubious ownership = not safe.
     /// </summary>
-    private static async Task<(bool IsSafe, bool IsDubiousOwnership)> CheckRepoSafeAsync(string repositoryPath, string pathForGit, CancellationToken cancellationToken)
+    private async Task<(bool IsSafe, bool IsDubiousOwnership)> CheckRepoSafeAsync(string repositoryPath, string pathForGit, CancellationToken cancellationToken)
     {
-        var (exitCode, _, stderr) = await RunGitConfigAsync("rev-parse --is-inside-work-tree", cancellationToken, repositoryPath);
+        var (exitCode, _, stderr) = await RunGitAsync("git", "rev-parse --is-inside-work-tree", repositoryPath, cancellationToken);
         if (exitCode == 0)
             return (true, false);
         var err = stderr ?? "";
@@ -127,11 +136,13 @@ public class GitCommandService(ILogger<GitCommandService> logger)
             })
             .Build();
 
-    private static async Task<(int ExitCode, string? Stdout, string? Stderr)> RunGitConfigAsync(string arguments, CancellationToken cancellationToken, string? workingDirectory = null)
+    /// <summary>Runs a git command with DEBUG logging once after completion (safe parameters, elapsed ms). Tokens are not logged.</summary>
+    private async Task<(int ExitCode, string? Stdout, string? Stderr)> RunGitAsync(string fileName, string arguments, string? workingDirectory, CancellationToken cancellationToken)
     {
+        var sw = Stopwatch.StartNew();
         var startInfo = new System.Diagnostics.ProcessStartInfo
         {
-            FileName = "git",
+            FileName = fileName,
             Arguments = arguments,
             WorkingDirectory = workingDirectory ?? "",
             RedirectStandardOutput = true,
@@ -141,12 +152,19 @@ public class GitCommandService(ILogger<GitCommandService> logger)
         };
         using var process = System.Diagnostics.Process.Start(startInfo);
         if (process == null)
+        {
+            sw.Stop();
+            logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode=-1)", startInfo.FileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds);
             return (-1, null, "Failed to start process");
+        }
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
+        sw.Stop();
+
+        logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode={ExitCode})", fileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds, process.ExitCode);
         return (process.ExitCode, stdout, stderr);
     }
 
@@ -173,47 +191,17 @@ public class GitCommandService(ILogger<GitCommandService> logger)
             return null;
         }
 
-        var startInfo = new System.Diagnostics.ProcessStartInfo
+        var (exitCode, stdout, stderr) = await RunGitAsync("git", "rev-parse HEAD", repositoryPath, cancellationToken);
+
+        if (exitCode != 0)
         {
-            FileName = "git",
-            Arguments = "rev-parse HEAD",
-            WorkingDirectory = repositoryPath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        try
-        {
-            using var process = System.Diagnostics.Process.Start(startInfo);
-            if (process == null)
-            {
-                logger.LogWarning("Failed to start git process for rev-parse HEAD in {Path}", repositoryPath);
-                return null;
-            }
-
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
-
-            if (process.ExitCode != 0)
-            {
-                logger.LogWarning("Git rev-parse HEAD failed with exit code {ExitCode} in {Path}. Stdout: {Stdout} Stderr: {Stderr}",
-                    process.ExitCode, repositoryPath,
-                    string.IsNullOrWhiteSpace(stdout) ? "(none)" : stdout.Trim(),
-                    string.IsNullOrWhiteSpace(stderr) ? "(none)" : stderr.Trim());
-                return null;
-            }
-
-            return stdout.Trim();
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error running git rev-parse HEAD in {Path}", repositoryPath);
+            logger.LogWarning("Git rev-parse HEAD failed with exit code {ExitCode} in {Path}. Stdout: {Stdout} Stderr: {Stderr}",
+                exitCode, repositoryPath,
+                string.IsNullOrWhiteSpace(stdout) ? "(none)" : stdout.Trim(),
+                string.IsNullOrWhiteSpace(stderr) ? "(none)" : stderr.Trim());
             return null;
         }
+
+        return stdout?.Trim();
     }
 }
