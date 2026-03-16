@@ -7,10 +7,8 @@ using Microsoft.Extensions.Logging;
 namespace GrayMoon.Agent.Commands;
 
 /// <summary>
-/// Handles post-checkout hooks: runs GitVersion, then performs a minimal git fetch for the current
-/// branch and default origin branch before computing commit counts. This keeps commit counts and
-/// upstream/default comparisons correct without paying the cost of a full fetch of all branches
-/// and tags (full fetch is done by Sync and branch list flows).
+/// Handles post-checkout hooks: runs a full git fetch so remote branches are fully persisted on
+/// disk, then runs GitVersion and computes commit counts.
 /// </summary>
 public sealed class CheckoutHookSyncCommand(IGitService git, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<CheckoutHookSyncCommand> logger)
 {
@@ -22,25 +20,16 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IAgentTokenProvider
             return;
         }
 
-        // Resolve default origin ref once so minimal fetch and commit-count calls share it.
+        // Resolve default origin ref once so fetch and commit-count calls share it.
         var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
 
-        // Minimal fetch: only current branch and default branch, not all branches/tags.
         string? token = await tokenProvider.GetTokenForRepositoryAsync(payload.RepositoryId, cancellationToken);
         string? fetchError = null;
-        if (token == null)
-        {
-            logger.LogDebug("CheckoutHookSync: no token available for repo {RepositoryId}; skipping minimal fetch.", payload.RepositoryId);
-        }
-        else
-        {
-            // Use minimal fetch before running GitVersion; GitVersion is invoked with /nofetch.
-            var (fetchSuccess, err) = await git.FetchMinimalAsync(payload.RepositoryPath, "-", defaultRef, token, cancellationToken);
-            if (!fetchSuccess)
-                fetchError = err;
-        }
+        var (fetchSuccess, err) = await git.FetchAsync(payload.RepositoryPath, includeTags: true, bearerToken: token, cancellationToken);
+        if (!fetchSuccess)
+            fetchError = err;
 
-        // Run GitVersion after minimal fetch, with /nofetch and /nonormalize for faster execution.
+        // Run GitVersion after fetch, with /nofetch and /nonormalize for faster execution.
         var (versionResult, _) = await git.GetVersionAsync(payload.RepositoryPath, nonNormalize: true, cancellationToken);
         var version = versionResult?.InformationalVersion ?? "-";
         var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
