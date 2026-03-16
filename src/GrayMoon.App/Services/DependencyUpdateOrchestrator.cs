@@ -44,10 +44,10 @@ public sealed class DependencyUpdateOrchestrator(
         }
 
         // Step 1: Refresh project data from .csproj files on disk.
-        setProgress("Refreshing projects...");
+        setProgress("Reading project files...");
         await workspaceGitService.RefreshWorkspaceProjectsAsync(
             workspaceId,
-            onProgress: (c, t, _) => setProgress($"Refreshing projects {c} of {t}"),
+            onProgress: (c, t, _) => setProgress($"Read {c} of {t} project files"),
             onRepoError: OnRepoError,
             repositoryIds: repoIdsToUpdate,
             cancellationToken);

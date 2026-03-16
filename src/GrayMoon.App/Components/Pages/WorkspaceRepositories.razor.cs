@@ -451,13 +451,15 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _ = InvokeAsync(StateHasChanged);
     }
 
-    /// <summary>Returns "Running x tasks..." when overlay is visible, workflow set the awaiting flag, and agent tasks are pending; otherwise returns progressMessage.</summary>
+    /// <summary>Returns \"Waiting for x agent jobs\" when overlay is visible, workflow set the awaiting flag, and agent jobs are pending; otherwise returns progressMessage.</summary>
     private string GetOverlayMessage(string progressMessage, bool overlayVisible, bool awaitingAgentTasks)
     {
         if (!overlayVisible) return progressMessage;
         if (!awaitingAgentTasks) return progressMessage;
         if (AgentTasksPendingCount == 0) return progressMessage;
-        return AgentTasksPendingCount == 1 ? "Running 1 task..." : $"Running {AgentTasksPendingCount} tasks...";
+        return AgentTasksPendingCount == 1
+            ? "Waiting for 1 agent job"
+            : $"Waiting for {AgentTasksPendingCount} agent jobs";
     }
 
     /// <summary>
