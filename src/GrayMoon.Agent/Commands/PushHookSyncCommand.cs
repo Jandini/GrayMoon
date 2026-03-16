@@ -7,8 +7,9 @@ using Microsoft.Extensions.Logging;
 namespace GrayMoon.Agent.Commands;
 
 /// <summary>
-/// Handles pre-push hooks: re-runs GitVersion and gets commit counts.
-/// No git fetch — uses current local state only (version, branch, ahead/behind, has-upstream).
+/// Handles pre-push hooks: performs a minimal git fetch for the current branch and default origin
+/// branch so commit counts use up-to-date remote tracking refs, then re-runs GitVersion and gets
+/// commit counts and upstream/default status.
 /// </summary>
 public sealed class PushHookSyncCommand(IGitService git, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<PushHookSyncCommand> logger)
 {
@@ -18,6 +19,22 @@ public sealed class PushHookSyncCommand(IGitService git, IAgentTokenProvider tok
         {
             logger.LogWarning("PushHookSync job missing repositoryPath");
             return;
+        }
+
+        // Resolve default origin ref once so minimal fetch and commit-count calls share it.
+        var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
+
+        string? fetchError = null;
+        string? token = await tokenProvider.GetTokenForRepositoryAsync(payload.RepositoryId, cancellationToken);
+        if (token == null)
+        {
+            logger.LogDebug("PushHookSync: no token available for repo {RepositoryId}; skipping minimal fetch.", payload.RepositoryId);
+        }
+        else
+        {
+            var (fetchSuccess, err) = await git.FetchMinimalAsync(payload.RepositoryPath, "-", defaultRef, token, cancellationToken);
+            if (!fetchSuccess)
+                fetchError = err;
         }
 
         var (versionResult, _) = await git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
@@ -30,7 +47,6 @@ public sealed class PushHookSyncCommand(IGitService git, IAgentTokenProvider tok
         int? defaultAhead = null;
         if (branch != "-")
         {
-            var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
             var (o, i, _) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, defaultRef, cancellationToken);
             outgoing = o;
             incoming = i;
@@ -42,15 +58,14 @@ public sealed class PushHookSyncCommand(IGitService git, IAgentTokenProvider tok
         bool? hasUpstream = null;
         if (branch != "-")
         {
-            string? token = await tokenProvider.GetTokenForRepositoryAsync(payload.RepositoryId, cancellationToken);
-            if (token == null)
-            {
-                logger.LogDebug("PushHookSync: no token available for repo {RepositoryId}; skipping remote branch query.", payload.RepositoryId);
-            }
-            else
+            if (token != null)
             {
                 var remoteBranches = await git.GetRemoteBranchesAsync(payload.RepositoryPath, token, cancellationToken);
                 hasUpstream = remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
+            }
+            else
+            {
+                logger.LogDebug("PushHookSync: no token available for repo {RepositoryId}; skipping remote branch query.", payload.RepositoryId);
             }
         }
 
@@ -68,7 +83,7 @@ public sealed class PushHookSyncCommand(IGitService git, IAgentTokenProvider tok
                 HasUpstream = hasUpstream,
                 DefaultBranchBehind = defaultBehind,
                 DefaultBranchAhead = defaultAhead,
-                ErrorMessage = null
+                ErrorMessage = fetchError
             };
             await connection.InvokeAsync(AgentHubMethods.SyncCommand, notification, cancellationToken);
             logger.LogInformation("PushHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}, hasUpstream={HasUpstream}",
