@@ -10,18 +10,9 @@
                     <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body">
-                    @if (IsMultiLevel)
-                    {
-                        <p class="mb-0">
-                            Proceed to update dependency versions in <code>.csproj</code> files to match the current versions of the referenced packages, update any configured version files that use those versions, and create git commits for each level in order.
-                        </p>
-                    }
-                    else
-                    {
-                        <p class="mb-0">
-                            Proceed to update dependency versions in <code>.csproj</code> files to match the current versions of the referenced packages, update any configured version files that use those versions, and create git commits in each affected repository for the modified files.
-                        </p>
-                    }
+                    <p class="mb-0">
+                        Proceed to update dependency versions in <code>.csproj</code> files to match the current versions of the referenced packages, update any configured version files that use those versions, and create git commits in each affected repository for the modified files.
+                    </p>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-warning" @onclick="OnProceed" disabled="@IsBusy">
@@ -42,7 +33,6 @@
 
 @code {
     [Parameter] public bool IsVisible { get; set; }
-    [Parameter] public bool IsMultiLevel { get; set; }
     [Parameter] public bool IsBusy { get; set; }
     [Parameter] public EventCallback OnProceed { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }

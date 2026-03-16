@@ -1017,13 +1017,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
         try
         {
-            await using var scope = ServiceScopeFactory.CreateAsyncScope();
-            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            var (payload, isMultiLevel) = await workspaceGitService.GetUpdatePlanAsync(WorkspaceId);
             _updateModal = _updateModal with
             {
-                IsVisible = true,
-                IsMultiLevel = isMultiLevel && payload.Count > 0
+                IsVisible = true
             };
             await InvokeAsync(StateHasChanged);
         }
@@ -2184,7 +2180,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private sealed record UpdateModalState
     {
         public bool IsVisible { get; init; }
-        public bool IsMultiLevel { get; init; }
     }
 
     private sealed record UpdateSingleRepoDependenciesModalState

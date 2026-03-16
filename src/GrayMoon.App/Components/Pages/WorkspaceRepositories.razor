@@ -203,10 +203,9 @@
                    OnCreateBranch="@CreateSingleBranchAsync" />
 
 <UpdateDependenciesModal IsVisible="@_updateModal.IsVisible"
-                          IsMultiLevel="@_updateModal.IsMultiLevel"
-                          IsBusy="@isUpdating"
-                          OnProceed="@OnUpdateProceedAsync"
-                          OnCancel="@CloseUpdateModal" />
+                         IsBusy="@isUpdating"
+                         OnProceed="@OnUpdateProceedAsync"
+                         OnCancel="@CloseUpdateModal" />
 
 <UpdateSingleRepositoryDependenciesModal IsVisible="@_updateSingleRepoModal.IsVisible"
                           Payload="@_updateSingleRepoModal.Payload"
