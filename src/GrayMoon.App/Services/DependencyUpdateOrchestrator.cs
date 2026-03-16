@@ -1,3 +1,7 @@
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using GrayMoon.App.Models;
 using Microsoft.Extensions.Options;
 
@@ -10,22 +14,31 @@ namespace GrayMoon.App.Services;
 /// </summary>
 public sealed class DependencyUpdateOrchestrator(
     WorkspaceGitService workspaceGitService,
+    WorkspaceFileVersionService fileVersionService,
     IOptions<WorkspaceOptions> workspaceOptions)
 {
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 8);
 
     /// <summary>
-    /// Runs the full update flow (refresh, sync deps, commit per level, refresh version).
+    /// Runs the full update flow: refresh projects, sync and commit csproj deps (per level or single-level),
+    /// refresh repo versions, then run version-file updates and optionally commit them.
     /// Stops on first error and reports it via <paramref name="onRepoError"/>.
     /// </summary>
     /// <param name="repoIdsToUpdate">Optional. When set, only these repositories are considered for the update plan and all steps.</param>
+    /// <param name="onVersionFilesUpdated">
+    /// Optional. When set and version files are updated, the orchestrator does not commit them but instead
+    /// groups updated file paths per repo and invokes this callback so the caller (typically UI) can confirm
+    /// and commit via <see cref="WorkspaceGitService.CommitFilePathsAsync"/>.
+    /// When null, version-file commits are performed automatically.
+    /// </param>
     public async Task RunAsync(
         int workspaceId,
         CancellationToken cancellationToken,
         Action<string> setProgress,
         Action<int, string> onRepoError,
         Action? onAppSideComplete = null,
-        IReadOnlySet<int>? repoIdsToUpdate = null)
+        IReadOnlySet<int>? repoIdsToUpdate = null,
+        Action<IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)>>? onVersionFilesUpdated = null)
     {
         var hadError = false;
         void OnRepoError(int repoId, string msg)
@@ -48,14 +61,7 @@ public sealed class DependencyUpdateOrchestrator(
         // Step 2: Build update plan (repos with mismatched deps, by level).
         var (payload, isMultiLevel) = await workspaceGitService.GetUpdatePlanAsync(workspaceId, repoIdsToUpdate, cancellationToken);
 
-        if (payload.Count == 0)
-        {
-            onAppSideComplete?.Invoke();
-            await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
-            return;
-        }
-
-        if (isMultiLevel)
+        if (payload.Count > 0 && isMultiLevel)
         {
             // Multi-level: for each level, sync → commit → refresh version (commits required before next level).
             var levelsAsc = payload.Select(p => p.DependencyLevel ?? 0).Distinct().OrderBy(x => x).ToList();
@@ -133,7 +139,7 @@ public sealed class DependencyUpdateOrchestrator(
                 }
             }
         }
-        else
+        else if (payload.Count > 0)
         {
             // Single-level: sync all → commit all → refresh version for all.
             setProgress("Syncing dependencies...");
@@ -193,6 +199,56 @@ public sealed class DependencyUpdateOrchestrator(
                 {
                     if (!success)
                         OnRepoError(repoId, err ?? "Refresh version failed.");
+                }
+            }
+        }
+
+        // Step 6: Version-file update (runs even when there were no csproj updates, as long as the earlier steps did not error).
+        if (!hadError)
+        {
+            setProgress("Updating version files...");
+            // When repoIdsToUpdate is set, restrict updates to those repos; otherwise update all configured files.
+            var selectedRepoIds = repoIdsToUpdate != null && repoIdsToUpdate.Count > 0
+                ? new HashSet<int>(repoIdsToUpdate)
+                : null;
+
+            var (_, _, fileError, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
+                workspaceId,
+                selectedRepositoryIds: selectedRepoIds,
+                onFileUpdated: null,
+                cancellationToken: cancellationToken);
+
+            if (fileError != null && !fileError.Contains("No version configurations", StringComparison.OrdinalIgnoreCase))
+            {
+                // Version-file update errors are reported but do not stop final broadcast.
+                OnRepoError(0, fileError);
+            }
+
+            if (updatedFiles is { Count: > 0 })
+            {
+                var byRepo = updatedFiles
+                    .GroupBy(x => (x.RepositoryId, x.RepoName))
+                    .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
+                    .ToList();
+
+                if (onVersionFilesUpdated != null)
+                {
+                    onVersionFilesUpdated(byRepo);
+                }
+                else
+                {
+                    setProgress("Committing updated versions...");
+                    var commitResults = await workspaceGitService.CommitFilePathsAsync(
+                        workspaceId,
+                        byRepo,
+                        onProgress: (c, t, _) => setProgress($"Committed version files {c} of {t}"),
+                        cancellationToken: cancellationToken);
+
+                    foreach (var (repoId, errMsg) in commitResults)
+                    {
+                        if (!string.IsNullOrEmpty(errMsg))
+                            OnRepoError(repoId, errMsg);
+                    }
                 }
             }
         }

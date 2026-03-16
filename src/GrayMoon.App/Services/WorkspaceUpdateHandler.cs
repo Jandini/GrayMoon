@@ -9,7 +9,7 @@ public sealed class WorkspaceUpdateHandler(
     ILogger<WorkspaceUpdateHandler> logger)
 {
     /// <summary>
-    /// Runs the full update flow (refresh, sync deps, commit per level, refresh version) via the orchestrator.
+    /// Runs the full update flow (refresh, sync deps, commit per level, refresh version, version-file updates) via the orchestrator.
     /// </summary>
     public async Task RunUpdateAsync(
         int workspaceId,
@@ -17,7 +17,8 @@ public sealed class WorkspaceUpdateHandler(
         Action<string> setProgress,
         Action<int, string> setRepositoryError,
         Action? onAppSideComplete = null,
-        IReadOnlySet<int>? repoIdsToUpdate = null)
+        IReadOnlySet<int>? repoIdsToUpdate = null,
+        Action<IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)>>? onVersionFilesUpdated = null)
     {
         try
         {
@@ -27,7 +28,8 @@ public sealed class WorkspaceUpdateHandler(
                 setProgress,
                 setRepositoryError,
                 onAppSideComplete,
-                repoIdsToUpdate);
+                repoIdsToUpdate,
+                onVersionFilesUpdated);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
