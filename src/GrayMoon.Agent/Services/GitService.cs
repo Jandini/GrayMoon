@@ -24,6 +24,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return Path.Combine(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), safe);
     }
 
+
     public async Task<bool> CloneAsync(string workingDir, string cloneUrl, string? bearerToken, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(workingDir))
