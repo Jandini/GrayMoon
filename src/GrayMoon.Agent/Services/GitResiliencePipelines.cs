@@ -79,5 +79,62 @@ internal static class GitResiliencePipelines
                 }
             })
             .Build();
+
+    public static ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CreatePushPipeline(ILogger logger)
+        => new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
+            .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
+            {
+                // Retry any non-zero exit code from git push (e.g., transient network failures).
+                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>().HandleResult(r => r.ExitCode != 0),
+                MaxRetryAttempts = 3,
+                Delay = TimeSpan.FromMilliseconds(200),
+                BackoffType = DelayBackoffType.Exponential,
+                UseJitter = true,
+                OnRetry = args =>
+                {
+                    var exitCode = args.Outcome.Result.ExitCode;
+                    logger.LogWarning("Git push retry {Attempt} (ExitCode={ExitCode})", args.AttemptNumber, exitCode);
+                    return ValueTask.CompletedTask;
+                }
+            })
+            .Build();
+
+    public static ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CreateLsRemotePipeline(ILogger logger)
+        => new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
+            .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
+            {
+                // Retry any non-zero exit code from git ls-remote (e.g., transient network failures).
+                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>().HandleResult(r => r.ExitCode != 0),
+                MaxRetryAttempts = 3,
+                Delay = TimeSpan.FromMilliseconds(200),
+                BackoffType = DelayBackoffType.Exponential,
+                UseJitter = true,
+                OnRetry = args =>
+                {
+                    var exitCode = args.Outcome.Result.ExitCode;
+                    logger.LogWarning("Git ls-remote retry {Attempt} (ExitCode={ExitCode})", args.AttemptNumber, exitCode);
+                    return ValueTask.CompletedTask;
+                }
+            })
+            .Build();
+
+    public static ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CreateMinimalFetchPipeline(ILogger logger)
+        => new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
+            .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
+            {
+                // Retry any non-zero exit code from minimal git fetch (e.g., transient network failures).
+                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>().HandleResult(r => r.ExitCode != 0),
+                MaxRetryAttempts = 3,
+                Delay = TimeSpan.FromMilliseconds(200),
+                BackoffType = DelayBackoffType.Exponential,
+                UseJitter = true,
+                OnRetry = args =>
+                {
+                    var exitCode = args.Outcome.Result.ExitCode;
+                    logger.LogWarning("Git fetch (minimal) retry {Attempt} (ExitCode={ExitCode})", args.AttemptNumber, exitCode);
+                    return ValueTask.CompletedTask;
+                }
+            })
+            .Build();
 }
 
