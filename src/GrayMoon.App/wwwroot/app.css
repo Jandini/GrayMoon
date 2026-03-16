@@ -1000,3 +1000,7 @@ table.resizable-columns th:hover .resize-handle::after {
     background-color: #8957e5;
     color: #fff !important;
 }
+.repositories-table td.col-pr .pr-badge-closed {
+    background-color: #DA3633;
+    color: #fff !important;
+}
