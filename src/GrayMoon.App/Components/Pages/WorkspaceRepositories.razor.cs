@@ -33,8 +33,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private bool? isOutOfSync = null;
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0);
     private bool isPushRecommended => workspaceRepositories.Any(wr => (wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false);
-    /// <summary>When true, any repository has incoming commits; header shows red Pull button and executes only Pull (commit sync).</summary>
-    private bool hasIncomingCommits => workspaceRepositories.Any(wr => (wr.IncomingCommits ?? 0) > 0);
+    /// <summary>When true, any repository on its default branch has incoming commits; header shows red Pull button and executes only Pull (commit sync) for those repos.</summary>
+    private bool hasIncomingCommits => workspaceRepositories.Any(wr =>
+        (wr.IncomingCommits ?? 0) > 0
+        && !string.IsNullOrWhiteSpace(wr.BranchName)
+        && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
+        && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal));
     private IEnumerable<IGrouping<int?, WorkspaceRepositoryLink>> LevelGroups =>
         workspaceRepositories
             .GroupBy(wr => wr.DependencyLevel)
@@ -1006,7 +1010,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
             return;
 
         var repoIdsWithIncoming = workspaceRepositories
-            .Where(wr => (wr.IncomingCommits ?? 0) > 0)
+            .Where(wr =>
+                (wr.IncomingCommits ?? 0) > 0
+                && !string.IsNullOrWhiteSpace(wr.BranchName)
+                && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
+                && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal))
             .Select(wr => wr.RepositoryId)
             .ToList();
         if (repoIdsWithIncoming.Count == 0)
