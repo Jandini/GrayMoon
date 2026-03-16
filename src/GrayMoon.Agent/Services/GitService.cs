@@ -91,59 +91,16 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
     }
 
     private readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> SafeDirectoryRetryPipeline =
-        new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-            .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
-            {
-                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>().HandleResult(r => r.ExitCode != 0),
-                MaxRetryAttempts = 3,
-                Delay = TimeSpan.FromMilliseconds(100),
-                BackoffType = DelayBackoffType.Exponential,
-                UseJitter = true,
-                OnRetry = args =>
-                {
-                    var exitCode = args.Outcome.Result.ExitCode;
-                    logger.LogWarning("Git safe-directory retry {Attempt} (ExitCode={ExitCode})", args.AttemptNumber, exitCode);
-                    return ValueTask.CompletedTask;
-                }
-            })
-            .Build();
+        GitResiliencePipelines.CreateSafeDirectoryPipeline(logger);
 
     private readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CloneRetryPipeline =
-        new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-            .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
-            {
-                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>().HandleResult(r => r.ExitCode != 0),
-                MaxRetryAttempts = 3,
-                Delay = TimeSpan.FromMilliseconds(200),
-                BackoffType = DelayBackoffType.Exponential,
-                UseJitter = true,
-                OnRetry = args =>
-                {
-                    var exitCode = args.Outcome.Result.ExitCode;
-                    logger.LogWarning("Git clone retry {Attempt} (ExitCode={ExitCode})", args.AttemptNumber, exitCode);
-                    return ValueTask.CompletedTask;
-                }
-            })
-            .Build();
+        GitResiliencePipelines.CreateClonePipeline(logger);
 
     private readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> FetchRetryPipeline =
-        new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-            .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
-            {
-                // Retry any non-zero exit code from git fetch (e.g., transient network failures).
-                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>().HandleResult(r => r.ExitCode != 0),
-                MaxRetryAttempts = 3,
-                Delay = TimeSpan.FromMilliseconds(200),
-                BackoffType = DelayBackoffType.Exponential,
-                UseJitter = true,
-                OnRetry = args =>
-                {
-                    var exitCode = args.Outcome.Result.ExitCode;
-                    logger.LogWarning("Git fetch retry {Attempt} (ExitCode={ExitCode})", args.AttemptNumber, exitCode);
-                    return ValueTask.CompletedTask;
-                }
-            })
-            .Build();
+        GitResiliencePipelines.CreateFetchPipeline(logger);
+
+    private readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> PullRetryPipeline =
+        GitResiliencePipelines.CreatePullPipeline(logger);
 
     public async Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, CancellationToken ct)
         => await GetVersionAsync(repoPath, nonNormalize: false, ct);
@@ -497,9 +454,11 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return (false, false, "Invalid repository path or branch name");
 
         string args;
+        var logArgs = "";
         if (string.IsNullOrWhiteSpace(bearerToken))
         {
             args = $"pull origin {branchName}";
+            logArgs = args;
         }
         else
         {
@@ -508,9 +467,14 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             var headerValue = "Authorization: Basic " + base64;
             var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
             args = $"-c core.askpass=true -c credential.helper= -c \"http.extraHeader={escaped}\" pull origin {branchName}";
+            logArgs = "***";
         }
 
-        var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);
+        var sw = Stopwatch.StartNew();
+        var (exitCode, stdout, stderr) = await PullRetryPipeline.ExecuteAsync(
+            async cancellationToken => await RunProcessAsync("git", args, repoPath, cancellationToken),
+            ct);
+        sw.Stop();
 
         if (exitCode != 0)
         {
@@ -532,11 +496,11 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 return (false, true, combinedOutput);
             }
 
-            logger.LogError("Git pull failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            logger.LogError("Git pull failed in {ElapsedMs}ms for {RepoPath}. Args={Args}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, repoPath, logArgs, exitCode, stdout, stderr);
             return (false, false, combinedOutput);
         }
 
-        logger.LogInformation("Git pull completed for {RepoPath}. Branch={Branch}", repoPath, branchName);
+        logger.LogInformation("Git pull completed in {ElapsedMs}ms for {RepoPath}. Args={Args}, Branch={Branch}", sw.ElapsedMilliseconds, repoPath, logArgs, branchName);
         return (true, false, null);
     }
 
