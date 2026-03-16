@@ -29,6 +29,7 @@ public sealed class GitHubPullRequestService(
 
             var mergeable = dto.Mergeable;
             var mergeableState = dto.MergeableState;
+            var changedFiles = dto.ChangedFiles;
 
             if (string.Equals(dto.State, "open", StringComparison.OrdinalIgnoreCase) &&
                 (mergeable == null || string.Equals(mergeableState, "unknown", StringComparison.OrdinalIgnoreCase)))
@@ -38,6 +39,7 @@ public sealed class GitHubPullRequestService(
                 {
                     mergeable = fullPr.Mergeable;
                     mergeableState = fullPr.MergeableState;
+                    changedFiles = fullPr.ChangedFiles ?? changedFiles;
                 }
             }
 
@@ -48,7 +50,8 @@ public sealed class GitHubPullRequestService(
                 MergedAt = dto.MergedAt,
                 HtmlUrl = dto.HtmlUrl ?? string.Empty,
                 Mergeable = mergeable,
-                MergeableState = mergeableState
+                MergeableState = mergeableState,
+                ChangedFiles = changedFiles
             };
         }
         catch (Exception ex)

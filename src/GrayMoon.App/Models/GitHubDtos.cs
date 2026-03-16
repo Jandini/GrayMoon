@@ -121,6 +121,9 @@ public class GitHubPullRequestDto
 
     [JsonPropertyName("mergeable_state")]
     public string? MergeableState { get; set; }
+
+    [JsonPropertyName("changed_files")]
+    public int? ChangedFiles { get; set; }
 }
 
 public class GitHubPullRequestHeadDto

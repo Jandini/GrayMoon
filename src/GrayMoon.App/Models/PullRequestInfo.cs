@@ -9,6 +9,7 @@ public sealed class PullRequestInfo
     public bool IsClosed => string.Equals(State, "closed", StringComparison.OrdinalIgnoreCase);
     public DateTimeOffset? MergedAt { get; set; }
     public string HtmlUrl { get; set; } = string.Empty;
+    public int? ChangedFiles { get; set; }
     /// <summary>True = mergeable, false = conflict, null = unknown.</summary>
     public bool? Mergeable { get; set; }
     /// <summary>e.g. unknown, clean, dirty, unstable, blocked.</summary>

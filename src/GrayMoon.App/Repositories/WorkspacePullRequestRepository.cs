@@ -42,6 +42,7 @@ public sealed class WorkspacePullRequestRepository(AppDbContext dbContext, ILogg
             existing.MergeableState = pr?.MergeableState;
             existing.HtmlUrl = pr?.HtmlUrl;
             existing.MergedAt = pr?.MergedAt;
+            existing.ChangedFiles = pr?.ChangedFiles;
             existing.LastCheckedAt = now;
         }
         else
@@ -55,6 +56,7 @@ public sealed class WorkspacePullRequestRepository(AppDbContext dbContext, ILogg
                 MergeableState = pr?.MergeableState,
                 HtmlUrl = pr?.HtmlUrl,
                 MergedAt = pr?.MergedAt,
+                ChangedFiles = pr?.ChangedFiles,
                 LastCheckedAt = now
             });
         }

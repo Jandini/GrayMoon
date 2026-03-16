@@ -1004,3 +1004,6 @@ table.resizable-columns th:hover .resize-handle::after {
     background-color: #DA3633;
     color: #fff !important;
 }
+.repositories-table td.col-pr .pr-badge-files-changed {
+    margin-left: 0.25rem;
+}
