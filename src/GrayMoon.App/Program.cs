@@ -63,6 +63,7 @@ try
     builder.Services.AddScoped<WorkspaceFileVersionService>();
     builder.Services.AddScoped<WorkspaceCommitSyncHandler>();
     builder.Services.AddScoped<WorkspaceSyncHandler>();
+    builder.Services.AddScoped<DependencyUpdateOrchestrator>();
     builder.Services.AddScoped<WorkspaceUpdateHandler>();
     builder.Services.AddScoped<WorkspacePushHandler>();
     builder.Services.AddScoped<WorkspaceDependencyService>();

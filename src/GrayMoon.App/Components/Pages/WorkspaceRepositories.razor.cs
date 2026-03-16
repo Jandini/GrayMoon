@@ -451,55 +451,39 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _ = InvokeAsync(StateHasChanged);
     }
 
-    /// <summary>Returns "Running x tasks..." when overlay is visible, workflow set the awaiting flag, and agent tasks are pending; otherwise returns progressMessage.</summary>
+    /// <summary>Returns \"Waiting for x agent jobs\" when overlay is visible, workflow set the awaiting flag, and agent jobs are pending; otherwise returns progressMessage.</summary>
     private string GetOverlayMessage(string progressMessage, bool overlayVisible, bool awaitingAgentTasks)
     {
         if (!overlayVisible) return progressMessage;
         if (!awaitingAgentTasks) return progressMessage;
         if (AgentTasksPendingCount == 0) return progressMessage;
-        return AgentTasksPendingCount == 1 ? "Running 1 task..." : $"Running {AgentTasksPendingCount} tasks...";
+        return AgentTasksPendingCount == 1
+            ? "Waiting for 1 agent job"
+            : $"Waiting for {AgentTasksPendingCount} agent jobs";
     }
 
     /// <summary>
-    /// Attempts to update all configured file versions at the end of an update workflow.
-    /// Shows a toast for each file that was updated; logs warnings on failure and skips gracefully when no files are configured.
+    /// Called by the dependency update orchestrator when version-file updates have been applied but not yet committed.
+    /// Groups files by repo and opens the version-files commit modal so the user can confirm and commit via CommitFileVersionUpdatesAsync.
     /// </summary>
-    private async Task TryUpdateFileVersionsAsync()
+    private void HandleVersionFilesUpdated(IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)> byRepo)
     {
-        try
-        {
-            var (_, _, error, _) = await WorkspacePageService.FileVersionService.UpdateAllVersionsAsync(
-                WorkspaceId,
-                selectedRepositoryIds: null,
-                onFileUpdated: filePath => ToastService.Show($"File {filePath} updated."));
-            if (error != null && !error.Contains("No version configurations"))
-                Logger.LogWarning("Auto file-version update after dependency update: {Error}", error);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Auto file-version update failed after dependency update for workspace {WorkspaceId}", WorkspaceId);
-        }
-    }
+        if (byRepo == null || byRepo.Count == 0)
+            return;
 
-    /// <summary>Runs file version update without toasts; returns the list of updated files (repo, path) for commit or confirm dialog. Caller handles commit vs dialog.</summary>
-    private async Task<IReadOnlyList<(int RepositoryId, string RepoName, string FilePath)>?> RunFileVersionUpdateAndGetUpdatedFilesAsync()
-    {
-        try
-        {
-            var (_, _, error, updatedFiles) = await WorkspacePageService.FileVersionService.UpdateAllVersionsAsync(
-                WorkspaceId,
-                selectedRepositoryIds: null,
-                onFileUpdated: null,
-                cancellationToken: default);
-            if (error != null && !error.Contains("No version configurations"))
-                Logger.LogWarning("File-version update: {Error}", error);
-            return updatedFiles?.Count > 0 ? updatedFiles : null;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "File-version update failed for workspace {WorkspaceId}", WorkspaceId);
-            return null;
-        }
+        var repoCount = byRepo.Count;
+        var distinctFiles = byRepo
+            .SelectMany(r => r.FilePaths)
+            .Distinct()
+            .ToList();
+        var filesForDisplay = distinctFiles.Count <= 5
+            ? distinctFiles
+            : distinctFiles.Take(5).Concat(new[] { $"... and {distinctFiles.Count - 5} more" }).ToList();
+        var prefix = repoCount == 1
+            ? "Commit the updated version files in this repository?"
+            : $"Commit all updated version files in all {repoCount} repositories?";
+
+        OpenVersionFilesCommitModal(prefix, byRepo, filesForDisplay);
     }
 
     private void AbortPushAsync()
@@ -751,12 +735,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
         SetUpdateProgress($"Committed {current} of {total}");
     }
 
-    private async Task OnUpdateSingleRepositoryDependenciesProceedAsync(bool commitVersionUpdate)
+    private async Task OnUpdateSingleRepositoryDependenciesProceedAsync()
     {
         if (_updateSingleRepoModal.Payload == null)
             return;
         var repositoryId = _updateSingleRepoModal.RepositoryId;
-        var payloadToCommit = _updateSingleRepoModal.Payload;
         CloseUpdateSingleRepositoryDependenciesModal();
 
         _updateCts?.Cancel();
@@ -770,45 +753,17 @@ public sealed partial class WorkspaceRepositories : IDisposable
             await InvokeAsync(StateHasChanged);
             await using (var scope = ServiceScopeFactory.CreateAsyncScope())
             {
-                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-                await workspaceGitService.RunUpdateSingleRepositoryAsync(
+                var updateHandler = scope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
+                await updateHandler.RunUpdateAsync(
                     WorkspaceId,
-                    repositoryId,
-                    onProgressMessage: SetUpdateProgress,
-                    onRepoError: (repoId, msg) => { repositoryErrors[repoId] = msg; _ = InvokeAsync(StateHasChanged); },
-                    cancellationToken: _updateCts.Token);
-
-                if (commitVersionUpdate)
-                {
-                    SetUpdateProgress("Committing version update...");
-                    var commitResults = await workspaceGitService.CommitDependencyUpdatesAsync(
-                        WorkspaceId,
-                        new[] { payloadToCommit },
-                        onProgress: OnCommitDependencyProgress,
-                        cancellationToken: _updateCts.Token);
-                    var err = commitResults.FirstOrDefault(r => r.RepoId == repositoryId).ErrorMessage;
-                    if (err != null)
-                        ToastService.Show(err);
-                }
+                    _updateCts.Token,
+                    SetUpdateProgress,
+                    (repoId, msg) => { repositoryErrors[repoId] = msg; _ = InvokeAsync(StateHasChanged); },
+                    onAppSideComplete: () => _updateAwaitingAgentTasks = true,
+                    repoIdsToUpdate: new HashSet<int> { repositoryId },
+                    onVersionFilesUpdated: HandleVersionFilesUpdated);
             }
-            var updatedFiles = await RunFileVersionUpdateAndGetUpdatedFilesAsync();
             await RefreshFromSync();
-            if (updatedFiles is { Count: > 0 })
-            {
-                var byRepo = updatedFiles
-                    .GroupBy(x => (x.RepositoryId, x.RepoName))
-                    .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
-                    .ToList();
-                var repoCount = byRepo.Count;
-                var distinctFiles = updatedFiles.Select(x => x.FilePath).Distinct().ToList();
-                var filesForDisplay = distinctFiles.Count <= 5
-                    ? distinctFiles
-                    : distinctFiles.Take(5).Concat(new[] { $"... and {distinctFiles.Count - 5} more" }).ToList();
-                var prefix = repoCount == 1
-                    ? "Commit the updated version files in this repository?"
-                    : $"Commit all updated version files in all {repoCount} repositories?";
-                OpenVersionFilesCommitModal(prefix, byRepo, filesForDisplay);
-            }
         }
         catch (OperationCanceledException)
         {
@@ -821,6 +776,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
         finally
         {
+            _updateAwaitingAgentTasks = false;
             isUpdating = false;
             await InvokeAsync(StateHasChanged);
         }
@@ -1063,44 +1019,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
         try
         {
-            await using var scope = ServiceScopeFactory.CreateAsyncScope();
-            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            var (payload, isMultiLevel) = await workspaceGitService.GetUpdatePlanAsync(WorkspaceId);
-            if (payload.Count == 0)
-            {
-                var (_, _, fileError, updatedFiles) = await WorkspacePageService.FileVersionService.UpdateAllVersionsAsync(
-                    WorkspaceId,
-                    selectedRepositoryIds: null,
-                    onFileUpdated: null);
-                if (fileError != null && !fileError.Contains("No version configurations"))
-                    Logger.LogWarning("Auto file-version update: {Error}", fileError);
-                if (updatedFiles != null && updatedFiles.Count > 0)
-                {
-                    var byRepo = updatedFiles
-                        .GroupBy(x => (x.RepositoryId, x.RepoName))
-                        .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
-                        .ToList();
-                    var repoCount = byRepo.Count;
-                    var distinctFiles = updatedFiles.Select(x => x.FilePath).Distinct().ToList();
-                    var filesForDisplay = distinctFiles.Count <= 5
-                        ? distinctFiles
-                        : distinctFiles.Take(5).Concat(new[] { $"... and {distinctFiles.Count - 5} more" }).ToList();
-                    var prefix = repoCount == 1
-                        ? "Commit the updated version files in this repository?"
-                        : $"Commit all updated version files in all {repoCount} repositories?";
-                    OpenVersionFilesCommitModal(prefix, byRepo, filesForDisplay);
-                }
-                else
-                {
-                    ToastService.Show("No dependency updates required.");
-                }
-                return;
-            }
             _updateModal = _updateModal with
             {
-                IsVisible = true,
-                IsMultiLevel = isMultiLevel,
-                PlanPayloadForUpdateOnly = payload
+                IsVisible = true
             };
             await InvokeAsync(StateHasChanged);
         }
@@ -1114,17 +1035,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private async Task OnUpdateProceedAsync()
     {
         CloseUpdateModal();
-        await RunUpdateCoreAsync(withCommits: true);
+        await RunUpdateCoreAsync();
     }
 
-    private async Task OnUpdateOnlyAsync()
-    {
-        CloseUpdateModal();
-        await RunUpdateCoreAsync(withCommits: false);
-    }
-
-    /// <summary>Runs update (refresh, sync deps, optional commits). Overlay shows progress.</summary>
-    private async Task RunUpdateCoreAsync(bool withCommits)
+    /// <summary>Runs update (refresh, sync deps, commit per level, refresh version). Overlay shows progress.</summary>
+    private async Task RunUpdateCoreAsync()
     {
         if (workspace == null || workspaceRepositories.Count == 0 || isUpdating || isSyncing)
             return;
@@ -1141,10 +1056,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
             StateHasChanged();
             await Task.Yield();
 
-            var payloadForCommit = await WorkspaceUpdateHandler.RunUpdateAsync(
+            await WorkspaceUpdateHandler.RunUpdateAsync(
                 WorkspaceId,
-                withCommits,
-                _updateModal.PlanPayloadForUpdateOnly,
                 _updateCts.Token,
                 SetUpdateProgress,
                 (repoId, msg) =>
@@ -1152,66 +1065,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     repositoryErrors[repoId] = msg;
                     _ = InvokeAsync(StateHasChanged);
                 },
-                onAppSideComplete: () => _updateAwaitingAgentTasks = true);
+                onAppSideComplete: () => _updateAwaitingAgentTasks = true,
+                repoIdsToUpdate: null,
+                onVersionFilesUpdated: HandleVersionFilesUpdated);
 
             isUpdating = false;
             await InvokeAsync(StateHasChanged);
-            var updatedFiles = await RunFileVersionUpdateAndGetUpdatedFilesAsync();
             await RefreshFromSync();
-
-            if (withCommits && updatedFiles is { Count: > 0 })
-            {
-                var byRepo = updatedFiles
-                    .GroupBy(x => (x.RepositoryId, x.RepoName))
-                    .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
-                    .ToList();
-                await CommitFileVersionUpdatesAsync(byRepo);
-            }
-            else if (!withCommits && payloadForCommit is { Count: > 0 } payloadToCommit)
-            {
-                var repoCount = payloadToCommit.Count;
-                var message = repoCount == 1
-                    ? "Commit the updated version files in this repository?"
-                    : $"Commit all updated version files in all {repoCount} repositories?";
-                var captured = payloadToCommit;
-                var fileVersionByRepo = updatedFiles is { Count: > 0 }
-                    ? updatedFiles
-                        .GroupBy(x => (x.RepositoryId, x.RepoName))
-                        .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
-                        .ToList()
-                    : null;
-                ShowConfirm(message, async () =>
-                {
-                    await CommitPayloadAfterUpdateOnlyAsync(captured);
-                    if (fileVersionByRepo is { Count: > 0 })
-                    {
-                        var distinctFiles = updatedFiles!.Select(x => x.FilePath).Distinct().ToList();
-                        var filesForDisplay = distinctFiles.Count <= 5
-                            ? distinctFiles
-                            : distinctFiles.Take(5).Concat(new[] { $"... and {distinctFiles.Count - 5} more" }).ToList();
-                        var prefix2 = fileVersionByRepo.Count == 1
-                            ? "Commit the updated version files in this repository?"
-                            : $"Commit all updated version files in all {fileVersionByRepo.Count} repositories?";
-                        OpenVersionFilesCommitModal(prefix2, fileVersionByRepo, filesForDisplay);
-                    }
-                }, "Commit");
-            }
-            else if (!withCommits && updatedFiles is { Count: > 0 })
-            {
-                var byRepo = updatedFiles
-                    .GroupBy(x => (x.RepositoryId, x.RepoName))
-                    .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
-                    .ToList();
-                var repoCount = byRepo.Count;
-                var distinctFiles = updatedFiles.Select(x => x.FilePath).Distinct().ToList();
-                var filesForDisplay = distinctFiles.Count <= 5
-                    ? distinctFiles
-                    : distinctFiles.Take(5).Concat(new[] { $"... and {distinctFiles.Count - 5} more" }).ToList();
-                var prefix = repoCount == 1
-                    ? "Commit the updated version files in this repository?"
-                    : $"Commit all updated version files in all {repoCount} repositories?";
-                OpenVersionFilesCommitModal(prefix, byRepo, filesForDisplay);
-            }
         }
         catch (OperationCanceledException)
         {
@@ -1226,44 +1086,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
         finally
         {
             _updateAwaitingAgentTasks = false;
-            isUpdating = false;
-            await InvokeAsync(StateHasChanged);
-        }
-    }
-
-    /// <summary>Commit version files after user chose "Update only" and confirmed in the modal. Reuses CommitDependencyUpdatesAsync (agent StageAndCommit).</summary>
-    private async Task CommitPayloadAfterUpdateOnlyAsync(IReadOnlyList<SyncDependenciesRepoPayload> payload)
-    {
-        if (payload == null || payload.Count == 0)
-            return;
-
-        _updateCts?.Cancel();
-        _updateCts?.Dispose();
-        _updateCts = new CancellationTokenSource();
-        isUpdating = true;
-        SetUpdateProgress("Committing updated versions...");
-        try
-        {
-            await InvokeAsync(StateHasChanged);
-            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
-            {
-                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-                var commitResults = await workspaceGitService.CommitDependencyUpdatesAsync(
-                    WorkspaceId,
-                    payload,
-                    onProgress: OnCommitDependencyProgress,
-                    cancellationToken: _updateCts.Token);
-                foreach (var (repoId, errMsg) in commitResults)
-                {
-                    if (!string.IsNullOrEmpty(errMsg))
-                        repositoryErrors[repoId] = errMsg;
-                }
-            }
-            await TryUpdateFileVersionsAsync();
-            await RefreshFromSync();
-        }
-        finally
-        {
             isUpdating = false;
             await InvokeAsync(StateHasChanged);
         }
@@ -1297,7 +1119,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
                         repositoryErrors[repoId] = errMsg;
                 }
             }
-            await TryUpdateFileVersionsAsync();
             await RefreshFromSync();
         }
         finally
@@ -1385,7 +1206,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
             isUpdating = false;
             await InvokeAsync(StateHasChanged);
-            await TryUpdateFileVersionsAsync();
             await RefreshFromSync();
         }
         catch (OperationCanceledException)
@@ -2362,8 +2182,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private sealed record UpdateModalState
     {
         public bool IsVisible { get; init; }
-        public bool IsMultiLevel { get; init; }
-        public IReadOnlyList<SyncDependenciesRepoPayload>? PlanPayloadForUpdateOnly { get; init; }
     }
 
     private sealed record UpdateSingleRepoDependenciesModalState

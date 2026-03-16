@@ -407,7 +407,12 @@ public class WorkspaceGitService(
             await semaphore.WaitAsync(cancellationToken);
             try
             {
-                var pathsToStage = repo.ProjectUpdates.Select(p => p.ProjectPath).Distinct().ToList();
+                // Paths must be repo-relative with forward slashes for reliable git add across platforms.
+                var pathsToStage = repo.ProjectUpdates
+                    .Select(p => (p.ProjectPath ?? "").Trim().Replace('\\', '/'))
+                    .Where(p => p.Length > 0)
+                    .Distinct()
+                    .ToList();
                 var lines = new List<string> { "chore(deps): update package versions", "" };
                 var seen = new HashSet<(string Id, string Version)>();
                 foreach (var pu in repo.ProjectUpdates)
@@ -470,7 +475,11 @@ public class WorkspaceGitService(
             await semaphore.WaitAsync(cancellationToken);
             try
             {
-                var pathsToStage = repo.FilePaths.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p!.Trim()).Distinct().ToList();
+                var pathsToStage = repo.FilePaths
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .Select(p => p!.Trim().Replace('\\', '/'))
+                    .Distinct()
+                    .ToList();
                 if (pathsToStage.Count == 0)
                     return (RepoId: repo.RepoId, ErrorMessage: (string?)"No paths to stage.");
                 var commitMessage = $"chore(deps): update versions ({pathsToStage.Count})";
@@ -498,183 +507,6 @@ public class WorkspaceGitService(
         var completedResults = await Task.WhenAll(tasks);
         var byRepo = completedResults.ToDictionary(x => x.RepoId, x => x.ErrorMessage);
         return reposAndPaths.Select(r => (r.RepoId, ErrorMessage: byRepo[r.RepoId])).ToList();
-    }
-
-    /// <summary>Runs full update (refresh projects, sync deps, optional commits). Stops on first error and reports it via onRepoError (message under the repo). When <paramref name="repoIdsToUpdate"/> is set, only those repos are updated. When <paramref name="withCommits"/> is false and dependencies were synced, returns the list of repos that were updated so the caller may offer to commit.</summary>
-    public async Task<IReadOnlyList<SyncDependenciesRepoPayload>?> RunUpdateAsync(
-        int workspaceId,
-        bool withCommits,
-        Action<string>? onProgressMessage = null,
-        Action<int, string>? onRepoError = null,
-        Action? onAppSideComplete = null,
-        IReadOnlySet<int>? repoIdsToUpdate = null,
-        CancellationToken cancellationToken = default)
-    {
-        if (!_agentBridge.IsAgentConnected)
-            throw new InvalidOperationException("Agent not connected.");
-
-        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
-        if (workspace == null)
-            throw new InvalidOperationException($"Workspace {workspaceId} not found.");
-
-        var hadError = false;
-        void OnRepoError(int repoId, string msg)
-        {
-            hadError = true;
-            onRepoError?.Invoke(repoId, msg);
-        }
-
-        onProgressMessage?.Invoke("Refreshing projects...");
-        await RefreshWorkspaceProjectsAsync(
-            workspaceId,
-            onProgress: (c, t, _) => onProgressMessage?.Invoke($"Refreshing projects {c} of {t}"),
-            onRepoError: OnRepoError,
-            repositoryIds: repoIdsToUpdate,
-            cancellationToken);
-        if (hadError)
-            return null;
-
-        var (payload, isMultiLevel) = await GetUpdatePlanAsync(workspaceId, repoIdsToUpdate, cancellationToken);
-
-        if (payload.Count == 0)
-        {
-            onAppSideComplete?.Invoke();
-            await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
-            return null;
-        }
-
-        if (!withCommits)
-        {
-            onProgressMessage?.Invoke("Syncing dependencies...");
-            await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: OnRepoError, repoIdsToSync: repoIdsToUpdate, cancellationToken: cancellationToken);
-            if (hadError)
-                return null;
-            onAppSideComplete?.Invoke();
-            await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
-            return payload;
-        }
-
-        if (isMultiLevel)
-        {
-            var levelsAsc = payload.Select(p => p.DependencyLevel ?? 0).Distinct().OrderBy(x => x).ToList();
-            foreach (var level in levelsAsc)
-            {
-                if (hadError)
-                    break;
-
-                var reposAtLevel = payload.Where(p => (p.DependencyLevel ?? 0) == level).ToList();
-                if (reposAtLevel.Count == 0) continue;
-
-                var repoIds = reposAtLevel.Select(r => r.RepoId).ToHashSet();
-                onProgressMessage?.Invoke($"Updating {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
-                await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Syncing {c} of {t}"), onRepoError: OnRepoError, repoIdsToSync: repoIds, cancellationToken: cancellationToken);
-                if (hadError)
-                    break;
-
-                onProgressMessage?.Invoke($"Committing...");
-                var commitResults = await CommitDependencyUpdatesAsync(workspaceId, reposAtLevel, onProgress: (c, t, _) =>
-                {
-                    onProgressMessage?.Invoke($"Committed {c} of {t}");
-                    if (c == t)
-                        onAppSideComplete?.Invoke();
-                }, cancellationToken: cancellationToken);
-                foreach (var (repoId, errMsg) in commitResults)
-                {
-                    if (!string.IsNullOrEmpty(errMsg))
-                    {
-                        OnRepoError(repoId, errMsg);
-                        break;
-                    }
-                }
-                if (hadError)
-                    break;
-
-                var totalRefresh = reposAtLevel.Count;
-                var completedRefresh = 0;
-                var refreshSemaphore = new SemaphoreSlim(_maxConcurrent);
-                var refreshTasks = reposAtLevel.Select(async repo =>
-                {
-                    await refreshSemaphore.WaitAsync(cancellationToken);
-                    try
-                    {
-                        var (refreshSuccess, refreshError) = await SyncSingleRepositoryAsync(repo.RepoId, workspaceId, cancellationToken);
-                        var c = Interlocked.Increment(ref completedRefresh);
-                        onProgressMessage?.Invoke($"Updating version {c} of {totalRefresh}...");
-                        if (c == totalRefresh)
-                            onAppSideComplete?.Invoke();
-                        return (repo.RepoId, refreshSuccess, refreshError);
-                    }
-                    finally
-                    {
-                        refreshSemaphore.Release();
-                    }
-                });
-                var refreshResults = await Task.WhenAll(refreshTasks);
-                foreach (var (repoId, success, err) in refreshResults)
-                {
-                    if (!success)
-                        OnRepoError(repoId, err ?? "Refresh version failed.");
-                }
-            }
-        }
-        else
-        {
-            onProgressMessage?.Invoke("Syncing dependencies...");
-            await SyncDependenciesAsync(workspaceId, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: OnRepoError, repoIdsToSync: repoIdsToUpdate, cancellationToken: cancellationToken);
-            if (hadError)
-                return null;
-            onProgressMessage?.Invoke("Committing updates...");
-            var commitResults = await CommitDependencyUpdatesAsync(workspaceId, payload, onProgress: (c, t, _) =>
-            {
-                onProgressMessage?.Invoke($"Committed {c} of {t}");
-                if (c == t)
-                    onAppSideComplete?.Invoke();
-            }, cancellationToken: cancellationToken);
-            foreach (var (repoId, errMsg) in commitResults)
-            {
-                if (!string.IsNullOrEmpty(errMsg))
-                {
-                    OnRepoError(repoId, errMsg);
-                    break;
-                }
-            }
-            if (!hadError && payload.Count > 0)
-            {
-                var totalRefresh = payload.Count;
-                var completedRefresh = 0;
-                var refreshSemaphore = new SemaphoreSlim(_maxConcurrent);
-                var refreshTasks = payload.Select(async repo =>
-                {
-                    await refreshSemaphore.WaitAsync(cancellationToken);
-                    try
-                    {
-                        var (refreshSuccess, refreshError) = await SyncSingleRepositoryAsync(repo.RepoId, workspaceId, cancellationToken);
-                        var c = Interlocked.Increment(ref completedRefresh);
-                        onProgressMessage?.Invoke($"Updating version {c} of {totalRefresh}...");
-                        if (c == totalRefresh)
-                            onAppSideComplete?.Invoke();
-                        return (repo.RepoId, refreshSuccess, refreshError);
-                    }
-                    finally
-                    {
-                        refreshSemaphore.Release();
-                    }
-                });
-                var refreshResults = await Task.WhenAll(refreshTasks);
-                foreach (var (repoId, success, err) in refreshResults)
-                {
-                    if (!success)
-                        OnRepoError(repoId, err ?? "Refresh version failed.");
-                }
-            }
-        }
-
-        if (!hadError)
-        {
-            onAppSideComplete?.Invoke();
-            await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
-        }
-        return null;
     }
 
     /// <summary>Runs dependency-synchronized push: sync package registries (unless already done by caller), then push by level (lowest first). For each level, waits until required packages are in registry (or pushes all at once if not possible), then pushes all repos at that level in parallel. Ensures branch is upstreamed even when there are no commits to push. When <paramref name="repoIdsToPush"/> is set, only those repos are pushed. Set <paramref name="packageRegistriesAlreadySynced"/> to true when the caller already synced required packages (e.g. via SyncRegistriesForPackageIdsAsync) to avoid syncing twice.</summary>

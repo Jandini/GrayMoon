@@ -24,12 +24,8 @@
                             }
                         </ul>
                     </div>
-                    <div class="form-check">
-                        <input id="update-single-commit-checkbox" type="checkbox" class="form-check-input" @bind="CommitVersionUpdate" @ref="_commitCheckboxElement" />
-                        <label class="form-check-label" for="update-single-commit-checkbox">Commit version update</label>
-                    </div>
-                    <p class="small text-muted mt-1 mb-0">
-                        If checked, updated .csproj files will be committed after the update.
+                    <p class="small text-muted mb-0">
+                        .csproj files will be updated and committed.
                     </p>
                 </div>
                 <div class="modal-footer">
@@ -49,13 +45,10 @@
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public SyncDependenciesRepoPayload? Payload { get; set; }
     [Parameter] public string? RepoName { get; set; }
-    [Parameter] public EventCallback<bool> OnProceed { get; set; }
+    [Parameter] public EventCallback OnProceed { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
 
-    private bool CommitVersionUpdate { get; set; } = true;
     private ElementReference _modalElement;
-    private ElementReference _commitCheckboxElement;
-    private bool _shouldFocusCommitCheckbox;
 
     private IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> PackageLines =>
         Payload?.ProjectUpdates
@@ -65,27 +58,9 @@
             .ToList()
         ?? (IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>)Array.Empty<(string PackageId, string CurrentVersion, string NewVersion)>();
 
-    protected override void OnParametersSet()
-    {
-        if (IsVisible)
-        {
-            CommitVersionUpdate = true;
-            _shouldFocusCommitCheckbox = true;
-        }
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (_shouldFocusCommitCheckbox && IsVisible)
-        {
-            _shouldFocusCommitCheckbox = false;
-            await _commitCheckboxElement.FocusAsync();
-        }
-    }
-
     private async Task Proceed()
     {
-        await OnProceed.InvokeAsync(CommitVersionUpdate);
+        await OnProceed.InvokeAsync();
     }
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
