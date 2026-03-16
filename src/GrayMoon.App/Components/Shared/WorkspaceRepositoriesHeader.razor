@@ -27,7 +27,7 @@
         {
             <span class="workspace-repos-agent-tasks text-muted d-inline-flex align-items-center gap-1">
                 <i class="bi bi-cpu"></i>
-                @AgentTasksPendingCount agent job@(AgentTasksPendingCount == 1 ? "" : "s") running
+                @AgentTasksPendingCount agent job@(AgentTasksPendingCount == 1 ? "" : "s") pending
                 <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
             </span>
         }
@@ -82,7 +82,7 @@
         }
         <button class="btn @(IsOutOfSync == true ? "btn-danger" : "btn-primary")"
                 @onclick="@(() => OnSync.InvokeAsync())"
-                disabled="@(IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0 || AgentTasksPendingCount > 0)">
+                disabled="@(IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0)">
             Sync
         </button>
     </div>
