@@ -13,16 +13,13 @@
                     @if (IsMultiLevel)
                     {
                         <p class="mb-0">
-                            Repositories with dependency updates span multiple levels. Committing from lowest to highest ensures each level uses the latest versions before the next level is updated.
-                        </p>
-                        <p class="mb-0 mt-2">
-                            <strong>Proceed</strong> to update .csproj files and commit each level in order.
+                            Proceed to update dependency versions in <code>.csproj</code> files to match the current versions of the referenced packages, update any configured version files that use those versions, and create git commits for each level in order.
                         </p>
                     }
                     else
                     {
                         <p class="mb-0">
-                            Update .csproj files and create commits for the modified project files?
+                            Proceed to update dependency versions in <code>.csproj</code> files to match the current versions of the referenced packages, update any configured version files that use those versions, and create git commits in each affected repository for the modified files.
                         </p>
                     }
                 </div>
