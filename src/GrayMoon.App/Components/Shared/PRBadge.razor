@@ -1,10 +1,14 @@
 @using GrayMoon.App.Models
 @using Microsoft.AspNetCore.Components.Web
 
-@* PR column badge: none (dark gray), create (yellow, black text), #number (green), merged (purple). Default "none" until data loads. *@
+@* PR column badge: none (dark gray), create (yellow, black text), #number (green), merged (purple), closed (red). Default "none" until data loads. *@
 @if (PullRequest != null && PullRequest.IsMerged)
 {
     <a href="@PullRequest.HtmlUrl" target="_blank" rel="noopener noreferrer" class="badge pr-badge pr-badge-merged" title="PR #@PullRequest.Number merged">merged</a>
+}
+else if (PullRequest != null && PullRequest.IsClosed)
+{
+    <a href="@PullRequest.HtmlUrl" target="_blank" rel="noopener noreferrer" class="badge pr-badge pr-badge-closed" title="PR #@PullRequest.Number closed">closed</a>
 }
 else if (PullRequest != null && string.Equals(PullRequest.State, "open", StringComparison.OrdinalIgnoreCase))
 {

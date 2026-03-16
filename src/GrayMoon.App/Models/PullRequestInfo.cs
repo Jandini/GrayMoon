@@ -6,6 +6,7 @@ public sealed class PullRequestInfo
     public int Number { get; set; }
     public string State { get; set; } = string.Empty; // "open", "closed"
     public bool IsMerged => MergedAt.HasValue;
+    public bool IsClosed => string.Equals(State, "closed", StringComparison.OrdinalIgnoreCase);
     public DateTimeOffset? MergedAt { get; set; }
     public string HtmlUrl { get; set; } = string.Empty;
     /// <summary>True = mergeable, false = conflict, null = unknown.</summary>
