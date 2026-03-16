@@ -16,6 +16,7 @@ public class WorkspaceRepositoryPullRequest
     public string? MergeableState { get; set; }
     public string? HtmlUrl { get; set; }
     public DateTimeOffset? MergedAt { get; set; }
+    public int? ChangedFiles { get; set; }
     public DateTime LastCheckedAt { get; set; }
 
     public PullRequestInfo ToPullRequestInfo()
@@ -27,7 +28,8 @@ public class WorkspaceRepositoryPullRequest
             MergedAt = MergedAt,
             HtmlUrl = HtmlUrl ?? string.Empty,
             Mergeable = Mergeable,
-            MergeableState = MergeableState
+            MergeableState = MergeableState,
+            ChangedFiles = ChangedFiles
         };
     }
 }

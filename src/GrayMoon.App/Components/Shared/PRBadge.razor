@@ -4,17 +4,50 @@
 @* PR column badge: none (dark gray), create (yellow, black text), #number (green), merged (purple), closed (red). Default "none" until data loads. *@
 @if (PullRequest != null && PullRequest.IsMerged)
 {
-    <a href="@PullRequest.HtmlUrl" target="_blank" rel="noopener noreferrer" class="badge pr-badge pr-badge-merged" title="PR #@PullRequest.Number merged">merged</a>
+    <a href="@PullRequest.HtmlUrl"
+       target="_blank"
+       rel="noopener noreferrer"
+       class="badge pr-badge pr-badge-merged"
+       title="PR #@PullRequest.Number merged">merged</a>
+    @if (PullRequest.ChangedFiles is > 0)
+    {
+        <span class="badge pr-badge pr-badge-merged pr-badge-files-changed"
+              title="@($"{PullRequest.ChangedFiles} file{(PullRequest.ChangedFiles == 1 ? "" : "s")} changed")">
+            @PullRequest.ChangedFiles
+        </span>
+    }
 }
 else if (PullRequest != null && PullRequest.IsClosed)
 {
-    <a href="@PullRequest.HtmlUrl" target="_blank" rel="noopener noreferrer" class="badge pr-badge pr-badge-closed" title="PR #@PullRequest.Number closed">closed</a>
+    <a href="@PullRequest.HtmlUrl"
+       target="_blank"
+       rel="noopener noreferrer"
+       class="badge pr-badge pr-badge-closed"
+       title="PR #@PullRequest.Number closed">closed</a>
+    @if (PullRequest.ChangedFiles is > 0)
+    {
+        <span class="badge pr-badge pr-badge-closed pr-badge-files-changed"
+              title="@($"{PullRequest.ChangedFiles} file{(PullRequest.ChangedFiles == 1 ? "" : "s")} changed")">
+            @PullRequest.ChangedFiles
+        </span>
+    }
 }
 else if (PullRequest != null && string.Equals(PullRequest.State, "open", StringComparison.OrdinalIgnoreCase))
 {
     var openClass = GetOpenPrMergeabilityClass(PullRequest);
     var openTitle = GetOpenPrMergeabilityTitle(PullRequest);
-    <a href="@PullRequest.HtmlUrl" target="_blank" rel="noopener noreferrer" class="badge pr-badge pr-badge-open @openClass" title="@openTitle">#@PullRequest.Number</a>
+    <a href="@PullRequest.HtmlUrl"
+       target="_blank"
+       rel="noopener noreferrer"
+       class="badge pr-badge pr-badge-open @openClass"
+       title="@openTitle">#@PullRequest.Number</a>
+    @if (PullRequest.ChangedFiles is > 0)
+    {
+        <span class="badge pr-badge pr-badge-open @openClass pr-badge-files-changed"
+              title="@($"{PullRequest.ChangedFiles} file{(PullRequest.ChangedFiles == 1 ? "" : "s")} changed")">
+            @PullRequest.ChangedFiles
+        </span>
+    }
 }
 else if (IsPrVerified && (PullRequest == null || !string.Equals(PullRequest.State, "open", StringComparison.OrdinalIgnoreCase)) && (DefaultBranchAheadCommits ?? 0) > 0)
 {

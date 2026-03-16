@@ -30,6 +30,7 @@ public static class Migrations
         await MigrateSettingsAsync(dbContext);
         await MigrateWorkspaceRootPathAsync(dbContext);
         await MigrateWorkspaceRepositoryPullRequestsAsync(dbContext);
+        await MigrateWorkspaceRepositoryPullRequestsChangedFilesAsync(dbContext);
     }
 
     public static async Task MigrateRepositoriesTopicsAsync(AppDbContext dbContext)
@@ -783,6 +784,37 @@ public static class Migrations
                         LastCheckedAt TEXT NOT NULL,
                         FOREIGN KEY (WorkspaceRepositoryId) REFERENCES WorkspaceRepositories(WorkspaceRepositoryId) ON DELETE CASCADE
                     )";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds ChangedFiles column to WorkspaceRepositoryPullRequests to store PR changed file count.</summary>
+    public static async Task MigrateWorkspaceRepositoryPullRequestsChangedFilesAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceRepositoryPullRequests'";
+                var tableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!tableExists)
+                    return;
+
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositoryPullRequests') WHERE name='ChangedFiles'";
+                var hasColumn = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!hasColumn)
+                {
+                    cmd.CommandText = "ALTER TABLE WorkspaceRepositoryPullRequests ADD COLUMN ChangedFiles INTEGER";
                     await cmd.ExecuteNonQueryAsync();
                 }
             }
