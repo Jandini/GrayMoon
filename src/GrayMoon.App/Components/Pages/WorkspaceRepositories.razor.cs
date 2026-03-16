@@ -687,10 +687,19 @@ public sealed partial class WorkspaceRepositories : IDisposable
         ShowConfirmOpenGitHub(args.count, args.urls);
     }
 
-    /// <summary>True if the workspace has a merged PR for this repository's current branch (from prByRepositoryId).</summary>
+    /// <summary>
+    /// True if the workspace has a PR for this repository's current branch that is either merged
+    /// or closed (treated the same as merged for sync-to-default safety checks).
+    /// </summary>
     private bool IsPrMergedForRepo(int repositoryId)
     {
-        return prByRepositoryId.TryGetValue(repositoryId, out var pr) && pr?.IsMerged == true;
+        if (!prByRepositoryId.TryGetValue(repositoryId, out var pr) || pr == null)
+            return false;
+
+        if (pr.IsMerged)
+            return true;
+
+        return string.Equals(pr.State, "closed", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task ShowConfirmUpdateDependenciesAsync(int repositoryId, int unmatchedCount)
