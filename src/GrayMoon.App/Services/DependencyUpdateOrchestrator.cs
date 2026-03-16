@@ -133,6 +133,50 @@ public sealed class DependencyUpdateOrchestrator(
                     if (!success)
                         OnRepoError(repoId, err ?? "Refresh version failed.");
                 }
+
+                if (hadError)
+                    break;
+
+                // Step 6a: Update version files for this level (only repos at this level).
+                setProgress("Updating version files...");
+                var selectedRepoIds = new HashSet<int>(reposAtLevel.Select(r => r.RepoId));
+                var (_, _, fileError, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
+                    workspaceId,
+                    selectedRepositoryIds: selectedRepoIds,
+                    onFileUpdated: null,
+                    cancellationToken: cancellationToken);
+
+                if (fileError != null && !fileError.Contains("No version configurations", StringComparison.OrdinalIgnoreCase))
+                {
+                    OnRepoError(0, fileError);
+                    if (hadError)
+                        break;
+                }
+
+                if (updatedFiles is { Count: > 0 })
+                {
+                    var byRepo = updatedFiles
+                        .GroupBy(x => (x.RepositoryId, x.RepoName))
+                        .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
+                        .ToList();
+
+                    // For multi-level flow, always commit version-file changes per level to keep higher levels consistent.
+                    setProgress("Committing updated versions...");
+                    var vfCommitResults = await workspaceGitService.CommitFilePathsAsync(
+                        workspaceId,
+                        byRepo,
+                        onProgress: (c, t, _) => setProgress($"Committed version files {c} of {t}"),
+                        cancellationToken: cancellationToken);
+
+                    foreach (var (repoId, errMsg) in vfCommitResults)
+                    {
+                        if (!string.IsNullOrEmpty(errMsg))
+                            OnRepoError(repoId, errMsg);
+                    }
+
+                    if (hadError)
+                        break;
+                }
             }
         }
         else if (payload.Count > 0)
@@ -197,53 +241,51 @@ public sealed class DependencyUpdateOrchestrator(
                         OnRepoError(repoId, err ?? "Refresh version failed.");
                 }
             }
-        }
 
-        // Step 6: Version-file update (runs even when there were no csproj updates, as long as the earlier steps did not error).
-        if (!hadError)
-        {
-            setProgress("Updating version files...");
-            // When repoIdsToUpdate is set, restrict updates to those repos; otherwise update all configured files.
-            var selectedRepoIds = repoIdsToUpdate != null && repoIdsToUpdate.Count > 0
-                ? new HashSet<int>(repoIdsToUpdate)
-                : null;
-
-            var (_, _, fileError, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
-                workspaceId,
-                selectedRepositoryIds: selectedRepoIds,
-                onFileUpdated: null,
-                cancellationToken: cancellationToken);
-
-            if (fileError != null && !fileError.Contains("No version configurations", StringComparison.OrdinalIgnoreCase))
+            if (!hadError)
             {
-                // Version-file update errors are reported but do not stop final broadcast.
-                OnRepoError(0, fileError);
-            }
+                // Single-level: run version-file updates once for all repos in payload (or filter if repoIdsToUpdate is set).
+                setProgress("Updating version files...");
+                HashSet<int>? selectedRepoIds = null;
+                if (repoIdsToUpdate != null && repoIdsToUpdate.Count > 0)
+                    selectedRepoIds = new HashSet<int>(repoIdsToUpdate);
 
-            if (updatedFiles is { Count: > 0 })
-            {
-                var byRepo = updatedFiles
-                    .GroupBy(x => (x.RepositoryId, x.RepoName))
-                    .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
-                    .ToList();
+                var (_, _, fileError, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
+                    workspaceId,
+                    selectedRepositoryIds: selectedRepoIds,
+                    onFileUpdated: null,
+                    cancellationToken: cancellationToken);
 
-                if (onVersionFilesUpdated != null)
+                if (fileError != null && !fileError.Contains("No version configurations", StringComparison.OrdinalIgnoreCase))
                 {
-                    onVersionFilesUpdated(byRepo);
+                    OnRepoError(0, fileError);
                 }
-                else
-                {
-                    setProgress("Committing updated versions...");
-                    var commitResults = await workspaceGitService.CommitFilePathsAsync(
-                        workspaceId,
-                        byRepo,
-                        onProgress: (c, t, _) => setProgress($"Committed version files {c} of {t}"),
-                        cancellationToken: cancellationToken);
 
-                    foreach (var (repoId, errMsg) in commitResults)
+                if (updatedFiles is { Count: > 0 })
+                {
+                    var byRepo = updatedFiles
+                        .GroupBy(x => (x.RepositoryId, x.RepoName))
+                        .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
+                        .ToList();
+
+                    if (onVersionFilesUpdated != null)
                     {
-                        if (!string.IsNullOrEmpty(errMsg))
-                            OnRepoError(repoId, errMsg);
+                        onVersionFilesUpdated(byRepo);
+                    }
+                    else
+                    {
+                        setProgress("Committing updated versions...");
+                        var vfCommitResults = await workspaceGitService.CommitFilePathsAsync(
+                            workspaceId,
+                            byRepo,
+                            onProgress: (c, t, _) => setProgress($"Committed version files {c} of {t}"),
+                            cancellationToken: cancellationToken);
+
+                        foreach (var (repoId, errMsg) in vfCommitResults)
+                        {
+                            if (!string.IsNullOrEmpty(errMsg))
+                                OnRepoError(repoId, errMsg);
+                        }
                     }
                 }
             }
