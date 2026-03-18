@@ -65,6 +65,8 @@ try
     builder.Services.AddScoped<WorkspaceSyncHandler>();
     builder.Services.AddScoped<DependencyUpdateOrchestrator>();
     builder.Services.AddScoped<WorkspaceUpdateHandler>();
+    builder.Services.AddScoped<PushOrchestrator>();
+    builder.Services.AddScoped<WorkspacePushService>();
     builder.Services.AddScoped<WorkspacePushHandler>();
     builder.Services.AddScoped<WorkspaceDependencyService>();
     builder.Services.AddScoped<WorkspaceBranchHandler>();
