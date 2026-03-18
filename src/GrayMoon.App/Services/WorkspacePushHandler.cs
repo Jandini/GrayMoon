@@ -66,7 +66,7 @@ public sealed class WorkspacePushHandler(
                     repoIds,
                     setProgress,
                     (id, err) => showToast($"{id}: {err}"),
-                    onAppSideComplete,
+                    onAppSideComplete: null,
                     cancellationToken);
             }
 

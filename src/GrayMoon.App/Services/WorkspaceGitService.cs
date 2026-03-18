@@ -575,6 +575,7 @@ public class WorkspaceGitService(
         }
 
         var levelsAsc = payload.Select(p => p.DependencyLevel ?? 0).Distinct().OrderBy(x => x).ToList();
+        var lastLevel = levelsAsc[^1];
         foreach (var level in levelsAsc)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -671,7 +672,14 @@ public class WorkspaceGitService(
             }
 
             onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
-            await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken);
+            await PushReposAsync(
+                workspace,
+                reposAtLevel,
+                bearerByRepoId,
+                onProgressMessage,
+                onRepoError,
+                onAppSideComplete: level == lastLevel ? null : onAppSideComplete,
+                cancellationToken);
             await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
         }
 
