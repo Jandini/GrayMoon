@@ -871,6 +871,30 @@ public sealed partial class WorkspaceRepositories : IDisposable
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         ClosePushWithDependenciesModal();
 
+        try
+        {
+            await ExecutePushAsync(repoIds, synchronizedPush, requiredPackageIds);
+        }
+        catch (SynchronizedPushNotPossibleException ex)
+        {
+            ShowConfirm(
+                $"Synchronized push could not be completed because {ex.MissingPackagesCount} required package mappings are missing. Check NuGet connector configuration and token, then retry. Continue with normal push?",
+                () => ExecutePushAsync(
+                    repoIds,
+                    synchronizedPush: false,
+                    requiredPackageIds: requiredPackageIds),
+                confirmButtonText: "Continue");
+        }
+    }
+
+    private async Task ExecutePushAsync(
+        IReadOnlySet<int> repoIds,
+        bool synchronizedPush,
+        IReadOnlySet<string> requiredPackageIds)
+    {
+        if (workspace == null)
+            return;
+
         _pushCts?.Cancel();
         _pushCts?.Dispose();
         _pushCts = new CancellationTokenSource();

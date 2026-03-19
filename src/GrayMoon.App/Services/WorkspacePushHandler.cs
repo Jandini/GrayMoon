@@ -7,7 +7,8 @@ namespace GrayMoon.App.Services;
 /// Stateless; all UI state is owned by the caller.
 /// </summary>
 public sealed class WorkspacePushHandler(
-    IServiceScopeFactory serviceScopeFactory,
+    PushOrchestrator pushOrchestrator,
+    WorkspacePushService workspacePushService,
     ILogger<WorkspacePushHandler> logger)
 {
     public async Task<(IReadOnlyList<PushRepoPayload> Payload, bool HasUnpushed)> GetPushPlanAsync(
@@ -15,10 +16,7 @@ public sealed class WorkspacePushHandler(
         IReadOnlyList<WorkspaceRepositoryLink> workspaceRepositories,
         CancellationToken cancellationToken)
     {
-        await using var scope = serviceScopeFactory.CreateAsyncScope();
-        var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-
-        var (payload, _) = await workspaceGitService.GetPushPlanAsync(workspaceId);
+        var (payload, _) = await workspacePushService.GetPushPlanAsync(workspaceId, cancellationToken);
         var repoIdsWithUnpushed = workspaceRepositories
             .Where(wr => (wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false)
             .Select(wr => wr.RepositoryId)
@@ -38,42 +36,23 @@ public sealed class WorkspacePushHandler(
         Action? onAppSideComplete = null,
         CancellationToken cancellationToken = default)
     {
-        await using var scope = serviceScopeFactory.CreateAsyncScope();
-        var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-
         try
         {
-            if (synchronizedPush)
-            {
-                setProgress("Syncing package registries for required packages...");
-                if (requiredPackageIds.Count > 0 && scope.ServiceProvider.GetService<PackageRegistrySyncService>() is { } syncService)
-                    await syncService.SyncRegistriesForPackageIdsAsync(workspaceId, requiredPackageIds, cancellationToken);
-                setProgress("Pushing synchronized...");
-                await workspaceGitService.RunPushAsync(
-                    workspaceId,
-                    repoIds,
-                    setProgress,
-                    (id, err) => showToast($"{id}: {err}"),
-                    onAppSideComplete,
-                    packageRegistriesAlreadySynced: requiredPackageIds.Count > 0,
-                    cancellationToken: cancellationToken);
-            }
-            else
-            {
-                setProgress("Pushing...");
-                await workspaceGitService.RunPushReposParallelAsync(
-                    workspaceId,
-                    repoIds,
-                    setProgress,
-                    (id, err) => showToast($"{id}: {err}"),
-                    onAppSideComplete: null,
-                    cancellationToken);
-            }
-
-            await refresh();
+            await pushOrchestrator.RunAsync(
+                workspaceId,
+                repoIds,
+                synchronizedPush,
+                requiredPackageIds,
+                setProgress,
+                refresh,
+                showToast,
+                onAppSideComplete,
+                cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            if (ex is SynchronizedPushNotPossibleException)
+                throw;
             logger.LogError(ex, "Push with dependencies failed for workspace {WorkspaceId}", workspaceId);
             showToast(ex.Message);
             throw;
@@ -87,13 +66,11 @@ public sealed class WorkspacePushHandler(
         Action<string> setProgress,
         CancellationToken cancellationToken)
     {
-        await using var scope = serviceScopeFactory.CreateAsyncScope();
-        var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-        return await workspaceGitService.PushSingleRepositoryWithUpstreamAsync(
+        return await pushOrchestrator.PushSingleAsync(
             workspaceId,
             repositoryId,
             branchName,
-            msg => setProgress(msg),
+            setProgress,
             cancellationToken);
     }
 }
