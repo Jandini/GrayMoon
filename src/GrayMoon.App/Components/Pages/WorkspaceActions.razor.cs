@@ -2,6 +2,7 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
 using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Components.Pages;
 
@@ -12,7 +13,10 @@ public sealed partial class WorkspaceActions : IDisposable
     [Inject] private WorkspaceActionService ActionService { get; set; } = null!;
     [Inject] private GitHubActionsService GitHubActionsService { get; set; } = null!;
     [Inject] private WorkspaceRepository WorkspaceRepository { get; set; } = null!;
+    [Inject] private IOptions<WorkspaceOptions> WorkspaceOptions { get; set; } = null!;
     [Inject] private ILogger<WorkspaceActions> Logger { get; set; } = null!;
+
+    private int MaxConcurrency => Math.Max(1, WorkspaceOptions.Value.MaxParallelOperations);
 
     internal sealed class WorkspaceActionRow
     {
@@ -37,7 +41,7 @@ public sealed partial class WorkspaceActions : IDisposable
     private bool isRefreshing;
     private bool isRerunningAll;
     private int _rerunTotal;
-    private int _rerunCompleted;
+    private volatile int _rerunCompleted;
     private CancellationTokenSource _cts = new();
 
     internal bool HasFailedRows => rows.Any(r =>
@@ -278,9 +282,10 @@ public sealed partial class WorkspaceActions : IDisposable
 
         try
         {
-            foreach (var row in failedRows)
+            using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
+            var tasks = failedRows.Select(async row =>
             {
-                if (_cts.IsCancellationRequested) break;
+                await semaphore.WaitAsync(_cts.Token);
                 try
                 {
                     var actionEntry = BuildActionEntry(row);
@@ -292,10 +297,12 @@ public sealed partial class WorkspaceActions : IDisposable
                 }
                 finally
                 {
-                    _rerunCompleted++;
+                    semaphore.Release();
+                    Interlocked.Increment(ref _rerunCompleted);
                     await InvokeAsync(StateHasChanged);
                 }
-            }
+            });
+            await Task.WhenAll(tasks);
         }
         finally
         {
