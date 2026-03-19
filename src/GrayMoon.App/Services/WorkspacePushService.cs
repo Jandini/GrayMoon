@@ -111,9 +111,15 @@ public sealed class WorkspacePushService(
                 wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
 
         bool synchronizedPushPossible = payload.All(p => p.RequiredPackages.All(r => r.MatchedConnectorId.HasValue));
-        if (!synchronizedPushPossible && payload.Any(p => p.RequiredPackages.Count > 0))
+        var missingPackagesCount = payload
+            .SelectMany(p => p.RequiredPackages)
+            .Where(r => !r.MatchedConnectorId.HasValue)
+            .DistinctBy(r => (r.PackageId, r.Version))
+            .Count();
+        if (!synchronizedPushPossible && missingPackagesCount > 0)
         {
-            _logger.LogInformation("Push: some dependencies have no matched registry; pushing all repositories at once.");
+            _logger.LogInformation("Push: synchronized push unavailable; {Count} required package mappings are missing.", missingPackagesCount);
+            throw new SynchronizedPushNotPossibleException(missingPackagesCount);
         }
 
         if (!synchronizedPushPossible || _nuGetService == null || _connectorRepository == null)
@@ -174,7 +180,7 @@ public sealed class WorkspacePushService(
                     }
                     var found = getFoundCount();
                     var line1 = found == 0
-                        ? $"Waiting for {totalDeps} {(totalDeps == 1 ? "dependency" : "dependencies")}..."
+                        ? $"Waiting for {totalDeps} {(totalDeps == 1 ? "dependency" : "dependencies")}"
                         : $"Found {found} of {totalDeps} {(totalDeps == 1 ? "dependency" : "dependencies")}";
                     var totalSec = (int)remaining.TotalSeconds;
                     var mm = totalSec / 60;

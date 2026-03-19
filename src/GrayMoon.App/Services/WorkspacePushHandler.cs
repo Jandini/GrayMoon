@@ -51,6 +51,8 @@ public sealed class WorkspacePushHandler(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            if (ex is SynchronizedPushNotPossibleException)
+                throw;
             logger.LogError(ex, "Push with dependencies failed for workspace {WorkspaceId}", workspaceId);
             showToast(ex.Message);
             throw;
