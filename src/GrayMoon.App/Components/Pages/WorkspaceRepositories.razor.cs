@@ -462,8 +462,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
         if (!awaitingAgentTasks) return progressMessage;
         if (AgentTasksPendingCount == 0) return progressMessage;
         return AgentTasksPendingCount == 1
-            ? "Waiting for 1 pending operation"
-            : $"Waiting for {AgentTasksPendingCount} pending operations";
+            ? "Waiting for the agent to complete 1 task"
+            : $"Waiting for the agent to complete {AgentTasksPendingCount} tasks";
     }
 
     /// <summary>
