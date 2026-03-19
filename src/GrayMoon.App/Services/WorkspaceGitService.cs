@@ -202,6 +202,18 @@ public class WorkspaceGitService(
                 await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, r.RepositoryId, r.ProjectsDetail, cancellationToken);
         }
 
+        var repoIdsToUpdate = syncResults.Select(r => r.RepositoryId).ToList();
+        var linksToUpdate = await _dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId && repoIdsToUpdate.Contains(wr.RepositoryId))
+            .ToListAsync(cancellationToken);
+        foreach (var r in syncResults)
+        {
+            var link = linksToUpdate.FirstOrDefault(l => l.RepositoryId == r.RepositoryId);
+            if (link != null)
+                link.RepositoryType = ComputeRepositoryType(r.ProjectsDetail);
+        }
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
         var resultsForDeps = syncResults.Select(r => (r.RepositoryId, r.ProjectsDetail)).ToList();
         await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, resultsForDeps, persistDependencyLevel: true, cancellationToken);
 
@@ -238,6 +250,14 @@ public class WorkspaceGitService(
         var projectsDetail = response.Data != null ? GetProjectsDetail(response.Data) : null;
         if (projectsDetail is { Count: > 0 })
             await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repositoryId, projectsDetail, cancellationToken);
+
+        var link = await _dbContext.WorkspaceRepositories
+            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
+        if (link != null)
+        {
+            link.RepositoryType = ComputeRepositoryType(projectsDetail);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
 
         await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, [(repositoryId, projectsDetail)], persistDependencyLevel: true, cancellationToken);
         _logger.LogDebug("RefreshSingleRepositoryProjects completed for workspace {WorkspaceName}, repo {RepositoryId}", workspace.Name, repositoryId);
@@ -745,6 +765,16 @@ public class WorkspaceGitService(
         return (local, remote, defaultBranch);
     }
 
+    private static ProjectType? ComputeRepositoryType(IReadOnlyList<SyncProjectInfo>? projects)
+    {
+        if (projects == null || projects.Count == 0) return null;
+        if (projects.Any(p => p.ProjectType == ProjectType.Service)) return ProjectType.Service;
+        if (projects.Any(p => p.ProjectType == ProjectType.Package)) return ProjectType.Package;
+        if (projects.Any(p => p.ProjectType == ProjectType.Executable)) return ProjectType.Executable;
+        if (projects.Any(p => p.ProjectType == ProjectType.Library)) return ProjectType.Library;
+        return ProjectType.Test;
+    }
+
     private static IReadOnlyList<SyncProjectInfo>? GetProjectsDetail(object data)
     {
         var r = AgentResponseJson.DeserializeAgentResponse<AgentSyncProjectsResponse>(data);
@@ -817,7 +847,11 @@ public class WorkspaceGitService(
             }
 
             if (info.ProjectsDetail is { Count: > 0 })
+            {
                 await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repoId, info.ProjectsDetail, cancellationToken);
+                if (wr != null)
+                    wr.RepositoryType = ComputeRepositoryType(info.ProjectsDetail);
+            }
 
             // Persist branches if available (include default branch so IsDefault is set)
             if ((info.LocalBranches != null || info.RemoteBranches != null) && wr != null)

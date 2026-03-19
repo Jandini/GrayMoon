@@ -237,11 +237,22 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
         workspaceRepositories = workspace.Repositories
             .OrderByDescending(wr => wr.DependencyLevel ?? int.MinValue)
+            .ThenBy(wr => GetRepositoryTypeSortOrder(wr.RepositoryType))
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
         prByRepositoryId = BuildPrByRepositoryIdFromLinks(workspaceRepositories);
         await LoadMismatchedDependencyLinesAsync();
     }
+
+    private static int GetRepositoryTypeSortOrder(ProjectType? type) => type switch
+    {
+        ProjectType.Service    => 0,
+        ProjectType.Package    => 1,
+        ProjectType.Executable => 2,
+        ProjectType.Library    => 3,
+        ProjectType.Test       => 4,
+        _                      => 5 // null — no projects yet
+    };
 
     private static IReadOnlyDictionary<int, PullRequestInfo?> BuildPrByRepositoryIdFromLinks(List<WorkspaceRepositoryLink> links)
     {
@@ -365,6 +376,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         workspace = w;
         workspaceRepositories = workspace.Repositories
             .OrderByDescending(wr => wr.DependencyLevel ?? int.MinValue)
+            .ThenBy(wr => GetRepositoryTypeSortOrder(wr.RepositoryType))
             .ThenByDescending(wr => wr.Dependencies ?? int.MinValue)
             .ToList();
         prByRepositoryId = BuildPrByRepositoryIdFromLinks(workspaceRepositories);
