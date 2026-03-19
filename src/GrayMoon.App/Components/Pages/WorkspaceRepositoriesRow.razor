@@ -19,13 +19,13 @@
         <td class="col-repo">
             @if (!string.IsNullOrEmpty(repoUrl))
             {
-                <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link">
+                <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link" title="@RepositoryTypeTitle">
                     <strong>@repo.RepositoryName</strong>
                 </a>
             }
             else
             {
-                <strong>@repo.RepositoryName</strong>
+                <strong title="@RepositoryTypeTitle">@repo.RepositoryName</strong>
             }
         </td>
         <td class="col-version">
@@ -179,6 +179,16 @@
     [Parameter] public EventCallback OnSyncClick { get; set; }
     [Parameter] public EventCallback OnDismissError { get; set; }
     [Parameter] public EventCallback OnPrBadgeMouseEnter { get; set; }
+
+    private string RepositoryTypeTitle => Link?.RepositoryType switch
+    {
+        ProjectType.Service    => "Service",
+        ProjectType.Package    => "Package",
+        ProjectType.Test       => "Test",
+        ProjectType.Executable => "Executable",
+        ProjectType.Library    => "Library",
+        _                      => "Unknown"
+    };
 
     private async Task HandlePrBadgeMouseEnter()
     {
