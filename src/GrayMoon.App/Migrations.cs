@@ -32,6 +32,7 @@ public static class Migrations
         await MigrateWorkspaceRepositoryPullRequestsAsync(dbContext);
         await MigrateWorkspaceRepositoryPullRequestsChangedFilesAsync(dbContext);
         await MigrateWorkspaceRepositoryActionsAsync(dbContext);
+        await MigrateWorkspaceRepositoriesRepositoryTypeAsync(dbContext);
     }
 
     public static async Task MigrateRepositoriesTopicsAsync(AppDbContext dbContext)
@@ -824,6 +825,32 @@ public static class Migrations
                         LastCheckedAt TEXT NOT NULL,
                         FOREIGN KEY (WorkspaceRepositoryId) REFERENCES WorkspaceRepositories(WorkspaceRepositoryId) ON DELETE CASCADE
                     )";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds RepositoryType column to WorkspaceRepositories to store the dominant project type (Service, Package, etc.).</summary>
+    public static async Task MigrateWorkspaceRepositoriesRepositoryTypeAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='RepositoryType'";
+                var hasColumn = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!hasColumn)
+                {
+                    cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN RepositoryType INTEGER";
                     await cmd.ExecuteNonQueryAsync();
                 }
             }
