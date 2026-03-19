@@ -46,14 +46,14 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
             {
                 selector: 'node[nodeType = "service"]',
                 style: {
-                    'border-color': '#4ec9b0',
+                    'border-color': '#ffb454',
                     'border-width': 1
                 }
             },
             {
                 selector: 'node[nodeType = "package"]',
                 style: {
-                    'border-color': '#c586c0',
+                    'border-color': '#39bae6',
                     'border-width': 1
                 }
             },
