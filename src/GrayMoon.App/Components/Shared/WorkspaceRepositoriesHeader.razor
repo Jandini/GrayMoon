@@ -27,8 +27,11 @@
         {
             <span class="workspace-repos-agent-tasks text-muted d-inline-flex align-items-center gap-1">
                 <i class="bi bi-cpu"></i>
-                @AgentTasksPendingCount pending job@(AgentTasksPendingCount == 1 ? "" : "s")
-                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                @AgentTasksPendingCount operation@(AgentTasksPendingCount == 1 ? "" : "s") pending
+                @if (!IsOverlayVisible)
+                {
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                }
             </span>
         }
     </div>
