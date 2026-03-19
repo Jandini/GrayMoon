@@ -58,6 +58,8 @@ try
     builder.Services.AddScoped<GitHubPullRequestService>();
     builder.Services.AddScoped<WorkspacePullRequestRepository>();
     builder.Services.AddScoped<WorkspacePullRequestService>();
+    builder.Services.AddScoped<WorkspaceActionRepository>();
+    builder.Services.AddScoped<WorkspaceActionService>();
     builder.Services.AddScoped<PackageRegistrySyncService>();
     builder.Services.AddScoped<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
     builder.Services.AddScoped<WorkspaceFileVersionService>();

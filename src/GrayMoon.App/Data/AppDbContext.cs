@@ -10,6 +10,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Workspace> Workspaces => Set<Workspace>();
     public DbSet<WorkspaceRepositoryLink> WorkspaceRepositories => Set<WorkspaceRepositoryLink>();
     public DbSet<WorkspaceRepositoryPullRequest> WorkspaceRepositoryPullRequests => Set<WorkspaceRepositoryPullRequest>();
+    public DbSet<WorkspaceRepositoryAction> WorkspaceRepositoryActions => Set<WorkspaceRepositoryAction>();
     public DbSet<WorkspaceProject> WorkspaceProjects => Set<WorkspaceProject>();
     public DbSet<ProjectDependency> ProjectDependencies => Set<ProjectDependency>();
     public DbSet<RepositoryBranch> RepositoryBranches => Set<RepositoryBranch>();
@@ -134,6 +135,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithOne(pr => pr.WorkspaceRepository)
                 .HasForeignKey<WorkspaceRepositoryPullRequest>(pr => pr.WorkspaceRepositoryId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(wr => wr.Action)
+                .WithOne(a => a.WorkspaceRepository)
+                .HasForeignKey<WorkspaceRepositoryAction>(a => a.WorkspaceRepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<WorkspaceRepositoryPullRequest>(entity =>
@@ -144,6 +150,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.Property(pr => pr.State).HasMaxLength(20);
             entity.Property(pr => pr.MergeableState).HasMaxLength(50);
             entity.Property(pr => pr.HtmlUrl).HasMaxLength(500);
+        });
+
+        modelBuilder.Entity<WorkspaceRepositoryAction>(entity =>
+        {
+            entity.ToTable("WorkspaceRepositoryActions");
+            entity.HasKey(a => a.WorkspaceRepositoryId);
+
+            entity.Property(a => a.Status).HasMaxLength(20);
+            entity.Property(a => a.HtmlUrl).HasMaxLength(500);
+            entity.Property(a => a.BranchName).HasMaxLength(200);
+            entity.Property(a => a.WorkflowName).HasMaxLength(200);
         });
 
         modelBuilder.Entity<WorkspaceProject>(entity =>

@@ -31,6 +31,7 @@ public static class Migrations
         await MigrateWorkspaceRootPathAsync(dbContext);
         await MigrateWorkspaceRepositoryPullRequestsAsync(dbContext);
         await MigrateWorkspaceRepositoryPullRequestsChangedFilesAsync(dbContext);
+        await MigrateWorkspaceRepositoryActionsAsync(dbContext);
     }
 
     public static async Task MigrateRepositoriesTopicsAsync(AppDbContext dbContext)
@@ -781,6 +782,45 @@ public static class Migrations
                         MergeableState TEXT,
                         HtmlUrl TEXT,
                         MergedAt TEXT,
+                        LastCheckedAt TEXT NOT NULL,
+                        FOREIGN KEY (WorkspaceRepositoryId) REFERENCES WorkspaceRepositories(WorkspaceRepositoryId) ON DELETE CASCADE
+                    )";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Creates WorkspaceRepositoryActions table for persisted CI action status per workspace–repository link.</summary>
+    public static async Task MigrateWorkspaceRepositoryActionsAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceRepositoryActions'";
+                var tableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+
+                if (!tableExists)
+                {
+                    cmd.CommandText = @"
+                    CREATE TABLE WorkspaceRepositoryActions (
+                        WorkspaceRepositoryId INTEGER PRIMARY KEY,
+                        Status TEXT,
+                        HtmlUrl TEXT,
+                        UpdatedAt TEXT,
+                        BranchName TEXT,
+                        RunId INTEGER,
+                        WorkflowId INTEGER,
+                        WorkflowName TEXT,
                         LastCheckedAt TEXT NOT NULL,
                         FOREIGN KEY (WorkspaceRepositoryId) REFERENCES WorkspaceRepositories(WorkspaceRepositoryId) ON DELETE CASCADE
                     )";
