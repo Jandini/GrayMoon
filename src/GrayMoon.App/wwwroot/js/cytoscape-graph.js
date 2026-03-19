@@ -10,7 +10,7 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
     if (!container || typeof cytoscape === 'undefined') return null;
 
     var nodeElements = (nodes || []).map(function (n) {
-        return { data: { id: String(n.id), label: n.label || String(n.id) } };
+        return { data: { id: String(n.id), label: n.label || String(n.id), nodeType: n.nodeType || 'other' } };
     });
     var edgeElements = (edges || []).map(function (e, i) {
         return { data: { id: 'e' + i, source: String(e.source), target: String(e.target) } };
@@ -41,6 +41,20 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
                     'border-color': '#3f3f46',
                     'width': 140,
                     'height': 40
+                }
+            },
+            {
+                selector: 'node[nodeType = "service"]',
+                style: {
+                    'border-color': '#4ec9b0',
+                    'border-width': 1
+                }
+            },
+            {
+                selector: 'node[nodeType = "package"]',
+                style: {
+                    'border-color': '#c586c0',
+                    'border-width': 1
                 }
             },
             {

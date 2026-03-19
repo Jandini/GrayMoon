@@ -6,7 +6,7 @@ public sealed record RepositoryDependencyGraph(
     IReadOnlyList<RepositoryDependencyEdge> Edges);
 
 /// <summary>Node for repository dependency graph.</summary>
-public sealed record RepositoryDependencyNode(int RepositoryId, string RepositoryName);
+public sealed record RepositoryDependencyNode(int RepositoryId, string RepositoryName, ProjectType? RepositoryType = null);
 
 /// <summary>Edge: DependentRepositoryId depends on ReferencedRepositoryId.</summary>
 public sealed record RepositoryDependencyEdge(int DependentRepositoryId, int ReferencedRepositoryId);
