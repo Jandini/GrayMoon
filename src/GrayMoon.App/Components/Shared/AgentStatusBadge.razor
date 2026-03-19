@@ -5,7 +5,7 @@
 
 <a href="/agent" class="@BadgeClassFull" 
    title="@TitleText" 
-   style="cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle;">
+   style="cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; @BadgeStyle">
     @StateLabel
 </a>
 
@@ -30,6 +30,14 @@
         AgentConnectionState.Connecting => "bg-secondary",
         AgentConnectionState.VersionMismatch => "bg-danger",
         _ => "bg-secondary"
+    };
+
+    private string BadgeStyle => State switch
+    {
+        AgentConnectionState.Online => "background-color: #198754 !important;",
+        AgentConnectionState.Offline => "background-color: #dc3545 !important; color: #fff !important;",
+        AgentConnectionState.VersionMismatch => "background-color: #dc3545 !important; color: #fff !important;",
+        _ => ""
     };
 
     private string BadgeClassFull => $"badge {BadgeClass} text-decoration-none ms-2";
