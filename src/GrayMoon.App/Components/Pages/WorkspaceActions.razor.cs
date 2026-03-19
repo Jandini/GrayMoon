@@ -27,7 +27,7 @@ public sealed partial class WorkspaceActions : IDisposable
 
         public bool IsRefreshing { get; set; }
         public bool RunInProgress { get; set; }
-        public string? RunError { get; set; }
+        public string? ErrorMessage { get; set; }
     }
 
     private Workspace? workspace;
@@ -35,7 +35,19 @@ public sealed partial class WorkspaceActions : IDisposable
     private string? errorMessage;
     private bool isLoading = true;
     private bool isRefreshing;
+    private bool isRerunningAll;
+    private int _rerunTotal;
+    private int _rerunCompleted;
     private CancellationTokenSource _cts = new();
+
+    internal bool HasFailedRows => rows.Any(r =>
+        string.Equals(r.Action?.Status, "failed", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(r.Action?.BranchName, r.Link.BranchName, StringComparison.OrdinalIgnoreCase));
+
+    internal string RerunAllOverlayMessage =>
+        _rerunCompleted == 0
+            ? "Re-running actions..."
+            : $"Re-running {_rerunCompleted} of {_rerunTotal}";
 
     protected override async Task OnInitializedAsync()
     {
@@ -137,6 +149,8 @@ public sealed partial class WorkspaceActions : IDisposable
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             Logger.LogError(ex, "Error refreshing action for {Repo}/{Branch}", row.Repo.RepositoryName, row.Link.BranchName);
+            row.ErrorMessage = ex.Message;
+            _ = ClearRowErrorAsync(row, row.ErrorMessage);
         }
         finally
         {
@@ -180,7 +194,7 @@ public sealed partial class WorkspaceActions : IDisposable
     {
         if (row.Action?.RunId == null) return;
 
-        row.RunError = null;
+        row.ErrorMessage = null;
         row.RunInProgress = true;
         await InvokeAsync(StateHasChanged);
 
@@ -193,8 +207,8 @@ public sealed partial class WorkspaceActions : IDisposable
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error re-running workflow for {Repo}", row.Repo.RepositoryName);
-            row.RunError = ex.Message;
-            _ = ClearRowErrorAsync(row, row.RunError);
+            row.ErrorMessage = ex.Message;
+            _ = ClearRowErrorAsync(row, row.ErrorMessage);
             await InvokeAsync(StateHasChanged);
         }
         finally
@@ -208,7 +222,7 @@ public sealed partial class WorkspaceActions : IDisposable
     {
         if (row.Action?.WorkflowId == null) return;
 
-        row.RunError = null;
+        row.ErrorMessage = null;
         row.RunInProgress = true;
         await InvokeAsync(StateHasChanged);
 
@@ -223,8 +237,8 @@ public sealed partial class WorkspaceActions : IDisposable
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error running workflow for {Repo}", row.Repo.RepositoryName);
-            row.RunError = ex.Message;
-            _ = ClearRowErrorAsync(row, row.RunError);
+            row.ErrorMessage = ex.Message;
+            _ = ClearRowErrorAsync(row, row.ErrorMessage);
             await InvokeAsync(StateHasChanged);
         }
         finally
@@ -246,12 +260,58 @@ public sealed partial class WorkspaceActions : IDisposable
         HeadBranch = row.Link.BranchName
     };
 
+    internal async Task RerunAllFailedAsync()
+    {
+        var failedRows = rows
+            .Where(r =>
+                string.Equals(r.Action?.Status, "failed", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(r.Action?.BranchName, r.Link.BranchName, StringComparison.OrdinalIgnoreCase) &&
+                (r.Action?.RunId ?? 0) > 0)
+            .ToList();
+
+        if (failedRows.Count == 0) return;
+
+        _rerunTotal = failedRows.Count;
+        _rerunCompleted = 0;
+        isRerunningAll = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            foreach (var row in failedRows)
+            {
+                if (_cts.IsCancellationRequested) break;
+                try
+                {
+                    var actionEntry = BuildActionEntry(row);
+                    await GitHubActionsService.RerunWorkflowAsync(actionEntry);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Error re-running workflow for {Repo}", row.Repo.RepositoryName);
+                }
+                finally
+                {
+                    _rerunCompleted++;
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+        }
+        finally
+        {
+            isRerunningAll = false;
+            await InvokeAsync(StateHasChanged);
+            // Refresh all rows so badges reflect the new run state
+            _ = RefreshAllAsync();
+        }
+    }
+
     private async Task ClearRowErrorAsync(WorkspaceActionRow row, string? messageToClear)
     {
         await Task.Delay(5000);
-        if (row.RunError == messageToClear)
+        if (row.ErrorMessage == messageToClear)
         {
-            row.RunError = null;
+            row.ErrorMessage = null;
             await InvokeAsync(StateHasChanged);
         }
     }

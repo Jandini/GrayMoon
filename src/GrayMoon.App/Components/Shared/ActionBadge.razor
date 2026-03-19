@@ -1,7 +1,11 @@
 @using GrayMoon.App.Models
 
-@* CI action status badge: none (gray), success (green), running (orange), failed (red). Shows "none" until status is verified. *@
-@if (string.Equals(Status, "success", StringComparison.OrdinalIgnoreCase))
+@* CI action status badge: none (gray), success (green), running (orange), failed (red), error (red). Shows "none" until status is verified. *@
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <span class="badge action-badge action-badge-failed" title="@ErrorMessage">error</span>
+}
+else if (string.Equals(Status, "success", StringComparison.OrdinalIgnoreCase))
 {
     @if (!string.IsNullOrWhiteSpace(HtmlUrl))
     {
@@ -45,4 +49,5 @@ else
 @code {
     [Parameter] public string? Status { get; set; }
     [Parameter] public string? HtmlUrl { get; set; }
+    [Parameter] public string? ErrorMessage { get; set; }
 }

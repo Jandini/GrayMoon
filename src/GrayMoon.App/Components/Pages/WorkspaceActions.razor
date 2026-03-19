@@ -23,6 +23,14 @@
                 </p>
             </div>
             <div class="d-flex align-items-center gap-2">
+                @if (HasFailedRows)
+                {
+                    <button class="btn btn-danger"
+                            @onclick="RerunAllFailedAsync"
+                            disabled="@(isRerunningAll || isRefreshing || isLoading)">
+                        Re-run
+                    </button>
+                }
                 <button class="btn btn-outline-secondary"
                         @onclick="RefreshAllAsync"
                         disabled="@(isRefreshing || isLoading || workspace == null)">
@@ -111,7 +119,8 @@
                                             </td>
                                             <td class="col-action-status text-center">
                                                 <ActionBadge Status="@(effectiveAction?.Status)"
-                                                             HtmlUrl="@effectiveAction?.HtmlUrl" />
+                                                             HtmlUrl="@effectiveAction?.HtmlUrl"
+                                                             ErrorMessage="@row.ErrorMessage" />
                                             </td>
                                             <td class="col-actions ps-3">
                                                 @if (CanRerun(row))
@@ -148,17 +157,6 @@
                                                 }
                                             </td>
                                         </tr>
-                                        @if (row.RunError != null)
-                                        {
-                                            <tr class="table-danger actions-error-row">
-                                                <td colspan="5" class="py-2">
-                                                    <div class="d-flex align-items-center gap-2 text-danger small">
-                                                        <i class="bi bi-exclamation-triangle"></i>
-                                                        @row.RunError
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        }
                                     }
                                 }
                             </tbody>
@@ -169,6 +167,8 @@
         </div>
     }
 </div>
+
+<LoadingOverlay IsVisible="@isRerunningAll" Message="@RerunAllOverlayMessage" />
 
 @code {
     private static ActionStatusInfo? GetEffectiveAction(WorkspaceActionRow row)
