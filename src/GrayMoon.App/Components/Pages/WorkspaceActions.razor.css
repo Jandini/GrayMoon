@@ -9,6 +9,17 @@
     text-decoration: underline;
 }
 
+.repo-link {
+    text-decoration: none;
+}
+
+.repo-link:hover,
+.repo-link:focus {
+    color: inherit !important;
+    text-decoration: underline;
+    text-decoration-color: inherit;
+}
+
 /* Match Repositories / Workspaces: left-align all columns; Status and Result right-aligned via col-status-badge; last column (Action) matches Workspaces col-actions; use global resizable-columns padding for header spacing */
 .actions-table th,
 .actions-table td {

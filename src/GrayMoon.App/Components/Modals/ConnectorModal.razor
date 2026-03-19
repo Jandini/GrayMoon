@@ -25,12 +25,34 @@
                                 </div>
                                 <div class="col-md-6">
                                     <label class="form-label">Connector Type <span class="text-danger">*</span></label>
-                                    <InputSelect class="form-select"
-                                                 @bind-Value="Model.ConnectorType"
-                                                 @bind-Value:after="@(OnConnectorTypeChangedAsync)">
-                                        <option value="@ConnectorType.GitHub">GitHub</option>
-                                        <option value="@ConnectorType.NuGet">NuGet</option>
-                                    </InputSelect>
+                                    <div class="dropdown">
+                                        <button class="btn btn-outline-secondary dropdown-toggle w-100 text-start d-flex align-items-center gap-2 justify-content-between"
+                                                type="button"
+                                                style="border-color: var(--border-input) !important;"
+                                                @onclick="ToggleTypeDropdown">
+                                            <span class="d-flex align-items-center gap-2">
+                                                <i class="bi @ConnectorTypeIcon"></i>
+                                                @ConnectorTypeLabel
+                                            </span>
+                                        </button>
+                                        @if (_typeDropdownOpen)
+                                        {
+                                            <ul class="dropdown-menu show w-100">
+                                                <li>
+                                                    <button class="dropdown-item d-flex align-items-center gap-2" type="button"
+                                                            @onclick="() => SelectConnectorType(ConnectorType.GitHub)">
+                                                        <i class="bi bi-github"></i> GitHub
+                                                    </button>
+                                                </li>
+                                                <li>
+                                                    <button class="dropdown-item d-flex align-items-center gap-2" type="button"
+                                                            @onclick="() => SelectConnectorType(ConnectorType.NuGet)">
+                                                        <i class="bi bi-box-seam"></i> NuGet
+                                                    </button>
+                                                </li>
+                                            </ul>
+                                        }
+                                    </div>
                                     <ValidationMessage For="@(() => Model.ConnectorType)" />
                                 </div>
                             </div>
@@ -78,7 +100,20 @@
                                                     <span class="text-danger">*</span>
                                                 }
                                             </label>
-                                            <InputText class="form-control" type="password" @bind-Value="Model.UserToken" />
+                                            <div class="input-group">
+                                                <InputText class="form-control" type="password" @bind-Value="Model.UserToken" />
+                                                @if (Model.ConnectorType == ConnectorType.GitHub)
+                                                {
+                                                    <a class="btn btn-outline-secondary"
+                                                       href="https://github.com/settings/tokens/new"
+                                                       target="_blank"
+                                                       rel="noopener noreferrer"
+                                                       title="Create a classic personal access token on GitHub"
+                                                       style="border-color: var(--border-input) !important;">
+                                                        Create
+                                                    </a>
+                                                }
+                                            </div>
                                             <ValidationMessage For="@(() => Model.UserToken)" />
                                         </div>
                                     }
@@ -143,6 +178,31 @@
 
     private string SubmitButtonText => Mode == ConnectorModalMode.Edit ? "Update" : "Add";
     private bool _wasVisible;
+    private bool _typeDropdownOpen;
+
+    private string ConnectorTypeLabel => Model?.ConnectorType switch
+    {
+        ConnectorType.GitHub => "GitHub",
+        ConnectorType.NuGet => "NuGet",
+        _ => "Select type"
+    };
+
+    private string ConnectorTypeIcon => Model?.ConnectorType switch
+    {
+        ConnectorType.GitHub => "bi-github",
+        ConnectorType.NuGet => "bi-box-seam",
+        _ => "bi-chevron-down"
+    };
+
+    private void ToggleTypeDropdown() => _typeDropdownOpen = !_typeDropdownOpen;
+
+    private async Task SelectConnectorType(ConnectorType type)
+    {
+        if (Model == null) return;
+        Model.ConnectorType = type;
+        _typeDropdownOpen = false;
+        await OnConnectorTypeChangedAsync();
+    }
 
     private bool ShouldShowUserNameField()
     {

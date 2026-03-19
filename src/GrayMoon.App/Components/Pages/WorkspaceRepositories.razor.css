@@ -534,8 +534,8 @@
 }
 
 ::deep .repositories-table td.col-version {
-    overflow: none;
-    text-overflow: none;
+    overflow: hidden;
+    text-overflow: clip;
 }
 
 @media (max-width: 640.98px) {
@@ -551,6 +551,7 @@
 
 ::deep .repositories-table td.col-branch {
     color: var(--text-muted);
+    text-overflow: clip;
 }
 
 /* Repository links: white text, white underline on hover only */
