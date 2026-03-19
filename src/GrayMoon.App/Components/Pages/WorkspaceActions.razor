@@ -11,10 +11,26 @@
         <div class="d-flex justify-content-between align-items-center mb-4">
             <div>
                 <h2>@(workspace?.Name ?? "Workspace") Actions</h2>
-                <p class="text-muted mb-0" style="min-height: 1.5rem;">
+                <p class="text-muted mb-0 d-flex align-items-center gap-2 flex-wrap" style="min-height: 1.5rem;">
                     @if (!isLoading && rows.Count > 0)
                     {
                         @($"{rows.Count} {(rows.Count == 1 ? "repository" : "repositories")}")
+                        @if (FailedCount > 0)
+                        {
+                            <span class="badge action-badge action-badge-failed">failed @FailedCount</span>
+                        }
+                        @if (RunningCount > 0)
+                        {
+                            <span class="badge action-badge action-badge-running">running @RunningCount</span>
+                        }
+                        @if (SuccessCount > 0)
+                        {
+                            <span class="badge action-badge action-badge-success">success @SuccessCount</span>
+                        }
+                        @if (NoneCount > 0)
+                        {
+                            <span class="badge action-badge action-badge-none">none @NoneCount</span>
+                        }
                     }
                     else
                     {

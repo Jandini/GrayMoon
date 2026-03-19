@@ -1032,7 +1032,7 @@ table.resizable-columns th:hover .resize-handle::after {
 .action-badge.action-badge-none:focus {
     background-color: #495057 !important;
     color: #fff !important;
-    text-decoration: underline;
+    text-decoration: none;
 }
 .action-badge.action-badge-success {
     background-color: #238636 !important;
@@ -1042,7 +1042,7 @@ table.resizable-columns th:hover .resize-handle::after {
 .action-badge.action-badge-success:focus {
     background-color: #238636 !important;
     color: #fff !important;
-    text-decoration: underline;
+    text-decoration: none;
 }
 .action-badge.action-badge-running {
     background-color: #d29922 !important;
@@ -1052,7 +1052,7 @@ table.resizable-columns th:hover .resize-handle::after {
 .action-badge.action-badge-running:focus {
     background-color: #d29922 !important;
     color: #000 !important;
-    text-decoration: underline;
+    text-decoration: none;
 }
 .action-badge.action-badge-failed {
     background-color: #DA3633 !important;
@@ -1062,5 +1062,5 @@ table.resizable-columns th:hover .resize-handle::after {
 .action-badge.action-badge-failed:focus {
     background-color: #DA3633 !important;
     color: #fff !important;
-    text-decoration: underline;
+    text-decoration: none;
 }

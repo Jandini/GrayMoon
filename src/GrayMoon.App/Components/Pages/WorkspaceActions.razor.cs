@@ -60,6 +60,23 @@ public sealed partial class WorkspaceActions : IDisposable
         string.Equals(r.Action?.Status, "running", StringComparison.OrdinalIgnoreCase) &&
         string.Equals(r.Action?.BranchName, r.Link.BranchName, StringComparison.OrdinalIgnoreCase));
 
+    internal int FailedCount => rows.Count(r =>
+        string.Equals(r.Action?.Status, "failed", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(r.Action?.BranchName, r.Link.BranchName, StringComparison.OrdinalIgnoreCase));
+
+    internal int RunningCount => rows.Count(r =>
+        string.Equals(r.Action?.Status, "running", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(r.Action?.BranchName, r.Link.BranchName, StringComparison.OrdinalIgnoreCase));
+
+    internal int SuccessCount => rows.Count(r =>
+        string.Equals(r.Action?.Status, "success", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(r.Action?.BranchName, r.Link.BranchName, StringComparison.OrdinalIgnoreCase));
+
+    internal int NoneCount => rows.Count(r =>
+        r.Action == null ||
+        !string.Equals(r.Action.BranchName, r.Link.BranchName, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(r.Action.Status, "none", StringComparison.OrdinalIgnoreCase));
+
     internal string RerunAllOverlayMessage =>
         _rerunCompleted == 0
             ? "Re-running actions..."
