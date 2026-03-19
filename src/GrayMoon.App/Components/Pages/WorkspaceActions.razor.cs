@@ -48,10 +48,16 @@ public sealed partial class WorkspaceActions : IDisposable
     private CancellationTokenSource _cts = new();
     private HubConnection? _hubConnection;
     private CancellationTokenSource? _syncDebounceCts;
+    private bool _autoPollRunning;
     private const int SyncDebounceMs = 500;
+    private const int AutoPollIntervalMs = 5000;
 
     internal bool HasFailedRows => rows.Any(r =>
         string.Equals(r.Action?.Status, "failed", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(r.Action?.BranchName, r.Link.BranchName, StringComparison.OrdinalIgnoreCase));
+
+    private bool HasRunningRows => rows.Any(r =>
+        string.Equals(r.Action?.Status, "running", StringComparison.OrdinalIgnoreCase) &&
         string.Equals(r.Action?.BranchName, r.Link.BranchName, StringComparison.OrdinalIgnoreCase));
 
     internal string RerunAllOverlayMessage =>
@@ -220,6 +226,43 @@ public sealed partial class WorkspaceActions : IDisposable
         }
     }
 
+    private void EnsureAutoPollRunning()
+    {
+        if (_autoPollRunning) return;
+        _autoPollRunning = true;
+        _ = AutoPollLoopAsync(_cts.Token);
+    }
+
+    private async Task AutoPollLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(AutoPollIntervalMs, cancellationToken);
+
+                if (cancellationToken.IsCancellationRequested) break;
+
+                var runningRows = rows
+                    .Where(r =>
+                        string.Equals(r.Action?.Status, "running", StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(r.Action?.BranchName, r.Link.BranchName, StringComparison.OrdinalIgnoreCase) &&
+                        !string.IsNullOrWhiteSpace(r.Link.BranchName))
+                    .ToList();
+
+                if (runningRows.Count == 0) break;
+
+                var tasks = runningRows.Select(row => RefreshRowAsync(row, cancellationToken)).ToList();
+                await Task.WhenAll(tasks);
+            }
+        }
+        catch (OperationCanceledException) { /* page disposed */ }
+        finally
+        {
+            _autoPollRunning = false;
+        }
+    }
+
     private async Task RefreshRowAsync(WorkspaceActionRow row, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(row.Link.BranchName)) return;
@@ -238,6 +281,9 @@ public sealed partial class WorkspaceActions : IDisposable
             {
                 row.Action = info;
                 row.IsVerified = true;
+
+                if (string.Equals(info?.Status, "running", StringComparison.OrdinalIgnoreCase))
+                    EnsureAutoPollRunning();
             }
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
