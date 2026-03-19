@@ -126,6 +126,26 @@ public class GitHubService : IConnectorService
         return response?.WorkflowRuns.FirstOrDefault();
     }
 
+    /// <summary>Returns the most recent workflow runs for a specific branch (up to <paramref name="perPage"/> results).</summary>
+    public async Task<List<GitHubWorkflowRunDto>> GetWorkflowRunsForBranchAsync(Connector connector, string owner, string repo, string branch, int perPage = 20)
+    {
+        EnsureConnectorConfigured(connector);
+
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+        if (string.IsNullOrWhiteSpace(branch))
+            throw new ArgumentException("Branch is required.", nameof(branch));
+
+        var encodedBranch = Uri.EscapeDataString(branch);
+        var response = await GetAsync<GitHubWorkflowRunsResponse>(
+            connector,
+            $"repos/{owner}/{repo}/actions/runs?branch={encodedBranch}&per_page={perPage}");
+
+        return response?.WorkflowRuns ?? new List<GitHubWorkflowRunDto>();
+    }
+
     public async Task RerunWorkflowRunAsync(Connector connector, string owner, string repo, long runId)
     {
         EnsureConnectorConfigured(connector);

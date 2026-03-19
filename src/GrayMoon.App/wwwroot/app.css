@@ -1007,3 +1007,60 @@ table.resizable-columns th:hover .resize-handle::after {
 .repositories-table td.col-pr .pr-badge-files-changed {
     margin-left: 0.25rem;
 }
+
+/* Actions page run/re-run button – fixed size so spinner swap never causes resize */
+.action-run-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    height: 1.5rem;
+    min-width: 3rem;
+    white-space: nowrap;
+}
+
+/* Action status column badges – same color palette as PR badges */
+.action-badge {
+    font-weight: 400;
+    text-decoration: none;
+}
+.action-badge.action-badge-none {
+    background-color: #495057 !important;
+    color: #fff !important;
+}
+.action-badge.action-badge-none:hover,
+.action-badge.action-badge-none:focus {
+    background-color: #495057 !important;
+    color: #fff !important;
+    text-decoration: none;
+}
+.action-badge.action-badge-success {
+    background-color: #238636 !important;
+    color: #fff !important;
+}
+.action-badge.action-badge-success:hover,
+.action-badge.action-badge-success:focus {
+    background-color: #238636 !important;
+    color: #fff !important;
+    text-decoration: none;
+}
+.action-badge.action-badge-running {
+    background-color: #d29922 !important;
+    color: #000 !important;
+}
+.action-badge.action-badge-running:hover,
+.action-badge.action-badge-running:focus {
+    background-color: #d29922 !important;
+    color: #000 !important;
+    text-decoration: none;
+}
+.action-badge.action-badge-failed {
+    background-color: #DA3633 !important;
+    color: #fff !important;
+}
+.action-badge.action-badge-failed:hover,
+.action-badge.action-badge-failed:focus {
+    background-color: #DA3633 !important;
+    color: #fff !important;
+    text-decoration: none;
+}

@@ -115,6 +115,84 @@ public class GitHubActionsService(
         }
     }
 
+    /// <summary>
+    /// Fetches all recent workflow runs for the given branch and returns an aggregated status.
+    /// Groups by workflow, takes the latest run per workflow, then returns:
+    /// "failed" if any has a failure conclusion, "running" if any is still in progress,
+    /// "success" if all completed successfully, or "none" if no runs found.
+    /// </summary>
+    public async Task<ActionStatusInfo?> GetAggregateActionStatusForBranchAsync(GitHubRepositoryEntry repository, string branch)
+    {
+        if (string.IsNullOrWhiteSpace(repository.OrgName) || string.IsNullOrWhiteSpace(repository.RepositoryName))
+            return null;
+
+        if (string.IsNullOrWhiteSpace(branch))
+            return new ActionStatusInfo { Status = "none" };
+
+        var connector = await connectorRepository.GetByNameAsync(repository.ConnectorName);
+        if (connector == null)
+        {
+            logger.LogWarning("Connector {ConnectorName} not found for aggregate actions.", repository.ConnectorName);
+            return null;
+        }
+
+        var runs = await gitHubService.GetWorkflowRunsForBranchAsync(connector, repository.OrgName, repository.RepositoryName, branch);
+        if (runs.Count == 0)
+            return new ActionStatusInfo { Status = "none", BranchName = branch };
+
+        // Take the latest run per workflow to avoid stale duplicates counting against aggregate
+        var latestPerWorkflow = runs
+            .GroupBy(r => r.WorkflowId)
+            .Select(g => g.OrderByDescending(r => r.UpdatedAt).First())
+            .ToList();
+
+        var failedRun = latestPerWorkflow
+            .Where(r => IsFailureConclusion(r.Conclusion))
+            .OrderByDescending(r => r.UpdatedAt)
+            .FirstOrDefault();
+
+        var runningRun = latestPerWorkflow
+            .Where(r => !string.Equals(r.Status, "completed", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(r => r.UpdatedAt)
+            .FirstOrDefault();
+
+        var latestRun = latestPerWorkflow.OrderByDescending(r => r.UpdatedAt).First();
+
+        string status;
+        GitHubWorkflowRunDto primaryRun;
+
+        if (failedRun != null)
+        {
+            status = "failed";
+            primaryRun = failedRun;
+        }
+        else if (runningRun != null)
+        {
+            status = "running";
+            primaryRun = runningRun;
+        }
+        else
+        {
+            status = "success";
+            primaryRun = latestRun;
+        }
+
+        return new ActionStatusInfo
+        {
+            Status = status,
+            HtmlUrl = primaryRun.HtmlUrl,
+            UpdatedAt = primaryRun.UpdatedAt,
+            BranchName = branch,
+            RunId = primaryRun.Id,
+            WorkflowId = primaryRun.WorkflowId,
+            WorkflowName = primaryRun.Name
+        };
+    }
+
+    private static bool IsFailureConclusion(string? conclusion) =>
+        string.Equals(conclusion, "failure", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(conclusion, "timed_out", StringComparison.OrdinalIgnoreCase);
+
     public async Task RerunWorkflowAsync(GitHubActionEntry action)
     {
         if (action.RunId <= 0)

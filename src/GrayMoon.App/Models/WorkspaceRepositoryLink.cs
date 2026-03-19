@@ -63,4 +63,7 @@ public class WorkspaceRepositoryLink
 
     /// <summary>Persisted pull request state for this workspace–repo link. 1:1 optional.</summary>
     public WorkspaceRepositoryPullRequest? PullRequest { get; set; }
+
+    /// <summary>Persisted CI action status for this workspace–repo link. 1:1 optional.</summary>
+    public WorkspaceRepositoryAction? Action { get; set; }
 }
