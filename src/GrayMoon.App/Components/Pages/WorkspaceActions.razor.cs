@@ -2,6 +2,7 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Components.Pages;
@@ -14,13 +15,15 @@ public sealed partial class WorkspaceActions : IDisposable
     [Inject] private GitHubActionsService GitHubActionsService { get; set; } = null!;
     [Inject] private WorkspaceRepository WorkspaceRepository { get; set; } = null!;
     [Inject] private IOptions<WorkspaceOptions> WorkspaceOptions { get; set; } = null!;
+    [Inject] private IServiceScopeFactory ServiceScopeFactory { get; set; } = null!;
+    [Inject] private NavigationManager NavigationManager { get; set; } = null!;
     [Inject] private ILogger<WorkspaceActions> Logger { get; set; } = null!;
 
     private int MaxConcurrency => Math.Max(1, WorkspaceOptions.Value.MaxParallelOperations);
 
     internal sealed class WorkspaceActionRow
     {
-        public required WorkspaceRepositoryLink Link { get; init; }
+        public required WorkspaceRepositoryLink Link { get; set; }
         public required GitHubRepositoryEntry Repo { get; init; }
 
         /// <summary>Persisted or freshly-fetched aggregate action status. Null until first DB load or fetch.</summary>
@@ -43,6 +46,9 @@ public sealed partial class WorkspaceActions : IDisposable
     private int _rerunTotal;
     private volatile int _rerunCompleted;
     private CancellationTokenSource _cts = new();
+    private HubConnection? _hubConnection;
+    private CancellationTokenSource? _syncDebounceCts;
+    private const int SyncDebounceMs = 500;
 
     internal bool HasFailedRows => rows.Any(r =>
         string.Equals(r.Action?.Status, "failed", StringComparison.OrdinalIgnoreCase) &&
@@ -58,11 +64,45 @@ public sealed partial class WorkspaceActions : IDisposable
         await LoadWorkspaceAsync();
     }
 
-    protected override void OnAfterRender(bool firstRender)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && !isLoading && rows.Count > 0)
-        {
+        if (!firstRender) return;
+
+        if (!isLoading && rows.Count > 0)
             StartBackgroundRefresh();
+
+        if (workspace != null && errorMessage == null)
+        {
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(NavigationManager.ToAbsoluteUri("/hubs/workspace-sync"))
+                .WithAutomaticReconnect()
+                .Build();
+
+            _hubConnection.On<int>("WorkspaceSynced", async (workspaceId) =>
+            {
+                if (workspaceId != WorkspaceId) return;
+
+                _syncDebounceCts?.Cancel();
+                _syncDebounceCts?.Dispose();
+                _syncDebounceCts = new CancellationTokenSource();
+                var cts = _syncDebounceCts;
+                try
+                {
+                    await Task.Delay(SyncDebounceMs, cts.Token);
+                    await InvokeAsync(RefreshFromSyncAsync);
+                }
+                catch (OperationCanceledException) { /* debounced */ }
+                finally
+                {
+                    if (cts == _syncDebounceCts)
+                    {
+                        _syncDebounceCts?.Dispose();
+                        _syncDebounceCts = null;
+                    }
+                }
+            });
+
+            await _hubConnection.StartAsync();
         }
     }
 
@@ -119,6 +159,56 @@ public sealed partial class WorkspaceActions : IDisposable
         finally
         {
             isLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// Called when WorkspaceSynced is received. Reloads workspace links from a fresh DB scope,
+    /// updates branch names in-place, and triggers background fetches only for rows where the branch changed.
+    /// </summary>
+    private async Task RefreshFromSyncAsync()
+    {
+        try
+        {
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var repo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+            var freshWorkspace = await repo.GetByIdAsync(WorkspaceId);
+            if (freshWorkspace == null) return;
+
+            workspace = freshWorkspace;
+
+            var freshLinks = freshWorkspace.Repositories
+                .Where(l => l.Repository != null && l.Repository.Connector != null)
+                .ToDictionary(l => l.RepositoryId);
+
+            var rowsToRefresh = new List<WorkspaceActionRow>();
+
+            foreach (var row in rows)
+            {
+                if (!freshLinks.TryGetValue(row.Repo.RepositoryId, out var freshLink)) continue;
+
+                var branchChanged = !string.Equals(row.Link.BranchName, freshLink.BranchName, StringComparison.OrdinalIgnoreCase);
+                row.Link = freshLink;
+
+                if (branchChanged)
+                {
+                    // Branch mismatch → invalidate cached status so badge shows "none" immediately
+                    row.Action = null;
+                    row.IsVerified = false;
+                    rowsToRefresh.Add(row);
+                }
+            }
+
+            await InvokeAsync(StateHasChanged);
+
+            foreach (var row in rowsToRefresh.Where(r => !string.IsNullOrWhiteSpace(r.Link.BranchName)))
+            {
+                _ = RefreshRowAsync(row, _cts.Token);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error refreshing from sync for workspace {WorkspaceId}", WorkspaceId);
         }
     }
 
@@ -355,5 +445,9 @@ public sealed partial class WorkspaceActions : IDisposable
     {
         _cts.Cancel();
         _cts.Dispose();
+        _syncDebounceCts?.Cancel();
+        _syncDebounceCts?.Dispose();
+        _ = _hubConnection?.StopAsync();
+        _ = _hubConnection?.DisposeAsync().AsTask();
     }
 }
