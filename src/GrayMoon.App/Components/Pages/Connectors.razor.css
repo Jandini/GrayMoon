@@ -56,7 +56,7 @@
 /* Status badge colors from Bootstrap RGB (blue=testing, green=ok, red=error) */
 .status-badge-testing,
 .status-badge-unknown {
-    background-color: rgb(var(--bs-primary-rgb));
+    background-color: var(--accent-blue);
     color: #fff;
 }
 
