@@ -38,7 +38,7 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
                     'text-max-width': '120px',
                     'padding': '1px',
                     'border-width': 1,
-                    'border-color': '#3f3f46',
+                    'border-color': '#d946ef',
                     'width': 140,
                     'height': 40
                 }
