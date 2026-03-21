@@ -15,21 +15,25 @@
                     @if (!isLoading && rows.Count > 0)
                     {
                         @($"{rows.Count} {(rows.Count == 1 ? "repository" : "repositories")}")
+                        @if (FailedCount > 0 || RunningCount > 0 || SuccessCount > 0 || NoneCount > 0)
+                        {
+                            <span>|</span>
+                        }
                         @if (FailedCount > 0)
                         {
-                            <span class="badge action-badge action-badge-failed">failed @FailedCount</span>
+                            <span>failed <span class="badge action-badge action-badge-failed">@FailedCount</span></span>
                         }
                         @if (RunningCount > 0)
                         {
-                            <span class="badge action-badge action-badge-running">running @RunningCount</span>
+                            <span>running <span class="badge action-badge action-badge-running">@RunningCount</span></span>
                         }
                         @if (SuccessCount > 0)
                         {
-                            <span class="badge action-badge action-badge-success">success @SuccessCount</span>
+                            <span>success <span class="badge action-badge action-badge-success">@SuccessCount</span></span>
                         }
                         @if (NoneCount > 0)
                         {
-                            <span class="badge action-badge action-badge-none">none @NoneCount</span>
+                            <span>none <span class="badge action-badge action-badge-none">@NoneCount</span></span>
                         }
                     }
                     else
