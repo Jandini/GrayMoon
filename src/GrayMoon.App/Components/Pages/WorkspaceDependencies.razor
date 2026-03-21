@@ -191,7 +191,8 @@
                 var nodes = filteredNodes.Select(n => new
                 {
                     id = n.RepositoryId.ToString(),
-                    label = prefixByRepoId.TryGetValue(n.RepositoryId, out var label) ? label : n.RepositoryName
+                    label = prefixByRepoId.TryGetValue(n.RepositoryId, out var label) ? label : n.RepositoryName,
+                    nodeType = n.RepositoryType?.ToString().ToLowerInvariant() ?? "other"
                 }).ToList();
                 var edges = filteredEdges.Select(e => new { source = e.DependentRepositoryId.ToString(), target = e.ReferencedRepositoryId.ToString() }).ToList();
                 var roots = filteredNodes.Select(n => n.RepositoryId.ToString()).Except(edges.Select(e => e.target)).ToList();

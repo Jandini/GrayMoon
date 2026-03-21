@@ -780,7 +780,7 @@ public sealed class WorkspaceProjectRepository(
 
         var repoNodes = links
             .Where(wr => wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
-            .Select(wr => new RepositoryDependencyNode(wr.RepositoryId, wr.Repository!.RepositoryName!))
+            .Select(wr => new RepositoryDependencyNode(wr.RepositoryId, wr.Repository!.RepositoryName!, wr.RepositoryType))
             .ToList();
 
         var allRepoEdges = projectDerivedRepoEdges.Union(fileConfigRepoEdges).Distinct();
