@@ -1,3 +1,4 @@
+using System.Net;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
@@ -60,22 +61,28 @@ public sealed partial class WorkspaceActions : IDisposable
         string.Equals(r.Action?.Status, "running", StringComparison.OrdinalIgnoreCase) &&
         string.Equals(r.Action?.BranchName, r.Link.BranchName, StringComparison.OrdinalIgnoreCase));
 
+    internal int ErrorCount => rows.Count(r => !string.IsNullOrWhiteSpace(r.ErrorMessage));
+
     internal int FailedCount => rows.Count(r =>
+        string.IsNullOrWhiteSpace(r.ErrorMessage) &&
         string.Equals(r.Action?.Status, "failed", StringComparison.OrdinalIgnoreCase) &&
         string.Equals(r.Action?.BranchName, r.Link.BranchName, StringComparison.OrdinalIgnoreCase));
 
     internal int RunningCount => rows.Count(r =>
+        string.IsNullOrWhiteSpace(r.ErrorMessage) &&
         string.Equals(r.Action?.Status, "running", StringComparison.OrdinalIgnoreCase) &&
         string.Equals(r.Action?.BranchName, r.Link.BranchName, StringComparison.OrdinalIgnoreCase));
 
     internal int SuccessCount => rows.Count(r =>
+        string.IsNullOrWhiteSpace(r.ErrorMessage) &&
         string.Equals(r.Action?.Status, "success", StringComparison.OrdinalIgnoreCase) &&
         string.Equals(r.Action?.BranchName, r.Link.BranchName, StringComparison.OrdinalIgnoreCase));
 
     internal int NoneCount => rows.Count(r =>
-        r.Action == null ||
+        string.IsNullOrWhiteSpace(r.ErrorMessage) &&
+        (r.Action == null ||
         !string.Equals(r.Action.BranchName, r.Link.BranchName, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(r.Action.Status, "none", StringComparison.OrdinalIgnoreCase));
+        string.Equals(r.Action.Status, "none", StringComparison.OrdinalIgnoreCase)));
 
     internal string RerunAllOverlayMessage =>
         _rerunCompleted == 0
@@ -298,6 +305,7 @@ public sealed partial class WorkspaceActions : IDisposable
             {
                 row.Action = info;
                 row.IsVerified = true;
+                row.ErrorMessage = null;
 
                 if (string.Equals(info?.Status, "running", StringComparison.OrdinalIgnoreCase))
                     EnsureAutoPollRunning();
@@ -306,8 +314,7 @@ public sealed partial class WorkspaceActions : IDisposable
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             Logger.LogError(ex, "Error refreshing action for {Repo}/{Branch}", row.Repo.RepositoryName, row.Link.BranchName);
-            row.ErrorMessage = ex.Message;
-            _ = ClearRowErrorAsync(row, row.ErrorMessage);
+            row.ErrorMessage = GetFriendlyErrorMessage(ex);
         }
         finally
         {
@@ -364,8 +371,7 @@ public sealed partial class WorkspaceActions : IDisposable
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error re-running workflow for {Repo}", row.Repo.RepositoryName);
-            row.ErrorMessage = ex.Message;
-            _ = ClearRowErrorAsync(row, row.ErrorMessage);
+            row.ErrorMessage = GetFriendlyErrorMessage(ex);
             await InvokeAsync(StateHasChanged);
         }
         finally
@@ -394,8 +400,7 @@ public sealed partial class WorkspaceActions : IDisposable
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error running workflow for {Repo}", row.Repo.RepositoryName);
-            row.ErrorMessage = ex.Message;
-            _ = ClearRowErrorAsync(row, row.ErrorMessage);
+            row.ErrorMessage = GetFriendlyErrorMessage(ex);
             await InvokeAsync(StateHasChanged);
         }
         finally
@@ -466,25 +471,34 @@ public sealed partial class WorkspaceActions : IDisposable
         }
     }
 
-    private async Task ClearRowErrorAsync(WorkspaceActionRow row, string? messageToClear)
-    {
-        await Task.Delay(5000);
-        if (row.ErrorMessage == messageToClear)
+    private static string GetFriendlyErrorMessage(Exception ex) =>
+        ex switch
         {
-            row.ErrorMessage = null;
-            await InvokeAsync(StateHasChanged);
-        }
-    }
+            HttpRequestException { StatusCode: HttpStatusCode.Unauthorized } =>
+                "Unauthorized (401). Check the connector token on the Connectors page.",
+            HttpRequestException { StatusCode: HttpStatusCode.Forbidden } =>
+                "Forbidden (403). The token does not have permission to access GitHub Actions.",
+            HttpRequestException { StatusCode: HttpStatusCode.NotFound } =>
+                "Not found (404). The repository or workflow was not found.",
+            HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } =>
+                "Rate limited (429). Too many requests to GitHub. Try again later.",
+            HttpRequestException { StatusCode: HttpStatusCode.ServiceUnavailable } =>
+                "GitHub service unavailable (503). Try again later.",
+            HttpRequestException httpEx =>
+                $"GitHub API error: {httpEx.Message}",
+            _ => ex.Message
+        };
 
     internal static int GetStatusSortOrder(WorkspaceActionRow row)
     {
+        if (!string.IsNullOrWhiteSpace(row.ErrorMessage)) return 0;
         var status = GetEffectiveStatusForSort(row);
         return status switch
         {
-            "failed"  => 0,
-            "running" => 1,
-            "success" => 2,
-            _         => 3  // none or unknown
+            "failed"  => 1,
+            "running" => 2,
+            "success" => 3,
+            _         => 4  // none or unknown
         };
     }
 
