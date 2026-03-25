@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
@@ -52,7 +53,7 @@ public class WorkspaceGitService(
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
-            throw new InvalidOperationException("Agent not connected. Start GrayMoon.Agent to sync repositories.");
+            throw new AgentNotConnectedException();
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)

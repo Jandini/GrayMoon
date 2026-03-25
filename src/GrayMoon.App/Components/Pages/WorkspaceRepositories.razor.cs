@@ -1,4 +1,5 @@
 using System.Text.Json;
+using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
@@ -1441,10 +1442,20 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             await ReloadWorkspaceDataAfterCancelAsync();
         }
+        catch (AgentNotConnectedException ex)
+        {
+            Logger.LogError(ex, "Error syncing workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = $"Sync failed. {ex.Message}";
+        }
+        catch (ConnectorHealthException ex)
+        {
+            Logger.LogError(ex, "Error syncing workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = $"Sync failed. {ex.Message}";
+        }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error syncing workspace {WorkspaceId}", WorkspaceId);
-            errorMessage = "Sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+            errorMessage = "Sync failed. An unexpected error occurred. Check the logs for details.";
         }
         finally
         {
@@ -1509,10 +1520,20 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             await ReloadWorkspaceDataAfterCancelAsync();
         }
+        catch (AgentNotConnectedException ex)
+        {
+            Logger.LogError(ex, "Error syncing level for workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = $"Sync failed. {ex.Message}";
+        }
+        catch (ConnectorHealthException ex)
+        {
+            Logger.LogError(ex, "Error syncing level for workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = $"Sync failed. {ex.Message}";
+        }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error syncing level for workspace {WorkspaceId}", WorkspaceId);
-            errorMessage = "Sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+            errorMessage = "Sync failed. An unexpected error occurred. Check the logs for details.";
         }
         finally
         {
@@ -1576,10 +1597,20 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             await ReloadWorkspaceDataAfterCancelAsync();
         }
+        catch (AgentNotConnectedException ex)
+        {
+            Logger.LogError(ex, "Error syncing repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
+            errorMessage = $"Sync failed. {ex.Message}";
+        }
+        catch (ConnectorHealthException ex)
+        {
+            Logger.LogError(ex, "Error syncing repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
+            errorMessage = $"Sync failed. {ex.Message}";
+        }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error syncing repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
-            errorMessage = "Sync failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+            errorMessage = "Sync failed. An unexpected error occurred. Check the logs for details.";
         }
         finally
         {

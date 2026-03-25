@@ -1,3 +1,4 @@
+using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using Microsoft.EntityFrameworkCore;
@@ -60,7 +61,7 @@ public sealed class ConnectorHealthService(AppDbContext dbContext, ILogger<Conne
         if (!connector.IsActive)
         {
             var msg = $"Connector '{connector.ConnectorName}' is inactive. Activate or update it on the Connectors page.";
-            throw new InvalidOperationException(msg);
+            throw new ConnectorHealthException(msg);
         }
 
         if (connector.IsHealthy)
@@ -70,7 +71,7 @@ public sealed class ConnectorHealthService(AppDbContext dbContext, ILogger<Conne
             ? $"Connector '{connector.ConnectorName}' token is not healthy. Update it on the Connectors page."
             : connector.LastError;
 
-        throw new InvalidOperationException(error);
+        throw new ConnectorHealthException(error);
     }
 }
 
