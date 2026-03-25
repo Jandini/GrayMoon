@@ -72,11 +72,11 @@ public sealed class TokenHealthBackgroundService(
                     // Use the same connector-service pattern as the Connectors page.
                     // GitHubService/NuGetService will handle decrypted token usage.
                     var svc = serviceFactory.GetService(connector.ConnectorType);
-                    var healthy = await svc.TestConnectionAsync(connector);
+                    var result = await svc.TestConnectionAsync(connector);
 
-                    connector.IsHealthy = healthy;
-                    connector.LastError = healthy ? null : "Remote service rejected the token. Update the connector token.";
-                    if (healthy)
+                    connector.IsHealthy = result.Success;
+                    connector.LastError = result.Success ? null : (result.ErrorMessage ?? "Remote service rejected the token. Update the connector token.");
+                    if (result.Success)
                     {
                         logger.LogDebug("Token health check succeeded for connector {ConnectorId} ({ConnectorName}).",
                             connector.ConnectorId, connector.ConnectorName);

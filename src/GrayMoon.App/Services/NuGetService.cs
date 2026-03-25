@@ -1,5 +1,7 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using GrayMoon.Abstractions.Models;
 using GrayMoon.App.Models;
 
 namespace GrayMoon.App.Services;
@@ -171,7 +173,7 @@ public class NuGetService : IConnectorService
         return v.Trim();
     }
 
-    public async Task<bool> TestConnectionAsync(Connector connector)
+    public async Task<ConnectorTestResult> TestConnectionAsync(Connector connector)
     {
         if (connector.ConnectorType != ConnectorType.NuGet)
         {
@@ -187,13 +189,13 @@ public class NuGetService : IConnectorService
         // Other registries require token
         if (string.IsNullOrWhiteSpace(ConnectorHelpers.UnprotectToken(connector.UserToken)))
         {
-            throw new InvalidOperationException("Connector token is required for this NuGet registry.");
+            return ConnectorTestResult.Fail("Connector token is required for this NuGet registry.");
         }
 
         return await TestAuthenticatedNuGetConnectionAsync(connector);
     }
 
-    private async Task<bool> TestNuGetOrgConnectionAsync(Connector connector)
+    private async Task<ConnectorTestResult> TestNuGetOrgConnectionAsync(Connector connector)
     {
         try
         {
@@ -209,16 +211,21 @@ public class NuGetService : IConnectorService
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
             var response = await _httpClient.SendAsync(request);
-            return response.IsSuccessStatusCode;
+            if (response.IsSuccessStatusCode)
+                return ConnectorTestResult.Ok();
+
+            var message = MapHttpStatusToMessage(response.StatusCode, "NuGet");
+            _logger.LogError("Failed to test NuGet.org connection. Status={StatusCode}", response.StatusCode);
+            return ConnectorTestResult.Fail(message);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to test NuGet.org connection.");
-            return false;
+            return ConnectorTestResult.Fail($"Connection error: {ex.Message}");
         }
     }
 
-    private async Task<bool> TestAuthenticatedNuGetConnectionAsync(Connector connector)
+    private async Task<ConnectorTestResult> TestAuthenticatedNuGetConnectionAsync(Connector connector)
     {
         try
         {
@@ -250,12 +257,35 @@ public class NuGetService : IConnectorService
             }
 
             var response = await _httpClient.SendAsync(request);
-            return response.IsSuccessStatusCode;
+            if (response.IsSuccessStatusCode)
+                return ConnectorTestResult.Ok();
+
+            var registryName = ConnectorHelpers.IsGitHubPackages(connector.ApiBaseUrl) ? "GitHub Packages" : "NuGet registry";
+            var message = MapHttpStatusToMessage(response.StatusCode, registryName);
+            _logger.LogError("Failed to test authenticated NuGet connection. Status={StatusCode}", response.StatusCode);
+            return ConnectorTestResult.Fail(message);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to test authenticated NuGet connection.");
-            return false;
+            return ConnectorTestResult.Fail($"Connection error: {ex.Message}");
         }
     }
+
+    private static string MapHttpStatusToMessage(HttpStatusCode statusCode, string service) =>
+        statusCode switch
+        {
+            HttpStatusCode.Unauthorized =>
+                $"Unauthorized (401). Your {service} token is invalid or has expired. Update it on the Connectors page.",
+            HttpStatusCode.Forbidden =>
+                $"Forbidden (403). Your {service} token does not have sufficient permissions.",
+            HttpStatusCode.NotFound =>
+                $"Not found (404). Check the API base URL for connector '{service}'.",
+            HttpStatusCode.TooManyRequests =>
+                $"Rate limited (429). Too many requests to {service}. Try again later.",
+            HttpStatusCode.ServiceUnavailable =>
+                $"{service} service is unavailable (503). Try again later.",
+            _ =>
+                $"HTTP {(int)statusCode} error connecting to {service}."
+        };
 }

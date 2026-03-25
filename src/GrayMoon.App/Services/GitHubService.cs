@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using GrayMoon.Abstractions.Models;
 using GrayMoon.App.Models;
 using Polly;
 using Polly.Retry;
@@ -196,7 +197,7 @@ public class GitHubService : IConnectorService
         await PostAsync(connector, $"repos/{owner}/{repo}/actions/workflows/{workflowId}/dispatches", payload);
     }
 
-    public async Task<bool> TestConnectionAsync(Connector connector)
+    public async Task<ConnectorTestResult> TestConnectionAsync(Connector connector)
     {
         EnsureConnectorConfigured(connector);
 
@@ -205,14 +206,39 @@ public class GitHubService : IConnectorService
             var organizations = await GetAsync<List<GitHubOrganizationDto>>(connector, "user/orgs")
                 ?? new List<GitHubOrganizationDto>();
             var repositories = await GetRepositoriesAsync(connector);
-            return true;
+            return ConnectorTestResult.Ok();
+        }
+        catch (HttpRequestException ex)
+        {
+            var message = MapHttpStatusToMessage(ex.StatusCode, "GitHub");
+            _logger.LogError(ex, "Failed to test GitHub connector connection. Status={StatusCode}", ex.StatusCode);
+            return ConnectorTestResult.Fail(message);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to test GitHub connector connection.");
-            return false;
+            return ConnectorTestResult.Fail($"Connection error: {ex.Message}");
         }
     }
+
+    private static string MapHttpStatusToMessage(HttpStatusCode? statusCode, string service) =>
+        statusCode switch
+        {
+            HttpStatusCode.Unauthorized =>
+                $"Unauthorized (401). Your {service} token is invalid or has expired. Update it on the Connectors page.",
+            HttpStatusCode.Forbidden =>
+                $"Forbidden (403). Your {service} token does not have sufficient permissions.",
+            HttpStatusCode.NotFound =>
+                $"Not found (404). Check the API base URL for connector '{service}'.",
+            HttpStatusCode.TooManyRequests =>
+                $"Rate limited (429). Too many requests to {service}. Try again later.",
+            HttpStatusCode.ServiceUnavailable =>
+                $"{service} service is unavailable (503). Try again later.",
+            null =>
+                $"Could not connect to {service}. Check your network and API base URL.",
+            _ =>
+                $"HTTP {(int)statusCode} error connecting to {service}."
+        };
 
     public async Task<(int OrganizationCount, int RepositoryCount)> TestConnectionDetailedAsync(Connector connector)
     {

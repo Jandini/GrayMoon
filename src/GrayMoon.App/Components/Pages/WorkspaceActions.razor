@@ -15,9 +15,13 @@
                     @if (!isLoading && rows.Count > 0)
                     {
                         @($"{rows.Count} {(rows.Count == 1 ? "repository" : "repositories")}")
-                        @if (FailedCount > 0 || RunningCount > 0 || SuccessCount > 0 || NoneCount > 0)
+                        @if (ErrorCount > 0 || FailedCount > 0 || RunningCount > 0 || SuccessCount > 0 || NoneCount > 0)
                         {
                             <span>|</span>
+                        }
+                        @if (ErrorCount > 0)
+                        {
+                            <span>errors <span class="badge action-badge action-badge-failed">@ErrorCount</span></span>
                         }
                         @if (FailedCount > 0)
                         {
