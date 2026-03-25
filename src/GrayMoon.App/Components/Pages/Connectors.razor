@@ -395,19 +395,20 @@
             StateHasChanged();
 
             var service = ConnectorServiceFactory.GetService(connector.ConnectorType);
-            var success = await service.TestConnectionAsync(connector);
-            
-            if (success)
+            var result = await service.TestConnectionAsync(connector);
+
+            if (result.Success)
             {
                 await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Ok", null);
             }
             else
             {
-                await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Error", "Connection test failed.");
+                var errorMsg = result.ErrorMessage ?? "Connection test failed.";
+                await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Error", errorMsg);
                 await ConnectorRepository.UpdateIsActiveAsync(connector.ConnectorId, false);
             }
-            
-            return success;
+
+            return result.Success;
         }
         catch (Exception ex)
         {
