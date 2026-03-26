@@ -2,16 +2,16 @@
 
 @if (IsVisible)
 {
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+    <div class="modal show d-block modal-repos-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
          @onkeydown="HandleKeyDown">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-repos-wide">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@Title</h5>
                     <button type="button" class="btn-close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="mb-3">
+                    <div class="mb-3 repo-modal-body-content">
                         <label class="form-label mb-2">
                             Repositories
                             <span class="text-muted ms-2">(@SelectedRepositoryIds.Count selected)</span>
@@ -51,7 +51,7 @@
                                 <table class="table table-sm mb-0 repository-grid workspaces-table resizable-columns">
                                     <thead class="table-dark">
                                         <tr>
-                                            <th class="col-select">
+                                            <th class="col-select no-resize" data-width="12px">
                                                 <input class="form-check-input workspace-repo-checkbox"
                                                        type="checkbox"
                                                        checked="@AreAllFilteredSelected(filtered)"

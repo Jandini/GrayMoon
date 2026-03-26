@@ -10,10 +10,12 @@
     overflow: hidden;
 }
 
-/* When grid is present: fixed height so tbody scroll area matches visible grid */
+/* When grid is present: stretch to fill the flex parent */
 .repository-list:has(.repository-grid) {
-    height: min(387px, calc(55vh - 33px));
-    max-height: min(232px, calc(55vh - 33px));
+    flex: 1 1 0;
+    min-height: 0;
+    height: auto;
+    max-height: none;
     display: flex;
     flex-direction: column;
 }
@@ -103,7 +105,9 @@
 }
 
 .col-select {
-    width: 40px;
+    width: 32px !important;
+    min-width: 32px !important;
+    max-width: 32px !important;
 }
 
 /* Checkbox styling: dark gray fill, light gray frame when unselected; original blue when selected */
@@ -119,7 +123,8 @@
 
 .repository-grid th.col-select,
 .repository-grid td.col-select {
-    padding-left: 12px;
+    padding-left: 6px;
+    text-align: left;
 }
 
 .repository-grid th:nth-child(2),
@@ -160,15 +165,44 @@
     white-space: nowrap;
 }
 
-::deep .modal-dialog {
-    max-height: calc(100vh - 2rem);
-    margin: 1rem auto;
+/* Stretch the content area to fill the remaining flex space */
+.repo-modal-body-content {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
 }
 
-::deep .modal-content {
-    max-height: calc(100vh - 2rem);
+.repo-modal-body-content .repository-list {
+    flex: 1 1 0;
+    min-height: 0;
 }
 
-::deep .modal-body {
-    overflow-y: auto;
+/* 80 × 80 modal */
+.modal-repos-container {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+}
+
+::deep .modal-repos-wide {
+    width: 90vw;
+    max-width: 90vw;
+    height: 90vh;
+    margin: 0;
+}
+
+::deep .modal-repos-wide .modal-content {
+    height: 100%;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+::deep .modal-repos-wide .modal-body {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
