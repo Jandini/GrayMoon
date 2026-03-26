@@ -121,11 +121,8 @@
     border-color: var(--accent-blue) !important;
 }
 
-.repository-grid th.col-select,
-.repository-grid td.col-select {
-    padding: 0 !important;
-    text-align: center !important;
-}
+/* padding-left/right are locked to 0 by the global app.css rule;
+   top/bottom intentionally use Bootstrap's default (.25rem) for vertical alignment */
 
 .repository-grid th:nth-child(2),
 .repository-grid td:nth-child(2) {
@@ -160,6 +157,8 @@
 
 .repo-name-cell {
     display: block;
+    width: 100%;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
