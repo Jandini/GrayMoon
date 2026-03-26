@@ -176,7 +176,7 @@
 
 /* github-dropdown-wrap: signals the JS to show the dropdown on hover */
 ::deep .repositories-table .dependency-level-header .github-dropdown-wrap {
-    cursor: default;
+    cursor: pointer;
     user-select: none;
 }
 

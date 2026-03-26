@@ -117,6 +117,21 @@
             function scheduleHide() { hideTimer = setTimeout(hide, 150); }
             function cancelHide()   { clearTimeout(hideTimer); }
 
+            function openUrls(urls) {
+                urls.filter(u => u).forEach(u => window.open(u, '_blank', 'noopener,noreferrer'));
+            }
+
+            // Clicking the trigger itself opens all repos directly (no suffix).
+            document.addEventListener('click', e => {
+                const wrap = e.target.closest('.github-dropdown-wrap');
+                if (!wrap) return;
+                try {
+                    const urls = JSON.parse(wrap.dataset.urls || '[]');
+                    openUrls(urls);
+                } catch (_) { }
+                hide();
+            });
+
             function onItemClick(e) {
                 const item = e.target.closest('.gm-gh-dropdown-item');
                 if (!item || !activeTrigger) return;
