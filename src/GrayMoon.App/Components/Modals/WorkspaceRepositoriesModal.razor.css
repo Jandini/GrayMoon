@@ -45,6 +45,8 @@
     flex: 1 0 auto;
     min-width: 0;
     overflow: hidden;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
 }
 
 .repository-grid thead {
