@@ -1064,3 +1064,57 @@ table.resizable-columns th:hover .resize-handle::after {
     color: #fff !important;
     text-decoration: none;
 }
+
+/* GitHub level-header dropdown — appended to <body>, position: fixed escapes table overflow */
+.gm-gh-dropdown {
+    position: fixed;
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 0.35rem;
+    padding: 0.2rem 0;
+    font-size: 0.82rem;
+    font-family: var(--bs-body-font-family);
+    color: #e0e0e0;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.65);
+    z-index: 9999;
+    min-width: 11rem;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+}
+.gm-gh-dropdown.gm-gh-dropdown--visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+.gm-gh-dropdown-title {
+    color: #888;
+    font-size: 0.72rem;
+    padding: 0.3rem 0.8rem 0.3rem;
+    border-bottom: 1px solid #383838;
+    margin-bottom: 0.15rem;
+    cursor: default;
+    letter-spacing: 0.02em;
+}
+.gm-gh-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.32rem 0.8rem;
+    cursor: pointer;
+    color: #d0d0d0;
+    transition: background 0.08s, color 0.08s;
+}
+.gm-gh-dropdown-item:hover {
+    background: #2d2d2d;
+    color: #fff;
+}
+.gm-gh-dropdown-item i {
+    font-size: 0.78rem;
+    color: #777;
+    flex-shrink: 0;
+    transition: color 0.08s;
+}
+.gm-gh-dropdown-item:hover i {
+    color: #aaa;
+}

@@ -61,14 +61,10 @@
                     <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
                 </span>
             </span>
-            <span class="dependency-level-count dependency-level-count-link"
-                  role="button"
+            <span class="dependency-level-count github-dropdown-wrap"
+                  data-urls="@BaseUrlsJson"
                   tabindex="0"
-                  title="Open in GitHub..."
-                  style="cursor: pointer;"
-                  @onclick="HandleOpenGitHubClick"
-                  @onclick:preventDefault
-                  @onclick:stopPropagation>
+                  aria-haspopup="true">
                 <span class="dependency-level-count-num">@RepositoryCount</span> @(RepositoryCount == 1 ? "repository" : "repositories")
             </span>
         </div>
@@ -85,9 +81,15 @@
     [Parameter] public EventCallback OnSyncCommits { get; set; }
     [Parameter] public EventCallback OnOpenPr { get; set; }
     [Parameter] public EventCallback OnSyncLevel { get; set; }
-    [Parameter] public EventCallback<(int count, IReadOnlyList<string?> urls)> OnOpenGitHub { get; set; }
 
     private int RepositoryCount => Group?.Count() ?? 0;
+
+    private string BaseUrlsJson => System.Text.Json.JsonSerializer.Serialize(
+        Group?.Select(wr => wr.Repository)
+              .Where(r => r != null)
+              .Select(r => RepositoryUrlHelper.GetRepositoryUrl(r!.CloneUrl))
+              .Where(u => !string.IsNullOrEmpty(u))
+              .ToList() ?? []);
 
     private async Task HandleSyncToDefault()
     {
@@ -107,16 +109,5 @@
     private async Task HandleSyncLevel()
     {
         if (!ActionsDisabled) await OnSyncLevel.InvokeAsync();
-    }
-
-    private async Task HandleOpenGitHubClick()
-    {
-        if (Group == null) return;
-        var urls = Group
-            .Select(wr => wr.Repository)
-            .Where(r => r != null)
-            .Select(r => RepositoryUrlHelper.GetRepositoryUrl(r!.CloneUrl))
-            .ToList();
-        await OnOpenGitHub.InvokeAsync((RepositoryCount, urls));
     }
 }
