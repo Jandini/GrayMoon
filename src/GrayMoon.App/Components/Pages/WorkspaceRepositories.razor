@@ -130,7 +130,7 @@
                                                                        OnSyncCommits="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                                        OnOpenPr="() => ShowConfirmOpenPr(group)"
                                                                        OnSyncLevel="() => ShowConfirmSyncLevel(group.Select(wr => wr.RepositoryId).ToList())"
-                                                                       OnOpenGitHub="HandleOpenGitHubFromLevel" />
+                                                                       />
                                     @foreach (var wr in group)
                                     {
                                         <WorkspaceRepositoriesRow WorkspaceId="@WorkspaceId"

@@ -686,24 +686,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    private void ShowConfirmOpenGitHub(int count, IReadOnlyList<string?> urls)
-    {
-        async Task OpenGitHubAsync()
-        {
-            var list = urls.Where(u => !string.IsNullOrEmpty(u)).Cast<string>().ToList();
-            await JSRuntime.InvokeVoidAsync("graymoonOpenUrls", list);
-        }
-        if (count <= 1)
-            _ = OpenGitHubAsync();
-        else
-            ShowConfirm($"Do you want to open GitHub page for {count} repositories?", OpenGitHubAsync);
-    }
-
-    private void HandleOpenGitHubFromLevel((int count, IReadOnlyList<string?> urls) args)
-    {
-        ShowConfirmOpenGitHub(args.count, args.urls);
-    }
-
     /// <summary>
     /// True if the workspace has a PR for this repository's current branch that is either merged
     /// or closed (treated the same as merged for sync-to-default safety checks).

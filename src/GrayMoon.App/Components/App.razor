@@ -66,6 +66,102 @@
             if (Array.isArray(urls))
                 urls.forEach(url => window.open(url, '_blank', 'noopener,noreferrer'));
         };
+        // GitHub dropdown: body-appended, fixed-position overlay driven by mouse delegation.
+        // Avoids table-responsive overflow clipping. Reads data-urls JSON from the trigger.
+        (function () {
+            const ITEMS = [
+                { label: 'Branches',      icon: 'bi-signpost-2',         suffix: '/branches' },
+                { label: 'Pull Requests', icon: 'bi-git',                suffix: '/pulls'    },
+                { label: 'Actions',       icon: 'bi-play-circle',        suffix: '/actions'  },
+                { label: 'Issues',        icon: 'bi-exclamation-circle', suffix: '/issues'   },
+                { label: 'Settings',      icon: 'bi-gear',               suffix: '/settings' },
+            ];
+            let panel = null, hideTimer = null, activeTrigger = null;
+
+            function build() {
+                panel = document.createElement('div');
+                panel.className = 'gm-gh-dropdown';
+                const title = document.createElement('div');
+                title.className = 'gm-gh-dropdown-title';
+                title.textContent = 'Open in GitHub\u2026';
+                panel.appendChild(title);
+                ITEMS.forEach(({ label, icon, suffix }) => {
+                    const row = document.createElement('div');
+                    row.className = 'gm-gh-dropdown-item';
+                    row.dataset.suffix = suffix;
+                    row.innerHTML = `<i class="bi ${icon}" aria-hidden="true"></i><span>${label}</span>`;
+                    panel.appendChild(row);
+                });
+                panel.addEventListener('mouseenter', cancelHide);
+                panel.addEventListener('mouseleave', scheduleHide);
+                panel.addEventListener('click', onItemClick);
+                document.body.appendChild(panel);
+            }
+
+            function show(trigger) {
+                if (!panel) build();
+                cancelHide();
+                activeTrigger = trigger;
+                const r = trigger.getBoundingClientRect();
+                panel.style.top  = (r.bottom + 4) + 'px';
+                panel.style.right = (window.innerWidth - r.right) + 'px';
+                panel.style.left = 'auto';
+                panel.classList.add('gm-gh-dropdown--visible');
+            }
+
+            function hide() {
+                panel?.classList.remove('gm-gh-dropdown--visible');
+                activeTrigger = null;
+            }
+
+            function scheduleHide() { hideTimer = setTimeout(hide, 150); }
+            function cancelHide()   { clearTimeout(hideTimer); }
+
+            function openUrls(urls) {
+                urls.filter(u => u).forEach(u => window.open(u, '_blank', 'noopener,noreferrer'));
+            }
+
+            // Clicking the trigger itself opens all repos directly (no suffix).
+            document.addEventListener('click', e => {
+                const wrap = e.target.closest('.github-dropdown-wrap');
+                if (!wrap) return;
+                try {
+                    const urls = JSON.parse(wrap.dataset.urls || '[]');
+                    openUrls(urls);
+                } catch (_) { }
+                hide();
+            });
+
+            function onItemClick(e) {
+                const item = e.target.closest('.gm-gh-dropdown-item');
+                if (!item || !activeTrigger) return;
+                const suffix = item.dataset.suffix;
+                try {
+                    const urls = JSON.parse(activeTrigger.dataset.urls || '[]')
+                        .filter(u => u)
+                        .map(u => u + suffix);
+                    if (urls.length) urls.forEach(u => window.open(u, '_blank', 'noopener,noreferrer'));
+                } catch (_) { }
+                hide();
+            }
+
+            document.addEventListener('mouseover', e => {
+                const wrap = e.target.closest('.github-dropdown-wrap');
+                if (wrap) { show(wrap); return; }
+                if (panel && panel.contains(e.target)) cancelHide();
+            });
+
+            document.addEventListener('mouseout', e => {
+                const inWrap  = !!e.target.closest('.github-dropdown-wrap');
+                const inPanel = !!(panel && panel.contains(e.target));
+                if (!inWrap && !inPanel) return;
+                const to = e.relatedTarget;
+                if (!to) { scheduleHide(); return; }
+                if (to.closest('.github-dropdown-wrap') || (panel && panel.contains(to))) return;
+                scheduleHide();
+            });
+        })();
+
         window.graymoonStorageGet = (key) => localStorage.getItem(key);
         window.graymoonStorageSet = (key, value) => { localStorage.setItem(key, value); };
         document.body.addEventListener('click', (e) => {
