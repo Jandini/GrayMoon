@@ -34,11 +34,17 @@
     height: 100%;
 }
 
-.repository-grid thead,
+.repository-grid thead tr,
 .repository-grid tbody tr {
-    display: table;
+    display: flex;
     width: 100%;
-    table-layout: fixed;
+}
+
+.repository-grid th,
+.repository-grid td {
+    flex: 0 0 auto;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .repository-grid thead {
@@ -105,9 +111,9 @@
 }
 
 .col-select {
-    width: 32px !important;
-    min-width: 32px !important;
-    max-width: 32px !important;
+    width: 26px !important;
+    min-width: 26px !important;
+    max-width: 26px !important;
 }
 
 /* Checkbox styling: dark gray fill, light gray frame when unselected; original blue when selected */
@@ -123,8 +129,8 @@
 
 .repository-grid th.col-select,
 .repository-grid td.col-select {
-    padding-left: 6px;
-    text-align: left;
+    padding: 0 !important;
+    text-align: center !important;
 }
 
 .repository-grid th:nth-child(2),
