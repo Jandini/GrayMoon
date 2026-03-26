@@ -42,7 +42,7 @@
 
 .repository-grid th,
 .repository-grid td {
-    flex: 0 0 auto;
+    flex: 1 0 auto;
     min-width: 0;
     overflow: hidden;
 }
@@ -108,12 +108,6 @@
 .repository-grid td {
     background-color: #252526;
     color: #d4d4d4;
-}
-
-.col-select {
-    width: 26px !important;
-    min-width: 26px !important;
-    max-width: 26px !important;
 }
 
 /* Checkbox styling: dark gray fill, light gray frame when unselected; original blue when selected */
