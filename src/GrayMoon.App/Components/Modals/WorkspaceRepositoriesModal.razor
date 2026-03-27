@@ -25,11 +25,24 @@
                             </div>
                         </div>
                         <div class="d-flex align-items-center mb-1">
-                            <input class="form-control"
-                                   placeholder="Search repositories… use topic:name for topic filter"
-                                   @bind="repositorySearch"
-                                   @bind:event="oninput"
-                                   @ref="firstInputElement" />
+                            <div class="repo-search-wrap @(!string.IsNullOrEmpty(repositorySearch) ? "has-filter" : null)">
+                                <input class="form-control repo-search-input"
+                                       placeholder="Search repositories… use topic:name for topic filter"
+                                       @bind="repositorySearch"
+                                       @bind:event="oninput"
+                                       @ref="firstInputElement" />
+                                @if (!string.IsNullOrEmpty(repositorySearch))
+                                {
+                                    <button type="button"
+                                            class="repo-search-clear"
+                                            title="Clear filter"
+                                            aria-label="Clear repository filter"
+                                            @onclick="() => repositorySearch = string.Empty"
+                                            @onclick:stopPropagation="true">
+                                        <i class="bi bi-x-circle" aria-hidden="true"></i>
+                                    </button>
+                                }
+                            </div>
                             <button type="button"
                                     class="btn btn-outline-secondary ms-2"
                                     @onclick="OnFetchRepositories"
