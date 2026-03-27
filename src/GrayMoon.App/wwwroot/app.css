@@ -768,6 +768,16 @@ h1:focus {
     background-color: var(--bg-input);
 }
 
+.form-check-input[role="switch"] {
+    background-color: #6c757d;
+    border-color: #6c757d;
+}
+
+.form-check-input[role="switch"]:checked {
+    background-color: var(--accent-blue);
+    border-color: var(--accent-blue);
+}
+
 .form-check-input:checked {
     background-color: var(--accent-blue);
     border-color: var(--accent-blue);
