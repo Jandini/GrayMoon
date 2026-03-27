@@ -11,7 +11,9 @@ GrayMoon helps you work across many repositories as one coordinated workspace:
 - keep repository status and activity up to date while you work in your IDE (checkout/commit/push/merge events are tracked)
 - track versions and dependency drift
 - update `PackageReference` versions automatically
+- one-click sync back to default branch after merge (single repo or multiple repos by dependency level)
 - synchronize pushes to reduce CI failures caused by missing dependency versions
+- group repositories by dependency levels and type (services vs packages/libraries) for easier dependency visualization
 - when version alignment is required, GrayMoon can update the impacted `PackageReference` versions and commit those changes as part of the same coordinated workflow
 
 If a shared package changes and dozens of repositories need updates, GrayMoon can handle the rollout flow in one place.
@@ -28,9 +30,12 @@ GrayMoon is useful for:
 ## Why teams use GrayMoon
 
 - You get one view of branch/version/PR/action status across repositories.
+- You can see GitHub Actions results for the current branch across all repositories in a workspace.
+- You can open multiple repositories (and multiple new PR pages by dependency level) in GitHub with one action.
 - You can run coordinated dependency updates instead of editing each repo manually.
 - You can create one feature branch (for example `feature/dependency-update`) across repos, auto-update package refs, auto-commit, and push together.
 - When rolling out changes, GrayMoon can push multiple repositories in parallel so the full workflow finishes faster than pushing repo-by-repo manually.
+- GrayMoon tracks changed files across repositories so you can avoid unnecessary PRs when changes are only dependency-version updates.
 
 ## Quick Start
 

@@ -69,7 +69,8 @@ This gives one operational view instead of opening each repository separately.
 - Refresh local and remote branch lists.
 - Set upstream tracking.
 - Delete local/remote branches safely.
-- Sync repository back to default branch with cleanup behavior.
+- One-click sync back to default branch (single repo or multiple repos in a dependency level).
+- After a PR is merged, GrayMoon can sync back to default by checking out the default branch, pruning the local feature branch when there is no commit drift, and pulling the latest changes.
 - Detect common branches across workspace repositories.
 
 ### 6) Sync and commit synchronization
@@ -112,6 +113,8 @@ This directly addresses CI failures caused by missing dependency versions at pus
 ### 10) Dependency graph, projects, and packages visibility
 
 - Workspace dependency graph visualization with filtering by repo or dependency level.
+- Automatic repository grouping by dependency levels based on dependency hierarchy.
+- Grouped visualization by repository type (services and packages/libraries) to make dependency flow easier to understand.
 - Project inventory view (type/framework/path).
 - Package inventory view and registry mapping checks.
 - Package registry sync actions for workspace packages.
@@ -120,6 +123,10 @@ This directly addresses CI failures caused by missing dependency versions at pus
 
 - Pull request state persistence and refresh per repository branch.
 - GitHub Actions aggregate status visibility per repository/branch.
+- Workspace-level view of GitHub Actions results for the current branch across all repositories in the workspace.
+- Open multiple repositories in GitHub from GrayMoon in one action.
+- Open new pull request pages in GitHub for multiple repositories in a selected dependency level.
+- Track changed files across repositories so you can verify whether feature-branch commits actually produce PR-worthy changes; if only dependency-version updates exist, you can skip creating unnecessary PRs.
 - Re-run failed workflows from the actions workspace view.
 
 ### 12) GitVersion compatibility per repository
