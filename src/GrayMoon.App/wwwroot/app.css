@@ -768,6 +768,16 @@ h1:focus {
     background-color: var(--bg-input);
 }
 
+.form-check-input[role="switch"] {
+    background-color: #6c757d;
+    border-color: #6c757d;
+}
+
+.form-check-input[role="switch"]:checked {
+    background-color: var(--accent-blue);
+    border-color: var(--accent-blue);
+}
+
 .form-check-input:checked {
     background-color: var(--accent-blue);
     border-color: var(--accent-blue);
@@ -869,6 +879,18 @@ input[list] {
     font-family: 'Times New Roman', Times, serif;
     font-weight: 500;
     letter-spacing: -0.02em;
+}
+
+/* No-resize checkbox column: flex: 0 0 26px is immune to any redistribution */
+table.resizable-columns th.no-resize,
+table.resizable-columns td.col-select {
+    flex: 0 0 26px !important;
+    width: 26px !important;
+    min-width: 26px !important;
+    max-width: 26px !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    text-align: center !important;
 }
 
 /* Resizable table columns */

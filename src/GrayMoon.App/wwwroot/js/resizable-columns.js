@@ -48,13 +48,16 @@
         if (savedWidths && savedWidths.length === ths.length) {
             ths.forEach((th, i) => {
                 if (th.classList.contains('no-resize')) {
-                    const px = th.getBoundingClientRect().width;
-                    th.style.width = px + 'px';
-                    th.style.minWidth = px + 'px';
-                    th.style.maxWidth = px + 'px';
+                    /* width controlled entirely by CSS — clear any stale inline styles */
+                    th.style.width = '';
+                    th.style.minWidth = '';
+                    th.style.maxWidth = '';
                 } else {
-                    th.style.width = savedWidths[i] + '%';
-                    th.style.minWidth = MIN_COL_WIDTH + 'px';
+                    const saved = savedWidths[i];
+                    if (saved > 0) {
+                        th.style.width = saved + '%';
+                        th.style.minWidth = MIN_COL_WIDTH + 'px';
+                    }
                 }
             });
         } else {
@@ -64,12 +67,10 @@
             const tableWidth = tableRect.width;
             if (tableWidth > 0) {
                 ths.forEach(th => {
-                    const px = th.getBoundingClientRect().width;
                     if (th.classList.contains('no-resize')) {
-                        th.style.width = px + 'px';
-                        th.style.minWidth = px + 'px';
-                        th.style.maxWidth = px + 'px';
+                        /* width controlled entirely by CSS — do not set inline styles */
                     } else {
+                        const px = th.getBoundingClientRect().width;
                         const pct = (px / tableWidth) * 100;
                         th.style.width = pct + '%';
                         th.style.minWidth = MIN_COL_WIDTH + 'px';
@@ -77,9 +78,7 @@
                 });
             } else {
                 ths.forEach(th => {
-                    if (th.classList.contains('no-resize')) {
-                        th.style.minWidth = MIN_COL_WIDTH + 'px';
-                    } else {
+                    if (!th.classList.contains('no-resize')) {
                         th.style.minWidth = MIN_COL_WIDTH + 'px';
                     }
                 });
@@ -137,10 +136,10 @@
                 const w = th.style.width || '';
                 const mw = th.style.minWidth || '';
                 if (th.classList.contains('no-resize')) {
-                    const px = th.getBoundingClientRect().width;
-                    tds[i].style.width = px + 'px';
-                    tds[i].style.minWidth = px + 'px';
-                    tds[i].style.maxWidth = px + 'px';
+                    /* width controlled entirely by CSS — clear inline styles on td too */
+                    tds[i].style.width = '';
+                    tds[i].style.minWidth = '';
+                    tds[i].style.maxWidth = '';
                 } else {
                     tds[i].style.width = w;
                     tds[i].style.minWidth = mw;
@@ -186,7 +185,9 @@
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
             const tableWidthPx = table.getBoundingClientRect().width;
-            const widths = ths.map(t => ((t.getBoundingClientRect().width / tableWidthPx) * 100));
+            const widths = ths.map(t => t.classList.contains('no-resize')
+                ? -1
+                : ((t.getBoundingClientRect().width / tableWidthPx) * 100));
             saveColumnWidths(table, widths);
             syncBodyColumnWidths(table, ths);
             activeResize = null;

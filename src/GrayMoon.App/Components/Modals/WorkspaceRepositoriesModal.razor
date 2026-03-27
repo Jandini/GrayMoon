@@ -2,26 +2,47 @@
 
 @if (IsVisible)
 {
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+    <div class="modal show d-block modal-repos-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
          @onkeydown="HandleKeyDown">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-repos-wide">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@Title</h5>
                     <button type="button" class="btn-close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label mb-2">
-                            Repositories
-                            <span class="text-muted ms-2">(@SelectedRepositoryIds.Count selected)</span>
-                        </label>
+                    <div class="mb-3 repo-modal-body-content">
+                        <div class="form-label mb-2 d-flex justify-content-between align-items-center">
+                            <span>Repositories <span class="text-muted ms-1">@SelectedRepositoryIds.Count selected</span></span>
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       role="switch"
+                                       id="selectedOnlySwitch"
+                                       checked="@_showOnlySelected"
+                                       @onchange="(ChangeEventArgs e) => ToggleSelectedOnly((bool)e.Value!)" />
+                                <label class="form-check-label" for="selectedOnlySwitch">Selected only</label>
+                            </div>
+                        </div>
                         <div class="d-flex align-items-center mb-1">
-                            <input class="form-control"
-                                   placeholder="Search repositories..."
-                                   @bind="repositorySearch"
-                                   @bind:event="oninput"
-                                   @ref="firstInputElement" />
+                            <div class="repo-search-wrap @(!string.IsNullOrEmpty(repositorySearch) ? "has-filter" : null)">
+                                <input class="form-control repo-search-input"
+                                       placeholder="Search repositories… use topic:name for topic filter"
+                                       @bind="repositorySearch"
+                                       @bind:event="oninput"
+                                       @ref="firstInputElement" />
+                                @if (!string.IsNullOrEmpty(repositorySearch))
+                                {
+                                    <button type="button"
+                                            class="repo-search-clear"
+                                            title="Clear filter"
+                                            aria-label="Clear repository filter"
+                                            @onclick="() => repositorySearch = string.Empty"
+                                            @onclick:stopPropagation="true">
+                                        <i class="bi bi-x-circle" aria-hidden="true"></i>
+                                    </button>
+                                }
+                            </div>
                             <button type="button"
                                     class="btn btn-outline-secondary ms-2"
                                     @onclick="OnFetchRepositories"
@@ -51,7 +72,7 @@
                                 <table class="table table-sm mb-0 repository-grid workspaces-table resizable-columns">
                                     <thead class="table-dark">
                                         <tr>
-                                            <th class="col-select">
+                                            <th class="col-select no-resize" data-width="26">
                                                 <input class="form-check-input workspace-repo-checkbox"
                                                        type="checkbox"
                                                        checked="@AreAllFilteredSelected(filtered)"
@@ -148,20 +169,44 @@
     [Parameter] public EventCallback OnSave { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback OnFetchRepositories { get; set; }
+    [Parameter] public bool DefaultSelectedOnly { get; set; }
 
     private string repositorySearch = string.Empty;
     private bool _wasVisible;
+    private bool _needsFocus;
+    private bool _showOnlySelected;
+    private HashSet<int> _selectedOnlySnapshot = new();
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    protected override void OnParametersSet()
     {
         if (IsVisible && !_wasVisible)
         {
             _wasVisible = true;
-            await firstInputElement.FocusAsync();
+            _needsFocus = true;
+            _showOnlySelected = DefaultSelectedOnly;
+            _selectedOnlySnapshot = new HashSet<int>(SelectedRepositoryIds);
         }
         else if (!IsVisible)
         {
             _wasVisible = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_needsFocus)
+        {
+            _needsFocus = false;
+            await firstInputElement.FocusAsync();
+        }
+    }
+
+    private void ToggleSelectedOnly(bool value)
+    {
+        _showOnlySelected = value;
+        if (value)
+        {
+            _selectedOnlySnapshot = new HashSet<int>(SelectedRepositoryIds);
         }
     }
 
@@ -177,6 +222,38 @@
         }
     }
 
+    private sealed record FieldToken(string Field, string Value);
+
+    private (List<string> Words, List<FieldToken> FieldTokens) ParseSearchQuery(string query)
+    {
+        var words = new List<string>();
+        var fieldTokens = new List<FieldToken>();
+
+        foreach (var token in query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var colon = token.IndexOf(':');
+            if (colon > 0)
+            {
+                var field = token[..colon].ToLowerInvariant();
+                var value = token[(colon + 1)..];
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    fieldTokens.Add(new FieldToken(field, value));
+                    continue;
+                }
+            }
+            words.Add(token);
+        }
+
+        return (words, fieldTokens);
+    }
+
+    private bool MatchesFieldToken(GitHubRepositoryEntry repository, FieldToken token) => token.Field switch
+    {
+        "topic" => (repository.Topics ?? string.Empty).Contains(token.Value, StringComparison.OrdinalIgnoreCase),
+        _ => true  // unknown prefixes are ignored so they don't break the search
+    };
+
     private List<GitHubRepositoryEntry> GetFilteredRepositories()
     {
         if (Repositories == null)
@@ -184,29 +261,34 @@
             return new List<GitHubRepositoryEntry>();
         }
 
-        var words = repositorySearch
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(w => w.Trim())
-            .Where(w => w.Length > 0)
-            .ToList();
+        IEnumerable<GitHubRepositoryEntry> source = Repositories;
 
-        if (words.Count == 0)
+        if (_showOnlySelected)
         {
-            return Repositories;
+            source = source.Where(r => _selectedOnlySnapshot.Contains(r.RepositoryId));
         }
 
-        return Repositories.Where(repository =>
+        var (words, fieldTokens) = ParseSearchQuery(repositorySearch);
+
+        if (words.Count == 0 && fieldTokens.Count == 0)
+        {
+            return source.ToList();
+        }
+
+        return source.Where(repository =>
         {
             var repoName = repository.RepositoryName ?? string.Empty;
             var ownerName = repository.OrgName ?? string.Empty;
             var topics = repository.Topics ?? string.Empty;
             var connectorName = repository.ConnectorName ?? string.Empty;
 
-            return words.All(word =>
+            var plainWordsMatch = words.All(word =>
                 repoName.Contains(word, StringComparison.OrdinalIgnoreCase) ||
                 ownerName.Contains(word, StringComparison.OrdinalIgnoreCase) ||
                 topics.Contains(word, StringComparison.OrdinalIgnoreCase) ||
                 connectorName.Contains(word, StringComparison.OrdinalIgnoreCase));
+
+            return plainWordsMatch && fieldTokens.All(t => MatchesFieldToken(repository, t));
         }).ToList();
     }
 
