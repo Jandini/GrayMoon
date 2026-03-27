@@ -1,0 +1,64 @@
+﻿GrayMoon Commercial License
+
+Copyright (c) 2026 GrayMoon
+
+Website: https://graymoon.io/
+
+This Commercial License grants the right to use GrayMoon in a commercial environment, subject to the terms below.
+
+1. Grant of License
+
+Upon purchase of a valid license, GrayMoon grants you a non-exclusive, non-transferable, revocable license to use the software for commercial purposes.
+
+2. Definition of Commercial Use
+
+Commercial Use includes any use:
+- by a for-profit organization
+- for internal business operations
+- within CI/CD pipelines or automated systems
+- in connection with revenue-generating activities
+- as part of a paid product or service
+
+3. License Model
+
+Licenses are typically issued on a per-user basis.
+
+Each individual who installs, uses, or interacts with GrayMoon within an organization must have a valid license.
+
+4. Restrictions
+
+You may NOT:
+- redistribute the software as a standalone product
+- sublicense or resell the software without explicit permission
+- provide GrayMoon as a hosted or SaaS offering without a separate agreement
+- remove or alter copyright or licensing notices
+
+5. Updates and Support
+
+Unless explicitly stated, this license does not guarantee:
+- ongoing updates
+- support or maintenance
+- service-level agreements
+
+Such services may be offered separately.
+
+6. Termination
+
+This license is valid for the duration of the purchased subscription.
+
+Failure to comply with these terms may result in termination of the license.
+
+7. No Warranty
+
+The software is provided "AS IS", without warranty of any kind.
+
+8. Limitation of Liability
+
+In no event shall GrayMoon be liable for any damages arising from the use of the software.
+
+9. Governing Terms
+
+Use of the software constitutes acceptance of these terms.
+
+For licensing inquiries or enterprise agreements, contact:
+https://graymoon.io/

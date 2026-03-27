@@ -1,0 +1,51 @@
+﻿GrayMoon Non-Commercial License
+
+Copyright (c) 2026 GrayMoon
+
+Website: https://graymoon.io/
+
+Permission is hereby granted, free of charge, to any individual or organization to use, copy, modify, and run this software for non-commercial purposes, subject to the conditions below.
+
+1. Definition of Non-Commercial Use
+
+Non-Commercial Use means use of the software solely for:
+- personal use
+- educational purposes
+- academic research
+- evaluation or testing
+- non-profit activities
+
+Non-Commercial Use explicitly excludes any use:
+- by or within a for-profit organization
+- in connection with revenue-generating activities
+- for internal business operations
+- within CI/CD pipelines or production environments of a business
+
+2. Restrictions
+
+You may NOT:
+- use this software for Commercial Use (see Commercial License)
+- sell, sublicense, or distribute the software as a paid product
+- provide the software as part of a hosted or SaaS offering for a fee
+- remove or alter copyright notices
+
+3. Distribution
+
+You may distribute unmodified copies of this software for non-commercial purposes only, provided this license is included.
+
+4. No Warranty
+
+This software is provided "AS IS", without warranty of any kind, express or implied, including but not limited to fitness for a particular purpose.
+
+5. Limitation of Liability
+
+In no event shall the author be liable for any claim, damages, or other liability arising from the use of the software.
+
+6. Commercial Use
+
+Any use that does not qualify as Non-Commercial Use requires a valid Commercial License.
+
+Commercial licenses can be obtained from:
+https://graymoon.io/
+
+By using this software, you agree to the terms of this license.
