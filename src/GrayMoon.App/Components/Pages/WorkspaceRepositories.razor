@@ -176,6 +176,7 @@
                             IsSaving="@_repositoriesModal.IsSaving"
                             IsFetching="@_repositoriesModal.IsFetching"
                             ErrorMessage="@_repositoriesModal.ErrorMessage"
+                            DefaultSelectedOnly="true"
                             OnSave="@SaveRepositoriesAsync"
                             OnCancel="@CloseRepositoriesModal"
                             OnFetchRepositories="@FetchRepositoriesAsync" />
