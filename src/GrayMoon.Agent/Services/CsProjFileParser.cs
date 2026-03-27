@@ -1,4 +1,5 @@
-using System.Xml;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Models;
@@ -7,6 +8,26 @@ namespace GrayMoon.Agent.Services;
 
 public sealed class CsProjFileParser : ICsProjFileParser
 {
+    // Matches a complete PackageReference element — self-closing (<PackageReference ... />) or with child
+    // elements (<PackageReference ...>...</PackageReference>). Singleline so . spans newlines, which lets
+    // a single match cover attributes spread across multiple lines.
+    private static readonly Regex PackageReferenceElementRegex = new(
+        @"<PackageReference\b.*?(?:/>|</PackageReference\s*>)",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+
+    private static readonly Regex IncludeAttributeRegex = new(
+        @"\bInclude\s*=\s*""([^""]*)""",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Captures the opening-quote prefix and closing quote so only the value between them is swapped.
+    private static readonly Regex VersionAttributeRegex = new(
+        @"(\bVersion\s*=\s*"")[^""]*("")",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex VersionElementRegex = new(
+        @"(<Version\s*>)[^<]*(</Version\s*>)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     public Task<CsProjFileInfo?> ParseAsync(string csprojPath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(csprojPath) || !File.Exists(csprojPath))
@@ -37,74 +58,54 @@ public sealed class CsProjFileParser : ICsProjFileParser
         foreach (var kv in packageIdToNewVersion)
             lookup[kv.Key] = kv.Value;
 
-        XDocument doc;
+        // Read as raw text so we can write back with every byte preserved except the version values.
+        Encoding fileEncoding;
+        string content;
         try
         {
-            doc = XDocument.Load(csprojPath, LoadOptions.PreserveWhitespace);
+            using var reader = new StreamReader(csprojPath, detectEncodingFromByteOrderMarks: true);
+            content = await reader.ReadToEndAsync(cancellationToken);
+            fileEncoding = reader.CurrentEncoding;
         }
         catch
         {
             return false;
         }
 
-        // XDocument.Save(path) adds an XML declaration by default. Only write one if the file had it on load.
-        var hadXmlDeclaration = doc.Declaration != null;
-
-        var root = doc.Root;
-        if (root == null)
-            return false;
-
         var modified = false;
-        foreach (var pr in root.Descendants().Where(e => string.Equals(e.Name.LocalName, "PackageReference", StringComparison.OrdinalIgnoreCase)))
+
+        var newContent = PackageReferenceElementRegex.Replace(content, match =>
         {
-            var include = pr.Attribute("Include")?.Value?.Trim();
-            if (string.IsNullOrEmpty(include) || !lookup.TryGetValue(include, out var newVersion) || newVersion == null)
-                continue;
+            var elementText = match.Value;
 
-            var versionAttr = pr.Attribute("Version");
-            var versionEl = pr.Elements().FirstOrDefault(e => string.Equals(e.Name.LocalName, "Version", StringComparison.OrdinalIgnoreCase));
+            var includeMatch = IncludeAttributeRegex.Match(elementText);
+            if (!includeMatch.Success) return elementText;
 
-            if (versionAttr != null)
+            var includeName = includeMatch.Groups[1].Value.Trim();
+            if (!lookup.TryGetValue(includeName, out var newVersion)) return elementText;
+
+            // Prefer Version attribute; fall back to <Version> child element.
+            if (VersionAttributeRegex.IsMatch(elementText))
             {
-                if (versionAttr.Value != newVersion)
-                {
-                    versionAttr.Value = newVersion;
-                    modified = true;
-                }
+                var updated = VersionAttributeRegex.Replace(elementText,
+                    m => m.Groups[1].Value + newVersion + m.Groups[2].Value);
+                if (updated != elementText) modified = true;
+                return updated;
             }
-            else if (versionEl != null)
+
+            if (VersionElementRegex.IsMatch(elementText))
             {
-                if (versionEl.Value != newVersion)
-                {
-                    versionEl.Value = newVersion;
-                    modified = true;
-                }
+                var updated = VersionElementRegex.Replace(elementText,
+                    m => m.Groups[1].Value + newVersion + m.Groups[2].Value);
+                if (updated != elementText) modified = true;
+                return updated;
             }
-            else
-            {
-                pr.Add(new XAttribute("Version", newVersion));
-                modified = true;
-            }
-        }
+
+            return elementText;
+        });
 
         if (modified)
-        {
-            if (hadXmlDeclaration)
-            {
-                doc.Save(csprojPath, SaveOptions.None);
-            }
-            else
-            {
-                var settings = new XmlWriterSettings
-                {
-                    OmitXmlDeclaration = true,
-                    Indent = false,
-                    NewLineOnAttributes = false
-                };
-                using (var writer = XmlWriter.Create(csprojPath, settings))
-                    doc.Save(writer);
-            }
-        }
+            await File.WriteAllTextAsync(csprojPath, newContent, fileEncoding, cancellationToken);
 
         return modified;
     }
