@@ -113,6 +113,7 @@ public class ConnectorRepository(AppDbContext dbContext, ILogger<ConnectorReposi
 
         connector.Status = status;
         connector.LastError = string.IsNullOrWhiteSpace(errorMessage) ? null : errorMessage;
+        connector.IsHealthy = status == "Ok";
         await dbContext.SaveChangesAsync();
         logger.LogInformation("Persistence: saved Connector. Action=UpdateStatus, ConnectorId={ConnectorId}, Status={Status}", connectorId, status);
     }

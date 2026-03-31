@@ -175,6 +175,16 @@
             ?? Configuration["GitHub::PersonalAccessToken"]
             ?? string.Empty;
         await LoadConnectorsAsync();
+        await TestAllConnectorsAsync();
+    }
+
+    private async Task TestAllConnectorsAsync()
+    {
+        if (connectors == null || connectors.Count == 0)
+            return;
+
+        foreach (var connector in connectors.ToList())
+            await TestConnectorAsync(connector);
     }
 
     private async Task LoadConnectorsAsync()
