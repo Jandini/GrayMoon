@@ -17,6 +17,12 @@
     pointer-events: none;
 }
 
+.toast-bubble--error {
+    background-color: #3b1a1a;
+    color: #f87171;
+    border-color: #7f1d1d;
+}
+
 .toast-bubble-text {
     display: block;
     text-align: center;

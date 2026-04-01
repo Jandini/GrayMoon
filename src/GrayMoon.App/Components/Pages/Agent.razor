@@ -6,6 +6,7 @@
 @inject IJSRuntime JSRuntime
 @inject AgentConnectionTracker AgentConnectionTracker
 @inject IAgentBridge AgentBridge
+@inject IToastService ToastService
 
 <PageTitle>Agent - GrayMoon</PageTitle>
 
@@ -292,6 +293,24 @@
 
     private async Task CopyToClipboard(string text)
     {
-        await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+        }
+        catch (JSException ex)
+        {
+            var message = ex.Message.Contains("not allowed", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("permission", StringComparison.OrdinalIgnoreCase)
+                ? "Clipboard access was denied by the browser."
+                : ex.Message.Contains("undefined", StringComparison.OrdinalIgnoreCase)
+                    || ex.Message.Contains("null", StringComparison.OrdinalIgnoreCase)
+                    ? "Clipboard API is not available. The page must be served over HTTPS."
+                    : $"Could not copy to clipboard: {ex.Message}";
+            ToastService.ShowError(message);
+        }
+        catch (JSDisconnectedException)
+        {
+            ToastService.ShowError("Could not copy to clipboard: the connection to the server was lost.");
+        }
     }
 }
