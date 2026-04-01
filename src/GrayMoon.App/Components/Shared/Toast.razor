@@ -5,11 +5,12 @@
 @{
     var message = ToastService.Message;
     var isVisible = ToastService.IsVisible;
+    var isError = ToastService.IsError;
 }
 
 @if (isVisible && !string.IsNullOrEmpty(message))
 {
-    <div class="toast-bubble" role="status" aria-live="polite">
+    <div class="toast-bubble @(isError ? "toast-bubble--error" : "")" role="alert" aria-live="assertive">
         <span class="toast-bubble-text">@message</span>
     </div>
 }
@@ -32,6 +33,7 @@
         {
             _lastMessage = ToastService.Message;
             _hideTimer?.Dispose();
+            var delay = ToastService.IsError ? 6_000 : 2_500;
             _hideTimer = new Timer(_ =>
             {
                 _hideTimer?.Dispose();
@@ -39,7 +41,7 @@
                 ToastService.Hide();
                 _lastMessage = null;
                 InvokeAsync(StateHasChanged);
-            }, null, 2_500, Timeout.Infinite);
+            }, null, delay, Timeout.Infinite);
         }
         else if (!ToastService.IsVisible)
         {
