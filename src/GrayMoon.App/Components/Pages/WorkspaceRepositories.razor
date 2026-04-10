@@ -127,7 +127,7 @@
                                                                        ColSpan="@TableColSpan"
                                                                        Group="@group"
                                                                        OnSyncToDefault="() => ShowConfirmSyncToDefaultLevel(group.Select(wr => wr.RepositoryId).ToList())"
-                                                                       OnSyncCommits="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
+                                                                       OnSyncCommits="() => CommitSyncLevelAsync(group.Select(wr => wr.RepositoryId).ToList())"
                                                                        OnOpenPr="() => ShowConfirmOpenPr(group)"
                                                                        OnSyncLevel="() => ShowConfirmSyncLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                                        />
@@ -210,12 +210,6 @@
                           RepoName="@_updateSingleRepoModal.RepoName"
                           OnProceed="@OnUpdateSingleRepositoryDependenciesProceedAsync"
                           OnCancel="@CloseUpdateSingleRepositoryDependenciesModal" />
-
-<VersionFilesCommitModal IsVisible="@_versionFilesCommitModal.IsVisible"
-                         Message="@_versionFilesCommitModal.Message"
-                         Files="@_versionFilesCommitModal.Files"
-                         OnProceed="@OnVersionFilesCommitProceedAsync"
-                         OnCancel="@CloseVersionFilesCommitModal" />
 
 <PushWithDependenciesModal IsVisible="@_pushWithDependenciesModal.IsVisible"
           Info="@_pushWithDependenciesModal.Info"

@@ -87,7 +87,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private IReadOnlyList<(int RepoId, int? DefaultAhead, bool? HasUpstream)>? _syncToDefaultCheckResults = null;
     private UpdateModalState _updateModal = new();
     private UpdateSingleRepoDependenciesModalState _updateSingleRepoModal = new();
-    private VersionFilesCommitModalState _versionFilesCommitModal = new();
     private PushWithDependenciesModalState _pushWithDependenciesModal = new();
     private ConfirmModalState _confirmModal = new();
     private string searchTerm = string.Empty;
@@ -479,30 +478,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
             : $"Waiting for the agent to complete {AgentTasksPendingCount} tasks";
     }
 
-    /// <summary>
-    /// Called by the dependency update orchestrator when version-file updates have been applied but not yet committed.
-    /// Groups files by repo and opens the version-files commit modal so the user can confirm and commit via CommitFileVersionUpdatesAsync.
-    /// </summary>
-    private void HandleVersionFilesUpdated(IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)> byRepo)
-    {
-        if (byRepo == null || byRepo.Count == 0)
-            return;
-
-        var repoCount = byRepo.Count;
-        var distinctFiles = byRepo
-            .SelectMany(r => r.FilePaths)
-            .Distinct()
-            .ToList();
-        var filesForDisplay = distinctFiles.Count <= 5
-            ? distinctFiles
-            : distinctFiles.Take(5).Concat(new[] { $"... and {distinctFiles.Count - 5} more" }).ToList();
-        var prefix = repoCount == 1
-            ? "Commit the updated version files in this repository?"
-            : $"Commit all updated version files in all {repoCount} repositories?";
-
-        OpenVersionFilesCommitModal(prefix, byRepo, filesForDisplay);
-    }
-
     private void AbortPushAsync()
     {
         _pushCts?.Cancel();
@@ -738,11 +713,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _updateSingleRepoModal = _updateSingleRepoModal with { IsVisible = false, Payload = null };
     }
 
-    private void OnCommitDependencyProgress(int current, int total, int unused)
-    {
-        SetUpdateProgress($"Committed {current} of {total}");
-    }
-
     private async Task OnUpdateSingleRepositoryDependenciesProceedAsync()
     {
         if (_updateSingleRepoModal.Payload == null)
@@ -768,8 +738,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     SetUpdateProgress,
                     (repoId, msg) => { repositoryErrors[repoId] = msg; _ = InvokeAsync(StateHasChanged); },
                     onAppSideComplete: () => _updateAwaitingAgentTasks = true,
-                    repoIdsToUpdate: new HashSet<int> { repositoryId },
-                    onVersionFilesUpdated: HandleVersionFilesUpdated);
+                    repoIdsToUpdate: new HashSet<int> { repositoryId });
             }
             await RefreshFromSync();
         }
@@ -1102,8 +1071,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     _ = InvokeAsync(StateHasChanged);
                 },
                 onAppSideComplete: () => _updateAwaitingAgentTasks = true,
-                repoIdsToUpdate: null,
-                onVersionFilesUpdated: HandleVersionFilesUpdated);
+                repoIdsToUpdate: null);
 
             isUpdating = false;
             await InvokeAsync(StateHasChanged);
@@ -1125,79 +1093,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
             isUpdating = false;
             await InvokeAsync(StateHasChanged);
         }
-    }
-
-    /// <summary>Commit file-version updates (no dependency updates path). Stages and commits the given paths per repo via agent StageAndCommit.</summary>
-    private async Task CommitFileVersionUpdatesAsync(IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)> byRepo)
-    {
-        if (byRepo == null || byRepo.Count == 0)
-            return;
-
-        _updateCts?.Cancel();
-        _updateCts?.Dispose();
-        _updateCts = new CancellationTokenSource();
-        isUpdating = true;
-        SetUpdateProgress("Committing updated versions...");
-        try
-        {
-            await InvokeAsync(StateHasChanged);
-            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
-            {
-                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-                var commitResults = await workspaceGitService.CommitFilePathsAsync(
-                    WorkspaceId,
-                    byRepo,
-                    onProgress: OnCommitDependencyProgress,
-                    cancellationToken: _updateCts.Token);
-                foreach (var (repoId, errMsg) in commitResults)
-                {
-                    if (!string.IsNullOrEmpty(errMsg))
-                        repositoryErrors[repoId] = errMsg;
-                }
-            }
-            await RefreshFromSync();
-        }
-        finally
-        {
-            isUpdating = false;
-            await InvokeAsync(StateHasChanged);
-        }
-    }
-
-    /// <summary>Opens the dedicated version-files commit modal with message and file list.</summary>
-    private void OpenVersionFilesCommitModal(
-        string message,
-        IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)> byRepo,
-        IReadOnlyList<string> filesForDisplay)
-    {
-        _versionFilesCommitModal = _versionFilesCommitModal with
-        {
-            IsVisible = true,
-            Message = message,
-            ByRepoToCommit = byRepo,
-            Files = filesForDisplay
-        };
-        StateHasChanged();
-    }
-
-    private void CloseVersionFilesCommitModal()
-    {
-        _versionFilesCommitModal = _versionFilesCommitModal with
-        {
-            IsVisible = false,
-            ByRepoToCommit = null,
-            Files = Array.Empty<string>()
-        };
-        StateHasChanged();
-    }
-
-    private async Task OnVersionFilesCommitProceedAsync()
-    {
-        var byRepo = _versionFilesCommitModal.ByRepoToCommit;
-        CloseVersionFilesCommitModal();
-        if (byRepo == null || byRepo.Count == 0)
-            return;
-        await CommitFileVersionUpdatesAsync(byRepo);
     }
 
     private async Task HandleDependencyBadgeKeydown(KeyboardEventArgs e, int repositoryId, int unmatchedDeps)
@@ -2256,14 +2151,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public SyncDependenciesRepoPayload? Payload { get; init; }
         public int RepositoryId { get; init; }
         public string? RepoName { get; init; }
-    }
-
-    private sealed record VersionFilesCommitModalState
-    {
-        public bool IsVisible { get; init; }
-        public string Message { get; init; } = "";
-        public IReadOnlyList<string> Files { get; init; } = Array.Empty<string>();
-        public IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)>? ByRepoToCommit { get; init; }
     }
 
     private sealed record PushWithDependenciesModalState
