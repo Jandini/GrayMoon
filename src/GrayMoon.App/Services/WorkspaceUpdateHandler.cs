@@ -17,8 +17,7 @@ public sealed class WorkspaceUpdateHandler(
         Action<string> setProgress,
         Action<int, string> setRepositoryError,
         Action? onAppSideComplete = null,
-        IReadOnlySet<int>? repoIdsToUpdate = null,
-        Action<IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)>>? onVersionFilesUpdated = null)
+        IReadOnlySet<int>? repoIdsToUpdate = null)
     {
         try
         {
@@ -28,8 +27,7 @@ public sealed class WorkspaceUpdateHandler(
                 setProgress,
                 setRepositoryError,
                 onAppSideComplete,
-                repoIdsToUpdate,
-                onVersionFilesUpdated);
+                repoIdsToUpdate);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

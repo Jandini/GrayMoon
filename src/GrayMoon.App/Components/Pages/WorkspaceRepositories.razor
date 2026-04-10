@@ -211,12 +211,6 @@
                           OnProceed="@OnUpdateSingleRepositoryDependenciesProceedAsync"
                           OnCancel="@CloseUpdateSingleRepositoryDependenciesModal" />
 
-<VersionFilesCommitModal IsVisible="@_versionFilesCommitModal.IsVisible"
-                         Message="@_versionFilesCommitModal.Message"
-                         Files="@_versionFilesCommitModal.Files"
-                         OnProceed="@OnVersionFilesCommitProceedAsync"
-                         OnCancel="@CloseVersionFilesCommitModal" />
-
 <PushWithDependenciesModal IsVisible="@_pushWithDependenciesModal.IsVisible"
           Info="@_pushWithDependenciesModal.Info"
           RepoName="@_pushWithDependenciesModal.RepoName"
