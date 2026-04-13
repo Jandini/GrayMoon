@@ -181,7 +181,7 @@ public sealed class WorkspacePushService(
                     }
                     var found = getFoundCount();
                     var line1 = found == 0
-                        ? $"Waiting for {totalDeps} {(totalDeps == 1 ? "package" : "packages")}"
+                        ? $"Waiting for {totalDeps} {(totalDeps == 1 ? "package" : "packages")}..."
                         : $"Found {found} of {totalDeps} {(totalDeps == 1 ? "package" : "packages")}";
                     var totalSec = (int)remaining.TotalSeconds;
                     var mm = totalSec / 60;
