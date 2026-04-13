@@ -154,7 +154,8 @@ public sealed class WorkspacePushService(
                     totalDeps,
                     string.Join(", ", requiredForLevel.Select(r => r.PackageId + "@" + r.Version + " (connector " + r.MatchedConnectorId + ")")));
 
-                var timeoutMinutes = totalDeps * Math.Max(0.1, workspaceOptions.Value.PushWaitDependencyTimeoutMinutesPerDependency);
+                var minutesPerDep = Math.Max(0.1, workspaceOptions.Value.PushWaitDependencyTimeoutMinutesPerDependency);
+                var timeoutMinutes = totalDeps * minutesPerDep;
                 var totalTimeout = TimeSpan.FromMinutes(timeoutMinutes);
                 using var timeoutCts = new CancellationTokenSource(totalTimeout);
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
@@ -180,7 +181,7 @@ public sealed class WorkspacePushService(
                     }
                     var found = getFoundCount();
                     var line1 = found == 0
-                        ? $"Waiting for {totalDeps} {(totalDeps == 1 ? "package" : "packages")}"
+                        ? $"Waiting for {totalDeps} {(totalDeps == 1 ? "package" : "packages")}..."
                         : $"Found {found} of {totalDeps} {(totalDeps == 1 ? "package" : "packages")}";
                     var totalSec = (int)remaining.TotalSeconds;
                     var mm = totalSec / 60;
@@ -197,6 +198,7 @@ public sealed class WorkspacePushService(
                         }
                         if (toCheck.Length > 0)
                         {
+                            var prevFound = getFoundCount();
                             foreach (var chunk in toCheck.Chunk(_maxConcurrent))
                             {
                                 await Task.WhenAll(chunk.Select(async i =>
@@ -218,7 +220,14 @@ public sealed class WorkspacePushService(
                                     }
                                 }));
                             }
-                            if (getFoundCount() >= totalDeps)
+                            var nowFound = getFoundCount();
+                            if (nowFound > prevFound)
+                            {
+                                var stillWaiting = totalDeps - nowFound;
+                                if (stillWaiting > 0)
+                                    deadline = DateTime.UtcNow + TimeSpan.FromMinutes(stillWaiting * minutesPerDep);
+                            }
+                            if (nowFound >= totalDeps)
                                 _logger.LogInformation("Push wait: all {Total} package(s) found for level {Level}, proceeding.", totalDeps, level);
                         }
                     }
