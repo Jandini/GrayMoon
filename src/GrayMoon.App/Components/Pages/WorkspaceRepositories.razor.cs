@@ -1721,7 +1721,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 {
                     workspaceBranchesFetchProgressMessage = completed <= 0
                         ? "Fetching branches..."
-                        : $"Fetched {completed} of {total} branches...";
+                        : $"Fetched branches in {completed} of {total} repositories...";
                     _ = InvokeAsync(StateHasChanged);
                 },
                 _workspaceBranchesFetchCts.Token);
