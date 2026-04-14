@@ -1639,6 +1639,24 @@ public sealed partial class WorkspaceRepositories : IDisposable
         };
     }
 
+    /// <summary>When every workspace repo has the same non-empty <see cref="WorkspaceRepositoryLink.BranchName"/>, returns that name; otherwise null.</summary>
+    private static string? GetUnifiedWorkspaceCurrentBranch(IReadOnlyList<WorkspaceRepositoryLink> links)
+    {
+        if (links.Count == 0)
+            return null;
+        string? first = null;
+        foreach (var link in links)
+        {
+            var name = link.BranchName?.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+                return null;
+            first ??= name;
+            if (!string.Equals(first, name, StringComparison.OrdinalIgnoreCase))
+                return null;
+        }
+        return first;
+    }
+
     private async Task ShowBranchModalAsync()
     {
         if (workspace == null || workspaceRepositories.Count == 0)
@@ -1651,7 +1669,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             Logger.LogWarning(ex, "Could not load common branches for branch modal");
         }
-        _branchModal = _branchModal with { IsVisible = true };
+        _branchModal = _branchModal with
+        {
+            IsVisible = true,
+            WorkspaceUnifiedCurrentBranch = GetUnifiedWorkspaceCurrentBranch(workspaceRepositories)
+        };
         StateHasChanged();
     }
 
@@ -1677,7 +1699,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
             CommonBranchNames = commonLocal,
             CommonLocalBranchNames = commonLocal,
             CommonRemoteBranchNames = commonRemote,
-            DefaultDisplayText = data.DefaultDisplayText ?? "multiple"
+            DefaultDisplayText = data.DefaultDisplayText ?? "multiple",
+            WorkspaceUnifiedCurrentBranch = GetUnifiedWorkspaceCurrentBranch(workspaceRepositories)
         };
     }
 
@@ -2283,6 +2306,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public IReadOnlyList<string> CommonLocalBranchNames { get; init; } = Array.Empty<string>();
         public IReadOnlyList<string> CommonRemoteBranchNames { get; init; } = Array.Empty<string>();
         public string DefaultDisplayText { get; init; } = "multiple";
+        /// <summary>Local branch name when every linked repo reports the same current branch; otherwise null.</summary>
+        public string? WorkspaceUnifiedCurrentBranch { get; init; }
     }
 
     private sealed record SwitchBranchModalState
