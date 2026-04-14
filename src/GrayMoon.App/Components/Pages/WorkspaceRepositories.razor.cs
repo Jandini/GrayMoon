@@ -1780,7 +1780,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 {
                     workspaceBranchesCheckoutProgressMessage = completed <= 0
                         ? "Checking out..."
-                        : $"Checked out {completed} of {total}";
+                        : $"Checked out {branchName} in {completed} of {total} repositories";
                     _ = InvokeAsync(StateHasChanged);
                 },
                 _workspaceBranchesCheckoutCts.Token);
