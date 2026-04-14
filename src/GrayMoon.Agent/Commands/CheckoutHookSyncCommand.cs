@@ -12,7 +12,7 @@ namespace GrayMoon.Agent.Commands;
 /// upstream/default comparisons correct without paying the cost of a full fetch of all branches
 /// and tags (full fetch is done by Sync and branch list flows).
 /// </summary>
-public sealed class CheckoutHookSyncCommand(IGitService git, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<CheckoutHookSyncCommand> logger)
+public sealed class CheckoutHookSyncCommand(IGitService git, ICsProjFileService csProjFileService, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<CheckoutHookSyncCommand> logger)
 {
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
@@ -24,6 +24,7 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IAgentTokenProvider
 
         // Resolve default origin ref once so minimal fetch and commit-count calls share it.
         var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
+        var findProjectsTask = csProjFileService.FindAsync(payload.RepositoryPath, cancellationToken);
 
         // Minimal fetch: only current branch and default branch, not all branches/tags.
         string? token = await tokenProvider.GetTokenForRepositoryAsync(payload.RepositoryId, cancellationToken);
@@ -66,6 +67,27 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IAgentTokenProvider
             hasUpstream = remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
         }
 
+        var projects = await findProjectsTask;
+        var syncProjects = projects?
+            .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+            .Select(p => new RepositorySyncProjectNotification
+            {
+                Name = p.Name.Trim(),
+                ProjectType = (int)p.ProjectType,
+                ProjectPath = p.ProjectPath ?? "",
+                TargetFramework = p.TargetFramework ?? "",
+                PackageId = p.PackageId,
+                PackageReferences = p.PackageReferences
+                    .Where(pr => !string.IsNullOrWhiteSpace(pr.Name))
+                    .Select(pr => new RepositorySyncPackageReferenceNotification
+                    {
+                        Name = pr.Name.Trim(),
+                        Version = pr.Version ?? ""
+                    })
+                    .ToList()
+            })
+            .ToList();
+
         var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)
         {
@@ -80,6 +102,7 @@ public sealed class CheckoutHookSyncCommand(IGitService git, IAgentTokenProvider
                 HasUpstream = hasUpstream,
                 DefaultBranchBehind = defaultBehind,
                 DefaultBranchAhead = defaultAhead,
+                Projects = syncProjects,
                 ErrorMessage = fetchError
             };
             await connection.InvokeAsync(AgentHubMethods.SyncCommand, notification, cancellationToken);
