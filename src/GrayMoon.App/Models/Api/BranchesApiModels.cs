@@ -133,6 +133,12 @@ public sealed class CommonBranchesApiResult
     [JsonPropertyName("commonBranchNames")]
     public List<string>? CommonBranchNames { get; set; }
 
+    [JsonPropertyName("commonLocalBranchNames")]
+    public List<string>? CommonLocalBranchNames { get; set; }
+
+    [JsonPropertyName("commonRemoteBranchNames")]
+    public List<string>? CommonRemoteBranchNames { get; set; }
+
     /// <summary>Display text for the default option: branch name when all repos share same default (e.g. "main"), or "multiple" when they differ.</summary>
     [JsonPropertyName("defaultDisplayText")]
     public string? DefaultDisplayText { get; set; }

@@ -85,6 +85,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private bool isSyncingToDefault = false;
     private string syncToDefaultMessage = "";
     private IReadOnlyList<(int RepoId, int? DefaultAhead, bool? HasUpstream)>? _syncToDefaultCheckResults = null;
+    private bool isWorkspaceBranchesFetching = false;
+    private string workspaceBranchesFetchProgressMessage = "Fetching branches across workspace...";
+    private CancellationTokenSource? _workspaceBranchesFetchCts;
+    private bool isWorkspaceBranchesCheckingOut = false;
+    private string workspaceBranchesCheckoutProgressMessage = "Checking out branch across workspace...";
+    private CancellationTokenSource? _workspaceBranchesCheckoutCts;
     private UpdateModalState _updateModal = new();
     private UpdateSingleRepoDependenciesModalState _updateSingleRepoModal = new();
     private PushWithDependenciesModalState _pushWithDependenciesModal = new();
@@ -192,6 +198,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _fetchRepositoriesCts?.Dispose();
         _createBranchesCts?.Cancel();
         _createBranchesCts?.Dispose();
+        _workspaceBranchesFetchCts?.Cancel();
+        _workspaceBranchesFetchCts?.Dispose();
+        _workspaceBranchesCheckoutCts?.Cancel();
+        _workspaceBranchesCheckoutCts?.Dispose();
     }
 
     /// <summary>Called when WorkspaceSynced is received (or after Update): reload from a fresh scope so the grid gets current DB values (no stale DbContext).</summary>
@@ -1635,18 +1645,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             return;
         try
         {
-            var data = await WorkspaceBranchHandler.GetCommonBranchesAsync(
-                WorkspaceId,
-                ApiBaseUrl,
-                CancellationToken.None);
-            if (data != null)
-            {
-                _branchModal = _branchModal with
-                {
-                    CommonBranchNames = data.CommonBranchNames ?? new List<string>(),
-                    DefaultDisplayText = data.DefaultDisplayText ?? "multiple"
-                };
-            }
+            await LoadCommonBranchesForBranchModalAsync(CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -1659,6 +1658,157 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private void CloseBranchModal()
     {
         _branchModal = _branchModal with { IsVisible = false };
+    }
+
+    private async Task LoadCommonBranchesForBranchModalAsync(CancellationToken cancellationToken)
+    {
+        var data = await WorkspaceBranchHandler.GetCommonBranchesAsync(
+            WorkspaceId,
+            ApiBaseUrl,
+            cancellationToken);
+
+        if (data == null)
+            return;
+
+        var commonLocal = data.CommonLocalBranchNames ?? data.CommonBranchNames ?? new List<string>();
+        var commonRemote = data.CommonRemoteBranchNames ?? new List<string>();
+        _branchModal = _branchModal with
+        {
+            CommonBranchNames = commonLocal,
+            CommonLocalBranchNames = commonLocal,
+            CommonRemoteBranchNames = commonRemote,
+            DefaultDisplayText = data.DefaultDisplayText ?? "multiple"
+        };
+    }
+
+    private void AbortWorkspaceBranchesFetchAsync()
+    {
+        _workspaceBranchesFetchCts?.Cancel();
+    }
+
+    private void AbortWorkspaceBranchesCheckoutAsync()
+    {
+        _workspaceBranchesCheckoutCts?.Cancel();
+    }
+
+    private async Task FetchCommonBranchesAcrossWorkspaceAsync()
+    {
+        if (workspace == null || isWorkspaceBranchesFetching || isSyncing || isUpdating || isCommitSyncing || isCheckingOut)
+            return;
+
+        var repoIds = workspaceRepositories
+            .Select(wr => wr.RepositoryId)
+            .Distinct()
+            .ToList();
+        if (repoIds.Count == 0)
+            return;
+
+        _workspaceBranchesFetchCts?.Cancel();
+        _workspaceBranchesFetchCts?.Dispose();
+        _workspaceBranchesFetchCts = new CancellationTokenSource();
+
+        isWorkspaceBranchesFetching = true;
+        workspaceBranchesFetchProgressMessage = "Fetching branches...";
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var result = await WorkspaceBranchHandler.FetchBranchesForWorkspaceAsync(
+                WorkspaceId,
+                repoIds,
+                ApiBaseUrl,
+                (completed, total) =>
+                {
+                    workspaceBranchesFetchProgressMessage = completed <= 0
+                        ? "Fetching branches..."
+                        : $"Fetched {completed} of {total} branches...";
+                    _ = InvokeAsync(StateHasChanged);
+                },
+                _workspaceBranchesFetchCts.Token);
+
+            await RefreshFromSync();
+            await LoadCommonBranchesForBranchModalAsync(CancellationToken.None);
+            await InvokeAsync(StateHasChanged);
+
+            if (result.FailureCount > 0)
+                ToastService.Show($"Fetched branches for {result.SuccessCount} repositories. {result.FailureCount} failed.");
+        }
+        catch (OperationCanceledException)
+        {
+            ToastService.Show("Fetch branches cancelled.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error fetching branches across workspace {WorkspaceId}", WorkspaceId);
+            ToastService.Show("Failed to fetch branches across workspace.");
+        }
+        finally
+        {
+            isWorkspaceBranchesFetching = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task CheckoutCommonBranchAcrossWorkspaceAsync(string branchName)
+    {
+        if (workspace == null || string.IsNullOrWhiteSpace(branchName) || isWorkspaceBranchesCheckingOut || isSyncing || isUpdating || isCommitSyncing || isCheckingOut)
+            return;
+
+        var repoIds = workspaceRepositories
+            .Select(wr => wr.RepositoryId)
+            .Distinct()
+            .ToList();
+        if (repoIds.Count == 0)
+            return;
+
+        _workspaceBranchesCheckoutCts?.Cancel();
+        _workspaceBranchesCheckoutCts?.Dispose();
+        _workspaceBranchesCheckoutCts = new CancellationTokenSource();
+
+        isWorkspaceBranchesCheckingOut = true;
+        workspaceBranchesCheckoutProgressMessage = $"Checking out '{branchName}' 0 of {repoIds.Count}";
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var result = await WorkspaceBranchHandler.CheckoutBranchForWorkspaceAsync(
+                WorkspaceId,
+                repoIds,
+                branchName,
+                ApiBaseUrl,
+                (completed, total) =>
+                {
+                    workspaceBranchesCheckoutProgressMessage = $"Checking out '{branchName}' {completed} of {total}";
+                    _ = InvokeAsync(StateHasChanged);
+                },
+                _workspaceBranchesCheckoutCts.Token);
+
+            foreach (var repoId in repoIds)
+            {
+                if (result.ErrorsByRepositoryId.TryGetValue(repoId, out var error))
+                    repositoryErrors[repoId] = error;
+                else
+                    repositoryErrors.Remove(repoId);
+            }
+
+            await RefreshFromSync();
+            if (result.FailureCount > 0)
+                ToastService.Show($"Checked out branch in {result.SuccessCount} repositories. {result.FailureCount} failed.");
+        }
+        catch (OperationCanceledException)
+        {
+            ToastService.Show("Checkout cancelled.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error checking out branch {BranchName} across workspace {WorkspaceId}", branchName, WorkspaceId);
+            ToastService.Show("Failed to check out branch across workspace.");
+        }
+        finally
+        {
+            isWorkspaceBranchesCheckingOut = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task CreateBranchesAsync((string NewBranchName, string BaseBranch) args)
@@ -2128,6 +2278,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         public bool IsVisible { get; init; }
         public IReadOnlyList<string> CommonBranchNames { get; init; } = Array.Empty<string>();
+        public IReadOnlyList<string> CommonLocalBranchNames { get; init; } = Array.Empty<string>();
+        public IReadOnlyList<string> CommonRemoteBranchNames { get; init; } = Array.Empty<string>();
         public string DefaultDisplayText { get; init; } = "multiple";
     }
 

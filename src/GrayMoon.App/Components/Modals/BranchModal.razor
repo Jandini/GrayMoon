@@ -24,6 +24,14 @@
                                 New Branch
                             </button>
                         </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link @(activeTab == "switchbranch" ? "active" : "")"
+                                    type="button"
+                                    role="tab"
+                                    @onclick='() => SetActiveTab("switchbranch")'>
+                                Switch Branch
+                            </button>
+                        </li>
                     </ul>
 
                     @if (activeTab == "newbranch")
@@ -104,12 +112,79 @@
                             </div>
                         </div>
                     }
+                    else
+                    {
+                        <div class="mb-3 switch-branch-field-block">
+                            <div class="d-flex align-items-center justify-content-between switch-branch-label-row">
+                                <label class="form-label mb-0" for="switch-branch-filter">Branch name</label>
+                                <span class="switch-branch-tab-count">@GetBranchCountText(GetFilteredSwitchBranches().Count(), !string.IsNullOrWhiteSpace(switchBranchFilter))</span>
+                            </div>
+                            <input id="switch-branch-filter"
+                                   type="text"
+                                   class="form-control"
+                                   placeholder="search branch..."
+                                   @bind="switchBranchFilter"
+                                   @bind:event="oninput"
+                                   @bind:after="SelectClosestSwitchBranch"
+                                   @ref="switchBranchFilterInput" />
+                        </div>
+                        <div class="branch-list border rounded">
+                            @if (GetFilteredSwitchBranches().Count() == 0)
+                            {
+                                <div class="text-muted p-3">@(GetSwitchBranchOptions().Count == 0 ? "No common branches across all repositories." : "No branches match the filter.")</div>
+                            }
+                            else
+                            {
+                                @foreach (var branch in GetFilteredSwitchBranches())
+                                {
+                                    <div class="branch-item p-2 @(selectedSwitchBranchKey == branch.Key ? "bg-light" : "")"
+                                         style="cursor: pointer;"
+                                         @onclick='() => SelectSwitchBranch(branch.Key)'>
+                                        <div class="d-flex align-items-center justify-content-between">
+                                            <div class="d-flex align-items-center flex-grow-1 min-w-0">
+                                                <input type="radio"
+                                                       name="switchBranchSelection"
+                                                       class="switch-branch-radio"
+                                                       checked="@(selectedSwitchBranchKey == branch.Key)"
+                                                       @onchange='() => SelectSwitchBranch(branch.Key)' />
+                                                <span class="ms-2 text-truncate">@branch.BranchName</span>
+                                                <span class="badge bg-secondary ms-2">@(branch.IsRemote ? "Remote" : "Local")</span>
+                                            </div>
+                                            <button type="button"
+                                                    class="btn btn-link p-0 branch-delete-link branch-delete-link-disabled"
+                                                    title="Delete is not implemented yet"
+                                                    aria-label="Delete branch (not implemented)"
+                                                    disabled>
+                                                <i class="bi bi-trash" aria-hidden="true"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                }
+                            }
+                        </div>
+                    }
                 </div>
                 <div class="modal-footer">
+                    <div class="d-flex gap-2 align-items-center me-auto">
+                        @if (activeTab == "switchbranch")
+                        {
+                            <button type="button"
+                                    class="btn btn-outline-secondary"
+                                    @onclick="FetchAcrossWorkspaceAsync">
+                                Fetch
+                            </button>
+                        }
+                    </div>
                     @if (activeTab == "newbranch" && !showBranchExistsConfirmation)
                     {
                         <button type="button" class="btn btn-primary" @onclick="CreateAsync" disabled="@(string.IsNullOrWhiteSpace(newBranchName) || isCreating)">
                             Create
+                        </button>
+                    }
+                    else if (activeTab == "switchbranch")
+                    {
+                        <button type="button" class="btn btn-primary" @onclick="CheckoutSelectedBranchAsync" disabled="@(SelectedSwitchBranch == null || isCreating)">
+                            Check out
                         </button>
                     }
                     <button type="button" class="btn btn-secondary" @onclick="OnCancel" disabled="@isCreating">Cancel</button>
@@ -124,10 +199,14 @@
     [Parameter] public string? WorkspaceName { get; set; }
     [Parameter] public int WorkspaceId { get; set; }
     [Parameter] public IReadOnlyList<string> CommonBranchNames { get; set; } = Array.Empty<string>();
+    [Parameter] public IReadOnlyList<string> CommonLocalBranchNames { get; set; } = Array.Empty<string>();
+    [Parameter] public IReadOnlyList<string> CommonRemoteBranchNames { get; set; } = Array.Empty<string>();
     /// <summary>Display text for the default option: e.g. "main" when all repos same default, or "multiple" when different.</summary>
     [Parameter] public string DefaultDisplayText { get; set; } = "multiple";
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback<(string NewBranchName, string BaseBranch)> OnCreateBranch { get; set; }
+    [Parameter] public EventCallback OnFetchBranches { get; set; }
+    [Parameter] public EventCallback<string> OnCheckoutBranch { get; set; }
 
     private string activeTab = "newbranch";
     private string newBranchName = "";
@@ -141,11 +220,92 @@
     private bool showBasedOnDropdown = false;
     private ElementReference modalElement;
     private ElementReference newBranchNameInput;
+    private ElementReference switchBranchFilterInput;
     private bool _wasVisible;
+    private bool _focusSwitchFilterOnNextRender;
+    private string switchBranchFilter = "";
+    private string? selectedSwitchBranchKey;
+
+    private sealed record SwitchBranchOption(string Key, string BranchName, bool IsRemote);
 
     private void SetActiveTab(string tab)
     {
         activeTab = tab;
+        if (tab == "switchbranch")
+        {
+            SelectClosestSwitchBranch();
+            _focusSwitchFilterOnNextRender = true;
+        }
+    }
+
+    private List<SwitchBranchOption> GetSwitchBranchOptions()
+    {
+        var localBranches = (CommonLocalBranchNames.Count > 0 ? CommonLocalBranchNames : CommonBranchNames)
+            .Where(b => !string.IsNullOrWhiteSpace(b))
+            .Select(b => new SwitchBranchOption($"local:{b}", b, false));
+
+        var remoteBranches = CommonRemoteBranchNames
+            .Where(b => !string.IsNullOrWhiteSpace(b))
+            .Select(b => new SwitchBranchOption($"remote:{b}", b, true));
+
+        return localBranches.Concat(remoteBranches).ToList();
+    }
+
+    private IEnumerable<SwitchBranchOption> GetFilteredSwitchBranches()
+    {
+        var all = GetSwitchBranchOptions();
+        if (string.IsNullOrWhiteSpace(switchBranchFilter))
+            return all;
+
+        var term = switchBranchFilter.Trim();
+        return all.Where(b => b.BranchName.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void SelectClosestSwitchBranch()
+    {
+        var filtered = GetFilteredSwitchBranches().ToList();
+        if (filtered.Count == 0)
+        {
+            selectedSwitchBranchKey = null;
+            StateHasChanged();
+            return;
+        }
+
+        if (selectedSwitchBranchKey == null || filtered.All(b => b.Key != selectedSwitchBranchKey))
+            selectedSwitchBranchKey = filtered[0].Key;
+
+        StateHasChanged();
+    }
+
+    private void SelectSwitchBranch(string key)
+    {
+        selectedSwitchBranchKey = key;
+        StateHasChanged();
+    }
+
+    private SwitchBranchOption? SelectedSwitchBranch =>
+        GetSwitchBranchOptions().FirstOrDefault(b => b.Key == selectedSwitchBranchKey);
+
+    private string GetBranchCountText(int count, bool isFiltered = false)
+    {
+        if (isFiltered)
+            return count == 1 ? "1 branch matched" : $"{count} branches matched";
+        return count == 1 ? "1 branch" : $"{count} branches";
+    }
+
+    private async Task FetchAcrossWorkspaceAsync()
+    {
+        await OnFetchBranches.InvokeAsync();
+    }
+
+    private async Task CheckoutSelectedBranchAsync()
+    {
+        var selected = SelectedSwitchBranch;
+        if (selected == null)
+            return;
+
+        await OnCancel.InvokeAsync();
+        await OnCheckoutBranch.InvokeAsync(selected.BranchName);
     }
 
     private string GetSelectedBaseDisplayText()
@@ -175,6 +335,9 @@
             errorMessage = null;
             showBranchExistsConfirmation = false;
             activeTab = "newbranch";
+            switchBranchFilter = "";
+            selectedSwitchBranchKey = null;
+            _focusSwitchFilterOnNextRender = false;
         }
     }
 
@@ -194,6 +357,16 @@
         {
             _wasVisible = false;
             showBasedOnDropdown = false;
+        }
+
+        if (IsVisible && activeTab == "switchbranch" && _focusSwitchFilterOnNextRender)
+        {
+            _focusSwitchFilterOnNextRender = false;
+            try
+            {
+                await switchBranchFilterInput.FocusAsync();
+            }
+            catch { }
         }
     }
 
@@ -305,6 +478,10 @@
                 await ProceedWithCreateAsync();
             else if (!string.IsNullOrWhiteSpace(newBranchName?.Trim()))
                 await CreateAsync();
+        }
+        else if (e.Key == "Enter" && activeTab == "switchbranch" && !isCreating)
+        {
+            await CheckoutSelectedBranchAsync();
         }
     }
 
