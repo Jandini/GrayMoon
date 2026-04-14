@@ -1766,7 +1766,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _workspaceBranchesCheckoutCts = new CancellationTokenSource();
 
         isWorkspaceBranchesCheckingOut = true;
-        workspaceBranchesCheckoutProgressMessage = $"Checking out '{branchName}' 0 of {repoIds.Count}";
+        workspaceBranchesCheckoutProgressMessage = "Checking out...";
         await InvokeAsync(StateHasChanged);
 
         try
@@ -1778,7 +1778,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 ApiBaseUrl,
                 (completed, total) =>
                 {
-                    workspaceBranchesCheckoutProgressMessage = $"Checking out '{branchName}' {completed} of {total}";
+                    workspaceBranchesCheckoutProgressMessage = completed <= 0
+                        ? "Checking out..."
+                        : $"Checked out {completed} of {total}";
                     _ = InvokeAsync(StateHasChanged);
                 },
                 _workspaceBranchesCheckoutCts.Token);
