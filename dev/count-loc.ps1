@@ -3,7 +3,7 @@
 # Run from repo root: .\count-loc.ps1
 
 param(
-    [string]$Root = $PSScriptRoot,
+    [string]$Root = '..',
     [switch]$ByExtension,
     [switch]$ByDirectory
 )

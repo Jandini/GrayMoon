@@ -30,6 +30,7 @@ public sealed class DependencyUpdateOrchestrator(
         IReadOnlySet<int>? repoIdsToUpdate = null)
     {
         var hadError = false;
+        var processedAnyDependencyLevel = false;
         void OnRepoError(int repoId, string msg)
         {
             hadError = true;
@@ -62,6 +63,7 @@ public sealed class DependencyUpdateOrchestrator(
                 break;
 
             var repoIds = reposAtLevel.Select(r => r.RepoId).ToHashSet();
+            processedAnyDependencyLevel = true;
 
             setProgress($"Updating {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
             await workspaceGitService.SyncDependenciesAsync(
@@ -107,59 +109,32 @@ public sealed class DependencyUpdateOrchestrator(
                 break;
             }
 
-            setProgress("Updating version files...");
-            var (_, _, fileError, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
-                workspaceId,
-                selectedRepositoryIds: repoIds,
-                onFileUpdated: null,
-                cancellationToken: cancellationToken);
-
-            if (fileError != null && !fileError.Contains("No version configurations", StringComparison.OrdinalIgnoreCase))
+            if (!await UpdateAndCommitVersionFilesAsync(
+                    workspaceId,
+                    repoIds,
+                    cancellationToken,
+                    setProgress,
+                    onAppSideComplete,
+                    OnRepoError))
             {
-                OnRepoError(0, fileError);
+                hadError = true;
                 break;
             }
+        }
 
-            if (updatedFiles is { Count: > 0 })
-            {
-                var byRepo = updatedFiles
-                    .GroupBy(x => (x.RepositoryId, x.RepoName))
-                    .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
-                    .ToList();
-
-                setProgress("Committing updated versions...");
-                var vfCommitResults = await workspaceGitService.CommitFilePathsAsync(
+        // Even when there are no dependency changes for the selected scope, we still must
+        // run version-file update because this flow does not pre-check whether files need changes.
+        if (!hadError && !processedAnyDependencyLevel)
+        {
+            if (!await UpdateAndCommitVersionFilesAsync(
                     workspaceId,
-                    byRepo,
-                    onProgress: (c, t, _) => setProgress($"Committed version files {c} of {t}"),
-                    cancellationToken: cancellationToken);
-
-                var committedVersionRepoIds = new List<int>();
-                foreach (var (repoId, errMsg) in vfCommitResults)
-                {
-                    if (!string.IsNullOrEmpty(errMsg))
-                    {
-                        OnRepoError(repoId, errMsg);
-                        break;
-                    }
-                    committedVersionRepoIds.Add(repoId);
-                }
-                if (hadError)
-                    break;
-
-                // Version-file commits must also refresh GitVersion before planning next higher level.
-                if (committedVersionRepoIds.Count > 0
-                    && !await RefreshRepositoryVersionsAsync(
-                        committedVersionRepoIds,
-                        workspaceId,
-                        cancellationToken,
-                        setProgress,
-                        onAppSideComplete,
-                        OnRepoError))
-                {
-                    hadError = true;
-                    break;
-                }
+                    repoIdsToUpdate,
+                    cancellationToken,
+                    setProgress,
+                    onAppSideComplete,
+                    OnRepoError))
+            {
+                hadError = true;
             }
         }
 
@@ -212,6 +187,67 @@ public sealed class DependencyUpdateOrchestrator(
                 return false;
             }
         }
+
+        return true;
+    }
+
+    private async Task<bool> UpdateAndCommitVersionFilesAsync(
+        int workspaceId,
+        IReadOnlySet<int>? selectedRepositoryIds,
+        CancellationToken cancellationToken,
+        Action<string> setProgress,
+        Action? onAppSideComplete,
+        Action<int, string> onRepoError)
+    {
+        setProgress("Updating version files...");
+        var (_, _, fileError, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
+            workspaceId,
+            selectedRepositoryIds: selectedRepositoryIds,
+            onFileUpdated: null,
+            cancellationToken: cancellationToken);
+
+        if (fileError != null && !fileError.Contains("No version configurations", StringComparison.OrdinalIgnoreCase))
+        {
+            onRepoError(0, fileError);
+            return false;
+        }
+
+        if (updatedFiles is not { Count: > 0 })
+            return true;
+
+        var byRepo = updatedFiles
+            .GroupBy(x => (x.RepositoryId, x.RepoName))
+            .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
+            .ToList();
+
+        setProgress("Committing updated versions...");
+        var vfCommitResults = await workspaceGitService.CommitFilePathsAsync(
+            workspaceId,
+            byRepo,
+            onProgress: (c, t, _) => setProgress($"Committed version files {c} of {t}"),
+            cancellationToken: cancellationToken);
+
+        var committedVersionRepoIds = new List<int>();
+        foreach (var (repoId, errMsg) in vfCommitResults)
+        {
+            if (!string.IsNullOrEmpty(errMsg))
+            {
+                onRepoError(repoId, errMsg);
+                return false;
+            }
+            committedVersionRepoIds.Add(repoId);
+        }
+
+        // Version-file commits must also refresh GitVersion before planning next higher level.
+        if (committedVersionRepoIds.Count > 0
+            && !await RefreshRepositoryVersionsAsync(
+                committedVersionRepoIds,
+                workspaceId,
+                cancellationToken,
+                setProgress,
+                onAppSideComplete,
+                onRepoError))
+            return false;
 
         return true;
     }
