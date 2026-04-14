@@ -141,23 +141,27 @@
                                          style="cursor: pointer;"
                                          @onclick='() => SelectSwitchBranch(branch.Key)'>
                                         <div class="d-flex align-items-center justify-content-between">
-                                            <div class="d-flex align-items-center flex-grow-1 min-w-0">
+                                            <div class="d-flex align-items-center flex-grow-1 min-w-0 gap-2">
                                                 <input type="radio"
                                                        name="switchBranchSelection"
                                                        class="switch-branch-radio"
                                                        checked="@(selectedSwitchBranchKey == branch.Key)"
                                                        @onchange='() => SelectSwitchBranch(branch.Key)' />
                                                 <span class="ms-2 text-truncate">@branch.BranchName</span>
+                                                @if (branch.IsDefault)
+                                                {
+                                                    <span class="badge bg-success flex-shrink-0">Default</span>
+                                                }
+                                                @if (IsWorkspaceCurrentBranch(branch))
+                                                {
+                                                    <span class="badge bg-primary flex-shrink-0">Current</span>
+                                                }
                                             </div>
-                                            <div class="d-flex align-items-center flex-shrink-0 ms-2 branch-item-actions">
-                                                <span class="badge bg-secondary">@(branch.IsRemote ? "Remote" : "Local")</span>
-                                                <button type="button"
-                                                        class="btn btn-link p-0 branch-delete-link branch-delete-link-disabled ms-2"
-                                                        title="Delete is not implemented yet"
-                                                        aria-label="Delete branch (not implemented)"
-                                                        disabled>
-                                                    <i class="bi bi-trash" aria-hidden="true"></i>
-                                                </button>
+                                            <div class="d-flex align-items-center flex-shrink-0 ms-2 gap-2 branch-item-actions">
+                                                @if (branch.IsRemote)
+                                                {
+                                                    <span class="badge bg-secondary">Remote</span>
+                                                }
                                             </div>
                                         </div>
                                     </div>
@@ -185,7 +189,11 @@
                     }
                     else if (activeTab == "switchbranch")
                     {
-                        <button type="button" class="btn btn-primary" @onclick="CheckoutSelectedBranchAsync" disabled="@(SelectedSwitchBranch == null || isCreating)">
+                        <button type="button"
+                                class="btn btn-primary"
+                                @onclick="CheckoutSelectedBranchAsync"
+                                disabled="@(SelectedSwitchBranch == null || isCreating || IsSelectedBranchWorkspaceCurrent)"
+                                title="@(IsSelectedBranchWorkspaceCurrent ? "Already on this branch across all repositories." : null)">
                             Check out
                         </button>
                     }
@@ -205,6 +213,8 @@
     [Parameter] public IReadOnlyList<string> CommonRemoteBranchNames { get; set; } = Array.Empty<string>();
     /// <summary>Display text for the default option: e.g. "main" when all repos same default, or "multiple" when different.</summary>
     [Parameter] public string DefaultDisplayText { get; set; } = "multiple";
+    /// <summary>Local branch name when every repo in the workspace reports the same current branch; used for Current badge and disabling redundant checkout.</summary>
+    [Parameter] public string? WorkspaceUnifiedCurrentBranch { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback<(string NewBranchName, string BaseBranch)> OnCreateBranch { get; set; }
     [Parameter] public EventCallback OnFetchBranches { get; set; }
@@ -228,7 +238,20 @@
     private string switchBranchFilter = "";
     private string? selectedSwitchBranchKey;
 
-    private sealed record SwitchBranchOption(string Key, string BranchName, bool IsRemote);
+    private sealed record SwitchBranchOption(string Key, string BranchName, bool IsRemote, bool IsDefault);
+
+    private bool IsWorkspaceCurrentBranch(SwitchBranchOption o)
+    {
+        if (string.IsNullOrWhiteSpace(WorkspaceUnifiedCurrentBranch))
+            return false;
+        var cur = WorkspaceUnifiedCurrentBranch.Trim();
+        if (o.IsRemote)
+            return false;
+        return string.Equals(o.BranchName, cur, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsSelectedBranchWorkspaceCurrent =>
+        SelectedSwitchBranch != null && IsWorkspaceCurrentBranch(SelectedSwitchBranch);
 
     private void SetActiveTab(string tab)
     {
@@ -242,9 +265,27 @@
 
     private List<SwitchBranchOption> GetSwitchBranchOptions()
     {
+        var sharedDefaultBranch = string.IsNullOrWhiteSpace(DefaultDisplayText) ||
+                                  string.Equals(DefaultDisplayText, "multiple", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : DefaultDisplayText.Trim();
+
         var localBranches = (CommonLocalBranchNames.Count > 0 ? CommonLocalBranchNames : CommonBranchNames)
             .Where(b => !string.IsNullOrWhiteSpace(b))
-            .Select(b => new SwitchBranchOption($"local:{b}", b, false));
+            .Select(b =>
+            {
+                var branchName = b.Trim();
+                var isDefault = sharedDefaultBranch != null &&
+                                string.Equals(branchName, sharedDefaultBranch, StringComparison.OrdinalIgnoreCase);
+                return new SwitchBranchOption($"local:{branchName}", branchName, false, isDefault);
+            })
+            .ToList();
+
+        if (sharedDefaultBranch != null &&
+            localBranches.All(b => !string.Equals(b.BranchName, sharedDefaultBranch, StringComparison.OrdinalIgnoreCase)))
+        {
+            localBranches.Insert(0, new SwitchBranchOption($"local:{sharedDefaultBranch}", sharedDefaultBranch, false, true));
+        }
 
         var remoteBranches = CommonRemoteBranchNames
             .Where(b => !string.IsNullOrWhiteSpace(b))
@@ -254,7 +295,7 @@
                 var remoteName = branchName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase)
                     ? branchName
                     : $"origin/{branchName}";
-                return new SwitchBranchOption($"remote:{remoteName}", remoteName, true);
+                return new SwitchBranchOption($"remote:{remoteName}", remoteName, true, false);
             });
 
         return localBranches.Concat(remoteBranches).ToList();
@@ -280,8 +321,14 @@
             return;
         }
 
-        if (selectedSwitchBranchKey == null || filtered.All(b => b.Key != selectedSwitchBranchKey))
-            selectedSwitchBranchKey = filtered[0].Key;
+        if (selectedSwitchBranchKey != null && filtered.Any(b => b.Key == selectedSwitchBranchKey))
+        {
+            StateHasChanged();
+            return;
+        }
+
+        var pick = filtered.FirstOrDefault(b => !IsWorkspaceCurrentBranch(b)) ?? filtered[0];
+        selectedSwitchBranchKey = pick.Key;
 
         StateHasChanged();
     }
@@ -310,7 +357,7 @@
     private async Task CheckoutSelectedBranchAsync()
     {
         var selected = SelectedSwitchBranch;
-        if (selected == null)
+        if (selected == null || IsWorkspaceCurrentBranch(selected))
             return;
 
         await OnCancel.InvokeAsync();
