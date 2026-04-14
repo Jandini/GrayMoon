@@ -51,6 +51,29 @@ public sealed class SyncCommandHandler(
 
         await dbContext.SaveChangesAsync();
 
+        if (n.Projects is { Count: > 0 })
+        {
+            var syncProjects = n.Projects
+                .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+                .Select(p => new SyncProjectInfo(
+                    p.Name.Trim(),
+                    p.ProjectType >= 0 && p.ProjectType <= 4 ? (ProjectType)p.ProjectType : ProjectType.Library,
+                    p.ProjectPath ?? "",
+                    p.TargetFramework ?? "",
+                    p.PackageId,
+                    (p.PackageReferences ?? new List<RepositorySyncPackageReferenceNotification>())
+                        .Where(pr => !string.IsNullOrWhiteSpace(pr.Name))
+                        .Select(pr => new SyncPackageReference(pr.Name.Trim(), pr.Version ?? ""))
+                        .ToList()))
+                .ToList();
+
+            await workspaceProjectRepository.MergeWorkspaceProjectsAsync(n.WorkspaceId, n.RepositoryId, syncProjects);
+            await workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(
+                n.WorkspaceId,
+                [(n.RepositoryId, (IReadOnlyList<SyncProjectInfo>?)syncProjects)],
+                persistDependencyLevel: false);
+        }
+
         var allLinks = await dbContext.WorkspaceRepositories
             .Where(w => w.WorkspaceId == n.WorkspaceId)
             .Select(w => w.SyncStatus)

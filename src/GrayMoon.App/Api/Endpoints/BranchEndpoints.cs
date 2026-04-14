@@ -684,31 +684,51 @@ public static class BranchEndpoints
             return Results.Ok(new
             {
                 commonBranchNames = Array.Empty<string>(),
+                commonLocalBranchNames = Array.Empty<string>(),
+                commonRemoteBranchNames = Array.Empty<string>(),
                 defaultDisplayText = "multiple"
             });
         }
 
-        // Local branch names per repo (so we can intersect for "common")
-        var branchSets = new List<HashSet<string>>();
+        // Branch names per repo (local and remote separately so UI can combine without collapsing).
+        var localBranchSets = new List<HashSet<string>>();
+        var remoteBranchSets = new List<HashSet<string>>();
         var defaultBranchNames = new List<string>();
         foreach (var wr in links)
         {
             var branches = await dbContext.RepositoryBranches
-                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && !rb.IsRemote)
-                .Select(rb => rb.BranchName)
+                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
+                .Select(rb => new { rb.BranchName, rb.IsRemote, rb.IsDefault })
                 .ToListAsync();
-            branchSets.Add(branches.ToHashSet(StringComparer.OrdinalIgnoreCase));
-            var defaultRow = await dbContext.RepositoryBranches
-                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsDefault)
-                .Select(rb => rb.BranchName)
-                .FirstOrDefaultAsync();
+
+            localBranchSets.Add(
+                branches
+                    .Where(b => !b.IsRemote)
+                    .Select(b => b.BranchName)
+                    .Where(b => !string.IsNullOrWhiteSpace(b))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase));
+
+            remoteBranchSets.Add(
+                branches
+                    .Where(b => b.IsRemote)
+                    .Select(b => b.BranchName)
+                    .Where(b => !string.IsNullOrWhiteSpace(b))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase));
+
+            var defaultRow = branches.FirstOrDefault(b => b.IsDefault)?.BranchName;
             defaultBranchNames.Add(defaultRow ?? "");
         }
 
-        var common = branchSets[0];
-        for (var i = 1; i < branchSets.Count; i++)
+        var commonLocal = localBranchSets[0];
+        for (var i = 1; i < localBranchSets.Count; i++)
         {
-            common.IntersectWith(branchSets[i]);
+            commonLocal.IntersectWith(localBranchSets[i]);
+        }
+
+        var commonRemote = remoteBranchSets[0];
+        for (var i = 1; i < remoteBranchSets.Count; i++)
+        {
+            commonRemote.IntersectWith(remoteBranchSets[i]);
         }
 
         // Default option: one common default (e.g. main [default]) or "multiple [default]" when repos have different defaults
@@ -717,12 +737,17 @@ public static class BranchEndpoints
 
         // All other branches common across every repo go in the list; exclude the single default so it appears only as the first option
         if (distinctDefaults.Count == 1)
-            common.Remove(distinctDefaults[0]);
-        var commonBranchNames = common.OrderBy(b => b, StringComparer.OrdinalIgnoreCase).ToList();
+            commonLocal.Remove(distinctDefaults[0]);
+
+        var commonLocalBranchNames = commonLocal.OrderBy(b => b, StringComparer.OrdinalIgnoreCase).ToList();
+        var commonRemoteBranchNames = commonRemote.OrderBy(b => b, StringComparer.OrdinalIgnoreCase).ToList();
 
         return Results.Ok(new
         {
-            commonBranchNames,
+            // Keep legacy field populated with local common branches for backwards compatibility.
+            commonBranchNames = commonLocalBranchNames,
+            commonLocalBranchNames,
+            commonRemoteBranchNames,
             defaultDisplayText
         });
     }

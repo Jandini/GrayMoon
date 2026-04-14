@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using GrayMoon.App.Models.Api;
 
@@ -12,6 +13,8 @@ public sealed class WorkspaceBranchHandler(
     IHttpClientFactory httpClientFactory,
     ILogger<WorkspaceBranchHandler> logger)
 {
+    private const int DefaultMaxParallelOperations = 16;
+
     public async Task<CommonBranchesApiResult?> GetCommonBranchesAsync(int workspaceId, string apiBaseUrl, CancellationToken cancellationToken)
     {
         var httpClient = httpClientFactory.CreateClient();
@@ -192,5 +195,134 @@ public sealed class WorkspaceBranchHandler(
         logger.LogError("SyncToDefault failed for repo {RepositoryId}: {StatusCode}, {Error}", repositoryId, response.StatusCode, errorText2);
         return (false, errMsg);
     }
+
+    public async Task<WorkspaceBranchBulkResult> FetchBranchesForWorkspaceAsync(
+        int workspaceId,
+        IReadOnlyCollection<int> repositoryIds,
+        string apiBaseUrl,
+        Action<int, int>? reportProgress,
+        CancellationToken cancellationToken)
+    {
+        if (repositoryIds.Count == 0)
+            return WorkspaceBranchBulkResult.Empty;
+
+        var total = repositoryIds.Count;
+        var completed = 0;
+        var errors = new ConcurrentDictionary<int, string>();
+        using var semaphore = new SemaphoreSlim(DefaultMaxParallelOperations, DefaultMaxParallelOperations);
+        var httpClient = httpClientFactory.CreateClient();
+
+        var tasks = repositoryIds.Select(async repositoryId =>
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                var apiRequest = new { workspaceId, repositoryId };
+                var json = JsonSerializer.Serialize(apiRequest);
+                using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                using var response = await httpClient.PostAsync($"{apiBaseUrl}/api/branches/refresh", content, cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorText = await response.Content.ReadAsStringAsync(cancellationToken);
+                    errors[repositoryId] = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText)
+                        ?? $"Failed to fetch branches: {response.StatusCode}";
+                    return;
+                }
+
+                var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                var result = JsonSerializer.Deserialize<BranchesResponse>(responseContent, AgentResponseJson.Options);
+                if (result?.Success == false)
+                    errors[repositoryId] = result.ErrorMessage ?? "Failed to fetch branches.";
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Fetch branches failed for repository {RepositoryId}", repositoryId);
+                errors[repositoryId] = "Failed to fetch branches.";
+            }
+            finally
+            {
+                semaphore.Release();
+                var done = Interlocked.Increment(ref completed);
+                reportProgress?.Invoke(done, total);
+            }
+        });
+
+        await Task.WhenAll(tasks);
+        var failureCount = errors.Count;
+        return new WorkspaceBranchBulkResult(total - failureCount, failureCount, new Dictionary<int, string>(errors));
+    }
+
+    public async Task<WorkspaceBranchBulkResult> CheckoutBranchForWorkspaceAsync(
+        int workspaceId,
+        IReadOnlyCollection<int> repositoryIds,
+        string branchName,
+        string apiBaseUrl,
+        Action<int, int>? reportProgress,
+        CancellationToken cancellationToken)
+    {
+        if (repositoryIds.Count == 0)
+            return WorkspaceBranchBulkResult.Empty;
+
+        var total = repositoryIds.Count;
+        var completed = 0;
+        var errors = new ConcurrentDictionary<int, string>();
+        using var semaphore = new SemaphoreSlim(DefaultMaxParallelOperations, DefaultMaxParallelOperations);
+        var httpClient = httpClientFactory.CreateClient();
+
+        var tasks = repositoryIds.Select(async repositoryId =>
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                var apiRequest = new { workspaceId, repositoryId, branchName };
+                var json = JsonSerializer.Serialize(apiRequest);
+                using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                using var response = await httpClient.PostAsync($"{apiBaseUrl}/api/branches/checkout", content, cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorText = await response.Content.ReadAsStringAsync(cancellationToken);
+                    errors[repositoryId] = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText)
+                        ?? $"Failed to checkout branch: {response.StatusCode}";
+                    return;
+                }
+
+                var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                var result = JsonSerializer.Deserialize<CheckoutBranchResponse>(responseContent, AgentResponseJson.Options);
+                if (result is { Success: false })
+                    errors[repositoryId] = result.ErrorMessage ?? "Failed to checkout branch.";
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Checkout failed for repository {RepositoryId}", repositoryId);
+                errors[repositoryId] = "Failed to checkout branch.";
+            }
+            finally
+            {
+                semaphore.Release();
+                var done = Interlocked.Increment(ref completed);
+                reportProgress?.Invoke(done, total);
+            }
+        });
+
+        await Task.WhenAll(tasks);
+        var failureCount = errors.Count;
+        return new WorkspaceBranchBulkResult(total - failureCount, failureCount, new Dictionary<int, string>(errors));
+    }
+}
+
+public sealed record WorkspaceBranchBulkResult(
+    int SuccessCount,
+    int FailureCount,
+    IReadOnlyDictionary<int, string> ErrorsByRepositoryId)
+{
+    public static WorkspaceBranchBulkResult Empty { get; } = new(0, 0, new Dictionary<int, string>());
 }
 

@@ -15,5 +15,22 @@ public sealed class RepositorySyncNotification
     public bool? HasUpstream { get; init; }
     public int? DefaultBranchBehind { get; init; }
     public int? DefaultBranchAhead { get; init; }
+    public List<RepositorySyncProjectNotification>? Projects { get; init; }
     public string? ErrorMessage { get; init; }
+}
+
+public sealed class RepositorySyncProjectNotification
+{
+    public string Name { get; init; } = "";
+    public int ProjectType { get; init; }
+    public string? ProjectPath { get; init; }
+    public string? TargetFramework { get; init; }
+    public string? PackageId { get; init; }
+    public List<RepositorySyncPackageReferenceNotification>? PackageReferences { get; init; }
+}
+
+public sealed class RepositorySyncPackageReferenceNotification
+{
+    public string Name { get; init; } = "";
+    public string? Version { get; init; }
 }
