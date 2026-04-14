@@ -148,15 +148,17 @@
                                                        checked="@(selectedSwitchBranchKey == branch.Key)"
                                                        @onchange='() => SelectSwitchBranch(branch.Key)' />
                                                 <span class="ms-2 text-truncate">@branch.BranchName</span>
-                                                <span class="badge bg-secondary ms-2">@(branch.IsRemote ? "Remote" : "Local")</span>
                                             </div>
-                                            <button type="button"
-                                                    class="btn btn-link p-0 branch-delete-link branch-delete-link-disabled"
-                                                    title="Delete is not implemented yet"
-                                                    aria-label="Delete branch (not implemented)"
-                                                    disabled>
-                                                <i class="bi bi-trash" aria-hidden="true"></i>
-                                            </button>
+                                            <div class="d-flex align-items-center flex-shrink-0 ms-2 branch-item-actions">
+                                                <span class="badge bg-secondary">@(branch.IsRemote ? "Remote" : "Local")</span>
+                                                <button type="button"
+                                                        class="btn btn-link p-0 branch-delete-link branch-delete-link-disabled ms-2"
+                                                        title="Delete is not implemented yet"
+                                                        aria-label="Delete branch (not implemented)"
+                                                        disabled>
+                                                    <i class="bi bi-trash" aria-hidden="true"></i>
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 }
@@ -246,7 +248,14 @@
 
         var remoteBranches = CommonRemoteBranchNames
             .Where(b => !string.IsNullOrWhiteSpace(b))
-            .Select(b => new SwitchBranchOption($"remote:{b}", b, true));
+            .Select(b =>
+            {
+                var branchName = b.Trim();
+                var remoteName = branchName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase)
+                    ? branchName
+                    : $"origin/{branchName}";
+                return new SwitchBranchOption($"remote:{remoteName}", remoteName, true);
+            });
 
         return localBranches.Concat(remoteBranches).ToList();
     }

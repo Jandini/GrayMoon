@@ -152,6 +152,10 @@
     background-color: var(--bg-active) !important;
 }
 
+.branch-item-actions {
+    justify-content: flex-end;
+}
+
 .branch-delete-link,
 .branch-delete-link i {
     color: #505050 !important;
