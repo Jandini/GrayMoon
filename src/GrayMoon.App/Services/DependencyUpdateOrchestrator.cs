@@ -237,6 +237,7 @@ public sealed class DependencyUpdateOrchestrator(
                 return false;
         }
 
+
         onRepoError(0, $"Version-file updates did not converge after {maxVersionFilePasses} passes.");
         return false;
     }
