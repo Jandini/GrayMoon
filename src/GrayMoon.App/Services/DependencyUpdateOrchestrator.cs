@@ -30,7 +30,6 @@ public sealed class DependencyUpdateOrchestrator(
         IReadOnlySet<int>? repoIdsToUpdate = null)
     {
         var hadError = false;
-        var processedAnyDependencyLevel = false;
         void OnRepoError(int repoId, string msg)
         {
             hadError = true;
@@ -63,7 +62,6 @@ public sealed class DependencyUpdateOrchestrator(
                 break;
 
             var repoIds = reposAtLevel.Select(r => r.RepoId).ToHashSet();
-            processedAnyDependencyLevel = true;
 
             setProgress($"Updating {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
             await workspaceGitService.SyncDependenciesAsync(
@@ -108,23 +106,11 @@ public sealed class DependencyUpdateOrchestrator(
                 hadError = true;
                 break;
             }
-
-            if (!await UpdateAndCommitVersionFilesAsync(
-                    workspaceId,
-                    repoIds,
-                    cancellationToken,
-                    setProgress,
-                    onAppSideComplete,
-                    OnRepoError))
-            {
-                hadError = true;
-                break;
-            }
         }
 
-        // Even when there are no dependency changes for the selected scope, we still must
-        // run version-file update because this flow does not pre-check whether files need changes.
-        if (!hadError && !processedAnyDependencyLevel)
+        // Always run version-file updates after dependency-level processing so files are
+        // written from the final versions produced by this orchestration.
+        if (!hadError)
         {
             if (!await UpdateAndCommitVersionFilesAsync(
                     workspaceId,
