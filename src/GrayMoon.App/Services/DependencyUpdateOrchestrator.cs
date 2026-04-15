@@ -1,5 +1,4 @@
 using GrayMoon.App.Models;
-using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services;
 
@@ -10,11 +9,8 @@ namespace GrayMoon.App.Services;
 /// </summary>
 public sealed class DependencyUpdateOrchestrator(
     WorkspaceGitService workspaceGitService,
-    WorkspaceFileVersionService fileVersionService,
-    IOptions<WorkspaceOptions> workspaceOptions)
+    WorkspaceFileVersionService fileVersionService)
 {
-    private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 8);
-
     /// <summary>
     /// Runs the full update flow: refresh projects, sync and commit csproj deps (per level or single-level),
     /// refresh repo versions, then run version-file updates and optionally commit them.
@@ -144,36 +140,20 @@ public sealed class DependencyUpdateOrchestrator(
             return true;
 
         var totalRefresh = repositoryIds.Count;
-        var completedRefresh = 0;
-        using var refreshSemaphore = new SemaphoreSlim(_maxConcurrent);
-        var refreshTasks = repositoryIds.Select(async repoId =>
+        for (var i = 0; i < repositoryIds.Count; i++)
         {
-            await refreshSemaphore.WaitAsync(cancellationToken);
-            try
+            var repoId = repositoryIds[i];
+            var (refreshSuccess, refreshError) = await workspaceGitService.SyncSingleRepositoryAsync(repoId, workspaceId, cancellationToken);
+            var completed = i + 1;
+            setProgress($"Updating version {completed} of {totalRefresh}...");
+            if (!refreshSuccess)
             {
-                var (refreshSuccess, refreshError) = await workspaceGitService.SyncSingleRepositoryAsync(repoId, workspaceId, cancellationToken);
-                var c = Interlocked.Increment(ref completedRefresh);
-                setProgress($"Updating version {c} of {totalRefresh}...");
-                if (c == totalRefresh)
-                    onAppSideComplete?.Invoke();
-                return (RepoId: repoId, Success: refreshSuccess, Error: refreshError);
-            }
-            finally
-            {
-                refreshSemaphore.Release();
-            }
-        });
-
-        var refreshResults = await Task.WhenAll(refreshTasks);
-        foreach (var (repoId, success, err) in refreshResults)
-        {
-            if (!success)
-            {
-                onRepoError(repoId, err ?? "Refresh version failed.");
+                onRepoError(repoId, refreshError ?? "Refresh version failed.");
                 return false;
             }
         }
 
+        onAppSideComplete?.Invoke();
         return true;
     }
 
