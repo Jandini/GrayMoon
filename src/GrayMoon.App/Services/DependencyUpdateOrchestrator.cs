@@ -224,6 +224,7 @@ public sealed class DependencyUpdateOrchestrator(
         var (_, _, fileError, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
             workspaceId,
             selectedRepositoryIds: selectedRepositoryIds,
+            filterPatternTokensToSelectedRepositories: false,
             onFileUpdated: null,
             cancellationToken: cancellationToken);
 
