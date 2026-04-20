@@ -28,6 +28,10 @@
     text-overflow: ellipsis;
 }
 
+.actions-table td.col-action-status {
+    text-overflow: clip;
+}
+
 .actions-table {
     table-layout: fixed;
     width: 100%;
