@@ -224,6 +224,7 @@ public static class BranchEndpoints
         GitHubRepositoryRepository repoRepository,
         WorkspacePullRequestRepository workspacePullRequestRepository,
         AppDbContext dbContext,
+        WorkspaceGitService workspaceGitService,
         IHubContext<WorkspaceSyncHub> hubContext,
         ConnectorHealthService connectorHealthService,
         ILoggerFactory loggerFactory)
@@ -282,6 +283,9 @@ public static class BranchEndpoints
             if (!commandSuccess)
                 return Results.Problem(errorMessage, statusCode: 500);
 
+            if (!string.IsNullOrWhiteSpace(syncResponse?.CurrentBranch))
+                wr.BranchName = syncResponse.CurrentBranch;
+
             // Sync prunes the previous local branch; remove it from persistence
             var toRemove = await dbContext.RepositoryBranches
                 .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && !rb.IsRemote && rb.BranchName == currentBranchName)
@@ -290,6 +294,25 @@ public static class BranchEndpoints
             {
                 dbContext.RepositoryBranches.RemoveRange(toRemove);
                 await dbContext.SaveChangesAsync(CancellationToken.None);
+            }
+
+            // Sync-to-default performs checkout + pull, which can change project files.
+            // Refresh project/dependency data now so UnmatchedDeps is current without requiring a follow-up Sync.
+            try
+            {
+                var projectRefreshOk = await workspaceGitService.RefreshSingleRepositoryProjectsAsync(
+                    workspaceId,
+                    repositoryId,
+                    onRepoError: (_, msg) => logger.LogWarning("Sync-to-default project refresh reported an issue for repo {RepositoryId}: {Message}", repositoryId, msg),
+                    cancellationToken: CancellationToken.None);
+                if (!projectRefreshOk)
+                {
+                    logger.LogWarning("Sync-to-default project refresh failed for repo {RepositoryId}", repositoryId);
+                }
+            }
+            catch (Exception refreshEx)
+            {
+                logger.LogWarning(refreshEx, "Sync-to-default project refresh threw for repo {RepositoryId}", repositoryId);
             }
 
             // Broadcast update to refresh UI
