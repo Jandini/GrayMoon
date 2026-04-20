@@ -1,4 +1,5 @@
 using GrayMoon.App.Models;
+using GrayMoon.App.Repositories;
 using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services;
@@ -11,13 +12,14 @@ namespace GrayMoon.App.Services;
 public sealed class DependencyUpdateOrchestrator(
     WorkspaceGitService workspaceGitService,
     WorkspaceFileVersionService fileVersionService,
+    WorkspaceRepository workspaceRepository,
     IOptions<WorkspaceOptions> workspaceOptions)
 {
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 8);
 
     /// <summary>
-    /// Runs the full update flow: refresh projects, sync and commit csproj deps (per level or single-level),
-    /// refresh repo versions, then run version-file updates and optionally commit them.
+    /// Runs the full update flow per dependency level:
+    /// refresh projects, update+commit version files, sync+commit csproj deps, refresh repo versions.
     /// Stops on first error and reports it via <paramref name="onRepoError"/>.
     /// </summary>
     /// <param name="repoIdsToUpdate">Optional. When set, only these repositories are considered for the update plan and all steps.</param>
@@ -30,7 +32,6 @@ public sealed class DependencyUpdateOrchestrator(
         IReadOnlySet<int>? repoIdsToUpdate = null)
     {
         var hadError = false;
-        var processedAnyDependencyLevel = false;
         void OnRepoError(int repoId, string msg)
         {
             hadError = true;
@@ -48,22 +49,40 @@ public sealed class DependencyUpdateOrchestrator(
         if (hadError)
             return;
 
-        // Step 2+: Rebuild plan before each level and process the current lowest level atomically.
-        while (!hadError)
+        // Step 2+: Process repositories by dependency level.
+        var levelRepoIds = await GetRepositoryIdsByDependencyLevelAsync(workspaceId, repoIdsToUpdate, OnRepoError);
+        if (levelRepoIds.Count == 0)
+            hadError = true;
+
+        foreach (var (level, repoIds) in levelRepoIds)
         {
-            var (payload, _) = await workspaceGitService.GetUpdatePlanAsync(workspaceId, repoIdsToUpdate, cancellationToken);
-            if (payload.Count == 0)
+            if (hadError)
                 break;
 
-            var level = payload.Min(p => p.DependencyLevel ?? 0);
+            if (repoIds.Count == 0)
+                break;
+
+            // Version files must be committed first because those commits can change
+            // versions consumed by dependency updates at this and higher levels.
+            if (!await UpdateAndCommitVersionFilesAsync(
+                    workspaceId,
+                    repoIds,
+                    level,
+                    cancellationToken,
+                    setProgress,
+                    onAppSideComplete,
+                    OnRepoError))
+            {
+                hadError = true;
+                break;
+            }
+
+            var (payload, _) = await workspaceGitService.GetUpdatePlanAsync(workspaceId, repoIds, cancellationToken);
             var reposAtLevel = payload
-                .Where(p => (p.DependencyLevel ?? 0) == level)
+                .Where(p => repoIds.Contains(p.RepoId))
                 .ToList();
             if (reposAtLevel.Count == 0)
-                break;
-
-            var repoIds = reposAtLevel.Select(r => r.RepoId).ToHashSet();
-            processedAnyDependencyLevel = true;
+                continue;
 
             setProgress($"Updating {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
             await workspaceGitService.SyncDependenciesAsync(
@@ -108,34 +127,6 @@ public sealed class DependencyUpdateOrchestrator(
                 hadError = true;
                 break;
             }
-
-            if (!await UpdateAndCommitVersionFilesAsync(
-                    workspaceId,
-                    repoIds,
-                    cancellationToken,
-                    setProgress,
-                    onAppSideComplete,
-                    OnRepoError))
-            {
-                hadError = true;
-                break;
-            }
-        }
-
-        // Even when there are no dependency changes for the selected scope, we still must
-        // run version-file update because this flow does not pre-check whether files need changes.
-        if (!hadError && !processedAnyDependencyLevel)
-        {
-            if (!await UpdateAndCommitVersionFilesAsync(
-                    workspaceId,
-                    repoIdsToUpdate,
-                    cancellationToken,
-                    setProgress,
-                    onAppSideComplete,
-                    OnRepoError))
-            {
-                hadError = true;
-            }
         }
 
         // Finalize: broadcast so grid refreshes.
@@ -144,6 +135,36 @@ public sealed class DependencyUpdateOrchestrator(
             onAppSideComplete?.Invoke();
             await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
         }
+    }
+
+    private async Task<IReadOnlyList<(int Level, IReadOnlySet<int> RepoIds)>> GetRepositoryIdsByDependencyLevelAsync(
+        int workspaceId,
+        IReadOnlySet<int>? selectedRepositoryIds,
+        Action<int, string> onRepoError)
+    {
+        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+        {
+            onRepoError(0, $"Workspace {workspaceId} not found.");
+            return [];
+        }
+
+        var levelRepoIds = workspace.Repositories
+            .Where(link => link.Repository != null)
+            .Where(link => selectedRepositoryIds == null || selectedRepositoryIds.Count == 0 || selectedRepositoryIds.Contains(link.RepositoryId))
+            .GroupBy(link => link.DependencyLevel ?? 0)
+            .OrderBy(g => g.Key)
+            .Select(g => (Level: g.Key, RepoIds: (IReadOnlySet<int>)g.Select(x => x.RepositoryId).ToHashSet()))
+            .ToList();
+
+        if (levelRepoIds.Count > 0)
+            return levelRepoIds;
+
+        if (selectedRepositoryIds is { Count: > 0 })
+            return [(0, selectedRepositoryIds)];
+
+        onRepoError(0, "No repositories found for update.");
+        return [];
     }
 
     private async Task<bool> RefreshRepositoryVersionsAsync(
@@ -168,8 +189,6 @@ public sealed class DependencyUpdateOrchestrator(
                 var (refreshSuccess, refreshError) = await workspaceGitService.SyncSingleRepositoryAsync(repoId, workspaceId, cancellationToken);
                 var c = Interlocked.Increment(ref completedRefresh);
                 setProgress($"Updating version {c} of {totalRefresh}...");
-                if (c == totalRefresh)
-                    onAppSideComplete?.Invoke();
                 return (RepoId: repoId, Success: refreshSuccess, Error: refreshError);
             }
             finally
@@ -188,21 +207,24 @@ public sealed class DependencyUpdateOrchestrator(
             }
         }
 
+        onAppSideComplete?.Invoke();
         return true;
     }
 
     private async Task<bool> UpdateAndCommitVersionFilesAsync(
         int workspaceId,
-        IReadOnlySet<int>? selectedRepositoryIds,
+        IReadOnlySet<int> selectedRepositoryIds,
+        int level,
         CancellationToken cancellationToken,
         Action<string> setProgress,
         Action? onAppSideComplete,
         Action<int, string> onRepoError)
     {
-        setProgress("Updating version files...");
+        setProgress($"Updating version files in level {level}...");
         var (_, _, fileError, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
             workspaceId,
             selectedRepositoryIds: selectedRepositoryIds,
+            filterPatternTokensToSelectedRepositories: false,
             onFileUpdated: null,
             cancellationToken: cancellationToken);
 
@@ -220,7 +242,7 @@ public sealed class DependencyUpdateOrchestrator(
             .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
             .ToList();
 
-        setProgress("Committing updated versions...");
+        setProgress($"Committing updated versions in level {level}...");
         var vfCommitResults = await workspaceGitService.CommitFilePathsAsync(
             workspaceId,
             byRepo,
@@ -238,7 +260,6 @@ public sealed class DependencyUpdateOrchestrator(
             committedVersionRepoIds.Add(repoId);
         }
 
-        // Version-file commits must also refresh GitVersion before planning next higher level.
         if (committedVersionRepoIds.Count > 0
             && !await RefreshRepositoryVersionsAsync(
                 committedVersionRepoIds,
@@ -249,6 +270,8 @@ public sealed class DependencyUpdateOrchestrator(
                 onRepoError))
             return false;
 
+
         return true;
     }
+
 }

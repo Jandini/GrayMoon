@@ -14,12 +14,16 @@ public sealed class WorkspaceFileVersionService(
     /// For every file in the workspace that has a version pattern configured:
     ///   1. Resolves the current version for each repo from the workspace's repository links (DB state); no GitVersion is run.
     ///   2. Calls UpdateFileVersions on the agent with those versions in the request to perform the in-place substitution.
-    /// When <paramref name="selectedRepositoryIds"/> is set, only repositories in that set are included: pattern lines are filtered to tokens matching selected repo names, and only files in selected repos are updated.
+    /// When <paramref name="selectedRepositoryIds"/> is set, only files in those repositories are updated.
+    /// By default, version-pattern token lines are also filtered to selected repo names; set
+    /// <paramref name="filterPatternTokensToSelectedRepositories"/> to false to keep all token lines
+    /// while still limiting which files are updated.
     /// Returns (updatedLineCount, failedFileCount, fatalError, list of (RepositoryId, RepoName, FilePath) for each file that was updated).
     /// </summary>
     public async Task<(int Updated, int Failed, string? Error, IReadOnlyList<(int RepositoryId, string RepoName, string FilePath)> UpdatedFiles)> UpdateAllVersionsAsync(
         int workspaceId,
         IReadOnlySet<int>? selectedRepositoryIds = null,
+        bool filterPatternTokensToSelectedRepositories = true,
         Action<string>? onFileUpdated = null,
         CancellationToken cancellationToken = default)
     {
@@ -49,7 +53,7 @@ public sealed class WorkspaceFileVersionService(
             foreach (var token in ExtractTokens(cfg.VersionPattern))
                 repoNamesInUse.Add(token);
         }
-        if (selectedRepoNames != null)
+        if (selectedRepoNames != null && filterPatternTokensToSelectedRepositories)
             repoNamesInUse.IntersectWith(selectedRepoNames);
 
         // Build repo name -> version from workspace links (DB state). No GitVersion is run.
@@ -82,7 +86,7 @@ public sealed class WorkspaceFileVersionService(
                 continue;
 
             var versionPatternToSend = cfg.VersionPattern;
-            if (selectedRepoNames != null)
+            if (selectedRepoNames != null && filterPatternTokensToSelectedRepositories)
             {
                 versionPatternToSend = FilterPatternLinesToRepos(cfg.VersionPattern, selectedRepoNames);
                 if (string.IsNullOrWhiteSpace(versionPatternToSend)) continue;
