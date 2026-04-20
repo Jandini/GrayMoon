@@ -220,7 +220,7 @@ public sealed class DependencyUpdateOrchestrator(
         Action? onAppSideComplete,
         Action<int, string> onRepoError)
     {
-        setProgress($"Updating version files (level {level})...");
+        setProgress($"Updating version files in level {level}...");
         var (_, _, fileError, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
             workspaceId,
             selectedRepositoryIds: selectedRepositoryIds,
@@ -242,7 +242,7 @@ public sealed class DependencyUpdateOrchestrator(
             .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
             .ToList();
 
-        setProgress($"Committing updated versions (level {level})...");
+        setProgress($"Committing updated versions in level {level}...");
         var vfCommitResults = await workspaceGitService.CommitFilePathsAsync(
             workspaceId,
             byRepo,
