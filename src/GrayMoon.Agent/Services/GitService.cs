@@ -971,6 +971,20 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return (false, err);
         }
 
+        // Skip commit when staging resulted in no index changes.
+        var (stagedExit, _, stagedErr) = await RunProcessAsync("git", "diff --cached --quiet", repoPath, ct);
+        if (stagedExit == 0)
+        {
+            logger.LogInformation("Git stage and commit skipped for {RepoPath}: nothing staged to commit", repoPath);
+            return (true, null);
+        }
+        if (stagedExit != 1)
+        {
+            var err = (stagedErr ?? "").Trim();
+            logger.LogError("Git staged diff check failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, stagedExit, err);
+            return (false, string.IsNullOrWhiteSpace(err) ? "Failed to verify staged changes before commit." : err);
+        }
+
         var messageNormalized = commitMessage.Replace("\r\n", "\n").Replace("\r", "\n").TrimEnd();
         var (commitExit, commitOut, commitErr) = await RunProcessWithStdinAsync("git", "commit -F -", repoPath, messageNormalized, ct);
         if (commitExit != 0)
