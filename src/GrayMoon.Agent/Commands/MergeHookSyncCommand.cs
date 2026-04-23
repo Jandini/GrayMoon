@@ -10,7 +10,7 @@ namespace GrayMoon.Agent.Commands;
 /// Handles post-merge hooks: re-runs GitVersion and gets commit counts.
 /// No git fetch — the merge already brought remote changes in; existing remote tracking refs are current enough.
 /// </summary>
-public sealed class MergeHookSyncCommand(IGitService git, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<MergeHookSyncCommand> logger)
+public sealed class MergeHookSyncCommand(IGitService git, ICsProjFileService csProjFileService, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<MergeHookSyncCommand> logger)
 {
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
@@ -23,6 +23,7 @@ public sealed class MergeHookSyncCommand(IGitService git, IAgentTokenProvider to
         var (versionResult, _) = await git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
         var version = versionResult?.InformationalVersion ?? "-";
         var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
+        var findProjectsTask = csProjFileService.FindAsync(payload.RepositoryPath, cancellationToken);
 
         int? outgoing = null;
         int? incoming = null;
@@ -53,6 +54,27 @@ public sealed class MergeHookSyncCommand(IGitService git, IAgentTokenProvider to
             }
         }
 
+        var projects = await findProjectsTask;
+        var syncProjects = projects?
+            .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+            .Select(p => new RepositorySyncProjectNotification
+            {
+                Name = p.Name.Trim(),
+                ProjectType = (int)p.ProjectType,
+                ProjectPath = p.ProjectPath ?? "",
+                TargetFramework = p.TargetFramework ?? "",
+                PackageId = p.PackageId,
+                PackageReferences = p.PackageReferences
+                    .Where(pr => !string.IsNullOrWhiteSpace(pr.Name))
+                    .Select(pr => new RepositorySyncPackageReferenceNotification
+                    {
+                        Name = pr.Name.Trim(),
+                        Version = pr.Version ?? ""
+                    })
+                    .ToList()
+            })
+            .ToList();
+
         var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)
         {
@@ -67,6 +89,7 @@ public sealed class MergeHookSyncCommand(IGitService git, IAgentTokenProvider to
                 HasUpstream = hasUpstream,
                 DefaultBranchBehind = defaultBehind,
                 DefaultBranchAhead = defaultAhead,
+                Projects = syncProjects,
                 ErrorMessage = null
             };
             await connection.InvokeAsync(AgentHubMethods.SyncCommand, notification, cancellationToken);
