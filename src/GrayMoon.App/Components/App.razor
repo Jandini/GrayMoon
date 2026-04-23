@@ -73,6 +73,8 @@
                 { label: 'Branches',      icon: 'bi-signpost-2',         suffix: '/branches' },
                 { label: 'Pull Requests', icon: 'bi-git',                suffix: '/pulls'    },
                 { label: 'Actions',       icon: 'bi-play-circle',        suffix: '/actions'  },
+                { label: 'Releases',      icon: 'bi-box-seam',           suffix: '/releases' },
+                { label: 'Tags',          icon: 'bi-tag',                suffix: '/tags'     },
                 { label: 'Issues',        icon: 'bi-exclamation-circle', suffix: '/issues'   },
                 { label: 'Settings',      icon: 'bi-gear',               suffix: '/settings' },
             ];
@@ -121,6 +123,11 @@
                 urls.filter(u => u).forEach(u => window.open(u, '_blank', 'noopener,noreferrer'));
             }
 
+            function appendSuffix(url, suffix) {
+                const base = (url || '').replace(/\/+$/, '');
+                return base ? (base + suffix) : '';
+            }
+
             // Clicking the trigger itself opens all repos directly (no suffix).
             document.addEventListener('click', e => {
                 const wrap = e.target.closest('.github-dropdown-wrap');
@@ -139,7 +146,7 @@
                 try {
                     const urls = JSON.parse(activeTrigger.dataset.urls || '[]')
                         .filter(u => u)
-                        .map(u => u + suffix);
+                        .map(u => appendSuffix(u, suffix));
                     if (urls.length) urls.forEach(u => window.open(u, '_blank', 'noopener,noreferrer'));
                 } catch (_) { }
                 hide();
