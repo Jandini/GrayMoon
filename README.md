@@ -62,6 +62,22 @@ docker run -d --name graymoon -p 8384:8384 -v graymoon:/app/db -e TokenKey="my s
 
 Open http://localhost:8384 in your browser.
 
+
+
+Update running container:
+
+```sh
+docker pull jandini/graymoon:latest && docker stop graymoon && docker rm graymoon && docker run -d --name graymoon -p 8384:8384 -v graymoon:/app/db jandini/graymoon:latest
+```
+
+Update running container with token encryption key:
+
+```sh
+docker pull jandini/graymoon:latest && docker stop graymoon && docker rm graymoon && docker run -d --name graymoon -p 8384:8384 -v graymoon:/app/db -e TokenKey="my strong password here" jandini/graymoon:latest
+```
+
+
+
 ## Agent
 
 The app runs in a container and does not run git or access your workspace filesystem. A **host-side agent** does that: it runs on the machine where your repos live, connects to the app via SignalR, and runs git, GitVersion, and workspace I/O.
