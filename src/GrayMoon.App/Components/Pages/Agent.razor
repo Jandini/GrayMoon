@@ -41,6 +41,10 @@
                             {
                                 <p class="mb-3 small text-muted">The agent is running version <strong class="text-muted">@(AgentConnectionTracker.AgentSemVer ?? "unknown")</strong>, which is not compatible with this application. Run the command below to update.</p>
                             }
+                            <p class="mb-2 small text-muted">
+                                The Windows service requires the .NET 8 (x64) runtime on the host.
+                                <a href="@AgentDotnet8RuntimeUrl" target="_blank" rel="noopener noreferrer">Download the .NET 8 runtime</a>
+                            </p>
                             <p class="mb-3">Run this PowerShell command as Administrator to install the GrayMoon Agent as a Windows service:</p>
                             <div class="input-group">
                                 <input type="text" class="form-control font-monospace bg-dark" id="installCommand" readonly
@@ -102,6 +106,8 @@
         </div>
     </div>
 @code {
+    private const string AgentDotnet8RuntimeUrl = "https://aka.ms/dotnet-core-applaunch?framework=Microsoft.NETCore.App&framework_version=8.0.0&arch=x64&rid=win-x64&os=win10";
+
     private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion);
 
     private string installCommand = string.Empty;
@@ -195,10 +201,10 @@
             return;
         }
         builder.OpenElement(0, "a");
-        builder.AddAttribute(1, "href", "https://dotnet.microsoft.com/en-us/download");
+        builder.AddAttribute(1, "href", AgentDotnet8RuntimeUrl);
         builder.AddAttribute(2, "target", "_blank");
         builder.AddAttribute(3, "rel", "noopener noreferrer");
-        builder.AddContent(4, "Download .NET");
+        builder.AddContent(4, "Download .NET 8 runtime");
         builder.CloseElement();
     };
 
