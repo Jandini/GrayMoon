@@ -20,6 +20,180 @@ $agentPath = Join-Path $env:ProgramData 'GrayMoon'
 $agentExe = Join-Path $agentPath 'graymoon-agent.exe'
 $downloadUrl = '{DOWNLOAD_URL}'
 
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class NativeLogonValidator
+{
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern bool LogonUser(
+        string lpszUsername,
+        string lpszDomain,
+        string lpszPassword,
+        int dwLogonType,
+        int dwLogonProvider,
+        out IntPtr phToken);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool CloseHandle(IntPtr hObject);
+}
+"@
+
+function Split-AccountName {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AccountName
+    )
+
+    if ($AccountName.Contains('\')) {
+        $parts = $AccountName.Split('\', 2)
+        return @{
+            Domain = $parts[0]
+            UserName = $parts[1]
+        }
+    }
+
+    if ($AccountName.Contains('@')) {
+        $parts = $AccountName.Split('@', 2)
+        return @{
+            Domain = $parts[1]
+            UserName = $parts[0]
+        }
+    }
+
+    return @{
+        Domain = $env:COMPUTERNAME
+        UserName = $AccountName
+    }
+}
+
+function Test-UserCredentials {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AccountName,
+        [Parameter(Mandatory = $true)]
+        [string]$Password
+    )
+
+    $identity = Split-AccountName -AccountName $AccountName
+    $tokenHandle = [IntPtr]::Zero
+    $logonTypeInteractive = 2
+    $providerDefault = 0
+
+    $ok = [NativeLogonValidator]::LogonUser(
+        $identity.UserName,
+        $identity.Domain,
+        $Password,
+        $logonTypeInteractive,
+        $providerDefault,
+        [ref]$tokenHandle
+    )
+
+    if ($ok -and $tokenHandle -ne [IntPtr]::Zero) {
+        [void][NativeLogonValidator]::CloseHandle($tokenHandle)
+    }
+
+    return $ok
+}
+
+function Grant-ServiceLogonRight {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AccountName
+    )
+
+    $sid = ([System.Security.Principal.NTAccount]$AccountName).Translate([System.Security.Principal.SecurityIdentifier]).Value
+    $sidEntry = "*$sid"
+    $tempDir = Join-Path $env:TEMP "GrayMoon-ServiceRights"
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+
+    $cfgPath = Join-Path $tempDir "secpol.cfg"
+    $infPath = Join-Path $tempDir "secpol.inf"
+    $dbPath = Join-Path $tempDir "secpol.sdb"
+
+    try {
+        $null = & secedit /export /cfg "$cfgPath" /areas USER_RIGHTS
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to export local security policy."
+        }
+
+        $content = if (Test-Path $cfgPath) { Get-Content -Path $cfgPath -ErrorAction Stop } else { @() }
+        $lineIndex = -1
+        for ($i = 0; $i -lt $content.Count; $i++) {
+            if ($content[$i] -match '^SeServiceLogonRight\s*=') {
+                $lineIndex = $i
+                break
+            }
+        }
+
+        $newLine = "SeServiceLogonRight = $sidEntry"
+        if ($lineIndex -ge 0) {
+            $existingPart = ($content[$lineIndex] -split '=', 2)[1]
+            $entries = @()
+            if (-not [string]::IsNullOrWhiteSpace($existingPart)) {
+                $entries = $existingPart.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+            }
+
+            if ($entries -contains $sidEntry) {
+                return
+            }
+
+            $entries += $sidEntry
+            $newLine = "SeServiceLogonRight = $($entries -join ',')"
+            $content[$lineIndex] = $newLine
+        } else {
+            $privilegeSectionIndex = -1
+            for ($i = 0; $i -lt $content.Count; $i++) {
+                if ($content[$i] -match '^\[Privilege Rights\]') {
+                    $privilegeSectionIndex = $i
+                    break
+                }
+            }
+
+            if ($privilegeSectionIndex -lt 0) {
+                $content += "[Privilege Rights]"
+                $content += $newLine
+            } else {
+                $insertIndex = $privilegeSectionIndex + 1
+                while ($insertIndex -lt $content.Count -and -not $content[$insertIndex].StartsWith('[')) {
+                    $insertIndex++
+                }
+
+                $before = @()
+                $after = @()
+                if ($insertIndex -gt 0) {
+                    $before = $content[0..($insertIndex - 1)]
+                }
+                if ($insertIndex -lt $content.Count) {
+                    $after = $content[$insertIndex..($content.Count - 1)]
+                }
+                $content = @($before + $newLine + $after)
+            }
+        }
+
+        @"
+[Unicode]
+Unicode=yes
+[Version]
+signature="`$CHICAGO`$"
+Revision=1
+[Privilege Rights]
+$newLine
+"@ | Set-Content -Path $infPath -Encoding Unicode -Force
+
+        $null = & secedit /configure /db "$dbPath" /cfg "$infPath" /areas USER_RIGHTS
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to apply local security policy update."
+        }
+    }
+    finally {
+        Remove-Item -Path $cfgPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $infPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $dbPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Host 'Checking for existing service...' -ForegroundColor Yellow
 $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 $serviceExists = $null -ne $existingService
@@ -78,22 +252,34 @@ if ($serviceExists) {
         Write-Host "Service will run as: $currentUser" -ForegroundColor Cyan
         Write-Host "Enter password for $currentUser (required for service to access git credentials and dotnet tools):" -ForegroundColor Yellow
         $password = Read-Host -Prompt "Password" -AsSecureString
-        $passwordPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($password))
-        
-        # Clear the secure string from memory
-        $password.Dispose()
-        
-        # Use sc.exe to create service with custom user account (New-Service doesn't support this)
-        # Note: sc.exe is still needed for setting custom user credentials
-        $result = & sc.exe create $serviceName binPath= $binPath start= auto DisplayName= "$serviceDisplayName" obj= "$currentUser" password= "$passwordPlain" 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            $errorMsg = if ($result -is [System.Array]) { ($result | Out-String).Trim() } else { $result.ToString() }
-            throw "sc.exe create failed with exit code ${LASTEXITCODE}: $errorMsg"
+        $passwordBstr = [IntPtr]::Zero
+        try {
+            $passwordBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($password)
+            $passwordPlain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordBstr)
+
+            if (-not (Test-UserCredentials -AccountName $currentUser -Password $passwordPlain)) {
+                throw "Invalid credentials for '$currentUser'. Aborting installation."
+            }
+
+            Write-Host 'Granting "Log on as a service" right...' -ForegroundColor Yellow
+            Grant-ServiceLogonRight -AccountName $currentUser
+            
+            # Use sc.exe to create service with custom user account (New-Service doesn't support this)
+            # Note: sc.exe is still needed for setting custom user credentials
+            $result = & sc.exe create $serviceName binPath= $binPath start= auto DisplayName= "$serviceDisplayName" obj= "$currentUser" password= "$passwordPlain" 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                $errorMsg = if ($result -is [System.Array]) { ($result | Out-String).Trim() } else { $result.ToString() }
+                throw "sc.exe create failed with exit code ${LASTEXITCODE}: $errorMsg"
+            }
         }
-        
-        # Clear password from memory immediately
-        $passwordPlain = $null
-        [System.GC]::Collect()
+        finally {
+            if ($passwordBstr -ne [IntPtr]::Zero) {
+                [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordBstr)
+            }
+            $passwordPlain = $null
+            $password.Dispose()
+            [System.GC]::Collect()
+        }
         
         # Set description using sc.exe
         & sc.exe description $serviceName "$serviceDescription" | Out-Null
