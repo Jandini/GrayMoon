@@ -297,7 +297,7 @@
             UserName = connector.UserName,
             UserToken = string.IsNullOrWhiteSpace(connector.UserToken)
                 ? defaultUserToken
-                : connector.UserToken
+                : (ConnectorHelpers.UnprotectToken(connector.UserToken) ?? string.Empty)
         };
 
         editErrorMessage = null;
