@@ -481,7 +481,8 @@
             {
                 var errorMsg = result.ErrorMessage ?? "Connection test failed.";
                 await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Error", errorMsg);
-                await ConnectorRepository.UpdateIsActiveAsync(connector.ConnectorId, false);
+                if (result.IsConnectorFault)
+                    await ConnectorRepository.UpdateIsActiveAsync(connector.ConnectorId, false);
             }
 
             return result.Success;
@@ -489,8 +490,9 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error testing connector.");
-            await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Error", ex.Message);
-            await ConnectorRepository.UpdateIsActiveAsync(connector.ConnectorId, false);
+            // Unexpected app exception — not a connector fault; do not deactivate
+            await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Error",
+                "An unexpected error occurred while testing the connector.");
             return false;
         }
     }

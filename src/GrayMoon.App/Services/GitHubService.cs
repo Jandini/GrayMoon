@@ -212,7 +212,8 @@ public class GitHubService : IConnectorService
         {
             var message = MapHttpStatusToMessage(ex.StatusCode, "GitHub");
             _logger.LogError(ex, "Failed to test GitHub connector connection. Status={StatusCode}", ex.StatusCode);
-            return ConnectorTestResult.Fail(message);
+            var isConnectorFault = ex.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound;
+            return isConnectorFault ? ConnectorTestResult.Fault(message) : ConnectorTestResult.Fail(message);
         }
         catch (Exception ex)
         {
