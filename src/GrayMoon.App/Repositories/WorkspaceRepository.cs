@@ -201,10 +201,11 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
         var existingRepoIds = existing.Select(wr => wr.RepositoryId).ToHashSet();
         var requestedRepoIds = repositoryIds.Distinct().ToHashSet();
 
-        var newRepoIds = await _dbContext.Repositories
+        var validRepoIds = await _dbContext.Repositories
             .Where(repository => requestedRepoIds.Contains(repository.RepositoryId))
             .Select(repository => repository.RepositoryId)
-            .ToHashSetAsync();
+            .ToListAsync();
+        var newRepoIds = validRepoIds.ToHashSet();
 
         var invalidRepoIds = requestedRepoIds.Except(newRepoIds).ToList();
         if (invalidRepoIds.Count > 0)
