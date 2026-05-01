@@ -356,6 +356,7 @@
             .Select(link => link.RepositoryId)
             .ToHashSet();
         await EnsureRepositoriesAsync();
+        PruneInvalidSelectedRepositoryIds();
         showRepositoriesModal = true;
     }
 
@@ -456,6 +457,14 @@
     {
         if (editingWorkspaceId == null) return;
         if (isSavingRepositories) return;
+
+        var removedInvalidSelections = PruneInvalidSelectedRepositoryIds();
+        if (removedInvalidSelections > 0)
+        {
+            Logger.LogWarning("Removed {Count} stale repository selections before saving workspace {WorkspaceId}",
+                removedInvalidSelections,
+                editingWorkspaceId.Value);
+        }
 
         if (selectedRepositoryIds.Count == 0)
         {
@@ -565,10 +574,12 @@
             });
             var result = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
             repositories = result.Repositories.ToList();
+            PruneInvalidSelectedRepositoryIds();
         }
         catch (OperationCanceledException)
         {
             repositories = await RepositoryService.GetPersistedRepositoriesAsync();
+            PruneInvalidSelectedRepositoryIds();
         }
         catch (Exception ex)
         {
@@ -580,6 +591,22 @@
         {
             isPersisting = false;
         }
+    }
+
+    private int PruneInvalidSelectedRepositoryIds()
+    {
+        if (repositories == null || selectedRepositoryIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var validRepositoryIds = repositories
+            .Select(repository => repository.RepositoryId)
+            .ToHashSet();
+
+        var before = selectedRepositoryIds.Count;
+        selectedRepositoryIds.RemoveWhere(repositoryId => !validRepositoryIds.Contains(repositoryId));
+        return before - selectedRepositoryIds.Count;
     }
 
     private async Task ToggleDefaultAsync(int workspaceId, string workspaceName)

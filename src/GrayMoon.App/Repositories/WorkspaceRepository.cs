@@ -199,7 +199,22 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
             .ToListAsync();
 
         var existingRepoIds = existing.Select(wr => wr.RepositoryId).ToHashSet();
-        var newRepoIds = repositoryIds.Distinct().ToHashSet();
+        var requestedRepoIds = repositoryIds.Distinct().ToHashSet();
+
+        var newRepoIds = await _dbContext.Repositories
+            .Where(repository => requestedRepoIds.Contains(repository.RepositoryId))
+            .Select(repository => repository.RepositoryId)
+            .ToHashSetAsync();
+
+        var invalidRepoIds = requestedRepoIds.Except(newRepoIds).ToList();
+        if (invalidRepoIds.Count > 0)
+        {
+            _logger.LogWarning(
+                "Ignoring {InvalidCount} invalid repository IDs while replacing workspace repositories. WorkspaceId={WorkspaceId}, RepositoryIds=[{RepositoryIds}]",
+                invalidRepoIds.Count,
+                workspaceId,
+                string.Join(", ", invalidRepoIds));
+        }
 
         var toRemove = existing.Where(wr => !newRepoIds.Contains(wr.RepositoryId)).ToList();
         var toAdd = newRepoIds.Except(existingRepoIds).ToList();
