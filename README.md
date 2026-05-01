@@ -51,13 +51,13 @@ Keep both running for full functionality.
 Run on port `8384`; optional volume to persist the SQLite database:
 
 ```bash
-docker run -d --name graymoon -p 8384:8384 -v graymoon:/app/db jandini/graymoon:latest
+docker run -d --restart unless-stopped --name graymoon -p 8384:8384 -v graymoon:/app/db jandini/graymoon:latest
 ```
 
 To override the default token encryption key (recommended for non-dev use), set `TokenKey` to any password-like value (it will be hashed into a key automatically). Advanced users can also pass a Base64-encoded key if they prefer:
 
 ```bash
-docker run -d --name graymoon -p 8384:8384 -v graymoon:/app/db -e TokenKey="my strong password here" jandini/graymoon:latest
+docker run -d --restart unless-stopped --name graymoon -p 8384:8384 -v graymoon:/app/db -e TokenKey="my strong password here" jandini/graymoon:latest
 ```
 
 Open http://localhost:8384 in your browser.
@@ -67,13 +67,13 @@ Open http://localhost:8384 in your browser.
 Update running container:
 
 ```sh
-docker pull jandini/graymoon:latest && docker stop graymoon && docker rm graymoon && docker run -d --name graymoon -p 8384:8384 -v graymoon:/app/db jandini/graymoon:latest
+docker pull jandini/graymoon:latest && docker stop graymoon && docker rm graymoon && docker run -d --restart unless-stopped --name graymoon -p 8384:8384 -v graymoon:/app/db jandini/graymoon:latest
 ```
 
 Update running container with token encryption key:
 
 ```sh
-docker pull jandini/graymoon:latest && docker stop graymoon && docker rm graymoon && docker run -d --name graymoon -p 8384:8384 -v graymoon:/app/db -e TokenKey="my strong password here" jandini/graymoon:latest
+docker pull jandini/graymoon:latest && docker stop graymoon || true && docker rm graymoon || true && docker run -d --restart unless-stopped --name graymoon -p 8384:8384 -v graymoon:/app/db -e TokenKey="my strong password here" jandini/graymoon:latest
 ```
 
 
