@@ -189,7 +189,7 @@ public class NuGetService : IConnectorService
         // Other registries require token
         if (string.IsNullOrWhiteSpace(ConnectorHelpers.UnprotectToken(connector.UserToken)))
         {
-            return ConnectorTestResult.Fail("Connector token is required for this NuGet registry.");
+            return ConnectorTestResult.Fault("Connector token is required for this NuGet registry.");
         }
 
         return await TestAuthenticatedNuGetConnectionAsync(connector);
@@ -216,7 +216,8 @@ public class NuGetService : IConnectorService
 
             var message = MapHttpStatusToMessage(response.StatusCode, "NuGet");
             _logger.LogError("Failed to test NuGet.org connection. Status={StatusCode}", response.StatusCode);
-            return ConnectorTestResult.Fail(message);
+            var isConnectorFault = response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound;
+            return isConnectorFault ? ConnectorTestResult.Fault(message) : ConnectorTestResult.Fail(message);
         }
         catch (Exception ex)
         {
@@ -263,7 +264,8 @@ public class NuGetService : IConnectorService
             var registryName = ConnectorHelpers.IsGitHubPackages(connector.ApiBaseUrl) ? "GitHub Packages" : "NuGet registry";
             var message = MapHttpStatusToMessage(response.StatusCode, registryName);
             _logger.LogError("Failed to test authenticated NuGet connection. Status={StatusCode}", response.StatusCode);
-            return ConnectorTestResult.Fail(message);
+            var isConnectorFault = response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound;
+            return isConnectorFault ? ConnectorTestResult.Fault(message) : ConnectorTestResult.Fail(message);
         }
         catch (Exception ex)
         {

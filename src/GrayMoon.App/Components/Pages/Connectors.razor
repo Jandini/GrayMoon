@@ -23,9 +23,16 @@
                     &nbsp;
                 </p>
             </div>
-            <button class="btn btn-primary" @onclick="ShowCreateModal">
-                Add Connector
-            </button>
+            <div class="d-flex align-items-center gap-2">
+                <button class="btn btn-outline-primary"
+                        @onclick="TestAllConnectorsAsync"
+                        disabled="@(connectors == null || connectors.Count == 0 || isTestingAll)">
+                    Test Connectors
+                </button>
+                <button class="btn btn-primary" @onclick="ShowCreateModal">
+                    Add Connector
+                </button>
+            </div>
         </div>
         @if (errorMessage != null)
         {
@@ -89,7 +96,7 @@
                                                        role="switch"
                                                        checked="@connector.IsActive"
                                                        aria-label="Toggle connector active"
-                                                       disabled="@(testingConnectorId == connector.ConnectorId || togglingConnectorId == connector.ConnectorId)"
+                                                          disabled="@IsConnectorBusy(connector.ConnectorId)"
                                                        @onchange="(args) => ToggleConnectorAsync(connector, args)" />
                                             </div>
                                         </td>
@@ -100,6 +107,11 @@
                                             </span>
                                         </td>
                                         <td class="col-actions">
+                                            <button class="btn btn-sm btn-outline-secondary me-2"
+                                                    @onclick="() => TestSingleConnectorAsync(connector)"
+                                                    disabled="@IsConnectorBusy(connector.ConnectorId)">
+                                                Test
+                                            </button>
                                             <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => ShowEditModal(connector)">Edit</button>
                                             <button class="btn btn-sm btn-outline-danger me-2" @onclick="() => ShowDeleteModal(connector)">Delete</button>
                                         </td>
@@ -155,8 +167,9 @@
     private ConnectorForm editModel = new();
     private int editConnectorId;
     private Connector? selectedConnector;
-    private int? testingConnectorId;
+    private readonly HashSet<int> testingConnectorIds = new();
     private int? togglingConnectorId;
+    private bool isTestingAll;
 
     private bool isCreating;
     private bool isUpdating;
@@ -175,16 +188,56 @@
             ?? Configuration["GitHub::PersonalAccessToken"]
             ?? string.Empty;
         await LoadConnectorsAsync();
-        await TestAllConnectorsAsync();
     }
 
     private async Task TestAllConnectorsAsync()
     {
-        if (connectors == null || connectors.Count == 0)
+        if (connectors == null || connectors.Count == 0 || isTestingAll)
             return;
 
-        foreach (var connector in connectors.ToList())
-            await TestConnectorAsync(connector);
+        var connectorsToTest = connectors.ToList();
+
+        try
+        {
+            isTestingAll = true;
+            errorMessage = null;
+
+            foreach (var connector in connectorsToTest)
+            {
+                testingConnectorIds.Add(connector.ConnectorId);
+            }
+
+            await Task.WhenAll(connectorsToTest.Select(connector =>
+                ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Testing", null)));
+
+            await LoadConnectorsAsync();
+            StateHasChanged();
+
+            await Task.WhenAll(connectorsToTest.Select(TestConnectorCoreAsync));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error testing all connectors.");
+            errorMessage = $"Failed to test connectors: {ex.Message}";
+        }
+        finally
+        {
+            foreach (var connector in connectorsToTest)
+            {
+                testingConnectorIds.Remove(connector.ConnectorId);
+            }
+
+            isTestingAll = false;
+            await LoadConnectorsAsync();
+        }
+    }
+
+    private async Task TestSingleConnectorAsync(Connector connector)
+    {
+        if (isTestingAll || IsConnectorBusy(connector.ConnectorId))
+            return;
+
+        await TestConnectorAsync(connector);
     }
 
     private async Task LoadConnectorsAsync()
@@ -297,7 +350,7 @@
             UserName = connector.UserName,
             UserToken = string.IsNullOrWhiteSpace(connector.UserToken)
                 ? defaultUserToken
-                : connector.UserToken
+                : (ConnectorHelpers.UnprotectToken(connector.UserToken) ?? string.Empty)
         };
 
         editErrorMessage = null;
@@ -399,11 +452,24 @@
     {
         try
         {
-            testingConnectorId = connector.ConnectorId;
+            testingConnectorIds.Add(connector.ConnectorId);
             await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Testing", null);
             await LoadConnectorsAsync();
             StateHasChanged();
 
+            return await TestConnectorCoreAsync(connector);
+        }
+        finally
+        {
+            testingConnectorIds.Remove(connector.ConnectorId);
+            await LoadConnectorsAsync();
+        }
+    }
+
+    private async Task<bool> TestConnectorCoreAsync(Connector connector)
+    {
+        try
+        {
             var service = ConnectorServiceFactory.GetService(connector.ConnectorType);
             var result = await service.TestConnectionAsync(connector);
 
@@ -415,7 +481,8 @@
             {
                 var errorMsg = result.ErrorMessage ?? "Connection test failed.";
                 await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Error", errorMsg);
-                await ConnectorRepository.UpdateIsActiveAsync(connector.ConnectorId, false);
+                if (result.IsConnectorFault)
+                    await ConnectorRepository.UpdateIsActiveAsync(connector.ConnectorId, false);
             }
 
             return result.Success;
@@ -423,14 +490,10 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error testing connector.");
-            await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Error", ex.Message);
-            await ConnectorRepository.UpdateIsActiveAsync(connector.ConnectorId, false);
+            // Unexpected app exception — not a connector fault; do not deactivate
+            await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Error",
+                "An unexpected error occurred while testing the connector.");
             return false;
-        }
-        finally
-        {
-            testingConnectorId = null;
-            await LoadConnectorsAsync();
         }
     }
 
@@ -465,6 +528,16 @@
         {
             togglingConnectorId = null;
         }
+    }
+
+    private bool IsConnectorTesting(int connectorId)
+    {
+        return testingConnectorIds.Contains(connectorId);
+    }
+
+    private bool IsConnectorBusy(int connectorId)
+    {
+        return IsConnectorTesting(connectorId) || togglingConnectorId == connectorId;
     }
 
     private static string GetStatusLabel(Connector connector)

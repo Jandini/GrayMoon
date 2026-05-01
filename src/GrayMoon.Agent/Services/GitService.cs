@@ -127,10 +127,35 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         sw.Stop();
         if (exitCode != 0)
         {
-            var error = (!string.IsNullOrWhiteSpace(stderr) ? stderr : stdout)?.Trim()
-                        ?? $"{toolName} exited with code {exitCode}";
-            logger.LogError("{ToolName} failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", toolName, sw.ElapsedMilliseconds, exitCode, stdout, stderr);
-            return (null, error);
+            var manifestExists = File.Exists(Path.Combine(repoPath, "dotnet-tools.json"))
+                || File.Exists(Path.Combine(repoPath, ".config", "dotnet-tools.json"));
+            if (manifestExists)
+            {
+                logger.LogWarning("{ToolName} failed and tool manifest found. Running 'dotnet tool restore' in {RepoPath}", toolName, repoPath);
+                var (restoreExitCode, _, restoreStderr) = await RunProcessAsync("dotnet", "tool restore", repoPath, ct);
+                if (restoreExitCode != 0)
+                {
+                    logger.LogError("dotnet tool restore failed. ExitCode={ExitCode}, Stderr={Stderr}", restoreExitCode, restoreStderr);
+                    return (null, $"dotnet tool restore failed: {restoreStderr?.Trim()}");
+                }
+                logger.LogInformation("dotnet tool restore succeeded in {RepoPath}. Retrying {ToolName}", repoPath, toolName);
+                var (retryExitCode, retryStdout, retryStderr) = await RunProcessAsync(fileName, arguments, repoPath, ct);
+                if (retryExitCode != 0)
+                {
+                    var retryError = (!string.IsNullOrWhiteSpace(retryStderr) ? retryStderr : retryStdout)?.Trim()
+                                    ?? $"{toolName} exited with code {retryExitCode}";
+                    logger.LogError("{ToolName} failed after tool restore. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", toolName, retryExitCode, retryStdout, retryStderr);
+                    return (null, retryError);
+                }
+                stdout = retryStdout;
+            }
+            else
+            {
+                var error = (!string.IsNullOrWhiteSpace(stderr) ? stderr : stdout)?.Trim()
+                            ?? $"{toolName} exited with code {exitCode}";
+                logger.LogError("{ToolName} failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", toolName, sw.ElapsedMilliseconds, exitCode, stdout, stderr);
+                return (null, error);
+            }
         }
         logger.LogDebug("{ToolName} completed in {ElapsedMs}ms for {RepoPath}", toolName, sw.ElapsedMilliseconds, repoPath);
 

@@ -36,14 +36,39 @@ public class GitVersionCommandService(ILogger<GitVersionCommandService> logger, 
             }
             if (result.ExitCode != 0)
             {
-                logger.LogWarning("dotnet-gitversion failed with exit code {ExitCode} in {Path}. Stdout: {Stdout} Stderr: {Stderr}",
-                    result.ExitCode, repositoryPath,
-                    string.IsNullOrWhiteSpace(result.Stdout) ? "(none)" : result.Stdout.Trim(),
-                    string.IsNullOrWhiteSpace(result.Stderr) ? "(none)" : result.Stderr.Trim());
-                return null;
+                var manifestExists = File.Exists(Path.Combine(repositoryPath, "dotnet-tools.json"))
+                    || File.Exists(Path.Combine(repositoryPath, ".config", "dotnet-tools.json"));
+                if (manifestExists)
+                {
+                    logger.LogWarning("dotnet-gitversion failed and tool manifest found. Running 'dotnet tool restore' in {Path}", repositoryPath);
+                    var restore = await commandLine.RunAsync("dotnet", "tool restore", repositoryPath, null, cancellationToken);
+                    if (restore.ExitCode != 0)
+                    {
+                        logger.LogError("dotnet tool restore failed. ExitCode={ExitCode}, Stderr={Stderr}", restore.ExitCode, restore.Stderr?.Trim());
+                        return null;
+                    }
+                    logger.LogInformation("dotnet tool restore succeeded in {Path}. Retrying dotnet-gitversion", repositoryPath);
+                    result = await commandLine.RunAsync("dotnet-gitversion", "/output json /nofetch /verbosity quiet", repositoryPath, null, cancellationToken);
+                    if (result.ExitCode != 0)
+                    {
+                        logger.LogWarning("dotnet-gitversion failed after tool restore. ExitCode={ExitCode} in {Path}. Stdout: {Stdout} Stderr: {Stderr}",
+                            result.ExitCode, repositoryPath,
+                            string.IsNullOrWhiteSpace(result.Stdout) ? "(none)" : result.Stdout.Trim(),
+                            string.IsNullOrWhiteSpace(result.Stderr) ? "(none)" : result.Stderr.Trim());
+                        return null;
+                    }
+                }
+                else
+                {
+                    logger.LogWarning("dotnet-gitversion failed with exit code {ExitCode} in {Path}. Stdout: {Stdout} Stderr: {Stderr}",
+                        result.ExitCode, repositoryPath,
+                        string.IsNullOrWhiteSpace(result.Stdout) ? "(none)" : result.Stdout.Trim(),
+                        string.IsNullOrWhiteSpace(result.Stderr) ? "(none)" : result.Stderr.Trim());
+                    return null;
+                }
             }
 
-            var parsed = ParseGitVersionJson(result.Stdout);
+            var parsed = ParseGitVersionJson(result.Stdout ?? string.Empty);
             if (parsed != null)
             {
                 logger.LogInformation("GitVersion for {Path}: {InformationalVersion} ({Branch})", repositoryPath,

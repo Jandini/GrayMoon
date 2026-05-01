@@ -779,7 +779,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         if (workspace == null || isCommitSyncing || isSyncing || isUpdating)
             return;
-        ShowConfirm("Do you want to pull for this repository?", () => CommitSyncAsync(repositoryId));
+        _ = CommitSyncAsync(repositoryId);
     }
 
     /// <summary>When user clicks the not-upstreamed badge: check dependencies. Show modal only if at least one dependency repo needs push; otherwise push directly.</summary>
@@ -1021,9 +1021,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
             return;
         }
         if (repoIdsWithIncoming.Count == 1)
-            ShowConfirm("Do you want to pull for this repository?", () => CommitSyncAsync(repoIdsWithIncoming[0]));
+            _ = CommitSyncAsync(repoIdsWithIncoming[0]);
         else
-            ShowConfirm($"Do you want to pull for {repoIdsWithIncoming.Count} repositories?", () => CommitSyncLevelAsync(repoIdsWithIncoming));
+            _ = CommitSyncLevelAsync(repoIdsWithIncoming);
     }
 
     /// <summary>Update button click: get update plan; if no updates, toast; else show modal (single vs multi-level).</summary>
