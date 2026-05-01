@@ -15,6 +15,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 {
     private readonly int _listenPort = options.Value.ListenPort;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private readonly HashSet<string> _toolRestoreAttempted = new(StringComparer.OrdinalIgnoreCase);
 
     public string GetWorkspacePath(string root, string workspaceName)
     {
@@ -127,10 +128,34 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         sw.Stop();
         if (exitCode != 0)
         {
-            var error = (!string.IsNullOrWhiteSpace(stderr) ? stderr : stdout)?.Trim()
-                        ?? $"{toolName} exited with code {exitCode}";
-            logger.LogError("{ToolName} failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", toolName, sw.ElapsedMilliseconds, exitCode, stdout, stderr);
-            return (null, error);
+            var combinedOutput = (!string.IsNullOrWhiteSpace(stderr) ? stderr : stdout)?.Trim() ?? string.Empty;
+            if (combinedOutput.Contains("dotnet tool restore", StringComparison.OrdinalIgnoreCase)
+                && _toolRestoreAttempted.Add(repoPath))
+            {
+                logger.LogWarning("{ToolName} requires tool restore. Running 'dotnet tool restore' in {RepoPath}", toolName, repoPath);
+                var (restoreExitCode, _, restoreStderr) = await RunProcessAsync("dotnet", "tool restore", repoPath, ct);
+                if (restoreExitCode != 0)
+                {
+                    logger.LogError("dotnet tool restore failed. ExitCode={ExitCode}, Stderr={Stderr}", restoreExitCode, restoreStderr);
+                    return (null, $"dotnet tool restore failed: {restoreStderr?.Trim()}");
+                }
+                logger.LogInformation("dotnet tool restore succeeded in {RepoPath}. Retrying {ToolName}", repoPath, toolName);
+                var (retryExitCode, retryStdout, retryStderr) = await RunProcessAsync(fileName, arguments, repoPath, ct);
+                if (retryExitCode != 0)
+                {
+                    var retryError = (!string.IsNullOrWhiteSpace(retryStderr) ? retryStderr : retryStdout)?.Trim()
+                                    ?? $"{toolName} exited with code {retryExitCode}";
+                    logger.LogError("{ToolName} failed after tool restore. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", toolName, retryExitCode, retryStdout, retryStderr);
+                    return (null, retryError);
+                }
+                stdout = retryStdout;
+            }
+            else
+            {
+                var error = combinedOutput.Length > 0 ? combinedOutput : $"{toolName} exited with code {exitCode}";
+                logger.LogError("{ToolName} failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", toolName, sw.ElapsedMilliseconds, exitCode, stdout, stderr);
+                return (null, error);
+            }
         }
         logger.LogDebug("{ToolName} completed in {ElapsedMs}ms for {RepoPath}", toolName, sw.ElapsedMilliseconds, repoPath);
 

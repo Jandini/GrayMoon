@@ -7,6 +7,7 @@ namespace GrayMoon.App.Services;
 public class GitVersionCommandService(ILogger<GitVersionCommandService> logger, ICommandLineService commandLine)
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private readonly HashSet<string> _toolRestoreAttempted = new(StringComparer.OrdinalIgnoreCase);
 
     public async Task<GitVersionResult?> GetVersionAsync(string repositoryPath, CancellationToken cancellationToken = default)
     {
@@ -36,11 +37,36 @@ public class GitVersionCommandService(ILogger<GitVersionCommandService> logger, 
             }
             if (result.ExitCode != 0)
             {
-                logger.LogWarning("dotnet-gitversion failed with exit code {ExitCode} in {Path}. Stdout: {Stdout} Stderr: {Stderr}",
-                    result.ExitCode, repositoryPath,
-                    string.IsNullOrWhiteSpace(result.Stdout) ? "(none)" : result.Stdout.Trim(),
-                    string.IsNullOrWhiteSpace(result.Stderr) ? "(none)" : result.Stderr.Trim());
-                return null;
+                var combinedOutput = (!string.IsNullOrWhiteSpace(result.Stderr) ? result.Stderr : result.Stdout)?.Trim() ?? string.Empty;
+                if (combinedOutput.Contains("dotnet tool restore", StringComparison.OrdinalIgnoreCase)
+                    && _toolRestoreAttempted.Add(repositoryPath))
+                {
+                    logger.LogWarning("dotnet-gitversion requires tool restore. Running 'dotnet tool restore' in {Path}", repositoryPath);
+                    var restore = await commandLine.RunAsync("dotnet", "tool restore", repositoryPath, null, cancellationToken);
+                    if (restore.ExitCode != 0)
+                    {
+                        logger.LogError("dotnet tool restore failed. ExitCode={ExitCode}, Stderr={Stderr}", restore.ExitCode, restore.Stderr?.Trim());
+                        return null;
+                    }
+                    logger.LogInformation("dotnet tool restore succeeded in {Path}. Retrying dotnet-gitversion", repositoryPath);
+                    result = await commandLine.RunAsync("dotnet-gitversion", "/output json /nofetch /verbosity quiet", repositoryPath, null, cancellationToken);
+                    if (result.ExitCode != 0)
+                    {
+                        logger.LogWarning("dotnet-gitversion failed after tool restore. ExitCode={ExitCode} in {Path}. Stdout: {Stdout} Stderr: {Stderr}",
+                            result.ExitCode, repositoryPath,
+                            string.IsNullOrWhiteSpace(result.Stdout) ? "(none)" : result.Stdout.Trim(),
+                            string.IsNullOrWhiteSpace(result.Stderr) ? "(none)" : result.Stderr.Trim());
+                        return null;
+                    }
+                }
+                else
+                {
+                    logger.LogWarning("dotnet-gitversion failed with exit code {ExitCode} in {Path}. Stdout: {Stdout} Stderr: {Stderr}",
+                        result.ExitCode, repositoryPath,
+                        string.IsNullOrWhiteSpace(result.Stdout) ? "(none)" : result.Stdout.Trim(),
+                        string.IsNullOrWhiteSpace(result.Stderr) ? "(none)" : result.Stderr.Trim());
+                    return null;
+                }
             }
 
             var parsed = ParseGitVersionJson(result.Stdout);
