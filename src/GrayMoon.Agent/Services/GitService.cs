@@ -15,7 +15,6 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 {
     private readonly int _listenPort = options.Value.ListenPort;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
-    private readonly HashSet<string> _toolRestoreAttempted = new(StringComparer.OrdinalIgnoreCase);
 
     public string GetWorkspacePath(string root, string workspaceName)
     {
@@ -128,11 +127,11 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         sw.Stop();
         if (exitCode != 0)
         {
-            var combinedOutput = (!string.IsNullOrWhiteSpace(stderr) ? stderr : stdout)?.Trim() ?? string.Empty;
-            if (combinedOutput.Contains("dotnet tool restore", StringComparison.OrdinalIgnoreCase)
-                && _toolRestoreAttempted.Add(repoPath))
+            var manifestExists = File.Exists(Path.Combine(repoPath, "dotnet-tools.json"))
+                || File.Exists(Path.Combine(repoPath, ".config", "dotnet-tools.json"));
+            if (manifestExists)
             {
-                logger.LogWarning("{ToolName} requires tool restore. Running 'dotnet tool restore' in {RepoPath}", toolName, repoPath);
+                logger.LogWarning("{ToolName} failed and tool manifest found. Running 'dotnet tool restore' in {RepoPath}", toolName, repoPath);
                 var (restoreExitCode, _, restoreStderr) = await RunProcessAsync("dotnet", "tool restore", repoPath, ct);
                 if (restoreExitCode != 0)
                 {
@@ -152,7 +151,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             }
             else
             {
-                var error = combinedOutput.Length > 0 ? combinedOutput : $"{toolName} exited with code {exitCode}";
+                var error = (!string.IsNullOrWhiteSpace(stderr) ? stderr : stdout)?.Trim()
+                            ?? $"{toolName} exited with code {exitCode}";
                 logger.LogError("{ToolName} failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", toolName, sw.ElapsedMilliseconds, exitCode, stdout, stderr);
                 return (null, error);
             }

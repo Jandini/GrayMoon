@@ -7,7 +7,6 @@ namespace GrayMoon.App.Services;
 public class GitVersionCommandService(ILogger<GitVersionCommandService> logger, ICommandLineService commandLine)
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
-    private readonly HashSet<string> _toolRestoreAttempted = new(StringComparer.OrdinalIgnoreCase);
 
     public async Task<GitVersionResult?> GetVersionAsync(string repositoryPath, CancellationToken cancellationToken = default)
     {
@@ -37,11 +36,11 @@ public class GitVersionCommandService(ILogger<GitVersionCommandService> logger, 
             }
             if (result.ExitCode != 0)
             {
-                var combinedOutput = (!string.IsNullOrWhiteSpace(result.Stderr) ? result.Stderr : result.Stdout)?.Trim() ?? string.Empty;
-                if (combinedOutput.Contains("dotnet tool restore", StringComparison.OrdinalIgnoreCase)
-                    && _toolRestoreAttempted.Add(repositoryPath))
+                var manifestExists = File.Exists(Path.Combine(repositoryPath, "dotnet-tools.json"))
+                    || File.Exists(Path.Combine(repositoryPath, ".config", "dotnet-tools.json"));
+                if (manifestExists)
                 {
-                    logger.LogWarning("dotnet-gitversion requires tool restore. Running 'dotnet tool restore' in {Path}", repositoryPath);
+                    logger.LogWarning("dotnet-gitversion failed and tool manifest found. Running 'dotnet tool restore' in {Path}", repositoryPath);
                     var restore = await commandLine.RunAsync("dotnet", "tool restore", repositoryPath, null, cancellationToken);
                     if (restore.ExitCode != 0)
                     {
@@ -69,7 +68,7 @@ public class GitVersionCommandService(ILogger<GitVersionCommandService> logger, 
                 }
             }
 
-            var parsed = ParseGitVersionJson(result.Stdout);
+            var parsed = ParseGitVersionJson(result.Stdout ?? string.Empty);
             if (parsed != null)
             {
                 logger.LogInformation("GitVersion for {Path}: {InformationalVersion} ({Branch})", repositoryPath,
