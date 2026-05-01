@@ -43,11 +43,11 @@
     text-align: center;
 }
 
-/* Actions column: fit both buttons only – fixed width so it stays visible */
+/* Actions column: fit all three buttons – fixed width so it stays visible */
 .connectors-table th.col-actions,
 .connectors-table td.col-actions {
-    width: 140px;
-    min-width: 140px;
+    width: 160px;
+    min-width: 160px;
     overflow: visible;
     white-space: nowrap;
     box-sizing: content-box;
