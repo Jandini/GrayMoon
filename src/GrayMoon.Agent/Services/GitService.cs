@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using GrayMoon.Agent.Abstractions;
@@ -15,6 +16,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 {
     private readonly int _listenPort = options.Value.ListenPort;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private readonly ConcurrentDictionary<string, byte> _safeRepoCache = new(StringComparer.OrdinalIgnoreCase);
 
     public string GetWorkspacePath(string root, string workspaceName)
     {
@@ -55,6 +57,13 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return;
 
         var fullPath = Path.GetFullPath(repoPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        if (_safeRepoCache.ContainsKey(fullPath))
+        {
+            logger.LogDebug("Repository safety already verified in this process, skipping safe.directory check: {Path}", fullPath.Replace('\\', '/'));
+            return;
+        }
+
         var pathForGit = fullPath.Replace('\\', '/'); // Git accepts forward slashes on all platforms
 
         var (isSafe, _) = await CheckRepoSafeAsync(repoPath, pathForGit, ct);
@@ -62,19 +71,28 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         if (isSafe)
         {
+            _safeRepoCache.TryAdd(fullPath, 0);
             logger.LogDebug("Repository already safe, skipping safe.directory update: {Path}", pathForGit);
             return;
         }
 
-        var addArgs = $"config --local --add safe.directory \"{pathForGit.Replace("\"", "\\\"")}\"";
+        // Must use --global, not --local: LibGit2Sharp (used internally by GitVersion) performs its
+        // own ownership check via libgit2's git_repository_open before the repo is open, so it can
+        // only read system/global config at that point. A --local entry in .git/config is invisible
+        // to libgit2 during the ownership check (chicken-and-egg), so git.exe commands succeed but
+        // GitVersion fails with "repository path is not owned by current user".
+        var addArgs = $"config --global --add safe.directory \"{pathForGit.Replace("\"", "\\\"")}\"";
         var (exitCode, stdout, stderr) = await SafeDirectoryRetryPipeline.ExecuteAsync(
             async (cancellationToken) => await RunProcessAsync("git", addArgs, repoPath, cancellationToken),
             ct);
 
         if (exitCode == 0)
-            logger.LogDebug("Added safe.directory for repository: {Path}", pathForGit);
+        {
+            _safeRepoCache.TryAdd(fullPath, 0);
+            logger.LogDebug("Added safe.directory (global) for repository: {Path}", pathForGit);
+        }
         else
-            logger.LogError("Git config safe.directory failed. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", exitCode, stdout, stderr);
+            logger.LogError("Git config safe.directory (global) failed. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", exitCode, stdout, stderr);
     }
 
     /// <summary>
@@ -129,7 +147,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         {
             var manifestExists = File.Exists(Path.Combine(repoPath, "dotnet-tools.json"))
                 || File.Exists(Path.Combine(repoPath, ".config", "dotnet-tools.json"));
-            if (manifestExists)
+
+            if (manifestExists && ShouldAttemptDotNetToolRestore(fileName, stderr, stdout))
             {
                 logger.LogWarning("{ToolName} failed and tool manifest found. Running 'dotnet tool restore' in {RepoPath}", toolName, repoPath);
                 var (restoreExitCode, _, restoreStderr) = await RunProcessAsync("dotnet", "tool restore", repoPath, ct);
@@ -142,8 +161,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 var (retryExitCode, retryStdout, retryStderr) = await RunProcessAsync(fileName, arguments, repoPath, ct);
                 if (retryExitCode != 0)
                 {
-                    var retryError = (!string.IsNullOrWhiteSpace(retryStderr) ? retryStderr : retryStdout)?.Trim()
-                                    ?? $"{toolName} exited with code {retryExitCode}";
+                    var retryError = BuildProcessError(retryStderr, retryStdout, $"{toolName} exited with code {retryExitCode}");
                     logger.LogError("{ToolName} failed after tool restore. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", toolName, retryExitCode, retryStdout, retryStderr);
                     return (null, retryError);
                 }
@@ -151,8 +169,9 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             }
             else
             {
-                var error = (!string.IsNullOrWhiteSpace(stderr) ? stderr : stdout)?.Trim()
-                            ?? $"{toolName} exited with code {exitCode}";
+                var error = BuildProcessError(stderr, stdout, $"{toolName} exited with code {exitCode}");
+                if (manifestExists)
+                    logger.LogWarning("{ToolName} failed in {ElapsedMs}ms in {RepoPath}. Tool manifest exists, but failure does not look like a missing local tool; skipping 'dotnet tool restore'. ExitCode={ExitCode}", toolName, sw.ElapsedMilliseconds, repoPath, exitCode);
                 logger.LogError("{ToolName} failed in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", toolName, sw.ElapsedMilliseconds, exitCode, stdout, stderr);
                 return (null, error);
             }
@@ -1112,5 +1131,27 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
     {
         var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, stdinContent, ct);
         return (r.ExitCode, r.Stdout, r.Stderr);
+    }
+
+    private static string BuildProcessError(string? stderr, string? stdout, string fallback)
+    {
+        return (!string.IsNullOrWhiteSpace(stderr) ? stderr : stdout)?.Trim() ?? fallback;
+    }
+
+    private static bool ShouldAttemptDotNetToolRestore(string fileName, string? stderr, string? stdout)
+    {
+        if (!string.Equals(fileName, "dotnet", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var output = string.Concat(stderr ?? string.Empty, "\n", stdout ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(output))
+            return false;
+
+        return output.Contains("could not execute because the specified command or file was not found", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("dotnet-gitversion does not exist", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("no executable found matching command", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("is not recognized as an internal or external command", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("run 'dotnet tool restore'", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("run \"dotnet tool restore\"", StringComparison.OrdinalIgnoreCase);
     }
 }
