@@ -17,7 +17,6 @@ public sealed class PushOrchestrator(
         bool synchronizedPush,
         IReadOnlySet<string> requiredPackageIds,
         Action<string> setProgress,
-        Func<Task> refresh,
         Action<string> showToast,
         Action? onAppSideComplete = null,
         CancellationToken cancellationToken = default)
@@ -49,8 +48,6 @@ public sealed class PushOrchestrator(
                 onAppSideComplete: null,
                 cancellationToken: cancellationToken);
         }
-
-        await refresh();
     }
 
     public Task<(bool Success, string? ErrorMessage)> PushSingleAsync(

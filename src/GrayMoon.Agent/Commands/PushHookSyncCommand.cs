@@ -7,10 +7,14 @@ using Microsoft.Extensions.Logging;
 namespace GrayMoon.Agent.Commands;
 
 /// <summary>
-/// Handles pre-push hooks: re-runs GitVersion and gets commit counts.
-/// No git fetch — uses current local state only (version, branch, ahead/behind, has-upstream).
+/// Handles pre-push hooks: re-runs GitVersion to capture the version/branch at push time.
+/// Commit counts and upstream state are intentionally omitted — this hook fires BEFORE the
+/// push completes, so any counts read here are stale (still show the commits about to be
+/// pushed). Sending them via SyncCommand would overwrite the correct post-push values
+/// written by UpdateCommitCountsAndUpstreamAfterPushAsync, causing a race condition where
+/// the grid briefly shows the correct 0 and then flips back to the pre-push count.
 /// </summary>
-public sealed class PushHookSyncCommand(IGitService git, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<PushHookSyncCommand> logger)
+public sealed class PushHookSyncCommand(IGitService git, IHubConnectionProvider hubProvider, ILogger<PushHookSyncCommand> logger)
 {
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
@@ -24,55 +28,23 @@ public sealed class PushHookSyncCommand(IGitService git, IAgentTokenProvider tok
         var version = versionResult?.InformationalVersion ?? "-";
         var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
 
-        int? outgoing = null;
-        int? incoming = null;
-        int? defaultBehind = null;
-        int? defaultAhead = null;
-        if (branch != "-")
-        {
-            var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
-            var (o, i, _) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, defaultRef, cancellationToken);
-            outgoing = o;
-            incoming = i;
-            var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(payload.RepositoryPath, defaultRef, cancellationToken);
-            defaultBehind = db;
-            defaultAhead = da;
-        }
-
-        bool? hasUpstream = null;
-        if (branch != "-")
-        {
-            string? token = await tokenProvider.GetTokenForRepositoryAsync(payload.RepositoryId, cancellationToken);
-            if (token == null)
-            {
-                logger.LogDebug("PushHookSync: no token available for repo {RepositoryId}; skipping remote branch query.", payload.RepositoryId);
-            }
-            else
-            {
-                var remoteBranches = await git.GetRemoteBranchesAsync(payload.RepositoryPath, token, cancellationToken);
-                hasUpstream = remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
-            }
-        }
-
         var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)
         {
+            // OutgoingCommits, IncomingCommits, HasUpstream and DefaultBranch deltas are all null
+            // so SyncCommandHandler's HasValue guards skip those columns — the app-side
+            // UpdateCommitCountsAndUpstreamAfterPushAsync writes the authoritative post-push counts.
             var notification = new RepositorySyncNotification
             {
                 WorkspaceId = payload.WorkspaceId,
                 RepositoryId = payload.RepositoryId,
                 Version = version,
                 Branch = branch,
-                OutgoingCommits = outgoing,
-                IncomingCommits = incoming,
-                HasUpstream = hasUpstream,
-                DefaultBranchBehind = defaultBehind,
-                DefaultBranchAhead = defaultAhead,
                 ErrorMessage = null
             };
             await connection.InvokeAsync(AgentHubMethods.SyncCommand, notification, cancellationToken);
-            logger.LogInformation("PushHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}, hasUpstream={HasUpstream}",
-                payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream);
+            logger.LogInformation("PushHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}",
+                payload.WorkspaceId, payload.RepositoryId, version, branch);
         }
         else
         {
