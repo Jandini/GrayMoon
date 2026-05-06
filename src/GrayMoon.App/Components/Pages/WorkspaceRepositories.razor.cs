@@ -882,7 +882,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 synchronizedPush,
                 requiredPackageIds,
                 SetPushProgress,
-                RefreshFromSync,
                 ToastService.Show,
                 onAppSideComplete: () => _pushAwaitingAgentTasks = true,
                 _pushCts.Token);
@@ -895,6 +894,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             _pushAwaitingAgentTasks = false;
             isPushing = false;
+            // Reload from a fresh DB scope so the grid reflects the post-push commit counts
+            // written by UpdateCommitCountsAndUpstreamAfterPushAsync. This runs on the Blazor
+            // renderer context (finally is on the same await chain as the UI event handler),
+            // making it the single authoritative post-push refresh point.
+            await RefreshFromSync();
             await InvokeAsync(StateHasChanged);
         }
     }

@@ -127,8 +127,6 @@ public sealed class WorkspacePushService(
             onProgressMessage?.Invoke("Pushing all repositories...");
             await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken);
             await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
-            if (_hubContext != null)
-                await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
             return;
         }
 
@@ -251,8 +249,6 @@ public sealed class WorkspacePushService(
         }
 
         await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
-        if (_hubContext != null)
-            await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
 
     /// <summary>Pushed a single repository's current branch with upstream (-u). Used when the user clicks the "not-upstreamed" badge.</summary>
@@ -402,8 +398,6 @@ public sealed class WorkspacePushService(
         onProgressMessage?.Invoke($"Pushing {payload.Count} {(payload.Count == 1 ? "repository" : "repositories")}...");
         await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken);
         await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
-        if (_hubContext != null)
-            await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
 
     private async Task PushReposAsync(

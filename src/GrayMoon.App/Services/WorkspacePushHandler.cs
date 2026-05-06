@@ -31,7 +31,6 @@ public sealed class WorkspacePushHandler(
         bool synchronizedPush,
         IReadOnlySet<string> requiredPackageIds,
         Action<string> setProgress,
-        Func<Task> refresh,
         Action<string> showToast,
         Action? onAppSideComplete = null,
         CancellationToken cancellationToken = default)
@@ -44,7 +43,6 @@ public sealed class WorkspacePushHandler(
                 synchronizedPush,
                 requiredPackageIds,
                 setProgress,
-                refresh,
                 showToast,
                 onAppSideComplete,
                 cancellationToken);
