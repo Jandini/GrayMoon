@@ -430,7 +430,7 @@
             else
             {
                 Logger.LogInformation("User edited workspace {WorkspaceName}", workspaceName);
-                await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, workspaceName, editingWorkspaceRepositoryIds);
+                await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, workspaceName, editingWorkspaceRepositoryIds, editingWorkspaceRootPath);
 
                 if (existingRepositoryCount > 0)
                     await TrySuggestImportsAsync(editingWorkspaceId.Value, workspaceName);
@@ -479,7 +479,7 @@
         try
         {
             Logger.LogInformation("User added {Count} repositories to workspace {WorkspaceName}", selectedRepositoryIds.Count, repositoriesModalWorkspaceName);
-            await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, repositoriesModalWorkspaceName, selectedRepositoryIds);
+            await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, repositoriesModalWorkspaceName, selectedRepositoryIds, editingWorkspaceRootPath);
 
             CloseRepositoriesModal();
             await LoadWorkspacesAsync();

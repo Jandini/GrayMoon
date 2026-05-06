@@ -1216,7 +1216,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         await InvokeAsync(StateHasChanged);
         try
         {
-            await WorkspacePageService.WorkspaceRepository.UpdateAsync(WorkspaceId, workspace.Name, _repositoriesModal.SelectedRepositoryIds);
+            await WorkspacePageService.WorkspaceRepository.UpdateAsync(WorkspaceId, workspace.Name, _repositoriesModal.SelectedRepositoryIds, workspace.RootPath);
             CloseRepositoriesModal();
             await ReloadWorkspaceDataAsync();
             ApplySyncStateFromWorkspace();
