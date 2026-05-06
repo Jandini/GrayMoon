@@ -67,10 +67,12 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
 
     /// <summary>
     /// Merges fetched repositories with existing ones using <see cref="Repository.CloneUrl"/> as the unique key.
-    /// Updates existing rows when CloneUrl matches; adds new rows for new CloneUrls.
-    /// Removes repositories that are not in <paramref name="repositories"/> (and their workspace links via cascade).
+    /// Detects GitHub renames (same connector, org and URL owner-prefix, only the name segment differs) and updates
+    /// the existing row in place — preserving <see cref="Repository.RepositoryId"/> and all workspace links.
+    /// Adds new rows for genuinely new clone URLs and removes rows no longer returned by GitHub.
     /// </summary>
-    public async Task MergeRepositoriesAsync(IReadOnlyCollection<Repository> repositories)
+    /// <returns>Repositories that were detected as renames and updated in place.</returns>
+    public async Task<IReadOnlyList<RenamedRepositoryInfo>> MergeRepositoriesAsync(IReadOnlyCollection<Repository> repositories)
     {
         var normalized = repositories
             .Select(r => new Repository
@@ -91,30 +93,97 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
 
         await using var transaction = await _dbContext.Database.BeginTransactionAsync();
 
-        var existing = await _dbContext.Repositories.ToListAsync();
+        var existing = await _dbContext.Repositories.AsNoTracking().ToListAsync();
         var toRemove = existing.Where(r => !fetchedUrls.Contains(r.CloneUrl.Trim())).ToList();
-        if (toRemove.Count > 0)
+
+        // Identify new repos (fetched URLs not yet in DB) — candidates for rename targets
+        var existingUrls = new HashSet<string>(existing.Select(r => r.CloneUrl.Trim()), StringComparer.OrdinalIgnoreCase);
+        var newRepos = normalized.Where(r => !existingUrls.Contains(r.CloneUrl)).ToList();
+
+        // Detect renames: match removed repos to new repos by same connector + org + URL owner-prefix
+        var renames = new List<RenamedRepositoryInfo>();
+        var renamedOldUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var renamedNewUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var oldRepo in toRemove)
         {
-            _dbContext.Repositories.RemoveRange(toRemove);
-            await _dbContext.SaveChangesAsync();
-            _logger.LogInformation("Persistence: Repository. Action=Merge (remove not fetched), RemovedCount={RemovedCount}", toRemove.Count);
+            foreach (var newRepo in newRepos)
+            {
+                if (renamedNewUrls.Contains(newRepo.CloneUrl)) continue;
+                if (IsLikelyRename(oldRepo, newRepo))
+                {
+                    renames.Add(new RenamedRepositoryInfo
+                    {
+                        OldName = oldRepo.RepositoryName,
+                        NewName = newRepo.RepositoryName,
+                        OrgName = oldRepo.OrgName
+                    });
+                    renamedOldUrls.Add(oldRepo.CloneUrl.Trim());
+                    renamedNewUrls.Add(newRepo.CloneUrl);
+                    _logger.LogInformation(
+                        "Detected GitHub rename: '{OldName}' → '{NewName}' (ConnectorId={ConnectorId}, Org={OrgName})",
+                        oldRepo.RepositoryName, newRepo.RepositoryName, oldRepo.ConnectorId, oldRepo.OrgName);
+                    break;
+                }
+            }
         }
 
+        // Repos to actually delete = toRemove minus those identified as renames
+        var actualRemovals = toRemove.Where(r => !renamedOldUrls.Contains(r.CloneUrl.Trim())).ToList();
+        if (actualRemovals.Count > 0)
+        {
+            // Load the rows into the tracker so EF Core can issue the DELETEs
+            var removalIds = actualRemovals.Select(r => r.RepositoryId).ToHashSet();
+            var trackedRemovals = await _dbContext.Repositories
+                .Where(r => removalIds.Contains(r.RepositoryId))
+                .ToListAsync();
+            _dbContext.Repositories.RemoveRange(trackedRemovals);
+            await _dbContext.SaveChangesAsync();
+            _logger.LogInformation("Persistence: Repository. Action=Merge (remove not fetched), RemovedCount={RemovedCount}", actualRemovals.Count);
+        }
+
+        // Apply updates and inserts; for renames, UPDATE the existing row in place (preserves RepositoryId + workspace links)
         var existingByUrl = existing
-            .Where(r => fetchedUrls.Contains(r.CloneUrl.Trim()))
+            .Where(r => fetchedUrls.Contains(r.CloneUrl.Trim()) && !renamedOldUrls.Contains(r.CloneUrl.Trim()))
             .GroupBy(r => r.CloneUrl.Trim(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
+        // Map renamed old repo by old URL so we can load it for in-place update
+        var renameByOldUrl = toRemove
+            .Where(r => renamedOldUrls.Contains(r.CloneUrl.Trim()))
+            .ToDictionary(r => r.CloneUrl.Trim(), StringComparer.OrdinalIgnoreCase);
+
         foreach (var repo in normalized)
         {
-            if (existingByUrl.TryGetValue(repo.CloneUrl, out var existingRepo))
+            if (renamedNewUrls.Contains(repo.CloneUrl))
             {
-                existingRepo.ConnectorId = repo.ConnectorId;
-                existingRepo.OrgName = repo.OrgName;
-                existingRepo.RepositoryName = repo.RepositoryName;
-                existingRepo.Visibility = repo.Visibility;
-                existingRepo.CloneUrl = repo.CloneUrl;
-                existingRepo.Topics = repo.Topics;
+                // Find the existing row that this new repo renames, load it tracked, then update in place
+                var matchingOldRepo = renameByOldUrl.Values.FirstOrDefault(old => IsLikelyRename(old, repo));
+                if (matchingOldRepo != null)
+                {
+                    var trackedExisting = await _dbContext.Repositories.FindAsync(matchingOldRepo.RepositoryId);
+                    if (trackedExisting != null)
+                    {
+                        trackedExisting.RepositoryName = repo.RepositoryName;
+                        trackedExisting.CloneUrl = repo.CloneUrl;
+                        trackedExisting.OrgName = repo.OrgName;
+                        trackedExisting.Visibility = repo.Visibility;
+                        trackedExisting.Topics = repo.Topics;
+                    }
+                }
+            }
+            else if (existingByUrl.TryGetValue(repo.CloneUrl, out var existingEntry))
+            {
+                var trackedExisting = await _dbContext.Repositories.FindAsync(existingEntry.RepositoryId);
+                if (trackedExisting != null)
+                {
+                    trackedExisting.ConnectorId = repo.ConnectorId;
+                    trackedExisting.OrgName = repo.OrgName;
+                    trackedExisting.RepositoryName = repo.RepositoryName;
+                    trackedExisting.Visibility = repo.Visibility;
+                    trackedExisting.CloneUrl = repo.CloneUrl;
+                    trackedExisting.Topics = repo.Topics;
+                }
             }
             else
             {
@@ -123,8 +192,39 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
         }
 
         await _dbContext.SaveChangesAsync();
-        _logger.LogInformation("Persistence: Repository. Action=Merge, TotalFetched={TotalFetched}, UpdatedOrAdded={UpdatedOrAdded}", normalized.Count, normalized.Count);
+        _logger.LogInformation(
+            "Persistence: Repository. Action=Merge, TotalFetched={TotalFetched}, Renames={Renames}, Removed={Removed}",
+            normalized.Count, renames.Count, actualRemovals.Count);
         await transaction.CommitAsync();
+
+        return renames;
+    }
+
+    private static bool IsLikelyRename(Repository oldRepo, Repository newRepo)
+    {
+        if (oldRepo.ConnectorId != newRepo.ConnectorId) return false;
+        if (!string.Equals(oldRepo.OrgName, newRepo.OrgName, StringComparison.OrdinalIgnoreCase)) return false;
+
+        if (!Uri.TryCreate(oldRepo.CloneUrl, UriKind.Absolute, out var oldUri) ||
+            !Uri.TryCreate(newRepo.CloneUrl, UriKind.Absolute, out var newUri))
+            return false;
+
+        if (!string.Equals(oldUri.Scheme, newUri.Scheme, StringComparison.OrdinalIgnoreCase)) return false;
+        if (!string.Equals(oldUri.Host, newUri.Host, StringComparison.OrdinalIgnoreCase)) return false;
+
+        var oldPath = oldUri.AbsolutePath.TrimEnd('/');
+        var newPath = newUri.AbsolutePath.TrimEnd('/');
+
+        if (oldPath.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) oldPath = oldPath[..^4];
+        if (newPath.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) newPath = newPath[..^4];
+
+        var oldSlash = oldPath.LastIndexOf('/');
+        var newSlash = newPath.LastIndexOf('/');
+        if (oldSlash < 0 || newSlash < 0) return false;
+
+        // Same owner/org path prefix, only the trailing repo-name segment differs
+        return string.Equals(oldPath[..oldSlash], newPath[..newSlash], StringComparison.OrdinalIgnoreCase)
+               && !string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task DeleteOrphanedAsync(IReadOnlyCollection<int> connectorIds)
