@@ -52,7 +52,7 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
         return workspace;
     }
 
-    public async Task UpdateAsync(int workspaceId, string name, IReadOnlyCollection<int> repositoryIds)
+    public async Task UpdateAsync(int workspaceId, string name, IReadOnlyCollection<int> repositoryIds, string? rootPath)
     {
         var normalized = NormalizeName(name);
         if (await NameExistsAsync(normalized, workspaceId))
@@ -70,6 +70,7 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
         }
 
         workspace.Name = normalized;
+        workspace.RootPath = string.IsNullOrWhiteSpace(rootPath) ? null : rootPath.Trim();
         await _dbContext.SaveChangesAsync();
         _logger.LogInformation("Persistence: saved Workspace. Action=Update, WorkspaceId={WorkspaceId}, Name={Name}", workspaceId, workspace.Name);
 

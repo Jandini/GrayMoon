@@ -17,6 +17,8 @@ public sealed class AgentBridge(
     AgentConnectionTracker connectionTracker,
     ILogger<AgentBridge> logger) : IAgentBridge
 {
+    private static readonly TimeSpan AgentResponseTimeout = TimeSpan.FromMinutes(2);
+
     public bool IsAgentConnected => connectionTracker.GetAgentConnectionId() != null;
 
     public async Task<AgentCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default)
@@ -28,7 +30,7 @@ public sealed class AgentBridge(
         var requestId = Guid.NewGuid().ToString("N");
         var argsJson = args != null ? JsonSerializer.SerializeToElement(args) : (JsonElement?)null;
 
-        var task = AgentResponseDelivery.WaitAsync(requestId, cancellationToken);
+        var task = AgentResponseDelivery.WaitAsync(requestId, AgentResponseTimeout, cancellationToken);
 
         try
         {
@@ -42,6 +44,7 @@ public sealed class AgentBridge(
         }
         catch (Exception ex)
         {
+            AgentResponseDelivery.Fail(requestId, ex);
             logger.LogError(ex, "Failed to send command {Command} to agent", command);
             return new AgentCommandResponse(false, null, ex.Message);
         }
