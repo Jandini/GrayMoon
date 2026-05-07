@@ -229,6 +229,12 @@
               OnConfirm="@OnConfirmModalYesAsync"
               OnCancel="@CloseConfirmModal" />
 
+<DefaultBranchWarningModal IsVisible="@_defaultBranchWarningModal.IsVisible"
+                           Message="@_defaultBranchWarningModal.Message"
+                           RepoItems="@_defaultBranchWarningModal.RepoItems"
+                           OnProceed="@OnDefaultBranchWarningProceedAsync"
+                           OnCancel="@CloseDefaultBranchWarningModal" />
+
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
 <LoadingOverlay IsVisible="@isSyncing"
                 Message="@GetOverlayMessage(syncProgressMessage, isSyncing, _syncAwaitingAgentTasks)"

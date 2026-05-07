@@ -1,0 +1,65 @@
+@using Microsoft.AspNetCore.Components.Web
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDown"
+         @ref="_modalElement">
+        <div class="modal-dialog modal-dialog-scrollable default-branch-warning-modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Default Branch Warning</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2 small">
+                        @Message
+                    </p>
+                    <div class="default-branch-warning-scroll small mb-3">
+                        <ul class="list-unstyled mb-0 ps-0">
+                            @foreach (var item in RepoItems)
+                            {
+                                <li class="mb-1"><code>@item.RepoName</code> <span class="text-muted">(@item.DefaultBranchName)</span></li>
+                            }
+                        </ul>
+                    </div>
+                    <p class="small text-muted mb-0">
+                        The branch may be protected. Proceed with caution.
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-warning" @onclick="OnProceed">
+                        Proceed
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public string Message { get; set; } = "";
+    [Parameter] public IReadOnlyList<(string RepoName, string DefaultBranchName)> RepoItems { get; set; } = Array.Empty<(string, string)>();
+    [Parameter] public EventCallback OnProceed { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private ElementReference _modalElement;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible)
+            await _modalElement.FocusAsync();
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            await OnCancel.InvokeAsync();
+        else if (e.Key == "Enter")
+            await OnProceed.InvokeAsync();
+    }
+}
