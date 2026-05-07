@@ -86,12 +86,18 @@ public class GitHubRepositoryService(
             }
         }
 
+        IReadOnlyList<RenamedRepositoryInfo> renamedRepositories = [];
         if (allFetched.Count > 0)
         {
-            await repositoryRepository.MergeRepositoriesAsync(allFetched);
+            renamedRepositories = await repositoryRepository.MergeRepositoriesAsync(allFetched);
         }
 
         var repositoriesList = await repositoryRepository.GetAllEntriesAsync();
-        return new RefreshRepositoriesResult { Repositories = repositoriesList, ConnectorErrors = connectorErrors };
+        return new RefreshRepositoriesResult
+        {
+            Repositories = repositoriesList,
+            ConnectorErrors = connectorErrors,
+            RenamedRepositories = renamedRepositories
+        };
     }
 }

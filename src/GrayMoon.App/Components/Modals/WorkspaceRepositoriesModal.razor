@@ -135,6 +135,25 @@
                         </div>
                     </div>
 
+                    @if (RenameWarnings is { Count: > 0 })
+                    {
+                        <div class="alert alert-warning">
+                            <i class="bi bi-exclamation-triangle me-1"></i>
+                            <strong>Repository rename detected.</strong> The following repositories were renamed in GitHub and have been updated automatically. Workspace links are preserved.
+                            <ul class="mb-0 mt-1">
+                                @foreach (var rename in RenameWarnings)
+                                {
+                                    <li>
+                                        @if (!string.IsNullOrWhiteSpace(rename.OrgName))
+                                        {
+                                            <span>@rename.OrgName / </span>
+                                        }
+                                        <strong>@rename.OldName</strong> &rarr; <strong>@rename.NewName</strong>
+                                    </li>
+                                }
+                            </ul>
+                        </div>
+                    }
                     @if (ErrorMessage != null)
                     {
                         <div class="alert alert-danger">@ErrorMessage</div>
@@ -166,6 +185,7 @@
     [Parameter] public bool IsSaving { get; set; }
     [Parameter] public bool IsFetching { get; set; }
     [Parameter] public string? ErrorMessage { get; set; }
+    [Parameter] public IReadOnlyList<RenamedRepositoryInfo>? RenameWarnings { get; set; }
     [Parameter] public EventCallback OnSave { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback OnFetchRepositories { get; set; }

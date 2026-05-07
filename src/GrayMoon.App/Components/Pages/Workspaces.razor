@@ -162,6 +162,7 @@
                             IsSaving="@isSavingRepositories"
                             IsFetching="@isPersisting"
                             ErrorMessage="@repositoriesModalErrorMessage"
+                            RenameWarnings="@repositoriesModalRenameWarnings"
                             OnSave="@SaveRepositoriesAsync"
                             OnCancel="@CloseRepositoriesModal"
                             OnFetchRepositories="@FetchRepositoriesAsync" />
@@ -213,6 +214,7 @@
     private string repositoriesModalWorkspaceName = string.Empty;
     private string? editorErrorMessage;
     private string? repositoriesModalErrorMessage;
+    private IReadOnlyList<RenamedRepositoryInfo>? repositoriesModalRenameWarnings;
     private string editorTitle = "Add Workspace";
     private int? editingWorkspaceId;
     private string? editingWorkspaceRootPath;
@@ -352,6 +354,7 @@
         editingWorkspaceId = workspaceId;
         repositoriesModalWorkspaceName = workspace.Name;
         repositoriesModalErrorMessage = null;
+        repositoriesModalRenameWarnings = null;
         selectedRepositoryIds = workspace.Repositories
             .Select(link => link.RepositoryId)
             .ToHashSet();
@@ -370,6 +373,7 @@
     {
         showRepositoriesModal = false;
         repositoriesModalErrorMessage = null;
+        repositoriesModalRenameWarnings = null;
     }
 
     private async Task SaveWorkspaceAsync()
@@ -574,6 +578,7 @@
             });
             var result = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
             repositories = result.Repositories.ToList();
+            repositoriesModalRenameWarnings = result.RenamedRepositories.Count > 0 ? result.RenamedRepositories : null;
             PruneInvalidSelectedRepositoryIds();
         }
         catch (OperationCanceledException)

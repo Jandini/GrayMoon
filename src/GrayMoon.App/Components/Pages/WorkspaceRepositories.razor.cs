@@ -1258,6 +1258,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             });
             var result = await WorkspacePageService.RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
             _repositoriesModal.Repositories = result.Repositories.ToList();
+            _repositoriesModal.RenameWarnings = result.RenamedRepositories.Count > 0 ? result.RenamedRepositories : null;
         }
         catch (OperationCanceledException)
         {
@@ -2295,6 +2296,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         public bool IsVisible { get; set; }
         public string? ErrorMessage { get; set; }
+        public IReadOnlyList<RenamedRepositoryInfo>? RenameWarnings { get; set; }
         public List<GitHubRepositoryEntry>? Repositories { get; set; }
         public HashSet<int> SelectedRepositoryIds { get; set; } = new();
         public bool IsSaving { get; set; }
