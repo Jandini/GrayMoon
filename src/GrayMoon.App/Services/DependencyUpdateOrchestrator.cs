@@ -62,6 +62,8 @@ public sealed class DependencyUpdateOrchestrator(
             if (repoIds.Count == 0)
                 break;
 
+            Action<string> levelProgress = msg => setProgress($"{msg}\nLevel {level}");
+
             // Version files must be committed first because those commits can change
             // versions consumed by dependency updates at this and higher levels.
             if (!await UpdateAndCommitVersionFilesAsync(
@@ -69,7 +71,7 @@ public sealed class DependencyUpdateOrchestrator(
                     repoIds,
                     level,
                     cancellationToken,
-                    setProgress,
+                    levelProgress,
                     onAppSideComplete,
                     OnRepoError))
             {
@@ -84,23 +86,23 @@ public sealed class DependencyUpdateOrchestrator(
             if (reposAtLevel.Count == 0)
                 continue;
 
-            setProgress($"Updating {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
+            levelProgress($"Updating {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
             await workspaceGitService.SyncDependenciesAsync(
                 workspaceId,
-                onProgress: (c, t, _) => setProgress($"Syncing {c} of {t}"),
+                onProgress: (c, t, _) => levelProgress($"Syncing {c} of {t}"),
                 onRepoError: OnRepoError,
                 repoIdsToSync: repoIds,
                 cancellationToken);
             if (hadError)
                 break;
 
-            setProgress("Committing...");
+            levelProgress("Committing...");
             var commitResults = await workspaceGitService.CommitDependencyUpdatesAsync(
                 workspaceId,
                 reposAtLevel,
                 onProgress: (c, t, _) =>
                 {
-                    setProgress($"Committed {c} of {t}");
+                    levelProgress($"Committed {c} of {t}");
                     if (c == t)
                         onAppSideComplete?.Invoke();
                 },
@@ -120,7 +122,7 @@ public sealed class DependencyUpdateOrchestrator(
                     reposAtLevel.Select(r => r.RepoId).ToList(),
                     workspaceId,
                     cancellationToken,
-                    setProgress,
+                    levelProgress,
                     onAppSideComplete,
                     OnRepoError))
             {
@@ -220,7 +222,7 @@ public sealed class DependencyUpdateOrchestrator(
         Action? onAppSideComplete,
         Action<int, string> onRepoError)
     {
-        setProgress($"Updating version files in level {level}...");
+        setProgress("Updating version files...");
         var (_, _, fileError, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
             workspaceId,
             selectedRepositoryIds: selectedRepositoryIds,
@@ -242,7 +244,7 @@ public sealed class DependencyUpdateOrchestrator(
             .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
             .ToList();
 
-        setProgress($"Committing updated versions in level {level}...");
+        setProgress("Committing updated versions...");
         var vfCommitResults = await workspaceGitService.CommitFilePathsAsync(
             workspaceId,
             byRepo,

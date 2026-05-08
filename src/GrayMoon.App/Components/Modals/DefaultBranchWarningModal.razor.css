@@ -1,0 +1,40 @@
+/* Constrain dialog to viewport; modal-dialog-scrollable makes the body scroll */
+.default-branch-warning-modal {
+    max-height: calc(100vh - 2rem);
+    margin: 1rem auto;
+}
+
+.default-branch-warning-modal .modal-body {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Scrollable repo list */
+.default-branch-warning-scroll {
+    flex: 0 1 auto;
+    font-size: 0.875rem;
+    max-height: 12rem;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: auto;
+    scrollbar-color: #6c757d transparent;
+}
+
+.default-branch-warning-scroll::-webkit-scrollbar {
+    width: 0.6rem;
+    height: 0.6rem;
+}
+
+.default-branch-warning-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.default-branch-warning-scroll::-webkit-scrollbar-thumb {
+    background: #6c757d;
+    border-radius: 0.3rem;
+}
+
+.default-branch-warning-scroll::-webkit-scrollbar-thumb:hover {
+    background: #5a6268;
+}

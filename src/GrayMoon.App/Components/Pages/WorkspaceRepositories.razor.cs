@@ -95,6 +95,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private UpdateSingleRepoDependenciesModalState _updateSingleRepoModal = new();
     private PushWithDependenciesModalState _pushWithDependenciesModal = new();
     private ConfirmModalState _confirmModal = new();
+    private DefaultBranchWarningModalState _defaultBranchWarningModal = new();
     private string searchTerm = string.Empty;
 
     private bool _syncAwaitingAgentTasks;
@@ -535,6 +536,36 @@ public sealed partial class WorkspaceRepositories : IDisposable
         StateHasChanged();
     }
 
+    private void ShowDefaultBranchWarning(string message, IReadOnlyList<(string RepoName, string DefaultBranchName)> repoItems, Func<Task> onProceed)
+    {
+        _defaultBranchWarningModal = _defaultBranchWarningModal with
+        {
+            IsVisible = true,
+            Message = message,
+            RepoItems = repoItems,
+            PendingAction = onProceed,
+        };
+        StateHasChanged();
+    }
+
+    private void CloseDefaultBranchWarningModal()
+    {
+        _defaultBranchWarningModal = _defaultBranchWarningModal with
+        {
+            IsVisible = false,
+            PendingAction = null,
+        };
+        StateHasChanged();
+    }
+
+    private async Task OnDefaultBranchWarningProceedAsync()
+    {
+        var action = _defaultBranchWarningModal.PendingAction;
+        CloseDefaultBranchWarningModal();
+        if (action != null)
+            await action();
+    }
+
 
     private void ShowConfirmOpenPr(IEnumerable<WorkspaceRepositoryLink> group)
     {
@@ -702,20 +733,38 @@ public sealed partial class WorkspaceRepositories : IDisposable
             }
             var repoPayload = payload[0];
             var repoName = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.Repository?.RepositoryName;
-            _updateSingleRepoModal = _updateSingleRepoModal with
+
+            var repo = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId);
+            if (repo != null
+                && !string.IsNullOrWhiteSpace(repo.DefaultBranchName)
+                && string.Equals(repo.BranchName, repo.DefaultBranchName, StringComparison.Ordinal))
             {
-                IsVisible = true,
-                Payload = repoPayload,
-                RepositoryId = repositoryId,
-                RepoName = repoName
-            };
-            await InvokeAsync(StateHasChanged);
+                ShowDefaultBranchWarning(
+                    "The following repository is on its default branch. Updating dependencies will commit changes directly to the default (protected) branch.",
+                    new[] { (repoName ?? $"repo {repositoryId}", repo.DefaultBranchName!) },
+                    () => OpenUpdateSingleRepoModalAsync(repoPayload, repositoryId, repoName));
+                return;
+            }
+
+            await OpenUpdateSingleRepoModalAsync(repoPayload, repositoryId, repoName);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error getting update plan for repository {RepositoryId}", repositoryId);
             ToastService.Show("Could not load dependency updates.");
         }
+    }
+
+    private async Task OpenUpdateSingleRepoModalAsync(SyncDependenciesRepoPayload repoPayload, int repositoryId, string? repoName)
+    {
+        _updateSingleRepoModal = _updateSingleRepoModal with
+        {
+            IsVisible = true,
+            Payload = repoPayload,
+            RepositoryId = repositoryId,
+            RepoName = repoName
+        };
+        await InvokeAsync(StateHasChanged);
     }
 
     private void CloseUpdateSingleRepositoryDependenciesModal()
@@ -788,6 +837,24 @@ public sealed partial class WorkspaceRepositories : IDisposable
         if (workspace == null || isPushing || isSyncing || isUpdating)
             return;
 
+        var repo = workspaceRepositories.FirstOrDefault(r => r.RepositoryId == repositoryId);
+        if (repo != null
+            && !string.IsNullOrWhiteSpace(repo.DefaultBranchName)
+            && string.Equals(repo.BranchName, repo.DefaultBranchName, StringComparison.Ordinal))
+        {
+            var repoName = repo.Repository?.RepositoryName ?? $"repo {repositoryId}";
+            ShowDefaultBranchWarning(
+                "The following repository is on its default branch. Pushing will commit directly to the default (protected) branch.",
+                new[] { (repoName, repo.DefaultBranchName!) },
+                () => PushBadgeClickCoreAsync(repositoryId, branchName));
+            return;
+        }
+
+        await PushBadgeClickCoreAsync(repositoryId, branchName);
+    }
+
+    private async Task PushBadgeClickCoreAsync(int repositoryId, string? branchName)
+    {
         try
         {
             var repoIdsThatNeedPush = workspaceRepositories
@@ -1036,6 +1103,28 @@ public sealed partial class WorkspaceRepositories : IDisposable
         if (workspace == null || workspaceRepositories.Count == 0 || isUpdating || isSyncing)
             return;
 
+        var reposOnDefault = workspaceRepositories
+            .Where(wr => !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
+                && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal))
+            .ToList();
+
+        if (reposOnDefault.Count > 0)
+        {
+            var repoItems = reposOnDefault
+                .Select(wr => (wr.Repository?.RepositoryName ?? $"repo {wr.RepositoryId}", wr.DefaultBranchName!))
+                .ToList();
+            ShowDefaultBranchWarning(
+                "The following repositories are on their default branch. Update will commit dependency changes directly to the default (protected) branch.",
+                repoItems,
+                OpenUpdateModalAsync);
+            return;
+        }
+
+        await OpenUpdateModalAsync();
+    }
+
+    private async Task OpenUpdateModalAsync()
+    {
         try
         {
             _updateModal = _updateModal with
@@ -2289,6 +2378,14 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public bool IsVisible { get; init; }
         public string Message { get; init; } = "";
         public string ButtonText { get; init; } = "Yes";
+        public Func<Task>? PendingAction { get; init; }
+    }
+
+    private sealed record DefaultBranchWarningModalState
+    {
+        public bool IsVisible { get; init; }
+        public string Message { get; init; } = "";
+        public IReadOnlyList<(string RepoName, string DefaultBranchName)> RepoItems { get; init; } = Array.Empty<(string, string)>();
         public Func<Task>? PendingAction { get; init; }
     }
 
