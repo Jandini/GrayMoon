@@ -33,7 +33,13 @@
             var messageText = idx >= 0 ? Message[..idx].Trim() : Message;
             @if (!string.IsNullOrEmpty(countdown))
             {
-                <p class="loading-overlay-countdown">@countdown</p>
+                @foreach (var countdownLine in countdown.Split('\n'))
+                {
+                    if (!string.IsNullOrWhiteSpace(countdownLine))
+                    {
+                        <p class="loading-overlay-countdown">@countdownLine.Trim()</p>
+                    }
+                }
             }
             <p class="loading-overlay-message">@messageText</p>
         }

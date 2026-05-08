@@ -137,6 +137,7 @@ public sealed class WorkspacePushService(
             cancellationToken.ThrowIfCancellationRequested();
             var reposAtLevel = payload.Where(p => (p.DependencyLevel ?? 0) == level).ToList();
             if (reposAtLevel.Count == 0) continue;
+            var levelProgress = onProgressMessage == null ? (Action<string>?)null : msg => onProgressMessage($"{msg}\nLevel {level}");
 
             var requiredForLevel = reposAtLevel
                 .SelectMany(r => r.RequiredPackages)
@@ -173,7 +174,7 @@ public sealed class WorkspacePushService(
                     var remaining = deadline - DateTime.UtcNow;
                     if (remaining <= TimeSpan.Zero)
                     {
-                        onProgressMessage?.Invoke("Timed out.");
+                        levelProgress?.Invoke("Timed out.");
                         _logger.LogWarning("Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", totalTimeout.TotalMinutes, getFoundCount(), totalDeps);
                         throw new OperationCanceledException("Push wait for dependencies timed out.");
                     }
@@ -184,7 +185,7 @@ public sealed class WorkspacePushService(
                     var totalSec = (int)remaining.TotalSeconds;
                     var mm = totalSec / 60;
                     var ss = totalSec % 60;
-                    onProgressMessage?.Invoke($"{line1}\n{mm:D2}:{ss:D2}");
+                    levelProgress?.Invoke($"{line1}\n{mm:D2}:{ss:D2}");
 
                     if ((DateTime.UtcNow - lastPollUtc).TotalSeconds >= 2)
                     {
@@ -236,12 +237,12 @@ public sealed class WorkspacePushService(
                 }
             }
 
-            onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
+            levelProgress?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
             await PushReposAsync(
                 workspace,
                 reposAtLevel,
                 bearerByRepoId,
-                onProgressMessage,
+                levelProgress,
                 onRepoError,
                 onAppSideComplete: level == lastLevel ? null : onAppSideComplete,
                 cancellationToken);
@@ -349,8 +350,9 @@ public sealed class WorkspacePushService(
             cancellationToken.ThrowIfCancellationRequested();
             var reposAtLevel = payload.Where(p => (p.DependencyLevel ?? 0) == level).ToList();
             if (reposAtLevel.Count == 0) continue;
-            onProgressMessage?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
-            await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete: null, cancellationToken);
+            var levelProgress = onProgressMessage == null ? (Action<string>?)null : msg => onProgressMessage($"{msg}\nLevel {level}");
+            levelProgress?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
+            await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, levelProgress, onRepoError, onAppSideComplete: null, cancellationToken);
             await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
         }
 
