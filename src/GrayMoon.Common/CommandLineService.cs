@@ -12,12 +12,16 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
 {
     private const int MaxLoggedStreamLength = 8_000;
 
+    private const int MaxMirrorLineLength = 4096;
+
     public async Task<CommandLineResult> RunAsync(
         string fileName,
         string arguments,
         string? workingDirectory = null,
         string? stdin = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool streamStderrAsStdout = false,
+        bool mirrorFailureOutputAsStderr = false)
     {
         arguments ??= "";
         var sw = Stopwatch.StartNew();
@@ -29,6 +33,8 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
             cwd);
 
         ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.CommandLine, $"$ {fileName} {LogSafe.ForLog(arguments)}"));
+
+        var stderrStreamKind = streamStderrAsStdout ? AgentCommandStreamKind.Stdout : AgentCommandStreamKind.Stderr;
 
         var startInfo = new ProcessStartInfo
         {
@@ -69,7 +75,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
             segment =>
             {
                 logger.LogDebug("Command stderr ({Executable}): {Segment}", fileName, TruncateForLog(LogSafe.ForLog(segment)));
-                ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.Stderr, segment));
+                ReportAmbient(new CommandLineStreamEvent(stderrStreamKind, segment));
             },
             cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
@@ -78,7 +84,35 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
         sw.Stop();
 
         logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode={ExitCode})", fileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds, process.ExitCode);
+
+        if (mirrorFailureOutputAsStderr && process.ExitCode != 0)
+            MirrorCombinedOutputAsStderr(stdout, stderr);
+
         return new CommandLineResult(process.ExitCode, stdout, stderr);
+    }
+
+    private static void MirrorCombinedOutputAsStderr(string? stdout, string? stderr)
+    {
+        EmitLines(stdout);
+        EmitLines(stderr);
+
+        void EmitLines(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return;
+
+            foreach (var raw in text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n', StringSplitOptions.None))
+            {
+                if (string.IsNullOrWhiteSpace(raw))
+                    continue;
+
+                var line = raw.Length > MaxMirrorLineLength
+                    ? string.Concat(raw.AsSpan(0, MaxMirrorLineLength), " …")
+                    : raw;
+
+                ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.Stderr, line));
+            }
+        }
     }
 
     /// <summary>

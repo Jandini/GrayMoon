@@ -27,7 +27,7 @@ public class GitVersionCommandService(ILogger<GitVersionCommandService> logger, 
     {
         try
         {
-            var result = await commandLine.RunAsync("dotnet-gitversion", "/output json /nofetch /verbosity quiet", repositoryPath, null, cancellationToken);
+            var result = await commandLine.RunAsync("dotnet-gitversion", "/output json /nofetch /verbosity quiet", repositoryPath, null, cancellationToken, streamStderrAsStdout: true, mirrorFailureOutputAsStderr: true);
 
             if (result.ExitCode == -1)
             {
@@ -48,7 +48,7 @@ public class GitVersionCommandService(ILogger<GitVersionCommandService> logger, 
                         return null;
                     }
                     logger.LogInformation("dotnet tool restore succeeded in {Path}. Retrying dotnet-gitversion", repositoryPath);
-                    result = await commandLine.RunAsync("dotnet-gitversion", "/output json /nofetch /verbosity quiet", repositoryPath, null, cancellationToken);
+                    result = await commandLine.RunAsync("dotnet-gitversion", "/output json /nofetch /verbosity quiet", repositoryPath, null, cancellationToken, streamStderrAsStdout: true, mirrorFailureOutputAsStderr: true);
                     if (result.ExitCode != 0)
                     {
                         logger.LogWarning("dotnet-gitversion failed after tool restore. ExitCode={ExitCode} in {Path}. Stdout: {Stdout} Stderr: {Stderr}",

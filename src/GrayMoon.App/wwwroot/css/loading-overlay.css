@@ -34,16 +34,16 @@
   background: rgba(0, 0, 0, var(--overlay-dim, 0.45));
 }
 
-/* Live command log: bottom dock, above backdrop, below spinner/message */
+/* Live command log: fills from bottom up to app header (sidebar logo + main top-row are 3.5rem) */
 .loading-overlay-terminal {
   position: absolute;
   left: 0;
   right: 0;
+  top: var(--loading-overlay-top-bar-height, 3.5rem);
   bottom: 0;
-  /* Taller strip so full lines fit (line box not clipped at top of scrollport) */
-  height: 40vh;
-  min-height: 12rem;
-  max-height: 52vh;
+  height: auto;
+  min-height: 0;
+  max-height: none;
   z-index: 1;
   display: flex;
   flex-direction: column;
@@ -64,9 +64,13 @@
   /* Same stack as overlay: no extra dimming layer (simple 0.7 / matrix veil already behind) */
   background: transparent;
   box-shadow: none;
-  font-family: "Cascadia Mono", "Consolas", "Courier New", monospace;
+  /* System / classic terminal mono stack (CRT-ish, not UI sans) */
+  font-family: ui-monospace, "Cascadia Mono", "Cascadia Code", "Segoe UI Mono",
+    "Liberation Mono", "Menlo", "Monaco", "Consolas", "Courier New", monospace;
   font-size: 0.72rem;
   line-height: 1.45;
+  letter-spacing: 0.015em;
+  font-variant-ligatures: none;
   -webkit-font-smoothing: antialiased;
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -98,8 +102,13 @@
   color: rgba(120, 210, 150, 0.72);
 }
 
+.loading-overlay-terminal__line--err .loading-overlay-terminal__prefix {
+  color: rgba(255, 140, 140, 0.6);
+}
+
 .loading-overlay-terminal__line--err .loading-overlay-terminal__text {
-  color: rgba(235, 160, 120, 0.78);
+  color: rgba(255, 82, 82, 0.95);
+  text-shadow: 0 0 12px rgba(255, 60, 60, 0.22);
 }
 
 /* Brand at top-left of overlay – same position and font as sidebar header */

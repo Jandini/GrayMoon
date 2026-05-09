@@ -6,12 +6,14 @@ using System.Threading.Channels;
 using GrayMoon.Abstractions.Agent;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs;
+using GrayMoon.Agent.Logging;
 using GrayMoon.Common;
 using Microsoft.AspNetCore.SignalR.Client;
 using Polly;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Serilog.Context;
 
 namespace GrayMoon.Agent.Hosted;
 
@@ -106,11 +108,15 @@ public sealed class JobBackgroundService(
             var sendTask = SendCommandOutputLoopAsync(connection, job.RequestId, streamLabel, channel.Reader, ct);
             try
             {
-                using (new CommandLineStreamScope(e =>
+                void ForwardStream(CommandLineStreamEvent e)
                 {
                     var text = TruncateStreamText(e.Text);
                     writer.TryWrite(new PendingStreamLine(e.Kind, text));
-                }))
+                }
+
+                using (LogContext.PushProperty(AgentLogProperties.RequestId, job.RequestId))
+                using (AgentOverlayLogBridge.Register(job.RequestId, ForwardStream))
+                using (new CommandLineStreamScope(ForwardStream))
                 {
                     result = await dispatcher.ExecuteAsync(job.Command, job.Request, ct);
                 }

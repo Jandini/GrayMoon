@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
+using GrayMoon.Abstractions.Agent;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Models;
 using GrayMoon.Common;
@@ -155,6 +156,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 if (restoreExitCode != 0)
                 {
                     logger.LogError("dotnet tool restore failed. ExitCode={ExitCode}, Stderr={Stderr}", restoreExitCode, restoreStderr);
+                    ReportOverlayStderr($"dotnet tool restore failed (exit {restoreExitCode}). {restoreStderr?.Trim()}");
                     return (null, $"dotnet tool restore failed: {restoreStderr?.Trim()}");
                 }
                 logger.LogInformation("dotnet tool restore succeeded in {RepoPath}. Retrying {ToolName}", repoPath, toolName);
@@ -184,6 +186,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
         catch (JsonException ex)
         {
+            ReportOverlayStderr($"Failed to parse {toolName} JSON: {ex.Message}");
             return (null, $"Failed to parse {toolName} output: {ex.Message}");
         }
     }
@@ -1112,13 +1115,29 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return string.IsNullOrWhiteSpace(sanitized) ? "workspace" : sanitized;
     }
 
+    /// <summary>Git and GitVersion use stderr for progress; mirror combined output as stderr on failure for the overlay.</summary>
+    private static bool IsGitLikeProgressStreaming(string fileName, string arguments)
+    {
+        if (string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (string.Equals(fileName, "dotnet-gitversion", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return string.Equals(fileName, "dotnet", StringComparison.OrdinalIgnoreCase)
+               && arguments.Contains("gitversion", StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task<(int ExitCode, string? Stdout, string? Stderr)> RunProcessAsync(
         string fileName,
         string arguments,
         string? workingDirectory,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool? streamStderrAsStdout = null,
+        bool? mirrorFailureOutputAsStderr = null)
     {
-        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, null, ct);
+        var gitLike = IsGitLikeProgressStreaming(fileName, arguments);
+        var stderrAsOut = streamStderrAsStdout ?? gitLike;
+        var mirror = mirrorFailureOutputAsStderr ?? gitLike;
+        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, null, ct, stderrAsOut, mirror);
         return (r.ExitCode, r.Stdout, r.Stderr);
     }
 
@@ -1129,8 +1148,25 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         string stdinContent,
         CancellationToken ct)
     {
-        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, stdinContent, ct);
+        var gitLike = IsGitLikeProgressStreaming(fileName, arguments);
+        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, stdinContent, ct, gitLike, gitLike);
         return (r.ExitCode, r.Stdout, r.Stderr);
+    }
+
+    private static void ReportOverlayStderr(string message)
+    {
+        var sink = CommandLineStreamAmbient.Current.Value;
+        if (sink == null || string.IsNullOrWhiteSpace(message))
+            return;
+
+        try
+        {
+            sink(new CommandLineStreamEvent(AgentCommandStreamKind.Stderr, message.Trim()));
+        }
+        catch
+        {
+            // overlay must not break GitVersion handling
+        }
     }
 
     private static string BuildProcessError(string? stderr, string? stdout, string fallback)

@@ -28,7 +28,7 @@ public class GitCommandService(ILogger<GitCommandService> logger, ICommandLineSe
 
         try
         {
-            var result = await commandLine.RunAsync("git", arguments, workingDirectory, null, cancellationToken);
+            var result = await commandLine.RunAsync("git", arguments, workingDirectory, null, cancellationToken, streamStderrAsStdout: true, mirrorFailureOutputAsStderr: true);
 
             if (result.ExitCode == -1)
             {
@@ -113,7 +113,8 @@ public class GitCommandService(ILogger<GitCommandService> logger, ICommandLineSe
 
     private async Task<(int ExitCode, string? Stdout, string? Stderr)> RunGitAsync(string fileName, string arguments, string? workingDirectory, CancellationToken cancellationToken)
     {
-        var result = await commandLine.RunAsync(fileName, arguments, workingDirectory, null, cancellationToken);
+        var gitLike = string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase);
+        var result = await commandLine.RunAsync(fileName, arguments, workingDirectory, null, cancellationToken, gitLike, gitLike);
         return (result.ExitCode, result.Stdout, result.Stderr);
     }
 
