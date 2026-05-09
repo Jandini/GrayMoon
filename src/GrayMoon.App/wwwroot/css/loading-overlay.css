@@ -135,6 +135,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
+  gap: 0.35rem;
   padding-left: 0.75rem;
   padding-right: 1rem;
   z-index: 3;
@@ -223,6 +224,55 @@
   font-size: 14px;
   letter-spacing: 0.2px;
   margin: 0;
+}
+
+/* Live command log toggle — beside GrayMoon in brand row; bright = hidden, dark = log visible */
+.loading-overlay__terminal-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 1.05rem;
+  line-height: 1;
+  padding: 0.15rem;
+  margin: 0 0 0 0.1rem;
+  border: none;
+  border-radius: 0;
+  background: none !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  color: rgba(226, 230, 238, 0.98);
+  filter: drop-shadow(0 0 5px rgba(0, 0, 0, 0.85)) brightness(1.06);
+  cursor: pointer;
+  opacity: 1;
+  transition: color 0.15s ease, filter 0.15s ease, opacity 0.15s ease;
+  pointer-events: auto;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.loading-overlay__terminal-toggle .bi-terminal {
+  display: block;
+}
+
+.loading-overlay__terminal-toggle--on {
+  color: rgba(92, 98, 110, 0.94);
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.9)) brightness(0.74);
+  opacity: 0.9;
+}
+
+.loading-overlay:not(.show) .loading-overlay__brand .loading-overlay__terminal-toggle {
+  display: none !important;
+}
+
+.loading-overlay__terminal-toggle:hover {
+  opacity: 1;
+}
+
+.loading-overlay__terminal-toggle--on:hover {
+  color: rgba(118, 124, 136, 0.96);
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.85)) brightness(0.84);
 }
 
 /* Easter egg: rabbit toggle in bottom-right (visible in both simple and matrix overlay) */

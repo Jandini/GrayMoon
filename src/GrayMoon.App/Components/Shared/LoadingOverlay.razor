@@ -1,6 +1,7 @@
 @using GrayMoon.Abstractions.Agent
 @inject IJSRuntime JS
 @inject MatrixOverlayPreferenceService MatrixPreference
+@inject CommandTerminalOverlayPreferenceService CommandTerminalOverlayPreference
 @inject AgentQueueStateService AgentQueueStateService
 @inject OverlayCommandTerminalService CommandTerminal
 @implements IAsyncDisposable
@@ -12,7 +13,7 @@
         <canvas id="@_canvasId" class="matrix-canvas"></canvas>
         <div class="loading-overlay__veil"></div>
     }
-    @if (IsVisible && ShowCommandTerminal)
+    @if (IsVisible && ShouldShowCommandTerminal)
     {
         <div class="loading-overlay-terminal" aria-hidden="true">
             <div @ref="_terminalScroll" class="loading-overlay-terminal__inner">
@@ -30,6 +31,16 @@
             <img src="moon.svg" alt="GrayMoon" class="navbar-brand-icon" />
             <span class="navbar-brand-title">GrayMoon</span>
         </span>
+        @if (ShowCommandTerminal)
+        {
+            <button type="button"
+                    class="loading-overlay__terminal-toggle @(CommandTerminalOverlayPreference.IsVisible ? "loading-overlay__terminal-toggle--on" : "")"
+                    aria-label="@(CommandTerminalOverlayPreference.IsVisible ? "Hide live command log" : "Show live command log")"
+                    aria-pressed="@(CommandTerminalOverlayPreference.IsVisible ? "true" : "false")"
+                    @onclick="ToggleCommandTerminalOverlay">
+                <i class="bi bi-terminal" aria-hidden="true"></i>
+            </button>
+        }
     </div>
     <div class="loading-overlay-content">
         <div class="loading-overlay-spinner-wrap">
@@ -77,8 +88,10 @@
     /// <summary>When true, show task count inside spinner. Default false.</summary>
     [Parameter] public bool ShowTaskCountInSpinner { get; set; } = false;
 
-    /// <summary>When true, show the live agent command terminal strip at the bottom while visible.</summary>
+    /// <summary>When false, the live command terminal is never shown regardless of user toggle.</summary>
     [Parameter] public bool ShowCommandTerminal { get; set; } = true;
+
+    private bool ShouldShowCommandTerminal => ShowCommandTerminal && CommandTerminalOverlayPreference.IsVisible;
 
     private int DisplayTaskCount => !IsVisible ? 0 : (PendingAgentTasksCount ?? AgentQueueStateService.GetTotalPendingCount());
 
@@ -122,6 +135,7 @@
     protected override void OnInitialized()
     {
         MatrixPreference.UseMatrixEffectChanged += OnMatrixPreferenceChanged;
+        CommandTerminalOverlayPreference.IsVisibleChanged += OnCommandTerminalOverlayPreferenceChanged;
         AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         CommandTerminal.Changed += OnTerminalChanged;
         _terminalLines = CommandTerminal.GetSnapshot();
@@ -137,6 +151,12 @@
 
     private void OnMatrixPreferenceChanged(object? sender, EventArgs e)
     {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnCommandTerminalOverlayPreferenceChanged(object? sender, EventArgs e)
+    {
+        _lastScrolledLineCount = -1;
         _ = InvokeAsync(StateHasChanged);
     }
 
@@ -171,7 +191,7 @@
         _wasVisible = IsVisible;
         _wasMatrixEffect = useMatrix;
 
-        if (IsVisible && ShowCommandTerminal && _terminalLines.Count != _lastScrolledLineCount)
+        if (IsVisible && ShouldShowCommandTerminal && _terminalLines.Count != _lastScrolledLineCount)
         {
             _lastScrolledLineCount = _terminalLines.Count;
             try
@@ -199,9 +219,12 @@
         MatrixPreference.Toggle();
     }
 
+    private void ToggleCommandTerminalOverlay() => CommandTerminalOverlayPreference.Toggle();
+
     public void Dispose()
     {
         MatrixPreference.UseMatrixEffectChanged -= OnMatrixPreferenceChanged;
+        CommandTerminalOverlayPreference.IsVisibleChanged -= OnCommandTerminalOverlayPreferenceChanged;
         AgentQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
         CommandTerminal.Changed -= OnTerminalChanged;
     }
