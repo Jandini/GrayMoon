@@ -122,12 +122,20 @@
                                             var showGhaTerminal = string.IsNullOrWhiteSpace(row.ErrorMessage)
                                                 && IsLineRunningForBranch(row, line)
                                                 && (line.Action?.RunId ?? 0) > 0;
+                                            var showRepoBranchInRow = firstLine
+                                                || IsLineRunningForBranch(row, line)
+                                                || line.RunInProgress;
                                             var repoEndOnDataRow = isLastWorkflowLineInRepo && !showGhaTerminal;
                                             var repoEndOnGhaRow = isLastWorkflowLineInRepo && showGhaTerminal;
-                                            var trClass = $"{stripeClass} actions-data-row" + (repoEndOnDataRow ? " actions-row-repo-end" : "") + (firstLine && row.ErrorMessage != null ? " actions-error-row" : "");
+                                            var isRunningWorkflowRow = IsLineRunningForBranch(row, line);
+                                            var trClass = $"{stripeClass} actions-data-row"
+                                                + (repoEndOnDataRow ? " actions-row-repo-end" : "")
+                                                + (firstLine && row.ErrorMessage != null ? " actions-error-row" : "")
+                                                + (isRunningWorkflowRow ? " actions-row-running" : "")
+                                                + (showGhaTerminal ? " actions-row-running-above-terminal" : "");
                                             <tr class="@trClass">
                                                 <td class="col-repo">
-                                                    @if (firstLine)
+                                                    @if (showRepoBranchInRow)
                                                     {
                                                         var repoUrl = GrayMoon.App.Services.RepositoryUrlHelper.GetRepositoryUrl(row.Repo.CloneUrl);
                                                         @if (!string.IsNullOrWhiteSpace(repoUrl))
@@ -143,7 +151,7 @@
                                                     }
                                                 </td>
                                                 <td class="col-branch">
-                                                    @if (firstLine)
+                                                    @if (showRepoBranchInRow)
                                                     {
                                                         @if (!string.IsNullOrWhiteSpace(row.Link.BranchName))
                                                         {
@@ -231,7 +239,7 @@
                                             </tr>
                                             @if (showGhaTerminal)
                                             {
-                                                <tr class="@($"{stripeClass} actions-gha-feed-row actions-data-row{(repoEndOnGhaRow ? " actions-row-repo-end" : "")}")">
+                                                <tr class="@($"{stripeClass} actions-gha-feed-row actions-data-row actions-row-running actions-row-running-terminal{(repoEndOnGhaRow ? " actions-row-repo-end" : "")}")">
                                                     <td colspan="5" class="p-0 border-0">
                                                         <GhaWorkflowLiveTerminal @key="@($"{row.Repo.RepositoryId}-{(line.Action?.WorkflowId ?? 0)}-{(line.Action?.RunId ?? 0)}")"
                                                                                  ConnectorName="@row.Repo.ConnectorName"

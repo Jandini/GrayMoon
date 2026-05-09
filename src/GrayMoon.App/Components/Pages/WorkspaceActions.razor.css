@@ -145,3 +145,33 @@
 .grid-page-body .table.actions-table tbody tr.actions-data-row.actions-row-repo-end > td {
     border-bottom: 1px solid var(--border-color) !important;
 }
+
+/* Running workflow: same backdrop as GHA live terminal for a seamless block */
+.grid-page-body .table.actions-table tbody tr.actions-row-running > td {
+    background-color: rgba(6, 8, 10, 0.94) !important;
+    color: rgba(230, 235, 240, 0.96);
+    border-bottom: none !important;
+}
+
+.grid-page-body .table.actions-table tbody tr.actions-row-running .text-muted {
+    color: rgba(186, 194, 188, 0.92) !important;
+}
+
+.grid-page-body .table.actions-table tbody tr.actions-row-running .repo-link,
+.grid-page-body .table.actions-table tbody tr.actions-row-running .repo-link strong,
+.grid-page-body .table.actions-table tbody tr.actions-row-running td.col-repo strong {
+    color: rgba(240, 244, 248, 0.98) !important;
+}
+
+.grid-page-body .table.actions-table tbody tr.actions-row-running-above-terminal > td {
+    border-bottom: none !important;
+}
+
+.grid-page-body .table.actions-table tbody tr.actions-row-running-terminal > td {
+    background-color: rgba(6, 8, 10, 0.94) !important;
+    border-bottom: none !important;
+}
+
+.grid-page-body .table.actions-table tbody tr.actions-row-running-terminal.actions-row-repo-end > td {
+    border-bottom: 1px solid var(--border-color) !important;
+}

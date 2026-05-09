@@ -363,7 +363,8 @@ public sealed partial class WorkspaceActions : IDisposable
         {
             var actionEntry = BuildActionEntry(row, line);
             await GitHubActionsService.RerunWorkflowAsync(actionEntry);
-            await RefreshRowAsync(row, _cts.Token);
+            await Task.Delay(2000, CancellationToken.None);
+            await RefreshRowAsync(row, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -391,8 +392,8 @@ public sealed partial class WorkspaceActions : IDisposable
         {
             var actionEntry = BuildActionEntry(row, line);
             await GitHubActionsService.RunWorkflowAsync(actionEntry);
-            await Task.Delay(2000);
-            await RefreshRowAsync(row, _cts.Token);
+            await Task.Delay(2000, CancellationToken.None);
+            await RefreshRowAsync(row, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -479,12 +480,20 @@ public sealed partial class WorkspaceActions : IDisposable
                 "Forbidden (403). The token does not have permission to access GitHub Actions.",
             HttpRequestException { StatusCode: HttpStatusCode.NotFound } =>
                 "Not found (404). The repository or workflow was not found.",
+            HttpRequestException { StatusCode: HttpStatusCode.UnprocessableEntity } http422 =>
+                string.IsNullOrWhiteSpace(http422.Message)
+                    ? "GitHub rejected the workflow request (422). It may not support manual runs on this branch, or required workflow inputs are missing."
+                    : http422.Message,
             HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } =>
                 "Rate limited (429). Too many requests to GitHub. Try again later.",
             HttpRequestException { StatusCode: HttpStatusCode.ServiceUnavailable } =>
                 "GitHub service unavailable (503). Try again later.",
             HttpRequestException httpEx =>
-                $"GitHub API error: {httpEx.Message}",
+                string.IsNullOrWhiteSpace(httpEx.Message)
+                    ? "GitHub API request failed."
+                    : httpEx.Message,
+            OperationCanceledException =>
+                "The operation was cancelled (for example, refresh was interrupted). Try Run again or use Refresh.",
             _ => ex.Message
         };
 
