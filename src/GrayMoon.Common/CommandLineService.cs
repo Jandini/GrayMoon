@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Common;
@@ -9,6 +10,8 @@ namespace GrayMoon.Common;
 /// </summary>
 public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICommandLineService
 {
+    private const int MaxLoggedStreamLength = 8_000;
+
     public async Task<CommandLineResult> RunAsync(
         string fileName,
         string arguments,
@@ -44,8 +47,14 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
             process.StandardInput.Close();
         }
 
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        var stdoutTask = ConsumeStreamAsync(
+            process.StandardOutput,
+            line => logger.LogDebug("Command stdout ({Executable}): {Line}", fileName, TruncateForLog(LogSafe.ForLog(line))),
+            cancellationToken);
+        var stderrTask = ConsumeStreamAsync(
+            process.StandardError,
+            line => logger.LogDebug("Command stderr ({Executable}): {Line}", fileName, TruncateForLog(LogSafe.ForLog(line))),
+            cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
@@ -53,5 +62,34 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
 
         logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode={ExitCode})", fileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds, process.ExitCode);
         return new CommandLineResult(process.ExitCode, stdout, stderr);
+    }
+
+    private static async Task<string> ConsumeStreamAsync(
+        StreamReader reader,
+        Action<string> onLine,
+        CancellationToken cancellationToken)
+    {
+        var sb = new StringBuilder();
+
+        while (true)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null)
+                break;
+
+            sb.AppendLine(line);
+            onLine(line);
+        }
+
+        return sb.ToString();
+    }
+
+    private static string TruncateForLog(string text)
+    {
+        if (text.Length <= MaxLoggedStreamLength)
+            return text;
+
+        var omitted = text.Length - MaxLoggedStreamLength;
+        return $"{text[..MaxLoggedStreamLength]} ... (truncated, {omitted} chars omitted)";
     }
 }
