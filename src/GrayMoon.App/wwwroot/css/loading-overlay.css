@@ -168,16 +168,26 @@
   background: rgba(0, 0, 0, 0.42) !important;
 }
 
-.actions-gha-terminal .loading-overlay-terminal__prefix {
-  color: rgba(95, 102, 98, 0.7) !important;
+/*
+ * GHA stream colors must beat WorkspaceActions running-row td { color: light gray } inheritance.
+ * Yellow worked because .loading-overlay-terminal--scheme-yellow added extra selector weight; green (default)
+ * needs :not(.loading-overlay-terminal--scheme-yellow) at equal chain length. Embed lives under tr.actions-row-running-terminal.
+ */
+.grid-page-body .table.actions-table tbody tr.actions-row-running-terminal .actions-gha-terminal .loading-overlay-terminal:not(.loading-overlay-terminal--scheme-yellow) .loading-overlay-terminal__prefix {
+  color: rgba(95, 102, 98, 0.75) !important;
 }
 
-.actions-gha-terminal .loading-overlay-terminal__line--out .loading-overlay-terminal__text {
-  color: rgba(58, 112, 78, 0.88) !important;
+.grid-page-body .table.actions-table tbody tr.actions-row-running-terminal .actions-gha-terminal .loading-overlay-terminal:not(.loading-overlay-terminal--scheme-yellow) .loading-overlay-terminal__line--out .loading-overlay-terminal__text {
+  /* Match overlay green stdout (.loading-overlay-terminal__line--out) */
+  color: rgba(120, 210, 150, 0.88) !important;
 }
 
-.actions-gha-terminal .loading-overlay-terminal--scheme-yellow .loading-overlay-terminal__line--out .loading-overlay-terminal__text {
-  color: rgba(130, 108, 40, 0.85) !important;
+.grid-page-body .table.actions-table tbody tr.actions-row-running-terminal .actions-gha-terminal .loading-overlay-terminal--scheme-yellow .loading-overlay-terminal__prefix {
+  color: rgba(95, 102, 98, 0.75) !important;
+}
+
+.grid-page-body .table.actions-table tbody tr.actions-row-running-terminal .actions-gha-terminal .loading-overlay-terminal--scheme-yellow .loading-overlay-terminal__line--out .loading-overlay-terminal__text {
+  color: rgba(220, 190, 72, 0.9) !important;
 }
 
 /* Brand at top-left of overlay – same position and font as sidebar header; above full-height terminal */
