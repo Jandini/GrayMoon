@@ -55,7 +55,6 @@
 
 .actions-gha-terminal__caption-steps {
     flex-shrink: 0;
-    color: rgba(168, 178, 172, 0.95);
     text-align: right;
 }
 
@@ -67,10 +66,6 @@
 
 .loading-overlay-terminal--scheme-yellow .actions-gha-terminal__caption-prefix {
     color: rgba(230, 200, 90, 0.92);
-}
-
-.actions-gha-terminal__caption-text {
-    color: rgba(188, 196, 190, 0.96);
 }
 
 .actions-gha-terminal__scroll.loading-overlay-terminal__inner {

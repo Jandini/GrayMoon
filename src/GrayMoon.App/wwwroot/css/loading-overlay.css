@@ -155,6 +155,31 @@
   color: rgba(220, 190, 72, 0.88);
 }
 
+/*
+ * Workspace Actions: embedded GHA live terminal (GhaWorkflowLiveTerminal).
+ * Global selectors — Blazor scoped CSS from the component bundle does not reliably override these rules.
+ */
+.actions-gha-terminal .actions-gha-terminal__caption-text,
+.actions-gha-terminal .actions-gha-terminal__caption-steps {
+  color: rgba(248, 250, 252, 0.98) !important;
+}
+
+.actions-gha-terminal .actions-gha-terminal__scroll.loading-overlay-terminal__inner {
+  background: rgba(0, 0, 0, 0.42) !important;
+}
+
+.actions-gha-terminal .loading-overlay-terminal__prefix {
+  color: rgba(95, 102, 98, 0.7) !important;
+}
+
+.actions-gha-terminal .loading-overlay-terminal__line--out .loading-overlay-terminal__text {
+  color: rgba(58, 112, 78, 0.88) !important;
+}
+
+.actions-gha-terminal .loading-overlay-terminal--scheme-yellow .loading-overlay-terminal__line--out .loading-overlay-terminal__text {
+  color: rgba(130, 108, 40, 0.85) !important;
+}
+
 /* Brand at top-left of overlay – same position and font as sidebar header; above full-height terminal */
 .loading-overlay__brand {
   position: absolute;
