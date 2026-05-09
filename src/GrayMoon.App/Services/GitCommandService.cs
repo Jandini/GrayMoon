@@ -24,18 +24,31 @@ public class GitCommandService(ILogger<GitCommandService> logger, ICommandLineSe
             Directory.CreateDirectory(workingDirectory);
         }
 
-        var arguments = BuildCloneArguments(cloneUrl, bearerToken);
-
         try
         {
-            var result = await commandLine.RunAsync("git", arguments, workingDirectory, null, cancellationToken, streamStderrAsStdout: true, mirrorFailureOutputAsStderr: true);
+            var plainArgs = BuildPlainCloneArguments(cloneUrl);
+            var result = await commandLine.RunAsync("git", plainArgs, workingDirectory, null, cancellationToken, streamStderrAsStdout: true, mirrorFailureOutputAsStderr: true);
 
             if (result.ExitCode == -1)
             {
                 logger.LogError("Failed to start git process.");
                 return false;
             }
-            if (result.ExitCode != 0)
+
+            if (result.ExitCode == 0)
+            {
+                logger.LogInformation("Git clone completed (host credentials): {Url} into {Directory}", cloneUrl, workingDirectory);
+                return true;
+            }
+
+            logger.LogInformation(
+                "Git clone without inline auth failed (ExitCode={ExitCode}). {Detail}",
+                result.ExitCode,
+                string.IsNullOrWhiteSpace(bearerToken)
+                    ? "No app token; not retrying with inline auth."
+                    : "Retrying with app-supplied token.");
+
+            if (string.IsNullOrWhiteSpace(bearerToken))
             {
                 logger.LogWarning("Git clone failed with exit code {ExitCode}. Stdout: {Stdout} Stderr: {Stderr}",
                     result.ExitCode,
@@ -44,7 +57,24 @@ public class GitCommandService(ILogger<GitCommandService> logger, ICommandLineSe
                 return false;
             }
 
-            logger.LogInformation("Git clone completed: {Url} into {Directory}", cloneUrl, workingDirectory);
+            var tokenArgs = BuildTokenAuthenticatedCloneArguments(cloneUrl, bearerToken);
+            result = await commandLine.RunAsync("git", tokenArgs, workingDirectory, null, cancellationToken, streamStderrAsStdout: true, mirrorFailureOutputAsStderr: true);
+
+            if (result.ExitCode == -1)
+            {
+                logger.LogError("Failed to start git process (token fallback).");
+                return false;
+            }
+            if (result.ExitCode != 0)
+            {
+                logger.LogWarning("Git clone failed with exit code {ExitCode} after token fallback. Stdout: {Stdout} Stderr: {Stderr}",
+                    result.ExitCode,
+                    string.IsNullOrWhiteSpace(result.Stdout) ? "(none)" : result.Stdout.Trim(),
+                    string.IsNullOrWhiteSpace(result.Stderr) ? "(none)" : result.Stderr.Trim());
+                return false;
+            }
+
+            logger.LogInformation("Git clone completed (inline token): {Url} into {Directory}", cloneUrl, workingDirectory);
             return true;
         }
         catch (Exception ex)
@@ -118,15 +148,11 @@ public class GitCommandService(ILogger<GitCommandService> logger, ICommandLineSe
         return (result.ExitCode, result.Stdout, result.Stderr);
     }
 
-    /// <summary>
-    /// Builds git clone arguments. When bearerToken is set, uses -c http.extraHeader with Basic auth for private HTTPS repos.
-    /// GitHub expects Basic auth (x-access-token:TOKEN or username:TOKEN), not Bearer, for git clone.
-    /// </summary>
-    private static string BuildCloneArguments(string cloneUrl, string? bearerToken)
-    {
-        if (string.IsNullOrWhiteSpace(bearerToken))
-            return $"clone \"{cloneUrl}\"";
+    private static string BuildPlainCloneArguments(string cloneUrl) => $"clone \"{cloneUrl}\"";
 
+    /// <summary>Uses -c http.extraHeader with Basic auth when host credentials are insufficient. GitHub expects Basic (x-access-token:TOKEN), not Bearer.</summary>
+    private static string BuildTokenAuthenticatedCloneArguments(string cloneUrl, string bearerToken)
+    {
         var credentials = "x-access-token:" + bearerToken;
         var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
         var headerValue = "Authorization: Basic " + base64;

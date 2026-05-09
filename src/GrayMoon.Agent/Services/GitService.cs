@@ -37,18 +37,42 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (!Directory.Exists(workingDir))
             Directory.CreateDirectory(workingDir);
 
-        var args = BuildCloneArguments(cloneUrl, bearerToken);
+        var plainArgs = BuildPlainCloneArguments(cloneUrl);
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await CloneRetryPipeline.ExecuteAsync(
-            async (cancellationToken) => await RunProcessAsync("git", args, workingDir, cancellationToken),
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", plainArgs, workingDir, ct);
+        sw.Stop();
+        if (exitCode == 0)
+        {
+            logger.LogInformation("Git clone completed in {ElapsedMs}ms (host credentials): {Url} -> {Dir}", sw.ElapsedMilliseconds, cloneUrl, workingDir);
+            return true;
+        }
+
+        logger.LogInformation(
+            "Git clone without inline auth failed in {ElapsedMs}ms (ExitCode={ExitCode}). {Detail}",
+            sw.ElapsedMilliseconds,
+            exitCode,
+            string.IsNullOrWhiteSpace(bearerToken)
+                ? "No app token; not retrying with inline auth."
+                : "Retrying with app-supplied token.");
+
+        if (string.IsNullOrWhiteSpace(bearerToken))
+        {
+            logger.LogError("Git clone failed. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", exitCode, stdout, stderr);
+            return false;
+        }
+
+        var tokenArgs = BuildTokenAuthenticatedCloneArguments(cloneUrl, bearerToken);
+        sw.Restart();
+        (exitCode, stdout, stderr) = await CloneRetryPipeline.ExecuteAsync(
+            async (cancellationToken) => await RunProcessAsync("git", tokenArgs, workingDir, cancellationToken),
             ct);
         sw.Stop();
         if (exitCode != 0)
         {
-            logger.LogError("Git clone failed after retries in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, exitCode, stdout, stderr);
+            logger.LogError("Git clone failed after token fallback and retries in {ElapsedMs}ms. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, exitCode, stdout, stderr);
             return false;
         }
-        logger.LogInformation("Git clone completed in {ElapsedMs}ms: {Url} -> {Dir}", sw.ElapsedMilliseconds, cloneUrl, workingDir);
+        logger.LogInformation("Git clone completed in {ElapsedMs}ms (inline token): {Url} -> {Dir}", sw.ElapsedMilliseconds, cloneUrl, workingDir);
         return true;
     }
 
@@ -1095,10 +1119,11 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
 
-    private static string BuildCloneArguments(string cloneUrl, string? bearerToken)
+    private static string BuildPlainCloneArguments(string cloneUrl) => $"clone \"{cloneUrl}\"";
+
+    /// <summary>Uses -c http.extraHeader with Basic auth for private HTTPS repos when host credentials are insufficient.</summary>
+    private static string BuildTokenAuthenticatedCloneArguments(string cloneUrl, string bearerToken)
     {
-        if (string.IsNullOrWhiteSpace(bearerToken))
-            return $"clone \"{cloneUrl}\"";
         var credentials = "x-access-token:" + bearerToken;
         var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
         var headerValue = "Authorization: Basic " + base64;
