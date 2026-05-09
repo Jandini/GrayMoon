@@ -55,6 +55,12 @@ public sealed partial class WorkspaceActions : IDisposable
     private const int SyncDebounceMs = 500;
     private const int AutoPollIntervalMs = 5000;
 
+    /// <summary>After dispatch/rerun, GitHub may not list the new run immediately; refresh until we see running or exhaust attempts.</summary>
+    private const int RunWorkflowVisibilityMaxAttempts = 10;
+
+    private const int RunWorkflowVisibilityFirstDelayMs = 2000;
+    private const int RunWorkflowVisibilityRetryDelayMs = 3000;
+
     internal bool HasFailedRows => rows.Any(row =>
         row.WorkflowLines.Any(line =>
             IsLineFailedForBranch(row, line)));
@@ -323,6 +329,70 @@ public sealed partial class WorkspaceActions : IDisposable
         }
     }
 
+    /// <summary>Refreshes the row until the given workflow shows as running with a run id, or max attempts (GitHub listing lag after dispatch/rerun).</summary>
+    private async Task<bool> TryRefreshUntilWorkflowLineRunningAsync(
+        WorkspaceActionRow row,
+        long workflowId,
+        string operationLabel,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; attempt <= RunWorkflowVisibilityMaxAttempts; attempt++)
+        {
+            var delayMs = attempt == 1 ? RunWorkflowVisibilityFirstDelayMs : RunWorkflowVisibilityRetryDelayMs;
+            try
+            {
+                await Task.Delay(delayMs, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+
+            await RefreshRowAsync(row, cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(row.ErrorMessage))
+            {
+                Logger.LogWarning(
+                    "{Operation}: refresh failed for row after attempt {Attempt}; stopping visibility retries",
+                    operationLabel,
+                    attempt);
+                return false;
+            }
+
+            var wfLine = row.WorkflowLines.FirstOrDefault(l => l.Action?.WorkflowId == workflowId);
+            if (wfLine != null
+                && IsLineRunningForBranch(row, wfLine)
+                && (wfLine.Action?.RunId ?? 0) > 0)
+            {
+                Logger.LogInformation(
+                    "{Operation}: GitHub shows running workflow after attempt {Attempt}/{Max} WorkflowId={WorkflowId} RunId={RunId}",
+                    operationLabel,
+                    attempt,
+                    RunWorkflowVisibilityMaxAttempts,
+                    workflowId,
+                    wfLine.Action!.RunId);
+                return true;
+            }
+
+            if (attempt < RunWorkflowVisibilityMaxAttempts)
+            {
+                Logger.LogDebug(
+                    "{Operation}: attempt {Attempt}/{Max} — workflow not running in API yet WorkflowId={WorkflowId}",
+                    operationLabel,
+                    attempt,
+                    RunWorkflowVisibilityMaxAttempts,
+                    workflowId);
+            }
+        }
+
+        Logger.LogWarning(
+            "{Operation}: no running workflow after {Max} refresh attempts WorkflowId={WorkflowId} (run may still be queued; grid will update on next poll)",
+            operationLabel,
+            RunWorkflowVisibilityMaxAttempts,
+            workflowId);
+        return false;
+    }
+
     internal async Task RefreshAllAsync()
     {
         if (workspace == null || rows.Count == 0) return;
@@ -362,13 +432,40 @@ public sealed partial class WorkspaceActions : IDisposable
         try
         {
             var actionEntry = BuildActionEntry(row, line);
+            Logger.LogInformation(
+                "GHA Re-run requested: WorkspaceId={WorkspaceId} Connector={Connector} {Owner}/{Repo} branch={Branch} workflow={WorkflowName} WorkflowId={WorkflowId} RunId={RunId}",
+                WorkspaceId,
+                row.Repo.ConnectorName,
+                actionEntry.Owner,
+                actionEntry.RepositoryName,
+                actionEntry.HeadBranch,
+                actionEntry.WorkflowName,
+                actionEntry.WorkflowId,
+                actionEntry.RunId);
             await GitHubActionsService.RerunWorkflowAsync(actionEntry);
-            await Task.Delay(2000, CancellationToken.None);
-            await RefreshRowAsync(row, CancellationToken.None);
+            var rerunVisible = await TryRefreshUntilWorkflowLineRunningAsync(
+                row,
+                actionEntry.WorkflowId,
+                "GHA Re-run",
+                CancellationToken.None);
+            Logger.LogInformation(
+                "GHA Re-run completed (refresh phase): WorkspaceId={WorkspaceId} {Owner}/{Repo} workflow={WorkflowName} priorRunId={RunId} runningVisible={RunningVisible}",
+                WorkspaceId,
+                actionEntry.Owner,
+                actionEntry.RepositoryName,
+                actionEntry.WorkflowName,
+                actionEntry.RunId,
+                rerunVisible);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error re-running workflow for {Repo}", row.Repo.RepositoryName);
+            Logger.LogError(ex,
+                "GHA Re-run failed: WorkspaceId={WorkspaceId} {Owner}/{Repo} workflow={WorkflowName} RunId={RunId}",
+                WorkspaceId,
+                row.Repo.OrgName,
+                row.Repo.RepositoryName,
+                line.Action?.WorkflowName,
+                line.Action?.RunId);
             row.ErrorMessage = GetFriendlyErrorMessage(ex);
             await InvokeAsync(StateHasChanged);
         }
@@ -391,13 +488,41 @@ public sealed partial class WorkspaceActions : IDisposable
         try
         {
             var actionEntry = BuildActionEntry(row, line);
+            Logger.LogInformation(
+                "GHA Run (workflow_dispatch) requested: WorkspaceId={WorkspaceId} Connector={Connector} {Owner}/{Repo} branch={Branch} workflow={WorkflowName} WorkflowId={WorkflowId}",
+                WorkspaceId,
+                row.Repo.ConnectorName,
+                actionEntry.Owner,
+                actionEntry.RepositoryName,
+                actionEntry.HeadBranch,
+                actionEntry.WorkflowName,
+                actionEntry.WorkflowId);
             await GitHubActionsService.RunWorkflowAsync(actionEntry);
-            await Task.Delay(2000, CancellationToken.None);
-            await RefreshRowAsync(row, CancellationToken.None);
+            var runVisible = await TryRefreshUntilWorkflowLineRunningAsync(
+                row,
+                actionEntry.WorkflowId,
+                "GHA Run",
+                CancellationToken.None);
+            Logger.LogInformation(
+                "GHA Run completed (dispatch + refresh phase): WorkspaceId={WorkspaceId} {Owner}/{Repo} branch={Branch} workflow={WorkflowName} WorkflowId={WorkflowId} runningVisible={RunningVisible}",
+                WorkspaceId,
+                actionEntry.Owner,
+                actionEntry.RepositoryName,
+                actionEntry.HeadBranch,
+                actionEntry.WorkflowName,
+                actionEntry.WorkflowId,
+                runVisible);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error running workflow for {Repo}", row.Repo.RepositoryName);
+            Logger.LogError(ex,
+                "GHA Run failed: WorkspaceId={WorkspaceId} {Owner}/{Repo} branch={Branch} workflow={WorkflowName} WorkflowId={WorkflowId}",
+                WorkspaceId,
+                row.Repo.OrgName,
+                row.Repo.RepositoryName,
+                row.Link.BranchName,
+                line.Action?.WorkflowName,
+                line.Action?.WorkflowId);
             row.ErrorMessage = GetFriendlyErrorMessage(ex);
             await InvokeAsync(StateHasChanged);
         }
@@ -434,6 +559,11 @@ public sealed partial class WorkspaceActions : IDisposable
 
         if (failedPairs.Count == 0) return;
 
+        Logger.LogInformation(
+            "GHA Re-run all failed requested: WorkspaceId={WorkspaceId} count={Count}",
+            WorkspaceId,
+            failedPairs.Count);
+
         _rerunTotal = failedPairs.Count;
         _rerunCompleted = 0;
         isRerunningAll = true;
@@ -448,11 +578,28 @@ public sealed partial class WorkspaceActions : IDisposable
                 try
                 {
                     var actionEntry = BuildActionEntry(pair.Row, pair.Line);
+                    Logger.LogInformation(
+                        "GHA Re-run all: invoking {Owner}/{Repo} workflow={WorkflowName} RunId={RunId}",
+                        actionEntry.Owner,
+                        actionEntry.RepositoryName,
+                        actionEntry.WorkflowName,
+                        actionEntry.RunId);
                     await GitHubActionsService.RerunWorkflowAsync(actionEntry);
+                    Logger.LogInformation(
+                        "GHA Re-run all: API ok {Owner}/{Repo} workflow={WorkflowName} RunId={RunId}",
+                        actionEntry.Owner,
+                        actionEntry.RepositoryName,
+                        actionEntry.WorkflowName,
+                        actionEntry.RunId);
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogError(ex, "Error re-running workflow for {Repo}", pair.Row.Repo.RepositoryName);
+                    Logger.LogError(ex,
+                        "GHA Re-run all item failed: WorkspaceId={WorkspaceId} {Owner}/{Repo} RunId={RunId}",
+                        WorkspaceId,
+                        pair.Row.Repo.OrgName,
+                        pair.Row.Repo.RepositoryName,
+                        pair.Line.Action?.RunId);
                 }
                 finally
                 {
@@ -462,6 +609,10 @@ public sealed partial class WorkspaceActions : IDisposable
                 }
             });
             await Task.WhenAll(tasks);
+            Logger.LogInformation(
+                "GHA Re-run all finished (API phase): WorkspaceId={WorkspaceId} attempted={Count}",
+                WorkspaceId,
+                failedPairs.Count);
         }
         finally
         {
