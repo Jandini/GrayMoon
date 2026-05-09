@@ -1,4 +1,13 @@
 /* Full-page loading overlay with optional Matrix rain canvas */
+/* Terminus woff2 bundled from https://github.com/jmegs/in-the-beginning-was-the-command-line (assets/fonts/terminus.woff2) */
+@font-face {
+  font-family: "GrayMoon Terminus";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/terminus.woff2") format("woff2");
+}
+
 .loading-overlay {
   position: fixed;
   inset: 0;
@@ -26,20 +35,22 @@
   inset: 0;
   width: 100%;
   height: 100%;
+  z-index: 0;
 }
 
 .loading-overlay__veil {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, var(--overlay-dim, 0.45));
+  z-index: 0;
 }
 
-/* Live command log: fills from bottom up to app header (sidebar logo + main top-row are 3.5rem) */
+/* Live command log: full viewport height; brand/header sits above via z-index */
 .loading-overlay-terminal {
   position: absolute;
   left: 0;
   right: 0;
-  top: var(--loading-overlay-top-bar-height, 3.5rem);
+  top: 0;
   bottom: 0;
   height: auto;
   min-height: 0;
@@ -57,21 +68,25 @@
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  /* Extra vertical padding so first/last visible rows stay whole inside the scrollport */
+  /* Start at the top of the page; GrayMoon brand overlays with its own backdrop */
   padding: 0.75rem 0.65rem 0.65rem;
+  scroll-padding-top: 0.35rem;
   border: none;
   border-radius: 0;
   /* Same stack as overlay: no extra dimming layer (simple 0.7 / matrix veil already behind) */
   background: transparent;
   box-shadow: none;
-  /* System / classic terminal mono stack (CRT-ish, not UI sans) */
-  font-family: ui-monospace, "Cascadia Mono", "Cascadia Code", "Segoe UI Mono",
-    "Liberation Mono", "Menlo", "Monaco", "Consolas", "Courier New", monospace;
-  font-size: 0.72rem;
+  /* Embedded Terminus, then system monospace fallbacks */
+  font-family: "GrayMoon Terminus", "Terminus", "Terminus (TTF)", "xos4 Terminus", "Ubuntu Mono",
+    "Noto Sans Mono", "DejaVu Sans Mono", "Liberation Mono", ui-monospace, "Cascadia Mono",
+    "Cascadia Code", "Segoe UI Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 0.78rem;
+  font-weight: 300;
   line-height: 1.45;
-  letter-spacing: 0.015em;
+  letter-spacing: 0.02em;
   font-variant-ligatures: none;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   scrollbar-width: none;
   -ms-overflow-style: none;
   scroll-padding-block: 0.35rem;
@@ -90,7 +105,7 @@
 
 .loading-overlay-terminal__prefix {
   color: rgba(140, 165, 155, 0.55);
-  font-weight: 600;
+  font-weight: 400;
   margin-right: 0.35rem;
 }
 
@@ -111,17 +126,18 @@
   text-shadow: 0 0 12px rgba(255, 60, 60, 0.22);
 }
 
-/* Brand at top-left of overlay – same position and font as sidebar header */
+/* Brand at top-left of overlay – same position and font as sidebar header; above full-height terminal */
 .loading-overlay__brand {
   position: absolute;
   top: 0;
   left: 0;
-  height: 3.5rem;
+  height: var(--loading-overlay-top-bar-height, 3.5rem);
   display: flex;
   align-items: center;
   justify-content: flex-start;
   padding-left: 0.75rem;
-  z-index: 2;
+  padding-right: 1rem;
+  z-index: 3;
   color: var(--text-primary, #cccccc);
   pointer-events: none;
 }
@@ -135,7 +151,13 @@
 .loading-overlay__brand .navbar-brand-title {
   font-family: "Cinzel", "Helvetica Neue", Helvetica, Arial, sans-serif;
   letter-spacing: 0.02em;
-  text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000;
+  /* Outline + soft halo so “GrayMoon” stays readable over terminal colors */
+  text-shadow:
+    -1px 0 0 #000,
+    1px 0 0 #000,
+    0 -1px 0 #000,
+    0 1px 0 #000,
+    0 0 10px rgba(0, 0, 0, 0.85);
   font-size: 1.35rem;
   line-height: 1;
 }
@@ -144,6 +166,7 @@
   height: 20px;
   width: 20px;
   display: block;
+  filter: drop-shadow(0 0 1px #000) drop-shadow(0 0 4px rgba(0, 0, 0, 0.75));
 }
 
 /* Content (spinner, message, abort) above canvas and veil – no panel, transparent */
@@ -152,7 +175,7 @@
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  z-index: 2;
+  z-index: 3;
   display: flex;
   flex-direction: column;
   align-items: center;
