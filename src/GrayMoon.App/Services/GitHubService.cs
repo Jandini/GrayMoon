@@ -230,6 +230,23 @@ public class GitHubService : IConnectorService
         return response?.WorkflowRuns ?? new List<GitHubWorkflowRunDto>();
     }
 
+    /// <summary>Lists jobs for a workflow run (steps, status).</summary>
+    public async Task<GitHubWorkflowJobsResponse?> GetWorkflowRunJobsAsync(Connector connector, string owner, string repo, long runId, CancellationToken cancellationToken = default)
+    {
+        EnsureConnectorConfigured(connector);
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+        if (runId <= 0)
+            throw new ArgumentException("Run id is required.", nameof(runId));
+
+        return await GetAsync<GitHubWorkflowJobsResponse>(
+            connector,
+            $"repos/{owner}/{repo}/actions/runs/{runId}/jobs?per_page=100",
+            cancellationToken);
+    }
+
     public async Task RerunWorkflowRunAsync(Connector connector, string owner, string repo, long runId)
     {
         EnsureConnectorConfigured(connector);

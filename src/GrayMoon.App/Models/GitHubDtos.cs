@@ -49,6 +49,9 @@ public class GitHubWorkflowDto
     [JsonPropertyName("path")]
     public string Path { get; set; } = string.Empty;
 
+    [JsonPropertyName("html_url")]
+    public string HtmlUrl { get; set; } = string.Empty;
+
     [JsonPropertyName("state")]
     public string State { get; set; } = string.Empty;
 }
@@ -93,6 +96,49 @@ public class GitHubWorkflowRunsResponse
 {
     [JsonPropertyName("workflow_runs")]
     public List<GitHubWorkflowRunDto> WorkflowRuns { get; set; } = new();
+}
+
+/// <summary>GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs</summary>
+public sealed class GitHubWorkflowJobsResponse
+{
+    [JsonPropertyName("total_count")]
+    public int TotalCount { get; set; }
+
+    [JsonPropertyName("jobs")]
+    public List<GitHubWorkflowJobDto> Jobs { get; set; } = new();
+}
+
+public sealed class GitHubWorkflowJobDto
+{
+    [JsonPropertyName("id")]
+    public long Id { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+
+    [JsonPropertyName("conclusion")]
+    public string? Conclusion { get; set; }
+
+    [JsonPropertyName("steps")]
+    public List<GitHubWorkflowJobStepDto> Steps { get; set; } = new();
+}
+
+public sealed class GitHubWorkflowJobStepDto
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+
+    [JsonPropertyName("conclusion")]
+    public string? Conclusion { get; set; }
+
+    [JsonPropertyName("number")]
+    public long Number { get; set; }
 }
 
 /// <summary>Single file from GET /repos/{owner}/{repo}/contents/{path}.</summary>

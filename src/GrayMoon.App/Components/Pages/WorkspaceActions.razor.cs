@@ -381,6 +381,7 @@ public sealed partial class WorkspaceActions : IDisposable
     internal async Task RunWorkflowAsync(WorkspaceActionRow row, WorkflowActionLine line)
     {
         if (line.Action?.WorkflowId == null) return;
+        if (IsLineRunningForBranch(row, line)) return;
 
         row.ErrorMessage = null;
         line.RunInProgress = true;
@@ -553,6 +554,25 @@ public sealed partial class WorkspaceActions : IDisposable
         (line.Action?.SupportsWorkflowDispatch ?? false) &&
         (line.Action?.WorkflowId ?? 0) > 0 &&
         !string.IsNullOrWhiteSpace(row.Link.BranchName);
+
+    /// <summary>True when Run should be non-interactive: dispatch in flight or latest run still in progress on GitHub.</summary>
+    internal static bool IsRunWorkflowBusy(WorkspaceActionRow row, WorkflowActionLine line) =>
+        line.RunInProgress || IsLineRunningForBranch(row, line);
+
+    /// <summary>GitHub Actions workflow page (not a specific run); uses persisted <see cref="ActionStatusInfo.WorkflowHtmlUrl"/> or builds from repo + workflow id.</summary>
+    internal static string? GetWorkflowPageUrl(WorkspaceActionRow row, WorkflowActionLine line)
+    {
+        if (line.Action == null)
+            return null;
+        return RepositoryUrlHelper.BuildWorkflowPageUrl(
+            line.Action.WorkflowHtmlUrl,
+            row.Repo.CloneUrl,
+            row.Repo.OrgName,
+            row.Repo.RepositoryName,
+            line.Action.WorkflowId ?? 0,
+            line.Action.WorkflowPath,
+            null);
+    }
 
     internal static IEnumerable<WorkflowActionLine> LinesForDisplay(WorkspaceActionRow row)
     {

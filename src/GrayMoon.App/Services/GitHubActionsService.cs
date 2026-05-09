@@ -175,12 +175,22 @@ public class GitHubActionsService(
             {
                 latestByWorkflowId.TryGetValue(wf.Id, out var run);
                 var supportsDispatch = dispatchById.GetValueOrDefault(wf.Id, false);
+                var workflowPageUrl = RepositoryUrlHelper.BuildWorkflowPageUrl(
+                    wf.HtmlUrl,
+                    repository.CloneUrl,
+                    owner,
+                    repoName,
+                    wf.Id,
+                    wf.Path,
+                    connector.ApiBaseUrl);
                 result.Add(ToPerWorkflowActionStatus(
                     branch,
                     wf.Id,
                     wf.Name,
                     run,
                     supportsDispatch,
+                    workflowPageUrl,
+                    wf.Path,
                     owner,
                     repoName,
                     repository.CloneUrl,
@@ -196,12 +206,22 @@ public class GitHubActionsService(
                     ? null
                     : await gitHubService.GetRepositoryFileUtf8TextAsync(connector, owner, repoName, meta.Path, cancellationToken);
                 var supportsDispatch = YamlAppearsToHaveWorkflowDispatch(yaml);
+                var workflowPageUrl = RepositoryUrlHelper.BuildWorkflowPageUrl(
+                    meta?.HtmlUrl,
+                    repository.CloneUrl,
+                    owner,
+                    repoName,
+                    run.WorkflowId,
+                    meta?.Path,
+                    connector.ApiBaseUrl);
                 result.Add(ToPerWorkflowActionStatus(
                     branch,
                     run.WorkflowId,
                     run.Name,
                     run,
                     supportsDispatch,
+                    workflowPageUrl,
+                    meta?.Path,
                     owner,
                     repoName,
                     repository.CloneUrl,
@@ -227,6 +247,8 @@ public class GitHubActionsService(
         string workflowName,
         GitHubWorkflowRunDto? run,
         bool supportsWorkflowDispatch,
+        string? workflowPageUrl,
+        string? workflowFilePath,
         string owner,
         string repoName,
         string cloneUrl,
@@ -240,6 +262,8 @@ public class GitHubActionsService(
                 BranchName = branch,
                 WorkflowId = workflowId,
                 WorkflowName = workflowName,
+                WorkflowHtmlUrl = workflowPageUrl,
+                WorkflowPath = workflowFilePath,
                 SupportsWorkflowDispatch = supportsWorkflowDispatch
             };
         }
@@ -266,6 +290,8 @@ public class GitHubActionsService(
             RunId = run.Id,
             WorkflowId = workflowId,
             WorkflowName = displayName,
+            WorkflowHtmlUrl = workflowPageUrl,
+            WorkflowPath = workflowFilePath,
             SupportsWorkflowDispatch = supportsWorkflowDispatch
         };
     }

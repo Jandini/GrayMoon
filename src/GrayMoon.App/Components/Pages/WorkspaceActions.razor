@@ -118,8 +118,13 @@
                                         {
                                             var line = displayLines[li];
                                             var firstLine = li == 0;
-                                            var isLastInRepo = li == displayLines.Count - 1;
-                                            var trClass = $"{stripeClass} actions-data-row" + (isLastInRepo ? " actions-row-repo-end" : "") + (firstLine && row.ErrorMessage != null ? " actions-error-row" : "");
+                                            var isLastWorkflowLineInRepo = li == displayLines.Count - 1;
+                                            var showGhaTerminal = string.IsNullOrWhiteSpace(row.ErrorMessage)
+                                                && IsLineRunningForBranch(row, line)
+                                                && (line.Action?.RunId ?? 0) > 0;
+                                            var repoEndOnDataRow = isLastWorkflowLineInRepo && !showGhaTerminal;
+                                            var repoEndOnGhaRow = isLastWorkflowLineInRepo && showGhaTerminal;
+                                            var trClass = $"{stripeClass} actions-data-row" + (repoEndOnDataRow ? " actions-row-repo-end" : "") + (firstLine && row.ErrorMessage != null ? " actions-error-row" : "");
                                             <tr class="@trClass">
                                                 <td class="col-repo">
                                                     @if (firstLine)
@@ -153,7 +158,16 @@
                                                 <td class="col-workflow">
                                                     @if (!string.IsNullOrWhiteSpace(line.Action?.WorkflowName))
                                                     {
-                                                        <span class="text-muted">@line.Action!.WorkflowName</span>
+                                                        var workflowUrl = GetWorkflowPageUrl(row, line);
+                                                        @if (!string.IsNullOrWhiteSpace(workflowUrl))
+                                                        {
+                                                            <a href="@workflowUrl" target="_blank" rel="noopener noreferrer"
+                                                               class="actions-workflow-link" title="Open workflow on GitHub">@line.Action!.WorkflowName</a>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="text-muted">@line.Action!.WorkflowName</span>
+                                                        }
                                                     }
                                                     else
                                                     {
@@ -200,8 +214,8 @@
                                                         {
                                                             <button class="btn btn-outline-primary action-run-btn"
                                                                     @onclick="() => RunWorkflowAsync(row, line)"
-                                                                    disabled="@line.RunInProgress"
-                                                                    title="Run workflow: @line.Action?.WorkflowName">
+                                                                    disabled="@IsRunWorkflowBusy(row, line)"
+                                                                    title="@(IsLineRunningForBranch(row, line) ? "This workflow is already running for this branch." : $"Run workflow: {line.Action?.WorkflowName}")">
                                                                 @if (line.RunInProgress)
                                                                 {
                                                                     <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
@@ -215,6 +229,19 @@
                                                     }
                                                 </td>
                                             </tr>
+                                            @if (showGhaTerminal)
+                                            {
+                                                <tr class="@($"{stripeClass} actions-gha-feed-row actions-data-row{(repoEndOnGhaRow ? " actions-row-repo-end" : "")}")">
+                                                    <td colspan="5" class="p-0 border-0">
+                                                        <GhaWorkflowLiveTerminal @key="@($"{row.Repo.RepositoryId}-{(line.Action?.WorkflowId ?? 0)}-{(line.Action?.RunId ?? 0)}")"
+                                                                                 ConnectorName="@row.Repo.ConnectorName"
+                                                                                 Owner="@(row.Repo.OrgName ?? "")"
+                                                                                 RepositoryName="@row.Repo.RepositoryName"
+                                                                                 RunId="@(line.Action!.RunId!.Value)"
+                                                                                 WorkflowDisplayName="@line.Action.WorkflowName" />
+                                                    </td>
+                                                </tr>
+                                            }
                                         }
 
                                         groupIndex++;
