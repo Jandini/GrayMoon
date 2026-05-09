@@ -2,9 +2,11 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading.Channels;
 using GrayMoon.Abstractions.Agent;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs;
+using GrayMoon.Common;
 using Microsoft.AspNetCore.SignalR.Client;
 using Polly;
 using Microsoft.Extensions.Hosting;
@@ -23,7 +25,10 @@ public sealed class JobBackgroundService(
     ILogger<JobBackgroundService> logger) : BackgroundService
 {
     private readonly int _maxConcurrent = Math.Max(1, options.Value.MaxConcurrentCommands);
+    private const int MaxCommandStreamLineLength = 4096;
     private readonly ResiliencePipeline _responseSendPipeline = ResponseCommandSendPipeline.Create(logger);
+
+    private readonly record struct PendingStreamLine(AgentCommandStreamKind Kind, string Text);
 
     /// <summary>Matches hub JSON style enough for a useful byte-size estimate of the <see cref="AgentCommandResponse"/> argument.</summary>
     private static readonly JsonSerializerOptions ResponsePayloadSizeJsonOptions = new()
@@ -91,12 +96,92 @@ public sealed class JobBackgroundService(
     private async Task ProcessCommandAsync(ICommandJob job, CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
-        var result = await dispatcher.ExecuteAsync(job.Command, job.Request, ct);
+        object? result;
+        var connection = hubProvider.Connection;
+        if (connection is { State: HubConnectionState.Connected })
+        {
+            var streamLabel = CommandJobStreamLabel.Resolve(job.Command, job.Request);
+            var channel = Channel.CreateUnbounded<PendingStreamLine>();
+            var writer = channel.Writer;
+            var sendTask = SendCommandOutputLoopAsync(connection, job.RequestId, streamLabel, channel.Reader, ct);
+            try
+            {
+                using (new CommandLineStreamScope(e =>
+                {
+                    var text = TruncateStreamText(e.Text);
+                    writer.TryWrite(new PendingStreamLine(e.Kind, text));
+                }))
+                {
+                    result = await dispatcher.ExecuteAsync(job.Command, job.Request, ct);
+                }
+            }
+            finally
+            {
+                writer.Complete();
+                try
+                {
+                    await sendTask.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // shutdown / cancel
+                }
+            }
+        }
+        else
+        {
+            result = await dispatcher.ExecuteAsync(job.Command, job.Request, ct);
+        }
+
         sw.Stop();
         var (success, error) = GetCommandSuccessAndError(result);
         logger.LogInformation("ResponseCommand {RequestId} completed ({Command}) in {ElapsedMs}ms", job.RequestId, job.Command, sw.ElapsedMilliseconds);
         logger.LogTrace("ResponseCommand {RequestId} response content: {@ResponseBody}", job.RequestId, result);
         await SendResponseAsync(job.RequestId, job.Command, new AgentCommandResponse(success, result, error), ct);
+    }
+
+    private async Task SendCommandOutputLoopAsync(
+        HubConnection connection,
+        string requestId,
+        string? streamLabel,
+        ChannelReader<PendingStreamLine> reader,
+        CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var item in reader.ReadAllAsync(ct).ConfigureAwait(false))
+            {
+                try
+                {
+                    if (connection.State != HubConnectionState.Connected)
+                        break;
+
+                    await connection
+                        .InvokeAsync(AgentHubMethods.CommandOutput, requestId, streamLabel, (int)item.Kind, item.Text, ct)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogDebug(ex, "CommandOutput send failed for {RequestId}", requestId);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // normal on cancel
+        }
+    }
+
+    private static string TruncateStreamText(string text)
+    {
+        if (text.Length <= MaxCommandStreamLineLength)
+            return text;
+
+        return string.Concat(text.AsSpan(0, MaxCommandStreamLineLength), " …");
     }
 
     /// <summary>If result has a Success property that is false, return (false, ErrorMessage); otherwise (true, null).</summary>

@@ -9,11 +9,16 @@ public static class AgentResponseDelivery
     private sealed record PendingRequest(
         TaskCompletionSource<AgentCommandResponse> Completion,
         CancellationTokenRegistration Registration,
-        CancellationTokenSource TimeoutCts);
+        CancellationTokenSource TimeoutCts,
+        Action<AgentCommandStreamLine>? OnStreamLine);
 
     private static readonly ConcurrentDictionary<string, PendingRequest> Pending = new();
 
-    public static Task<AgentCommandResponse> WaitAsync(string requestId, TimeSpan timeout, CancellationToken cancellationToken)
+    public static Task<AgentCommandResponse> WaitAsync(
+        string requestId,
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        Action<AgentCommandStreamLine>? onStreamLine = null)
     {
         var completion = new TaskCompletionSource<AgentCommandResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
         var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -38,7 +43,7 @@ public static class AgentResponseDelivery
 
         });
 
-        if (!Pending.TryAdd(requestId, new PendingRequest(completion, registration, timeoutCts)))
+        if (!Pending.TryAdd(requestId, new PendingRequest(completion, registration, timeoutCts, onStreamLine)))
         {
             registration.Dispose();
             timeoutCts.Dispose();
@@ -46,6 +51,15 @@ public static class AgentResponseDelivery
         }
 
         return completion.Task;
+    }
+
+    /// <summary>Invoked from <see cref="Hubs.AgentHub"/> when the agent pushes a streamed line for a pending request.</summary>
+    public static void ReportStreamLine(string requestId, AgentCommandStreamLine line)
+    {
+        if (!Pending.TryGetValue(requestId, out var pending))
+            return;
+
+        pending.OnStreamLine?.Invoke(line);
     }
 
     public static void Complete(string requestId, AgentCommandResponse response)

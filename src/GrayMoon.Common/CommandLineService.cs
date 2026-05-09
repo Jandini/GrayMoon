@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using GrayMoon.Abstractions.Agent;
 using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Common;
@@ -26,6 +27,8 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
             fileName,
             LogSafe.ForLog(arguments),
             cwd);
+
+        ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.CommandLine, $"$ {fileName} {LogSafe.ForLog(arguments)}"));
 
         var startInfo = new ProcessStartInfo
         {
@@ -55,11 +58,19 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
 
         var stdoutTask = ConsumeStreamAsync(
             process.StandardOutput,
-            segment => logger.LogDebug("Command stdout ({Executable}): {Segment}", fileName, TruncateForLog(LogSafe.ForLog(segment))),
+            segment =>
+            {
+                logger.LogDebug("Command stdout ({Executable}): {Segment}", fileName, TruncateForLog(LogSafe.ForLog(segment)));
+                ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.Stdout, segment));
+            },
             cancellationToken);
         var stderrTask = ConsumeStreamAsync(
             process.StandardError,
-            segment => logger.LogDebug("Command stderr ({Executable}): {Segment}", fileName, TruncateForLog(LogSafe.ForLog(segment))),
+            segment =>
+            {
+                logger.LogDebug("Command stderr ({Executable}): {Segment}", fileName, TruncateForLog(LogSafe.ForLog(segment)));
+                ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.Stderr, segment));
+            },
             cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         var stdout = await stdoutTask;
@@ -136,5 +147,21 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
 
         var omitted = text.Length - MaxLoggedStreamLength;
         return $"{text[..MaxLoggedStreamLength]} ... (truncated, {omitted} chars omitted)";
+    }
+
+    private static void ReportAmbient(CommandLineStreamEvent e)
+    {
+        var sink = CommandLineStreamAmbient.Current.Value;
+        if (sink == null)
+            return;
+
+        try
+        {
+            sink(e);
+        }
+        catch
+        {
+            // Streaming must not break process execution
+        }
     }
 }

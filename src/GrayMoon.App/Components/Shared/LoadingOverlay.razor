@@ -1,6 +1,8 @@
+@using GrayMoon.Abstractions.Agent
 @inject IJSRuntime JS
 @inject MatrixOverlayPreferenceService MatrixPreference
 @inject AgentQueueStateService AgentQueueStateService
+@inject OverlayCommandTerminalService CommandTerminal
 @implements IAsyncDisposable
 @implements IDisposable
 
@@ -9,6 +11,19 @@
     {
         <canvas id="@_canvasId" class="matrix-canvas"></canvas>
         <div class="loading-overlay__veil"></div>
+    }
+    @if (IsVisible && ShowCommandTerminal)
+    {
+        <div class="loading-overlay-terminal" aria-hidden="true">
+            <div @ref="_terminalScroll" class="loading-overlay-terminal__inner">
+                @foreach (var line in _terminalLines)
+                {
+                    <p class="loading-overlay-terminal__line loading-overlay-terminal__line--@KindCss(line.Kind)">
+                        <span class="loading-overlay-terminal__prefix">[@(string.IsNullOrWhiteSpace(line.StreamLabel) ? "agent" : line.StreamLabel)]</span><span class="loading-overlay-terminal__text">@line.Text</span>
+                    </p>
+                }
+            </div>
+        </div>
     }
     <div class="loading-overlay__brand">
         <span class="navbar-brand-content">
@@ -62,7 +77,15 @@
     /// <summary>When true, show task count inside spinner. Default false.</summary>
     [Parameter] public bool ShowTaskCountInSpinner { get; set; } = false;
 
+    /// <summary>When true, show the live agent command terminal strip at the bottom while visible.</summary>
+    [Parameter] public bool ShowCommandTerminal { get; set; } = true;
+
     private int DisplayTaskCount => !IsVisible ? 0 : (PendingAgentTasksCount ?? AgentQueueStateService.GetTotalPendingCount());
+
+    private ElementReference _terminalScroll;
+    private IReadOnlyList<OverlayTerminalLine> _terminalLines = Array.Empty<OverlayTerminalLine>();
+    private int _lastScrolledLineCount = -1;
+    private bool _prevIsVisibleForTerminal;
 
     /// <summary>Dim strength 0..100 (matrix mode only).</summary>
     [Parameter] public int DimOpacityPercent { get; set; } = 45;
@@ -82,10 +105,32 @@
     private bool _wasVisible;
     private bool _wasMatrixEffect;
 
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !_prevIsVisibleForTerminal)
+        {
+            if (AgentQueueStateService.GetTotalPendingCount() == 0)
+                CommandTerminal.Clear();
+
+            _terminalLines = CommandTerminal.GetSnapshot();
+            _lastScrolledLineCount = -1;
+        }
+
+        _prevIsVisibleForTerminal = IsVisible;
+    }
+
     protected override void OnInitialized()
     {
         MatrixPreference.UseMatrixEffectChanged += OnMatrixPreferenceChanged;
         AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
+        CommandTerminal.Changed += OnTerminalChanged;
+        _terminalLines = CommandTerminal.GetSnapshot();
+    }
+
+    private void OnTerminalChanged(object? sender, EventArgs e)
+    {
+        _terminalLines = CommandTerminal.GetSnapshot();
+        _ = InvokeAsync(StateHasChanged);
     }
 
     private void OnQueueStateChanged(object? sender, EventArgs e) => _ = InvokeAsync(StateHasChanged);
@@ -125,7 +170,27 @@
 
         _wasVisible = IsVisible;
         _wasMatrixEffect = useMatrix;
+
+        if (IsVisible && ShowCommandTerminal && _terminalLines.Count != _lastScrolledLineCount)
+        {
+            _lastScrolledLineCount = _terminalLines.Count;
+            try
+            {
+                await JS.InvokeVoidAsync("loadingOverlayTerminal.scrollToEnd", _terminalScroll);
+            }
+            catch (Exception)
+            {
+                // circuit / JS unavailable
+            }
+        }
     }
+
+    private static string KindCss(AgentCommandStreamKind kind) => kind switch
+    {
+        AgentCommandStreamKind.Stderr => "err",
+        AgentCommandStreamKind.CommandLine => "cmd",
+        _ => "out"
+    };
 
     private async Task AbortClicked() => await OnAbort.InvokeAsync();
 
@@ -138,6 +203,7 @@
     {
         MatrixPreference.UseMatrixEffectChanged -= OnMatrixPreferenceChanged;
         AgentQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
+        CommandTerminal.Changed -= OnTerminalChanged;
     }
 
     public async ValueTask DisposeAsync()

@@ -55,6 +55,7 @@ try
     builder.Services.AddScoped<AppSettingRepository>();
     builder.Services.AddSingleton<AgentConnectionTracker>();
     builder.Services.AddSingleton<AgentQueueStateService>();
+    builder.Services.AddSingleton<OverlayCommandTerminalService>();
     builder.Services.AddSingleton<IToastService, ToastService>();
     builder.Services.AddSingleton<MatrixOverlayPreferenceService>();
     builder.Services.AddScoped<SyncCommandHandler>();

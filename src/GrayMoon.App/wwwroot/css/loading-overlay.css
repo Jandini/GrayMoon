@@ -34,6 +34,74 @@
   background: rgba(0, 0, 0, var(--overlay-dim, 0.45));
 }
 
+/* Live command log: bottom dock, above backdrop, below spinner/message */
+.loading-overlay-terminal {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  /* Taller strip so full lines fit (line box not clipped at top of scrollport) */
+  height: 40vh;
+  min-height: 12rem;
+  max-height: 52vh;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  padding: 0 0.5rem 0.35rem;
+  box-sizing: border-box;
+}
+
+.loading-overlay-terminal__inner {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  /* Extra vertical padding so first/last visible rows stay whole inside the scrollport */
+  padding: 0.75rem 0.65rem 0.65rem;
+  border: none;
+  border-radius: 0;
+  /* Same stack as overlay: no extra dimming layer (simple 0.7 / matrix veil already behind) */
+  background: transparent;
+  box-shadow: none;
+  font-family: "Cascadia Mono", "Consolas", "Courier New", monospace;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-padding-block: 0.35rem;
+}
+
+.loading-overlay-terminal__inner::-webkit-scrollbar {
+  display: none;
+}
+
+.loading-overlay-terminal__line {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  padding: 0.06rem 0;
+}
+
+.loading-overlay-terminal__prefix {
+  color: rgba(140, 165, 155, 0.55);
+  font-weight: 600;
+  margin-right: 0.35rem;
+}
+
+.loading-overlay-terminal__line--cmd .loading-overlay-terminal__text {
+  color: rgba(190, 215, 200, 0.82);
+}
+
+.loading-overlay-terminal__line--out .loading-overlay-terminal__text {
+  color: rgba(120, 210, 150, 0.72);
+}
+
+.loading-overlay-terminal__line--err .loading-overlay-terminal__text {
+  color: rgba(235, 160, 120, 0.78);
+}
+
 /* Brand at top-left of overlay – same position and font as sidebar header */
 .loading-overlay__brand {
   position: absolute;
@@ -44,7 +112,7 @@
   align-items: center;
   justify-content: flex-start;
   padding-left: 0.75rem;
-  z-index: 1;
+  z-index: 2;
   color: var(--text-primary, #cccccc);
   pointer-events: none;
 }
@@ -75,7 +143,7 @@
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  z-index: 1;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
