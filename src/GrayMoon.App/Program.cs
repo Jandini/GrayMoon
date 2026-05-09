@@ -59,6 +59,7 @@ try
     builder.Services.AddSingleton<IToastService, ToastService>();
     builder.Services.AddSingleton<MatrixOverlayPreferenceService>();
     builder.Services.AddSingleton<CommandTerminalOverlayPreferenceService>();
+    builder.Services.AddSingleton<LoadingOverlayUiSettingsService>();
     builder.Services.AddScoped<SyncCommandHandler>();
     builder.Services.AddScoped<IAgentBridge, AgentBridge>();
     builder.Services.AddScoped<WorkspaceService>();

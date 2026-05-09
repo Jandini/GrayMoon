@@ -4,17 +4,19 @@
 @using GrayMoon.App.Services
 @inject AppSettingRepository AppSettingRepository
 @inject WorkspaceService WorkspaceService
+@inject CommandTerminalOverlayPreferenceService CommandTerminalOverlayPreference
+@inject LoadingOverlayUiSettingsService LoadingOverlayUiSettings
 
 <PageTitle>Settings - GrayMoon</PageTitle>
 
-<div class="container-fluid page-container grid-page">
+<div class="container-fluid page-container grid-page settings-page">
     <div class="grid-page-header">
         <h2>Settings</h2>
         <p class="text-muted">Configure application settings</p>
     </div>
 
-    <div class="grid-page-body">
-        <div class="card page-card mb-4">
+    <div class="grid-page-body settings-page__scroll">
+        <div class="card page-card mb-4 settings-page__card">
             <div class="card-header">
                 <h5 class="mb-0">Workspace</h5>
             </div>
@@ -64,6 +66,99 @@
                 </div>
             </div>
         </div>
+
+        <div class="card page-card mb-4 settings-terminal-card settings-page__card">
+            <div class="card-header py-3">
+                <div class="d-flex align-items-start gap-3">
+                    <div class="settings-terminal-card__icon rounded-2 d-flex align-items-center justify-content-center flex-shrink-0">
+                        <i class="bi bi-terminal" aria-hidden="true"></i>
+                    </div>
+                    <div>
+                        <h5 class="mb-1">Loading overlay &amp; command terminal</h5>
+                        <p class="text-muted small mb-0">
+                            Changes save immediately. Only command lines and standard output tint switch between green and yellow; errors stay red.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body p-4">
+                <div class="row g-4">
+                    <div class="col-12">
+                        <fieldset class="border-0 m-0 p-0">
+                            <legend class="form-label fw-semibold text-uppercase small text-muted mb-3 letter-spacing-tight">Behavior</legend>
+                            <div class="row g-3">
+                                <div class="col-12 col-lg-6">
+                                    <label class="d-flex justify-content-between align-items-start gap-3 p-3 rounded-3 settings-terminal-card__row settings-terminal-card__row--clickable h-100 mb-0" for="terminalShowByDefault">
+                                        <div class="min-w-0">
+                                            <span class="fw-medium d-block mb-1">Show command terminal by default</span>
+                                            <p class="text-muted small mb-0">
+                                                When on, the log is visible as soon as the overlay opens. You can still hide it with the icon next to GrayMoon.
+                                            </p>
+                                        </div>
+                                        <div class="form-check form-switch m-0 flex-shrink-0">
+                                            <input class="form-check-input" type="checkbox" role="switch" id="terminalShowByDefault"
+                                                   checked="@terminalShowByDefault"
+                                                   @onchange="OnTerminalShowByDefaultChanged" />
+                                        </div>
+                                    </label>
+                                </div>
+                                <div class="col-12 col-lg-6">
+                                    <label class="d-flex justify-content-between align-items-start gap-3 p-3 rounded-3 settings-terminal-card__row settings-terminal-card__row--clickable h-100 mb-0" for="terminalTransparentBackdrop">
+                                        <div class="min-w-0">
+                                            <span class="fw-medium d-block mb-1">Transparent loading overlay</span>
+                                            <p class="text-muted small mb-0">
+                                                When off, the overlay is solid black with no transparency.
+                                            </p>
+                                        </div>
+                                        <div class="form-check form-switch m-0 flex-shrink-0">
+                                            <input class="form-check-input" type="checkbox" role="switch" id="terminalTransparentBackdrop"
+                                                   checked="@terminalTransparentBackdrop"
+                                                   @onchange="OnTerminalTransparentBackdropChanged" />
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
+                        </fieldset>
+                    </div>
+                    <div class="col-12">
+                        <fieldset class="border-0 m-0 p-0">
+                            <legend class="form-label fw-semibold text-uppercase small text-muted mb-3 letter-spacing-tight">Command &amp; output colors</legend>
+                            <p class="text-muted small mb-3">stderr and error styling are unchanged in both themes.</p>
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <div class="form-check settings-terminal-card__radio settings-terminal-card__radio--green p-3 rounded-3 h-100">
+                                        <input class="form-check-input" type="radio" name="terminalColorScheme" id="terminalScheme_Green"
+                                               checked="@(terminalColorScheme == TerminalColorScheme.Green)"
+                                               @onchange="@(() => OnTerminalColorSchemeChanged(TerminalColorScheme.Green))" />
+                                        <label class="form-check-label w-100" for="terminalScheme_Green">
+                                            <span class="fw-medium d-block">Green</span>
+                                            <span class="settings-terminal-card__swatch settings-terminal-card__swatch--green mt-2" aria-hidden="true"></span>
+                                            <span class="d-block small text-muted mt-2">Cool green for commands and stdout.</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check settings-terminal-card__radio settings-terminal-card__radio--yellow p-3 rounded-3 h-100">
+                                        <input class="form-check-input" type="radio" name="terminalColorScheme" id="terminalScheme_Yellow"
+                                               checked="@(terminalColorScheme == TerminalColorScheme.Yellow)"
+                                               @onchange="@(() => OnTerminalColorSchemeChanged(TerminalColorScheme.Yellow))" />
+                                        <label class="form-check-label w-100" for="terminalScheme_Yellow">
+                                            <span class="fw-medium d-block">Yellow</span>
+                                            <span class="settings-terminal-card__swatch settings-terminal-card__swatch--yellow mt-2" aria-hidden="true"></span>
+                                            <span class="d-block small text-muted mt-2">Gold and amber for commands and stdout.</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </fieldset>
+                    </div>
+                </div>
+                @if (!string.IsNullOrEmpty(terminalPersistError))
+                {
+                    <div class="alert alert-danger py-2 px-3 small mt-3 mb-0" role="alert">@terminalPersistError</div>
+                }
+            </div>
+        </div>
     </div>
 </div>
 
@@ -74,9 +169,59 @@
     private bool? pathValidation;
     private string? pathValidationMessage;
 
+    private bool terminalShowByDefault;
+    private bool terminalTransparentBackdrop = true;
+    private TerminalColorScheme terminalColorScheme = TerminalColorScheme.Green;
+    private string? terminalPersistError;
+
     protected override async Task OnInitializedAsync()
     {
         workspaceRootPath = await AppSettingRepository.GetValueAsync(AppSettingRepository.WorkspaceRootPathKey);
+        await LoadTerminalPreferencesAsync();
+    }
+
+    private async Task LoadTerminalPreferencesAsync()
+    {
+        terminalShowByDefault = await AppSettingRepository.GetBoolAsync(AppSettingRepository.TerminalShowByDefaultKey, defaultValue: false);
+        terminalTransparentBackdrop = await AppSettingRepository.GetBoolAsync(AppSettingRepository.TerminalTransparentBackdropKey, defaultValue: true);
+        terminalColorScheme = await AppSettingRepository.GetTerminalColorSchemeAsync();
+    }
+
+    private async Task OnTerminalShowByDefaultChanged(ChangeEventArgs e)
+    {
+        terminalShowByDefault = e.Value is bool b && b;
+        await PersistTerminalOverlaySettingsAsync();
+    }
+
+    private async Task OnTerminalTransparentBackdropChanged(ChangeEventArgs e)
+    {
+        terminalTransparentBackdrop = e.Value is bool b && b;
+        await PersistTerminalOverlaySettingsAsync();
+    }
+
+    private async Task OnTerminalColorSchemeChanged(TerminalColorScheme scheme)
+    {
+        terminalColorScheme = scheme;
+        await PersistTerminalOverlaySettingsAsync();
+    }
+
+    private async Task PersistTerminalOverlaySettingsAsync()
+    {
+        terminalPersistError = null;
+        try
+        {
+            await AppSettingRepository.SetBoolAsync(AppSettingRepository.TerminalShowByDefaultKey, terminalShowByDefault);
+            await AppSettingRepository.SetBoolAsync(AppSettingRepository.TerminalTransparentBackdropKey, terminalTransparentBackdrop);
+            await AppSettingRepository.SetTerminalColorSchemeAsync(terminalColorScheme);
+
+            CommandTerminalOverlayPreference.IsVisible = terminalShowByDefault;
+            LoadingOverlayUiSettings.TransparentBackdrop = terminalTransparentBackdrop;
+            LoadingOverlayUiSettings.TerminalColorScheme = terminalColorScheme;
+        }
+        catch
+        {
+            terminalPersistError = "Could not save terminal preferences. Check the database and try again.";
+        }
     }
 
     private async Task OnWorkspaceRootKeyDownAsync(KeyboardEventArgs e)

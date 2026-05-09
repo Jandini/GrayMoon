@@ -1,8 +1,12 @@
 @inherits LayoutComponentBase
 @using System.Reflection
 @using GrayMoon.App.Components.Shared
+@using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
 @inject AgentConnectionTracker AgentConnectionTracker
+@inject AppSettingRepository AppSettingRepository
+@inject CommandTerminalOverlayPreferenceService CommandTerminalOverlayPreference
+@inject LoadingOverlayUiSettingsService LoadingOverlayUiSettings
 
 <Toast />
 
@@ -40,7 +44,7 @@
 @code {
     private string? version;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         var informationalVersion = typeof(Program).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
@@ -51,5 +55,12 @@
             : informationalVersion;
 
         AgentConnectionTracker.OnStateChanged((sync) => { _ = InvokeAsync(StateHasChanged); });
+
+        var showTerminal = await AppSettingRepository.GetBoolAsync(AppSettingRepository.TerminalShowByDefaultKey, defaultValue: false);
+        CommandTerminalOverlayPreference.IsVisible = showTerminal;
+
+        var transparent = await AppSettingRepository.GetBoolAsync(AppSettingRepository.TerminalTransparentBackdropKey, defaultValue: true);
+        var scheme = await AppSettingRepository.GetTerminalColorSchemeAsync();
+        LoadingOverlayUiSettings.LoadSilently(transparent, scheme);
     }
 }

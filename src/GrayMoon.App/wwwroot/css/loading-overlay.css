@@ -30,6 +30,20 @@
   background-color: rgba(0, 0, 0, 0.7);
 }
 
+/* Opaque simple overlay: solid black (no app show-through). */
+.loading-overlay--simple.loading-overlay--backdrop-opaque {
+  background-color: #000000;
+}
+
+/*
+ * Opaque + Matrix: do not set veil dim to 1 — that paints solid black over the canvas and hides the rain.
+ * Black fills the overlay behind the canvas so transparent canvas pixels do not reveal the app; veil keeps
+ * using --overlay-dim from matrixOverlay.setDim (e.g. 0.45) so the effect stays visible.
+ */
+.loading-overlay--matrix.loading-overlay--backdrop-opaque {
+  background-color: #000000;
+}
+
 .matrix-canvas {
   position: absolute;
   inset: 0;
@@ -103,18 +117,21 @@
   padding: 0.06rem 0;
 }
 
+/* Stream/repo label — neutral gray in both themes (not tinted green or yellow) */
 .loading-overlay-terminal__prefix {
-  color: rgba(140, 165, 155, 0.55);
+  color: rgba(148, 152, 158, 0.62);
   font-weight: 400;
   margin-right: 0.35rem;
 }
 
+/* Command echo — muted light gray (darker than centered overlay message text) */
 .loading-overlay-terminal__line--cmd .loading-overlay-terminal__text {
-  color: rgba(190, 215, 200, 0.82);
+  color: rgba(168, 182, 176, 0.92);
 }
 
+/* Stdout — green theme */
 .loading-overlay-terminal__line--out .loading-overlay-terminal__text {
-  color: rgba(120, 210, 150, 0.72);
+  color: rgba(120, 210, 150, 0.78);
 }
 
 .loading-overlay-terminal__line--err .loading-overlay-terminal__prefix {
@@ -124,6 +141,18 @@
 .loading-overlay-terminal__line--err .loading-overlay-terminal__text {
   color: rgba(255, 82, 82, 0.95);
   text-shadow: 0 0 12px rgba(255, 60, 60, 0.22);
+}
+
+/*
+ * Yellow scheme: same structure as green — gray [label], whiteish commands, stdout yellow instead of green.
+ * Prefix stays base gray; stderr unchanged.
+ */
+.loading-overlay-terminal--scheme-yellow .loading-overlay-terminal__line--cmd .loading-overlay-terminal__text {
+  color: rgba(178, 174, 166, 0.92);
+}
+
+.loading-overlay-terminal--scheme-yellow .loading-overlay-terminal__line--out .loading-overlay-terminal__text {
+  color: rgba(220, 190, 72, 0.88);
 }
 
 /* Brand at top-left of overlay – same position and font as sidebar header; above full-height terminal */

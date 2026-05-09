@@ -1,13 +1,15 @@
 @using GrayMoon.Abstractions.Agent
+@using GrayMoon.App.Services
 @inject IJSRuntime JS
 @inject MatrixOverlayPreferenceService MatrixPreference
 @inject CommandTerminalOverlayPreferenceService CommandTerminalOverlayPreference
+@inject LoadingOverlayUiSettingsService OverlayUiSettings
 @inject AgentQueueStateService AgentQueueStateService
 @inject OverlayCommandTerminalService CommandTerminal
 @implements IAsyncDisposable
 @implements IDisposable
 
-<div class="loading-overlay @(IsVisible ? "show" : "") @(MatrixPreference.UseMatrixEffect ? "loading-overlay--matrix" : "loading-overlay--simple")" aria-hidden="@(!IsVisible)">
+<div class="loading-overlay @(IsVisible ? "show" : "") @(MatrixPreference.UseMatrixEffect ? "loading-overlay--matrix" : "loading-overlay--simple") @(!OverlayUiSettings.TransparentBackdrop ? "loading-overlay--backdrop-opaque" : "")" aria-hidden="@(!IsVisible)">
     @if (MatrixPreference.UseMatrixEffect)
     {
         <canvas id="@_canvasId" class="matrix-canvas"></canvas>
@@ -15,7 +17,7 @@
     }
     @if (IsVisible && ShouldShowCommandTerminal)
     {
-        <div class="loading-overlay-terminal" aria-hidden="true">
+        <div class="loading-overlay-terminal @(OverlayUiSettings.TerminalColorScheme == TerminalColorScheme.Yellow ? "loading-overlay-terminal--scheme-yellow" : "")" aria-hidden="true">
             <div @ref="_terminalScroll" class="loading-overlay-terminal__inner">
                 @foreach (var line in _terminalLines)
                 {
@@ -136,6 +138,7 @@
     {
         MatrixPreference.UseMatrixEffectChanged += OnMatrixPreferenceChanged;
         CommandTerminalOverlayPreference.IsVisibleChanged += OnCommandTerminalOverlayPreferenceChanged;
+        OverlayUiSettings.Changed += OnOverlayUiSettingsChanged;
         AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         CommandTerminal.Changed += OnTerminalChanged;
         _terminalLines = CommandTerminal.GetSnapshot();
@@ -159,6 +162,8 @@
         _lastScrolledLineCount = -1;
         _ = InvokeAsync(StateHasChanged);
     }
+
+    private void OnOverlayUiSettingsChanged(object? sender, EventArgs e) => _ = InvokeAsync(StateHasChanged);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -225,6 +230,7 @@
     {
         MatrixPreference.UseMatrixEffectChanged -= OnMatrixPreferenceChanged;
         CommandTerminalOverlayPreference.IsVisibleChanged -= OnCommandTerminalOverlayPreferenceChanged;
+        OverlayUiSettings.Changed -= OnOverlayUiSettingsChanged;
         AgentQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
         CommandTerminal.Changed -= OnTerminalChanged;
     }
