@@ -1,20 +1,48 @@
+@using GrayMoon.Abstractions.Agent
+@using GrayMoon.App.Services
 @inject IJSRuntime JS
 @inject MatrixOverlayPreferenceService MatrixPreference
+@inject CommandTerminalOverlayPreferenceService CommandTerminalOverlayPreference
+@inject LoadingOverlayUiSettingsService OverlayUiSettings
 @inject AgentQueueStateService AgentQueueStateService
+@inject OverlayCommandTerminalService CommandTerminal
 @implements IAsyncDisposable
 @implements IDisposable
 
-<div class="loading-overlay @(IsVisible ? "show" : "") @(MatrixPreference.UseMatrixEffect ? "loading-overlay--matrix" : "loading-overlay--simple")" aria-hidden="@(!IsVisible)">
+<div class="loading-overlay @(IsVisible ? "show" : "") @(MatrixPreference.UseMatrixEffect ? "loading-overlay--matrix" : "loading-overlay--simple") @(!OverlayUiSettings.TransparentBackdrop ? "loading-overlay--backdrop-opaque" : "")" aria-hidden="@(!IsVisible)">
     @if (MatrixPreference.UseMatrixEffect)
     {
         <canvas id="@_canvasId" class="matrix-canvas"></canvas>
         <div class="loading-overlay__veil"></div>
+    }
+    @if (IsVisible && ShouldShowCommandTerminal)
+    {
+        <div class="loading-overlay-terminal @(OverlayUiSettings.TerminalColorScheme == TerminalColorScheme.Yellow ? "loading-overlay-terminal--scheme-yellow" : "")" aria-hidden="true">
+            <div @ref="_terminalScroll" class="loading-overlay-terminal__inner">
+                @foreach (var line in _terminalLines)
+                {
+                    <p class="loading-overlay-terminal__line loading-overlay-terminal__line--@KindCss(line.Kind)">
+                        <span class="loading-overlay-terminal__prefix">[@(string.IsNullOrWhiteSpace(line.StreamLabel) ? "agent" : line.StreamLabel)]</span><span class="loading-overlay-terminal__text">@line.Text</span>
+                    </p>
+                }
+            </div>
+        </div>
     }
     <div class="loading-overlay__brand">
         <span class="navbar-brand-content">
             <img src="moon.svg" alt="GrayMoon" class="navbar-brand-icon" />
             <span class="navbar-brand-title">GrayMoon</span>
         </span>
+        @if (ShowCommandTerminal)
+        {
+            <button type="button"
+                    class="loading-overlay__terminal-toggle @(CommandTerminalOverlayPreference.IsVisible ? "loading-overlay__terminal-toggle--on" : "")"
+                    aria-label="@(CommandTerminalOverlayPreference.IsVisible ? "Hide live command log" : "Show live command log")"
+                    aria-pressed="@(CommandTerminalOverlayPreference.IsVisible ? "true" : "false")"
+                    @onclick="ToggleCommandTerminalOverlay">
+                <i class="bi bi-terminal" aria-hidden="true"></i>
+            </button>
+        }
     </div>
     <div class="loading-overlay-content">
         <div class="loading-overlay-spinner-wrap">
@@ -62,7 +90,17 @@
     /// <summary>When true, show task count inside spinner. Default false.</summary>
     [Parameter] public bool ShowTaskCountInSpinner { get; set; } = false;
 
+    /// <summary>When false, the live command terminal is never shown regardless of user toggle.</summary>
+    [Parameter] public bool ShowCommandTerminal { get; set; } = true;
+
+    private bool ShouldShowCommandTerminal => ShowCommandTerminal && CommandTerminalOverlayPreference.IsVisible;
+
     private int DisplayTaskCount => !IsVisible ? 0 : (PendingAgentTasksCount ?? AgentQueueStateService.GetTotalPendingCount());
+
+    private ElementReference _terminalScroll;
+    private IReadOnlyList<OverlayTerminalLine> _terminalLines = Array.Empty<OverlayTerminalLine>();
+    private int _lastScrolledLineCount = -1;
+    private bool _prevIsVisibleForTerminal;
 
     /// <summary>Dim strength 0..100 (matrix mode only).</summary>
     [Parameter] public int DimOpacityPercent { get; set; } = 45;
@@ -82,10 +120,34 @@
     private bool _wasVisible;
     private bool _wasMatrixEffect;
 
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !_prevIsVisibleForTerminal)
+        {
+            if (AgentQueueStateService.GetTotalPendingCount() == 0)
+                CommandTerminal.Clear();
+
+            _terminalLines = CommandTerminal.GetSnapshot();
+            _lastScrolledLineCount = -1;
+        }
+
+        _prevIsVisibleForTerminal = IsVisible;
+    }
+
     protected override void OnInitialized()
     {
         MatrixPreference.UseMatrixEffectChanged += OnMatrixPreferenceChanged;
+        CommandTerminalOverlayPreference.IsVisibleChanged += OnCommandTerminalOverlayPreferenceChanged;
+        OverlayUiSettings.Changed += OnOverlayUiSettingsChanged;
         AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
+        CommandTerminal.Changed += OnTerminalChanged;
+        _terminalLines = CommandTerminal.GetSnapshot();
+    }
+
+    private void OnTerminalChanged(object? sender, EventArgs e)
+    {
+        _terminalLines = CommandTerminal.GetSnapshot();
+        _ = InvokeAsync(StateHasChanged);
     }
 
     private void OnQueueStateChanged(object? sender, EventArgs e) => _ = InvokeAsync(StateHasChanged);
@@ -94,6 +156,14 @@
     {
         _ = InvokeAsync(StateHasChanged);
     }
+
+    private void OnCommandTerminalOverlayPreferenceChanged(object? sender, EventArgs e)
+    {
+        _lastScrolledLineCount = -1;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnOverlayUiSettingsChanged(object? sender, EventArgs e) => _ = InvokeAsync(StateHasChanged);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -125,7 +195,27 @@
 
         _wasVisible = IsVisible;
         _wasMatrixEffect = useMatrix;
+
+        if (IsVisible && ShouldShowCommandTerminal && _terminalLines.Count != _lastScrolledLineCount)
+        {
+            _lastScrolledLineCount = _terminalLines.Count;
+            try
+            {
+                await JS.InvokeVoidAsync("loadingOverlayTerminal.scrollToEnd", _terminalScroll);
+            }
+            catch (Exception)
+            {
+                // circuit / JS unavailable
+            }
+        }
     }
+
+    private static string KindCss(AgentCommandStreamKind kind) => kind switch
+    {
+        AgentCommandStreamKind.Stderr => "err",
+        AgentCommandStreamKind.CommandLine => "cmd",
+        _ => "out"
+    };
 
     private async Task AbortClicked() => await OnAbort.InvokeAsync();
 
@@ -134,10 +224,15 @@
         MatrixPreference.Toggle();
     }
 
+    private void ToggleCommandTerminalOverlay() => CommandTerminalOverlayPreference.Toggle();
+
     public void Dispose()
     {
         MatrixPreference.UseMatrixEffectChanged -= OnMatrixPreferenceChanged;
+        CommandTerminalOverlayPreference.IsVisibleChanged -= OnCommandTerminalOverlayPreferenceChanged;
+        OverlayUiSettings.Changed -= OnOverlayUiSettingsChanged;
         AgentQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
+        CommandTerminal.Changed -= OnTerminalChanged;
     }
 
     public async ValueTask DisposeAsync()

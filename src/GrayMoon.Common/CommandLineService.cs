@@ -1,5 +1,6 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
+using System.Text;
+using GrayMoon.Abstractions.Agent;
 using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Common;
@@ -9,15 +10,32 @@ namespace GrayMoon.Common;
 /// </summary>
 public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICommandLineService
 {
+    private const int MaxLoggedStreamLength = 8_000;
+
+    private const int MaxMirrorLineLength = 4096;
+
     public async Task<CommandLineResult> RunAsync(
         string fileName,
         string arguments,
         string? workingDirectory = null,
         string? stdin = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool streamStderrAsStdout = false,
+        bool mirrorFailureOutputAsStderr = false)
     {
         arguments ??= "";
         var sw = Stopwatch.StartNew();
+        var cwd = string.IsNullOrEmpty(workingDirectory) ? "." : workingDirectory;
+        logger.LogDebug(
+            "Command starting {Executable} {Parameters} cwd={WorkingDirectory}",
+            fileName,
+            LogSafe.ForLog(arguments),
+            cwd);
+
+        ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.CommandLine, $"$ {fileName} {LogSafe.ForLog(arguments)}"));
+
+        var stderrStreamKind = streamStderrAsStdout ? AgentCommandStreamKind.Stdout : AgentCommandStreamKind.Stderr;
+
         var startInfo = new ProcessStartInfo
         {
             FileName = fileName,
@@ -44,14 +62,140 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
             process.StandardInput.Close();
         }
 
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        var stdoutTask = ConsumeStreamAsync(
+            process.StandardOutput,
+            segment =>
+            {
+                logger.LogDebug("Command stdout ({Executable}): {Segment}", fileName, TruncateForLog(LogSafe.ForLog(segment)));
+                ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.Stdout, segment));
+            },
+            cancellationToken);
+        var stderrTask = ConsumeStreamAsync(
+            process.StandardError,
+            segment =>
+            {
+                logger.LogDebug("Command stderr ({Executable}): {Segment}", fileName, TruncateForLog(LogSafe.ForLog(segment)));
+                ReportAmbient(new CommandLineStreamEvent(stderrStreamKind, segment));
+            },
+            cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
         sw.Stop();
 
         logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode={ExitCode})", fileName, LogSafe.ForLog(arguments), sw.ElapsedMilliseconds, process.ExitCode);
+
+        if (mirrorFailureOutputAsStderr && process.ExitCode != 0)
+            MirrorCombinedOutputAsStderr(stdout, stderr);
+
         return new CommandLineResult(process.ExitCode, stdout, stderr);
+    }
+
+    private static void MirrorCombinedOutputAsStderr(string? stdout, string? stderr)
+    {
+        EmitLines(stdout);
+        EmitLines(stderr);
+
+        void EmitLines(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return;
+
+            foreach (var raw in text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n', StringSplitOptions.None))
+            {
+                if (string.IsNullOrWhiteSpace(raw))
+                    continue;
+
+                var line = raw.Length > MaxMirrorLineLength
+                    ? string.Concat(raw.AsSpan(0, MaxMirrorLineLength), " …")
+                    : raw;
+
+                ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.Stderr, line));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads stdout/stderr in small chunks and splits on <c>\n</c>, <c>\r\n</c>, and bare <c>\r</c>.
+    /// Git clone/fetch progress uses carriage returns without newlines; <see cref="StreamReader.ReadLineAsync"/> would buffer until a newline and look "stuck".
+    /// </summary>
+    private static async Task<string> ConsumeStreamAsync(
+        StreamReader reader,
+        Action<string> onSegment,
+        CancellationToken cancellationToken)
+    {
+        var aggregate = new StringBuilder();
+        var segmentBuffer = new StringBuilder();
+        var afterCr = false;
+        var buffer = new char[8192];
+
+        void FlushSegment()
+        {
+            if (segmentBuffer.Length == 0)
+                return;
+
+            var segment = segmentBuffer.ToString();
+            segmentBuffer.Clear();
+            aggregate.AppendLine(segment);
+            onSegment(segment);
+        }
+
+        while (true)
+        {
+            var read = await reader.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+                break;
+
+            for (var i = 0; i < read; i++)
+            {
+                var c = buffer[i];
+                if (c == '\r')
+                {
+                    FlushSegment();
+                    afterCr = true;
+                }
+                else if (c == '\n')
+                {
+                    if (afterCr)
+                        afterCr = false;
+                    else
+                        FlushSegment();
+                }
+                else
+                {
+                    if (afterCr)
+                        afterCr = false;
+                    segmentBuffer.Append(c);
+                }
+            }
+        }
+
+        FlushSegment();
+        return aggregate.ToString();
+    }
+
+    private static string TruncateForLog(string text)
+    {
+        if (text.Length <= MaxLoggedStreamLength)
+            return text;
+
+        var omitted = text.Length - MaxLoggedStreamLength;
+        return $"{text[..MaxLoggedStreamLength]} ... (truncated, {omitted} chars omitted)";
+    }
+
+    private static void ReportAmbient(CommandLineStreamEvent e)
+    {
+        var sink = CommandLineStreamAmbient.Current.Value;
+        if (sink == null)
+            return;
+
+        try
+        {
+            sink(e);
+        }
+        catch
+        {
+            // Streaming must not break process execution
+        }
     }
 }

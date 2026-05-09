@@ -10,6 +10,7 @@ using GrayMoon.App.Services;
 using GrayMoon.App.Services.Security;
 using GrayMoon.Common;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 
@@ -34,6 +35,14 @@ try
     builder.Services.AddRazorComponents()
         .AddInteractiveServerComponents();
 
+    // Default SignalR incoming message limit is 32KB. SyncRepository ResponseCommand carries branch lists
+    // plus full .csproj/package graphs; larger repos exceed that and the server closes the connection,
+    // which surfaces on the agent as HubException during InvokeAsync (not a git failure).
+    builder.Services.Configure<HubOptions>(options =>
+    {
+        options.MaximumReceiveMessageSize = 10 * 1024 * 1024;
+    });
+
     // Database (SQLite) for persisted data - stored in db/ for easy container volume mounting
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=db/graymoon.db";
     builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connectionString));
@@ -46,8 +55,11 @@ try
     builder.Services.AddScoped<AppSettingRepository>();
     builder.Services.AddSingleton<AgentConnectionTracker>();
     builder.Services.AddSingleton<AgentQueueStateService>();
+    builder.Services.AddSingleton<OverlayCommandTerminalService>();
     builder.Services.AddSingleton<IToastService, ToastService>();
     builder.Services.AddSingleton<MatrixOverlayPreferenceService>();
+    builder.Services.AddSingleton<CommandTerminalOverlayPreferenceService>();
+    builder.Services.AddSingleton<LoadingOverlayUiSettingsService>();
     builder.Services.AddScoped<SyncCommandHandler>();
     builder.Services.AddScoped<IAgentBridge, AgentBridge>();
     builder.Services.AddScoped<WorkspaceService>();

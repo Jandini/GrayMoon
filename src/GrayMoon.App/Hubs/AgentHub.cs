@@ -5,7 +5,12 @@ using Microsoft.AspNetCore.SignalR;
 
 namespace GrayMoon.App.Hubs;
 
-public sealed class AgentHub(AgentConnectionTracker connectionTracker, AgentQueueStateService agentQueueStateService, SyncCommandHandler syncCommandHandler, IServiceScopeFactory scopeFactory) : Hub
+public sealed class AgentHub(
+    AgentConnectionTracker connectionTracker,
+    AgentQueueStateService agentQueueStateService,
+    SyncCommandHandler syncCommandHandler,
+    IServiceScopeFactory scopeFactory,
+    ILogger<AgentHub> logger) : Hub
 {
     public override async Task OnConnectedAsync()
     {
@@ -41,10 +46,40 @@ public sealed class AgentHub(AgentConnectionTracker connectionTracker, AgentQueu
         await base.OnDisconnectedAsync(exception);
     }
 
+    /// <summary>Invoked by the agent for streaming command / stdout / stderr while a request is pending.</summary>
+    public Task CommandOutput(string requestId, string? streamLabel, int kind, string text)
+    {
+        if (!Enum.IsDefined(typeof(AgentCommandStreamKind), kind))
+            return Task.CompletedTask;
+
+        try
+        {
+            AgentResponseDelivery.ReportStreamLine(
+                requestId,
+                new AgentCommandStreamLine(streamLabel, (AgentCommandStreamKind)kind, text));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "CommandOutput failed for request {RequestId}", requestId);
+            throw;
+        }
+
+        return Task.CompletedTask;
+    }
+
     /// <summary>Invoked by the agent when it completes a command. Delivers the response to the waiting caller.</summary>
     public Task ResponseCommand(string requestId, AgentCommandResponse response)
     {
-        AgentResponseDelivery.Complete(requestId, response);
+        try
+        {
+            AgentResponseDelivery.Complete(requestId, response);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "ResponseCommand failed while completing request {RequestId}", requestId);
+            throw;
+        }
+
         return Task.CompletedTask;
     }
 

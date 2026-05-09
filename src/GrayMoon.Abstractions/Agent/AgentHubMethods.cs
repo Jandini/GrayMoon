@@ -11,6 +11,9 @@ public static class AgentHubMethods
     /// <summary>Agent → App: command completed (requestId, payload).</summary>
     public const string ResponseCommand = "ResponseCommand";
 
+    /// <summary>Agent → App: streaming command line / stdout / stderr (requestId, streamLabel, kind, text). streamLabel drives the UI prefix (repo, workspace, or command).</summary>
+    public const string CommandOutput = "CommandOutput";
+
     /// <summary>Agent → App: repository sync result from hooks (notification).</summary>
     public const string SyncCommand = "SyncCommand";
 

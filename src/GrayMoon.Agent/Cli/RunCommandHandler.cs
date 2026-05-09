@@ -6,6 +6,7 @@ using GrayMoon.Agent.Hosted;
 using GrayMoon.Agent.Hub;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
+using GrayMoon.Agent.Logging;
 using GrayMoon.Agent.Queue;
 using GrayMoon.Agent.Services;
 using Microsoft.Extensions.Configuration;
@@ -74,6 +75,8 @@ internal static class RunCommandHandler
         builder.Logging.AddSerilog(new LoggerConfiguration()
             .MinimumLevel.Debug()
             .Enrich.WithMachineName()
+            .Enrich.FromLogContext()
+            .WriteTo.Sink(new OverlayStreamSerilogSink(), Serilog.Events.LogEventLevel.Error)
             .WriteTo.Console(
                 theme: AnsiConsoleTheme.Code,
                 outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")

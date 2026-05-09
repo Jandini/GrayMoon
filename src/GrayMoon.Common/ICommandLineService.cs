@@ -14,11 +14,20 @@ public interface ICommandLineService
     /// <param name="workingDirectory">Working directory; null or empty to use current.</param>
     /// <param name="stdin">Optional stdin content; null to not redirect stdin.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="streamStderrAsStdout">
+    /// When true, process stderr is still returned on the result as stderr, but live overlay streaming uses stdout styling
+    /// (git/dotnet-gitversion use stderr for progress and non-fatal messages).
+    /// </param>
+    /// <param name="mirrorFailureOutputAsStderr">
+    /// When true and exit code is non-zero, combined stdout+stderr is sent to the overlay again as stderr lines (red).
+    /// </param>
     /// <returns>Exit code (or -1 if process failed to start), stdout, and stderr.</returns>
     Task<CommandLineResult> RunAsync(
         string fileName,
         string arguments,
         string? workingDirectory = null,
         string? stdin = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        bool streamStderrAsStdout = false,
+        bool mirrorFailureOutputAsStderr = false);
 }

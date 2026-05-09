@@ -6,3 +6,124 @@
     border: 1px solid var(--border-color, #333);
     border-radius: 0.375rem;
 }
+
+/* Scroll the settings stack; cards keep natural height (no flex stretch). Dark scrollbar. */
+.settings-page .settings-page__scroll {
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: block;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: calc(100vh - 190px);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(95, 95, 105, 0.95) rgba(22, 22, 28, 0.92);
+}
+
+.settings-page .settings-page__scroll::-webkit-scrollbar {
+    width: 10px;
+}
+
+.settings-page .settings-page__scroll::-webkit-scrollbar-track {
+    background: rgba(20, 20, 26, 0.95);
+    border-radius: 5px;
+}
+
+.settings-page .settings-page__scroll::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(88, 88, 98, 0.95), rgba(62, 62, 72, 0.98));
+    border-radius: 5px;
+    border: 2px solid rgba(20, 20, 26, 0.95);
+}
+
+.settings-page .settings-page__scroll::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, rgba(108, 108, 118, 1), rgba(78, 78, 88, 1));
+}
+
+.settings-page .settings-page__card {
+    flex: none !important;
+    min-height: 0 !important;
+    display: block !important;
+}
+
+.settings-page .settings-page__card .card-body {
+    flex: none !important;
+    display: block !important;
+}
+
+.settings-terminal-card__icon {
+    width: 2.75rem;
+    height: 2.75rem;
+    background: linear-gradient(145deg, rgba(48, 48, 56, 0.95), rgba(32, 32, 40, 0.9));
+    border: 1px solid rgba(72, 72, 82, 0.85);
+    color: rgba(175, 178, 188, 0.92);
+    font-size: 1.2rem;
+}
+
+.settings-terminal-card__row {
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.settings-terminal-card__row--clickable {
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.settings-terminal-card__row--clickable:hover {
+    background: rgba(255, 255, 255, 0.048);
+    border-color: rgba(255, 255, 255, 0.11);
+}
+
+.settings-terminal-card__row--clickable:focus-within {
+    border-color: rgba(130, 165, 200, 0.35);
+    outline: none;
+}
+
+.settings-terminal-card__radio {
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    transition: border-color 0.15s ease, background 0.15s ease;
+    margin-bottom: 0;
+    cursor: pointer;
+}
+
+.settings-terminal-card__radio:hover {
+    background: rgba(255, 255, 255, 0.048);
+    border-color: rgba(255, 255, 255, 0.11);
+}
+
+.settings-terminal-card__radio:focus-within {
+    outline: none;
+    border-color: rgba(130, 165, 200, 0.35);
+}
+
+.settings-terminal-card__radio--green:has(.form-check-input:checked) {
+    border-color: rgba(90, 165, 120, 0.45);
+    background: rgba(40, 75, 55, 0.18);
+}
+
+.settings-terminal-card__radio--yellow:has(.form-check-input:checked) {
+    border-color: rgba(220, 175, 65, 0.55);
+    background: rgba(75, 60, 22, 0.28);
+}
+
+.settings-terminal-card__swatch {
+    display: block;
+    width: 100%;
+    max-width: 12rem;
+    height: 0.55rem;
+    border-radius: 4px;
+}
+
+.settings-terminal-card__swatch--green {
+    background: linear-gradient(90deg, rgba(140, 165, 155, 0.75), rgba(120, 210, 150, 0.9));
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25) inset;
+}
+
+.settings-terminal-card__swatch--yellow {
+    background: linear-gradient(90deg, rgba(215, 175, 55, 0.88), rgba(255, 228, 95, 0.95));
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2) inset;
+}
+
+.settings-terminal-card .letter-spacing-tight {
+    letter-spacing: 0.05em;
+}

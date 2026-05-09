@@ -15,10 +15,9 @@ public interface IAgentBridge
 public sealed class AgentBridge(
     IHubContext<AgentHub> hubContext,
     AgentConnectionTracker connectionTracker,
+    OverlayCommandTerminalService overlayCommandTerminal,
     ILogger<AgentBridge> logger) : IAgentBridge
 {
-    private static readonly TimeSpan AgentResponseTimeout = TimeSpan.FromMinutes(2);
-
     public bool IsAgentConnected => connectionTracker.GetAgentConnectionId() != null;
 
     public async Task<AgentCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default)
@@ -30,7 +29,7 @@ public sealed class AgentBridge(
         var requestId = Guid.NewGuid().ToString("N");
         var argsJson = args != null ? JsonSerializer.SerializeToElement(args) : (JsonElement?)null;
 
-        var task = AgentResponseDelivery.WaitAsync(requestId, AgentResponseTimeout, cancellationToken);
+        var task = AgentResponseDelivery.WaitAsync(requestId, cancellationToken, overlayCommandTerminal.Append);
 
         try
         {

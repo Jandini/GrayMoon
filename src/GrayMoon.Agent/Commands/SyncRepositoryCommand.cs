@@ -38,12 +38,25 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
         if (git.DirectoryExists(repoPath))
         {
             await git.AddSafeDirectoryAsync(repoPath, cancellationToken);
-            // FindAsync only reads .csproj files; safe to run in parallel with git operations.
-            var findProjectsTask = csProjFileService.FindAsync(repoPath, cancellationToken);
 
             // Ensure fetch completes before running GitVersion (which is invoked with /nofetch).
             var (fetchOk, fetchErr) = await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
             fetchError = fetchErr;
+            if (!fetchOk)
+            {
+                return new SyncRepositoryResponse
+                {
+                    Success = false,
+                    ErrorMessage = fetchError ?? "Git fetch failed.",
+                    Version = version,
+                    Branch = branch,
+                    Projects = projects,
+                    OutgoingCommits = outgoingCommits,
+                    IncomingCommits = incomingCommits,
+                    GitVersionError = versionError,
+                    GitFetchError = fetchError
+                };
+            }
 
             GitVersionResult? vr;
             (vr, versionError) = await git.GetVersionAsync(repoPath, cancellationToken);
@@ -92,10 +105,11 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 // If branch fetching fails, continue without branches (non-critical)
             }
 
-            projects = await findProjectsTask;
+            projects = await csProjFileService.FindAsync(repoPath, cancellationToken);
 
             return new SyncRepositoryResponse
             {
+                Success = true,
                 Version = version,
                 Branch = branch,
                 Projects = projects,
@@ -111,6 +125,16 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
             };
         }
 
-        return new SyncRepositoryResponse { Version = version, Branch = branch, Projects = projects, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits, GitVersionError = versionError, GitFetchError = fetchError };
+        return new SyncRepositoryResponse
+        {
+            Success = true,
+            Version = version,
+            Branch = branch,
+            Projects = projects,
+            OutgoingCommits = outgoingCommits,
+            IncomingCommits = incomingCommits,
+            GitVersionError = versionError,
+            GitFetchError = fetchError
+        };
     }
 }
