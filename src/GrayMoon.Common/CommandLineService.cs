@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Extensions.Logging;
 
@@ -21,6 +20,13 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
     {
         arguments ??= "";
         var sw = Stopwatch.StartNew();
+        var cwd = string.IsNullOrEmpty(workingDirectory) ? "." : workingDirectory;
+        logger.LogDebug(
+            "Command starting {Executable} {Parameters} cwd={WorkingDirectory}",
+            fileName,
+            LogSafe.ForLog(arguments),
+            cwd);
+
         var startInfo = new ProcessStartInfo
         {
             FileName = fileName,
@@ -49,11 +55,11 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
 
         var stdoutTask = ConsumeStreamAsync(
             process.StandardOutput,
-            line => logger.LogDebug("Command stdout ({Executable}): {Line}", fileName, TruncateForLog(LogSafe.ForLog(line))),
+            segment => logger.LogDebug("Command stdout ({Executable}): {Segment}", fileName, TruncateForLog(LogSafe.ForLog(segment))),
             cancellationToken);
         var stderrTask = ConsumeStreamAsync(
             process.StandardError,
-            line => logger.LogDebug("Command stderr ({Executable}): {Line}", fileName, TruncateForLog(LogSafe.ForLog(line))),
+            segment => logger.LogDebug("Command stderr ({Executable}): {Segment}", fileName, TruncateForLog(LogSafe.ForLog(segment))),
             cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         var stdout = await stdoutTask;
@@ -64,24 +70,63 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
         return new CommandLineResult(process.ExitCode, stdout, stderr);
     }
 
+    /// <summary>
+    /// Reads stdout/stderr in small chunks and splits on <c>\n</c>, <c>\r\n</c>, and bare <c>\r</c>.
+    /// Git clone/fetch progress uses carriage returns without newlines; <see cref="StreamReader.ReadLineAsync"/> would buffer until a newline and look "stuck".
+    /// </summary>
     private static async Task<string> ConsumeStreamAsync(
         StreamReader reader,
-        Action<string> onLine,
+        Action<string> onSegment,
         CancellationToken cancellationToken)
     {
-        var sb = new StringBuilder();
+        var aggregate = new StringBuilder();
+        var segmentBuffer = new StringBuilder();
+        var afterCr = false;
+        var buffer = new char[8192];
+
+        void FlushSegment()
+        {
+            if (segmentBuffer.Length == 0)
+                return;
+
+            var segment = segmentBuffer.ToString();
+            segmentBuffer.Clear();
+            aggregate.AppendLine(segment);
+            onSegment(segment);
+        }
 
         while (true)
         {
-            var line = await reader.ReadLineAsync(cancellationToken);
-            if (line is null)
+            var read = await reader.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
+            if (read == 0)
                 break;
 
-            sb.AppendLine(line);
-            onLine(line);
+            for (var i = 0; i < read; i++)
+            {
+                var c = buffer[i];
+                if (c == '\r')
+                {
+                    FlushSegment();
+                    afterCr = true;
+                }
+                else if (c == '\n')
+                {
+                    if (afterCr)
+                        afterCr = false;
+                    else
+                        FlushSegment();
+                }
+                else
+                {
+                    if (afterCr)
+                        afterCr = false;
+                    segmentBuffer.Append(c);
+                }
+            }
         }
 
-        return sb.ToString();
+        FlushSegment();
+        return aggregate.ToString();
     }
 
     private static string TruncateForLog(string text)

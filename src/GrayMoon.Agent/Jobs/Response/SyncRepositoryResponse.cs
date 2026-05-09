@@ -5,6 +5,12 @@ namespace GrayMoon.Agent.Jobs.Response;
 
 public sealed class SyncRepositoryResponse
 {
+    [JsonPropertyName("success")]
+    public bool Success { get; set; } = true;
+
+    [JsonPropertyName("errorMessage")]
+    public string? ErrorMessage { get; set; }
+
     [JsonPropertyName("version")]
     public string? Version { get; set; }
 

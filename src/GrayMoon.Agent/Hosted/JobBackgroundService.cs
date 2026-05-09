@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using GrayMoon.Abstractions.Agent;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs;
@@ -19,6 +22,15 @@ public sealed class JobBackgroundService(
     ILogger<JobBackgroundService> logger) : BackgroundService
 {
     private readonly int _maxConcurrent = Math.Max(1, options.Value.MaxConcurrentCommands);
+    private static readonly TimeSpan ResponseSendRetryDelay = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan ResponseSendMaxWait = TimeSpan.FromSeconds(30);
+
+    /// <summary>Matches hub JSON style enough for a useful byte-size estimate of the <see cref="AgentCommandResponse"/> argument.</summary>
+    private static readonly JsonSerializerOptions ResponsePayloadSizeJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.Never
+    };
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -51,13 +63,22 @@ public sealed class JobBackgroundService(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Worker {WorkerId} failed processing job", workerId);
+                logger.LogError(ex, "Worker {WorkerId} failed processing job. Kind={JobKind}, RequestId={RequestId}, Command={Command}",
+                    workerId, envelope.Kind, envelope.CommandJob?.RequestId, envelope.CommandJob?.Command);
                 if (envelope.CommandJob != null)
                 {
                     var errorBody = new { Success = false, Error = ex.Message };
                     logger.LogInformation("ResponseCommand {RequestId} failed: {Error}", envelope.CommandJob.RequestId, ex.Message);
                     logger.LogTrace("ResponseCommand {RequestId} response content: {@ResponseBody}", envelope.CommandJob.RequestId, errorBody);
-                    await SendResponseAsync(envelope.CommandJob.RequestId, new AgentCommandResponse(false, null, ex.Message));
+                    try
+                    {
+                        await SendResponseAsync(envelope.CommandJob.RequestId, envelope.CommandJob.Command, new AgentCommandResponse(false, null, ex.Message), stoppingToken);
+                    }
+                    catch (Exception sendEx)
+                    {
+                        logger.LogError(sendEx, "Failed sending error ResponseCommand. RequestId={RequestId}, Command={Command}",
+                            envelope.CommandJob.RequestId, envelope.CommandJob.Command);
+                    }
                 }
             }
             finally
@@ -75,7 +96,7 @@ public sealed class JobBackgroundService(
         var (success, error) = GetCommandSuccessAndError(result);
         logger.LogInformation("ResponseCommand {RequestId} completed ({Command}) in {ElapsedMs}ms", job.RequestId, job.Command, sw.ElapsedMilliseconds);
         logger.LogTrace("ResponseCommand {RequestId} response content: {@ResponseBody}", job.RequestId, result);
-        await SendResponseAsync(job.RequestId, new AgentCommandResponse(success, result, error));
+        await SendResponseAsync(job.RequestId, job.Command, new AgentCommandResponse(success, result, error), ct);
     }
 
     /// <summary>If result has a Success property that is false, return (false, ErrorMessage); otherwise (true, null).</summary>
@@ -94,14 +115,79 @@ public sealed class JobBackgroundService(
         return (true, null);
     }
 
-    private async Task SendResponseAsync(string requestId, AgentCommandResponse response)
+    private async Task SendResponseAsync(string requestId, string command, AgentCommandResponse response, CancellationToken ct)
     {
-        var connection = hubProvider.Connection;
-        if (connection?.State == HubConnectionState.Connected)
-            await connection.InvokeAsync(AgentHubMethods.ResponseCommand, requestId, response);
-        else
+        var startedAt = DateTime.UtcNow;
+        Exception? lastError = null;
+        var attempt = 0;
+
+        while (!ct.IsCancellationRequested && DateTime.UtcNow - startedAt < ResponseSendMaxWait)
         {
-            logger.LogWarning("Hub not connected, cannot send ResponseCommand for {RequestId}", requestId);
+            attempt++;
+            var connection = hubProvider.Connection;
+            if (connection == null)
+            {
+                logger.LogWarning("Hub connection is null while sending ResponseCommand. RequestId={RequestId}, Command={Command}, Attempt={Attempt}",
+                    requestId, command, attempt);
+                await Task.Delay(ResponseSendRetryDelay, ct);
+                continue;
+            }
+
+            if (connection.State != HubConnectionState.Connected)
+            {
+                logger.LogWarning("Hub connection not ready while sending ResponseCommand. RequestId={RequestId}, Command={Command}, Attempt={Attempt}, State={State}",
+                    requestId, command, attempt, connection.State);
+                await Task.Delay(ResponseSendRetryDelay, ct);
+                continue;
+            }
+
+            try
+            {
+                LogResponseCommandPayloadSize(requestId, command, response);
+                await connection.InvokeAsync(AgentHubMethods.ResponseCommand, requestId, response, ct);
+                return;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                logger.LogWarning(ex, "ResponseCommand send attempt failed. RequestId={RequestId}, Command={Command}, Attempt={Attempt}, State={State}, ConnectionId={ConnectionId}",
+                    requestId, command, attempt, connection.State, connection.ConnectionId);
+                await Task.Delay(ResponseSendRetryDelay, ct);
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Unable to send ResponseCommand for request '{requestId}' ({command}) within {ResponseSendMaxWait.TotalSeconds:F0}s. LastError={lastError?.Message ?? "none"}",
+            lastError);
+    }
+
+    /// <summary>
+    /// Logs approximate UTF-8 size of the response as JSON (same shape as the hub <c>data</c> argument).
+    /// The full SignalR frame is slightly larger; this is what you compare to the former 32KB receive limit.
+    /// </summary>
+    private void LogResponseCommandPayloadSize(string requestId, string command, AgentCommandResponse response)
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(response, ResponsePayloadSizeJsonOptions);
+            var utf8Bytes = Encoding.UTF8.GetByteCount(json);
+
+            if (utf8Bytes >= 32 * 1024)
+            {
+                logger.LogInformation(
+                    "ResponseCommand payload ~{Utf8Bytes} UTF-8 bytes (exceeds former default SignalR MaximumReceiveMessageSize of 32KB). RequestId={RequestId}, Command={Command}",
+                    utf8Bytes, requestId, command);
+            }
+            else
+            {
+                logger.LogDebug(
+                    "ResponseCommand payload ~{Utf8Bytes} UTF-8 bytes. RequestId={RequestId}, Command={Command}",
+                    utf8Bytes, requestId, command);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not measure ResponseCommand payload size. RequestId={RequestId}, Command={Command}", requestId, command);
         }
     }
 }
