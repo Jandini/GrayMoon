@@ -6,6 +6,7 @@ using GrayMoon.Abstractions.Agent;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs;
 using Microsoft.AspNetCore.SignalR.Client;
+using Polly;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -22,8 +23,7 @@ public sealed class JobBackgroundService(
     ILogger<JobBackgroundService> logger) : BackgroundService
 {
     private readonly int _maxConcurrent = Math.Max(1, options.Value.MaxConcurrentCommands);
-    private static readonly TimeSpan ResponseSendRetryDelay = TimeSpan.FromSeconds(1);
-    private static readonly TimeSpan ResponseSendMaxWait = TimeSpan.FromSeconds(30);
+    private readonly ResiliencePipeline _responseSendPipeline = ResponseCommandSendPipeline.Create(logger);
 
     /// <summary>Matches hub JSON style enough for a useful byte-size estimate of the <see cref="AgentCommandResponse"/> argument.</summary>
     private static readonly JsonSerializerOptions ResponsePayloadSizeJsonOptions = new()
@@ -117,48 +117,25 @@ public sealed class JobBackgroundService(
 
     private async Task SendResponseAsync(string requestId, string command, AgentCommandResponse response, CancellationToken ct)
     {
-        var startedAt = DateTime.UtcNow;
-        Exception? lastError = null;
-        var attempt = 0;
-
-        while (!ct.IsCancellationRequested && DateTime.UtcNow - startedAt < ResponseSendMaxWait)
+        var connection = hubProvider.Connection;
+        if (connection == null)
         {
-            attempt++;
-            var connection = hubProvider.Connection;
-            if (connection == null)
-            {
-                logger.LogWarning("Hub connection is null while sending ResponseCommand. RequestId={RequestId}, Command={Command}, Attempt={Attempt}",
-                    requestId, command, attempt);
-                await Task.Delay(ResponseSendRetryDelay, ct);
-                continue;
-            }
-
-            if (connection.State != HubConnectionState.Connected)
-            {
-                logger.LogWarning("Hub connection not ready while sending ResponseCommand. RequestId={RequestId}, Command={Command}, Attempt={Attempt}, State={State}",
-                    requestId, command, attempt, connection.State);
-                await Task.Delay(ResponseSendRetryDelay, ct);
-                continue;
-            }
-
-            try
-            {
-                LogResponseCommandPayloadSize(requestId, command, response);
-                await connection.InvokeAsync(AgentHubMethods.ResponseCommand, requestId, response, ct);
-                return;
-            }
-            catch (Exception ex)
-            {
-                lastError = ex;
-                logger.LogWarning(ex, "ResponseCommand send attempt failed. RequestId={RequestId}, Command={Command}, Attempt={Attempt}, State={State}, ConnectionId={ConnectionId}",
-                    requestId, command, attempt, connection.State, connection.ConnectionId);
-                await Task.Delay(ResponseSendRetryDelay, ct);
-            }
+            throw new InvalidOperationException(
+                $"Cannot send ResponseCommand: hub connection is null. RequestId={requestId}, Command={command}.");
         }
 
-        throw new InvalidOperationException(
-            $"Unable to send ResponseCommand for request '{requestId}' ({command}) within {ResponseSendMaxWait.TotalSeconds:F0}s. LastError={lastError?.Message ?? "none"}",
-            lastError);
+        if (connection.State != HubConnectionState.Connected)
+        {
+            throw new InvalidOperationException(
+                $"Cannot send ResponseCommand: hub connection state is {connection.State}. RequestId={requestId}, Command={command}.");
+        }
+
+        LogResponseCommandPayloadSize(requestId, command, response);
+
+        await _responseSendPipeline.ExecuteAsync(async token =>
+        {
+            await connection.InvokeAsync(AgentHubMethods.ResponseCommand, requestId, response, token);
+        }, ct);
     }
 
     /// <summary>
