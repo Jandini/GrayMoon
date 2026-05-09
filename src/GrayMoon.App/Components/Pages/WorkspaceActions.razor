@@ -113,10 +113,13 @@
                                     @foreach (var row in rows.OrderBy(GetStatusSortOrder).ThenBy(r => r.Repo.RepositoryName, System.StringComparer.OrdinalIgnoreCase))
                                     {
                                         var stripeClass = GroupStripeClass(groupIndex);
-                                        var firstLine = true;
-                                        @foreach (var line in LinesForDisplay(row))
+                                        var displayLines = LinesForDisplay(row).ToList();
+                                        @for (var li = 0; li < displayLines.Count; li++)
                                         {
-                                            var trClass = stripeClass + (firstLine && row.ErrorMessage != null ? " actions-error-row" : "");
+                                            var line = displayLines[li];
+                                            var firstLine = li == 0;
+                                            var isLastInRepo = li == displayLines.Count - 1;
+                                            var trClass = $"{stripeClass} actions-data-row" + (isLastInRepo ? " actions-row-repo-end" : "") + (firstLine && row.ErrorMessage != null ? " actions-error-row" : "");
                                             <tr class="@trClass">
                                                 <td class="col-repo">
                                                     @if (firstLine)
@@ -212,7 +215,6 @@
                                                     }
                                                 </td>
                                             </tr>
-                                            firstLine = false;
                                         }
 
                                         groupIndex++;

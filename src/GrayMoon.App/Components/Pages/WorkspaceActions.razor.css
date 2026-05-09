@@ -119,3 +119,16 @@
 .actions-table tbody tr.actions-error-row td {
     color: #842029;
 }
+
+/*
+ * One gray line only after the last workflow row of each repository (not between workflows).
+ * Use app theme --border-color and !important so we win over .table defaults and
+ * .table tbody tr:last-child td { border-bottom-width: 0 } in app.css.
+ */
+.grid-page-body .table.actions-table tbody tr.actions-data-row > td {
+    border-bottom: none !important;
+}
+
+.grid-page-body .table.actions-table tbody tr.actions-data-row.actions-row-repo-end > td {
+    border-bottom: 1px solid var(--border-color) !important;
+}

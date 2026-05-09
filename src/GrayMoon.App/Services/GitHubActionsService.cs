@@ -53,7 +53,13 @@ public class GitHubActionsService(
                         Status = run.Status,
                         Conclusion = run.Conclusion,
                         UpdatedAt = run.UpdatedAt,
-                        HtmlUrl = run.HtmlUrl,
+                        HtmlUrl = RepositoryUrlHelper.GetWorkflowRunWebUrl(
+                                      repository.CloneUrl,
+                                      repository.OrgName,
+                                      repository.RepositoryName,
+                                      run.Id,
+                                      connector.ApiBaseUrl)
+                                  ?? run.HtmlUrl,
                         HeadBranch = run.HeadBranch
                     });
                 }
@@ -105,7 +111,13 @@ public class GitHubActionsService(
                 Status = run.Status,
                 Conclusion = run.Conclusion,
                 UpdatedAt = run.UpdatedAt,
-                HtmlUrl = run.HtmlUrl,
+                HtmlUrl = RepositoryUrlHelper.GetWorkflowRunWebUrl(
+                              repository.CloneUrl,
+                              repository.OrgName,
+                              repository.RepositoryName,
+                              run.Id,
+                              connector.ApiBaseUrl)
+                          ?? run.HtmlUrl,
                 HeadBranch = run.HeadBranch
             };
         }
@@ -163,7 +175,16 @@ public class GitHubActionsService(
             {
                 latestByWorkflowId.TryGetValue(wf.Id, out var run);
                 var supportsDispatch = dispatchById.GetValueOrDefault(wf.Id, false);
-                result.Add(ToPerWorkflowActionStatus(branch, wf.Id, wf.Name, run, supportsDispatch));
+                result.Add(ToPerWorkflowActionStatus(
+                    branch,
+                    wf.Id,
+                    wf.Name,
+                    run,
+                    supportsDispatch,
+                    owner,
+                    repoName,
+                    repository.CloneUrl,
+                    connector.ApiBaseUrl));
             }
         }
         else
@@ -175,7 +196,16 @@ public class GitHubActionsService(
                     ? null
                     : await gitHubService.GetRepositoryFileUtf8TextAsync(connector, owner, repoName, meta.Path, cancellationToken);
                 var supportsDispatch = YamlAppearsToHaveWorkflowDispatch(yaml);
-                result.Add(ToPerWorkflowActionStatus(branch, run.WorkflowId, run.Name, run, supportsDispatch));
+                result.Add(ToPerWorkflowActionStatus(
+                    branch,
+                    run.WorkflowId,
+                    run.Name,
+                    run,
+                    supportsDispatch,
+                    owner,
+                    repoName,
+                    repository.CloneUrl,
+                    connector.ApiBaseUrl));
             }
         }
 
@@ -191,7 +221,16 @@ public class GitHubActionsService(
 
     private static readonly Regex WorkflowDispatchTriggerRegex = new(@"\bworkflow_dispatch\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
-    private static ActionStatusInfo ToPerWorkflowActionStatus(string branch, long workflowId, string workflowName, GitHubWorkflowRunDto? run, bool supportsWorkflowDispatch)
+    private static ActionStatusInfo ToPerWorkflowActionStatus(
+        string branch,
+        long workflowId,
+        string workflowName,
+        GitHubWorkflowRunDto? run,
+        bool supportsWorkflowDispatch,
+        string owner,
+        string repoName,
+        string cloneUrl,
+        string? connectorApiBaseUrl)
     {
         if (run == null)
         {
@@ -214,10 +253,14 @@ public class GitHubActionsService(
             status = "success";
 
         var displayName = string.IsNullOrWhiteSpace(run.Name) ? workflowName : run.Name;
+        var htmlUrl = RepositoryUrlHelper.GetWorkflowRunWebUrl(cloneUrl, owner, repoName, run.Id, connectorApiBaseUrl);
+        if (string.IsNullOrWhiteSpace(htmlUrl) && Uri.TryCreate(run.HtmlUrl, UriKind.Absolute, out _))
+            htmlUrl = run.HtmlUrl;
+
         return new ActionStatusInfo
         {
             Status = status,
-            HtmlUrl = run.HtmlUrl,
+            HtmlUrl = htmlUrl,
             UpdatedAt = run.UpdatedAt,
             BranchName = branch,
             RunId = run.Id,
