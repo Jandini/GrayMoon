@@ -11,8 +11,14 @@
     <div class="actions-gha-terminal">
         <div class="actions-gha-terminal__wrap">
             <div class="loading-overlay-terminal @(OverlayUiSettings.TerminalColorScheme == TerminalColorScheme.Yellow ? "loading-overlay-terminal--scheme-yellow" : "") actions-gha-terminal__terminal">
-                <div class="actions-gha-terminal__caption" title="@_caption">
-                    <span class="actions-gha-terminal__caption-prefix">▶</span><span class="actions-gha-terminal__caption-text">@_caption</span>
+                <div class="actions-gha-terminal__caption" title="@_captionTooltip">
+                    <span class="actions-gha-terminal__caption-main">
+                        <span class="actions-gha-terminal__caption-prefix">▶</span><span class="actions-gha-terminal__caption-text">@_caption</span>
+                    </span>
+                    @if (!string.IsNullOrWhiteSpace(_stepProgress))
+                    {
+                        <span class="actions-gha-terminal__caption-steps">@_stepProgress</span>
+                    }
                 </div>
                 <div class="loading-overlay-terminal__inner actions-gha-terminal__scroll" aria-live="polite">
                     @foreach (var line in _visibleLines)
@@ -45,6 +51,7 @@
     private readonly Dictionary<string, string> _stepSignatures = new(StringComparer.Ordinal);
     private bool _snapshottedSteps;
     private string _caption = "Workflow · Connecting to GitHub Actions…";
+    private string? _stepProgress;
     private CancellationTokenSource? _cts;
     private Task? _pollTask;
 
@@ -64,6 +71,9 @@
             return take;
         }
     }
+
+    private string _captionTooltip =>
+        string.IsNullOrWhiteSpace(_stepProgress) ? _caption : $"{_caption} · {_stepProgress}";
 
     protected override void OnInitialized()
     {
@@ -116,9 +126,11 @@
             var response = await GitHubService.GetWorkflowRunJobsAsync(connector, Owner, RepositoryName, RunId, cancellationToken);
             var jobs = response?.Jobs ?? [];
             _caption = BuildCaption(jobs, WorkflowDisplayName);
+            _stepProgress = BuildStepProgressForCaptionJob(jobs);
 
             if (jobs.Count == 0)
             {
+                _stepProgress = null;
                 AppendUnique("Waiting for GitHub to assign jobs to this run…");
                 return;
             }
@@ -173,11 +185,7 @@
         if (jobs.Count == 0)
             return $"{wf} · Waiting for jobs…";
 
-        var job = jobs.FirstOrDefault(j => string.Equals(j.Status, "in_progress", StringComparison.OrdinalIgnoreCase))
-                  ?? jobs.FirstOrDefault(j => string.Equals(j.Status, "queued", StringComparison.OrdinalIgnoreCase))
-                  ?? jobs.FirstOrDefault(j => string.Equals(j.Status, "waiting", StringComparison.OrdinalIgnoreCase))
-                  ?? jobs[0];
-
+        var job = GetCaptionJob(jobs)!;
         var steps = job.Steps ?? [];
         var step = steps.FirstOrDefault(s => string.Equals(s.Status, "in_progress", StringComparison.OrdinalIgnoreCase))
                    ?? steps.LastOrDefault(s => string.Equals(s.Status, "completed", StringComparison.OrdinalIgnoreCase));
@@ -194,6 +202,40 @@
         }
 
         return $"{wf} · {job.Name} › {stepLabel}";
+    }
+
+    /// <summary>Same "current" job as <see cref="BuildCaption"/>; step counts come from the jobs API for that run.</summary>
+    private static GitHubWorkflowJobDto? GetCaptionJob(IReadOnlyList<GitHubWorkflowJobDto> jobs)
+    {
+        if (jobs.Count == 0) return null;
+        return jobs.FirstOrDefault(j => string.Equals(j.Status, "in_progress", StringComparison.OrdinalIgnoreCase))
+               ?? jobs.FirstOrDefault(j => string.Equals(j.Status, "queued", StringComparison.OrdinalIgnoreCase))
+               ?? jobs.FirstOrDefault(j => string.Equals(j.Status, "waiting", StringComparison.OrdinalIgnoreCase))
+               ?? jobs[0];
+    }
+
+    /// <summary>1-based index of the active step and total steps for the caption job (YAML steps GitHub reports for that job).</summary>
+    private static string? BuildStepProgressForCaptionJob(IReadOnlyList<GitHubWorkflowJobDto> jobs)
+    {
+        var job = GetCaptionJob(jobs);
+        if (job == null) return null;
+
+        var ordered = (job.Steps ?? []).OrderBy(s => s.Number).ToList();
+        var y = ordered.Count;
+        if (y == 0)
+            return null;
+
+        var inProgressIdx = ordered.FindIndex(s => string.Equals(s.Status, "in_progress", StringComparison.OrdinalIgnoreCase));
+        if (inProgressIdx >= 0)
+            return $"Step {inProgressIdx + 1} of {y}";
+
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            if (!string.Equals(ordered[i].Status, "completed", StringComparison.OrdinalIgnoreCase))
+                return $"Step {i + 1} of {y}";
+        }
+
+        return $"Step {y} of {y}";
     }
 
     private static string FormatStepTransition(string jobName, GitHubWorkflowJobStepDto step)

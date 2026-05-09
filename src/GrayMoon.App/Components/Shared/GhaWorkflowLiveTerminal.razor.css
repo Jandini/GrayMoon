@@ -40,7 +40,23 @@
     border-bottom: 1px solid rgba(148, 152, 158, 0.18);
     white-space: nowrap;
     overflow: hidden;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.65rem;
+}
+
+.actions-gha-terminal__caption-main {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.actions-gha-terminal__caption-steps {
+    flex-shrink: 0;
+    color: rgba(168, 178, 172, 0.95);
+    text-align: right;
 }
 
 .actions-gha-terminal__caption-prefix {
