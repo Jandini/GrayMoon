@@ -95,6 +95,19 @@ public class GitHubWorkflowRunsResponse
     public List<GitHubWorkflowRunDto> WorkflowRuns { get; set; } = new();
 }
 
+/// <summary>Single file from GET /repos/{owner}/{repo}/contents/{path}.</summary>
+public sealed class GitHubContentResponse
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = string.Empty;
+
+    [JsonPropertyName("encoding")]
+    public string? Encoding { get; set; }
+
+    [JsonPropertyName("content")]
+    public string? Content { get; set; }
+}
+
 /// <summary>Pull request list item from GET /repos/{owner}/{repo}/pulls.</summary>
 public class GitHubPullRequestDto
 {

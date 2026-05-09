@@ -45,11 +45,15 @@
 }
 
 .col-repo {
-    width: 30%;
+    width: 26%;
+}
+
+.col-branch {
+    width: 16%;
 }
 
 .col-workflow {
-    width: 20%;
+    width: 22%;
 }
 
 .col-event {
@@ -60,13 +64,17 @@
     width: 18%;
 }
 
-.col-updated {
-    width: 12%;
-}
-
 /* Last column: actions (match Workspaces.razor) */
 .col-actions {
-    width: 10%;
+    width: 18%;
+}
+
+.actions-table tbody tr.actions-group-even {
+    background-color: transparent;
+}
+
+.actions-table tbody tr.actions-group-odd {
+    background-color: var(--bs-table-striped-bg, rgba(0, 0, 0, 0.05));
 }
 
 /* Status / Result: center header and body text (override global col-status-badge right alignment) */

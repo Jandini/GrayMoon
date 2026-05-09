@@ -21,4 +21,7 @@ public sealed class ActionStatusInfo
 
     /// <summary>Display name of the most relevant workflow.</summary>
     public string? WorkflowName { get; set; }
+
+    /// <summary>True when the workflow file declares a <c>workflow_dispatch</c> trigger (manual run is allowed).</summary>
+    public bool SupportsWorkflowDispatch { get; set; }
 }

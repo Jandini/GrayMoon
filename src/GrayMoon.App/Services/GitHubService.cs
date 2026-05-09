@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using GrayMoon.Abstractions.Models;
 using GrayMoon.App.Models;
@@ -104,6 +105,88 @@ public class GitHubService : IConnectorService
 
         var response = await GetAsync<GitHubWorkflowsResponse>($"repos/{owner}/{repo}/actions/workflows");
         return response?.Workflows ?? new List<GitHubWorkflowDto>();
+    }
+
+    /// <summary>Lists workflows for a repo using the connector token (workspace / multi-connector actions).</summary>
+    public async Task<List<GitHubWorkflowDto>> GetWorkflowsAsync(Connector connector, string owner, string repo, CancellationToken cancellationToken = default)
+    {
+        EnsureConnectorConfigured(connector);
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+
+        var response = await GetAsync<GitHubWorkflowsResponse>(connector, $"repos/{owner}/{repo}/actions/workflows", cancellationToken);
+        return response?.Workflows ?? new List<GitHubWorkflowDto>();
+    }
+
+    /// <summary>GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}. Returns null if not found.</summary>
+    public async Task<GitHubWorkflowDto?> GetWorkflowByIdAsync(Connector connector, string owner, string repo, long workflowId, CancellationToken cancellationToken = default)
+    {
+        EnsureConnectorConfigured(connector);
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+
+        using var response = await GetResponseAsync(connector, $"repos/{owner}/{repo}/actions/workflows/{workflowId}", cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return null;
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError("GitHub API call failed. Status: {StatusCode}, URL: {Url}, Response: {Response}",
+                response.StatusCode,
+                response.RequestMessage?.RequestUri,
+                errorContent);
+            response.EnsureSuccessStatusCode();
+        }
+
+        return await response.Content.ReadFromJsonAsync<GitHubWorkflowDto>(_jsonOptions, cancellationToken);
+    }
+
+    /// <summary>Loads a repository file as UTF-8 text (e.g. workflow YAML). Returns null if missing or not a file.</summary>
+    public async Task<string?> GetRepositoryFileUtf8TextAsync(Connector connector, string owner, string repo, string filePath, CancellationToken cancellationToken = default)
+    {
+        EnsureConnectorConfigured(connector);
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+        if (string.IsNullOrWhiteSpace(filePath))
+            return null;
+
+        var encodedPath = string.Join("/", filePath.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Uri.EscapeDataString));
+        using var response = await GetResponseAsync(connector, $"repos/{owner}/{repo}/contents/{encodedPath}", cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return null;
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError("GitHub API call failed. Status: {StatusCode}, URL: {Url}, Response: {Response}",
+                response.StatusCode,
+                response.RequestMessage?.RequestUri,
+                errorContent);
+            response.EnsureSuccessStatusCode();
+        }
+
+        var dto = await response.Content.ReadFromJsonAsync<GitHubContentResponse>(_jsonOptions, cancellationToken);
+        if (dto == null || !string.Equals(dto.Type, "file", StringComparison.OrdinalIgnoreCase))
+            return null;
+        if (!string.Equals(dto.Encoding, "base64", StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(dto.Content))
+            return null;
+
+        try
+        {
+            var raw = dto.Content.Replace("\n", "", StringComparison.Ordinal).Replace("\r", "", StringComparison.Ordinal);
+            var bytes = Convert.FromBase64String(raw);
+            return Encoding.UTF8.GetString(bytes);
+        }
+        catch (FormatException ex)
+        {
+            _logger.LogDebug(ex, "Could not decode repository file as base64. Path={Path}", filePath);
+            return null;
+        }
     }
 
     public async Task<GitHubWorkflowRunDto?> GetLatestWorkflowRunAsync(Connector connector, string owner, string repo)
