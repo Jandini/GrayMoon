@@ -21,4 +21,13 @@ public sealed class ActionStatusInfo
 
     /// <summary>Display name of the most relevant workflow.</summary>
     public string? WorkflowName { get; set; }
+
+    /// <summary>Browser URL for this workflow (Actions tab for the definition), not a specific run.</summary>
+    public string? WorkflowHtmlUrl { get; set; }
+
+    /// <summary>Repo-relative workflow file path (e.g. <c>.github/workflows/build-app.yml</c>) for building the Actions workflow tab URL.</summary>
+    public string? WorkflowPath { get; set; }
+
+    /// <summary>True when the workflow file declares a <c>workflow_dispatch</c> trigger (manual run is allowed).</summary>
+    public bool SupportsWorkflowDispatch { get; set; }
 }

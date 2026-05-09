@@ -9,24 +9,27 @@ public sealed class WorkspaceActionService(
     GitHubActionsService gitHubActionsService)
 {
     /// <summary>Returns persisted action state for the workspace keyed by RepositoryId. Used when building the grid from cache.</summary>
-    public async Task<IReadOnlyDictionary<int, ActionStatusInfo?>> GetPersistedActionsForWorkspaceAsync(int workspaceId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyDictionary<int, RepositoryActionsPersistedState>> GetPersistedActionsForWorkspaceAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         return await actionRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
     }
 
     /// <summary>
-    /// Fetches the aggregate CI status for <paramref name="branch"/> of the given repository from GitHub and persists it.
-    /// Returns the fetched status, or null if the repository has no valid connector/org.
+    /// Fetches CI status per workflow for <paramref name="branch"/> from GitHub and persists it.
+    /// Returns null if the repository has no valid connector/org (nothing persisted).
     /// Throws on GitHub API errors (e.g. HTTP 401/403) so the caller can surface them as error badges.
     /// </summary>
-    public async Task<ActionStatusInfo?> FetchAndPersistAsync(
+    public async Task<IReadOnlyList<ActionStatusInfo>?> FetchAndPersistAsync(
         int workspaceRepositoryId,
         GitHubRepositoryEntry repository,
         string branch,
         CancellationToken cancellationToken = default)
     {
-        var info = await gitHubActionsService.GetAggregateActionStatusForBranchAsync(repository, branch);
-        await actionRepository.UpsertAsync(workspaceRepositoryId, info, cancellationToken);
-        return info;
+        var workflows = await gitHubActionsService.GetWorkflowStatusesForBranchAsync(repository, branch, cancellationToken);
+        if (workflows == null)
+            return null;
+
+        await actionRepository.UpsertAsync(workspaceRepositoryId, workflows, branch, cancellationToken);
+        return workflows;
     }
 }

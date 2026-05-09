@@ -80,12 +80,12 @@
             <div class="card page-card mb-4">
                 <div class="card-body p-0">
                     <div class="table-responsive">
-                        <table class="table table-striped table-hover mb-0 actions-table resizable-columns">
+                        <table class="table table-hover mb-0 actions-table resizable-columns">
                             <thead class="table-dark">
                                 <tr>
                                     <th class="col-repo">Repository</th>
                                     <th class="col-branch">Branch</th>
-                                    <th class="col-updated">Last checked</th>
+                                    <th class="col-workflow">Workflow</th>
                                     <th class="col-action-status">Status</th>
                                     <th class="col-actions">Actions</th>
                                 </tr>
@@ -109,78 +109,150 @@
                                 }
                                 else
                                 {
-                                    @foreach (var row in rows.OrderBy(GetStatusSortOrder))
+                                    var groupIndex = 0;
+                                    @foreach (var row in rows.OrderBy(GetStatusSortOrder).ThenBy(r => r.Repo.RepositoryName, System.StringComparer.OrdinalIgnoreCase))
                                     {
-                                        var effectiveAction = GetEffectiveAction(row);
-                                        <tr>
-                                            <td class="col-repo">
-                                                @{
-                                                    var repoUrl = GrayMoon.App.Services.RepositoryUrlHelper.GetRepositoryUrl(row.Repo.CloneUrl);
-                                                }
-                                                @if (!string.IsNullOrWhiteSpace(repoUrl))
-                                                {
-                                                    <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link">
-                                                        <strong>@row.Repo.RepositoryName</strong>
-                                                    </a>
-                                                }
-                                                else
-                                                {
-                                                    <strong>@row.Repo.RepositoryName</strong>
-                                                }
-                                            </td>
-                                            <td class="col-branch">
-                                                @if (!string.IsNullOrWhiteSpace(row.Link.BranchName))
-                                                {
-                                                    <span class="text-muted">@row.Link.BranchName</span>
-                                                }
-                                                else
-                                                {
-                                                    <span class="text-muted">-</span>
-                                                }
-                                            </td>
-                                            <td class="col-updated text-muted">
-                                                @(effectiveAction?.UpdatedAt?.ToLocalTime().ToString("g") ?? "-")
-                                            </td>
-                                            <td class="col-action-status text-center">
-                                                <ActionBadge Status="@(effectiveAction?.Status)"
-                                                             HtmlUrl="@effectiveAction?.HtmlUrl"
-                                                             ErrorMessage="@row.ErrorMessage" />
-                                            </td>
-                                            <td class="col-actions ps-3">
-                                                @if (CanRerun(row))
-                                                {
-                                                    <button class="btn btn-outline-primary action-run-btn"
-                                                            @onclick="() => RerunWorkflowAsync(row)"
-                                                            disabled="@row.RunInProgress"
-                                                            title="Re-run failed workflow: @row.Action?.WorkflowName">
-                                                        @if (row.RunInProgress)
+                                        var stripeClass = GroupStripeClass(groupIndex);
+                                        var displayLines = LinesForDisplay(row).ToList();
+                                        @for (var li = 0; li < displayLines.Count; li++)
+                                        {
+                                            var line = displayLines[li];
+                                            var firstLine = li == 0;
+                                            var isLastWorkflowLineInRepo = li == displayLines.Count - 1;
+                                            var showGhaTerminal = string.IsNullOrWhiteSpace(row.ErrorMessage)
+                                                && IsLineRunningForBranch(row, line)
+                                                && (line.Action?.RunId ?? 0) > 0;
+                                            var showRepoBranchInRow = firstLine
+                                                || IsLineRunningForBranch(row, line)
+                                                || line.RunInProgress;
+                                            var repoEndOnDataRow = isLastWorkflowLineInRepo && !showGhaTerminal;
+                                            var repoEndOnGhaRow = isLastWorkflowLineInRepo && showGhaTerminal;
+                                            var isRunningWorkflowRow = IsLineRunningForBranch(row, line);
+                                            var trClass = $"{stripeClass} actions-data-row"
+                                                + (repoEndOnDataRow ? " actions-row-repo-end" : "")
+                                                + (firstLine && row.ErrorMessage != null ? " actions-error-row" : "")
+                                                + (isRunningWorkflowRow ? " actions-row-running" : "")
+                                                + (showGhaTerminal ? " actions-row-running-above-terminal" : "");
+                                            <tr class="@trClass">
+                                                <td class="col-repo">
+                                                    @if (showRepoBranchInRow)
+                                                    {
+                                                        var repoUrl = GrayMoon.App.Services.RepositoryUrlHelper.GetRepositoryUrl(row.Repo.CloneUrl);
+                                                        @if (!string.IsNullOrWhiteSpace(repoUrl))
                                                         {
-                                                            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                                            <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link">
+                                                                <strong>@row.Repo.RepositoryName</strong>
+                                                            </a>
                                                         }
                                                         else
                                                         {
-                                                            @:Re-run
+                                                            <strong>@row.Repo.RepositoryName</strong>
                                                         }
-                                                    </button>
-                                                }
-                                                else if (CanRun(row))
-                                                {
-                                                    <button class="btn btn-outline-primary action-run-btn"
-                                                            @onclick="() => RunWorkflowAsync(row)"
-                                                            disabled="@row.RunInProgress"
-                                                            title="Run workflow: @row.Action?.WorkflowName">
-                                                        @if (row.RunInProgress)
+                                                    }
+                                                </td>
+                                                <td class="col-branch">
+                                                    @if (showRepoBranchInRow)
+                                                    {
+                                                        @if (!string.IsNullOrWhiteSpace(row.Link.BranchName))
                                                         {
-                                                            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                                            <span class="text-muted">@row.Link.BranchName</span>
                                                         }
                                                         else
                                                         {
-                                                            @:Run
+                                                            <span class="text-muted">-</span>
                                                         }
-                                                    </button>
-                                                }
-                                            </td>
-                                        </tr>
+                                                    }
+                                                </td>
+                                                <td class="col-workflow">
+                                                    @if (!string.IsNullOrWhiteSpace(line.Action?.WorkflowName))
+                                                    {
+                                                        var workflowUrl = GetWorkflowPageUrl(row, line);
+                                                        @if (!string.IsNullOrWhiteSpace(workflowUrl))
+                                                        {
+                                                            <a href="@workflowUrl" target="_blank" rel="noopener noreferrer"
+                                                               class="actions-workflow-link" title="Open workflow on GitHub">@line.Action!.WorkflowName</a>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="text-muted">@line.Action!.WorkflowName</span>
+                                                        }
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="text-muted">-</span>
+                                                    }
+                                                </td>
+                                                <td class="col-action-status text-center">
+                                                    @if (firstLine)
+                                                    {
+                                                        <ActionBadge Status="@(line.Action?.Status)"
+                                                                     HtmlUrl="@line.Action?.HtmlUrl"
+                                                                     ErrorMessage="@row.ErrorMessage" />
+                                                    }
+                                                    else if (string.IsNullOrWhiteSpace(row.ErrorMessage))
+                                                    {
+                                                        <ActionBadge Status="@(line.Action?.Status)"
+                                                                     HtmlUrl="@line.Action?.HtmlUrl" />
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="text-muted">—</span>
+                                                    }
+                                                </td>
+                                                <td class="col-actions ps-3">
+                                                    @if (string.IsNullOrWhiteSpace(row.ErrorMessage))
+                                                    {
+                                                        @if (CanRerun(row, line))
+                                                        {
+                                                            <button class="btn btn-outline-primary action-run-btn"
+                                                                    @onclick="() => RerunWorkflowAsync(row, line)"
+                                                                    disabled="@line.RunInProgress"
+                                                                    title="Re-run failed workflow: @line.Action?.WorkflowName">
+                                                                @if (line.RunInProgress)
+                                                                {
+                                                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                                                }
+                                                                else
+                                                                {
+                                                                    @:Re-run
+                                                                }
+                                                            </button>
+                                                        }
+                                                        else if (CanRun(row, line))
+                                                        {
+                                                            <button class="btn btn-outline-primary action-run-btn"
+                                                                    @onclick="() => RunWorkflowAsync(row, line)"
+                                                                    disabled="@IsRunWorkflowBusy(row, line)"
+                                                                    title="@(IsLineRunningForBranch(row, line) ? "This workflow is already running for this branch." : $"Run workflow: {line.Action?.WorkflowName}")">
+                                                                @if (line.RunInProgress)
+                                                                {
+                                                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                                                }
+                                                                else
+                                                                {
+                                                                    @:Run
+                                                                }
+                                                            </button>
+                                                        }
+                                                    }
+                                                </td>
+                                            </tr>
+                                            @if (showGhaTerminal)
+                                            {
+                                                <tr class="@($"{stripeClass} actions-gha-feed-row actions-data-row actions-row-running actions-row-running-terminal{(repoEndOnGhaRow ? " actions-row-repo-end" : "")}")">
+                                                    <td colspan="5" class="p-0 border-0">
+                                                        <GhaWorkflowLiveTerminal @key="@($"{row.Repo.RepositoryId}-{(line.Action?.WorkflowId ?? 0)}-{(line.Action?.RunId ?? 0)}")"
+                                                                                 ConnectorName="@row.Repo.ConnectorName"
+                                                                                 Owner="@(row.Repo.OrgName ?? "")"
+                                                                                 RepositoryName="@row.Repo.RepositoryName"
+                                                                                 RunId="@(line.Action!.RunId!.Value)"
+                                                                                 WorkflowDisplayName="@line.Action.WorkflowName" />
+                                                    </td>
+                                                </tr>
+                                            }
+                                        }
+
+                                        groupIndex++;
                                     }
                                 }
                             </tbody>
@@ -193,13 +265,3 @@
 </div>
 
 <LoadingOverlay IsVisible="@isRerunningAll" Message="@RerunAllOverlayMessage" />
-
-@code {
-    private static ActionStatusInfo? GetEffectiveAction(WorkspaceActionRow row)
-    {
-        if (row.Action == null) return null;
-        if (!string.Equals(row.Action.BranchName, row.Link.BranchName, StringComparison.OrdinalIgnoreCase))
-            return null;
-        return row.Action;
-    }
-}

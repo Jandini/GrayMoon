@@ -32,6 +32,7 @@ public static class Migrations
         await MigrateWorkspaceRepositoryPullRequestsAsync(dbContext);
         await MigrateWorkspaceRepositoryPullRequestsChangedFilesAsync(dbContext);
         await MigrateWorkspaceRepositoryActionsAsync(dbContext);
+        await MigrateWorkspaceRepositoryActionsWorkflowsJsonAsync(dbContext);
         await MigrateWorkspaceRepositoriesRepositoryTypeAsync(dbContext);
     }
 
@@ -825,6 +826,36 @@ public static class Migrations
                         LastCheckedAt TEXT NOT NULL,
                         FOREIGN KEY (WorkspaceRepositoryId) REFERENCES WorkspaceRepositories(WorkspaceRepositoryId) ON DELETE CASCADE
                     )";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds WorkflowsJson column for per-workflow CI status list.</summary>
+    public static async Task MigrateWorkspaceRepositoryActionsWorkflowsJsonAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceRepositoryActions'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                    return;
+
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositoryActions') WHERE name='WorkflowsJson'";
+                var hasColumn = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!hasColumn)
+                {
+                    cmd.CommandText = "ALTER TABLE WorkspaceRepositoryActions ADD COLUMN WorkflowsJson TEXT";
                     await cmd.ExecuteNonQueryAsync();
                 }
             }

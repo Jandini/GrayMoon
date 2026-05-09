@@ -1,0 +1,280 @@
+@using GrayMoon.App.Models
+@using GrayMoon.App.Repositories
+@inject GitHubService GitHubService
+@inject ConnectorRepository ConnectorRepository
+@inject LoadingOverlayUiSettingsService OverlayUiSettings
+@inject ILogger<GhaWorkflowLiveTerminal> Logger
+@implements IAsyncDisposable
+
+@if (RunId > 0 && !string.IsNullOrWhiteSpace(ConnectorName) && !string.IsNullOrWhiteSpace(Owner) && !string.IsNullOrWhiteSpace(RepositoryName))
+{
+    <div class="actions-gha-terminal">
+        <div class="actions-gha-terminal__wrap">
+            <div class="loading-overlay-terminal @(OverlayUiSettings.TerminalColorScheme == TerminalColorScheme.Yellow ? "loading-overlay-terminal--scheme-yellow" : "") actions-gha-terminal__terminal">
+                <div class="actions-gha-terminal__caption" title="@_captionTooltip">
+                    <span class="actions-gha-terminal__caption-main">
+                        <span class="actions-gha-terminal__caption-prefix">▶</span><span class="actions-gha-terminal__caption-text">@_caption</span>
+                    </span>
+                    @if (!string.IsNullOrWhiteSpace(_stepProgress))
+                    {
+                        <span class="actions-gha-terminal__caption-steps">@_stepProgress</span>
+                    }
+                </div>
+                <div class="loading-overlay-terminal__inner actions-gha-terminal__scroll" aria-live="polite">
+                    @foreach (var line in _visibleLines)
+                    {
+                        <p class="loading-overlay-terminal__line loading-overlay-terminal__line--out actions-gha-terminal__line">
+                            @if (string.IsNullOrWhiteSpace(line))
+                            {
+                                <span class="loading-overlay-terminal__text">&nbsp;</span>
+                            }
+                            else
+                            {
+                                <span class="loading-overlay-terminal__prefix">[gha]</span><span class="loading-overlay-terminal__text">@line</span>
+                            }
+                        </p>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public string ConnectorName { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Owner { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string RepositoryName { get; set; } = string.Empty;
+    [Parameter] public long RunId { get; set; }
+    [Parameter] public string? WorkflowDisplayName { get; set; }
+
+    private readonly List<string> _buffer = [];
+    private readonly Dictionary<string, string> _stepSignatures = new(StringComparer.Ordinal);
+    private bool _snapshottedSteps;
+    private string _caption = "Workflow · Connecting to GitHub Actions…";
+    private string? _stepProgress;
+    private CancellationTokenSource? _cts;
+    private Task? _pollTask;
+
+    private const int BodyLineCount = 8;
+
+    private IReadOnlyList<string> _visibleLines
+    {
+        get
+        {
+            List<string> take;
+            if (_buffer.Count >= BodyLineCount)
+                take = _buffer.Skip(_buffer.Count - BodyLineCount).ToList();
+            else
+                take = _buffer.ToList();
+            while (take.Count < BodyLineCount)
+                take.Insert(0, "");
+            return take;
+        }
+    }
+
+    private string _captionTooltip =>
+        string.IsNullOrWhiteSpace(_stepProgress) ? _caption : $"{_caption} · {_stepProgress}";
+
+    protected override void OnInitialized()
+    {
+        OverlayUiSettings.Changed += OnOverlayUiSettingsChanged;
+        _buffer.Add($"Run #{RunId} · Subscribing to job updates…");
+    }
+
+    private void OnOverlayUiSettingsChanged(object? sender, EventArgs e) =>
+        _ = InvokeAsync(StateHasChanged);
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (RunId > 0 && _pollTask == null)
+        {
+            _cts = new CancellationTokenSource();
+            _pollTask = PollLoopAsync(_cts.Token);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task PollLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await PollOnceAsync(cancellationToken);
+                await InvokeAsync(StateHasChanged);
+                await Task.Delay(3000, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            /* disposed */
+        }
+    }
+
+    private async Task PollOnceAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var connector = await ConnectorRepository.GetByNameAsync(ConnectorName);
+            if (connector == null)
+            {
+                AppendUnique("Connector not found — cannot load job status.");
+                return;
+            }
+
+            var response = await GitHubService.GetWorkflowRunJobsAsync(connector, Owner, RepositoryName, RunId, cancellationToken);
+            var jobs = response?.Jobs ?? [];
+            _caption = BuildCaption(jobs, WorkflowDisplayName);
+            _stepProgress = BuildStepProgressForCaptionJob(jobs);
+
+            if (jobs.Count == 0)
+            {
+                _stepProgress = null;
+                AppendUnique("Waiting for GitHub to assign jobs to this run…");
+                return;
+            }
+
+            if (!_snapshottedSteps)
+            {
+                _snapshottedSteps = true;
+                foreach (var job in jobs.OrderBy(j => j.Id))
+                {
+                    foreach (var step in (job.Steps ?? []).OrderBy(s => s.Number))
+                        _stepSignatures[$"{job.Id}:{step.Number}"] = $"{step.Status}|{step.Conclusion}";
+                }
+
+                var stepCount = jobs.Sum(j => j.Steps?.Count ?? 0);
+                AppendUnique($"Live · {jobs.Count} job(s), {stepCount} step(s) — streaming updates…");
+                return;
+            }
+
+            foreach (var job in jobs.OrderBy(j => j.Id))
+            {
+                var steps = job.Steps ?? [];
+                foreach (var step in steps.OrderBy(s => s.Number))
+                {
+                    var key = $"{job.Id}:{step.Number}";
+                    var sig = $"{step.Status}|{step.Conclusion}";
+                    if (_stepSignatures.TryGetValue(key, out var prev) && prev == sig)
+                        continue;
+                    _stepSignatures[key] = sig;
+                    AppendUnique(FormatStepTransition(job.Name, step));
+                }
+            }
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            Logger.LogDebug(ex, "GHA live feed poll failed for run {RunId}", RunId);
+            AppendUnique($"Update failed: {ex.Message}");
+        }
+    }
+
+    private void AppendUnique(string line)
+    {
+        if (_buffer.Count > 0 && string.Equals(_buffer[^1], line, StringComparison.Ordinal))
+            return;
+        _buffer.Add(line);
+        while (_buffer.Count > 120)
+            _buffer.RemoveAt(0);
+    }
+
+    private static string BuildCaption(IReadOnlyList<GitHubWorkflowJobDto> jobs, string? workflowName)
+    {
+        var wf = string.IsNullOrWhiteSpace(workflowName) ? "Workflow" : workflowName!;
+        if (jobs.Count == 0)
+            return $"{wf} · Waiting for jobs…";
+
+        var job = GetCaptionJob(jobs)!;
+        var steps = job.Steps ?? [];
+        var step = steps.FirstOrDefault(s => string.Equals(s.Status, "in_progress", StringComparison.OrdinalIgnoreCase))
+                   ?? steps.LastOrDefault(s => string.Equals(s.Status, "completed", StringComparison.OrdinalIgnoreCase));
+
+        var stepLabel = step?.Name;
+        if (string.IsNullOrWhiteSpace(stepLabel))
+        {
+            if (string.Equals(job.Status, "queued", StringComparison.OrdinalIgnoreCase))
+                stepLabel = "Queued for runner…";
+            else if (string.Equals(job.Status, "in_progress", StringComparison.OrdinalIgnoreCase))
+                stepLabel = "Running…";
+            else
+                stepLabel = job.Status;
+        }
+
+        return $"{wf} · {job.Name} › {stepLabel}";
+    }
+
+    /// <summary>Same "current" job as <see cref="BuildCaption"/>; step counts come from the jobs API for that run.</summary>
+    private static GitHubWorkflowJobDto? GetCaptionJob(IReadOnlyList<GitHubWorkflowJobDto> jobs)
+    {
+        if (jobs.Count == 0) return null;
+        return jobs.FirstOrDefault(j => string.Equals(j.Status, "in_progress", StringComparison.OrdinalIgnoreCase))
+               ?? jobs.FirstOrDefault(j => string.Equals(j.Status, "queued", StringComparison.OrdinalIgnoreCase))
+               ?? jobs.FirstOrDefault(j => string.Equals(j.Status, "waiting", StringComparison.OrdinalIgnoreCase))
+               ?? jobs[0];
+    }
+
+    /// <summary>1-based index of the active step and total steps for the caption job (YAML steps GitHub reports for that job).</summary>
+    private static string? BuildStepProgressForCaptionJob(IReadOnlyList<GitHubWorkflowJobDto> jobs)
+    {
+        var job = GetCaptionJob(jobs);
+        if (job == null) return null;
+
+        var ordered = (job.Steps ?? []).OrderBy(s => s.Number).ToList();
+        var y = ordered.Count;
+        if (y == 0)
+            return null;
+
+        var inProgressIdx = ordered.FindIndex(s => string.Equals(s.Status, "in_progress", StringComparison.OrdinalIgnoreCase));
+        if (inProgressIdx >= 0)
+            return $"Step {inProgressIdx + 1} of {y}";
+
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            if (!string.Equals(ordered[i].Status, "completed", StringComparison.OrdinalIgnoreCase))
+                return $"Step {i + 1} of {y}";
+        }
+
+        return $"Step {y} of {y}";
+    }
+
+    private static string FormatStepTransition(string jobName, GitHubWorkflowJobStepDto step)
+    {
+        if (string.Equals(step.Status, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            var c = step.Conclusion ?? "";
+            if (string.Equals(c, "success", StringComparison.OrdinalIgnoreCase))
+                return $"✓ {jobName} › {step.Name}";
+            if (string.Equals(c, "skipped", StringComparison.OrdinalIgnoreCase))
+                return $"⊘ {jobName} › {step.Name} (skipped)";
+            if (string.Equals(c, "failure", StringComparison.OrdinalIgnoreCase) || string.Equals(c, "cancelled", StringComparison.OrdinalIgnoreCase))
+                return $"✗ {jobName} › {step.Name} ({c})";
+            return $"• {jobName} › {step.Name} — {c}";
+        }
+
+        if (string.Equals(step.Status, "in_progress", StringComparison.OrdinalIgnoreCase))
+            return $"⧗ {jobName} › {step.Name}…";
+
+        return $"… {jobName} › {step.Name} — {step.Status}";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        OverlayUiSettings.Changed -= OnOverlayUiSettingsChanged;
+        try
+        {
+            _cts?.Cancel();
+            if (_pollTask != null)
+                await _pollTask;
+        }
+        catch (OperationCanceledException)
+        {
+            /* ok */
+        }
+        finally
+        {
+            _cts?.Dispose();
+            _cts = null;
+        }
+    }
+}

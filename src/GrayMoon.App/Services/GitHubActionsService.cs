@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 
@@ -52,7 +53,13 @@ public class GitHubActionsService(
                         Status = run.Status,
                         Conclusion = run.Conclusion,
                         UpdatedAt = run.UpdatedAt,
-                        HtmlUrl = run.HtmlUrl,
+                        HtmlUrl = RepositoryUrlHelper.GetWorkflowRunWebUrl(
+                                      repository.CloneUrl,
+                                      repository.OrgName,
+                                      repository.RepositoryName,
+                                      run.Id,
+                                      connector.ApiBaseUrl)
+                                  ?? run.HtmlUrl,
                         HeadBranch = run.HeadBranch
                     });
                 }
@@ -104,7 +111,13 @@ public class GitHubActionsService(
                 Status = run.Status,
                 Conclusion = run.Conclusion,
                 UpdatedAt = run.UpdatedAt,
-                HtmlUrl = run.HtmlUrl,
+                HtmlUrl = RepositoryUrlHelper.GetWorkflowRunWebUrl(
+                              repository.CloneUrl,
+                              repository.OrgName,
+                              repository.RepositoryName,
+                              run.Id,
+                              connector.ApiBaseUrl)
+                          ?? run.HtmlUrl,
                 HeadBranch = run.HeadBranch
             };
         }
@@ -116,76 +129,170 @@ public class GitHubActionsService(
     }
 
     /// <summary>
-    /// Fetches all recent workflow runs for the given branch and returns an aggregated status.
-    /// Groups by workflow, takes the latest run per workflow, then returns:
-    /// "failed" if any has a failure conclusion, "running" if any is still in progress,
-    /// "success" if all completed successfully, or "none" if no runs found.
+    /// Fetches active workflows and the latest run per workflow for <paramref name="branch"/>.
+    /// Each entry is independent (not cross-workflow aggregate).
     /// </summary>
-    public async Task<ActionStatusInfo?> GetAggregateActionStatusForBranchAsync(GitHubRepositoryEntry repository, string branch)
+    public async Task<IReadOnlyList<ActionStatusInfo>?> GetWorkflowStatusesForBranchAsync(GitHubRepositoryEntry repository, string branch, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(repository.OrgName) || string.IsNullOrWhiteSpace(repository.RepositoryName))
             return null;
 
         if (string.IsNullOrWhiteSpace(branch))
-            return new ActionStatusInfo { Status = "none" };
+            return [new ActionStatusInfo { Status = "none", BranchName = branch }];
 
         var connector = await connectorRepository.GetByNameAsync(repository.ConnectorName);
         if (connector == null)
         {
-            logger.LogWarning("Connector {ConnectorName} not found for aggregate actions.", repository.ConnectorName);
+            logger.LogWarning("Connector {ConnectorName} not found for workflow statuses.", repository.ConnectorName);
             return null;
         }
 
-        var runs = await gitHubService.GetWorkflowRunsForBranchAsync(connector, repository.OrgName, repository.RepositoryName, branch);
-        if (runs.Count == 0)
-            return new ActionStatusInfo { Status = "none", BranchName = branch };
+        var owner = repository.OrgName!;
+        var repoName = repository.RepositoryName;
 
-        // Take the latest run per workflow to avoid stale duplicates counting against aggregate
-        var latestPerWorkflow = runs
-            .GroupBy(r => r.WorkflowId)
-            .Select(g => g.OrderByDescending(r => r.UpdatedAt).First())
+        var workflows = (await gitHubService.GetWorkflowsAsync(connector, owner, repoName, cancellationToken))
+            .Where(w => string.Equals(w.State, "active", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(w => w.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var failedRun = latestPerWorkflow
-            .Where(r => IsFailureConclusion(r.Conclusion))
-            .OrderByDescending(r => r.UpdatedAt)
-            .FirstOrDefault();
+        var runs = await gitHubService.GetWorkflowRunsForBranchAsync(
+            connector, owner, repoName, branch, perPage: 100);
+        var latestByWorkflowId = runs
+            .GroupBy(r => r.WorkflowId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(r => r.UpdatedAt).First());
 
-        var runningRun = latestPerWorkflow
-            .Where(r => !string.Equals(r.Status, "completed", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(r => r.UpdatedAt)
-            .FirstOrDefault();
-
-        var latestRun = latestPerWorkflow.OrderByDescending(r => r.UpdatedAt).First();
-
-        string status;
-        GitHubWorkflowRunDto primaryRun;
-
-        if (failedRun != null)
+        var result = new List<ActionStatusInfo>();
+        if (workflows.Count > 0)
         {
-            status = "failed";
-            primaryRun = failedRun;
-        }
-        else if (runningRun != null)
-        {
-            status = "running";
-            primaryRun = runningRun;
+            var dispatchPairs = await Task.WhenAll(workflows.Select(async wf =>
+            {
+                var yaml = await gitHubService.GetRepositoryFileUtf8TextAsync(connector, owner, repoName, wf.Path, cancellationToken);
+                return (wf.Id, Supports: YamlAppearsToHaveWorkflowDispatch(yaml));
+            }));
+            var dispatchById = dispatchPairs.ToDictionary(x => x.Id, x => x.Supports);
+
+            foreach (var wf in workflows)
+            {
+                latestByWorkflowId.TryGetValue(wf.Id, out var run);
+                var supportsDispatch = dispatchById.GetValueOrDefault(wf.Id, false);
+                var workflowPageUrl = RepositoryUrlHelper.BuildWorkflowPageUrl(
+                    wf.HtmlUrl,
+                    repository.CloneUrl,
+                    owner,
+                    repoName,
+                    wf.Id,
+                    wf.Path,
+                    connector.ApiBaseUrl);
+                result.Add(ToPerWorkflowActionStatus(
+                    branch,
+                    wf.Id,
+                    wf.Name,
+                    run,
+                    supportsDispatch,
+                    workflowPageUrl,
+                    wf.Path,
+                    owner,
+                    repoName,
+                    repository.CloneUrl,
+                    connector.ApiBaseUrl));
+            }
         }
         else
         {
-            status = "success";
-            primaryRun = latestRun;
+            foreach (var run in latestByWorkflowId.Values.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                var meta = await gitHubService.GetWorkflowByIdAsync(connector, owner, repoName, run.WorkflowId, cancellationToken);
+                var yaml = string.IsNullOrWhiteSpace(meta?.Path)
+                    ? null
+                    : await gitHubService.GetRepositoryFileUtf8TextAsync(connector, owner, repoName, meta.Path, cancellationToken);
+                var supportsDispatch = YamlAppearsToHaveWorkflowDispatch(yaml);
+                var workflowPageUrl = RepositoryUrlHelper.BuildWorkflowPageUrl(
+                    meta?.HtmlUrl,
+                    repository.CloneUrl,
+                    owner,
+                    repoName,
+                    run.WorkflowId,
+                    meta?.Path,
+                    connector.ApiBaseUrl);
+                result.Add(ToPerWorkflowActionStatus(
+                    branch,
+                    run.WorkflowId,
+                    run.Name,
+                    run,
+                    supportsDispatch,
+                    workflowPageUrl,
+                    meta?.Path,
+                    owner,
+                    repoName,
+                    repository.CloneUrl,
+                    connector.ApiBaseUrl));
+            }
         }
+
+        return result;
+    }
+
+    /// <summary>Detects a <c>workflow_dispatch</c> trigger in workflow YAML without a full parser.</summary>
+    private static bool YamlAppearsToHaveWorkflowDispatch(string? yaml)
+    {
+        if (string.IsNullOrWhiteSpace(yaml)) return false;
+        return WorkflowDispatchTriggerRegex.IsMatch(yaml);
+    }
+
+    private static readonly Regex WorkflowDispatchTriggerRegex = new(@"\bworkflow_dispatch\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static ActionStatusInfo ToPerWorkflowActionStatus(
+        string branch,
+        long workflowId,
+        string workflowName,
+        GitHubWorkflowRunDto? run,
+        bool supportsWorkflowDispatch,
+        string? workflowPageUrl,
+        string? workflowFilePath,
+        string owner,
+        string repoName,
+        string cloneUrl,
+        string? connectorApiBaseUrl)
+    {
+        if (run == null)
+        {
+            return new ActionStatusInfo
+            {
+                Status = "none",
+                BranchName = branch,
+                WorkflowId = workflowId,
+                WorkflowName = workflowName,
+                WorkflowHtmlUrl = workflowPageUrl,
+                WorkflowPath = workflowFilePath,
+                SupportsWorkflowDispatch = supportsWorkflowDispatch
+            };
+        }
+
+        string status;
+        if (IsFailureConclusion(run.Conclusion))
+            status = "failed";
+        else if (!string.Equals(run.Status, "completed", StringComparison.OrdinalIgnoreCase))
+            status = "running";
+        else
+            status = "success";
+
+        var displayName = string.IsNullOrWhiteSpace(run.Name) ? workflowName : run.Name;
+        var htmlUrl = RepositoryUrlHelper.GetWorkflowRunWebUrl(cloneUrl, owner, repoName, run.Id, connectorApiBaseUrl);
+        if (string.IsNullOrWhiteSpace(htmlUrl) && Uri.TryCreate(run.HtmlUrl, UriKind.Absolute, out _))
+            htmlUrl = run.HtmlUrl;
 
         return new ActionStatusInfo
         {
             Status = status,
-            HtmlUrl = primaryRun.HtmlUrl,
-            UpdatedAt = primaryRun.UpdatedAt,
+            HtmlUrl = htmlUrl,
+            UpdatedAt = run.UpdatedAt,
             BranchName = branch,
-            RunId = primaryRun.Id,
-            WorkflowId = primaryRun.WorkflowId,
-            WorkflowName = primaryRun.Name
+            RunId = run.Id,
+            WorkflowId = workflowId,
+            WorkflowName = displayName,
+            WorkflowHtmlUrl = workflowPageUrl,
+            WorkflowPath = workflowFilePath,
+            SupportsWorkflowDispatch = supportsWorkflowDispatch
         };
     }
 

@@ -26,6 +26,9 @@ public class WorkspaceRepositoryAction
 
     public string? WorkflowName { get; set; }
 
+    /// <summary>Serialized <see cref="List{ActionStatusInfo}"/> when using multi-workflow persistence; legacy rows use scalar columns only.</summary>
+    public string? WorkflowsJson { get; set; }
+
     public DateTime LastCheckedAt { get; set; }
 
     public ActionStatusInfo ToActionStatusInfo() => new()
@@ -36,6 +39,7 @@ public class WorkspaceRepositoryAction
         BranchName = BranchName,
         RunId = RunId,
         WorkflowId = WorkflowId,
-        WorkflowName = WorkflowName
+        WorkflowName = WorkflowName,
+        SupportsWorkflowDispatch = false
     };
 }

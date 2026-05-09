@@ -1,3 +1,4 @@
+using System.Text.Json;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using Microsoft.EntityFrameworkCore;
@@ -7,8 +8,13 @@ namespace GrayMoon.App.Repositories;
 /// <summary>Persistence for CI action status per workspace–repository link. Single place for all action table read/write.</summary>
 public sealed class WorkspaceActionRepository(AppDbContext dbContext, ILogger<WorkspaceActionRepository> logger)
 {
-    /// <summary>Returns persisted action state for all repositories in the workspace, keyed by RepositoryId. Missing row yields null (never checked).</summary>
-    public async Task<IReadOnlyDictionary<int, ActionStatusInfo?>> GetByWorkspaceIdAsync(int workspaceId, CancellationToken cancellationToken = default)
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    /// <summary>Returns persisted action state for all repositories in the workspace, keyed by RepositoryId. Missing row omitted (never checked).</summary>
+    public async Task<IReadOnlyDictionary<int, RepositoryActionsPersistedState>> GetByWorkspaceIdAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         var links = await dbContext.WorkspaceRepositories
             .AsNoTracking()
@@ -16,51 +22,65 @@ public sealed class WorkspaceActionRepository(AppDbContext dbContext, ILogger<Wo
             .Where(wr => wr.WorkspaceId == workspaceId)
             .ToListAsync(cancellationToken);
 
-        var result = new Dictionary<int, ActionStatusInfo?>();
+        var result = new Dictionary<int, RepositoryActionsPersistedState>();
         foreach (var link in links)
         {
             if (link.Action == null) continue;
-            result[link.RepositoryId] = link.Action.ToActionStatusInfo();
+
+            IReadOnlyList<ActionStatusInfo> workflows;
+            if (!string.IsNullOrWhiteSpace(link.Action.WorkflowsJson))
+            {
+                var list = JsonSerializer.Deserialize<List<ActionStatusInfo>>(link.Action.WorkflowsJson, JsonOptions) ?? [];
+                workflows = list;
+            }
+            else
+            {
+                workflows = [link.Action.ToActionStatusInfo()];
+            }
+
+            result[link.RepositoryId] = new RepositoryActionsPersistedState
+            {
+                BranchName = link.Action.BranchName,
+                Workflows = workflows
+            };
         }
+
         return result;
     }
 
-    /// <summary>Inserts or updates the action row for the given workspace–repo link.</summary>
-    public async Task UpsertAsync(int workspaceRepositoryId, ActionStatusInfo? info, CancellationToken cancellationToken = default)
+    /// <summary>Inserts or updates the action row for the given workspace–repo link. JSON is the source of truth; legacy scalar columns are cleared.</summary>
+    public async Task UpsertAsync(int workspaceRepositoryId, IReadOnlyList<ActionStatusInfo> workflows, string? branchName, CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
+        var json = JsonSerializer.Serialize(workflows, JsonOptions);
         var existing = await dbContext.WorkspaceRepositoryActions
             .FirstOrDefaultAsync(a => a.WorkspaceRepositoryId == workspaceRepositoryId, cancellationToken);
 
         if (existing != null)
         {
-            existing.Status = info?.Status;
-            existing.HtmlUrl = info?.HtmlUrl;
-            existing.UpdatedAt = info?.UpdatedAt;
-            existing.BranchName = info?.BranchName;
-            existing.RunId = info?.RunId;
-            existing.WorkflowId = info?.WorkflowId;
-            existing.WorkflowName = info?.WorkflowName;
+            existing.BranchName = branchName;
+            existing.WorkflowsJson = json;
             existing.LastCheckedAt = now;
+            existing.Status = null;
+            existing.HtmlUrl = null;
+            existing.UpdatedAt = null;
+            existing.RunId = null;
+            existing.WorkflowId = null;
+            existing.WorkflowName = null;
         }
         else
         {
             dbContext.WorkspaceRepositoryActions.Add(new WorkspaceRepositoryAction
             {
                 WorkspaceRepositoryId = workspaceRepositoryId,
-                Status = info?.Status,
-                HtmlUrl = info?.HtmlUrl,
-                UpdatedAt = info?.UpdatedAt,
-                BranchName = info?.BranchName,
-                RunId = info?.RunId,
-                WorkflowId = info?.WorkflowId,
-                WorkflowName = info?.WorkflowName,
+                BranchName = branchName,
+                WorkflowsJson = json,
                 LastCheckedAt = now
             });
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        logger.LogTrace("Upserted Action for WorkspaceRepositoryId={WorkspaceRepositoryId}, Status={Status}, Branch={Branch}",
-            workspaceRepositoryId, info?.Status, info?.BranchName);
+        logger.LogTrace("Upserted Actions for WorkspaceRepositoryId={WorkspaceRepositoryId}, Branch={Branch}, WorkflowCount={Count}",
+            workspaceRepositoryId, branchName, workflows.Count);
     }
 }
