@@ -26,6 +26,15 @@ public sealed partial class WorkspaceActions : IDisposable
     {
         public ActionStatusInfo? Action { get; set; }
         public bool RunInProgress { get; set; }
+        public bool AbortInProgress { get; set; }
+    }
+
+    /// <summary>Survives <see cref="RefreshRowAsync"/> replacing <see cref="WorkflowActionLine"/> instances so Run/Abort cannot double-post or flicker enabled mid-refresh.</summary>
+    internal sealed class WorkflowActionButtonLatch
+    {
+        public bool RunPending { get; set; }
+        public bool AbortPending { get; set; }
+        public bool RerunPending { get; set; }
     }
 
     internal sealed class WorkspaceActionRow
@@ -38,6 +47,8 @@ public sealed partial class WorkspaceActions : IDisposable
         public bool IsVerified { get; set; }
         public bool IsRefreshing { get; set; }
         public string? ErrorMessage { get; set; }
+
+        public Dictionary<long, WorkflowActionButtonLatch> ActionLatches { get; } = new();
     }
 
     private Workspace? workspace;
@@ -72,6 +83,9 @@ public sealed partial class WorkspaceActions : IDisposable
 
     internal int RunningCount => rows.Sum(row => row.WorkflowLines.Count(line =>
         string.IsNullOrWhiteSpace(row.ErrorMessage) && IsLineRunningForBranch(row, line)));
+
+    internal int AbortedCount => rows.Sum(row => row.WorkflowLines.Count(line =>
+        string.IsNullOrWhiteSpace(row.ErrorMessage) && IsLineAbortedForBranch(row, line)));
 
     internal int SuccessCount => rows.Sum(row => row.WorkflowLines.Count(line =>
         string.IsNullOrWhiteSpace(row.ErrorMessage) && IsLineSuccessForBranch(row, line)));
@@ -226,6 +240,7 @@ public sealed partial class WorkspaceActions : IDisposable
                 if (branchChanged)
                 {
                     row.WorkflowLines = [new WorkflowActionLine()];
+                    row.ActionLatches.Clear();
                     row.IsVerified = false;
                     rowsToRefresh.Add(row);
                 }
@@ -307,6 +322,7 @@ public sealed partial class WorkspaceActions : IDisposable
                 row.WorkflowLines = list
                     .Select(w => new WorkflowActionLine { Action = w })
                     .ToList();
+                ApplyActionLatches(row);
                 row.IsVerified = true;
                 row.ErrorMessage = null;
 
@@ -393,6 +409,171 @@ public sealed partial class WorkspaceActions : IDisposable
         return false;
     }
 
+    /// <summary>After cancel, GitHub may still report <c>in_progress</c> briefly; refresh until the workflow line is no longer running.</summary>
+    private async Task<bool> TryRefreshUntilWorkflowNotRunningAsync(
+        WorkspaceActionRow row,
+        long workflowId,
+        long runId,
+        string operationLabel,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; attempt <= RunWorkflowVisibilityMaxAttempts; attempt++)
+        {
+            var delayMs = attempt == 1 ? RunWorkflowVisibilityFirstDelayMs : RunWorkflowVisibilityRetryDelayMs;
+            try
+            {
+                await Task.Delay(delayMs, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+
+            await RefreshRowAsync(row, cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(row.ErrorMessage))
+            {
+                Logger.LogWarning(
+                    "{Operation}: refresh failed for row after attempt {Attempt}; stopping cancel visibility retries",
+                    operationLabel,
+                    attempt);
+                return false;
+            }
+
+            var wfLine = row.WorkflowLines.FirstOrDefault(l => l.Action?.RunId == runId)
+                ?? (workflowId > 0
+                    ? row.WorkflowLines.FirstOrDefault(l => l.Action?.WorkflowId == workflowId)
+                    : null);
+
+            if (wfLine != null && !IsLineRunningForBranch(row, wfLine))
+            {
+                Logger.LogInformation(
+                    "{Operation}: workflow no longer running after attempt {Attempt}/{Max} WorkflowId={WorkflowId} RunId={RunId} Status={Status}",
+                    operationLabel,
+                    attempt,
+                    RunWorkflowVisibilityMaxAttempts,
+                    workflowId,
+                    runId,
+                    wfLine.Action?.Status);
+                return true;
+            }
+
+            if (attempt < RunWorkflowVisibilityMaxAttempts)
+            {
+                Logger.LogDebug(
+                    "{Operation}: attempt {Attempt}/{Max} — run still in progress in API WorkflowId={WorkflowId} RunId={RunId}",
+                    operationLabel,
+                    attempt,
+                    RunWorkflowVisibilityMaxAttempts,
+                    workflowId,
+                    runId);
+            }
+        }
+
+        Logger.LogWarning(
+            "{Operation}: still running after {Max} refresh attempts WorkflowId={WorkflowId} RunId={RunId} (grid will update on next poll)",
+            operationLabel,
+            RunWorkflowVisibilityMaxAttempts,
+            workflowId,
+            runId);
+        return false;
+    }
+
+    /// <summary>Latch key: GitHub workflow id when present, else run id (for lines without workflow id).</summary>
+    private static long GetLineLatchKey(WorkflowActionLine line)
+    {
+        var w = line.Action?.WorkflowId ?? 0;
+        if (w > 0) return w;
+        return line.Action?.RunId ?? 0;
+    }
+
+    private static WorkflowActionButtonLatch GetOrCreateLatch(WorkspaceActionRow row, long key)
+    {
+        if (!row.ActionLatches.TryGetValue(key, out var latch))
+        {
+            latch = new WorkflowActionButtonLatch();
+            row.ActionLatches[key] = latch;
+        }
+
+        return latch;
+    }
+
+    private static bool TryBeginRunLatch(WorkspaceActionRow row, long workflowId)
+    {
+        if (workflowId <= 0) return false;
+        var latch = GetOrCreateLatch(row, workflowId);
+        if (latch.RunPending || latch.AbortPending || latch.RerunPending) return false;
+        latch.RunPending = true;
+        return true;
+    }
+
+    private static bool TryBeginAbortLatch(WorkspaceActionRow row, WorkflowActionLine line)
+    {
+        var key = GetLineLatchKey(line);
+        if (key <= 0) return false;
+        var latch = GetOrCreateLatch(row, key);
+        if (latch.RunPending || latch.AbortPending || latch.RerunPending) return false;
+        latch.AbortPending = true;
+        return true;
+    }
+
+    private static bool TryBeginRerunLatch(WorkspaceActionRow row, WorkflowActionLine line)
+    {
+        var key = GetLineLatchKey(line);
+        if (key <= 0) return false;
+        var latch = GetOrCreateLatch(row, key);
+        if (latch.RunPending || latch.AbortPending || latch.RerunPending) return false;
+        latch.RerunPending = true;
+        return true;
+    }
+
+    private static void EndRunLatch(WorkspaceActionRow row, long workflowId)
+    {
+        if (workflowId <= 0) return;
+        if (!row.ActionLatches.TryGetValue(workflowId, out var latch)) return;
+        latch.RunPending = false;
+        RemoveLatchIfIdle(row, workflowId, latch);
+    }
+
+    private static void EndAbortLatch(WorkspaceActionRow row, long key)
+    {
+        if (key <= 0) return;
+        if (!row.ActionLatches.TryGetValue(key, out var latch)) return;
+        latch.AbortPending = false;
+        RemoveLatchIfIdle(row, key, latch);
+    }
+
+    private static void EndRerunLatch(WorkspaceActionRow row, long key)
+    {
+        if (key <= 0) return;
+        if (!row.ActionLatches.TryGetValue(key, out var latch)) return;
+        latch.RerunPending = false;
+        RemoveLatchIfIdle(row, key, latch);
+    }
+
+    private static void RemoveLatchIfIdle(WorkspaceActionRow row, long key, WorkflowActionButtonLatch latch)
+    {
+        if (!latch.RunPending && !latch.AbortPending && !latch.RerunPending)
+            row.ActionLatches.Remove(key);
+    }
+
+    private static void ApplyActionLatches(WorkspaceActionRow row)
+    {
+        foreach (var line in row.WorkflowLines)
+        {
+            var key = GetLineLatchKey(line);
+            if (key <= 0 || !row.ActionLatches.TryGetValue(key, out var latch))
+            {
+                line.RunInProgress = false;
+                line.AbortInProgress = false;
+                continue;
+            }
+
+            line.RunInProgress = latch.RunPending || latch.RerunPending;
+            line.AbortInProgress = latch.AbortPending;
+        }
+    }
+
     internal async Task RefreshAllAsync()
     {
         if (workspace == null || rows.Count == 0) return;
@@ -425,8 +606,11 @@ public sealed partial class WorkspaceActions : IDisposable
     {
         if (line.Action?.RunId == null) return;
 
+        var latchKey = GetLineLatchKey(line);
+        if (!TryBeginRerunLatch(row, line)) return;
+
         row.ErrorMessage = null;
-        line.RunInProgress = true;
+        ApplyActionLatches(row);
         await InvokeAsync(StateHasChanged);
 
         try
@@ -471,7 +655,71 @@ public sealed partial class WorkspaceActions : IDisposable
         }
         finally
         {
-            line.RunInProgress = false;
+            EndRerunLatch(row, latchKey);
+            ApplyActionLatches(row);
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    internal async Task AbortWorkflowAsync(WorkspaceActionRow row, WorkflowActionLine line)
+    {
+        if ((line.Action?.RunId ?? 0) <= 0) return;
+        if (!IsLineRunningForBranch(row, line)) return;
+
+        var workflowId = line.Action!.WorkflowId ?? 0;
+        var runId = line.Action.RunId!.Value;
+        var latchKey = GetLineLatchKey(line);
+        if (!TryBeginAbortLatch(row, line)) return;
+
+        row.ErrorMessage = null;
+        ApplyActionLatches(row);
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var actionEntry = BuildActionEntry(row, line);
+            Logger.LogInformation(
+                "GHA Cancel requested: WorkspaceId={WorkspaceId} Connector={Connector} {Owner}/{Repo} branch={Branch} workflow={WorkflowName} WorkflowId={WorkflowId} RunId={RunId}",
+                WorkspaceId,
+                row.Repo.ConnectorName,
+                actionEntry.Owner,
+                actionEntry.RepositoryName,
+                actionEntry.HeadBranch,
+                actionEntry.WorkflowName,
+                actionEntry.WorkflowId,
+                actionEntry.RunId);
+            await GitHubActionsService.CancelWorkflowRunAsync(actionEntry);
+            var stopped = await TryRefreshUntilWorkflowNotRunningAsync(
+                row,
+                workflowId,
+                runId,
+                "GHA Cancel",
+                CancellationToken.None);
+            Logger.LogInformation(
+                "GHA Cancel completed (refresh phase): WorkspaceId={WorkspaceId} {Owner}/{Repo} workflow={WorkflowName} RunId={RunId} noLongerRunningVisible={Stopped}",
+                WorkspaceId,
+                actionEntry.Owner,
+                actionEntry.RepositoryName,
+                actionEntry.WorkflowName,
+                runId,
+                stopped);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex,
+                "GHA Cancel failed: WorkspaceId={WorkspaceId} {Owner}/{Repo} workflow={WorkflowName} RunId={RunId}",
+                WorkspaceId,
+                row.Repo.OrgName,
+                row.Repo.RepositoryName,
+                line.Action?.WorkflowName,
+                line.Action?.RunId);
+            row.ErrorMessage = GetFriendlyErrorMessage(ex);
+            await InvokeAsync(StateHasChanged);
+        }
+        finally
+        {
+            EndAbortLatch(row, latchKey);
+            ApplyActionLatches(row);
             await InvokeAsync(StateHasChanged);
         }
     }
@@ -481,8 +729,11 @@ public sealed partial class WorkspaceActions : IDisposable
         if (line.Action?.WorkflowId == null) return;
         if (IsLineRunningForBranch(row, line)) return;
 
+        var latchKey = line.Action.WorkflowId.Value;
+        if (!TryBeginRunLatch(row, latchKey)) return;
+
         row.ErrorMessage = null;
-        line.RunInProgress = true;
+        ApplyActionLatches(row);
         await InvokeAsync(StateHasChanged);
 
         try
@@ -528,7 +779,8 @@ public sealed partial class WorkspaceActions : IDisposable
         }
         finally
         {
-            line.RunInProgress = false;
+            EndRunLatch(row, latchKey);
+            ApplyActionLatches(row);
             await InvokeAsync(StateHasChanged);
         }
     }
@@ -631,6 +883,8 @@ public sealed partial class WorkspaceActions : IDisposable
                 "Forbidden (403). The token does not have permission to access GitHub Actions.",
             HttpRequestException { StatusCode: HttpStatusCode.NotFound } =>
                 "Not found (404). The repository or workflow was not found.",
+            HttpRequestException { StatusCode: HttpStatusCode.Conflict } =>
+                "Conflict (409). The workflow run may already be finished.",
             HttpRequestException { StatusCode: HttpStatusCode.UnprocessableEntity } http422 =>
                 string.IsNullOrWhiteSpace(http422.Message)
                     ? "GitHub rejected the workflow request (422). It may not support manual runs on this branch, or required workflow inputs are missing."
@@ -655,15 +909,16 @@ public sealed partial class WorkspaceActions : IDisposable
         return status switch
         {
             "failed" => 1,
-            "running" => 2,
-            "success" => 3,
-            _ => 4
+            "aborted" => 2,
+            "running" => 3,
+            "success" => 4,
+            _ => 5
         };
     }
 
     private static string? GetEffectiveStatusForSort(WorkspaceActionRow row)
     {
-        var order = 4;
+        var order = 5;
         string? worst = null;
         foreach (var line in row.WorkflowLines)
         {
@@ -673,9 +928,10 @@ public sealed partial class WorkspaceActions : IDisposable
             var o = a.Status switch
             {
                 "failed" => 1,
-                "running" => 2,
-                "success" => 3,
-                _ => 4
+                "aborted" => 2,
+                "running" => 3,
+                "success" => 4,
+                _ => 5
             };
             if (o < order)
             {
@@ -702,6 +958,11 @@ public sealed partial class WorkspaceActions : IDisposable
         string.Equals(line.Action.BranchName, row.Link.BranchName, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(line.Action.Status, "success", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsLineAbortedForBranch(WorkspaceActionRow row, WorkflowActionLine line) =>
+        line.Action != null &&
+        string.Equals(line.Action.BranchName, row.Link.BranchName, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(line.Action.Status, "aborted", StringComparison.OrdinalIgnoreCase);
+
     private static bool IsLineNoneForBranch(WorkspaceActionRow row, WorkflowActionLine line) =>
         line.Action == null ||
         !string.Equals(line.Action.BranchName, row.Link.BranchName, StringComparison.OrdinalIgnoreCase) ||
@@ -715,9 +976,12 @@ public sealed partial class WorkspaceActions : IDisposable
         (line.Action?.WorkflowId ?? 0) > 0 &&
         !string.IsNullOrWhiteSpace(row.Link.BranchName);
 
-    /// <summary>True when Run should be non-interactive: dispatch in flight or latest run still in progress on GitHub.</summary>
+    internal static bool CanAbort(WorkspaceActionRow row, WorkflowActionLine line) =>
+        IsLineRunningForBranch(row, line) && (line.Action?.RunId ?? 0) > 0;
+
+    /// <summary>True when Run should be non-interactive: workflow_dispatch request in flight.</summary>
     internal static bool IsRunWorkflowBusy(WorkspaceActionRow row, WorkflowActionLine line) =>
-        line.RunInProgress || IsLineRunningForBranch(row, line);
+        line.RunInProgress;
 
     /// <summary>GitHub Actions workflow page (not a specific run); uses persisted <see cref="ActionStatusInfo.WorkflowHtmlUrl"/> or builds from repo + workflow id.</summary>
     internal static string? GetWorkflowPageUrl(WorkspaceActionRow row, WorkflowActionLine line)

@@ -15,7 +15,7 @@
                     @if (!isLoading && rows.Count > 0)
                     {
                         @($"{rows.Count} {(rows.Count == 1 ? "repository" : "repositories")}")
-                        @if (ErrorCount > 0 || FailedCount > 0 || RunningCount > 0 || SuccessCount > 0 || NoneCount > 0)
+                        @if (ErrorCount > 0 || FailedCount > 0 || AbortedCount > 0 || RunningCount > 0 || SuccessCount > 0 || NoneCount > 0)
                         {
                             <span>|</span>
                         }
@@ -26,6 +26,10 @@
                         @if (FailedCount > 0)
                         {
                             <span>failed <span class="badge action-badge action-badge-failed">@FailedCount</span></span>
+                        }
+                        @if (AbortedCount > 0)
+                        {
+                            <span>aborted <span class="badge action-badge action-badge-aborted">@AbortedCount</span></span>
                         }
                         @if (RunningCount > 0)
                         {
@@ -124,7 +128,8 @@
                                                 && (line.Action?.RunId ?? 0) > 0;
                                             var showRepoBranchInRow = firstLine
                                                 || IsLineRunningForBranch(row, line)
-                                                || line.RunInProgress;
+                                                || line.RunInProgress
+                                                || line.AbortInProgress;
                                             var repoEndOnDataRow = isLastWorkflowLineInRepo && !showGhaTerminal;
                                             var repoEndOnGhaRow = isLastWorkflowLineInRepo && showGhaTerminal;
                                             var isRunningWorkflowRow = IsLineRunningForBranch(row, line);
@@ -218,12 +223,28 @@
                                                                 }
                                                             </button>
                                                         }
+                                                        else if (CanAbort(row, line))
+                                                        {
+                                                            <button class="btn btn-outline-primary action-run-btn"
+                                                                    @onclick="() => AbortWorkflowAsync(row, line)"
+                                                                    disabled="@line.AbortInProgress"
+                                                                    title="Cancel this workflow run on GitHub">
+                                                                @if (line.AbortInProgress)
+                                                                {
+                                                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                                                }
+                                                                else
+                                                                {
+                                                                    @:Abort
+                                                                }
+                                                            </button>
+                                                        }
                                                         else if (CanRun(row, line))
                                                         {
                                                             <button class="btn btn-outline-primary action-run-btn"
                                                                     @onclick="() => RunWorkflowAsync(row, line)"
                                                                     disabled="@IsRunWorkflowBusy(row, line)"
-                                                                    title="@(IsLineRunningForBranch(row, line) ? "This workflow is already running for this branch." : $"Run workflow: {line.Action?.WorkflowName}")">
+                                                                    title="@($"Run workflow: {line.Action?.WorkflowName}")">
                                                                 @if (line.RunInProgress)
                                                                 {
                                                                     <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>

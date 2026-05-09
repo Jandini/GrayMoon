@@ -1086,6 +1086,16 @@ table.resizable-columns th:hover .resize-handle::after {
     color: #fff !important;
     text-decoration: none;
 }
+.action-badge.action-badge-aborted {
+    background-color: #8957e5 !important;
+    color: #fff !important;
+}
+.action-badge.action-badge-aborted:hover,
+.action-badge.action-badge-aborted:focus {
+    background-color: #8957e5 !important;
+    color: #fff !important;
+    text-decoration: none;
+}
 
 /* GitHub level-header dropdown — appended to <body>, position: fixed escapes table overflow */
 .gm-gh-dropdown {

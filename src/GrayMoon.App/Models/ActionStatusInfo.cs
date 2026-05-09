@@ -3,7 +3,7 @@ namespace GrayMoon.App.Models;
 /// <summary>Display model for a repository's aggregated CI action status for a branch (from GitHub Actions).</summary>
 public sealed class ActionStatusInfo
 {
-    /// <summary>Aggregate status: "none", "success", "running", "failed".</summary>
+    /// <summary>Aggregate status: "none", "success", "running", "failed", "aborted" (cancelled on GitHub).</summary>
     public string Status { get; set; } = "none";
 
     public string? HtmlUrl { get; set; }

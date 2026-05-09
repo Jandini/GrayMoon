@@ -291,6 +291,55 @@ public class GitHubService : IConnectorService
         await PostAsync(connector, $"repos/{owner}/{repo}/actions/runs/{runId}/rerun", payload: null, cancellationToken: cancellationToken);
     }
 
+    /// <summary>POST /repos/{owner}/{repo}/actions/runs/{run_id}/cancel — cancels an in-progress workflow run.</summary>
+    /// <remarks>409 when the run already finished is treated as success (UI/API lag vs GitHub).</remarks>
+    public async Task CancelWorkflowRunAsync(Connector connector, string owner, string repo, long runId, CancellationToken cancellationToken = default)
+    {
+        EnsureConnectorConfigured(connector);
+
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+        if (runId <= 0)
+            throw new ArgumentException("Workflow run id is required.", nameof(runId));
+
+        var requestUri = $"repos/{owner}/{repo}/actions/runs/{runId}/cancel";
+        var baseUrl = string.IsNullOrWhiteSpace(connector.ApiBaseUrl)
+            ? "https://api.github.com/"
+            : connector.ApiBaseUrl.TrimEnd('/') + "/";
+
+        using var response = await GitHubMutationRetryPipeline.ExecuteAsync(async ct =>
+        {
+            using var request = CreatePostRequest(connector, requestUri, payload: null);
+            return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        }, cancellationToken);
+
+        if (response.IsSuccessStatusCode)
+            return;
+
+        var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (IsCancelWorkflowRunAlreadyCompleted(response.StatusCode, errorContent))
+        {
+            _logger.LogDebug(
+                "GitHub cancel: run already completed (409), refreshing state. URL: {Url}",
+                new Uri(new Uri(baseUrl), requestUri));
+            return;
+        }
+
+        _logger.LogError("GitHub API POST failed. Status: {StatusCode}, URL: {Url}, Response: {Response}",
+            response.StatusCode,
+            new Uri(new Uri(baseUrl), requestUri),
+            errorContent);
+
+        var detail = TryParseGitHubApiUserMessage(errorContent);
+        var summary = string.IsNullOrWhiteSpace(detail)
+            ? $"GitHub returned {(int)response.StatusCode} ({response.ReasonPhrase})."
+            : detail.Trim();
+        throw new HttpRequestException(summary, inner: null, statusCode: response.StatusCode);
+    }
+
     public async Task DispatchWorkflowAsync(Connector connector, string owner, string repo, long workflowId, string branch, CancellationToken cancellationToken = default)
     {
         EnsureConnectorConfigured(connector);
@@ -557,6 +606,15 @@ public class GitHubService : IConnectorService
             ? $"GitHub returned {(int)response.StatusCode} ({response.ReasonPhrase})."
             : detail.Trim();
         throw new HttpRequestException(summary, inner: null, statusCode: response.StatusCode);
+    }
+
+    private static bool IsCancelWorkflowRunAlreadyCompleted(HttpStatusCode status, string errorContent)
+    {
+        if (status != HttpStatusCode.Conflict)
+            return false;
+        var msg = TryParseGitHubApiUserMessage(errorContent);
+        return msg != null
+               && msg.Contains("Cannot cancel a workflow run that is completed", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Extracts the user-visible <c>message</c> field from a GitHub API JSON error body.</summary>
