@@ -215,7 +215,7 @@
     width: 18%;
 }
 
-.col-status {
+.col-action-status {
     width: 18%;
 }
 
@@ -232,10 +232,15 @@
     background-color: var(--bs-table-striped-bg, rgba(0, 0, 0, 0.05));
 }
 
-/* Status / Result: center header and body text (override global col-status-badge right alignment) */
-.actions-table th.col-status,
-.actions-table td.col-status {
+/* Status: center header and body (column class is col-action-status in WorkspaceActions.razor) */
+.actions-table th.col-action-status,
+.actions-table td.col-action-status {
     text-align: center;
+}
+
+/* Optical alignment: badges read left of the column center vs. the "Status" header text */
+.actions-table td.col-action-status .action-badge {
+    margin-left: 0.35rem;
 }
 
 .actions-buttons {
