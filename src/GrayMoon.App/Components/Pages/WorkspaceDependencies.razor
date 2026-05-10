@@ -3,6 +3,7 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Components.Shared
+@using Microsoft.AspNetCore.Components.Web
 @inject WorkspaceRepository WorkspaceRepository
 @inject WorkspaceProjectRepository WorkspaceProjectRepository
 @inject NavigationManager NavigationManager
@@ -15,59 +16,97 @@
 
 <div class="container-fluid page-container grid-page dependencies-page">
     <div class="grid-page-header">
-        <div class="d-flex justify-content-between align-items-center mb-4 deps-header-row">
-            <div>
-                <h2>@(workspace?.Name ?? "workspace") Dependency Graph</h2>
-                <p class="text-muted mb-0" style="min-height: 1.5rem;">
-                    @if (graph != null)
+        <div class="workspace-repos-header workspace-dependencies-header">
+            <div class="workspace-repos-title-row">
+                <h2 class="workspace-repos-title">@(workspace?.Name ?? "workspace") Dependency Graph</h2>
+                <p class="text-muted mb-0 workspace-repos-subtitle workspace-dependencies__subtitle">
+                    @if (!isLoading && graph != null && graph.Nodes.Count > 0)
                     {
                         var (nodeCount, edgeCount) = GetFilteredCounts();
-                        @($"{nodeCount} repositories, {edgeCount} dependencies")
+                        var searchNote = HasSearchFilter ? " - matching search" : "";
+                        <span>@($"{nodeCount} repositories, {edgeCount} dependencies{searchNote}")</span>
                     }
-                    &nbsp;
+                    else if (!isLoading && workspace != null && graph != null && graph.Nodes.Count == 0)
+                    {
+                        <span>No dependency data</span>
+                    }
+                    else if (!isLoading && workspace != null)
+                    {
+                        <span>&nbsp;</span>
+                    }
+                    else if (isLoading)
+                    {
+                        <span>&nbsp;</span>
+                    }
                 </p>
+                <span class="workspace-repos-title-spacer"></span>
             </div>
-            @if (graph != null && graph.Nodes.Count > 0)
-            {
-                <div class="deps-filter-dropdown @(showFilterMenu ? "show" : "")">
-                    <button type="button"
-                            class="btn btn-outline-secondary dropdown-toggle deps-filter-toggle"
-                            aria-expanded="@showFilterMenu"
-                            title="@GetFilterLabel()"
-                            @onclick="ToggleFilterMenu">
-                        <span class="deps-filter-toggle-label">@GetFilterLabel()</span>
-                    </button>
-                    <div class="deps-filter-menu">
-                        <button type="button"
-                                class="dropdown-item deps-filter-option @(selectedFilterValue == "" ? "active" : "")"
-                                @onclick='() => SelectFilter("")'>
-                            All repositories
-                        </button>
-                        @foreach (var level in GetOrderedDependencyLevels())
+            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions deps-header-actions">
+                <div class="workspace-repos-search-wrapper">
+                    <div class="workspace-repos-search-input-wrap @(HasSearchFilter ? "has-filter" : null)">
+                        <input id="workspace-dependencies-search"
+                               class="form-control workspace-repos-search"
+                               placeholder="Search repositories (shows each match and its dependency tree)..."
+                               value="@searchTerm"
+                               disabled="@(isLoading || graph == null || graph.Nodes.Count == 0)"
+                               @oninput="OnSearchChanged"
+                               @onkeydown="OnSearchKeyDown" />
+                        @if (HasSearchFilter)
                         {
-                            var levelVal = $"level-{level}";
                             <button type="button"
-                                    class="dropdown-item deps-filter-option @(selectedFilterValue == levelVal ? "active" : "")"
-                                    @onclick="() => SelectFilter(levelVal)">
-                                Level @level
-                            </button>
-                        }
-                        @foreach (var n in graph.Nodes.OrderBy(n => n.RepositoryName, StringComparer.OrdinalIgnoreCase))
-                        {
-                            var repoVal = n.RepositoryId.ToString();
-                            <button type="button"
-                                    class="dropdown-item deps-filter-option @(selectedFilterValue == repoVal ? "active" : "")"
-                                    @onclick="() => SelectFilter(repoVal)">
-                                @n.RepositoryName
+                                    class="workspace-repos-search-clear"
+                                    title="Clear filter"
+                                    aria-label="Clear search filter"
+                                    @onclick="ClearSearchFilter"
+                                    @onclick:stopPropagation="true">
+                                <i class="bi bi-x-circle" aria-hidden="true"></i>
                             </button>
                         }
                     </div>
-                    @if (showFilterMenu)
-                    {
-                        <div class="deps-filter-backdrop" @onclick="CloseFilterMenu"></div>
-                    }
                 </div>
-            }
+                @if (graph != null && graph.Nodes.Count > 0)
+                {
+                    <div class="deps-filter-dropdown @(showFilterMenu ? "show" : "")">
+                        <button type="button"
+                                class="btn btn-outline-secondary dropdown-toggle deps-filter-toggle"
+                                aria-expanded="@showFilterMenu"
+                                title="@(HasSearchFilter ? "Clear search to apply this scope to the graph." : GetFilterLabel())"
+                                disabled="@HasSearchFilter"
+                                @onclick="ToggleFilterMenu">
+                            <span class="deps-filter-toggle-label">@GetFilterLabel()</span>
+                        </button>
+                        <div class="deps-filter-menu">
+                            <button type="button"
+                                    class="dropdown-item deps-filter-option @(selectedFilterValue == "" ? "active" : "")"
+                                    @onclick='() => SelectFilter("")'>
+                                All repositories
+                            </button>
+                            @foreach (var level in GetOrderedDependencyLevels())
+                            {
+                                var levelVal = $"level-{level}";
+                                <button type="button"
+                                        class="dropdown-item deps-filter-option @(selectedFilterValue == levelVal ? "active" : "")"
+                                        @onclick="() => SelectFilter(levelVal)">
+                                    Level @level
+                                </button>
+                            }
+                            @foreach (var n in graph.Nodes.OrderBy(n => n.RepositoryName, StringComparer.OrdinalIgnoreCase))
+                            {
+                                var repoVal = n.RepositoryId.ToString();
+                                <button type="button"
+                                        class="dropdown-item deps-filter-option @(selectedFilterValue == repoVal ? "active" : "")"
+                                        @onclick="() => SelectFilter(repoVal)">
+                                    @n.RepositoryName
+                                </button>
+                            }
+                        </div>
+                        @if (showFilterMenu)
+                        {
+                            <div class="deps-filter-backdrop" @onclick="CloseFilterMenu"></div>
+                        }
+                    </div>
+                }
+            </div>
         </div>
         @if (errorMessage != null)
         {
@@ -84,6 +123,10 @@
             {
                 <p class="dependencies-empty-message text-muted text-center mb-0">No dependencies to display. Sync repositories to discover projects and dependencies.</p>
             }
+            else if (NoRepositoriesMatchSearch)
+            {
+                <p class="dependencies-empty-message text-muted text-center mb-0">No repositories match your search.</p>
+            }
         </div>
     }
 </div>
@@ -98,8 +141,18 @@
     private string? errorMessage;
     private bool isLoading = true;
     private string selectedFilterValue = "";
-    private string _lastRenderedFilter = "";
+    private string _lastRenderedState = "";
     private bool showFilterMenu;
+    private string searchTerm = string.Empty;
+
+    private bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
+
+    /// <summary>Graph has data but the repository search matched nothing.</summary>
+    private bool NoRepositoriesMatchSearch =>
+        graph != null
+        && graph.Nodes.Count > 0
+        && HasSearchFilter
+        && GetFilteredNodesAndEdges().Nodes.Count == 0;
     private const string GraphContainerId = "cytoscape-dependency-graph";
     private const string LevelPrefix = "level-";
 
@@ -145,6 +198,7 @@
 
     private void ToggleFilterMenu()
     {
+        if (HasSearchFilter) return;
         showFilterMenu = !showFilterMenu;
     }
 
@@ -157,6 +211,37 @@
     {
         selectedFilterValue = value;
         showFilterMenu = false;
+        StateHasChanged();
+    }
+
+    private static List<string> SplitSearchWords(string term) =>
+        term
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(w => w.Trim())
+            .Where(w => w.Length > 0)
+            .ToList();
+
+    private void OnSearchChanged(ChangeEventArgs e)
+    {
+        searchTerm = e.Value?.ToString() ?? string.Empty;
+        showFilterMenu = false;
+        StateHasChanged();
+    }
+
+    private void ClearSearchFilter()
+    {
+        searchTerm = string.Empty;
+        StateHasChanged();
+    }
+
+    private void OnSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            searchTerm = string.Empty;
+            showFilterMenu = false;
+            StateHasChanged();
+        }
     }
 
     private string GetFilterLabel()
@@ -175,39 +260,71 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (graph == null || graph.Nodes.Count == 0) return;
-        if (firstRender || _lastRenderedFilter != selectedFilterValue)
-        {
-            _lastRenderedFilter = selectedFilterValue;
-            try
-            {
-                await JSRuntime.InvokeVoidAsync("destroyCytoscapeGraph", GraphContainerId);
-            }
-            catch { /* ignore */ }
 
-            try
+        var stateKey = $"{selectedFilterValue}|{searchTerm}";
+        if (!firstRender && _lastRenderedState == stateKey) return;
+
+        _lastRenderedState = stateKey;
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("destroyCytoscapeGraph", GraphContainerId);
+        }
+        catch { /* ignore */ }
+
+        var (filteredNodes, filteredEdges) = GetFilteredNodesAndEdges();
+        if (filteredNodes.Count == 0) return;
+
+        try
+        {
+            var prefixByRepoId = GetLabelsWithGroupPrefixStripped(graph.Nodes.Select(n => (n.RepositoryId, n.RepositoryName)).ToList());
+            var nodes = filteredNodes.Select(n => new
             {
-                var prefixByRepoId = GetLabelsWithGroupPrefixStripped(graph.Nodes.Select(n => (n.RepositoryId, n.RepositoryName)).ToList());
-                var (filteredNodes, filteredEdges) = GetFilteredNodesAndEdges();
-                var nodes = filteredNodes.Select(n => new
-                {
-                    id = n.RepositoryId.ToString(),
-                    label = prefixByRepoId.TryGetValue(n.RepositoryId, out var label) ? label : n.RepositoryName,
-                    nodeType = n.RepositoryType?.ToString().ToLowerInvariant() ?? "other"
-                }).ToList();
-                var edges = filteredEdges.Select(e => new { source = e.DependentRepositoryId.ToString(), target = e.ReferencedRepositoryId.ToString() }).ToList();
-                var roots = filteredNodes.Select(n => n.RepositoryId.ToString()).Except(edges.Select(e => e.target)).ToList();
-                await JSRuntime.InvokeVoidAsync("renderCytoscapeGraph", GraphContainerId, nodes, edges, roots);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "Cytoscape render failed for workspace {WorkspaceId}", WorkspaceId);
-            }
+                id = n.RepositoryId.ToString(),
+                label = prefixByRepoId.TryGetValue(n.RepositoryId, out var label) ? label : n.RepositoryName,
+                nodeType = n.RepositoryType?.ToString().ToLowerInvariant() ?? "other"
+            }).ToList();
+            var edges = filteredEdges.Select(e => new { source = e.DependentRepositoryId.ToString(), target = e.ReferencedRepositoryId.ToString() }).ToList();
+            var roots = filteredNodes.Select(n => n.RepositoryId.ToString()).Except(edges.Select(e => e.target)).ToList();
+            await JSRuntime.InvokeVoidAsync("renderCytoscapeGraph", GraphContainerId, nodes, edges, roots);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Cytoscape render failed for workspace {WorkspaceId}", WorkspaceId);
         }
     }
 
     private (IReadOnlyList<RepositoryDependencyNode> Nodes, IReadOnlyList<RepositoryDependencyEdge> Edges) GetFilteredNodesAndEdges()
     {
         if (graph == null) return (new List<RepositoryDependencyNode>(), new List<RepositoryDependencyEdge>());
+
+        if (HasSearchFilter)
+        {
+            var words = SplitSearchWords(searchTerm);
+            if (words.Count == 0)
+                return (graph.Nodes, graph.Edges);
+
+            var matched = graph.Nodes.Where(n =>
+            {
+                var name = n.RepositoryName ?? string.Empty;
+                return words.All(w => name.Contains(w, StringComparison.OrdinalIgnoreCase));
+            }).ToList();
+            if (matched.Count == 0)
+                return (new List<RepositoryDependencyNode>(), new List<RepositoryDependencyEdge>());
+
+            var nodeIds = new HashSet<int>();
+            foreach (var m in matched)
+            {
+                foreach (var id in GetTransitiveReferencedRepositoryIds(m.RepositoryId))
+                    nodeIds.Add(id);
+            }
+
+            var filteredNodes = graph.Nodes.Where(n => nodeIds.Contains(n.RepositoryId)).ToList();
+            var filteredEdges = graph.Edges
+                .Where(e => nodeIds.Contains(e.DependentRepositoryId) && nodeIds.Contains(e.ReferencedRepositoryId))
+                .ToList();
+            return (filteredNodes, filteredEdges);
+        }
+
         if (string.IsNullOrEmpty(selectedFilterValue))
             return (graph.Nodes, graph.Edges);
 
@@ -237,6 +354,30 @@
         }
 
         return (graph.Nodes, graph.Edges);
+    }
+
+    /// <summary>Repository ids reachable from <paramref name="rootRepoId"/> by following dependency edges (this repo depends on ...).</summary>
+    private HashSet<int> GetTransitiveReferencedRepositoryIds(int rootRepoId)
+    {
+        if (graph == null) return [];
+
+        var byDependent = graph.Edges
+            .GroupBy(e => e.DependentRepositoryId)
+            .ToDictionary(g => g.Key, g => g.Select(e => e.ReferencedRepositoryId).ToList());
+
+        var visited = new HashSet<int>();
+        var stack = new Stack<int>();
+        stack.Push(rootRepoId);
+        while (stack.Count > 0)
+        {
+            var id = stack.Pop();
+            if (!visited.Add(id)) continue;
+            if (!byDependent.TryGetValue(id, out var refs)) continue;
+            foreach (var r in refs)
+                stack.Push(r);
+        }
+
+        return visited;
     }
 
     private HashSet<int> GetRepoIdsAtLevel(int level)

@@ -28,16 +28,30 @@
     transform: translate(-50%, -50%);
 }
 
+/* Header: match workspace search toolbar subtitle wrapping */
+.workspace-dependencies-header .workspace-repos-subtitle.workspace-dependencies__subtitle {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    flex: 0 0 auto;
+    min-width: 0;
+}
+
+.dependencies-page .deps-header-actions {
+    flex-wrap: wrap;
+}
+
 .deps-filter-dropdown {
-    flex-shrink: 0;
+    flex: 0 1 20rem;
+    min-width: 10rem;
+    max-width: 100%;
     position: relative;
     z-index: 1050;
-    margin-left: auto;
 }
 
 .deps-filter-toggle {
-    min-width: 5rem;
-    width: 25rem;
+    min-width: 0;
+    width: 100%;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -129,17 +143,13 @@
 }
 
 @media (max-width: 900px) {
-    .dependencies-page .deps-header-row {
+    .dependencies-page .deps-header-actions {
         flex-direction: column;
-        align-items: flex-start !important;
+        align-items: stretch !important;
     }
 
     .deps-filter-dropdown {
-        width: 100%;
-        margin-left: 0;
-    }
-
-    .deps-filter-toggle {
-        width: 100%;
+        flex: 1 1 auto;
+        max-width: none;
     }
 }
