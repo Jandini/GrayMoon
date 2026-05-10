@@ -72,6 +72,22 @@ public sealed partial class WorkspaceActions : IDisposable
     private const int RunWorkflowVisibilityFirstDelayMs = 2000;
     private const int RunWorkflowVisibilityRetryDelayMs = 3000;
 
+    private bool _showErrors = true;
+    private bool _showFailed = true;
+    private bool _showAborted = true;
+    private bool _showRunning = true;
+    private bool _showSuccess = true;
+    private bool _showNone;
+
+    private enum ActionLineFilterBucket
+    {
+        Failed,
+        Running,
+        Aborted,
+        Success,
+        None
+    }
+
     internal bool HasFailedRows => rows.Any(row =>
         row.WorkflowLines.Any(line =>
             IsLineFailedForBranch(row, line)));
@@ -97,6 +113,46 @@ public sealed partial class WorkspaceActions : IDisposable
         _rerunCompleted == 0
             ? "Re-running actions..."
             : $"Re-running {_rerunCompleted} of {_rerunTotal}";
+
+    /// <summary>True when the workspace has repos but every line is hidden by status filters.</summary>
+    internal bool NoWorkflowRowsMatchFilters =>
+        !isLoading && rows.Count > 0 && !rows.Any(row => LinesForGrid(row).Any());
+
+    internal void ToggleShowErrors()
+    {
+        _showErrors = !_showErrors;
+        StateHasChanged();
+    }
+
+    internal void ToggleShowFailed()
+    {
+        _showFailed = !_showFailed;
+        StateHasChanged();
+    }
+
+    internal void ToggleShowAborted()
+    {
+        _showAborted = !_showAborted;
+        StateHasChanged();
+    }
+
+    internal void ToggleShowRunning()
+    {
+        _showRunning = !_showRunning;
+        StateHasChanged();
+    }
+
+    internal void ToggleShowSuccess()
+    {
+        _showSuccess = !_showSuccess;
+        StateHasChanged();
+    }
+
+    internal void ToggleShowNone()
+    {
+        _showNone = !_showNone;
+        StateHasChanged();
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -1003,6 +1059,50 @@ public sealed partial class WorkspaceActions : IDisposable
         if (row.WorkflowLines.Count > 0)
             return row.WorkflowLines;
         return [new WorkflowActionLine()];
+    }
+
+    /// <summary>Workflow lines to render after applying status filter toggles (repo errors: all lines or none).</summary>
+    internal IEnumerable<WorkflowActionLine> LinesForGrid(WorkspaceActionRow row)
+    {
+        if (!string.IsNullOrWhiteSpace(row.ErrorMessage))
+        {
+            if (!_showErrors)
+                yield break;
+            foreach (var line in LinesForDisplay(row))
+                yield return line;
+            yield break;
+        }
+
+        foreach (var line in LinesForDisplay(row))
+        {
+            if (IsBucketVisible(GetLineFilterBucket(row, line)))
+                yield return line;
+        }
+    }
+
+    private bool IsBucketVisible(ActionLineFilterBucket bucket) =>
+        bucket switch
+        {
+            ActionLineFilterBucket.Failed => _showFailed,
+            ActionLineFilterBucket.Running => _showRunning,
+            ActionLineFilterBucket.Aborted => _showAborted,
+            ActionLineFilterBucket.Success => _showSuccess,
+            ActionLineFilterBucket.None => _showNone,
+            _ => true
+        };
+
+    /// <summary>Matches <see cref="ActionBadge"/> status order: failed, running, aborted, success, else none.</summary>
+    private static ActionLineFilterBucket GetLineFilterBucket(WorkspaceActionRow row, WorkflowActionLine line)
+    {
+        if (IsLineFailedForBranch(row, line))
+            return ActionLineFilterBucket.Failed;
+        if (IsLineRunningForBranch(row, line))
+            return ActionLineFilterBucket.Running;
+        if (IsLineAbortedForBranch(row, line))
+            return ActionLineFilterBucket.Aborted;
+        if (IsLineSuccessForBranch(row, line))
+            return ActionLineFilterBucket.Success;
+        return ActionLineFilterBucket.None;
     }
 
     internal static string GroupStripeClass(int groupIndex) =>

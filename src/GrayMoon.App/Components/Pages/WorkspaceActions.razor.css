@@ -1,3 +1,98 @@
+/* Status filter chips (subtitle toolbar) */
+.workspace-actions__filter-sep {
+    opacity: 0.45;
+    user-select: none;
+}
+
+.gha-status-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.2rem 0.55rem;
+    font-size: 0.8125rem;
+    line-height: 1.2;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.gha-status-filter:focus {
+    outline: none;
+}
+
+.gha-status-filter:focus-visible {
+    outline: 2px solid var(--bs-primary, #0d6efd);
+    outline-offset: 2px;
+}
+
+.gha-status-filter__label {
+    font-weight: 500;
+    letter-spacing: 0.01em;
+}
+
+.gha-status-filter__count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.25rem;
+    padding: 0 0.28rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.35;
+    border-radius: 999px;
+}
+
+.gha-status-filter--on {
+    background-color: #1a1a1a;
+    color: rgba(255, 255, 255, 0.92);
+    border-color: rgba(255, 255, 255, 0.35);
+}
+
+/* Count pill colors when filter is on — match wwwroot/app.css .action-badge-* */
+.gha-status-filter--on .gha-status-filter__count--errors,
+.gha-status-filter--on .gha-status-filter__count--failed {
+    background-color: #da3633;
+    color: #fff;
+}
+
+.gha-status-filter--on .gha-status-filter__count--aborted {
+    background-color: #8957e5;
+    color: #fff;
+}
+
+.gha-status-filter--on .gha-status-filter__count--running {
+    background-color: #d29922;
+    color: #000;
+}
+
+.gha-status-filter--on .gha-status-filter__count--success {
+    background-color: #238636;
+    color: #fff;
+}
+
+.gha-status-filter--on .gha-status-filter__count--none {
+    background-color: #495057;
+    color: #fff;
+}
+
+.gha-status-filter--off {
+    background-color: rgba(0, 0, 0, 0.04);
+    color: var(--bs-secondary-color, #6c757d);
+    border-color: rgba(0, 0, 0, 0.12);
+    opacity: 0.92;
+}
+
+.gha-status-filter--off .gha-status-filter__count {
+    background-color: rgba(0, 0, 0, 0.06);
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.gha-status-filter--off:hover {
+    opacity: 1;
+    border-color: rgba(0, 0, 0, 0.18);
+}
+
 /* Actions grid: workflow name → GitHub Actions workflow tab (not default blue link) */
 .actions-workflow-link {
     color: rgba(236, 240, 245, 0.9) !important;
