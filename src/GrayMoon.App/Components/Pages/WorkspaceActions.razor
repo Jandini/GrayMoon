@@ -222,7 +222,6 @@
                                             var isRunningWorkflowRow = IsLineRunningForBranch(row, line);
                                             var trClass = $"{stripeClass} actions-data-row"
                                                 + (repoEndOnDataRow ? " actions-row-repo-end" : "")
-                                                + (firstLine && row.ErrorMessage != null ? " actions-error-row" : "")
                                                 + (isRunningWorkflowRow ? " actions-row-running" : "")
                                                 + (showGhaTerminal ? " actions-row-running-above-terminal" : "");
                                             <tr class="@trClass">

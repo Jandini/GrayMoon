@@ -271,15 +271,6 @@
     min-height: 0;
 }
 
-.actions-table tbody tr.actions-error-row,
-.actions-table tbody tr.actions-error-row:hover {
-    background-color: #f8d7da;
-}
-
-.actions-table tbody tr.actions-error-row td {
-    color: #842029;
-}
-
 /*
  * One gray line only after the last workflow row of each repository (not between workflows).
  * Use app theme --border-color and !important so we win over .table defaults and
