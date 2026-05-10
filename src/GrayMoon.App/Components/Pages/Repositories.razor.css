@@ -1,3 +1,12 @@
+/* Header: match workspace search toolbar */
+.repositories-page-header .workspace-repos-subtitle.repositories-page__subtitle {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    flex: 0 0 auto;
+    min-width: 0;
+}
+
 .repositories-table th,
 .repositories-table td {
     white-space: nowrap;
