@@ -47,7 +47,7 @@
 }
 
 .switch-branch-tabs .nav-link:focus-visible {
-    box-shadow: 0 0 0 0.1rem var(--bg-primary), 0 0 0 0.25rem var(--accent-blue);
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
 }
 
 /* Tab count / branch count next to title: smaller, dark gray */

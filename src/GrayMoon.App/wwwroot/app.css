@@ -48,6 +48,9 @@
     --accent-blue-hover: #1177bb;
     --accent-blue-active: #0a4d73;
     --accent-blue-light: #264f78;
+
+    /* Keyboard focus: white-ish thin frame (buttons/links: 1px box-shadow; inputs: 1px border) */
+    --focus-ring-outer: rgba(255, 255, 255, 0.52);
     
     --success: #89d185;
     --warning: #dcdcaa;
@@ -232,8 +235,27 @@ a.workspaces-breadcrumb-link:hover {
     color: var(--bg-primary);
 }
 
-.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
-    box-shadow: 0 0 0 0.1rem var(--bg-primary), 0 0 0 0.25rem var(--accent-blue);
+/* Buttons: single thin frame (not double ring) */
+.btn:focus,
+.btn:active:focus,
+.btn-link.nav-link:focus {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
+}
+
+/* Text inputs / selects: border-only focus like workspace repository search — no glow */
+.form-control:focus,
+.form-select:focus,
+.form-check-input:focus {
+    outline: none;
+    box-shadow: none !important;
+}
+
+/* Plain links (not Bootstrap .btn) — thin frame to match buttons */
+a:focus-visible:not(.btn) {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
+    border-radius: 0.125rem;
 }
 
 .content {
@@ -264,8 +286,13 @@ h1:focus {
 
 .form-control:focus, .form-select:focus {
     background-color: var(--bg-input);
-    border-color: var(--accent-blue) !important;
+    border-color: var(--focus-ring-outer) !important;
     color: var(--text-primary);
+    box-shadow: none !important;
+}
+
+.form-check-input:focus {
+    border-color: var(--focus-ring-outer);
 }
 
 .form-control::placeholder {
@@ -968,6 +995,11 @@ table.resizable-columns th:hover .resize-handle::after {
     border-radius: 0.25rem;
     cursor: pointer;
     transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.repositories-table td.col-divergence .divergence-link:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
 }
 
 .repositories-table td.col-divergence .divergence-link-behind {

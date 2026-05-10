@@ -3,6 +3,7 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Options;
 
@@ -72,6 +73,23 @@ public sealed partial class WorkspaceActions : IDisposable
     private const int RunWorkflowVisibilityFirstDelayMs = 2000;
     private const int RunWorkflowVisibilityRetryDelayMs = 3000;
 
+    private bool _showErrors = true;
+    private bool _showFailed = true;
+    private bool _showAborted = true;
+    private bool _showRunning = true;
+    private bool _showSuccess = true;
+    private bool _showNone;
+    private string searchTerm = string.Empty;
+
+    private enum ActionLineFilterBucket
+    {
+        Failed,
+        Running,
+        Aborted,
+        Success,
+        None
+    }
+
     internal bool HasFailedRows => rows.Any(row =>
         row.WorkflowLines.Any(line =>
             IsLineFailedForBranch(row, line)));
@@ -97,6 +115,75 @@ public sealed partial class WorkspaceActions : IDisposable
         _rerunCompleted == 0
             ? "Re-running actions..."
             : $"Re-running {_rerunCompleted} of {_rerunTotal}";
+
+    internal bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
+
+    /// <summary>Workflow table rows visible with current status filters (before text search).</summary>
+    internal int VisibleWorkflowLineCount => rows.Sum(r => LinesForGrid(r).Count());
+
+    /// <summary>Workflow table rows visible after status filters and text search.</summary>
+    internal int FilteredWorkflowLineCount => rows.Sum(r => LinesForTable(r).Count());
+
+    /// <summary>True when the workspace has repos but no row is visible (status filters and/or search).</summary>
+    internal bool NoVisibleWorkflowRows =>
+        !isLoading && rows.Count > 0 && !rows.Any(row => LinesForTable(row).Any());
+
+    internal void OnSearchChanged(ChangeEventArgs e)
+    {
+        searchTerm = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    internal void ClearSearchFilter()
+    {
+        searchTerm = string.Empty;
+        StateHasChanged();
+    }
+
+    internal void OnSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            searchTerm = string.Empty;
+            StateHasChanged();
+        }
+    }
+
+    internal void ToggleShowErrors()
+    {
+        _showErrors = !_showErrors;
+        StateHasChanged();
+    }
+
+    internal void ToggleShowFailed()
+    {
+        _showFailed = !_showFailed;
+        StateHasChanged();
+    }
+
+    internal void ToggleShowAborted()
+    {
+        _showAborted = !_showAborted;
+        StateHasChanged();
+    }
+
+    internal void ToggleShowRunning()
+    {
+        _showRunning = !_showRunning;
+        StateHasChanged();
+    }
+
+    internal void ToggleShowSuccess()
+    {
+        _showSuccess = !_showSuccess;
+        StateHasChanged();
+    }
+
+    internal void ToggleShowNone()
+    {
+        _showNone = !_showNone;
+        StateHasChanged();
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -1003,6 +1090,78 @@ public sealed partial class WorkspaceActions : IDisposable
         if (row.WorkflowLines.Count > 0)
             return row.WorkflowLines;
         return [new WorkflowActionLine()];
+    }
+
+    /// <summary>Workflow lines to render after applying status filter toggles (repo errors: all lines or none).</summary>
+    internal IEnumerable<WorkflowActionLine> LinesForGrid(WorkspaceActionRow row)
+    {
+        if (!string.IsNullOrWhiteSpace(row.ErrorMessage))
+        {
+            if (!_showErrors)
+                yield break;
+            foreach (var line in LinesForDisplay(row))
+                yield return line;
+            yield break;
+        }
+
+        foreach (var line in LinesForDisplay(row))
+        {
+            if (IsBucketVisible(GetLineFilterBucket(row, line)))
+                yield return line;
+        }
+    }
+
+    /// <summary>Lines to render after status toggles and repository/workflow text search.</summary>
+    internal IEnumerable<WorkflowActionLine> LinesForTable(WorkspaceActionRow row)
+    {
+        foreach (var line in LinesForGrid(row))
+        {
+            if (LineMatchesSearch(row, line))
+                yield return line;
+        }
+    }
+
+    private bool LineMatchesSearch(WorkspaceActionRow row, WorkflowActionLine line)
+    {
+        var words = SplitSearchWords(searchTerm);
+        if (words.Count == 0)
+            return true;
+        var repo = row.Repo.RepositoryName ?? string.Empty;
+        var workflow = line.Action?.WorkflowName ?? string.Empty;
+        var haystack = $"{repo} {workflow}";
+        return words.All(w => haystack.Contains(w, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static List<string> SplitSearchWords(string term) =>
+        term
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(w => w.Trim())
+            .Where(w => w.Length > 0)
+            .ToList();
+
+    private bool IsBucketVisible(ActionLineFilterBucket bucket) =>
+        bucket switch
+        {
+            ActionLineFilterBucket.Failed => _showFailed,
+            ActionLineFilterBucket.Running => _showRunning,
+            ActionLineFilterBucket.Aborted => _showAborted,
+            ActionLineFilterBucket.Success => _showSuccess,
+            ActionLineFilterBucket.None => _showNone,
+            _ => true
+        };
+
+    /// <summary>Matches <see cref="ActionBadge"/> status order: failed, running, aborted, success, else none.</summary>
+    private static ActionLineFilterBucket GetLineFilterBucket(WorkspaceActionRow row, WorkflowActionLine line)
+    {
+        if (IsLineFailedForBranch(row, line))
+            return ActionLineFilterBucket.Failed;
+        if (IsLineRunningForBranch(row, line))
+            return ActionLineFilterBucket.Running;
+        if (IsLineAbortedForBranch(row, line))
+            return ActionLineFilterBucket.Aborted;
+        if (IsLineSuccessForBranch(row, line))
+            return ActionLineFilterBucket.Success;
+        return ActionLineFilterBucket.None;
     }
 
     internal static string GroupStripeClass(int groupIndex) =>

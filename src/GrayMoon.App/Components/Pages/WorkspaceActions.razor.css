@@ -1,3 +1,133 @@
+/*
+ * Title row: use same baseline alignment as app.css .workspace-repos-header .workspace-repos-title-row
+ * (do not override with flex-end — that sat the subtitle lower than the h2 text).
+ * Workflow count stays in <p> like WorkspaceRepositories; status chips are siblings so they don't stretch the subtitle.
+ */
+.workspace-actions-header .workspace-repos-subtitle.workspace-actions__subtitle {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    flex: 0 0 auto;
+    min-width: 0;
+}
+
+.workspace-actions-header .workspace-actions__filters,
+.workspace-actions-header .workspace-actions__filter-sep {
+    flex: 0 0 auto;
+    align-self: baseline;
+}
+
+/* Status filter chips (subtitle toolbar) */
+.workspace-actions__filter-sep {
+    opacity: 0.45;
+    user-select: none;
+}
+
+.gha-status-filter {
+    --gha-status-filter-radius: 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: calc(0.2rem + 1px) 0.55rem;
+    font-size: 0.8125rem;
+    line-height: 1.2;
+    border-radius: var(--gha-status-filter-radius);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+/* Focus ring: same as app.css .btn / .form-control (Workspace Repositories header) */
+.gha-status-filter:focus,
+.gha-status-filter:active:focus {
+    outline: none;
+}
+
+.gha-status-filter:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
+}
+
+.workspace-actions-header .workspace-repos-search:focus,
+.workspace-actions-header .workspace-repos-search:focus-visible {
+    border-color: var(--focus-ring-outer) !important;
+    box-shadow: none !important;
+}
+
+.workspace-actions-header .workspace-repos-search-clear:focus,
+.workspace-actions-header .workspace-repos-search-clear:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
+    border-radius: 0.25rem;
+}
+
+.gha-status-filter__label {
+    font-weight: 500;
+    letter-spacing: 0.01em;
+}
+
+.gha-status-filter__count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.25rem;
+    padding: 0 0.28rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.35;
+    border-radius: var(--gha-status-filter-radius);
+}
+
+.gha-status-filter--on {
+    background-color: #1a1a1a;
+    color: rgba(255, 255, 255, 0.92);
+    border-color: rgba(255, 255, 255, 0.35);
+}
+
+/* Count pill colors when filter is on — match wwwroot/app.css .action-badge-* */
+.gha-status-filter--on .gha-status-filter__count--errors,
+.gha-status-filter--on .gha-status-filter__count--failed {
+    background-color: #da3633;
+    color: #fff;
+}
+
+.gha-status-filter--on .gha-status-filter__count--aborted {
+    background-color: #8957e5;
+    color: #fff;
+}
+
+.gha-status-filter--on .gha-status-filter__count--running {
+    background-color: #d29922;
+    color: #000;
+}
+
+.gha-status-filter--on .gha-status-filter__count--success {
+    background-color: #238636;
+    color: #fff;
+}
+
+.gha-status-filter--on .gha-status-filter__count--none {
+    background-color: #495057;
+    color: #fff;
+}
+
+.gha-status-filter--off {
+    background-color: rgba(0, 0, 0, 0.04);
+    color: var(--bs-secondary-color, #6c757d);
+    border-color: rgba(0, 0, 0, 0.12);
+    opacity: 0.92;
+}
+
+.gha-status-filter--off .gha-status-filter__count {
+    background-color: rgba(0, 0, 0, 0.06);
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.gha-status-filter--off:hover {
+    opacity: 1;
+    border-color: rgba(0, 0, 0, 0.18);
+}
+
 /* Actions grid: workflow name → GitHub Actions workflow tab (not default blue link) */
 .actions-workflow-link {
     color: rgba(236, 240, 245, 0.9) !important;
@@ -9,6 +139,12 @@
     color: rgba(255, 255, 255, 0.98) !important;
     text-decoration: underline;
     text-decoration-color: rgba(255, 255, 255, 0.45);
+}
+
+.actions-workflow-link:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
+    border-radius: 0.125rem;
 }
 
 .action-link {
@@ -31,6 +167,12 @@
     color: inherit !important;
     text-decoration: underline;
     text-decoration-color: inherit;
+}
+
+.repo-link:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
+    border-radius: 0.125rem;
 }
 
 /* Match Repositories / Workspaces: left-align all columns; Status and Result right-aligned via col-status-badge; last column (Action) matches Workspaces col-actions; use global resizable-columns padding for header spacing */
@@ -73,7 +215,7 @@
     width: 18%;
 }
 
-.col-status {
+.col-action-status {
     width: 18%;
 }
 
@@ -90,10 +232,15 @@
     background-color: var(--bs-table-striped-bg, rgba(0, 0, 0, 0.05));
 }
 
-/* Status / Result: center header and body text (override global col-status-badge right alignment) */
-.actions-table th.col-status,
-.actions-table td.col-status {
+/* Status: center header and body (column class is col-action-status in WorkspaceActions.razor) */
+.actions-table th.col-action-status,
+.actions-table td.col-action-status {
     text-align: center;
+}
+
+/* Optical alignment: badges read left of the column center vs. the "Status" header text */
+.actions-table td.col-action-status .action-badge {
+    margin-left: 0.35rem;
 }
 
 .actions-buttons {
@@ -122,15 +269,6 @@
 .page-card .table-responsive {
     flex: 1 1 auto;
     min-height: 0;
-}
-
-.actions-table tbody tr.actions-error-row,
-.actions-table tbody tr.actions-error-row:hover {
-    background-color: #f8d7da;
-}
-
-.actions-table tbody tr.actions-error-row td {
-    color: #842029;
 }
 
 /*
