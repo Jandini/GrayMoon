@@ -422,3 +422,4 @@ FodyWeavers.xsd
 db/
 
 /.cursor/verify-out-deps
+/.cursor/verify-out-connectors-repos
