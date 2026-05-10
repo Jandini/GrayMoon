@@ -37,13 +37,28 @@
     transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
 }
 
-.gha-status-filter:focus {
+/* Focus ring: same as app.css .btn / .form-control (Workspace Repositories header) */
+.gha-status-filter:focus,
+.gha-status-filter:active:focus {
     outline: none;
 }
 
 .gha-status-filter:focus-visible {
-    outline: 2px solid var(--bs-primary, #0d6efd);
-    outline-offset: 2px;
+    outline: none;
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
+}
+
+.workspace-actions-header .workspace-repos-search:focus,
+.workspace-actions-header .workspace-repos-search:focus-visible {
+    border-color: var(--focus-ring-outer) !important;
+    box-shadow: none !important;
+}
+
+.workspace-actions-header .workspace-repos-search-clear:focus,
+.workspace-actions-header .workspace-repos-search-clear:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
+    border-radius: 0.25rem;
 }
 
 .gha-status-filter__label {
@@ -126,6 +141,12 @@
     text-decoration-color: rgba(255, 255, 255, 0.45);
 }
 
+.actions-workflow-link:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
+    border-radius: 0.125rem;
+}
+
 .action-link {
     color: inherit !important;
     text-decoration: none;
@@ -146,6 +167,12 @@
     color: inherit !important;
     text-decoration: underline;
     text-decoration-color: inherit;
+}
+
+.repo-link:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
+    border-radius: 0.125rem;
 }
 
 /* Match Repositories / Workspaces: left-align all columns; Status and Result right-aligned via col-status-badge; last column (Action) matches Workspaces col-actions; use global resizable-columns padding for header spacing */
