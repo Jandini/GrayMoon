@@ -421,3 +421,4 @@ FodyWeavers.xsd
 /src/GrayMoon.App/graymoon.db-wal
 db/
 
+/.cursor/verify-out-deps
