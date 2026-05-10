@@ -5,13 +5,14 @@
 }
 
 .gha-status-filter {
+    --gha-status-filter-radius: 0.75rem;
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    padding: 0.2rem 0.55rem;
+    padding: calc(0.2rem + 1px) 0.55rem;
     font-size: 0.8125rem;
     line-height: 1.2;
-    border-radius: 999px;
+    border-radius: var(--gha-status-filter-radius);
     border: 1px solid transparent;
     cursor: pointer;
     transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
@@ -40,7 +41,7 @@
     font-size: 0.72rem;
     font-weight: 600;
     line-height: 1.35;
-    border-radius: 999px;
+    border-radius: var(--gha-status-filter-radius);
 }
 
 .gha-status-filter--on {
