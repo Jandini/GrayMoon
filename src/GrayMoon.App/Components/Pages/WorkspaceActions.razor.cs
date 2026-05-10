@@ -3,6 +3,7 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Options;
 
@@ -78,6 +79,7 @@ public sealed partial class WorkspaceActions : IDisposable
     private bool _showRunning = true;
     private bool _showSuccess = true;
     private bool _showNone;
+    private string searchTerm = string.Empty;
 
     private enum ActionLineFilterBucket
     {
@@ -114,9 +116,38 @@ public sealed partial class WorkspaceActions : IDisposable
             ? "Re-running actions..."
             : $"Re-running {_rerunCompleted} of {_rerunTotal}";
 
-    /// <summary>True when the workspace has repos but every line is hidden by status filters.</summary>
-    internal bool NoWorkflowRowsMatchFilters =>
-        !isLoading && rows.Count > 0 && !rows.Any(row => LinesForGrid(row).Any());
+    internal bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
+
+    /// <summary>Workflow table rows visible with current status filters (before text search).</summary>
+    internal int VisibleWorkflowLineCount => rows.Sum(r => LinesForGrid(r).Count());
+
+    /// <summary>Workflow table rows visible after status filters and text search.</summary>
+    internal int FilteredWorkflowLineCount => rows.Sum(r => LinesForTable(r).Count());
+
+    /// <summary>True when the workspace has repos but no row is visible (status filters and/or search).</summary>
+    internal bool NoVisibleWorkflowRows =>
+        !isLoading && rows.Count > 0 && !rows.Any(row => LinesForTable(row).Any());
+
+    internal void OnSearchChanged(ChangeEventArgs e)
+    {
+        searchTerm = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    internal void ClearSearchFilter()
+    {
+        searchTerm = string.Empty;
+        StateHasChanged();
+    }
+
+    internal void OnSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            searchTerm = string.Empty;
+            StateHasChanged();
+        }
+    }
 
     internal void ToggleShowErrors()
     {
@@ -1079,6 +1110,34 @@ public sealed partial class WorkspaceActions : IDisposable
                 yield return line;
         }
     }
+
+    /// <summary>Lines to render after status toggles and repository/workflow text search.</summary>
+    internal IEnumerable<WorkflowActionLine> LinesForTable(WorkspaceActionRow row)
+    {
+        foreach (var line in LinesForGrid(row))
+        {
+            if (LineMatchesSearch(row, line))
+                yield return line;
+        }
+    }
+
+    private bool LineMatchesSearch(WorkspaceActionRow row, WorkflowActionLine line)
+    {
+        var words = SplitSearchWords(searchTerm);
+        if (words.Count == 0)
+            return true;
+        var repo = row.Repo.RepositoryName ?? string.Empty;
+        var workflow = line.Action?.WorkflowName ?? string.Empty;
+        var haystack = $"{repo} {workflow}";
+        return words.All(w => haystack.Contains(w, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static List<string> SplitSearchWords(string term) =>
+        term
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(w => w.Trim())
+            .Where(w => w.Length > 0)
+            .ToList();
 
     private bool IsBucketVisible(ActionLineFilterBucket bucket) =>
         bucket switch

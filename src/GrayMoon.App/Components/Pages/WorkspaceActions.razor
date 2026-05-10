@@ -2,99 +2,129 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using GrayMoon.App.Models
 @using GrayMoon.App.Components.Shared
+@using Microsoft.AspNetCore.Components.Web
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
 <PageTitle>@(workspace?.Name ?? "Workspace") Actions - GrayMoon</PageTitle>
 
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div>
-                <h2>@(workspace?.Name ?? "Workspace") Actions</h2>
-                <p class="text-muted mb-0 d-flex align-items-center gap-2 flex-wrap workspace-actions__subtitle" style="min-height: 1.5rem;">
+        <div class="workspace-repos-header workspace-actions-header">
+            <div class="workspace-repos-title-row">
+                <h2 class="workspace-repos-title">@(workspace?.Name ?? "Workspace") Actions</h2>
+                <p class="text-muted mb-0 workspace-repos-subtitle workspace-actions__subtitle">
                     @if (!isLoading && rows.Count > 0)
                     {
-                        @($"{rows.Count} {(rows.Count == 1 ? "repository" : "repositories")}")
-                        @if (ErrorCount > 0 || FailedCount > 0 || AbortedCount > 0 || RunningCount > 0 || SuccessCount > 0 || NoneCount > 0)
-                        {
-                            <span class="workspace-actions__filter-sep" aria-hidden="true">|</span>
-                            <span class="workspace-actions__filters d-inline-flex align-items-center flex-wrap gap-1" role="toolbar" aria-label="Filter workflows by status">
-                                @if (ErrorCount > 0)
-                                {
-                                    <button type="button"
-                                            class="gha-status-filter @(_showErrors ? "gha-status-filter--on" : "gha-status-filter--off")"
-                                            aria-pressed="@_showErrors"
-                                            aria-label="Filter repository load errors"
-                                            @onclick="ToggleShowErrors">
-                                        <span class="gha-status-filter__label">errors</span>
-                                        <span class="gha-status-filter__count gha-status-filter__count--errors">@ErrorCount</span>
-                                    </button>
-                                }
-                                @if (FailedCount > 0)
-                                {
-                                    <button type="button"
-                                            class="gha-status-filter @(_showFailed ? "gha-status-filter--on" : "gha-status-filter--off")"
-                                            aria-pressed="@_showFailed"
-                                            aria-label="Filter failed workflows"
-                                            @onclick="ToggleShowFailed">
-                                        <span class="gha-status-filter__label">failed</span>
-                                        <span class="gha-status-filter__count gha-status-filter__count--failed">@FailedCount</span>
-                                    </button>
-                                }
-                                @if (AbortedCount > 0)
-                                {
-                                    <button type="button"
-                                            class="gha-status-filter @(_showAborted ? "gha-status-filter--on" : "gha-status-filter--off")"
-                                            aria-pressed="@_showAborted"
-                                            aria-label="Filter aborted workflows"
-                                            @onclick="ToggleShowAborted">
-                                        <span class="gha-status-filter__label">aborted</span>
-                                        <span class="gha-status-filter__count gha-status-filter__count--aborted">@AbortedCount</span>
-                                    </button>
-                                }
-                                @if (RunningCount > 0)
-                                {
-                                    <button type="button"
-                                            class="gha-status-filter @(_showRunning ? "gha-status-filter--on" : "gha-status-filter--off")"
-                                            aria-pressed="@_showRunning"
-                                            aria-label="Filter running workflows"
-                                            @onclick="ToggleShowRunning">
-                                        <span class="gha-status-filter__label">running</span>
-                                        <span class="gha-status-filter__count gha-status-filter__count--running">@RunningCount</span>
-                                    </button>
-                                }
-                                @if (SuccessCount > 0)
-                                {
-                                    <button type="button"
-                                            class="gha-status-filter @(_showSuccess ? "gha-status-filter--on" : "gha-status-filter--off")"
-                                            aria-pressed="@_showSuccess"
-                                            aria-label="Filter successful workflows"
-                                            @onclick="ToggleShowSuccess">
-                                        <span class="gha-status-filter__label">success</span>
-                                        <span class="gha-status-filter__count gha-status-filter__count--success">@SuccessCount</span>
-                                    </button>
-                                }
-                                @if (NoneCount > 0)
-                                {
-                                    <button type="button"
-                                            class="gha-status-filter @(_showNone ? "gha-status-filter--on" : "gha-status-filter--off")"
-                                            aria-pressed="@_showNone"
-                                            aria-label="Filter workflows with no status"
-                                            @onclick="ToggleShowNone">
-                                        <span class="gha-status-filter__label">none</span>
-                                        <span class="gha-status-filter__count gha-status-filter__count--none">@NoneCount</span>
-                                    </button>
-                                }
-                            </span>
-                        }
+                        var wfSuffix = HasSearchFilter ? " found" : "";
+                        var wfCount = HasSearchFilter ? FilteredWorkflowLineCount : VisibleWorkflowLineCount;
+                        <span>@($"{wfCount} {(wfCount == 1 ? "workflow" : "workflows")}{wfSuffix}")</span>
                     }
-                    else
+                    else if (!isLoading && workspace != null)
                     {
-                        @:&nbsp;
+                        <span>0 workflows</span>
+                    }
+                    else if (isLoading)
+                    {
+                        <span>&nbsp;</span>
                     }
                 </p>
+                @if (!isLoading && rows.Count > 0 && (ErrorCount > 0 || FailedCount > 0 || AbortedCount > 0 || RunningCount > 0 || SuccessCount > 0 || NoneCount > 0))
+                {
+                    <span class="workspace-actions__filter-sep text-muted" aria-hidden="true">|</span>
+                    <span class="workspace-actions__filters d-inline-flex align-items-center flex-wrap gap-1" role="toolbar" aria-label="Filter workflows by status">
+                        @if (ErrorCount > 0)
+                        {
+                            <button type="button"
+                                    class="gha-status-filter @(_showErrors ? "gha-status-filter--on" : "gha-status-filter--off")"
+                                    aria-pressed="@_showErrors"
+                                    aria-label="Filter repository load errors"
+                                    @onclick="ToggleShowErrors">
+                                <span class="gha-status-filter__label">errors</span>
+                                <span class="gha-status-filter__count gha-status-filter__count--errors">@ErrorCount</span>
+                            </button>
+                        }
+                        @if (FailedCount > 0)
+                        {
+                            <button type="button"
+                                    class="gha-status-filter @(_showFailed ? "gha-status-filter--on" : "gha-status-filter--off")"
+                                    aria-pressed="@_showFailed"
+                                    aria-label="Filter failed workflows"
+                                    @onclick="ToggleShowFailed">
+                                <span class="gha-status-filter__label">failed</span>
+                                <span class="gha-status-filter__count gha-status-filter__count--failed">@FailedCount</span>
+                            </button>
+                        }
+                        @if (AbortedCount > 0)
+                        {
+                            <button type="button"
+                                    class="gha-status-filter @(_showAborted ? "gha-status-filter--on" : "gha-status-filter--off")"
+                                    aria-pressed="@_showAborted"
+                                    aria-label="Filter aborted workflows"
+                                    @onclick="ToggleShowAborted">
+                                <span class="gha-status-filter__label">aborted</span>
+                                <span class="gha-status-filter__count gha-status-filter__count--aborted">@AbortedCount</span>
+                            </button>
+                        }
+                        @if (RunningCount > 0)
+                        {
+                            <button type="button"
+                                    class="gha-status-filter @(_showRunning ? "gha-status-filter--on" : "gha-status-filter--off")"
+                                    aria-pressed="@_showRunning"
+                                    aria-label="Filter running workflows"
+                                    @onclick="ToggleShowRunning">
+                                <span class="gha-status-filter__label">running</span>
+                                <span class="gha-status-filter__count gha-status-filter__count--running">@RunningCount</span>
+                            </button>
+                        }
+                        @if (SuccessCount > 0)
+                        {
+                            <button type="button"
+                                    class="gha-status-filter @(_showSuccess ? "gha-status-filter--on" : "gha-status-filter--off")"
+                                    aria-pressed="@_showSuccess"
+                                    aria-label="Filter successful workflows"
+                                    @onclick="ToggleShowSuccess">
+                                <span class="gha-status-filter__label">success</span>
+                                <span class="gha-status-filter__count gha-status-filter__count--success">@SuccessCount</span>
+                            </button>
+                        }
+                        @if (NoneCount > 0)
+                        {
+                            <button type="button"
+                                    class="gha-status-filter @(_showNone ? "gha-status-filter--on" : "gha-status-filter--off")"
+                                    aria-pressed="@_showNone"
+                                    aria-label="Filter workflows with no status"
+                                    @onclick="ToggleShowNone">
+                                <span class="gha-status-filter__label">none</span>
+                                <span class="gha-status-filter__count gha-status-filter__count--none">@NoneCount</span>
+                            </button>
+                        }
+                    </span>
+                }
+                <span class="workspace-repos-title-spacer"></span>
             </div>
-            <div class="d-flex align-items-center gap-2">
+            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
+                <div class="workspace-repos-search-wrapper">
+                    <div class="workspace-repos-search-input-wrap @(HasSearchFilter ? "has-filter" : null)">
+                        <input id="workspace-actions-search"
+                               class="form-control workspace-repos-search"
+                               placeholder="Search repository or workflow..."
+                               value="@searchTerm"
+                               disabled="@(isLoading || rows.Count == 0)"
+                               @oninput="OnSearchChanged"
+                               @onkeydown="OnSearchKeyDown" />
+                        @if (HasSearchFilter)
+                        {
+                            <button type="button"
+                                    class="workspace-repos-search-clear"
+                                    title="Clear filter"
+                                    aria-label="Clear search filter"
+                                    @onclick="ClearSearchFilter"
+                                    @onclick:stopPropagation="true">
+                                <i class="bi bi-x-circle" aria-hidden="true"></i>
+                            </button>
+                        }
+                    </div>
+                </div>
                 @if (HasFailedRows)
                 {
                     <button class="btn btn-danger"
@@ -155,11 +185,11 @@
                                         </td>
                                     </tr>
                                 }
-                                else if (NoWorkflowRowsMatchFilters)
+                                else if (NoVisibleWorkflowRows)
                                 {
                                     <tr>
                                         <td colspan="5" class="text-center text-muted py-4">
-                                            No workflows match the current filters.
+                                            @(HasSearchFilter ? "No workflows match your search." : "No workflows match the current filters.")
                                         </td>
                                     </tr>
                                 }
@@ -168,7 +198,7 @@
                                     var groupIndex = 0;
                                     @foreach (var row in rows.OrderBy(GetStatusSortOrder).ThenBy(r => r.Repo.RepositoryName, System.StringComparer.OrdinalIgnoreCase))
                                     {
-                                        var displayLines = LinesForGrid(row).ToList();
+                                        var displayLines = LinesForTable(row).ToList();
                                         if (displayLines.Count == 0)
                                         {
                                             continue;

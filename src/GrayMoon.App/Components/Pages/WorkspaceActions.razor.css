@@ -1,3 +1,22 @@
+/*
+ * Title row: use same baseline alignment as app.css .workspace-repos-header .workspace-repos-title-row
+ * (do not override with flex-end — that sat the subtitle lower than the h2 text).
+ * Workflow count stays in <p> like WorkspaceRepositories; status chips are siblings so they don't stretch the subtitle.
+ */
+.workspace-actions-header .workspace-repos-subtitle.workspace-actions__subtitle {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    flex: 0 0 auto;
+    min-width: 0;
+}
+
+.workspace-actions-header .workspace-actions__filters,
+.workspace-actions-header .workspace-actions__filter-sep {
+    flex: 0 0 auto;
+    align-self: baseline;
+}
+
 /* Status filter chips (subtitle toolbar) */
 .workspace-actions__filter-sep {
     opacity: 0.45;
