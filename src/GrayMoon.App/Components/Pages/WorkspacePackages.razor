@@ -4,6 +4,7 @@
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
 @using GrayMoon.App.Components.Shared
+@using Microsoft.AspNetCore.Components.Web
 @inject WorkspaceRepository WorkspaceRepository
 @inject WorkspaceProjectRepository WorkspaceProjectRepository
 @inject PackageRegistrySyncService PackageRegistrySyncService
@@ -14,22 +15,56 @@
 
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div>
-                <h2>@(workspace?.Name ?? "Workspace") Packages</h2>
-                <p class="text-muted mb-0" style="min-height: 1.5rem;">
-                    @if (packages.Count > 0)
+        <div class="workspace-repos-header workspace-packages-header">
+            <div class="workspace-repos-title-row">
+                <h2 class="workspace-repos-title">@(workspace?.Name ?? "Workspace") Packages</h2>
+                <p class="text-muted mb-0 workspace-repos-subtitle workspace-packages__subtitle">
+                    @if (!isLoading && packages.Count > 0)
                     {
-                        @($"{packages.Count} {(packages.Count == 1 ? "package" : "packages")}")
+                        var pkgSuffix = HasSearchFilter ? " found" : "";
+                        var pkgCount = HasSearchFilter ? FilteredPackageCount : packages.Count;
+                        <span>@($"{pkgCount} {(pkgCount == 1 ? "package" : "packages")}{pkgSuffix}")</span>
                     }
-                    &nbsp;
+                    else if (!isLoading && workspace != null)
+                    {
+                        <span>0 packages</span>
+                    }
+                    else if (isLoading)
+                    {
+                        <span>&nbsp;</span>
+                    }
                 </p>
+                <span class="workspace-repos-title-spacer"></span>
             </div>
-            <button class="btn btn-outline-primary"
-                    @onclick="SyncRegistriesAsync"
-                    disabled="@(isSyncingRegistries || packages.Count == 0)">
-                Sync registries
-            </button>
+            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
+                <div class="workspace-repos-search-wrapper">
+                    <div class="workspace-repos-search-input-wrap @(HasSearchFilter ? "has-filter" : null)">
+                        <input id="workspace-packages-search"
+                               class="form-control workspace-repos-search"
+                               placeholder="Search package id..."
+                               value="@searchTerm"
+                               disabled="@(isLoading || packages.Count == 0)"
+                               @oninput="OnSearchChanged"
+                               @onkeydown="OnSearchKeyDown" />
+                        @if (HasSearchFilter)
+                        {
+                            <button type="button"
+                                    class="workspace-repos-search-clear"
+                                    title="Clear filter"
+                                    aria-label="Clear search filter"
+                                    @onclick="ClearSearchFilter"
+                                    @onclick:stopPropagation="true">
+                                <i class="bi bi-x-circle" aria-hidden="true"></i>
+                            </button>
+                        }
+                    </div>
+                </div>
+                <button class="btn btn-outline-primary"
+                        @onclick="SyncRegistriesAsync"
+                        disabled="@(isSyncingRegistries || packages.Count == 0)">
+                    Sync registries
+                </button>
+            </div>
         </div>
         @if (errorMessage != null)
         {
@@ -69,9 +104,17 @@
                                         </td>
                                     </tr>
                                 }
+                                else if (NoPackagesMatchSearch)
+                                {
+                                    <tr>
+                                        <td colspan="3" class="text-center text-muted py-4">
+                                            No packages match your search.
+                                        </td>
+                                    </tr>
+                                }
                                 else
                                 {
-                                    @foreach (var p in packages)
+                                    @foreach (var p in FilteredPackages)
                                     {
                                         <tr>
                                             <td class="col-packageid"><strong>@(p.PackageId ?? "-")</strong></td>
@@ -100,6 +143,56 @@
     private string? errorMessage;
     private bool isLoading = true;
     private bool isSyncingRegistries = false;
+    private string searchTerm = string.Empty;
+
+    private bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
+
+    private IReadOnlyList<WorkspaceProject> FilteredPackages => GetFilteredPackages();
+
+    private int FilteredPackageCount => FilteredPackages.Count;
+
+    private bool NoPackagesMatchSearch =>
+        !isLoading && packages.Count > 0 && FilteredPackages.Count == 0;
+
+    private IReadOnlyList<WorkspaceProject> GetFilteredPackages()
+    {
+        var words = SplitSearchWords(searchTerm);
+        if (words.Count == 0)
+            return packages;
+        return packages.Where(p =>
+        {
+            var id = p.PackageId ?? string.Empty;
+            return words.All(w => id.Contains(w, StringComparison.OrdinalIgnoreCase));
+        }).ToList();
+    }
+
+    private static List<string> SplitSearchWords(string term) =>
+        term
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(w => w.Trim())
+            .Where(w => w.Length > 0)
+            .ToList();
+
+    private void OnSearchChanged(ChangeEventArgs e)
+    {
+        searchTerm = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    private void ClearSearchFilter()
+    {
+        searchTerm = string.Empty;
+        StateHasChanged();
+    }
+
+    private void OnSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            searchTerm = string.Empty;
+            StateHasChanged();
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {

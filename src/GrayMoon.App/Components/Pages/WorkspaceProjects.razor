@@ -3,6 +3,7 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Components.Shared
+@using Microsoft.AspNetCore.Components.Web
 @inject WorkspaceRepository WorkspaceRepository
 @inject WorkspaceProjectRepository WorkspaceProjectRepository
 @inject ILogger<WorkspaceProjects> Logger
@@ -12,16 +13,50 @@
 
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div>
-                <h2>@(workspace?.Name ?? "Workspace") Projects</h2>
-                <p class="text-muted mb-0" style="min-height: 1.5rem;">
-                    @if (projects.Count > 0)
+        <div class="workspace-repos-header workspace-projects-header">
+            <div class="workspace-repos-title-row">
+                <h2 class="workspace-repos-title">@(workspace?.Name ?? "Workspace") Projects</h2>
+                <p class="text-muted mb-0 workspace-repos-subtitle workspace-projects__subtitle">
+                    @if (!isLoading && projects.Count > 0)
                     {
-                        @($"{projects.Count} {(projects.Count == 1 ? "project" : "projects")}")
+                        var projSuffix = HasSearchFilter ? " found" : "";
+                        var projCount = HasSearchFilter ? FilteredProjectCount : projects.Count;
+                        <span>@($"{projCount} {(projCount == 1 ? "project" : "projects")}{projSuffix}")</span>
                     }
-                    &nbsp;
+                    else if (!isLoading && workspace != null)
+                    {
+                        <span>0 projects</span>
+                    }
+                    else if (isLoading)
+                    {
+                        <span>&nbsp;</span>
+                    }
                 </p>
+                <span class="workspace-repos-title-spacer"></span>
+            </div>
+            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
+                <div class="workspace-repos-search-wrapper">
+                    <div class="workspace-repos-search-input-wrap @(HasSearchFilter ? "has-filter" : null)">
+                        <input id="workspace-projects-search"
+                               class="form-control workspace-repos-search"
+                               placeholder="Search project name or file..."
+                               value="@searchTerm"
+                               disabled="@(isLoading || projects.Count == 0)"
+                               @oninput="OnSearchChanged"
+                               @onkeydown="OnSearchKeyDown" />
+                        @if (HasSearchFilter)
+                        {
+                            <button type="button"
+                                    class="workspace-repos-search-clear"
+                                    title="Clear filter"
+                                    aria-label="Clear search filter"
+                                    @onclick="ClearSearchFilter"
+                                    @onclick:stopPropagation="true">
+                                <i class="bi bi-x-circle" aria-hidden="true"></i>
+                            </button>
+                        }
+                    </div>
+                </div>
             </div>
         </div>
         @if (errorMessage != null)
@@ -63,9 +98,17 @@
                                         </td>
                                     </tr>
                                 }
+                                else if (NoProjectsMatchSearch)
+                                {
+                                    <tr>
+                                        <td colspan="4" class="text-center text-muted py-4">
+                                            No projects match your search.
+                                        </td>
+                                    </tr>
+                                }
                                 else
                                 {
-                                    @foreach (var p in projects)
+                                    @foreach (var p in FilteredProjects)
                                     {
                                         <tr>
                                             <td class="col-name"><strong>@p.ProjectName</strong></td>
@@ -93,6 +136,58 @@
     private List<WorkspaceProject> projects = new();
     private string? errorMessage;
     private bool isLoading = true;
+    private string searchTerm = string.Empty;
+
+    private bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
+
+    private IReadOnlyList<WorkspaceProject> FilteredProjects => GetFilteredProjects();
+
+    private int FilteredProjectCount => FilteredProjects.Count;
+
+    private bool NoProjectsMatchSearch =>
+        !isLoading && projects.Count > 0 && FilteredProjects.Count == 0;
+
+    private IReadOnlyList<WorkspaceProject> GetFilteredProjects()
+    {
+        var words = SplitSearchWords(searchTerm);
+        if (words.Count == 0)
+            return projects;
+        return projects.Where(p =>
+        {
+            var name = p.ProjectName ?? string.Empty;
+            var file = p.ProjectFilePath ?? string.Empty;
+            var haystack = $"{name} {file}";
+            return words.All(w => haystack.Contains(w, StringComparison.OrdinalIgnoreCase));
+        }).ToList();
+    }
+
+    private static List<string> SplitSearchWords(string term) =>
+        term
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(w => w.Trim())
+            .Where(w => w.Length > 0)
+            .ToList();
+
+    private void OnSearchChanged(ChangeEventArgs e)
+    {
+        searchTerm = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    private void ClearSearchFilter()
+    {
+        searchTerm = string.Empty;
+        StateHasChanged();
+    }
+
+    private void OnSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            searchTerm = string.Empty;
+            StateHasChanged();
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
