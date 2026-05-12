@@ -14,9 +14,12 @@ RUN dotnet publish "src/GrayMoon.App/GrayMoon.App.csproj" -c Release -o /app/pub
   /p:UseAppHost=false \
   /p:Version=$VERSION /p:DisableGitVersionTask=true
 
-# Publish Agent as single-file trimmed self-contained (Linux x64 and Windows x64 for download)
+# Publish Agent (framework-dependent, multi-file) for Linux x64 and Windows x64; pack as zip for download
+RUN apt-get update && apt-get install -y --no-install-recommends zip && rm -rf /var/lib/apt/lists/*
 RUN dotnet publish "src/GrayMoon.Agent/GrayMoon.Agent.csproj" -c Release -r linux-x64 -o /agent/publish-linux /p:Version=$VERSION /p:DisableGitVersionTask=true
 RUN dotnet publish "src/GrayMoon.Agent/GrayMoon.Agent.csproj" -c Release -r win-x64 -o /agent/publish-win /p:Version=$VERSION /p:DisableGitVersionTask=true
+RUN cd /agent/publish-linux && zip -q -r /agent/graymoon-agent-linux.zip .
+RUN cd /agent/publish-win && zip -q -r /agent/graymoon-agent-windows.zip .
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
@@ -24,9 +27,8 @@ WORKDIR /app
 COPY --from=build /app/publish .
 # Pack agent executables for download (runs on host)
 RUN mkdir -p /app/agent
-COPY --from=build /agent/publish-linux/graymoon-agent /app/agent/graymoon-agent
-COPY --from=build /agent/publish-win/graymoon-agent.exe /app/agent/graymoon-agent.exe
-RUN chmod +x /app/agent/graymoon-agent
+COPY --from=build /agent/graymoon-agent-linux.zip /app/agent/graymoon-agent-linux.zip
+COPY --from=build /agent/graymoon-agent-windows.zip /app/agent/graymoon-agent-windows.zip
 
 # Database stored in /app/db for easy volume persistence: -v ./data:/app/db
 VOLUME ["/app/db"]

@@ -47,7 +47,7 @@
             const platform = (navigator.platform || '').toLowerCase();
             const isWindows = /win(dows|32|64|ce)/.test(ua) || platform.indexOf('win') === 0;
             const qs = isWindows ? '?platform=windows' : '';
-            const filename = isWindows ? 'graymoon-agent.exe' : 'graymoon-agent';
+            const filename = isWindows ? 'graymoon-agent-windows.zip' : 'graymoon-agent-linux.zip';
             const base = (document.querySelector('base')?.getAttribute('href') || '/').replace(/\/$/, '') || '';
             const path = base + '/api/agent/download' + qs;
             const url = path.startsWith('http') ? path : (window.location.origin + path);

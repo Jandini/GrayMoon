@@ -4,8 +4,8 @@ namespace GrayMoon.App.Api.Endpoints;
 
 public static class AgentEndpoints
 {
-    public const string AgentFileNameLinux = "graymoon-agent";
-    public const string AgentFileNameWindows = "graymoon-agent.exe";
+    public const string AgentArchiveLinux = "graymoon-agent-linux.zip";
+    public const string AgentArchiveWindows = "graymoon-agent-windows.zip";
 
     public static IEndpointRouteBuilder MapAgentEndpoints(this IEndpointRouteBuilder routes)
     {
@@ -22,15 +22,15 @@ public static class AgentEndpoints
     {
         var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.Agent");
         var isWindows = string.Equals(platform, "windows", StringComparison.OrdinalIgnoreCase);
-        var fileName = isWindows ? AgentFileNameWindows : AgentFileNameLinux;
+        var fileName = isWindows ? AgentArchiveWindows : AgentArchiveLinux;
         var path = Path.Combine(env.ContentRootPath, "agent", fileName);
         if (!System.IO.File.Exists(path))
         {
-            logger.LogWarning("Agent binary not found at {Path}", path);
+            logger.LogWarning("Agent archive not found at {Path}", path);
             return Results.NotFound();
         }
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        return Results.File(stream, "application/octet-stream", fileName, enableRangeProcessing: true);
+        return Results.File(stream, "application/zip", fileName, enableRangeProcessing: true);
     }
 
     private static IResult InstallAgent(HttpContext httpContext, IWebHostEnvironment env, ILoggerFactory loggerFactory)

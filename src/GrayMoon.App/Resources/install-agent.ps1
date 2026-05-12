@@ -1,5 +1,6 @@
 # GrayMoon Agent Installation Script
-# This script downloads and installs the GrayMoon Agent as a Windows service
+# Downloads a zip of the framework-dependent agent (graymoon-agent.exe + DLLs), extracts to Program Files, and registers the Windows service.
+# The host must have the .NET 8 runtime (or ASP.NET Core 8 runtime) installed for the same RID as the published agent.
 
 $ErrorActionPreference = 'Stop'
 
@@ -19,6 +20,7 @@ $serviceDescription = 'Host-side agent for GrayMoon: executes git and repository
 $agentPath = Join-Path $env:ProgramFiles 'GrayMoon'
 $agentExe = Join-Path $agentPath 'graymoon-agent.exe'
 $downloadUrl = '{DOWNLOAD_URL}'
+$zipPath = Join-Path $env:TEMP 'graymoon-agent-windows-install.zip'
 
 Add-Type @"
 using System;
@@ -213,17 +215,19 @@ if ($serviceExists -and $existingService.Status -eq 'Running') {
     }
 }
 
-# Create directory
-Write-Host 'Creating installation directory...' -ForegroundColor Yellow
+# Prepare installation directory (clear existing files so the zip extract does not leave stale DLLs)
+Write-Host 'Preparing installation directory...' -ForegroundColor Yellow
 if (-not (Test-Path $agentPath)) {
     New-Item -ItemType Directory -Path $agentPath -Force | Out-Null
+} else {
+    Get-ChildItem -Path $agentPath -Force | Remove-Item -Recurse -Force -ErrorAction Stop
 }
 
-# Download agent (replace existing file if present)
+# Download agent archive, then extract (framework-dependent publish: exe + DLLs)
 Write-Host "Downloading agent from {BASE_URL}..." -ForegroundColor Yellow
 try {
     $webClient = New-Object System.Net.WebClient
-    $webClient.DownloadFile($downloadUrl, $agentExe)
+    $webClient.DownloadFile($downloadUrl, $zipPath)
     Write-Host 'Download completed.' -ForegroundColor Green
 } catch {
     Write-Host "ERROR: Failed to download agent: $_" -ForegroundColor Red
@@ -234,6 +238,27 @@ try {
         } catch {
             Write-Host "Could not restart service. Please restart manually." -ForegroundColor Yellow
         }
+    }
+    return 1
+}
+
+Write-Host 'Extracting agent...' -ForegroundColor Yellow
+try {
+    Expand-Archive -LiteralPath $zipPath -DestinationPath $agentPath -Force
+} catch {
+    Write-Host "ERROR: Failed to extract agent: $_" -ForegroundColor Red
+    if ($wasRunning) {
+        try { Start-Service -Name $serviceName -ErrorAction SilentlyContinue } catch { }
+    }
+    return 1
+} finally {
+    Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+}
+
+if (-not (Test-Path -Path $agentExe)) {
+    Write-Host "ERROR: graymoon-agent.exe not found under $agentPath after extract. Install .NET 8 Runtime if the app fails to start." -ForegroundColor Red
+    if ($wasRunning) {
+        try { Start-Service -Name $serviceName -ErrorAction SilentlyContinue } catch { }
     }
     return 1
 }
