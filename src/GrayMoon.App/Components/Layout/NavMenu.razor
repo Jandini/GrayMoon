@@ -1,7 +1,5 @@
 @implements IDisposable
-@using GrayMoon.App.Repositories
 @inject NavigationManager NavigationManager
-@inject WorkspaceRepository WorkspaceRepository
 
 <div class="top-row navbar navbar-dark">
     <div class="container-fluid d-flex justify-content-center align-items-center">
@@ -28,9 +26,9 @@
             </div>
 
             <div class="nav-item px-3">
-                <NavLink class="nav-link" href="@($"workspaces/{workspaceId}")" Match="NavLinkMatch.All">
+                <NavLink class="nav-link" href="@($"workspaces/{workspaceId}")" Match="NavLinkMatch.All" title="Repositories">
                     <i class="bi bi-grid" aria-hidden="true"></i>
-                    <span class="nav-link-text">@(workspaceName ?? "Workspace")</span>
+                    <span class="nav-link-text">Repos</span>
                 </NavLink>
             </div>
 
@@ -56,9 +54,9 @@
             </div>
 
             <div class="nav-item px-3">
-                <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/dependencies")" Match="NavLinkMatch.All">
+                <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/dependencies")" Match="NavLinkMatch.All" title="Dependencies">
                     <i class="bi bi-share" aria-hidden="true"></i>
-                    <span class="nav-link-text">Graph</span>
+                    <span class="nav-link-text">Deps</span>
                 </NavLink>
             </div>
 
@@ -119,7 +117,6 @@
 @code {
     private bool isWorkspaceView;
     private int? workspaceId;
-    private string? workspaceName;
 
     protected override async Task OnInitializedAsync()
     {
@@ -132,7 +129,7 @@
         _ = UpdateWorkspaceContextAsync();
     }
 
-    private async Task UpdateWorkspaceContextAsync()
+    private Task UpdateWorkspaceContextAsync()
     {
         var relativePath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
         var path = relativePath.Split('?', '#')[0];
@@ -143,21 +140,15 @@
             int.TryParse(segments[1], out var parsedId))
         {
             isWorkspaceView = true;
-            if (workspaceId != parsedId || string.IsNullOrWhiteSpace(workspaceName))
-            {
-                workspaceId = parsedId;
-                var workspace = await WorkspaceRepository.GetByIdAsync(parsedId);
-                workspaceName = workspace?.Name ?? "Workspace";
-            }
+            workspaceId = parsedId;
         }
         else
         {
             isWorkspaceView = false;
             workspaceId = null;
-            workspaceName = null;
         }
 
-        await InvokeAsync(StateHasChanged);
+        return InvokeAsync(StateHasChanged);
     }
 
     public void Dispose()

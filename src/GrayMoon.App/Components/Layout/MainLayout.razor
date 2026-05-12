@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@implements IDisposable
 @using System.Reflection
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Repositories
@@ -7,6 +8,7 @@
 @inject AppSettingRepository AppSettingRepository
 @inject CommandTerminalOverlayPreferenceService CommandTerminalOverlayPreference
 @inject LoadingOverlayUiSettingsService LoadingOverlayUiSettings
+@inject IWorkspaceTopBarService WorkspaceTopBarService
 
 <Toast />
 
@@ -16,7 +18,14 @@
     </div>
 
     <main>
-        <div class="top-row px-4">
+        <div class="top-row px-4 top-row-main">
+            <div class="top-row-workspace-title" role="status" aria-live="polite">
+                @if (!string.IsNullOrEmpty(WorkspaceTopBarService.WorkspaceDisplayName))
+                {
+                    <span class="top-row-workspace-title__text" title="@WorkspaceTopBarService.WorkspaceDisplayName">@WorkspaceTopBarService.WorkspaceDisplayName</span>
+                }
+            </div>
+            <div class="top-row-main-trailing">
             @if (!string.IsNullOrEmpty(version))
             {
                 <span class="header-version">
@@ -27,6 +36,7 @@
                 </span>
             }
             <AgentStatusBadge />
+            </div>
         </div>
 
         <article class="content px-4">
@@ -46,6 +56,8 @@
 
     protected override async Task OnInitializedAsync()
     {
+        WorkspaceTopBarService.Changed += OnWorkspaceTopBarChanged;
+
         var informationalVersion = typeof(Program).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
             ?.InformationalVersion;
@@ -62,5 +74,14 @@
         var transparent = await AppSettingRepository.GetBoolAsync(AppSettingRepository.TerminalTransparentBackdropKey, defaultValue: true);
         var scheme = await AppSettingRepository.GetTerminalColorSchemeAsync();
         LoadingOverlayUiSettings.LoadSilently(transparent, scheme);
+
+        await WorkspaceTopBarService.EnsureSynchronizedAsync();
+    }
+
+    private void OnWorkspaceTopBarChanged() => _ = InvokeAsync(StateHasChanged);
+
+    void IDisposable.Dispose()
+    {
+        WorkspaceTopBarService.Changed -= OnWorkspaceTopBarChanged;
     }
 }

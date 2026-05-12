@@ -85,6 +85,7 @@ try
     builder.Services.AddScoped<WorkspaceDependencyService>();
     builder.Services.AddScoped<WorkspaceBranchHandler>();
     builder.Services.AddScoped<IWorkspacePageService, WorkspacePageService>();
+    builder.Services.AddScoped<IWorkspaceTopBarService, WorkspaceTopBarService>();
 
     builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
 

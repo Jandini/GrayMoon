@@ -25,6 +25,45 @@ main {
     align-items: center;
 }
 
+/* Main column only: workspace name + trailing controls; keep sidebar .top-row rules unchanged */
+.top-row.top-row-main {
+    position: relative;
+    justify-content: flex-end;
+}
+
+/* Narrow: title lives in main strip only (sidebar logo row unchanged); small but readable */
+.top-row-workspace-title {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    padding-inline: 0.35rem;
+}
+
+.top-row-workspace-title__text {
+    pointer-events: auto;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: clamp(0.72rem, 3.1vw, 0.88rem);
+    font-weight: 600;
+    line-height: 1.15;
+    color: var(--text-primary);
+    max-width: calc(100% - 5.75rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.top-row-main-trailing {
+    position: relative;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
     .top-row ::deep a, .top-row ::deep .btn-link {
         white-space: nowrap;
         margin-left: 1.5rem;
@@ -32,14 +71,19 @@ main {
         color: var(--text-primary);
     }
 
+    .top-row-main-trailing ::deep a,
+    .top-row-main-trailing ::deep .btn-link {
+        margin-left: 0;
+    }
+
     .top-row ::deep a:hover, .top-row ::deep .btn-link:hover {
         text-decoration: underline;
         color: var(--accent-blue);
     }
 
-    .top-row ::deep a:first-child {
-        overflow: hidden;
-        text-overflow: ellipsis;
+    .top-row-main-trailing ::deep a:first-of-type {
+        overflow: visible;
+        text-overflow: clip;
     }
 
 .header-version {
@@ -77,12 +121,27 @@ main {
         overflow: hidden;
     }
 
+    /* Main-only: keep a slim header so workspace title + agent stay visible */
+    main .top-row.top-row-main {
+        height: 2.75rem;
+        min-height: 2.75rem;
+        overflow: visible;
+        border-bottom: 1px solid var(--border-color);
+        background-color: var(--bg-tertiary);
+        justify-content: flex-end;
+        align-items: center;
+    }
+
     .header-version {
         display: none;
     }
 
     .top-row ::deep a, .top-row ::deep .btn-link {
         margin-left: 0;
+    }
+
+    main .top-row-main-trailing {
+        z-index: 3;
     }
 }
 
@@ -109,6 +168,32 @@ main {
         position: sticky;
         top: 0;
         z-index: 1;
+    }
+
+    /* Viewport-centered title: geometric center of full page; stays under sidebar (z 101) and above main bg */
+    main .top-row-workspace-title {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        padding-inline: 0;
+        z-index: 90;
+        box-sizing: border-box;
+    }
+
+    /* Centered at 50vw: width bounded by sidebar (180px) on the left and header trailing cluster on the right */
+    main .top-row-workspace-title__text {
+        font-size: clamp(0.95rem, 0.28vw + 0.92rem, 1.28rem);
+        max-width: min(38rem, calc(100vw - 360px - 1.5rem), calc(100vw - 24rem));
+    }
+
+    main .top-row-main-trailing {
+        z-index: 91;
     }
 
     .top-row.auth ::deep a:first-child {

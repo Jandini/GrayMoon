@@ -9,13 +9,13 @@
 @inject ILogger<WorkspaceProjects> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
-<PageTitle>@(workspace?.Name ?? "Workspace") - Projects</PageTitle>
+<PageTitle>Projects - GrayMoon</PageTitle>
 
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
         <div class="workspace-repos-header workspace-projects-header">
             <div class="workspace-repos-title-row">
-                <h2 class="workspace-repos-title">@(workspace?.Name ?? "Workspace") Projects</h2>
+                <h2 class="workspace-repos-title">Projects</h2>
                 <p class="text-muted mb-0 workspace-repos-subtitle workspace-projects__subtitle">
                     @if (!isLoading && projects.Count > 0)
                     {
