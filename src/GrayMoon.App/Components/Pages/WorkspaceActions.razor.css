@@ -79,9 +79,10 @@
 }
 
 .gha-status-filter--on {
-    background-color: #1a1a1a;
+    background-color: var(--bg-tertiary, #2d2d30);
     color: rgba(255, 255, 255, 0.92);
-    border-color: rgba(255, 255, 255, 0.35);
+    /* Darker frame than off-state / hover so enabled chips read more grounded */
+    border-color: var(--border-color, #3e3e42);
 }
 
 /* Count pill colors when filter is on — match wwwroot/app.css .action-badge-* */
