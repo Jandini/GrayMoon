@@ -196,6 +196,76 @@ $newLine
     }
 }
 
+function Build-AgentServiceCommandLine {
+    param(
+        [Parameter(Mandatory)]
+        [string]$AgentExePath,
+        [Parameter(Mandatory)]
+        [string]$HubUrl
+    )
+    '"' + $AgentExePath + '" run -u "' + $HubUrl + '"'
+}
+
+function Set-Win32ServicePathName {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+        [Parameter(Mandatory)]
+        [string]$PathName
+    )
+    $svc = Get-CimInstance -ClassName Win32_Service -Filter "Name='$Name'" -ErrorAction Stop
+    $out = Invoke-CimMethod -InputObject $svc -MethodName Change -Arguments @{ PathName = $PathName }
+    if ($out.ReturnValue -ne 0) {
+        throw "Win32_Service.Change failed with return code $($out.ReturnValue). PathName: $PathName"
+    }
+}
+
+function Set-ServiceDescriptionRegistry {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+        [Parameter(Mandatory)]
+        [string]$Description
+    )
+    $keyPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$Name"
+    if (-not (Test-Path -LiteralPath $keyPath)) {
+        return
+    }
+    Set-ItemProperty -LiteralPath $keyPath -Name Description -Value $Description -Type String -Force -ErrorAction SilentlyContinue | Out-Null
+}
+
+function New-Win32ServiceWithLogon {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+        [Parameter(Mandatory)]
+        [string]$DisplayName,
+        [Parameter(Mandatory)]
+        [string]$PathName,
+        [Parameter(Mandatory)]
+        [string]$StartName,
+        [Parameter(Mandatory)]
+        [string]$StartPassword
+    )
+    $out = Invoke-CimMethod -ClassName Win32_Service -MethodName Create -Arguments @{
+        Name = $Name
+        DisplayName = $DisplayName
+        PathName = $PathName
+        ServiceType = [uint8]16
+        ErrorControl = [uint32]1
+        StartMode = 'Automatic'
+        DesktopInteract = $false
+        StartName = $StartName
+        StartPassword = $StartPassword
+        LoadOrderGroup = ''
+        LoadOrderGroupDependencies = ''
+        ServiceDependencies = ''
+    }
+    if ($out.ReturnValue -ne 0) {
+        throw "Win32_Service.Create failed with return code $($out.ReturnValue)."
+    }
+}
+
 Write-Host 'Checking for existing service...' -ForegroundColor Yellow
 $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 $serviceExists = $null -ne $existingService
@@ -268,15 +338,13 @@ if ($serviceExists) {
     Write-Host 'Updating service to use the new binary path and hub URL...' -ForegroundColor Yellow
     try {
         $hubUrl = '{HUB_URL}'
-        $binPath = "`"$agentExe`" run -u `"$hubUrl`""
-        $result = & sc.exe config $serviceName binPath= $binPath 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            $errorMsg = if ($result -is [System.Array]) { ($result | Out-String).Trim() } else { $result.ToString() }
-            throw "sc.exe config failed with exit code ${LASTEXITCODE}: $errorMsg"
-        }
+        $binPath = Build-AgentServiceCommandLine -AgentExePath $agentExe -HubUrl $hubUrl
+        Set-Win32ServicePathName -Name $serviceName -PathName $binPath
+        Set-ServiceDescriptionRegistry -Name $serviceName -Description $serviceDescription
         Write-Host 'Service configuration updated successfully.' -ForegroundColor Green
     } catch {
         Write-Host "ERROR: Failed to update service binary path: $_" -ForegroundColor Red
+        Write-Host "Agent files are under $agentPath but the service was not updated. Fix the service command line or re-run this script after resolving the error." -ForegroundColor Yellow
         return 1
     }
 } else {
@@ -284,8 +352,8 @@ if ($serviceExists) {
     Write-Host 'Installing as Windows service...' -ForegroundColor Yellow
     try {
         $hubUrl = '{HUB_URL}'
-        $binPath = "`"$agentExe`" run -u `"$hubUrl`""
-        
+        $binPath = Build-AgentServiceCommandLine -AgentExePath $agentExe -HubUrl $hubUrl
+
         # Install service to run as current user (required for git credentials, dotnet tools, and user environment)
         $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
         Write-Host "Service will run as: $currentUser" -ForegroundColor Cyan
@@ -302,14 +370,9 @@ if ($serviceExists) {
 
             Write-Host 'Granting "Log on as a service" right...' -ForegroundColor Yellow
             Grant-ServiceLogonRight -AccountName $currentUser
-            
-            # Use sc.exe to create service with custom user account (New-Service doesn't support this)
-            # Note: sc.exe is still needed for setting custom user credentials
-            $result = & sc.exe create $serviceName binPath= $binPath start= auto DisplayName= "$serviceDisplayName" obj= "$currentUser" password= "$passwordPlain" 2>&1
-            if ($LASTEXITCODE -ne 0) {
-                $errorMsg = if ($result -is [System.Array]) { ($result | Out-String).Trim() } else { $result.ToString() }
-                throw "sc.exe create failed with exit code ${LASTEXITCODE}: $errorMsg"
-            }
+
+            New-Win32ServiceWithLogon -Name $serviceName -DisplayName $serviceDisplayName -PathName $binPath -StartName $currentUser -StartPassword $passwordPlain
+            Set-ServiceDescriptionRegistry -Name $serviceName -Description $serviceDescription
         }
         finally {
             if ($passwordBstr -ne [IntPtr]::Zero) {
@@ -319,10 +382,7 @@ if ($serviceExists) {
             $password.Dispose()
             [System.GC]::Collect()
         }
-        
-        # Set description using sc.exe
-        & sc.exe description $serviceName "$serviceDescription" | Out-Null
-        
+
         Write-Host 'Service installed successfully.' -ForegroundColor Green
     } catch {
         Write-Host "ERROR: Failed to install service: $_" -ForegroundColor Red
