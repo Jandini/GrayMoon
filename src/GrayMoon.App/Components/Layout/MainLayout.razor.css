@@ -42,13 +42,15 @@ main {
     padding-inline: 0.35rem;
 }
 
+/* Same family/weight/line-height as page h2 (.h2); smaller scale so it fits the top bar */
 .top-row-workspace-title__text {
     pointer-events: auto;
-    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-    font-size: clamp(0.72rem, 3.1vw, 0.88rem);
-    font-weight: 600;
-    line-height: 1.15;
+    display: inline-block;
+    box-sizing: border-box;
     color: var(--text-primary);
+    margin-top: 0;
+    margin-bottom: 0;
+    font-size: calc((1.325rem + 0.9vw) * 0.78);
     max-width: calc(100% - 5.75rem);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -188,7 +190,6 @@ main {
 
     /* Centered at 50vw: width bounded by sidebar (180px) on the left and header trailing cluster on the right */
     main .top-row-workspace-title__text {
-        font-size: clamp(0.95rem, 0.28vw + 0.92rem, 1.28rem);
         max-width: min(38rem, calc(100vw - 360px - 1.5rem), calc(100vw - 24rem));
     }
 
@@ -211,6 +212,12 @@ main {
         padding-top: 2rem !important;
     }
 
+}
+
+@media (min-width: 1200px) {
+    main .top-row-workspace-title__text {
+        font-size: 1.56rem;
+    }
 }
 
 #blazor-error-ui {
