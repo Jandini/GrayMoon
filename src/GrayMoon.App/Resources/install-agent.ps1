@@ -16,7 +16,7 @@ if (-not $isAdmin) {
 $serviceName = 'GrayMoonAgent'
 $serviceDisplayName = 'GrayMoon Agent'
 $serviceDescription = 'Host-side agent for GrayMoon: executes git and repository I/O operations'
-$agentPath = Join-Path $env:ProgramData 'GrayMoon'
+$agentPath = Join-Path $env:ProgramFiles 'GrayMoon'
 $agentExe = Join-Path $agentPath 'graymoon-agent.exe'
 $downloadUrl = '{DOWNLOAD_URL}'
 
@@ -239,7 +239,21 @@ try {
 }
 
 if ($serviceExists) {
-    Write-Host 'File updated successfully.' -ForegroundColor Green
+    Write-Host 'Agent files updated.' -ForegroundColor Green
+    Write-Host 'Updating service to use the new binary path and hub URL...' -ForegroundColor Yellow
+    try {
+        $hubUrl = '{HUB_URL}'
+        $binPath = "`"$agentExe`" run -u `"$hubUrl`""
+        $result = & sc.exe config $serviceName binPath= $binPath 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $errorMsg = if ($result -is [System.Array]) { ($result | Out-String).Trim() } else { $result.ToString() }
+            throw "sc.exe config failed with exit code ${LASTEXITCODE}: $errorMsg"
+        }
+        Write-Host 'Service configuration updated successfully.' -ForegroundColor Green
+    } catch {
+        Write-Host "ERROR: Failed to update service binary path: $_" -ForegroundColor Red
+        return 1
+    }
 } else {
     # Service doesn't exist: create it
     Write-Host 'Installing as Windows service...' -ForegroundColor Yellow
