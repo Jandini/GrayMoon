@@ -9,6 +9,7 @@
 @inject CommandTerminalOverlayPreferenceService CommandTerminalOverlayPreference
 @inject LoadingOverlayUiSettingsService LoadingOverlayUiSettings
 @inject IWorkspaceTopBarService WorkspaceTopBarService
+@inject NavigationManager NavigationManager
 
 <Toast />
 
@@ -22,8 +23,12 @@
             <div class="top-row-workspace-title" role="status" aria-live="polite">
                 @if (!string.IsNullOrEmpty(WorkspaceTopBarService.WorkspaceDisplayName))
                 {
-                    <span class="h2 workspace-repos-title top-row-workspace-title__text my-0"
-                          title="@WorkspaceTopBarService.WorkspaceDisplayName">@WorkspaceTopBarService.WorkspaceDisplayName</span>
+                    <a href="@WorkspacesListHref"
+                       class="h2 workspace-repos-title top-row-workspace-title__text top-row-workspace-title__link my-0"
+                       title="@WorkspaceTopBarService.WorkspaceDisplayName"
+                       aria-label="Go to Workspaces">
+                        @WorkspaceTopBarService.WorkspaceDisplayName
+                    </a>
                 }
             </div>
             <div class="top-row-main-trailing">
@@ -78,6 +83,10 @@
 
         await WorkspaceTopBarService.EnsureSynchronizedAsync();
     }
+
+    /// <summary>Root-relative URL to the Workspaces list (correct from /workspaces/{{id}}/… and under virtual paths).</summary>
+    private string WorkspacesListHref =>
+        new Uri(new Uri(NavigationManager.BaseUri), "workspaces").AbsolutePath;
 
     private void OnWorkspaceTopBarChanged() => _ = InvokeAsync(StateHasChanged);
 

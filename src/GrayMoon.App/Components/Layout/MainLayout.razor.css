@@ -31,18 +31,18 @@ main {
     justify-content: flex-end;
 }
 
-/* Narrow: title lives in main strip only (sidebar logo row unchanged); small but readable */
+/* Workspace title strip: allow clicks on the link (do not use pointer-events: none here). */
 .top-row-workspace-title {
     position: absolute;
     inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    pointer-events: none;
+    pointer-events: auto;
     padding-inline: 0.35rem;
 }
 
-/* Same family/weight/line-height as page h2 (.h2); smaller scale so it fits the top bar */
+/* Same family/weight/line-height as page h2 (.h2); ~72% scale for top bar */
 .top-row-workspace-title__text {
     pointer-events: auto;
     display: inline-block;
@@ -50,11 +50,28 @@ main {
     color: var(--text-primary);
     margin-top: 0;
     margin-bottom: 0;
-    font-size: calc((1.325rem + 0.9vw) * 0.78);
+    font-size: calc((1.325rem + 0.9vw) * 0.72);
     max-width: calc(100% - 5.75rem);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.top-row-workspace-title ::deep a.top-row-workspace-title__link {
+    margin-left: 0;
+    text-decoration: none;
+    color: var(--text-primary);
+    cursor: pointer;
+    position: relative;
+    z-index: 1;
+    font-size: calc((1.325rem + 0.9vw) * 0.72);
+}
+
+/* Override generic .top-row ::deep a:hover (blue + underline); workspace title: white, no underline, pointer only */
+.top-row.top-row-main .top-row-workspace-title ::deep a.top-row-workspace-title__link:hover,
+.top-row.top-row-main .top-row-workspace-title ::deep a.top-row-workspace-title__link:focus-visible {
+    color: #fff;
+    text-decoration: none;
 }
 
 .top-row-main-trailing {
@@ -172,7 +189,7 @@ main {
         z-index: 1;
     }
 
-    /* Viewport-centered title: geometric center of full page; stays under sidebar (z 101) and above main bg */
+    /* Full-width strip for layout; must receive hits so the NavLink is clickable (pointer-events: none breaks this). */
     main .top-row-workspace-title {
         position: fixed;
         top: 0;
@@ -182,19 +199,22 @@ main {
         display: flex;
         align-items: center;
         justify-content: center;
-        pointer-events: none;
+        pointer-events: auto;
         padding-inline: 0;
-        z-index: 90;
+        z-index: 94;
         box-sizing: border-box;
     }
 
     /* Centered at 50vw: width bounded by sidebar (180px) on the left and header trailing cluster on the right */
-    main .top-row-workspace-title__text {
+    main .top-row-workspace-title__text,
+    main .top-row-workspace-title ::deep a.top-row-workspace-title__link {
         max-width: min(38rem, calc(100vw - 360px - 1.5rem), calc(100vw - 24rem));
+        font-size: calc((1.325rem + 0.9vw) * 0.72);
+        pointer-events: auto;
     }
 
     main .top-row-main-trailing {
-        z-index: 91;
+        z-index: 95;
     }
 
     .top-row.auth ::deep a:first-child {
@@ -215,8 +235,9 @@ main {
 }
 
 @media (min-width: 1200px) {
-    main .top-row-workspace-title__text {
-        font-size: 1.56rem;
+    main .top-row-workspace-title__text,
+    main .top-row-workspace-title ::deep a.top-row-workspace-title__link {
+        font-size: 1.44rem;
     }
 }
 
