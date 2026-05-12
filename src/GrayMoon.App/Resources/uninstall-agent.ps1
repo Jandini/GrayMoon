@@ -14,7 +14,6 @@ if (-not $isAdmin) {
 
 # Service name
 $serviceName = 'GrayMoonAgent'
-$agentPath = Join-Path $env:ProgramData 'GrayMoon'
 
 Write-Host 'Checking for service...' -ForegroundColor Yellow
 $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
@@ -38,6 +37,20 @@ if ($existingService) {
     }
 } else {
     Write-Host 'Service not found.' -ForegroundColor Yellow
+}
+
+$agentInstallPath = Join-Path $env:ProgramFiles 'GrayMoon'
+if (Test-Path -Path $agentInstallPath) {
+    Write-Host 'Removing installation directory...' -ForegroundColor Yellow
+    Remove-Item -Path $agentInstallPath -Recurse -Force -ErrorAction Stop
+    Write-Host 'Installation directory removed.' -ForegroundColor Green
+}
+
+$legacyAgentExe = Join-Path $env:ProgramData 'GrayMoon\graymoon-agent.exe'
+if (Test-Path -Path $legacyAgentExe) {
+    Write-Host 'Removing legacy agent executable...' -ForegroundColor Yellow
+    Remove-Item -Path $legacyAgentExe -Force -ErrorAction Stop
+    Write-Host 'Legacy executable removed.' -ForegroundColor Green
 }
 
 Write-Host ''

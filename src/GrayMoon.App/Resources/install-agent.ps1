@@ -1,5 +1,6 @@
 # GrayMoon Agent Installation Script
-# This script downloads and installs the GrayMoon Agent as a Windows service
+# Downloads a zip of the framework-dependent agent (graymoon-agent.exe + DLLs), extracts to Program Files, and registers the Windows service.
+# The host must have the .NET 8 runtime (or ASP.NET Core 8 runtime) installed for the same RID as the published agent.
 
 $ErrorActionPreference = 'Stop'
 
@@ -16,9 +17,10 @@ if (-not $isAdmin) {
 $serviceName = 'GrayMoonAgent'
 $serviceDisplayName = 'GrayMoon Agent'
 $serviceDescription = 'Host-side agent for GrayMoon: executes git and repository I/O operations'
-$agentPath = Join-Path $env:ProgramData 'GrayMoon'
+$agentPath = Join-Path $env:ProgramFiles 'GrayMoon'
 $agentExe = Join-Path $agentPath 'graymoon-agent.exe'
 $downloadUrl = '{DOWNLOAD_URL}'
+$zipPath = Join-Path $env:TEMP 'graymoon-agent-windows-install.zip'
 
 Add-Type @"
 using System;
@@ -194,6 +196,76 @@ $newLine
     }
 }
 
+function Build-AgentServiceCommandLine {
+    param(
+        [Parameter(Mandatory)]
+        [string]$AgentExePath,
+        [Parameter(Mandatory)]
+        [string]$HubUrl
+    )
+    '"' + $AgentExePath + '" run -u "' + $HubUrl + '"'
+}
+
+function Set-Win32ServicePathName {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+        [Parameter(Mandatory)]
+        [string]$PathName
+    )
+    $svc = Get-CimInstance -ClassName Win32_Service -Filter "Name='$Name'" -ErrorAction Stop
+    $out = Invoke-CimMethod -InputObject $svc -MethodName Change -Arguments @{ PathName = $PathName }
+    if ($out.ReturnValue -ne 0) {
+        throw "Win32_Service.Change failed with return code $($out.ReturnValue). PathName: $PathName"
+    }
+}
+
+function Set-ServiceDescriptionRegistry {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+        [Parameter(Mandatory)]
+        [string]$Description
+    )
+    $keyPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$Name"
+    if (-not (Test-Path -LiteralPath $keyPath)) {
+        return
+    }
+    Set-ItemProperty -LiteralPath $keyPath -Name Description -Value $Description -Type String -Force -ErrorAction SilentlyContinue | Out-Null
+}
+
+function New-Win32ServiceWithLogon {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+        [Parameter(Mandatory)]
+        [string]$DisplayName,
+        [Parameter(Mandatory)]
+        [string]$PathName,
+        [Parameter(Mandatory)]
+        [string]$StartName,
+        [Parameter(Mandatory)]
+        [string]$StartPassword
+    )
+    $out = Invoke-CimMethod -ClassName Win32_Service -MethodName Create -Arguments @{
+        Name = $Name
+        DisplayName = $DisplayName
+        PathName = $PathName
+        ServiceType = [uint8]16
+        ErrorControl = [uint32]1
+        StartMode = 'Automatic'
+        DesktopInteract = $false
+        StartName = $StartName
+        StartPassword = $StartPassword
+        LoadOrderGroup = ''
+        LoadOrderGroupDependencies = ''
+        ServiceDependencies = ''
+    }
+    if ($out.ReturnValue -ne 0) {
+        throw "Win32_Service.Create failed with return code $($out.ReturnValue)."
+    }
+}
+
 Write-Host 'Checking for existing service...' -ForegroundColor Yellow
 $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 $serviceExists = $null -ne $existingService
@@ -213,17 +285,19 @@ if ($serviceExists -and $existingService.Status -eq 'Running') {
     }
 }
 
-# Create directory
-Write-Host 'Creating installation directory...' -ForegroundColor Yellow
+# Prepare installation directory (clear existing files so the zip extract does not leave stale DLLs)
+Write-Host 'Preparing installation directory...' -ForegroundColor Yellow
 if (-not (Test-Path $agentPath)) {
     New-Item -ItemType Directory -Path $agentPath -Force | Out-Null
+} else {
+    Get-ChildItem -Path $agentPath -Force | Remove-Item -Recurse -Force -ErrorAction Stop
 }
 
-# Download agent (replace existing file if present)
+# Download agent archive, then extract (framework-dependent publish: exe + DLLs)
 Write-Host "Downloading agent from {BASE_URL}..." -ForegroundColor Yellow
 try {
     $webClient = New-Object System.Net.WebClient
-    $webClient.DownloadFile($downloadUrl, $agentExe)
+    $webClient.DownloadFile($downloadUrl, $zipPath)
     Write-Host 'Download completed.' -ForegroundColor Green
 } catch {
     Write-Host "ERROR: Failed to download agent: $_" -ForegroundColor Red
@@ -238,15 +312,48 @@ try {
     return 1
 }
 
+Write-Host 'Extracting agent...' -ForegroundColor Yellow
+try {
+    Expand-Archive -LiteralPath $zipPath -DestinationPath $agentPath -Force
+} catch {
+    Write-Host "ERROR: Failed to extract agent: $_" -ForegroundColor Red
+    if ($wasRunning) {
+        try { Start-Service -Name $serviceName -ErrorAction SilentlyContinue } catch { }
+    }
+    return 1
+} finally {
+    Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+}
+
+if (-not (Test-Path -Path $agentExe)) {
+    Write-Host "ERROR: graymoon-agent.exe not found under $agentPath after extract. Install .NET 8 Runtime if the app fails to start." -ForegroundColor Red
+    if ($wasRunning) {
+        try { Start-Service -Name $serviceName -ErrorAction SilentlyContinue } catch { }
+    }
+    return 1
+}
+
 if ($serviceExists) {
-    Write-Host 'File updated successfully.' -ForegroundColor Green
+    Write-Host 'Agent files updated.' -ForegroundColor Green
+    Write-Host 'Updating service to use the new binary path and hub URL...' -ForegroundColor Yellow
+    try {
+        $hubUrl = '{HUB_URL}'
+        $binPath = Build-AgentServiceCommandLine -AgentExePath $agentExe -HubUrl $hubUrl
+        Set-Win32ServicePathName -Name $serviceName -PathName $binPath
+        Set-ServiceDescriptionRegistry -Name $serviceName -Description $serviceDescription
+        Write-Host 'Service configuration updated successfully.' -ForegroundColor Green
+    } catch {
+        Write-Host "ERROR: Failed to update service binary path: $_" -ForegroundColor Red
+        Write-Host "Agent files are under $agentPath but the service was not updated. Fix the service command line or re-run this script after resolving the error." -ForegroundColor Yellow
+        return 1
+    }
 } else {
     # Service doesn't exist: create it
     Write-Host 'Installing as Windows service...' -ForegroundColor Yellow
     try {
         $hubUrl = '{HUB_URL}'
-        $binPath = "`"$agentExe`" run -u `"$hubUrl`""
-        
+        $binPath = Build-AgentServiceCommandLine -AgentExePath $agentExe -HubUrl $hubUrl
+
         # Install service to run as current user (required for git credentials, dotnet tools, and user environment)
         $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
         Write-Host "Service will run as: $currentUser" -ForegroundColor Cyan
@@ -263,14 +370,9 @@ if ($serviceExists) {
 
             Write-Host 'Granting "Log on as a service" right...' -ForegroundColor Yellow
             Grant-ServiceLogonRight -AccountName $currentUser
-            
-            # Use sc.exe to create service with custom user account (New-Service doesn't support this)
-            # Note: sc.exe is still needed for setting custom user credentials
-            $result = & sc.exe create $serviceName binPath= $binPath start= auto DisplayName= "$serviceDisplayName" obj= "$currentUser" password= "$passwordPlain" 2>&1
-            if ($LASTEXITCODE -ne 0) {
-                $errorMsg = if ($result -is [System.Array]) { ($result | Out-String).Trim() } else { $result.ToString() }
-                throw "sc.exe create failed with exit code ${LASTEXITCODE}: $errorMsg"
-            }
+
+            New-Win32ServiceWithLogon -Name $serviceName -DisplayName $serviceDisplayName -PathName $binPath -StartName $currentUser -StartPassword $passwordPlain
+            Set-ServiceDescriptionRegistry -Name $serviceName -Description $serviceDescription
         }
         finally {
             if ($passwordBstr -ne [IntPtr]::Zero) {
@@ -280,10 +382,7 @@ if ($serviceExists) {
             $password.Dispose()
             [System.GC]::Collect()
         }
-        
-        # Set description using sc.exe
-        & sc.exe description $serviceName "$serviceDescription" | Out-Null
-        
+
         Write-Host 'Service installed successfully.' -ForegroundColor Green
     } catch {
         Write-Host "ERROR: Failed to install service: $_" -ForegroundColor Red
