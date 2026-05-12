@@ -7,23 +7,56 @@
 @inject ConnectorRepository ConnectorRepository
 @inject ConnectorServiceFactory ConnectorServiceFactory
 @inject ILogger<Connectors> Logger
+@using Microsoft.AspNetCore.Components.Web
 
 <PageTitle>Connectors - GrayMoon</PageTitle>
 
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div>
-                <h2>Connectors</h2>
-                <p class="text-muted mb-0" style="min-height: 1.5rem;">
-                    @if (connectors?.Count > 0)
+        <div class="workspace-repos-header workspace-connectors-header">
+            <div class="workspace-repos-title-row">
+                <h2 class="workspace-repos-title">Connectors</h2>
+                <p class="text-muted mb-0 workspace-repos-subtitle workspace-connectors__subtitle">
+                    @if (connectors != null && connectors.Count > 0)
                     {
-                        @($"{connectors.Count} {(connectors.Count == 1 ? "connector" : "connectors")}")
+                        var connSuffix = HasSearchFilter ? " found" : "";
+                        var connCount = HasSearchFilter ? FilteredConnectorCount : connectors.Count;
+                        <span>@($"{connCount} {(connCount == 1 ? "connector" : "connectors")}{connSuffix}")</span>
                     }
-                    &nbsp;
+                    else if (connectors != null)
+                    {
+                        <span>0 connectors</span>
+                    }
+                    else
+                    {
+                        <span>&nbsp;</span>
+                    }
                 </p>
+                <span class="workspace-repos-title-spacer"></span>
             </div>
-            <div class="d-flex align-items-center gap-2">
+            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
+                <div class="workspace-repos-search-wrapper">
+                    <div class="workspace-repos-search-input-wrap @(HasSearchFilter ? "has-filter" : null)">
+                        <input id="connectors-search"
+                               class="form-control workspace-repos-search"
+                               placeholder="Search name, URL, user, or type..."
+                               value="@searchTerm"
+                               disabled="@(connectors == null || connectors.Count == 0)"
+                               @oninput="OnSearchChanged"
+                               @onkeydown="OnSearchKeyDown" />
+                        @if (HasSearchFilter)
+                        {
+                            <button type="button"
+                                    class="workspace-repos-search-clear"
+                                    title="Clear filter"
+                                    aria-label="Clear search filter"
+                                    @onclick="ClearSearchFilter"
+                                    @onclick:stopPropagation="true">
+                                <i class="bi bi-x-circle" aria-hidden="true"></i>
+                            </button>
+                        }
+                    </div>
+                </div>
                 <button class="btn btn-outline-primary"
                         @onclick="TestAllConnectorsAsync"
                         disabled="@(connectors == null || connectors.Count == 0 || isTestingAll)">
@@ -78,9 +111,17 @@
                                     </td>
                                 </tr>
                             }
+                            else if (NoConnectorsMatchSearch)
+                            {
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted py-4">
+                                        No connectors match your search.
+                                    </td>
+                                </tr>
+                            }
                             else
                             {
-                                @foreach (var connector in connectors)
+                                @foreach (var connector in FilteredConnectors)
                                 {
                                     <tr>
                                         <td>
@@ -158,7 +199,59 @@
 
 @code {
     private List<Connector>? connectors;
+    private string searchTerm = string.Empty;
     private string? errorMessage;
+
+    private bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
+
+    private IReadOnlyList<Connector> FilteredConnectors => GetFilteredConnectors();
+
+    private int FilteredConnectorCount => FilteredConnectors.Count;
+
+    private bool NoConnectorsMatchSearch =>
+        connectors != null && connectors.Count > 0 && HasSearchFilter && FilteredConnectors.Count == 0;
+
+    private IReadOnlyList<Connector> GetFilteredConnectors()
+    {
+        if (connectors == null) return Array.Empty<Connector>();
+        var words = SplitSearchWords(searchTerm);
+        if (words.Count == 0) return connectors;
+        return connectors.Where(c =>
+        {
+            var typeStr = c.ConnectorType.ToString();
+            var haystack = $"{c.ConnectorName} {c.ApiBaseUrl} {c.UserName} {typeStr}";
+            return words.All(w => haystack.Contains(w, StringComparison.OrdinalIgnoreCase));
+        }).ToList();
+    }
+
+    private static List<string> SplitSearchWords(string term) =>
+        term
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(w => w.Trim())
+            .Where(w => w.Length > 0)
+            .ToList();
+
+    private void OnSearchChanged(ChangeEventArgs e)
+    {
+        searchTerm = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    private void ClearSearchFilter()
+    {
+        searchTerm = string.Empty;
+        StateHasChanged();
+    }
+
+    private void OnSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            searchTerm = string.Empty;
+            StateHasChanged();
+        }
+    }
+
     private bool showCreateModal;
     private bool showEditModal;
     private bool showDeleteModal;

@@ -6,36 +6,61 @@
 @using GrayMoon.App.Components.Shared
 @inject GitHubRepositoryService RepositoryService
 @inject ILogger<Repositories> Logger
+@using Microsoft.AspNetCore.Components.Web
 
 <PageTitle>Repositories - GrayMoon</PageTitle>
 
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
-        <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
-            <div>
-                <h2>Repositories</h2>
-                <p class="text-muted mb-0" style="min-height: 1.5rem;">
-                    @if (GetFilteredRepositories()?.Count > 0)
+        <div class="workspace-repos-header repositories-page-header">
+            <div class="workspace-repos-title-row">
+                <h2 class="workspace-repos-title">Repositories</h2>
+                <p class="text-muted mb-0 workspace-repos-subtitle repositories-page__subtitle">
+                    @if (repositories != null && repositories.Count > 0)
                     {
-                        var count = GetFilteredRepositories()?.Count ?? 0;
-                        @($"{count} {(count == 1 ? "repository" : "repositories")}")
+                        var repoSuffix = HasSearchFilter ? " found" : "";
+                        var repoCount = HasSearchFilter ? (GetFilteredRepositories()?.Count ?? 0) : repositories.Count;
+                        <span>@($"{repoCount} {(repoCount == 1 ? "repository" : "repositories")}{repoSuffix}")</span>
                     }
-                    &nbsp;
+                    else if (repositories != null)
+                    {
+                        <span>0 repositories</span>
+                    }
+                    else
+                    {
+                        <span>&nbsp;</span>
+                    }
                 </p>
+                <span class="workspace-repos-title-spacer"></span>
             </div>
-            <div class="d-flex flex-column">
-                <div class="d-flex align-items-center mb-1">
-                    <input class="form-control" placeholder="Search repositories..."
-                           @bind="searchTerm" @bind:event="oninput" />
-                    <button class="btn btn-outline-secondary ms-2"
-                            @onclick="ReloadRepositoriesAsync"
-                            disabled="@(isPersisting)">
-                        Fetch
-                    </button>
+            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
+                <div class="workspace-repos-search-wrapper">
+                    <div class="workspace-repos-search-input-wrap @(HasSearchFilter ? "has-filter" : null)">
+                        <input id="repositories-search"
+                               class="form-control workspace-repos-search"
+                               placeholder="Search name, owner, topics, or connector (all words must match)..."
+                               value="@searchTerm"
+                               disabled="@(repositories == null || repositories.Count == 0)"
+                               @oninput="OnSearchChanged"
+                               @onkeydown="OnSearchKeyDown" />
+                        @if (HasSearchFilter)
+                        {
+                            <button type="button"
+                                    class="workspace-repos-search-clear"
+                                    title="Clear filter"
+                                    aria-label="Clear search filter"
+                                    @onclick="ClearSearchFilter"
+                                    @onclick:stopPropagation="true">
+                                <i class="bi bi-x-circle" aria-hidden="true"></i>
+                            </button>
+                        }
+                    </div>
                 </div>
-                <small class="form-text text-muted mb-2">
-                    Search by repository name, owner, topics, or connector; multiple words all must match.
-                </small>
+                <button class="btn btn-outline-secondary"
+                        @onclick="ReloadRepositoriesAsync"
+                        disabled="@(isPersisting)">
+                    Fetch
+                </button>
             </div>
         </div>
         @if (errorMessage != null)
@@ -158,6 +183,30 @@
     private string? errorMessage;
     private string searchTerm = string.Empty;
     private bool isPersisting;
+
+    private bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
+
+    private void OnSearchChanged(ChangeEventArgs e)
+    {
+        searchTerm = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    private void ClearSearchFilter()
+    {
+        searchTerm = string.Empty;
+        StateHasChanged();
+    }
+
+    private void OnSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            searchTerm = string.Empty;
+            StateHasChanged();
+        }
+    }
+
     private int? fetchedRepositoryCount;
     private CancellationTokenSource? _fetchRepositoriesCts;
 
@@ -252,12 +301,7 @@
             return null;
         }
 
-        var words = searchTerm
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(w => w.Trim())
-            .Where(w => w.Length > 0)
-            .ToList();
-
+        var words = SplitSearchWords(searchTerm);
         if (words.Count == 0)
         {
             return repositories;
@@ -277,4 +321,11 @@
                 connectorName.Contains(word, StringComparison.OrdinalIgnoreCase));
         }).ToList();
     }
+
+    private static List<string> SplitSearchWords(string term) =>
+        term
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(w => w.Trim())
+            .Where(w => w.Length > 0)
+            .ToList();
 }

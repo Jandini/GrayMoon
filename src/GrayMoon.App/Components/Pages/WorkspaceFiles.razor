@@ -7,6 +7,7 @@
 @using GrayMoon.App.Services
 @using GrayMoon.App.Components.Modals
 @using GrayMoon.App.Api.Endpoints
+@using Microsoft.AspNetCore.Components.Web
 @inject WorkspaceRepository WorkspaceRepository
 @inject WorkspaceFileRepository WorkspaceFileRepository
 @inject WorkspaceFileVersionConfigRepository VersionConfigRepository
@@ -20,18 +21,50 @@
 
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div>
-                <h2>@(workspace?.Name ?? "Workspace") Files</h2>
-                <p class="text-muted mb-0" style="min-height: 1.5rem;">
-                    @if (files.Count > 0)
+        <div class="workspace-repos-header workspace-files-header">
+            <div class="workspace-repos-title-row">
+                <h2 class="workspace-repos-title">@(workspace?.Name ?? "Workspace") Files</h2>
+                <p class="text-muted mb-0 workspace-repos-subtitle workspace-files__subtitle">
+                    @if (!isLoading && files.Count > 0)
                     {
-                        @($"{files.Count} {(files.Count == 1 ? "file" : "files")}")
+                        var fileSuffix = HasSearchFilter ? " found" : "";
+                        var fileCount = HasSearchFilter ? FilteredFileCount : files.Count;
+                        <span>@($"{fileCount} {(fileCount == 1 ? "file" : "files")}{fileSuffix}")</span>
                     }
-                    &nbsp;
+                    else if (!isLoading && workspace != null)
+                    {
+                        <span>0 files</span>
+                    }
+                    else if (isLoading)
+                    {
+                        <span>&nbsp;</span>
+                    }
                 </p>
+                <span class="workspace-repos-title-spacer"></span>
             </div>
-            <div class="d-flex gap-2">
+            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
+                <div class="workspace-repos-search-wrapper">
+                    <div class="workspace-repos-search-input-wrap @(HasSearchFilter ? "has-filter" : null)">
+                        <input id="workspace-files-search"
+                               class="form-control workspace-repos-search"
+                               placeholder="Search file name, path, or repository..."
+                               value="@searchTerm"
+                               disabled="@(isLoading || files.Count == 0)"
+                               @oninput="OnSearchChanged"
+                               @onkeydown="OnSearchKeyDown" />
+                        @if (HasSearchFilter)
+                        {
+                            <button type="button"
+                                    class="workspace-repos-search-clear"
+                                    title="Clear filter"
+                                    aria-label="Clear search filter"
+                                    @onclick="ClearSearchFilter"
+                                    @onclick:stopPropagation="true">
+                                <i class="bi bi-x-circle" aria-hidden="true"></i>
+                            </button>
+                        }
+                    </div>
+                </div>
                 <button class="btn btn-outline-primary" @onclick="UpdateVersionsAsync"
                         disabled="@(fileVersionConfigs.Count == 0)" title="Update versions in all configured files">
                     Update
@@ -48,68 +81,79 @@
             </div>
         }
     </div>
-    <div class="grid-page-body">
-        <div class="card page-card mb-4">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-striped table-hover mb-0 workspaces-table resizable-columns">
-                        <thead class="table-dark">
-                            <tr>
-                                <th class="col-filename text-nowrap">File Name</th>
-                                <th class="col-filepath text-nowrap">File Path</th>
-                                <th class="col-repo text-nowrap">Repository</th>
-                                <th class="col-actions text-nowrap">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @if (isLoading)
-                            {
+    @if (errorMessage == null)
+    {
+        <div class="grid-page-body">
+            <div class="card page-card mb-4">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover mb-0 workspaces-table resizable-columns">
+                            <thead class="table-dark">
                                 <tr>
-                                    <td colspan="4" class="text-center text-muted py-4">Loading files...</td>
+                                    <th class="col-filename text-nowrap">File Name</th>
+                                    <th class="col-filepath text-nowrap">File Path</th>
+                                    <th class="col-repo text-nowrap">Repository</th>
+                                    <th class="col-actions text-nowrap">Actions</th>
                                 </tr>
-                            }
-                            else if (files.Count == 0)
-                            {
-                                <tr>
-                                    <td colspan="4" class="text-center text-muted py-4">
-                                        No files in this workspace. Use "Add Files" to search and add files from your repositories.
-                                    </td>
-                                </tr>
-                            }
-                            else
-                            {
-                                @foreach (var f in files)
+                            </thead>
+                            <tbody>
+                                @if (isLoading)
                                 {
                                     <tr>
-                                        <td class="col-filename"><strong>@f.FileName</strong></td>
-                                        <td class="col-filepath text-muted">@f.FilePath</td>
-                                        <td class="col-repo">@(f.RepositoryName ?? "-")</td>
-                                        <td class="col-actions">
-                                            <button class="btn btn-sm btn-outline-secondary me-2"
-                                                    @onclick="() => OpenViewFileModal(f)"
-                                                    title="View file contents">
-                                                View
-                                            </button>
-                                            <button class="btn btn-sm me-2 @(fileVersionConfigs.ContainsKey(f.FileId) ? "btn-info" : "btn-outline-secondary")"
-                                                    @onclick="() => OpenVersionConfigModal(f)"
-                                                    title="@(fileVersionConfigs.ContainsKey(f.FileId) ? "Edit version configuration" : "Configure versioning")">
-                                                Configure
-                                            </button>
-                                            <button class="btn btn-sm btn-outline-danger"
-                                                    @onclick="() => RemoveFileAsync(f)"
-                                                    title="Remove file">
-                                                Remove
-                                            </button>
+                                        <td colspan="4" class="text-center text-muted py-4">Loading files...</td>
+                                    </tr>
+                                }
+                                else if (files.Count == 0)
+                                {
+                                    <tr>
+                                        <td colspan="4" class="text-center text-muted py-4">
+                                            No files in this workspace. Use "Add Files" to search and add files from your repositories.
                                         </td>
                                     </tr>
                                 }
-                            }
-                        </tbody>
-                    </table>
+                                else if (NoFilesMatchSearch)
+                                {
+                                    <tr>
+                                        <td colspan="4" class="text-center text-muted py-4">
+                                            No files match your search.
+                                        </td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    @foreach (var f in FilteredFiles)
+                                    {
+                                        <tr>
+                                            <td class="col-filename"><strong>@f.FileName</strong></td>
+                                            <td class="col-filepath text-muted">@f.FilePath</td>
+                                            <td class="col-repo">@(f.RepositoryName ?? "-")</td>
+                                            <td class="col-actions">
+                                                <button class="btn btn-sm btn-outline-secondary me-2"
+                                                        @onclick="() => OpenViewFileModal(f)"
+                                                        title="View file contents">
+                                                    View
+                                                </button>
+                                                <button class="btn btn-sm me-2 @(fileVersionConfigs.ContainsKey(f.FileId) ? "btn-info" : "btn-outline-secondary")"
+                                                        @onclick="() => OpenVersionConfigModal(f)"
+                                                        title="@(fileVersionConfigs.ContainsKey(f.FileId) ? "Edit version configuration" : "Configure versioning")">
+                                                    Configure
+                                                </button>
+                                                <button class="btn btn-sm btn-outline-danger"
+                                                        @onclick="() => RemoveFileAsync(f)"
+                                                        title="Remove file">
+                                                    Remove
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
+    }
 </div>
 
 <AddFilesModal IsVisible="@showFileModal"
@@ -154,6 +198,59 @@
     private bool isUpdating;
     private string updateMessage = "";
     private CancellationTokenSource? _updateCts;
+    private string searchTerm = string.Empty;
+
+    private bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
+
+    private IReadOnlyList<WorkspaceFileDto> FilteredFiles => GetFilteredFiles();
+
+    private int FilteredFileCount => FilteredFiles.Count;
+
+    private bool NoFilesMatchSearch =>
+        !isLoading && files.Count > 0 && FilteredFiles.Count == 0;
+
+    private IReadOnlyList<WorkspaceFileDto> GetFilteredFiles()
+    {
+        var words = SplitSearchWords(searchTerm);
+        if (words.Count == 0)
+            return files;
+        return files.Where(f =>
+        {
+            var name = f.FileName ?? string.Empty;
+            var path = f.FilePath ?? string.Empty;
+            var repo = f.RepositoryName ?? string.Empty;
+            var haystack = $"{name} {path} {repo}";
+            return words.All(w => haystack.Contains(w, StringComparison.OrdinalIgnoreCase));
+        }).ToList();
+    }
+
+    private static List<string> SplitSearchWords(string term) =>
+        term
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(w => w.Trim())
+            .Where(w => w.Length > 0)
+            .ToList();
+
+    private void OnSearchChanged(ChangeEventArgs e)
+    {
+        searchTerm = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    private void ClearSearchFilter()
+    {
+        searchTerm = string.Empty;
+        StateHasChanged();
+    }
+
+    private void OnSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            searchTerm = string.Empty;
+            StateHasChanged();
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {

@@ -1,3 +1,12 @@
+/* Header: match workspace search toolbar (WorkspaceRepositories / WorkspaceActions) */
+.workspace-packages-header .workspace-repos-subtitle.workspace-packages__subtitle {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    flex: 0 0 auto;
+    min-width: 0;
+}
+
 /* Match Repositories / Workspaces: left-align all columns; use global resizable-columns padding for header spacing */
 .packages-table th,
 .packages-table td {
