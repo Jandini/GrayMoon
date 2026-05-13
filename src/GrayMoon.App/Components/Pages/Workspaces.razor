@@ -7,6 +7,7 @@
 @using GrayMoon.App.Services
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Components.Modals
+@using Microsoft.AspNetCore.Components.Web
 @inject WorkspaceRepository WorkspaceRepository
 @inject ConnectorRepository ConnectorRepository
 @inject GitHubRepositoryService RepositoryService
@@ -20,20 +21,54 @@
 
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div>
-                <h2>Workspaces</h2>
-                <p class="text-muted mb-0" style="min-height: 1.5rem;">
-                    @if (workspaces?.Count > 0)
+        <div class="workspace-repos-header workspace-workspaces-header">
+            <div class="workspace-repos-title-row">
+                <h2 class="workspace-repos-title">Workspaces</h2>
+                <p class="text-muted mb-0 workspace-repos-subtitle workspace-workspaces__subtitle">
+                    @if (workspaces != null && workspaces.Count > 0)
                     {
-                        @($"{workspaces.Count} {(workspaces.Count == 1 ? "workspace" : "workspaces")}")
+                        var wsSuffix = HasSearchFilter ? " found" : "";
+                        var wsCount = HasSearchFilter ? FilteredWorkspaceCount : workspaces.Count;
+                        <span>@($"{wsCount} {(wsCount == 1 ? "workspace" : "workspaces")}{wsSuffix}")</span>
                     }
-                    &nbsp;
+                    else if (workspaces != null)
+                    {
+                        <span>0 workspaces</span>
+                    }
+                    else
+                    {
+                        <span>&nbsp;</span>
+                    }
                 </p>
+                <span class="workspace-repos-title-spacer"></span>
             </div>
-            <button class="btn btn-primary" @onclick="ShowCreateModalAsync">
-                Add Workspace
-            </button>
+            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
+                <div class="workspace-repos-search-wrapper">
+                    <div class="workspace-repos-search-input-wrap @(HasSearchFilter ? "has-filter" : null)">
+                        <input id="workspaces-list-search"
+                               class="form-control workspace-repos-search"
+                               placeholder="Search workspace name..."
+                               value="@searchTerm"
+                               disabled="@(workspaces == null || workspaces.Count == 0)"
+                               @oninput="OnSearchChanged"
+                               @onkeydown="OnSearchKeyDown" />
+                        @if (HasSearchFilter)
+                        {
+                            <button type="button"
+                                    class="workspace-repos-search-clear"
+                                    title="Clear filter"
+                                    aria-label="Clear search filter"
+                                    @onclick="ClearSearchFilter"
+                                    @onclick:stopPropagation="true">
+                                <i class="bi bi-x-circle" aria-hidden="true"></i>
+                            </button>
+                        }
+                    </div>
+                </div>
+                <button class="btn btn-primary" @onclick="ShowCreateModalAsync">
+                    Add Workspace
+                </button>
+            </div>
         </div>
         @if (errorMessage != null)
         {
@@ -75,9 +110,17 @@
                                     </td>
                                 </tr>
                             }
+                            else if (NoWorkspacesMatchSearch)
+                            {
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted py-4">
+                                        No workspaces match your search.
+                                    </td>
+                                </tr>
+                            }
                             else
                             {
-                                @foreach (var workspace in workspaces)
+                                @foreach (var workspace in FilteredWorkspaces)
                                 {
                                     <tr>
                                         <td class="col-name">
@@ -130,7 +173,7 @@
                 </div>
             </div>
         </div>
-        </div>
+    </div>
     }
 </div>
 
@@ -199,8 +242,59 @@
 
 @code {
     private List<WorkspaceModel>? workspaces;
+    private string searchTerm = string.Empty;
     private List<GitHubRepositoryEntry>? repositories;
     private string? errorMessage;
+
+    private bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
+
+    private IReadOnlyList<WorkspaceModel> FilteredWorkspaces => GetFilteredWorkspaces();
+
+    private int FilteredWorkspaceCount => FilteredWorkspaces.Count;
+
+    private bool NoWorkspacesMatchSearch =>
+        workspaces != null && workspaces.Count > 0 && HasSearchFilter && FilteredWorkspaces.Count == 0;
+
+    private IReadOnlyList<WorkspaceModel> GetFilteredWorkspaces()
+    {
+        if (workspaces == null) return Array.Empty<WorkspaceModel>();
+        var words = SplitSearchWords(searchTerm);
+        if (words.Count == 0) return workspaces;
+        return workspaces.Where(w =>
+        {
+            var name = w.Name ?? string.Empty;
+            return words.All(word => name.Contains(word, StringComparison.OrdinalIgnoreCase));
+        }).ToList();
+    }
+
+    private static List<string> SplitSearchWords(string term) =>
+        term
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(w => w.Trim())
+            .Where(w => w.Length > 0)
+            .ToList();
+
+    private void OnSearchChanged(ChangeEventArgs e)
+    {
+        searchTerm = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    private void ClearSearchFilter()
+    {
+        searchTerm = string.Empty;
+        StateHasChanged();
+    }
+
+    private void OnSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            searchTerm = string.Empty;
+            StateHasChanged();
+        }
+    }
+
     private bool showEditorModal;
     private bool showRepositoriesModal;
     private bool showDeleteModal;

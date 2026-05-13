@@ -25,6 +25,64 @@ main {
     align-items: center;
 }
 
+/* Main column only: workspace name + trailing controls; keep sidebar .top-row rules unchanged */
+.top-row.top-row-main {
+    position: relative;
+    justify-content: flex-end;
+}
+
+/* Workspace title strip: allow clicks on the link (do not use pointer-events: none here). */
+.top-row-workspace-title {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: auto;
+    padding-inline: 0.35rem;
+}
+
+/* Same family/weight/line-height as page h2 (.h2); ~72% scale for top bar */
+.top-row-workspace-title__text {
+    pointer-events: auto;
+    display: inline-block;
+    box-sizing: border-box;
+    color: var(--text-primary);
+    margin-top: 0;
+    margin-bottom: 0;
+    font-size: calc((1.325rem + 0.9vw) * 0.72);
+    max-width: calc(100% - 5.75rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.top-row-workspace-title ::deep a.top-row-workspace-title__link {
+    margin-left: 0;
+    text-decoration: none;
+    color: var(--text-primary);
+    cursor: pointer;
+    position: relative;
+    z-index: 1;
+    font-size: calc((1.325rem + 0.9vw) * 0.72);
+}
+
+/* Override generic .top-row ::deep a:hover (blue + underline); workspace title: white, no underline, pointer only */
+.top-row.top-row-main .top-row-workspace-title ::deep a.top-row-workspace-title__link:hover,
+.top-row.top-row-main .top-row-workspace-title ::deep a.top-row-workspace-title__link:focus-visible {
+    color: #fff;
+    text-decoration: none;
+}
+
+.top-row-main-trailing {
+    position: relative;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
     .top-row ::deep a, .top-row ::deep .btn-link {
         white-space: nowrap;
         margin-left: 1.5rem;
@@ -32,14 +90,19 @@ main {
         color: var(--text-primary);
     }
 
+    .top-row-main-trailing ::deep a,
+    .top-row-main-trailing ::deep .btn-link {
+        margin-left: 0;
+    }
+
     .top-row ::deep a:hover, .top-row ::deep .btn-link:hover {
         text-decoration: underline;
         color: var(--accent-blue);
     }
 
-    .top-row ::deep a:first-child {
-        overflow: hidden;
-        text-overflow: ellipsis;
+    .top-row-main-trailing ::deep a:first-of-type {
+        overflow: visible;
+        text-overflow: clip;
     }
 
 .header-version {
@@ -77,12 +140,27 @@ main {
         overflow: hidden;
     }
 
+    /* Main-only: keep a slim header so workspace title + agent stay visible */
+    main .top-row.top-row-main {
+        height: 2.75rem;
+        min-height: 2.75rem;
+        overflow: visible;
+        border-bottom: 1px solid var(--border-color);
+        background-color: var(--bg-tertiary);
+        justify-content: flex-end;
+        align-items: center;
+    }
+
     .header-version {
         display: none;
     }
 
     .top-row ::deep a, .top-row ::deep .btn-link {
         margin-left: 0;
+    }
+
+    main .top-row-main-trailing {
+        z-index: 3;
     }
 }
 
@@ -111,6 +189,34 @@ main {
         z-index: 1;
     }
 
+    /* Full-width strip for layout; must receive hits so the NavLink is clickable (pointer-events: none breaks this). */
+    main .top-row-workspace-title {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: auto;
+        padding-inline: 0;
+        z-index: 94;
+        box-sizing: border-box;
+    }
+
+    /* Centered at 50vw: width bounded by sidebar (180px) on the left and header trailing cluster on the right */
+    main .top-row-workspace-title__text,
+    main .top-row-workspace-title ::deep a.top-row-workspace-title__link {
+        max-width: min(38rem, calc(100vw - 360px - 1.5rem), calc(100vw - 24rem));
+        font-size: calc((1.325rem + 0.9vw) * 0.72);
+        pointer-events: auto;
+    }
+
+    main .top-row-main-trailing {
+        z-index: 95;
+    }
+
     .top-row.auth ::deep a:first-child {
         flex: 1;
         text-align: right;
@@ -126,6 +232,13 @@ main {
         padding-top: 2rem !important;
     }
 
+}
+
+@media (min-width: 1200px) {
+    main .top-row-workspace-title__text,
+    main .top-row-workspace-title ::deep a.top-row-workspace-title__link {
+        font-size: 1.44rem;
+    }
 }
 
 #blazor-error-ui {

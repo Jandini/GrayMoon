@@ -12,13 +12,13 @@
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 @implements IAsyncDisposable
 
-<PageTitle>@(workspace?.Name ?? "workspace") - Dependency Graph</PageTitle>
+<PageTitle>Dependencies - GrayMoon</PageTitle>
 
 <div class="container-fluid page-container grid-page dependencies-page">
     <div class="grid-page-header">
         <div class="workspace-repos-header workspace-dependencies-header">
             <div class="workspace-repos-title-row">
-                <h2 class="workspace-repos-title">@(workspace?.Name ?? "workspace") Dependency Graph</h2>
+                <h2 class="workspace-repos-title">Dependencies</h2>
                 <p class="text-muted mb-0 workspace-repos-subtitle workspace-dependencies__subtitle">
                     @if (!isLoading && graph != null && graph.Nodes.Count > 0)
                     {

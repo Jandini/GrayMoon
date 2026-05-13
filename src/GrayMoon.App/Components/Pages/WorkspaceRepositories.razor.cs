@@ -54,8 +54,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             .GroupBy(wr => wr.DependencyLevel)
             .OrderByDescending(g => g.Key ?? int.MinValue);
     private bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
-    private string PageTitleText => workspace?.Name ?? "Workspace";
-    private string RepositoriesModalTitle => $"Repositories for {PageTitleText}";
+    private string RepositoriesModalTitle => $"Repositories for {workspace?.Name ?? "Workspace"}";
     private bool ShowRepositoriesFetchOverlay => _repositoriesModal.IsVisible && _repositoriesModal.IsFetching;
     private string RepositoriesFetchOverlayMessage => _repositoriesModal.FetchedRepositoryCount is null || _repositoriesModal.FetchedRepositoryCount == 0
         ? "Fetching repositories..."
