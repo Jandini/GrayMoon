@@ -6,6 +6,8 @@ public sealed class RefreshRepositoriesResult
     public IReadOnlyList<GitHubRepositoryEntry> Repositories { get; init; } = [];
     public IReadOnlyList<ConnectorFetchError> ConnectorErrors { get; init; } = [];
     public IReadOnlyList<RenamedRepositoryInfo> RenamedRepositories { get; init; } = [];
+    /// <summary>Maps old (deleted) RepositoryId to the surviving canonical RepositoryId for any repository that was merged during rename reconciliation. Empty when no merges occurred.</summary>
+    public IReadOnlyDictionary<int, int> MergedRepositoryIdMap { get; init; } = new Dictionary<int, int>();
 }
 
 /// <summary>Error for a single connector when fetching its repositories.</summary>

@@ -61,6 +61,8 @@ public class GitHubRepositoryService(
                     RepositoryName = repo.Name,
                     Visibility = repo.Private ? "Private" : "Public",
                     CloneUrl = (repo.CloneUrl ?? string.Empty).Trim(),
+                    GitHubRepositoryId = repo.Id,
+                    NodeId = string.IsNullOrWhiteSpace(repo.NodeId) ? null : repo.NodeId,
                     Topics = repo.Topics != null && repo.Topics.Count > 0
                         ? string.Join(",", repo.Topics.Where(t => !string.IsNullOrWhiteSpace(t)))
                         : null
@@ -87,9 +89,12 @@ public class GitHubRepositoryService(
         }
 
         IReadOnlyList<RenamedRepositoryInfo> renamedRepositories = [];
+        IReadOnlyDictionary<int, int> mergedIdMap = new Dictionary<int, int>();
         if (allFetched.Count > 0)
         {
-            renamedRepositories = await repositoryRepository.MergeRepositoriesAsync(allFetched);
+            var mergeResult = await repositoryRepository.MergeRepositoriesAsync(allFetched);
+            renamedRepositories = mergeResult.Renames;
+            mergedIdMap = mergeResult.MergedRepositoryIdMap;
         }
 
         var repositoriesList = await repositoryRepository.GetAllEntriesAsync();
@@ -97,7 +102,8 @@ public class GitHubRepositoryService(
         {
             Repositories = repositoriesList,
             ConnectorErrors = connectorErrors,
-            RenamedRepositories = renamedRepositories
+            RenamedRepositories = renamedRepositories,
+            MergedRepositoryIdMap = mergedIdMap
         };
     }
 }

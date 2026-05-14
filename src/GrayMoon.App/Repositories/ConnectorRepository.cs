@@ -57,6 +57,12 @@ public class ConnectorRepository(AppDbContext dbContext, ILogger<ConnectorReposi
 
     public async Task<Connector> UpdateAsync(Connector connector)
     {
+        // Detach any stale Repository entities from prior operations so connector update is never blocked.
+        foreach (var entry in dbContext.ChangeTracker.Entries<Repository>().ToList())
+            entry.State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+        foreach (var entry in dbContext.ChangeTracker.Entries<WorkspaceRepositoryLink>().ToList())
+            entry.State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+
         var existing = await dbContext.Connectors
             .FirstOrDefaultAsync(item => item.ConnectorId == connector.ConnectorId);
 
@@ -86,6 +92,13 @@ public class ConnectorRepository(AppDbContext dbContext, ILogger<ConnectorReposi
 
     public async Task DeleteAsync(int connectorId)
     {
+        // Detach any stale Repository/WorkspaceRepositoryLink entities that may have been dirtied by a
+        // failed MergeRepositoriesAsync in this circuit-scope DbContext so token removal is never blocked.
+        foreach (var entry in dbContext.ChangeTracker.Entries<Repository>().ToList())
+            entry.State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+        foreach (var entry in dbContext.ChangeTracker.Entries<WorkspaceRepositoryLink>().ToList())
+            entry.State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+
         var connector = await dbContext.Connectors
             .FirstOrDefaultAsync(item => item.ConnectorId == connectorId);
 

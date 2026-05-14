@@ -62,8 +62,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<Repository>(entity =>
         {
             entity.ToTable("Repositories");
+            // Non-unique index for name lookups — renames must not be blocked by a unique constraint.
             entity.HasIndex(repository => new { repository.ConnectorId, repository.RepositoryName, repository.OrgName })
-                .IsUnique();
+                .IsUnique(false)
+                .HasDatabaseName("IX_Repositories_ConnectorId_Name_Org");
+
+            // Unique stable-identity index (filtered: only rows that have a provider ID).
+            entity.HasIndex(repository => new { repository.ConnectorId, repository.GitHubRepositoryId })
+                .IsUnique()
+                .HasFilter("\"GitHubRepositoryId\" > 0")
+                .HasDatabaseName("IX_Repositories_ConnectorId_GitHubRepositoryId");
+
+            entity.HasIndex(repository => repository.CloneUrl)
+                .HasDatabaseName("IX_Repositories_CloneUrl");
 
             entity.Property(repository => repository.RepositoryName)
                 .IsRequired()
@@ -79,6 +90,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.Property(repository => repository.CloneUrl)
                 .IsRequired()
                 .HasMaxLength(500);
+
+            entity.Property(repository => repository.GitHubRepositoryId)
+                .HasDefaultValue(0L);
+
+            entity.Property(repository => repository.NodeId)
+                .HasMaxLength(100);
 
             entity.Property(repository => repository.Topics)
                 .HasMaxLength(2000);
