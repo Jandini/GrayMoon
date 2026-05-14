@@ -34,6 +34,7 @@ public static class Migrations
         await MigrateWorkspaceRepositoryActionsAsync(dbContext);
         await MigrateWorkspaceRepositoryActionsWorkflowsJsonAsync(dbContext);
         await MigrateWorkspaceRepositoriesRepositoryTypeAsync(dbContext);
+        await MigrateRepositoryProviderIdAsync(dbContext);
     }
 
     public static async Task MigrateRepositoriesTopicsAsync(AppDbContext dbContext)
@@ -913,6 +914,76 @@ public static class Migrations
                 if (!hasColumn)
                 {
                     cmd.CommandText = "ALTER TABLE WorkspaceRepositoryPullRequests ADD COLUMN ChangedFiles INTEGER";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>
+    /// Adds GitHubRepositoryId (stable provider numeric ID) and NodeId (stable provider node ID) columns to
+    /// Repositories, drops the old unique name/org index (which blocks renames), and creates the new
+    /// filtered unique index on (ConnectorId, GitHubRepositoryId) for rows that have a provider ID.
+    /// Idempotent.
+    /// </summary>
+    public static async Task MigrateRepositoryProviderIdAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='Repositories'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                    return;
+
+                // Add GitHubRepositoryId column
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Repositories') WHERE name='GitHubRepositoryId'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "ALTER TABLE Repositories ADD COLUMN GitHubRepositoryId INTEGER NOT NULL DEFAULT 0";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                // Add NodeId column
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Repositories') WHERE name='NodeId'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "ALTER TABLE Repositories ADD COLUMN NodeId TEXT";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                // Drop the old unique name/org index that blocks renames — make it non-unique
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='IX_Repositories_ConnectorId_RepositoryName_OrgName'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0)
+                {
+                    cmd.CommandText = "DROP INDEX IX_Repositories_ConnectorId_RepositoryName_OrgName";
+                    await cmd.ExecuteNonQueryAsync();
+                    // Re-create as non-unique
+                    cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_Repositories_ConnectorId_Name_Org ON Repositories(ConnectorId, RepositoryName, OrgName)";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                // Create the stable-identity unique filtered index
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='IX_Repositories_ConnectorId_GitHubRepositoryId'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "CREATE UNIQUE INDEX IX_Repositories_ConnectorId_GitHubRepositoryId ON Repositories(ConnectorId, GitHubRepositoryId) WHERE GitHubRepositoryId > 0";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                // Create CloneUrl index for fast URL lookups
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='IX_Repositories_CloneUrl'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "CREATE INDEX IX_Repositories_CloneUrl ON Repositories(CloneUrl)";
                     await cmd.ExecuteNonQueryAsync();
                 }
             }

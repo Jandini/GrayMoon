@@ -673,6 +673,9 @@
             var result = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
             repositories = result.Repositories.ToList();
             repositoriesModalRenameWarnings = result.RenamedRepositories.Count > 0 ? result.RenamedRepositories : null;
+            // Translate any stale selectedRepositoryIds (caused by rename-merge) to canonical IDs.
+            if (result.MergedRepositoryIdMap.Count > 0)
+                TranslateStaleRepositoryIds(result.MergedRepositoryIdMap);
             PruneInvalidSelectedRepositoryIds();
         }
         catch (OperationCanceledException)
@@ -706,6 +709,19 @@
         var before = selectedRepositoryIds.Count;
         selectedRepositoryIds.RemoveWhere(repositoryId => !validRepositoryIds.Contains(repositoryId));
         return before - selectedRepositoryIds.Count;
+    }
+
+    private void TranslateStaleRepositoryIds(IReadOnlyDictionary<int, int> mergedIdMap)
+    {
+        var staleIds = selectedRepositoryIds.Where(id => mergedIdMap.ContainsKey(id)).ToList();
+        foreach (var staleId in staleIds)
+        {
+            selectedRepositoryIds.Remove(staleId);
+            selectedRepositoryIds.Add(mergedIdMap[staleId]);
+            Logger.LogInformation(
+                "Translated stale repository ID {StaleId} → canonical ID {CanonicalId} after rename merge.",
+                staleId, mergedIdMap[staleId]);
+        }
     }
 
     private async Task ToggleDefaultAsync(int workspaceId, string workspaceName)

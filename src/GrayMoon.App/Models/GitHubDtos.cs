@@ -19,6 +19,12 @@ public class GitHubRepositoryOwnerDto
 
 public class GitHubRepositoryDto
 {
+    [JsonPropertyName("id")]
+    public long Id { get; set; }
+
+    [JsonPropertyName("node_id")]
+    public string NodeId { get; set; } = string.Empty;
+
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
 
