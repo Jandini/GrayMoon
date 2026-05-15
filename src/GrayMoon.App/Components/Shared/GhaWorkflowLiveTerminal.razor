@@ -1,5 +1,6 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
+@using GrayMoon.App.Services
 @inject GitHubService GitHubService
 @inject ConnectorRepository ConnectorRepository
 @inject LoadingOverlayUiSettingsService OverlayUiSettings
@@ -178,7 +179,10 @@
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             Logger.LogDebug(ex, "GHA live feed poll failed for run {RunId}", RunId);
-            AppendUnique($"Update failed: {ex.Message}");
+            var failureText = ex is HttpRequestException httpEx
+                ? GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(httpEx)
+                : ex.Message;
+            AppendUnique($"Update failed: {failureText}");
             return PollIntervalWaitingJobsMs;
         }
     }

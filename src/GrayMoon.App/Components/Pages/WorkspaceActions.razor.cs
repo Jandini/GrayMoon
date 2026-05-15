@@ -1102,26 +1102,7 @@ public sealed partial class WorkspaceActions : IDisposable
     private static string GetFriendlyErrorMessage(Exception ex) =>
         ex switch
         {
-            HttpRequestException { StatusCode: HttpStatusCode.Unauthorized } =>
-                "Unauthorized (401). Check the connector token on the Connectors page.",
-            HttpRequestException { StatusCode: HttpStatusCode.Forbidden } =>
-                "Forbidden (403). The token does not have permission to access GitHub Actions.",
-            HttpRequestException { StatusCode: HttpStatusCode.NotFound } =>
-                "Not found (404). The repository or workflow was not found.",
-            HttpRequestException { StatusCode: HttpStatusCode.Conflict } =>
-                "Conflict (409). The workflow run may already be finished.",
-            HttpRequestException { StatusCode: HttpStatusCode.UnprocessableEntity } http422 =>
-                string.IsNullOrWhiteSpace(http422.Message)
-                    ? "GitHub rejected the workflow request (422). It may not support manual runs on this branch, or required workflow inputs are missing."
-                    : http422.Message,
-            HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } =>
-                "Rate limited (429). Too many requests to GitHub. Try again later.",
-            HttpRequestException { StatusCode: HttpStatusCode.ServiceUnavailable } =>
-                "GitHub service unavailable (503). Try again later.",
-            HttpRequestException httpEx =>
-                string.IsNullOrWhiteSpace(httpEx.Message)
-                    ? "GitHub API request failed."
-                    : httpEx.Message,
+            HttpRequestException httpEx => GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(httpEx),
             OperationCanceledException =>
                 "The operation was cancelled (for example, refresh was interrupted). Try Run again or use Refresh.",
             _ => ex.Message
