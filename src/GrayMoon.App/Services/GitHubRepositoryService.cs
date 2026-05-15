@@ -60,6 +60,7 @@ public class GitHubRepositoryService(
                     OrgName = repo.Owner?.Login,
                     RepositoryName = repo.Name,
                     Visibility = repo.Private ? "Private" : "Public",
+                    Archived = repo.Archived,
                     CloneUrl = (repo.CloneUrl ?? string.Empty).Trim(),
                     GitHubRepositoryId = repo.Id,
                     NodeId = string.IsNullOrWhiteSpace(repo.NodeId) ? null : repo.NodeId,

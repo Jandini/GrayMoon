@@ -87,6 +87,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .IsRequired()
                 .HasMaxLength(20);
 
+            entity.Property(repository => repository.Archived)
+                .HasDefaultValue(false);
+
             entity.Property(repository => repository.CloneUrl)
                 .IsRequired()
                 .HasMaxLength(500);

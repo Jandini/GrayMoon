@@ -22,6 +22,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
                 OrgName = repository.OrgName,
                 RepositoryName = repository.RepositoryName,
                 Visibility = repository.Visibility,
+                Archived = repository.Archived,
                 CloneUrl = repository.CloneUrl,
                 Topics = repository.Topics
             })
@@ -59,6 +60,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
                 OrgName = repository.OrgName,
                 RepositoryName = repository.RepositoryName,
                 Visibility = repository.Visibility,
+                Archived = repository.Archived,
                 CloneUrl = repository.CloneUrl,
                 Topics = repository.Topics
             })
@@ -139,6 +141,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
             if (nameChanged || urlChanged
                 || !string.Equals(match.OrgName, incoming.OrgName, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(match.Visibility, incoming.Visibility, StringComparison.OrdinalIgnoreCase)
+                || match.Archived != incoming.Archived
                 || !string.Equals(match.Topics ?? string.Empty, incoming.Topics ?? string.Empty, StringComparison.Ordinal)
                 || !string.Equals(match.NodeId, incoming.NodeId, StringComparison.Ordinal))
             {
@@ -162,6 +165,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
                         .SetProperty(r => r.CloneUrl, incoming.CloneUrl)
                         .SetProperty(r => r.OrgName, incoming.OrgName)
                         .SetProperty(r => r.Visibility, incoming.Visibility)
+                    .SetProperty(r => r.Archived, incoming.Archived)
                         .SetProperty(r => r.Topics, incoming.Topics)
                         .SetProperty(r => r.NodeId, incoming.NodeId));
                 updateCount++;
@@ -194,6 +198,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
                     .SetProperty(r => r.RepositoryName, incoming.RepositoryName)
                     .SetProperty(r => r.OrgName, incoming.OrgName)
                     .SetProperty(r => r.Visibility, incoming.Visibility)
+                    .SetProperty(r => r.Archived, incoming.Archived)
                     .SetProperty(r => r.Topics, incoming.Topics)
                     .SetProperty(r => r.GitHubRepositoryId, incoming.GitHubRepositoryId)
                     .SetProperty(r => r.NodeId, incoming.NodeId));
@@ -247,6 +252,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
                     .SetProperty(r => r.CloneUrl, incoming.CloneUrl)
                     .SetProperty(r => r.OrgName, incoming.OrgName)
                     .SetProperty(r => r.Visibility, incoming.Visibility)
+                    .SetProperty(r => r.Archived, incoming.Archived)
                     .SetProperty(r => r.Topics, incoming.Topics)
                     .SetProperty(r => r.GitHubRepositoryId, incoming.GitHubRepositoryId)
                     .SetProperty(r => r.NodeId, incoming.NodeId));

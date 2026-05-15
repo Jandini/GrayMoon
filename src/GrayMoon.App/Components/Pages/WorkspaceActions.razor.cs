@@ -309,6 +309,7 @@ public sealed partial class WorkspaceActions : IDisposable
                             OrgName = link.Repository.OrgName,
                             RepositoryName = link.Repository.RepositoryName,
                             Visibility = link.Repository.Visibility,
+                                Archived = link.Repository.Archived,
                             CloneUrl = link.Repository.CloneUrl
                         },
                         WorkflowLines = workflowLines,

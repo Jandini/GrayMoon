@@ -7,6 +7,7 @@ public class GitHubRepositoryEntry
     public string? OrgName { get; set; }
     public string RepositoryName { get; set; } = string.Empty;
     public string Visibility { get; set; } = "Public";
+    public bool Archived { get; set; }
     public string CloneUrl { get; set; } = string.Empty;
     public string? Topics { get; set; }
 }

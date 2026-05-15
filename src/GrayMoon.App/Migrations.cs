@@ -9,6 +9,7 @@ public static class Migrations
     public static async Task RunAllAsync(AppDbContext dbContext)
     {
         await MigrateRepositoriesTopicsAsync(dbContext);
+        await MigrateRepositoriesArchivedAsync(dbContext);
         await MigrateWorkspaceSyncMetadataAsync(dbContext);
         await MigrateConnectorUserNameAsync(dbContext);
         await MigrateConnectorTypeAndTokenAsync(dbContext);
@@ -52,6 +53,32 @@ public static class Migrations
                 if (count == 0)
                 {
                     cmd.CommandText = "ALTER TABLE Repositories ADD COLUMN Topics TEXT";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds Archived column to Repositories for marking GitHub archived repositories.</summary>
+    public static async Task MigrateRepositoriesArchivedAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Repositories') WHERE name='Archived'";
+                var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+                if (count == 0)
+                {
+                    cmd.CommandText = "ALTER TABLE Repositories ADD COLUMN Archived INTEGER NOT NULL DEFAULT 0";
                     await cmd.ExecuteNonQueryAsync();
                 }
             }
