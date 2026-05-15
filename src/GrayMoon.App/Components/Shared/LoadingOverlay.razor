@@ -45,6 +45,14 @@
         }
     </div>
     <div class="loading-overlay-content">
+        @{
+            var hasMessage = !string.IsNullOrEmpty(Message);
+            var parsed = hasMessage ? ParseOverlayMessage(Message!) : default;
+        }
+        @if (hasMessage && !string.IsNullOrEmpty(parsed.LevelCaption))
+        {
+            <p class="loading-overlay-level">@parsed.LevelCaption</p>
+        }
         <div class="loading-overlay-spinner-wrap">
             <div class="spinner-border" role="status">
                 <span class="visually-hidden">Loading...</span>
@@ -54,14 +62,11 @@
                 <span class="loading-overlay-spinner-count" aria-hidden="true">@DisplayTaskCount</span>
             }
         </div>
-        @if (!string.IsNullOrEmpty(Message))
+        @if (hasMessage)
         {
-            var idx = Message.IndexOf('\n');
-            var countdown = idx >= 0 ? Message[(idx + 1)..].Trim() : null;
-            var messageText = idx >= 0 ? Message[..idx].Trim() : Message;
-            @if (!string.IsNullOrEmpty(countdown))
+            @if (!string.IsNullOrEmpty(parsed.CountdownBody))
             {
-                @foreach (var countdownLine in countdown.Split('\n'))
+                @foreach (var countdownLine in parsed.CountdownBody.Split('\n'))
                 {
                     if (!string.IsNullOrWhiteSpace(countdownLine))
                     {
@@ -69,7 +74,7 @@
                     }
                 }
             }
-            <p class="loading-overlay-message">@messageText</p>
+            <p class="loading-overlay-message">@parsed.Primary</p>
         }
         @if (OnAbort.HasDelegate)
         {
@@ -208,6 +213,44 @@
                 // circuit / JS unavailable
             }
         }
+    }
+
+    private readonly record struct OverlayMessageParts(string Primary, string? LevelCaption, string? CountdownBody);
+
+    private static OverlayMessageParts ParseOverlayMessage(string message)
+    {
+        var idx = message.IndexOf('\n');
+        if (idx < 0)
+            return new OverlayMessageParts(message.Trim(), null, null);
+
+        var primary = message[..idx].Trim();
+        var remainder = message[(idx + 1)..];
+        string? level = null;
+        var otherLines = new List<string>();
+        foreach (var raw in remainder.Split('\n'))
+        {
+            var t = raw.Trim();
+            if (string.IsNullOrWhiteSpace(t))
+                continue;
+            if (IsDependencyLevelCaption(t))
+                level = t;
+            else
+                otherLines.Add(t);
+        }
+
+        var countdown = otherLines.Count > 0 ? string.Join("\n", otherLines) : null;
+        return new OverlayMessageParts(primary, level, countdown);
+    }
+
+    /// <summary>Matches lines like "Level 2" from dependency-level progress (update, push, etc.).</summary>
+    private static bool IsDependencyLevelCaption(string trimmedLine)
+    {
+        ReadOnlySpan<char> s = trimmedLine.AsSpan().Trim();
+        const string prefix = "Level ";
+        if (!s.StartsWith(prefix, StringComparison.Ordinal))
+            return false;
+        s = s[prefix.Length..].Trim();
+        return !s.IsEmpty && int.TryParse(s, out _);
     }
 
     private static string KindCss(AgentCommandStreamKind kind) => kind switch
