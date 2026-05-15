@@ -8,7 +8,7 @@ namespace GrayMoon.Agent.Services;
 
 public sealed class CsProjFileParser : ICsProjFileParser
 {
-    // Matches a complete PackageReference element — self-closing (<PackageReference ... />) or with child
+    // Matches a complete PackageReference element - self-closing (<PackageReference ... />) or with child
     // elements (<PackageReference ...>...</PackageReference>). Singleline so . spans newlines, which lets
     // a single match cover attributes spread across multiple lines.
     private static readonly Regex PackageReferenceElementRegex = new(

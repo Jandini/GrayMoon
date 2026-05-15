@@ -62,7 +62,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<Repository>(entity =>
         {
             entity.ToTable("Repositories");
-            // Non-unique index for name lookups — renames must not be blocked by a unique constraint.
+            // Non-unique index for name lookups - renames must not be blocked by a unique constraint.
             entity.HasIndex(repository => new { repository.ConnectorId, repository.RepositoryName, repository.OrgName })
                 .IsUnique(false)
                 .HasDatabaseName("IX_Repositories_ConnectorId_Name_Org");

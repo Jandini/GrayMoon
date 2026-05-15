@@ -1,4 +1,4 @@
-/* Local font files (no internet required) – latin subset only */
+/* Local font files (no internet required) - latin subset only */
 @font-face {
   font-family: 'Cinzel';
   font-style: normal;
@@ -243,7 +243,7 @@ a.workspaces-breadcrumb-link:hover {
     box-shadow: 0 0 0 1px var(--focus-ring-outer);
 }
 
-/* Text inputs / selects: border-only focus like workspace repository search — no glow */
+/* Text inputs / selects: border-only focus like workspace repository search - no glow */
 .form-control:focus,
 .form-select:focus,
 .form-check-input:focus {
@@ -251,7 +251,7 @@ a.workspaces-breadcrumb-link:hover {
     box-shadow: none !important;
 }
 
-/* Plain links (not Bootstrap .btn) — thin frame to match buttons */
+/* Plain links (not Bootstrap .btn) - thin frame to match buttons */
 a:focus-visible:not(.btn) {
     outline: none;
     box-shadow: 0 0 0 1px var(--focus-ring-outer);
@@ -270,7 +270,7 @@ h1:focus {
     outline: none;
 }
 
-/* Form Controls – dark gray frame (global; !important so Bootstrap cannot override) */
+/* Form Controls - dark gray frame (global; !important so Bootstrap cannot override) */
 .form-control,
 .form-select,
 .new-branch-based-on-trigger,
@@ -1024,7 +1024,7 @@ table.resizable-columns th:hover .resize-handle::after {
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
-/* PR column badges – white text except create (black on yellow) */
+/* PR column badges - white text except create (black on yellow) */
 .repositories-table td.col-pr .pr-badge {
     font-weight: 400;
 }
@@ -1069,7 +1069,7 @@ table.resizable-columns th:hover .resize-handle::after {
     margin-left: 0.25rem;
 }
 
-/* Actions page run/re-run button – fixed size so spinner swap never causes resize */
+/* Actions page run/re-run button - fixed size so spinner swap never causes resize */
 .action-run-btn {
     display: inline-flex;
     align-items: center;
@@ -1080,7 +1080,7 @@ table.resizable-columns th:hover .resize-handle::after {
     white-space: nowrap;
 }
 
-/* Action status column badges – same color palette as PR badges */
+/* Action status column badges - same color palette as PR badges */
 .action-badge {
     font-weight: 400;
     text-decoration: none;
@@ -1136,7 +1136,7 @@ table.resizable-columns th:hover .resize-handle::after {
     text-decoration: none;
 }
 
-/* GitHub level-header dropdown — appended to <body>, position: fixed escapes table overflow */
+/* GitHub level-header dropdown - appended to <body>, position: fixed escapes table overflow */
 .gm-gh-dropdown {
     position: fixed;
     background: #1e1e1e;

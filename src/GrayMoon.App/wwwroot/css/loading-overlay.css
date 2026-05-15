@@ -36,7 +36,7 @@
 }
 
 /*
- * Opaque + Matrix: do not set veil dim to 1 — that paints solid black over the canvas and hides the rain.
+ * Opaque + Matrix: do not set veil dim to 1 - that paints solid black over the canvas and hides the rain.
  * Black fills the overlay behind the canvas so transparent canvas pixels do not reveal the app; veil keeps
  * using --overlay-dim from matrixOverlay.setDim (e.g. 0.45) so the effect stays visible.
  */
@@ -117,19 +117,19 @@
   padding: 0.06rem 0;
 }
 
-/* Stream/repo label — neutral gray in both themes (not tinted green or yellow) */
+/* Stream/repo label - neutral gray in both themes (not tinted green or yellow) */
 .loading-overlay-terminal__prefix {
   color: rgba(148, 152, 158, 0.62);
   font-weight: 400;
   margin-right: 0.35rem;
 }
 
-/* Command echo — muted light gray (darker than centered overlay message text) */
+/* Command echo - muted light gray (darker than centered overlay message text) */
 .loading-overlay-terminal__line--cmd .loading-overlay-terminal__text {
   color: rgba(168, 182, 176, 0.92);
 }
 
-/* Stdout — green theme */
+/* Stdout - green theme */
 .loading-overlay-terminal__line--out .loading-overlay-terminal__text {
   color: rgba(120, 210, 150, 0.78);
 }
@@ -144,7 +144,7 @@
 }
 
 /*
- * Yellow scheme: same structure as green — gray [label], whiteish commands, stdout yellow instead of green.
+ * Yellow scheme: same structure as green - gray [label], whiteish commands, stdout yellow instead of green.
  * Prefix stays base gray; stderr unchanged.
  */
 .loading-overlay-terminal--scheme-yellow .loading-overlay-terminal__line--cmd .loading-overlay-terminal__text {
@@ -157,7 +157,7 @@
 
 /*
  * Workspace Actions: embedded GHA live terminal (GhaWorkflowLiveTerminal).
- * Global selectors — Blazor scoped CSS from the component bundle does not reliably override these rules.
+ * Global selectors - Blazor scoped CSS from the component bundle does not reliably override these rules.
  */
 .actions-gha-terminal .actions-gha-terminal__caption-text,
 .actions-gha-terminal .actions-gha-terminal__caption-steps {
@@ -190,7 +190,7 @@
   color: rgba(220, 190, 72, 0.9) !important;
 }
 
-/* Brand at top-left of overlay – same position and font as sidebar header; above full-height terminal */
+/* Brand at top-left of overlay - same position and font as sidebar header; above full-height terminal */
 .loading-overlay__brand {
   position: absolute;
   top: 0;
@@ -234,7 +234,7 @@
   filter: drop-shadow(0 0 1px #000) drop-shadow(0 0 4px rgba(0, 0, 0, 0.75));
 }
 
-/* Content (spinner, message, abort) above canvas and veil – no panel, transparent */
+/* Content (spinner, message, abort) above canvas and veil - no panel, transparent */
 .loading-overlay-content {
   position: absolute;
   left: 50%;
@@ -290,7 +290,7 @@
   margin: 0;
 }
 
-/* Live command log toggle — beside GrayMoon in brand row; bright = hidden, dark = log visible */
+/* Live command log toggle - beside GrayMoon in brand row; bright = hidden, dark = log visible */
 .loading-overlay__terminal-toggle {
   position: relative;
   display: inline-flex;

@@ -1,6 +1,6 @@
 namespace GrayMoon.App.Models;
 
-/// <summary>CI action status loaded from persistence for one workspace–repository link (multiple workflows).</summary>
+/// <summary>CI action status loaded from persistence for one workspace-repository link (multiple workflows).</summary>
 public sealed class RepositoryActionsPersistedState
 {
     public string? BranchName { get; init; }

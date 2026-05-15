@@ -798,7 +798,7 @@ public static class Migrations
         }
     }
 
-    /// <summary>Creates WorkspaceRepositoryActions table for persisted CI action status per workspace–repository link.</summary>
+    /// <summary>Creates WorkspaceRepositoryActions table for persisted CI action status per workspace-repository link.</summary>
     public static async Task MigrateWorkspaceRepositoryActionsAsync(AppDbContext dbContext)
     {
         try
@@ -960,7 +960,7 @@ public static class Migrations
                     await cmd.ExecuteNonQueryAsync();
                 }
 
-                // Drop the old unique name/org index that blocks renames — make it non-unique
+                // Drop the old unique name/org index that blocks renames - make it non-unique
                 cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='IX_Repositories_ConnectorId_RepositoryName_OrgName'";
                 if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0)
                 {

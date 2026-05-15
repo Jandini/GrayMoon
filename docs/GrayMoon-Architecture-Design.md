@@ -1,4 +1,4 @@
-# GrayMoon — Architecture & Design Reference
+# GrayMoon - Architecture & Design Reference
 
 **Version:** 0.1.0-main.177  
 **Target runtime:** .NET 8, ASP.NET Core 8, Blazor Server, EF Core 8 (SQLite)
@@ -11,8 +11,8 @@
 2. [Two-Process Architecture](#2-two-process-architecture)
 3. [Data Model](#3-data-model)
 4. [Communication Layer](#4-communication-layer)
-5. [GrayMoon.App — Service Layer](#5-graymoonapp--service-layer)
-6. [GrayMoon.Agent — Command Pipeline](#6-graymoonagent--command-pipeline)
+5. [GrayMoon.App - Service Layer](#5-graymoonapp--service-layer)
+6. [GrayMoon.Agent - Command Pipeline](#6-graymoonagent--command-pipeline)
 7. [Feature Workflows](#7-feature-workflows)
 8. [Concurrency Model](#8-concurrency-model)
 9. [Security Design](#9-security-design)
@@ -24,7 +24,7 @@
 
 ## 1. What GrayMoon Is
 
-GrayMoon is a **workspace orchestration tool for multi-repository .NET development**. It is designed for teams and individuals working across many repositories simultaneously — microservices, shared libraries, NuGet packages — where a single feature typically requires coordinated changes in several places.
+GrayMoon is a **workspace orchestration tool for multi-repository .NET development**. It is designed for teams and individuals working across many repositories simultaneously - microservices, shared libraries, NuGet packages - where a single feature typically requires coordinated changes in several places.
 
 ### Core problem solved
 
@@ -251,7 +251,7 @@ App AgentHub.SyncCommand
         └── hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId)
 ```
 
-`SyncCommandHandler` uses **`HasValue` guards**: null fields in the incoming notification do not overwrite existing DB values. This is important — it allows partial-update notifications (e.g. the pre-push hook now only sends Version + Branch, leaving commit counts untouched).
+`SyncCommandHandler` uses **`HasValue` guards**: null fields in the incoming notification do not overwrite existing DB values. This is important - it allows partial-update notifications (e.g. the pre-push hook now only sends Version + Branch, leaving commit counts untouched).
 
 ### 4.4 HTTP Hook Listener (Agent)
 
@@ -270,7 +270,7 @@ Each POST carries a JSON body: `{ "repositoryId", "workspaceId", "repositoryPath
 
 ---
 
-## 5. GrayMoon.App — Service Layer
+## 5. GrayMoon.App - Service Layer
 
 ### 5.1 Agent communication
 
@@ -278,14 +278,14 @@ Each POST carries a JSON body: `{ "repositoryId", "workspaceId", "repositoryPath
 |---------|----------------|
 | `AgentBridge` | Sends commands to the Agent; wraps SignalR `RequestCommand` with `requestId` tracking via `AgentResponseDelivery`. |
 | `AgentConnectionTracker` | Tracks current Agent SignalR connection ID; used by `AgentBridge` to find the target. |
-| `AgentResponseDelivery` | Static `ConcurrentDictionary<string, TCS>` — bridges async hub callbacks back to calling code. |
+| `AgentResponseDelivery` | Static `ConcurrentDictionary<string, TCS>` - bridges async hub callbacks back to calling code. |
 | `AgentQueueStateService` | Reports agent job-queue depth for diagnostics. |
 
 ### 5.2 Workspace orchestration
 
 | Service | Responsibility |
 |---------|----------------|
-| `WorkspaceGitService` | Core fanout service — sync, refresh projects, push, update, commit-sync, create branches, and dependency sync. Uses `SemaphoreSlim(MaxParallelOperations)` for all parallel work. |
+| `WorkspaceGitService` | Core fanout service - sync, refresh projects, push, update, commit-sync, create branches, and dependency sync. Uses `SemaphoreSlim(MaxParallelOperations)` for all parallel work. |
 | `WorkspaceService` | Workspace CRUD + root path resolution. `GetRootPathForWorkspaceAsync` returns `workspace.RootPath ?? Settings.RootPath`. |
 | `WorkspaceSyncHandler` | Thin wrapper around `WorkspaceGitService.SyncAsync` with error handling and broadcast. |
 | `WorkspacePushService` | Push business logic: builds push plan, runs parallel or level-ordered push, calls `UpdateCommitCountsAndUpstreamAfterPushAsync` which resets commit counts in DB and sends `WorkspaceSynced`. |
@@ -326,14 +326,14 @@ Each POST carries a JSON body: `{ "repositoryId", "workspaceId", "repositoryPath
 
 ---
 
-## 6. GrayMoon.Agent — Command Pipeline
+## 6. GrayMoon.Agent - Command Pipeline
 
 ### 6.1 Job kinds
 
 Two job kinds flow through a single bounded `Channel<JobEnvelope>`:
 
-- **Command jobs** — initiated by App `RequestCommand`; have a `requestId`; must send `ResponseCommand` back.
-- **Notify jobs** — initiated by git hook HTTP POST; fire-and-forget; may send `SyncCommand` back to App.
+- **Command jobs** - initiated by App `RequestCommand`; have a `requestId`; must send `ResponseCommand` back.
+- **Notify jobs** - initiated by git hook HTTP POST; fire-and-forget; may send `SyncCommand` back to App.
 
 ### 6.2 Agent command catalog
 
@@ -368,14 +368,14 @@ Hook commands (Notify job path):
 
 | Command | Hook | Does |
 |---------|------|------|
-| `PushHookSyncCommand` | pre-push | GitVersion only; sends `SyncCommand` with Version + Branch (no commit counts — push not yet complete) |
+| `PushHookSyncCommand` | pre-push | GitVersion only; sends `SyncCommand` with Version + Branch (no commit counts - push not yet complete) |
 | `CommitHookSyncCommand` | post-commit | GitVersion + commit counts; sends `SyncCommand` |
 | `CheckoutHookSyncCommand` | post-checkout | GitVersion + commit counts; sends `SyncCommand` |
 | `MergeHookSyncCommand` | post-merge | GitVersion + commit counts; sends `SyncCommand` |
 
 ### 6.3 Job concurrency (agent side)
 
-`JobBackgroundService` maintains up to `MaxConcurrentCommands` (default 8) parallel workers reading from the job queue. All workers share the same `Channel<JobEnvelope>`. There is no per-command serialization — the agent can run 8 jobs concurrently against different repositories without coordination. Callers that require serialization (e.g. dependency-level push ordering) must enforce it on the App side.
+`JobBackgroundService` maintains up to `MaxConcurrentCommands` (default 8) parallel workers reading from the job queue. All workers share the same `Channel<JobEnvelope>`. There is no per-command serialization - the agent can run 8 jobs concurrently against different repositories without coordination. Callers that require serialization (e.g. dependency-level push ordering) must enforce it on the App side.
 
 ### 6.4 Git hook registration
 
@@ -449,7 +449,7 @@ User clicks Push
 All repos pushed in parallel in one pass; no NuGet polling.
 
 **Pre-push hook interaction:**
-Git's pre-push hook fires before the actual push data transfer. `PushHookSyncCommand` intentionally sends only `Version` and `Branch` — no commit counts — because they would be stale (push not yet complete). The authoritative post-push counts come from `UpdateCommitCountsAndUpstreamAfterPushAsync` via explicit `GetCommitCounts` commands.
+Git's pre-push hook fires before the actual push data transfer. `PushHookSyncCommand` intentionally sends only `Version` and `Branch` - no commit counts - because they would be stale (push not yet complete). The authoritative post-push counts come from `UpdateCommitCountsAndUpstreamAfterPushAsync` via explicit `GetCommitCounts` commands.
 
 ### 7.3 Dependency Update Workflow
 
@@ -481,7 +481,7 @@ Single-repo and workspace-wide branch operations:
 - **Create branch:** `CreateBranch` command; optionally pattern-based across workspace.
 - **Checkout:** `CheckoutBranch` command; post-checkout hook fires and sends `SyncCommand`.
 - **Set upstream:** `SetUpstreamBranch` after first push of a new branch.
-- **Sync to default:** `SyncToDefaultBranch` — checkout default branch, prune feature branch if no drift, pull latest. Used after a PR is merged.
+- **Sync to default:** `SyncToDefaultBranch` - checkout default branch, prune feature branch if no drift, pull latest. Used after a PR is merged.
 - **Delete branch:** `DeleteBranch` with safety checks.
 - **Refresh branches:** `RefreshBranches` command; updates `RepositoryBranch` rows.
 
@@ -513,9 +513,9 @@ PR state is persisted in `WorkspaceRepositoryPullRequest` and refreshed whenever
 
 A single `Workspace:MaxParallelOperations` setting (default 16) governs all parallel workspace work in the App:
 
-- `WorkspaceGitService` — all parallel agent command fan-outs.
-- `PackageRegistrySyncService` — parallel NuGet package lookups.
-- `SyncBackgroundService` — default worker count (overridden by `Sync:MaxConcurrency`).
+- `WorkspaceGitService` - all parallel agent command fan-outs.
+- `PackageRegistrySyncService` - parallel NuGet package lookups.
+- `SyncBackgroundService` - default worker count (overridden by `Sync:MaxConcurrency`).
 
 All parallelism uses `SemaphoreSlim(_maxConcurrent)` + `Task.WhenAll`.
 
@@ -542,7 +542,7 @@ After the push bug fix in this version:
 
 ## 9. Security Design
 
-### 9.1 Token storage (Level 2 — AES-256-GCM)
+### 9.1 Token storage (Level 2 - AES-256-GCM)
 
 Connector tokens (`Connector.UserToken`) are stored encrypted using AES-256-GCM via `AesGcmTokenProtector`, which is backed by ASP.NET Core Data Protection. The key store is in the volume-mounted `/app/db/DataProtection-Keys/` directory so keys survive container restarts.
 
@@ -645,7 +645,7 @@ Currently command args are serialized as `JsonElement` and deserialized per comm
 Track which repos in a push plan were successfully pushed vs. failed. Allow the user to retry only the failed repos without re-pushing the successful ones.
 
 **Per-workspace agent (future)**  
-For team deployments, multiple agents per workspace (or per machine) would allow the App to orchestrate work across machines. The current single-agent model is a design constraint, not a fundamental limitation — `AgentConnectionTracker` would need to become a multi-entry registry.
+For team deployments, multiple agents per workspace (or per machine) would allow the App to orchestrate work across machines. The current single-agent model is a design constraint, not a fundamental limitation - `AgentConnectionTracker` would need to become a multi-entry registry.
 
 ### Performance
 

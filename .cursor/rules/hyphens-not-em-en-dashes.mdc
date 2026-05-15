@@ -1,0 +1,20 @@
+---
+description: Use ASCII hyphen (-) only; never em dash or en dash in project text.
+alwaysApply: true
+---
+
+# Hyphens only (no em dash or en dash)
+
+Do **not** use Unicode **em dash** (U+2014) or **en dash** (U+2013). Always use the regular **ASCII hyphen-minus** (`-`, U+002D).
+
+Applies to user-visible strings, UI markup, comments, XML docs, logs, CSS comments, Markdown, and internal docs (including `.cursor/plans/`). Do not introduce smart-quote typography that substitutes hyphens for em/en dashes.
+
+**Examples**
+
+- Prefer: `Step 1 - overview` (ASCII hyphen)
+- Avoid: `Step 1` + em dash + `overview`
+- Numeric spans in prose or docs: `0.1-2` not an en dash between numbers
+- Compound terms: `workspace-repository link` not an en dash between words
+- Empty table cells may use `-` as a placeholder
+
+Third-party vendored sources (e.g. `bootstrap.min.css`, icon fonts) are excluded from edits unless the project intentionally forks them.

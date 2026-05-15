@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
 
-/// <summary>Persistence for pull request state per workspace–repository link. Single place for all PR table read/write.</summary>
+/// <summary>Persistence for pull request state per workspace-repository link. Single place for all PR table read/write.</summary>
 public sealed class WorkspacePullRequestRepository(AppDbContext dbContext, ILogger<WorkspacePullRequestRepository> logger)
 {
     /// <summary>Returns persisted PR state for all repositories in the workspace, keyed by RepositoryId. Missing row yields null (no PR or not yet checked).</summary>
@@ -27,7 +27,7 @@ public sealed class WorkspacePullRequestRepository(AppDbContext dbContext, ILogg
         return result;
     }
 
-    /// <summary>Inserts or updates the PR row for the given workspace–repo link. Pass null to persist "no PR" with LastCheckedAt.</summary>
+    /// <summary>Inserts or updates the PR row for the given workspace-repo link. Pass null to persist "no PR" with LastCheckedAt.</summary>
     public async Task UpsertAsync(int workspaceRepositoryId, PullRequestInfo? pr, CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;

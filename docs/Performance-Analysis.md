@@ -4,7 +4,7 @@ This document provides a high-level performance analysis of GrayMoon (app + agen
 
 ---
 
-## 1. System overview – what matters for performance
+## 1. System overview - what matters for performance
 
 - **App (`GrayMoon.App`)**: ASP.NET Core 8 + Razor Components front-end, SQLite + EF Core persistence, background workers (sync, token health), and HTTP/SignalR endpoints.
 - **Agent (`GrayMoon.Agent`)**: Long-running host process that performs git and filesystem operations and some package-registry work, with background workers and a bounded job queue.
@@ -26,9 +26,9 @@ See `Parallelism-Analysis.md` for detailed concurrency mechanics; this document 
 ### 2.1 Workspace sync and refresh
 
 - **Main classes**:
-  - `WorkspaceGitService` – orchestrates sync, refresh projects, dependency sync, push, and branch creation across many repositories.
-  - `SyncBackgroundService` – reads sync requests from an unbounded channel and runs `SyncSingleRepositoryAsync` with a configurable worker count.
-  - `WorkspaceService` – resolves and manages workspace root paths, and forwards workspace-level commands to the agent.
+  - `WorkspaceGitService` - orchestrates sync, refresh projects, dependency sync, push, and branch creation across many repositories.
+  - `SyncBackgroundService` - reads sync requests from an unbounded channel and runs `SyncSingleRepositoryAsync` with a configurable worker count.
+  - `WorkspaceService` - resolves and manages workspace root paths, and forwards workspace-level commands to the agent.
 - **Characteristics**:
   - Heavy use of **parallelism** (SemaphoreSlim + `Task.WhenAll`) to fan out per-repository work.
   - Mix of **agent commands**, **EF Core persistence**, and **external HTTP calls** (for package registries) inside these flows.
@@ -37,7 +37,7 @@ See `Parallelism-Analysis.md` for detailed concurrency mechanics; this document 
 ### 2.2 Git and dependency operations
 
 - **Main classes**:
-  - `WorkspaceGitService` – `SyncAsync`, `RefreshWorkspaceProjectsAsync`, `SyncDependenciesAsync`, `RunUpdateAsync`, `RunPushAsync`, `CreateBranchesAsync`.
+  - `WorkspaceGitService` - `SyncAsync`, `RefreshWorkspaceProjectsAsync`, `SyncDependenciesAsync`, `RunUpdateAsync`, `RunPushAsync`, `CreateBranchesAsync`.
   - Agent-side commands for `SyncRepository`, `RefreshRepositoryProjects`, `SyncRepositoryDependencies`, `PushRepository`, etc.
 - **Characteristics**:
   - Uses a single **`MaxParallelOperations`** setting for workspace operations (see `WorkspaceOptions`).
@@ -49,9 +49,9 @@ See `Parallelism-Analysis.md` for detailed concurrency mechanics; this document 
 ### 2.3 Data access and workspace loading
 
 - **Main classes**:
-  - `AppDbContext` – SQLite-backed EF Core context with multiple indexed entities: connectors, repositories, workspaces, workspace repositories, branches, projects, dependencies, files, settings.
-  - `WorkspaceRepository` – reads and writes workspace graphs, including navigation properties and related entities.
-  - `WorkspaceProjectRepository` and related repositories – manage projects, dependency levels, and associated data.
+  - `AppDbContext` - SQLite-backed EF Core context with multiple indexed entities: connectors, repositories, workspaces, workspace repositories, branches, projects, dependencies, files, settings.
+  - `WorkspaceRepository` - reads and writes workspace graphs, including navigation properties and related entities.
+  - `WorkspaceProjectRepository` and related repositories - manage projects, dependency levels, and associated data.
 - **Characteristics**:
   - Many read paths (especially in UI) load **entire workspace graphs** with eager includes for repositories, connectors, pull requests, and branches.
   - Writes often occur in **per-repository loops**, sometimes with batched pre-loading and then per-repository updates.
@@ -59,17 +59,17 @@ See `Parallelism-Analysis.md` for detailed concurrency mechanics; this document 
 ### 2.4 UI rendering and SignalR updates
 
 - **Main components**:
-  - `WorkspaceRepositories` page (`.razor` + `.razor.cs`) – primary UI for viewing and managing workspace repositories, dependencies, and operations.
+  - `WorkspaceRepositories` page (`.razor` + `.razor.cs`) - primary UI for viewing and managing workspace repositories, dependencies, and operations.
   - SignalR hubs for workspace sync and agent events.
 - **Characteristics**:
   - Uses a **debounced** handler for `WorkspaceSynced` and `RepositoryError` events, but still reloads workspace data from a new `DbContext` scope on each (expensive for large workspaces).
-  - Client-side filtering, grouping, and overlay state are maintained in memory over a list of `workspaceRepositories` entries – trivial with small counts, but can become noticeable for very large workspaces.
+  - Client-side filtering, grouping, and overlay state are maintained in memory over a list of `workspaceRepositories` entries - trivial with small counts, but can become noticeable for very large workspaces.
 
 ### 2.5 Agent job processing
 
 - **Main components**:
-  - `JobBackgroundService` – agent-side background service with `MaxConcurrentCommands` workers consuming a bounded queue.
-  - `HookListenerHostedService` – receives local hook HTTP requests and enqueues jobs.
+  - `JobBackgroundService` - agent-side background service with `MaxConcurrentCommands` workers consuming a bounded queue.
+  - `HookListenerHostedService` - receives local hook HTTP requests and enqueues jobs.
 - **Characteristics**:
   - Uses a bounded channel to maintain backpressure on agent work.
   - Tracks job latencies with `Stopwatch` and logs them, which provides a useful **performance signal** for command-level timing.

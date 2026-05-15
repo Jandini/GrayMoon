@@ -24,7 +24,7 @@ public sealed class UpdateFileVersionsCommand(IGitService git) : ICommandHandler
         if (!File.Exists(fullFilePath))
             return new UpdateFileVersionsResponse { UpdatedCount = 0, ErrorMessage = $"File not found: {filePath}" };
 
-        // Parse pattern lines: each is PREFIX={reponame}SUFFIX — extract (prefix, repoName, suffix) tuples
+        // Parse pattern lines: each is PREFIX={reponame}SUFFIX - extract (prefix, repoName, suffix) tuples
         var patternEntries = ParsePatternLines(versionPattern);
         if (patternEntries.Count == 0)
             return new UpdateFileVersionsResponse { UpdatedCount = 0 };

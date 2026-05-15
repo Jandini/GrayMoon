@@ -41,7 +41,7 @@ window.versionPatternEditor = {
                 e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                 e.preventDefault();
             }
-        }, true /* capture — fires before Blazor's listener and before browser default */);
+        }, true /* capture - fires before Blazor's listener and before browser default */);
     },
 
     // Activates or deactivates the keydown guard. Call whenever suggestion visibility changes.
@@ -90,7 +90,7 @@ window.versionPatternEditor = {
         document.body.appendChild(mirror);
         mirror.appendChild(document.createTextNode(el.value.substring(0, atPos)));
         const marker = document.createElement('span');
-        marker.textContent = '\u200b'; // zero-width space – just marks the position
+        marker.textContent = '\u200b'; // zero-width space - just marks the position
         mirror.appendChild(marker);
 
         const mRect = marker.getBoundingClientRect();

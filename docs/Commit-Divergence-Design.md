@@ -1,4 +1,4 @@
-# Commit Divergence – Design Document
+# Commit Divergence - Design Document
 
 ## Overview
 
@@ -15,13 +15,13 @@ All counts are relative to the **default branch** (e.g. `origin/main` or `origin
 - **Behind:** Commits on the default branch that are not in the current branch. (Current branch is behind default.)
 - **Ahead:** Commits on the current branch that are not in the default branch. (Current branch is ahead of default.)
 
-When the default branch cannot be determined, show `—` or `— | —`. The existing **Commits** column keeps its role (colored badge + push/pull vs tracking branch); this column is a compact, read-only display of divergence vs default branch.
+When the default branch cannot be determined, show `-` or `- | -`. The existing **Commits** column keeps its role (colored badge + push/pull vs tracking branch); this column is a compact, read-only display of divergence vs default branch.
 
 ---
 
 ## 2. How the Information Is Obtained
 
-### 2.1 Agent (Git) side – vs default branch
+### 2.1 Agent (Git) side - vs default branch
 
 The agent must compute **behind** and **ahead** against the **default branch** (e.g. `main`/`master`), not the tracking branch.
 
@@ -38,21 +38,21 @@ The agent must compute **behind** and **ahead** against the **default branch** (
 - **A) Extend `GetCommitCountsAsync`** to also return default-branch counts (e.g. `defaultBehind`, `defaultAhead`), in addition to existing tracking-branch counts (for the Commits badge). One round-trip; sync/refresh/hooks all get both.
 - **B) New method** `GetCommitCountsVsDefaultAsync` (or a dedicated command) that returns only default-branch behind/ahead. App calls it when building the divergence column (or in parallel with existing GetCommitCounts).
 
-Recommendation: **A** – extend the existing response so sync, refresh, and every hook flow automatically get default-branch counts without extra calls.
+Recommendation: **A** - extend the existing response so sync, refresh, and every hook flow automatically get default-branch counts without extra calls.
 
 **Response shape (add to existing commit-counts response):**
 
-- `DefaultBranchBehind` (int?) – commits on default not in current branch.
-- `DefaultBranchAhead` (int?) – commits on current branch not in default.
+- `DefaultBranchBehind` (int?) - commits on default not in current branch.
+- `DefaultBranchAhead` (int?) - commits on current branch not in default.
 
 When default branch cannot be resolved or rev-list fails, return null for both.
 
 ### 2.2 Who uses the data
 
-- **GetCommitCountsCommand** – extend to return default-branch counts.
-- **SyncRepositoryCommand** – include default-branch counts in response.
-- **RefreshRepositoryVersionCommand** – include default-branch counts.
-- **Hook sync commands** – include default-branch counts in SyncCommand payload.
+- **GetCommitCountsCommand** - extend to return default-branch counts.
+- **SyncRepositoryCommand** - include default-branch counts in response.
+- **RefreshRepositoryVersionCommand** - include default-branch counts.
+- **Hook sync commands** - include default-branch counts in SyncCommand payload.
 
 ### 2.3 App side
 
@@ -66,7 +66,7 @@ When default branch cannot be resolved or rev-list fails, return null for both.
 
 - **Model:** `WorkspaceRepositoryLink`:
   - **Existing** (unchanged for Commits badge): `OutgoingCommits`, `IncomingCommits` (vs tracking branch), `BranchHasUpstream`.
-  - **New:** `DefaultBranchBehindCommits` (int?), `DefaultBranchAheadCommits` (int?) – used only by the Divergence column (vs default branch).
+  - **New:** `DefaultBranchBehindCommits` (int?), `DefaultBranchAheadCommits` (int?) - used only by the Divergence column (vs default branch).
 - **When persisted:** Same as today for sync/refresh/push/hooks; in addition, persist the new default-branch fields whenever the agent includes them in the response or SyncCommand.
 - **Migration:** Add two nullable int columns to `WorkspaceRepositories`.
 
@@ -82,12 +82,12 @@ When default branch cannot be resolved or rev-list fails, return null for both.
 
 ### 4.2 Display Format
 
-**Option A – Simple (recommended for first version)**  
+**Option A - Simple (recommended for first version)**  
 - Format: `behind | ahead` (e.g. `0 | 12`, `2 | 0`).
 - Pipe `|` in gray (e.g. `color: #6c757d` or Bootstrap `text-muted`).
-- When unknown (no upstream and no counts): show `—` or `— | —`.
+- When unknown (no upstream and no counts): show `-` or `- | -`.
 
-**Option B – GitHub-style**  
+**Option B - GitHub-style**  
 - Same semantics, with a small visual indicator:
   - “Behind” has a short line under the number when behind &gt; 0 (e.g. `2̣` or `2_` with underline).
   - “Ahead” has a short line under the number when ahead &gt; 0 (e.g. `1̣` or `_1`).
@@ -95,7 +95,7 @@ When default branch cannot be resolved or rev-list fails, return null for both.
 - Implement with a small inline element (e.g. `span` with `border-bottom` or a tiny SVG line) so it looks like a minimal branch diagram.
 
 **Empty / no branch:**  
-- If `BranchName` is empty or repo not cloned, show `—` in the divergence cell.
+- If `BranchName` is empty or repo not cloned, show `-` in the divergence cell.
 
 **Data source:** Use `DefaultBranchBehindCommits` and `DefaultBranchAheadCommits` (not `IncomingCommits`/`OutgoingCommits`, which remain for the Commits badge).
 

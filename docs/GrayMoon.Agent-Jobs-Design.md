@@ -1,4 +1,4 @@
-# GrayMoon.Agent — Jobs: Separate Services, Interfaces & JSON Handling
+# GrayMoon.Agent - Jobs: Separate Services, Interfaces & JSON Handling
 
 ## 1. Goals
 
@@ -15,8 +15,8 @@
 
 All enqueued work is represented as a **job**. Two kinds:
 
-- **Command jobs** — originate from SignalR `RequestCommand`; have a request ID and require a `ResponseCommand` back.
-- **Notify jobs** — originate from HTTP `/notify`; no request ID; agent pushes `SyncCommand` to the app.
+- **Command jobs** - originate from SignalR `RequestCommand`; have a request ID and require a `ResponseCommand` back.
+- **Notify jobs** - originate from HTTP `/notify`; no request ID; agent pushes `SyncCommand` to the app.
 
 Introduce a small type hierarchy and shared model location:
 

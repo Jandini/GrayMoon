@@ -93,6 +93,7 @@ public sealed class SyncCommandHandler(
         var workspacePullRequestService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
         await workspacePullRequestService.RefreshPullRequestsAsync(n.WorkspaceId, [n.RepositoryId]);
 
+        await hubContext.Clients.All.SendAsync("RepositorySynced", n.WorkspaceId, n.RepositoryId);
         await hubContext.Clients.All.SendAsync("WorkspaceSynced", n.WorkspaceId);
         if (!string.IsNullOrWhiteSpace(n.ErrorMessage))
             await hubContext.Clients.All.SendAsync("RepositoryError", n.WorkspaceId, n.RepositoryId, n.ErrorMessage);

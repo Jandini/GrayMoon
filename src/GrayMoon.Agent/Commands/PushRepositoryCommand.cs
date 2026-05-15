@@ -74,7 +74,7 @@ public sealed class PushRepositoryCommand(IGitService git, IHubConnectionProvide
         if (success)
         {
             // Fire-and-forget: send actual post-push commit counts to the app so DB is updated
-            // immediately after push — for both GrayMoon-initiated and any downstream refresh path.
+            // immediately after push - for both GrayMoon-initiated and any downstream refresh path.
             _ = SendPostPushSyncAsync(request.WorkspaceId, request.RepositoryId, repoPath, branch);
         }
 

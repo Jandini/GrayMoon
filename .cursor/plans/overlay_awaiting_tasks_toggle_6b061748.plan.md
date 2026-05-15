@@ -11,17 +11,17 @@ isProject: false
 
 Show **"Awaiting x tasks"** in the overlay only when **all three** are true:
 
-1. **All app-side tasks are completed** – the progress message is in the form "X of Y" with **X == Y** (e.g. "Committed 9 of 9", "Pushed 2 of 2", "Synchronized 10 of 10"), not "3 of 9".
-2. **There are agent tasks still to complete** – `AgentTasksPendingCount > 0` for the current workspace.
-3. **Toggle is on** – `UseAwaitingTasksMessageInOverlay` is true (default false).
+1. **All app-side tasks are completed** - the progress message is in the form "X of Y" with **X == Y** (e.g. "Committed 9 of 9", "Pushed 2 of 2", "Synchronized 10 of 10"), not "3 of 9".
+2. **There are agent tasks still to complete** - `AgentTasksPendingCount > 0` for the current workspace.
+3. **Toggle is on** - `UseAwaitingTasksMessageInOverlay` is true (default false).
 
 So while the app is still doing its part (e.g. "Committed 3 of 9"), the overlay keeps showing "Committed 3 of 9". Only when we reach "Committed 9 of 9" and the overlay is still visible because we're waiting on the agent do we switch the text to "Awaiting x tasks".
 
 ## Key files
 
-- [WorkspaceRepositories.razor](src/GrayMoon.App/Components/Pages/WorkspaceRepositories.razor) – LoadingOverlay usages
-- [WorkspaceRepositories.razor.cs](src/GrayMoon.App/Components/Pages/WorkspaceRepositories.razor.cs) – progress state, `AgentTasksPendingCount`, `OnQueueStateChanged`
-- [LoadingOverlay.razor](src/GrayMoon.App/Components/Shared/LoadingOverlay.razor) – spinner, optional count in ring, Message display
+- [WorkspaceRepositories.razor](src/GrayMoon.App/Components/Pages/WorkspaceRepositories.razor) - LoadingOverlay usages
+- [WorkspaceRepositories.razor.cs](src/GrayMoon.App/Components/Pages/WorkspaceRepositories.razor.cs) - progress state, `AgentTasksPendingCount`, `OnQueueStateChanged`
+- [LoadingOverlay.razor](src/GrayMoon.App/Components/Shared/LoadingOverlay.razor) - spinner, optional count in ring, Message display
 
 ## Implementation
 
@@ -32,7 +32,7 @@ So while the app is still doing its part (e.g. "Committed 3 of 9"), the overlay 
 - Add `**GetOverlayMessage(string progressMessage, bool overlayVisible)`**:
   - If overlay not visible, return `progressMessage`.
   - If `!UseAwaitingTasksMessageInOverlay`, return `progressMessage`.
-  - If `!IsCompletedNOfNProgressMessage(progressMessage)`, return `progressMessage` (app still working – e.g. "3 of 9").
+  - If `!IsCompletedNOfNProgressMessage(progressMessage)`, return `progressMessage` (app still working - e.g. "3 of 9").
   - If `AgentTasksPendingCount == 0`, return `progressMessage` (no agent tasks to wait for).
   - Otherwise return **"Awaiting {AgentTasksPendingCount} task(s)"**.
 - Use `GetOverlayMessage(...)` for the Message passed to LoadingOverlay for: sync, push, update, commit sync, sync-to-default. Other overlays keep their static message.

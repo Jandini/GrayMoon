@@ -1,4 +1,4 @@
-# WorkspaceRepositories.razor – Analysis and Optimization Plan
+# WorkspaceRepositories.razor - Analysis and Optimization Plan
 
 This document analyzes the **GrayMoon** codebase purpose, the **WorkspaceRepositories** page in detail, and proposes **breakdown and optimizations** to improve maintainability without changing behavior.
 
@@ -19,7 +19,7 @@ The **WorkspaceRepositories** page is the main workspace view: it lists reposito
 
 ---
 
-## 2. WorkspaceRepositories.razor – Current State
+## 2. WorkspaceRepositories.razor - Current State
 
 ### 2.1 Size and structure
 
@@ -101,7 +101,7 @@ The project does not use `.razor.cs` today; introducing it for this one page is 
 
 Instead of 55 flat fields, group by concern so the file is easier to reason about:
 
-- **Modal state**: e.g. `RepositoriesModalState`, `BranchModalState`, `SwitchBranchModalState`, `UpdateModalState`, `PushWithDependenciesModalState`, `ConfirmModalState` (each with the 3–6 fields for that modal).
+- **Modal state**: e.g. `RepositoriesModalState`, `BranchModalState`, `SwitchBranchModalState`, `UpdateModalState`, `PushWithDependenciesModalState`, `ConfirmModalState` (each with the 3-6 fields for that modal).
 - **Operation state**: e.g. `SyncState`, `UpdateState`, `PushState`, `CommitSyncState`, `CheckoutState`, `CreateBranchesState` (progress message, CTS, bool flags).
 
 Refactor one modal or one operation at a time; behavior stays the same.

@@ -291,7 +291,7 @@ public class GitHubService : IConnectorService
         await PostAsync(connector, $"repos/{owner}/{repo}/actions/runs/{runId}/rerun", payload: null, cancellationToken: cancellationToken);
     }
 
-    /// <summary>POST /repos/{owner}/{repo}/actions/runs/{run_id}/cancel — cancels an in-progress workflow run.</summary>
+    /// <summary>POST /repos/{owner}/{repo}/actions/runs/{run_id}/cancel - cancels an in-progress workflow run.</summary>
     /// <remarks>409 when the run already finished is treated as success (UI/API lag vs GitHub).</remarks>
     public async Task CancelWorkflowRunAsync(Connector connector, string owner, string repo, long runId, CancellationToken cancellationToken = default)
     {

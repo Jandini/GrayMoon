@@ -61,7 +61,7 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
         }
 
         // Detach any WRL entities for this workspace that may have been loaded elsewhere in this
-        // circuit-scope DbContext — prevents stale-state DbUpdateConcurrencyException.
+        // circuit-scope DbContext - prevents stale-state DbUpdateConcurrencyException.
         foreach (var entry in _dbContext.ChangeTracker.Entries<WorkspaceRepositoryLink>()
             .Where(e => e.Entity.WorkspaceId == workspaceId)
             .ToList())
@@ -69,7 +69,7 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
             entry.State = Microsoft.EntityFrameworkCore.EntityState.Detached;
         }
 
-        // Load workspace WITHOUT Include(Repositories) — scalar update only.
+        // Load workspace WITHOUT Include(Repositories) - scalar update only.
         var workspace = await _dbContext.Workspaces
             .FirstOrDefaultAsync(item => item.WorkspaceId == workspaceId);
 
@@ -204,7 +204,7 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
     {
         await using var transaction = await _dbContext.Database.BeginTransactionAsync();
 
-        // Re-read current DB state with AsNoTracking — never rely on tracker state here.
+        // Re-read current DB state with AsNoTracking - never rely on tracker state here.
         var current = await _dbContext.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId)

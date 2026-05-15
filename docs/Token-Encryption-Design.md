@@ -109,8 +109,8 @@ We want a single string column that:
 Suggested format:
 
 - `v2:KEYID:BASE64(IV || CIPHERTEXT || TAG)`
-  - `v2` – identifies the AES-GCM scheme (Level 2).
-  - `KEYID` – optional; allows multiple keys (e.g. `"v1"`, `"2026-03"`). If not used, we can set it to a fixed default such as `"default"`.
+  - `v2` - identifies the AES-GCM scheme (Level 2).
+  - `KEYID` - optional; allows multiple keys (e.g. `"v1"`, `"2026-03"`). If not used, we can set it to a fixed default such as `"default"`.
   - The final portion is one Base64 string containing **IV (12 bytes) + ciphertext (N) + tag (16 bytes)**.
 
 This string is what we store in `Connectors.UserToken`.
@@ -240,9 +240,9 @@ If we cannot inject into all existing call sites easily, we can keep the existin
 
 We need to handle **three formats** during migration:
 
-1. **Legacy plain text** (pre-Level 1) – theoretically no longer present after `MigrateConnectorUserTokenBase64Async`, but we handle it defensively if found.
-2. **Level 1 Base64-only** – strings that are valid Base64 but have **no `v2:` prefix**.
-3. **Level 2 AES-GCM** – strings starting with `v2:` as defined above.
+1. **Legacy plain text** (pre-Level 1) - theoretically no longer present after `MigrateConnectorUserTokenBase64Async`, but we handle it defensively if found.
+2. **Level 1 Base64-only** - strings that are valid Base64 but have **no `v2:` prefix**.
+3. **Level 2 AES-GCM** - strings starting with `v2:` as defined above.
 
 `ITokenProtector.Unprotect` is responsible for:
 

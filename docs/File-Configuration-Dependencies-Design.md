@@ -1,4 +1,4 @@
-# File Configuration Dependencies — Design Plan
+# File Configuration Dependencies - Design Plan
 
 This document describes how to extend GrayMoon’s dependency computation so that **file configuration** (version patterns with `{repositoryname}` tokens) contributes to repository dependencies, using the **existing dependency persistence** (WorkspaceRepositoryLink: DependencyLevel, Dependencies, UnmatchedDeps).
 
@@ -29,7 +29,7 @@ This document describes how to extend GrayMoon’s dependency computation so tha
 
 ### 1.3 File configuration (already in the app)
 
-- **WorkspaceFile**: FileId, WorkspaceId, RepositoryId, FilePath — a file belongs to one repository in a workspace.
+- **WorkspaceFile**: FileId, WorkspaceId, RepositoryId, FilePath - a file belongs to one repository in a workspace.
 - **WorkspaceFileVersionConfig**: ConfigId, FileId, VersionPattern (multi-line, each line `KEY={repositoryname}`).
 - **WorkspaceFileVersionService.ExtractTokens(pattern)** returns all `{token}` names from the pattern; these are **repository names** (matched to workspace repos by name).
 - **WorkspaceFileVersionConfigRepository.GetByWorkspaceIdAsync(workspaceId)** returns configs with File and Repository loaded (so we know file → RepositoryId).
@@ -40,7 +40,7 @@ This document describes how to extend GrayMoon’s dependency computation so tha
 ## 2. Goal
 
 - **If the repository has configured files:** for each such file, take all **matching repository tokens** from its version pattern (i.e. `{repositoryname}` tokens that resolve to a workspace repository) and treat those repositories as **dependencies of the repository that owns the file**.
-- **Use existing persistence:** do **not** add a new persistence table for “file-config dependencies.” Reuse WorkspaceRepositoryLink (DependencyLevel, Dependencies, UnmatchedDeps) by merging file-config–derived repo edges with project-derived repo edges when computing and persisting stats.
+- **Use existing persistence:** do **not** add a new persistence table for “file-config dependencies.” Reuse WorkspaceRepositoryLink (DependencyLevel, Dependencies, UnmatchedDeps) by merging file-config-derived repo edges with project-derived repo edges when computing and persisting stats.
 - **Downstream behavior:** Push order, sync order, dependency graph UI, and any logic that uses DependencyLevel or Dependencies should automatically respect file-config dependencies because they are folded into the same persisted fields.
 
 ---
@@ -108,7 +108,7 @@ This document describes how to extend GrayMoon’s dependency computation so tha
 
 ### 4.1 WorkspaceProjectRepository
 
-- **Inject** **WorkspaceFileVersionConfigRepository** (and ensure it can be used from the same DbContext / scope as WorkspaceProjectRepository, which it can — both are scoped and use AppDbContext).
+- **Inject** **WorkspaceFileVersionConfigRepository** (and ensure it can be used from the same DbContext / scope as WorkspaceProjectRepository, which it can - both are scoped and use AppDbContext).
 - **PersistRepositoryDependencyLevelAndDependenciesAsync** (private):
   - After loading workspaceProjects and building project-based repo edges:
     1. Load `WorkspaceRepositories` for workspaceId with `Include(wr => wr.Repository)`.

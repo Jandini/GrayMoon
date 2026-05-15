@@ -61,7 +61,7 @@
     private bool _needsRender;
 
     private const int BodyLineCount = 8;
-    /// <summary>Delay while jobs/steps are active — balances responsiveness vs API rate limits when many rows poll.</summary>
+    /// <summary>Delay while jobs/steps are active - balances responsiveness vs API rate limits when many rows poll.</summary>
     private const int PollIntervalActiveMs = 1_200;
     /// <summary>Delay when waiting for GitHub to attach jobs to the run.</summary>
     private const int PollIntervalWaitingJobsMs = 2_000;
@@ -122,7 +122,7 @@
             var connector = await ResolveConnectorAsync(cancellationToken);
             if (connector == null)
             {
-                AppendUnique("Connector not found — cannot load job status.");
+                AppendUnique("Connector not found - cannot load job status.");
                 return PollIntervalWaitingJobsMs;
             }
 
@@ -155,7 +155,7 @@
                 }
 
                 var stepCount = jobs.Sum(j => j.Steps?.Count ?? 0);
-                AppendUnique($"Live · {jobs.Count} job(s), {stepCount} step(s) — streaming updates…");
+                AppendUnique($"Live · {jobs.Count} job(s), {stepCount} step(s) - streaming updates…");
                 return DeterminePollDelayMs(jobs);
             }
 
@@ -314,13 +314,13 @@
                 return $"⊘ {jobName} › {step.Name} (skipped)";
             if (string.Equals(c, "failure", StringComparison.OrdinalIgnoreCase) || string.Equals(c, "cancelled", StringComparison.OrdinalIgnoreCase))
                 return $"✗ {jobName} › {step.Name} ({c})";
-            return $"• {jobName} › {step.Name} — {c}";
+            return $"• {jobName} › {step.Name} - {c}";
         }
 
         if (string.Equals(step.Status, "in_progress", StringComparison.OrdinalIgnoreCase))
             return $"⧗ {jobName} › {step.Name}…";
 
-        return $"… {jobName} › {step.Name} — {step.Status}";
+        return $"… {jobName} › {step.Name} - {step.Status}";
     }
 
     public async ValueTask DisposeAsync()

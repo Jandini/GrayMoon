@@ -1,4 +1,4 @@
-# WorkspaceRepositories.razor — Refactoring Plan
+# WorkspaceRepositories.razor - Refactoring Plan
 
 **Goal:** Make the page safe, maintainable, and optimized without breaking UX or functionality.  
 **Reference:** [WorkspaceRepositories-razor-Analysis.md](WorkspaceRepositories-razor-Analysis.md) (method inventory and best practices).
@@ -16,39 +16,39 @@ This plan applies **all 10 best practices** in a phased order so each step is sm
 
 ---
 
-## Phase 0 — Preparation (no UX change)
+## Phase 0 - Preparation (no UX change)
 
 **Purpose:** Add missing shared types and a URL helper so later phases don’t depend on the page.
 
-### 0.1 — Point 9: Extract API and DTOs
+### 0.1 - Point 9: Extract API and DTOs
 
 | Action | Detail |
 |--------|--------|
 | **Add DTO** | In `Models/Api/BranchesApiModels.cs` add `CreateBranchApiResult` with `Success` and `Error` (or align with existing `CreateBranchResponse` if the API returns `errorMessage`). |
 | **Update page** | In `WorkspaceRepositories.razor` remove the nested `CreateBranchApiResult` class and use the type from `GrayMoon.App.Models.Api`. |
-| **Verify** | Build; run; create branch from Switch Branch modal — response still deserializes. |
+| **Verify** | Build; run; create branch from Switch Branch modal - response still deserializes. |
 
 **Risk:** Low. Only moves a type and updates a using.
 
 ---
 
-### 0.2 — Point 7: Centralize URLs and navigation
+### 0.2 - Point 7: Centralize URLs and navigation
 
 | Action | Detail |
 |--------|--------|
 | **Add helper** | Create `Services/WorkspaceUrlHelper.cs` (or extend an existing route helper) with: `GetDependencyGraphUrl(int workspaceId, int? repositoryId = null, int? level = null)` returning `/workspaces/{id}/dependencies?repo={repo}` or `?level={level}`. |
 | **Update page** | Replace `GetDependencyGraphUrl(repoId)` and `GetDependencyGraphUrlForLevel(level)` with calls to the helper (pass `WorkspaceId`). |
-| **Verify** | Build; click dependency graph links for repo and level — same URLs and navigation. |
+| **Verify** | Build; click dependency graph links for repo and level - same URLs and navigation. |
 
 **Risk:** Low. Pure URL generation; no state or UI change.
 
 ---
 
-## Phase 1 — Code-behind and shared orchestration
+## Phase 1 - Code-behind and shared orchestration
 
 **Purpose:** Move logic out of the `.razor` file and deduplicate sync/commit-sync/sync-to-default so the page stays stable while we add structure.
 
-### 1.1 — Point 1: Move logic to a code-behind or view model
+### 1.1 - Point 1: Move logic to a code-behind or view model
 
 | Action | Detail |
 |--------|--------|
@@ -60,7 +60,7 @@ This plan applies **all 10 best practices** in a phased order so each step is sm
 
 ---
 
-### 1.2 — Point 4: Reuse sync/update/push orchestration
+### 1.2 - Point 4: Reuse sync/update/push orchestration
 
 | Action | Detail |
 |--------|--------|
@@ -74,28 +74,28 @@ This plan applies **all 10 best practices** in a phased order so each step is sm
 
 ---
 
-## Phase 2 — Feature handlers and modal state
+## Phase 2 - Feature handlers and modal state
 
 **Purpose:** Isolate feature logic and modal state so the page only coordinates.
 
-### 2.1 — Point 2: Extract feature-based services or handlers
+### 2.1 - Point 2: Extract feature-based services or handlers
 
 | Action | Detail |
 |--------|--------|
 | **Handlers** | Create stateless handler classes (or scoped services) that take dependencies in the constructor and expose async methods. Page creates them via factory or gets them from DI. Suggested split: |
-| | **WorkspaceSyncHandler** — `SyncAsync`, `SyncLevelAsync`, `SyncSingleRepoAsync` (call `RunSyncCoreAsync`); progress/CTS/errors reported via callbacks or a context object provided by the page. |
-| | **WorkspaceUpdateHandler** — Update plan, `RunUpdateCoreAsync`, single-repo update, commit payload, file-version update; page passes `WorkspaceId`, progress/error callbacks, and cancellation. |
-| | **WorkspacePushHandler** — Push plan, push with deps, single-repo push with upstream; page passes workspace id, progress, errors. |
-| | **WorkspaceCommitSyncHandler** — `CommitSyncAsync`, `CommitSyncLevelAsync` (calls API); page passes base URL, HTTP client, progress, errors. |
-| | **WorkspaceBranchHandler** — Create branches (all/single), checkout, sync to default (single/level); page passes workspace id, progress, errors. |
+| | **WorkspaceSyncHandler** - `SyncAsync`, `SyncLevelAsync`, `SyncSingleRepoAsync` (call `RunSyncCoreAsync`); progress/CTS/errors reported via callbacks or a context object provided by the page. |
+| | **WorkspaceUpdateHandler** - Update plan, `RunUpdateCoreAsync`, single-repo update, commit payload, file-version update; page passes `WorkspaceId`, progress/error callbacks, and cancellation. |
+| | **WorkspacePushHandler** - Push plan, push with deps, single-repo push with upstream; page passes workspace id, progress, errors. |
+| | **WorkspaceCommitSyncHandler** - `CommitSyncAsync`, `CommitSyncLevelAsync` (calls API); page passes base URL, HTTP client, progress, errors. |
+| | **WorkspaceBranchHandler** - Create branches (all/single), checkout, sync to default (single/level); page passes workspace id, progress, errors. |
 | **Page** | Page keeps: loading state, `workspaceRepositories`, `errorMessage`, `repositoryErrors`, modal visibility flags, and high-level actions that call the handlers and then set state / refresh. Handlers do not hold component state; they receive everything they need. |
 | **Verify** | Same flows as before: sync, update, push, pull, branch create/checkout/sync-to-default. |
 
-**Risk:** Medium–high. Start with one handler (e.g. `WorkspaceCommitSyncHandler`) and wire it; then replicate the pattern for sync, update, push, branch.
+**Risk:** Medium-high. Start with one handler (e.g. `WorkspaceCommitSyncHandler`) and wire it; then replicate the pattern for sync, update, push, branch.
 
 ---
 
-### 2.2 — Point 3: Extract modal state and commands
+### 2.2 - Point 3: Extract modal state and commands
 
 | Action | Detail |
 |--------|--------|
@@ -108,11 +108,11 @@ This plan applies **all 10 best practices** in a phased order so each step is sm
 
 ---
 
-## Phase 3 — Markup and components
+## Phase 3 - Markup and components
 
 **Purpose:** Shrink the Razor file and isolate table structure.
 
-### 3.1 — Point 5: Keep markup focused on structure and binding
+### 3.1 - Point 5: Keep markup focused on structure and binding
 
 | Action | Detail |
 |--------|--------|
@@ -124,7 +124,7 @@ This plan applies **all 10 best practices** in a phased order so each step is sm
 
 ---
 
-### 3.2 — Point 6: Use partials or subcomponents for table sections
+### 3.2 - Point 6: Use partials or subcomponents for table sections
 
 | Action | Detail |
 |--------|--------|
@@ -137,11 +137,11 @@ This plan applies **all 10 best practices** in a phased order so each step is sm
 
 ---
 
-## Phase 4 — Service surface and responsibility
+## Phase 4 - Service surface and responsibility
 
 **Purpose:** Reduce what the page injects and does so it acts as a coordinator.
 
-### 4.1 — Point 8: Limit injected services in the page
+### 4.1 - Point 8: Limit injected services in the page
 
 | Action | Detail |
 |--------|--------|
@@ -153,15 +153,15 @@ This plan applies **all 10 best practices** in a phased order so each step is sm
 
 ---
 
-### 4.2 — Point 10: Single responsibility per component
+### 4.2 - Point 10: Single responsibility per component
 
 | Action | Detail |
 |--------|--------|
-| **Optional split** | If the page is still large or has distinct “zones,” consider splitting into: (1) **WorkspaceRepositoriesPage** — route, layout, header, one main child; (2) **WorkspaceRepositoriesGrid** — table, level headers, rows, loading/empty states, search filter applied to data; (3) **WorkspaceRepositoriesHeader** — already exists; reuse. The page would own workspace load, errors, and modal/overlay state and pass data + callbacks into the grid. |
+| **Optional split** | If the page is still large or has distinct “zones,” consider splitting into: (1) **WorkspaceRepositoriesPage** - route, layout, header, one main child; (2) **WorkspaceRepositoriesGrid** - table, level headers, rows, loading/empty states, search filter applied to data; (3) **WorkspaceRepositoriesHeader** - already exists; reuse. The page would own workspace load, errors, and modal/overlay state and pass data + callbacks into the grid. |
 | **Responsibility** | Page: load workspace, manage errors and global state, show/hide modals and overlays, delegate actions to handlers. Grid: display and filter repos, emit row/level events. Handlers: run sync, update, push, commit-sync, branch operations. |
 | **Verify** | No UX or URL change; only file boundaries and responsibility boundaries clarified. |
 
-**Risk:** Low to medium. Can be done last and only if the team wants a clearer split; otherwise Phase 1–3 already achieve most of the maintainability gain.
+**Risk:** Low to medium. Can be done last and only if the team wants a clearer split; otherwise Phase 1-3 already achieve most of the maintainability gain.
 
 ---
 
@@ -184,15 +184,15 @@ This plan applies **all 10 best practices** in a phased order so each step is sm
 
 ## Suggested order of implementation
 
-1. **Phase 0** — DTO and URL helper (quick wins, no behavior change).  
-2. **Phase 1.1** — Code-behind (enables all other refactors).  
-3. **Phase 1.2** — Sync/commit-sync/sync-to-default consolidation (fewer bugs, easier to change).  
-4. **Phase 2.2** — Modal state (one modal at a time; reduces field sprawl).  
-5. **Phase 2.1** — Handlers (one handler at a time; e.g. CommitSync → Sync → Update → Push → Branch).  
-6. **Phase 3.2** — Level header and row components (biggest markup reduction).  
-7. **Phase 3.1** — Cleanup markup and bindings.  
-8. **Phase 4.1** — Facade service (after handlers exist).  
-9. **Phase 4.2** — Optional page/grid split.
+1. **Phase 0** - DTO and URL helper (quick wins, no behavior change).  
+2. **Phase 1.1** - Code-behind (enables all other refactors).  
+3. **Phase 1.2** - Sync/commit-sync/sync-to-default consolidation (fewer bugs, easier to change).  
+4. **Phase 2.2** - Modal state (one modal at a time; reduces field sprawl).  
+5. **Phase 2.1** - Handlers (one handler at a time; e.g. CommitSync → Sync → Update → Push → Branch).  
+6. **Phase 3.2** - Level header and row components (biggest markup reduction).  
+7. **Phase 3.1** - Cleanup markup and bindings.  
+8. **Phase 4.1** - Facade service (after handlers exist).  
+9. **Phase 4.2** - Optional page/grid split.
 
 ---
 

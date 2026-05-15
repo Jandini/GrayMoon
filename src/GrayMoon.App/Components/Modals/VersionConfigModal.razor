@@ -17,7 +17,7 @@
                     <p class="text-muted small mb-3">
                         Enter one version pattern per line. Each pattern is a line prefix followed by a <code>{repositoryname}</code> token.
                         For example: <code>MY_SERVICE_VERSION={repositoryname}</code> will match any line starting with <code>MY_SERVICE_VERSION=</code> and replace the rest with the repository's current version.
-                        The repository name should match a workspace repository — unknown tokens are silently ignored during update.
+                        The repository name should match a workspace repository - unknown tokens are silently ignored during update.
                         Type <kbd>@@</kbd> to autocomplete a repository name.
                     </p>
 
@@ -107,7 +107,7 @@
     private List<string> filteredRepos = new();
     private int suggestionIndex;
     private int _atPos;
-    private int _queryEnd;  // pre-computed end of @query — stable across Enter default-action timing
+    private int _queryEnd;  // pre-computed end of @query - stable across Enter default-action timing
     private double _dropdownX;
     private double _dropdownY;
     private int _pendingCaret = -1;

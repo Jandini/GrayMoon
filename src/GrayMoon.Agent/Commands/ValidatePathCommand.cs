@@ -18,7 +18,7 @@ public sealed class ValidatePathCommand : ICommandHandler<ValidatePathRequest, V
             // Validates path syntax (throws on invalid chars, relative paths, etc.)
             var fullPath = Path.GetFullPath(path);
 
-            // Try to create the directory if it doesn't exist — leave it in place once created
+            // Try to create the directory if it doesn't exist - leave it in place once created
             Directory.CreateDirectory(fullPath);
 
             return Task.FromResult(new ValidatePathResponse { IsValid = true });

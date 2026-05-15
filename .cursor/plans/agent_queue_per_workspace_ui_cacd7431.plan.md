@@ -5,7 +5,7 @@ todos: []
 isProject: false
 ---
 
-# Agent queue per workspace – UI and state exposure
+# Agent queue per workspace - UI and state exposure
 
 ## Context
 
@@ -41,7 +41,7 @@ flowchart LR
 
 ## Implementation
 
-### 1. SyncBackgroundService – per-workspace pending counts and notification
+### 1. SyncBackgroundService - per-workspace pending counts and notification
 
 **File:** [SyncBackgroundService.cs](src/GrayMoon.App/Services/SyncBackgroundService.cs)
 
@@ -52,7 +52,7 @@ flowchart LR
   - `public int GetPendingCountForWorkspace(int workspaceId)` → `_pendingCountByWorkspace.GetValueOrDefault(workspaceId)`.
 - Keep `GetQueueDepth()` unchanged (channel count only) for existing API if needed; UI will use the new “pending” (queued + in progress) counts.
 
-### 2. AgentStatusBadge – show "running" when any tasks pending
+### 2. AgentStatusBadge - show "running" when any tasks pending
 
 **File:** [AgentStatusBadge.razor](src/GrayMoon.App/Components/Shared/AgentStatusBadge.razor)
 
@@ -61,7 +61,7 @@ flowchart LR
 - **StateLabel**: If `State == AgentConnectionState.Online` and `SyncBackgroundService.GetTotalPendingCount() > 0` → `"running"`; otherwise keep current logic ("online", "update", "offline", etc.).
 - **TitleText**: When showing "running", set title to something like "Agent is running tasks" (and keep existing titles for other states).
 
-### 3. WorkspaceRepositoriesHeader – "Completing x agent tasks..." on the right
+### 3. WorkspaceRepositoriesHeader - "Completing x agent tasks..." on the right
 
 **File:** [WorkspaceRepositoriesHeader.razor](src/GrayMoon.App/Components/Shared/WorkspaceRepositoriesHeader.razor)
 
@@ -71,7 +71,7 @@ flowchart LR
   - When `AgentTasksPendingCount > 0`, add: `<span class="workspace-repos-agent-tasks text-muted">Completing @AgentTasksPendingCount agent task@(AgentTasksPendingCount == 1 ? "" : "s")...</span>`.
 - **Layout**: The title row already uses `display: flex; flex-wrap: wrap`. Use `margin-left: auto` on the agent-tasks span (or rely on the spacer) so it aligns to the right; when the row wraps on narrow viewports, the agent-tasks text will move to the next line so it does not overlap the title/subtitle. Add a small class in [WorkspaceRepositories.razor.css](src/GrayMoon.App/Components/Pages/WorkspaceRepositories.razor.css) (or [app.css](src/GrayMoon.App/wwwroot/app.css)) for the spacer and agent-tasks span if needed (e.g. `flex-shrink: 0` so the text doesn’t get squashed).
 
-### 4. WorkspaceRepositories page – feed count and subscribe
+### 4. WorkspaceRepositories page - feed count and subscribe
 
 **File:** [WorkspaceRepositories.razor](src/GrayMoon.App/Components/Pages/WorkspaceRepositories.razor) and code-behind (or `@code`)
 
@@ -80,7 +80,7 @@ flowchart LR
 - Compute `agentTasksPendingCount = SyncBackgroundService.GetPendingCountForWorkspace(WorkspaceId)` (use the page’s `WorkspaceId`).
 - Pass `AgentTasksPendingCount="@agentTasksPendingCount"` to `<WorkspaceRepositoriesHeader ... />`.
 
-### 5. Optional for later – HasWorkspaceJobsPending
+### 5. Optional for later - HasWorkspaceJobsPending
 
 - Add to **SyncBackgroundService** (or a small facade if you prefer):  
 `public bool HasWorkspaceJobsPending(int workspaceId) => GetPendingCountForWorkspace(workspaceId) > 0;`

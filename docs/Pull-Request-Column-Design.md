@@ -1,4 +1,4 @@
-# Pull Request Column – Design Document
+# Pull Request Column - Design Document
 
 ## Overview
 
@@ -25,8 +25,8 @@ Use GitHub REST API:
 
 - **List Pull Requests:** `GET /repos/{owner}/{repo}/pulls`
 - **Query parameters:**
-  - `state=open` – only open PRs (fast, one call per repo).
-  - `head={owner}:{branch}` – filter by source branch. For same-repo PRs this is the repo owner and current branch name.
+  - `state=open` - only open PRs (fast, one call per repo).
+  - `head={owner}:{branch}` - filter by source branch. For same-repo PRs this is the repo owner and current branch name.
 
 So the request is:
 
@@ -42,7 +42,7 @@ To support **merged** state (badge “merged” in purple), either:
 - **Option A:** Use `state=all` and take the first result; check `state` and `merged_at` to decide open vs merged. Slightly more data but still one request per repo.
 - **Option B:** First call with `state=open`; if empty, call again with `state=closed` and `head=owner:branch`, then inspect `merged_at` on the first result. Two calls only when there is no open PR.
 
-**Recommendation:** **Option A** – single request with `state=all`, `per_page=1`. If the single result’s head ref matches the current branch, use it and derive state (open / merged) from `state` and `merged_at`; otherwise treat as no PR.
+**Recommendation:** **Option A** - single request with `state=all`, `per_page=1`. If the single result’s head ref matches the current branch, use it and derive state (open / merged) from `state` and `merged_at`; otherwise treat as no PR.
 
 ### 1.2 Head ref format
 
@@ -63,12 +63,12 @@ So: **no new agent commands for PR**. PR data is fetched in the app via GitHub A
 
 ### 2.1 GitHub API (App)
 
-- **Option 1 – Extend `GitHubService`:** Add a method such as:
+- **Option 1 - Extend `GitHubService`:** Add a method such as:
   - `GetPullRequestForBranchAsync(Connector connector, string owner, string repo, string branch, CancellationToken ct)`
   - Returns a DTO with: `Number`, `State` (open/closed), `MergedAt` (nullable), `HtmlUrl`, `Title` (optional).
   - Implementation: `GET repos/{owner}/{repo}/pulls?state=all&head={owner}:{branch}&per_page=1`, then map first item to DTO; if empty or head ref doesn’t match, return “no PR”.
 
-- **Option 2 – New `GitHubPullRequestService`:** Thin service that takes `GitHubService`, `ConnectorRepository`, and exposes e.g. `GetPullRequestForBranchAsync(Repository repo, Connector connector, string branchName, CancellationToken ct)`. It would resolve owner/repo from the repository (see §2.2) and call `GitHubService` (which gets the new `GetPullRequestForBranchAsync` or a low-level `GetPullsAsync`).
+- **Option 2 - New `GitHubPullRequestService`:** Thin service that takes `GitHubService`, `ConnectorRepository`, and exposes e.g. `GetPullRequestForBranchAsync(Repository repo, Connector connector, string branchName, CancellationToken ct)`. It would resolve owner/repo from the repository (see §2.2) and call `GitHubService` (which gets the new `GetPullRequestForBranchAsync` or a low-level `GetPullsAsync`).
 
 **Recommendation:** Add **one new method on `GitHubService`** for the raw API call (`GetPullRequestForBranchAsync(Connector, owner, repo, branch)`), then either call it from a small **`GitHubPullRequestService`** that resolves owner/repo and connector per repo, or from the page/component that builds the PR column. Prefer a small **`GitHubPullRequestService`** so workspace page stays simple and we have a single place for “get PR for this workspace repo”.
 
@@ -78,28 +78,28 @@ So: **no new agent commands for PR**. PR data is fetched in the app via GitHub A
 - **Helper:** Extend **`RepositoryUrlHelper`** (or add a small static helper) to parse **owner** and **repo** from a GitHub clone URL:
   - `git@github.com:owner/repo.git` → `owner`, `repo`
   - `https://github.com/owner/repo.git` → `owner`, `repo`
-- If the URL is not GitHub, the repo is skipped for PR (no API call, show “—” or “none” in the PR column).
+- If the URL is not GitHub, the repo is skipped for PR (no API call, show “-” or “none” in the PR column).
 
 ### 2.3 Connector and token
 
 - Each `Repository` has `ConnectorId`. Use **`ConnectorRepository.GetByIdAsync(Repository.ConnectorId)`** to get the Connector.
 - Use that Connector’s `UserToken` (and optional `ApiBaseUrl`) in the existing `GitHubService.GetAsync(Connector, requestUri)` pattern.
-- If the connector is not GitHub or token is missing, skip PR fetch for that repo and show a neutral badge (“none” or “—”).
+- If the connector is not GitHub or token is missing, skip PR fetch for that repo and show a neutral badge (“none” or “-”).
 
 ---
 
 ## 3. When to Fetch PR Data
 
-### 3.1 Option A – On workspace page load (recommended for v1)
+### 3.1 Option A - On workspace page load (recommended for v1)
 
 - When the user opens the workspace repositories page, after the list of `WorkspaceRepositoryLink` (with Repository and branch) is available, **fetch PR in the app** for each repo that has a GitHub clone URL and a branch name.
-- **Parallelism:** Run requests in parallel with a **bounded concurrency** (e.g. 3–5 at a time) to avoid rate limits and avoid overwhelming the client.
+- **Parallelism:** Run requests in parallel with a **bounded concurrency** (e.g. 3-5 at a time) to avoid rate limits and avoid overwhelming the client.
 - **Caching:** Keep results in component state (e.g. `Dictionary<int, PullRequestInfo>` keyed by `RepositoryId`). No persistence in v1.
 
 **Pros:** Simple, always up-to-date when opening the page, no agent changes, no DB schema change.  
 **Cons:** Small delay on first load; no PR data when offline.
 
-### 3.2 Option B – Persist and refresh
+### 3.2 Option B - Persist and refresh
 
 - Add fields to **`WorkspaceRepositoryLink`**: e.g. `PullRequestNumber` (int?), `PullRequestState` (string or enum: Open, Merged, Closed), `PullRequestHtmlUrl` (string), `LastPrCheckAt` (DateTime?).
 - **When to set:** (1) After a full sync or refresh, the app calls the GitHub API for each repo and persists the result; and/or (2) on workspace page load, fetch and then persist.
@@ -108,7 +108,7 @@ So: **no new agent commands for PR**. PR data is fetched in the app via GitHub A
 **Pros:** Can show PR without a new API call; can show “last known” state.  
 **Cons:** Schema change, migration, and more logic; risk of stale data.
 
-**Recommendation for v1:** **Option A** – fetch on page load, in-memory only. Option B can be a follow-up if you want persisted PR state and fewer API calls on load.
+**Recommendation for v1:** **Option A** - fetch on page load, in-memory only. Option B can be a follow-up if you want persisted PR state and fewer API calls on load.
 
 ---
 
@@ -152,17 +152,17 @@ Non-GitHub repo or missing connector/token: show **none** (dark gray).
 ### 6.2 Cell content
 
 - **Component:** `PRBadge` (new shared component).
-- **Parameters:** e.g. `PullRequestNumber`, `PullRequestState` (open/merged/closed), `PullRequestUrl`, `DefaultBranchAheadCommits`, `HasPrData` (so we can show loading or “—” when fetch didn’t run).
+- **Parameters:** e.g. `PullRequestNumber`, `PullRequestState` (open/merged/closed), `PullRequestUrl`, `DefaultBranchAheadCommits`, `HasPrData` (so we can show loading or “-” when fetch didn’t run).
 - **Links:** When there is a PR, the badge can link to `PullRequestUrl` (GitHub PR page). “create” can link to the compare URL (same as used elsewhere: `{repoUrl}/compare/main...{branch}`).
 
 ### 6.3 Styling
 
 - Reuse existing badge patterns from the table (e.g. `.badge`, existing column alignment).
 - New classes, e.g.:
-  - `.pr-badge-none` – dark gray background.
-  - `.pr-badge-create` – yellow.
-  - `.pr-badge-open` – green.
-  - `.pr-badge-merged` – background #8957E5, color white.
+  - `.pr-badge-none` - dark gray background.
+  - `.pr-badge-create` - yellow.
+  - `.pr-badge-open` - green.
+  - `.pr-badge-merged` - background #8957E5, color white.
 
 Define these in `app.css` (or scoped CSS) under `.repositories-table td.col-pr`.
 
@@ -170,7 +170,7 @@ Define these in `app.css` (or scoped CSS) under `.repositories-table td.col-pr`.
 
 ## 7. Implementation Outline
 
-### 7.1 App – GitHub API
+### 7.1 App - GitHub API
 
 1. **GitHub API model:** Add a small DTO for the PR list response item (e.g. `GitHubPullRequestDto`) with `Number`, `State`, `MergedAt`, `HtmlUrl`, `Title`, and head ref info so we can confirm the branch matches.
 2. **`GitHubService`:** Add `GetPullRequestForBranchAsync(Connector connector, string owner, string repo, string branch, CancellationToken ct)`:
@@ -185,7 +185,7 @@ Define these in `app.css` (or scoped CSS) under `.repositories-table td.col-pr`.
      - Call `GitHubService.GetPullRequestForBranchAsync(connector, owner, repo, branchName, ct)`.
      - Return a simple app-side model (e.g. `PullRequestInfo { Number, State, MergedAt, HtmlUrl }`).
 
-### 7.2 App – Workspace page
+### 7.2 App - Workspace page
 
 1. **WorkspaceRepositories.razor:**
    - Inject `GitHubPullRequestService` and `ConnectorRepository` (if not already).
@@ -197,7 +197,7 @@ Define these in `app.css` (or scoped CSS) under `.repositories-table td.col-pr`.
    - Add `<td class="col-pr">` with `<PRBadge ... />` after the Divergence `<td>`, passing PR data and `DefaultBranchAheadCommits`.
    - Increment `colSpan` to 8.
 
-### 7.3 App – PRBadge component
+### 7.3 App - PRBadge component
 
 1. **Components/Shared/PRBadge.razor:**
    - Parameters: `PullRequestNumber`, `PullRequestState` (enum or string: Open, Merged, Closed), `PullRequestUrl`, `DefaultBranchAheadCommits`, and e.g. `IsLoading` / `IsGitHubRepo`.
@@ -219,8 +219,8 @@ Define these in `app.css` (or scoped CSS) under `.repositories-table td.col-pr`.
 | Non-GitHub repo | Do not call API; show “none” (dark gray). |
 | Missing or invalid connector/token | Skip API call; show “none”. |
 | Branch name with special characters | Use `Uri.EscapeDataString(branch)` in `head=` parameter. |
-| Rate limiting (403/429) | Log and show “—” or “none” for affected repos; optional: retry with backoff or show a “rate limited” message. |
-| Network error | Log; show “—” or “none” for that repo. |
+| Rate limiting (403/429) | Log and show “-” or “none” for affected repos; optional: retry with backoff or show a “rate limited” message. |
+| Network error | Log; show “-” or “none” for that repo. |
 | Repo not yet synced / no branch | Show “none”. |
 
 ---

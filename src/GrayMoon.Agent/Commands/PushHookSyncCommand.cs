@@ -30,7 +30,7 @@ public sealed class PushHookSyncCommand(IGitService git, IHubConnectionProvider 
         if (connection?.State == HubConnectionState.Connected)
         {
             // Send an immediate notification with Version+Branch so the UI updates right away.
-            // Commit counts are intentionally omitted here — this hook fires BEFORE the push
+            // Commit counts are intentionally omitted here - this hook fires BEFORE the push
             // data is transferred, so any counts read now are stale.
             // SyncCommandHandler's HasValue guards ensure null fields do not overwrite DB values.
             var notification = new RepositorySyncNotification
@@ -87,7 +87,7 @@ public sealed class PushHookSyncCommand(IGitService git, IHubConnectionProvider 
                     continue;
                 }
 
-                // Push done (outgoing == 0 or null) or max attempts reached — send final notification
+                // Push done (outgoing == 0 or null) or max attempts reached - send final notification
                 var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, CancellationToken.None);
                 var (versionResult, _) = await git.GetVersionAsync(repoPath, CancellationToken.None);
                 var finalVersion = versionResult?.InformationalVersion ?? "-";

@@ -27,7 +27,7 @@
     table-layout: fixed;
 }
 
-/* Active column: fit toggle only – fixed width so it stays visible */
+/* Active column: fit toggle only - fixed width so it stays visible */
 .connectors-table th.col-active,
 .connectors-table td.col-active {
     text-align: center;
@@ -37,7 +37,7 @@
     box-sizing: content-box;
 }
 
-/* Status column: fit badge only – fixed width so it stays visible */
+/* Status column: fit badge only - fixed width so it stays visible */
 .connectors-table th.status-col,
 .connectors-table td.status-col {
     text-align: center;
@@ -52,7 +52,7 @@
     text-align: center;
 }
 
-/* Actions column: fit all three buttons – fixed width so it stays visible */
+/* Actions column: fit all three buttons - fixed width so it stays visible */
 .connectors-table th.col-actions,
 .connectors-table td.col-actions {
     width: 160px;

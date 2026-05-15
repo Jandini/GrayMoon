@@ -1,4 +1,4 @@
-# Pull Request Persistence – Design Document
+# Pull Request Persistence - Design Document
 
 ## Overview
 
@@ -32,7 +32,7 @@ Use a **dedicated table** so PR concerns stay in one place and `WorkspaceReposit
 | MergedAt               | datetime?| When merged (for "merged" badge) |
 | LastCheckedAt          | datetime | When we last fetched from API |
 
-- **PK:** `WorkspaceRepositoryId` (one row per workspace–repo link).
+- **PK:** `WorkspaceRepositoryId` (one row per workspace-repo link).
 - **FK:** `WorkspaceRepositoryId` → `WorkspaceRepositories(WorkspaceRepositoryId)` ON DELETE CASCADE.
 - When there is no PR, store a row with `PullRequestNumber = null` (and other fields null) so we know "we checked, no PR"; or delete the row. Prefer **upsert: if no PR, write null number and state** so `LastCheckedAt` is still set.
 

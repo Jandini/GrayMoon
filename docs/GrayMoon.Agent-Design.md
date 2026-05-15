@@ -4,8 +4,8 @@
 
 GrayMoon.Agent is a host-side executable that executes all git and repository I/O operations on behalf of GrayMoon.App (which runs in Docker). It receives commands via SignalR from the app and pushes responses (and sync notifications) back. This design simplifies the app by removing git, GitVersion, and workspace filesystem access from the container.
 
-- **GrayMoon.App** (Docker): Web UI, DB, orchestration, SignalR hub — no git/filesystem.
-- **GrayMoon.Agent** (Host): All git commands, hooks, workspace I/O — runs as console app or Windows/Linux service.
+- **GrayMoon.App** (Docker): Web UI, DB, orchestration, SignalR hub - no git/filesystem.
+- **GrayMoon.Agent** (Host): All git commands, hooks, workspace I/O - runs as console app or Windows/Linux service.
 
 ---
 
@@ -31,9 +31,9 @@ When offline: sync operations fail with a clear message. No silent failures.
 
 ## 2. Concurrency & Queuing
 
-- **One agent per host** — single process, single connection to the app
-- **Up to 8 concurrent jobs** — configurable parallelism (`MaxConcurrentCommands`)
-- **Single shared queue** — both UI commands (SignalR `RequestCommand`) and hook notifications (`/notify`) are enqueued to the same queue
+- **One agent per host** - single process, single connection to the app
+- **Up to 8 concurrent jobs** - configurable parallelism (`MaxConcurrentCommands`)
+- **Single shared queue** - both UI commands (SignalR `RequestCommand`) and hook notifications (`/notify`) are enqueued to the same queue
 - When a slot frees, the next job is processed (FIFO within the queue)
 
 ```
@@ -78,7 +78,7 @@ Environment variables override: `GrayMoon__AppHubUrl`, `GrayMoon__ListenPort`, e
 post-commit → curl http://127.0.0.1:9191/notify → Agent enqueues to same queue → Worker runs GitVersion → Agent pushes workspaceId, repositoryId, version, branch to App → App persists
 ```
 
-- Hooks always use `http://127.0.0.1:{ListenPort}/notify` — no Docker URL config
+- Hooks always use `http://127.0.0.1:{ListenPort}/notify` - no Docker URL config
 - Agent runs on the host where repos live; hooks run in the same environment
 - `/notify` enqueues a job to the **same queue** as UI commands; a worker picks it up (up to 8 concurrent)
 - Single network concern: agent must reach the app; hooks only reach localhost
@@ -117,7 +117,7 @@ GrayMoon.sln
 
 ### Hub: `AgentHub` (path: `/agent`)
 
-Hub path is `/agent` (no `hubs/` prefix required — map via `MapHub<AgentHub>("/agent")`).
+Hub path is `/agent` (no `hubs/` prefix required - map via `MapHub<AgentHub>("/agent")`).
 
 **Server → Agent (invoke on agent client):**
 
@@ -144,9 +144,9 @@ The app sends all required data in each command. **AddSafeDirectory is called on
 | **GetWorkspaceRepositories** | `workspaceName` | `{ repositories: string[] }` |
 | **GetRepositoryVersion** | `workspaceName`, `repositoryName` | `{ exists, version?, branch? }` |
 
-**SyncRepository** — Full sync for one repo (used by workspace sync): ensures workspace dir exists, clones if repo missing. **AddSafeDirectory is called only immediately after CloneAsync** (when a clone was performed). Then runs GitVersion, writes post-commit/post-checkout hooks. Hooks curl `http://127.0.0.1:{ListenPort}/notify` with `{ repositoryId, workspaceId, repositoryPath }` (repositoryPath embedded at hook-creation time so the agent can run GitVersion directly when the hook fires).
+**SyncRepository** - Full sync for one repo (used by workspace sync): ensures workspace dir exists, clones if repo missing. **AddSafeDirectory is called only immediately after CloneAsync** (when a clone was performed). Then runs GitVersion, writes post-commit/post-checkout hooks. Hooks curl `http://127.0.0.1:{ListenPort}/notify` with `{ repositoryId, workspaceId, repositoryPath }` (repositoryPath embedded at hook-creation time so the agent can run GitVersion directly when the hook fires).
 
-**RefreshRepositoryVersion** — Manual/API-triggered single-repo refresh: runs GitVersion only (no AddSafeDirectory; repo was cloned earlier). Hook flow uses `/notify` instead (agent runs GitVersion and pushes result directly).
+**RefreshRepositoryVersion** - Manual/API-triggered single-repo refresh: runs GitVersion only (no AddSafeDirectory; repo was cloned earlier). Hook flow uses `/notify` instead (agent runs GitVersion and pushes result directly).
 
 ---
 

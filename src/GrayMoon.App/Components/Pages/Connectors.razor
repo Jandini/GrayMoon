@@ -583,7 +583,7 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error testing connector.");
-            // Unexpected app exception — not a connector fault; do not deactivate
+            // Unexpected app exception - not a connector fault; do not deactivate
             await ConnectorRepository.UpdateStatusAsync(connector.ConnectorId, "Error",
                 "An unexpected error occurred while testing the connector.");
             return false;

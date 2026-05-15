@@ -4,7 +4,7 @@ This plan addresses the regressions after moving the Workspace Repositories grid
 
 ---
 
-### Step 1 – Restore dependency level header layout and background
+### Step 1 - Restore dependency level header layout and background
 
 - **Goal**: Make the dependency level header row look exactly like before:
   - Dark background (black / near-black).
@@ -26,7 +26,7 @@ This plan addresses the regressions after moving the Workspace Repositories grid
 
 ---
 
-### Step 2 – Fix dependency level header icon colors
+### Step 2 - Fix dependency level header icon colors
 
 - **Goal**: Use the same icon colors as before (dedicated gray tones, not global text variables).
 - **Files**:
@@ -49,7 +49,7 @@ This plan addresses the regressions after moving the Workspace Repositories grid
 
 ---
 
-### Step 3 – Restore dependency column badge (background + text color)
+### Step 3 - Restore dependency column badge (background + text color)
 
 - **Goal**: Make the dependency badge cells look like before:
   - Solid background color per state (none/ok/mismatch).
@@ -73,7 +73,7 @@ This plan addresses the regressions after moving the Workspace Repositories grid
 
 ---
 
-### Step 4 – Restore ellipsis behavior for Repository / Version / Branch columns
+### Step 4 - Restore ellipsis behavior for Repository / Version / Branch columns
 
 - **Goal**:
   - `Repository`, `Version`, and `Branch` **never wrap**; they truncate with `...` when too long.
@@ -101,7 +101,7 @@ This plan addresses the regressions after moving the Workspace Repositories grid
 
 ---
 
-### Step 5 – Restore hover “frame” (pill) for Version and Branch
+### Step 5 - Restore hover “frame” (pill) for Version and Branch
 
 - **Goal**: When hovering Version and Branch:
   - Show the pill‑like frame and background, identical to Divergence/Commits badges behavior.
@@ -121,7 +121,7 @@ This plan addresses the regressions after moving the Workspace Repositories grid
 
 ---
 
-### Step 6 – Fix Repository link hover color (underline should match text color)
+### Step 6 - Fix Repository link hover color (underline should match text color)
 
 - **Goal**:
   - Repository names remain white (or current text color).

@@ -25,9 +25,9 @@ So the modal appears whenever there are dependencies, even if all dependency rep
 
 | Role                          | File                                                                                                                                                                       |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Push flow (badge + header)    | [WorkspaceRepositories.razor.cs](src/GrayMoon.App/Components/Pages/WorkspaceRepositories.razor.cs) — `OnPushBadgeClickAsync`, `OnPushClickAsync`                           |
-| Push handler (plan + execute) | [WorkspacePushHandler.cs](src/GrayMoon.App/Services/WorkspacePushHandler.cs) — get dep info today; will stop returning dep info for modal decision                         |
-| Push dependency data          | [WorkspaceProjectRepository.cs](src/GrayMoon.App/Repositories/WorkspaceProjectRepository.cs) — `GetPushDependencyInfoForRepoAsync`, `GetPushDependencyInfoForRepoSetAsync` |
+| Push flow (badge + header)    | [WorkspaceRepositories.razor.cs](src/GrayMoon.App/Components/Pages/WorkspaceRepositories.razor.cs) - `OnPushBadgeClickAsync`, `OnPushClickAsync`                           |
+| Push handler (plan + execute) | [WorkspacePushHandler.cs](src/GrayMoon.App/Services/WorkspacePushHandler.cs) - get dep info today; will stop returning dep info for modal decision                         |
+| Push dependency data          | [WorkspaceProjectRepository.cs](src/GrayMoon.App/Repositories/WorkspaceProjectRepository.cs) - `GetPushDependencyInfoForRepoAsync`, `GetPushDependencyInfoForRepoSetAsync` |
 | “Needs push” definition       | Same as existing: `(OutgoingCommits ?? 0) > 0                                                                                                                              |
 
 

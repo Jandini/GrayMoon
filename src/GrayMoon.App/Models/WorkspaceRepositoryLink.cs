@@ -6,7 +6,7 @@ namespace GrayMoon.App.Models;
 [Table("WorkspaceRepositories")]
 public class WorkspaceRepositoryLink
 {
-    /// <summary>Primary key for the workspace–repository link row.</summary>
+    /// <summary>Primary key for the workspace-repository link row.</summary>
     public int WorkspaceRepositoryId { get; set; }
 
     [Required]
@@ -64,9 +64,9 @@ public class WorkspaceRepositoryLink
     /// <summary>Dominant project type for this repository (Service &gt; Package &gt; Executable &gt; Library &gt; Test). Null when no projects are known. Set during sync and project refresh.</summary>
     public ProjectType? RepositoryType { get; set; }
 
-    /// <summary>Persisted pull request state for this workspace–repo link. 1:1 optional.</summary>
+    /// <summary>Persisted pull request state for this workspace-repo link. 1:1 optional.</summary>
     public WorkspaceRepositoryPullRequest? PullRequest { get; set; }
 
-    /// <summary>Persisted CI action status for this workspace–repo link. 1:1 optional.</summary>
+    /// <summary>Persisted CI action status for this workspace-repo link. 1:1 optional.</summary>
     public WorkspaceRepositoryAction? Action { get; set; }
 }

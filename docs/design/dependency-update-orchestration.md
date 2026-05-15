@@ -11,15 +11,15 @@ This document describes how **csproj dependencies** and **version file dependenc
 **What they are:** PackageReference versions in `.csproj` files. A project in repo A references a package produced by a project in repo B; the version in A’s `.csproj` should match the current version (e.g. GitVersion) of B.
 
 **Data sources:**
-- **WorkspaceProjects** — projects and their `ProjectFilePath` (path to `.csproj`), `PackageId`, `ProjectName`
-- **ProjectDependencies** — dependent project → referenced project, and current `Version` in the `.csproj`
-- **WorkspaceRepositoryLink.GitVersion** — current version of each repo (source of truth for “new” version)
+- **WorkspaceProjects** - projects and their `ProjectFilePath` (path to `.csproj`), `PackageId`, `ProjectName`
+- **ProjectDependencies** - dependent project → referenced project, and current `Version` in the `.csproj`
+- **WorkspaceRepositoryLink.GitVersion** - current version of each repo (source of truth for “new” version)
 
 **Mismatch rule:** For each dependency edge, `ProjectDependency.Version` ≠ referenced repo’s `GitVersion` ⇒ needs update.
 
 | Layer | Responsibility |
 |-------|----------------|
-| **WorkspaceProjectRepository** | Builds update plan: `GetSyncDependenciesPayloadAsync` — which repos/projects/packages need version bumps and to what version. |
+| **WorkspaceProjectRepository** | Builds update plan: `GetSyncDependenciesPayloadAsync` - which repos/projects/packages need version bumps and to what version. |
 | **WorkspaceGitService** | Refresh projects from disk (`RefreshWorkspaceProjectsAsync`), get plan (`GetUpdatePlanAsync`), sync `.csproj` on disk (`SyncDependenciesAsync`), commit `.csproj` changes (`CommitDependencyUpdatesAsync`), refresh repo version and broadcast. |
 | **DependencyUpdateOrchestrator** | Runs the **csproj-only** workflow: refresh → plan → (multi/single level) sync → commit → refresh version. Stateless; no UI. |
 | **WorkspaceUpdateHandler** | Thin wrapper: calls orchestrator with progress/error callbacks. |
@@ -38,9 +38,9 @@ This document describes how **csproj dependencies** and **version file dependenc
 **What they are:** Arbitrary files (e.g. `Directory.Build.props`, `version.json`) that contain version placeholders. The user configures a **version pattern** per file (e.g. `Version="{RepoA}"`). At update time, placeholders are replaced with current repo versions from workspace links (no GitVersion run).
 
 **Data sources:**
-- **WorkspaceFileVersionConfig** — `FileId`, `VersionPattern` (multi-line: `KEY={repositoryName}`)
-- **WorkspaceRepositoryLink.GitVersion** — current version per repo (same as for csproj)
-- **WorkspaceFile** — file path and repository
+- **WorkspaceFileVersionConfig** - `FileId`, `VersionPattern` (multi-line: `KEY={repositoryName}`)
+- **WorkspaceRepositoryLink.GitVersion** - current version per repo (same as for csproj)
+- **WorkspaceFile** - file path and repository
 
 **“Mismatch” rule:** There is no explicit mismatch. The operation is “update all configured files with current workspace repo versions.” So it’s always “run update” if there are configs.
 
@@ -50,7 +50,7 @@ This document describes how **csproj dependencies** and **version file dependenc
 | **WorkspaceGitService** | Commit updated paths: `CommitFilePathsAsync` (generic “stage these paths and commit” with message e.g. `chore(deps): update versions (N)`). |
 | **Orchestrator** | **None.** Version-file update is not part of `DependencyUpdateOrchestrator`. |
 | **UI (WorkspaceRepositories.razor.cs)** | After csproj update completes: call `RunFileVersionUpdateAndGetUpdatedFilesAsync()`; if any files updated, either auto-commit (`CommitFileVersionUpdatesAsync`) or show `VersionFilesCommitModal`. When Update is clicked and **no** csproj updates: run version-file update and show modal if there are updated files. Same for single-repo update. |
-| **Agent** | `UpdateFileVersions` — in-place substitution in one file using pattern + `repoVersions`. |
+| **Agent** | `UpdateFileVersions` - in-place substitution in one file using pattern + `repoVersions`. |
 
 **Flow (high level):**
 1. No plan step: all configured files are candidates.
@@ -360,7 +360,7 @@ So:
 Current:
 
 - `DependencyUpdateOrchestrator.RunAsync(workspaceId, cancellationToken, setProgress, onRepoError, onAppSideComplete, repoIdsToUpdate?)`  
-  — runs only the **csproj** flow.
+  - runs only the **csproj** flow.
 
 Proposed:
 
@@ -390,7 +390,7 @@ Recommendation: **Option B** for backward compatibility with “confirm before c
 ### 6.4 Dependency Injection
 
 - `DependencyUpdateOrchestrator` today depends on `WorkspaceGitService` and `IOptions<WorkspaceOptions>`.
-- Add `WorkspaceFileVersionService` (and, for Option B, no extra dependency for modal — just a callback).
+- Add `WorkspaceFileVersionService` (and, for Option B, no extra dependency for modal - just a callback).
 - Orchestrator stays in App layer; no UI types. Callback `onVersionFilesUpdated(byRepo)` can be a simple delegate so the page can pass a method that opens the modal and stores `byRepo` for commit on confirm.
 
 ### 6.5 UI Changes
@@ -421,7 +421,7 @@ Recommendation: **Option B** for backward compatibility with “confirm before c
 ### 6.7 Backward Compatibility
 
 - If there are no version configs, step 6 returns no updated files; step 7 is skipped. Behavior matches “csproj only.”
-- If there are no csproj updates but there are version configs, step 4 is skipped, step 6 runs, step 7 runs — “version files only” is just a subset of the same flow.
+- If there are no csproj updates but there are version configs, step 4 is skipped, step 6 runs, step 7 runs - “version files only” is just a subset of the same flow.
 - Single-repo: same orchestrator with `repoIdsToUpdate: { id }`; version-file update can be scoped to that repo in `UpdateAllVersionsAsync(selectedRepositoryIds: repoIdsToUpdate)`.
 
 ---

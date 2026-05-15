@@ -8,7 +8,7 @@
 
 ## Current state
 
-- **Update flow** is driven from [WorkspaceRepositories.razor.cs](src/GrayMoon.App/Components/Pages/WorkspaceRepositories.razor.cs) and implemented in [WorkspaceGitService.RunUpdateAsync](src/GrayMoon.App/Services/WorkspaceGitService.cs) (lines 504–679), which mixes refresh, plan, multi/single-level branching, sync, commit, and refresh version in one long method.
+- **Update flow** is driven from [WorkspaceRepositories.razor.cs](src/GrayMoon.App/Components/Pages/WorkspaceRepositories.razor.cs) and implemented in [WorkspaceGitService.RunUpdateAsync](src/GrayMoon.App/Services/WorkspaceGitService.cs) (lines 504-679), which mixes refresh, plan, multi/single-level branching, sync, commit, and refresh version in one long method.
 - **Progress** is reported via `Action<string> setProgress`; the page shows it in [LoadingOverlay](src/GrayMoon.App/Components/Shared/LoadingOverlay.razor) with "Running x tasks…" when awaiting agent tasks.
 - **Csproj commits**: Paths in [CommitDependencyUpdatesAsync](src/GrayMoon.App/Services/WorkspaceGitService.cs) should be normalized (repo-relative, forward slashes) to avoid commit bugs.
 
@@ -44,11 +44,11 @@ flowchart LR
 - **Location**: New file `src/GrayMoon.App/Services/DependencyUpdateOrchestrator.cs`.
 - **Signature**: `RunAsync(workspaceId, cancellationToken, setProgress, onRepoError, onAppSideComplete, repoIdsToUpdate?)` returning `Task` (no payload return).
 - **Steps** (clear, commented):
-  1. **Refresh projects** — `RefreshWorkspaceProjectsAsync`; stop on error.
-  2. **Get update plan** — `GetUpdatePlanAsync`. If empty, `RecomputeAndBroadcastWorkspaceSyncedAsync`, invoke `onAppSideComplete`, return.
+  1. **Refresh projects** - `RefreshWorkspaceProjectsAsync`; stop on error.
+  2. **Get update plan** - `GetUpdatePlanAsync`. If empty, `RecomputeAndBroadcastWorkspaceSyncedAsync`, invoke `onAppSideComplete`, return.
   3. **Multi-level**: For each level (ascending): sync deps for that level → commit for that level (required before next level) → refresh version for that level; invoke `onAppSideComplete` where appropriate; stop on error.
   4. **Single-level**: Sync all → commit all → refresh version for all; then `onAppSideComplete` and `RecomputeAndBroadcastWorkspaceSyncedAsync`.
-  5. **Finalize** — `RecomputeAndBroadcastWorkspaceSyncedAsync`; invoke `onAppSideComplete`.
+  5. **Finalize** - `RecomputeAndBroadcastWorkspaceSyncedAsync`; invoke `onAppSideComplete`.
 
 ### 2. Fix csproj commit path handling
 
@@ -75,11 +75,11 @@ flowchart LR
 
 ## Files to change
 
-- [WorkspaceGitService.cs](src/GrayMoon.App/Services/WorkspaceGitService.cs) — Path normalization in `CommitDependencyUpdatesAsync`; delegate `RunUpdateAsync` to orchestrator or remove.
-- [WorkspaceUpdateHandler.cs](src/GrayMoon.App/Services/WorkspaceUpdateHandler.cs) — Call orchestrator; remove payload return and "update only" handling.
-- [WorkspaceRepositories.razor.cs](src/GrayMoon.App/Components/Pages/WorkspaceRepositories.razor.cs) — Use orchestrator only; remove "Update only" and "commit later" flows.
-- [UpdateDependenciesModal.razor](src/GrayMoon.App/Components/Modals/UpdateDependenciesModal.razor) — Remove "Update only" button and related parameters.
-- DI registration — Register `DependencyUpdateOrchestrator`.
+- [WorkspaceGitService.cs](src/GrayMoon.App/Services/WorkspaceGitService.cs) - Path normalization in `CommitDependencyUpdatesAsync`; delegate `RunUpdateAsync` to orchestrator or remove.
+- [WorkspaceUpdateHandler.cs](src/GrayMoon.App/Services/WorkspaceUpdateHandler.cs) - Call orchestrator; remove payload return and "update only" handling.
+- [WorkspaceRepositories.razor.cs](src/GrayMoon.App/Components/Pages/WorkspaceRepositories.razor.cs) - Use orchestrator only; remove "Update only" and "commit later" flows.
+- [UpdateDependenciesModal.razor](src/GrayMoon.App/Components/Modals/UpdateDependenciesModal.razor) - Remove "Update only" button and related parameters.
+- DI registration - Register `DependencyUpdateOrchestrator`.
 
 ## Result
 
