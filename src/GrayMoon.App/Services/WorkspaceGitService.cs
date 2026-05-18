@@ -942,6 +942,8 @@ public class WorkspaceGitService(
             .ToListAsync(cancellationToken);
 
         var fetchedRefs = new HashSet<(string Name, bool IsRemote, bool IsTag)>();
+        // Tracks the agent-provided rank for tags so we can persist "newest first" order; branches default to 0.
+        var sortIndexByRef = new Dictionary<(string Name, bool IsRemote, bool IsTag), int>();
         if (localBranches != null)
         {
             foreach (var branch in localBranches)
@@ -960,10 +962,15 @@ public class WorkspaceGitService(
         }
         if (tags != null)
         {
+            var rank = 0;
             foreach (var tag in tags)
             {
                 if (!string.IsNullOrWhiteSpace(tag))
-                    fetchedRefs.Add((tag, false, true));
+                {
+                    var key = (tag, false, true);
+                    if (fetchedRefs.Add(key))
+                        sortIndexByRef[key] = rank++;
+                }
             }
         }
 
@@ -975,11 +982,14 @@ public class WorkspaceGitService(
         foreach (var (name, isRemote, isTag) in fetchedRefs)
         {
             var isDefault = !isTag && !string.IsNullOrWhiteSpace(defaultBranchName) && string.Equals(name, defaultBranchName, StringComparison.OrdinalIgnoreCase);
+            var sortIndex = sortIndexByRef.TryGetValue((name, isRemote, isTag), out var rank) ? rank : 0;
             var existing = existingBranches.FirstOrDefault(b => b.BranchName == name && b.IsRemote == isRemote && b.IsTag == isTag);
             if (existing != null)
             {
                 existing.LastSeenAt = now;
                 existing.IsDefault = isDefault;
+                if (isTag)
+                    existing.SortIndex = sortIndex;
             }
             else
             {
@@ -990,7 +1000,8 @@ public class WorkspaceGitService(
                     IsRemote = isRemote,
                     IsTag = isTag,
                     LastSeenAt = now,
-                    IsDefault = isDefault
+                    IsDefault = isDefault,
+                    SortIndex = isTag ? sortIndex : 0
                 });
             }
         }

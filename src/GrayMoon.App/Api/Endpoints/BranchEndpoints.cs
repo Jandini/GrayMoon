@@ -105,10 +105,12 @@ public static class BranchEndpoints
                 .OrderBy(b => b)
                 .ToList();
 
+            // Tags are persisted with SortIndex matching the agent's "newest first" (creator-date descending) order, so order by that here.
             var tags = rows
                 .Where(b => b.IsTag)
+                .OrderBy(b => b.SortIndex)
+                .ThenBy(b => b.BranchName)
                 .Select(b => b.BranchName)
-                .OrderBy(b => b)
                 .ToList();
 
             // Get current branch (null when on a tag) from workspace repository link

@@ -32,4 +32,7 @@ public class RepositoryBranch
 
     /// <summary>True if this row represents a Git tag rather than a branch. Tag rows always have <see cref="IsRemote"/> = false.</summary>
     public bool IsTag { get; set; }
+
+    /// <summary>Rank within the fetched list as reported by the agent (0 = first/newest). Only meaningful for tags, which the agent returns ordered by creator date descending; used to preserve "newest first" order across reads. Branches do not use this and default to 0.</summary>
+    public int SortIndex { get; set; }
 }
