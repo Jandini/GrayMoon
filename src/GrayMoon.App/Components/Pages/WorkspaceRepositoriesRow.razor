@@ -44,7 +44,17 @@
             }
         </td>
         <td class="col-branch">
-            @if (!string.IsNullOrEmpty(Link.BranchName))
+            @if (Link.IsOnTag)
+            {
+                <div class="branch-container">
+                    <span class="branch-inner branch-inner--tag"
+                          @onclick="HandleBranchClick"
+                          title="Repository is pinned to a tag. Click to switch.">
+                        <i class="bi bi-tag me-1" aria-hidden="true"></i>@Link.CheckedOutTag
+                    </span>
+                </div>
+            }
+            else if (!string.IsNullOrEmpty(Link.BranchName))
             {
                 <div class="branch-container">
                     <span class="branch-inner @(ActionsDisabled ? "branch-inner--disabled" : "")"
@@ -64,7 +74,8 @@
                                     DefaultAhead="@Link.DefaultBranchAheadCommits"
                                     BranchName="@Link.BranchName"
                                     RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
-                                    DefaultBranchName="@Link.DefaultBranchName" />
+                                    DefaultBranchName="@Link.DefaultBranchName"
+                                    IsOnTag="@Link.IsOnTag" />
                 </span>
                 <span class="metrics-block metrics-pr text-nowrap"
                       @onmouseenter="HandlePrBadgeMouseEnter">
@@ -88,7 +99,7 @@
                     }
                     else
                     {
-                        <span class="dependency-badge-tooltip-wrap dependency-badge-link @(IsUpdating || IsSyncing || ActionsDisabled ? "dependency-badge-link--disabled" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
+                        <span class="dependency-badge-tooltip-wrap dependency-badge-link @(IsUpdating || IsSyncing || ActionsDisabled || Link.IsOnTag ? "dependency-badge-link--disabled" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
                               role="button"
                               tabindex="0"
                               style="cursor: pointer;"
@@ -119,7 +130,8 @@
                                   Incoming="@Link.IncomingCommits"
                                   BranchHasUpstream="@Link.BranchHasUpstream"
                                   BranchName="@Link.BranchName"
-                                  Disabled="@ActionsDisabled"
+                                  Disabled="@(ActionsDisabled || Link.IsOnTag)"
+                                  IsOnTag="@Link.IsOnTag"
                                   OnPushClick="OnPushBadgeClick"
                                   OnPullClick="OnPullBadgeClick" />
                 </span>
@@ -127,7 +139,7 @@
                     <RepoSyncStatusBadge RepositoryId="repo.RepositoryId"
                                         Status="@RepoSyncStatus"
                                         IsSyncing="@IsSyncing"
-                                        Disabled="@ActionsDisabled"
+                                        Disabled="@(ActionsDisabled || Link.IsOnTag)"
                                         OnSyncClick="OnSyncClick" />
                 </span>
             </div>
@@ -203,6 +215,6 @@
 
     private async Task HandleDependencyBadgeClick()
     {
-        if (!ActionsDisabled) await OnDependencyBadgeClick.InvokeAsync();
+        if (!ActionsDisabled && Link?.IsOnTag != true) await OnDependencyBadgeClick.InvokeAsync();
     }
 }

@@ -3,7 +3,11 @@
 
 <div class="divergence-container">
     <span class="divergence-inner">
-        @if (string.IsNullOrWhiteSpace(BranchName) || (!DefaultBehind.HasValue && !DefaultAhead.HasValue))
+        @if (IsOnTag)
+        {
+            <span>&nbsp;</span>
+        }
+        else if (string.IsNullOrWhiteSpace(BranchName) || (!DefaultBehind.HasValue && !DefaultAhead.HasValue))
         {
             @("-")
         }
@@ -64,4 +68,6 @@
     [Parameter] public string? BranchName { get; set; }
     [Parameter] public string? RepositoryUrl { get; set; }
     [Parameter] public string? DefaultBranchName { get; set; }
+    /// <summary>True when the repository is checked out at a tag (detached HEAD); divergence vs. default branch is not meaningful, render blank.</summary>
+    [Parameter] public bool IsOnTag { get; set; }
 }

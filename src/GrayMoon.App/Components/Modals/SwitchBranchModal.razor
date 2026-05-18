@@ -50,6 +50,15 @@
                                         </button>
                                     </li>
                                     <li class="nav-item" role="presentation">
+                                        <button class="nav-link @(activeTab == "tags" ? "active" : "")"
+                                                type="button"
+                                                role="tab"
+                                                disabled="@isRefreshing"
+                                                @onclick='() => SetActiveTab("tags")'>
+                                            Tags
+                                        </button>
+                                    </li>
+                                    <li class="nav-item" role="presentation">
                                         <button class="nav-link @(activeTab == "newbranch" ? "active" : "")"
                                                 type="button"
                                                 role="tab"
@@ -66,13 +75,13 @@
                         {
                             <div class="mb-3 switch-branch-field-block">
                                 <div class="d-flex align-items-center justify-content-between switch-branch-label-row">
-                                    <label class="form-label mb-0" for="branch-filter">Branch name</label>
-                                    <span class="switch-branch-tab-count">@GetBranchCountText(activeTab == "local" ? GetFilteredLocalBranches().Count() : GetFilteredRemoteBranches().Count(), !string.IsNullOrWhiteSpace(branchFilter))</span>
+                                    <label class="form-label mb-0" for="branch-filter">@(activeTab == "tags" ? "Tag name" : "Branch name")</label>
+                                    <span class="switch-branch-tab-count">@GetFilterCountText()</span>
                                 </div>
                                 <input id="branch-filter"
                                        type="text"
                                        class="form-control"
-                                       placeholder="search branch..."
+                                       placeholder="@(activeTab == "tags" ? "search tag..." : "search branch...")"
                                        @bind="branchFilter"
                                        @bind:event="oninput"
                                        @bind:after="SelectClosestMatchingBranch"
@@ -80,7 +89,40 @@
                                        @ref="branchFilterInput" />
                             </div>
                             <div class="branch-list border rounded">
-                                @if (activeTab == "local")
+                                @if (activeTab == "tags")
+                                {
+                                    @if (GetFilteredTags().Count() == 0)
+                                    {
+                                        <div class="text-muted p-3">@(tags.Count == 0 ? "No tags found." : "No tags match the filter.")</div>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var tag in GetFilteredTags())
+                                        {
+                                            <div class="branch-item p-2 @(selectedBranch == tag ? "bg-light" : "")"
+                                                 style="cursor: pointer;"
+                                                 @onclick='() => SelectBranch(tag)'>
+                                                <div class="d-flex align-items-center justify-content-between">
+                                                    <div class="d-flex align-items-center flex-grow-1 min-w-0">
+                                                        <input type="radio"
+                                                               name="branchSelection"
+                                                               class="switch-branch-radio"
+                                                               checked="@(selectedBranch == tag)"
+                                                               @onchange='() => SelectBranch(tag)' />
+                                                        <span class="ms-2 @(tag == currentTag ? "fw-bold" : "")">
+                                                            <i class="bi bi-tag me-1" aria-hidden="true"></i>@tag
+                                                            @if (tag == currentTag)
+                                                            {
+                                                                <span class="badge bg-primary ms-2">Current</span>
+                                                            }
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        }
+                                    }
+                                }
+                                else if (activeTab == "local")
                                 {
                                     @if (GetFilteredLocalBranches().Count() == 0)
                                     {
@@ -111,7 +153,7 @@
                                                             @if (branch == currentBranchLocal)
                                                             {
                                                                 <span class="badge bg-primary ms-2">Current</span>
-                                                                @if (showSyncToDefaultButton)
+                                                                @if (showSyncToDefaultButton && string.IsNullOrWhiteSpace(currentTag))
                                                                 {
                                                                     <span class="badge ms-2" style="background-color: #ffc107; color: #000;">Local Only</span>
                                                                 }
@@ -367,7 +409,7 @@
                                 }
                                 Fetch
                             </button>
-                            @if (showSyncToDefaultButton && !string.IsNullOrWhiteSpace(defaultBranch) && activeTab == "local" && selectedBranch == currentBranchLocal)
+                            @if (showSyncToDefaultButton && !string.IsNullOrWhiteSpace(defaultBranch) && activeTab == "local" && selectedBranch == currentBranchLocal && string.IsNullOrWhiteSpace(currentTag))
                             {
                                 <button type="button" 
                                         class="btn btn-warning" 
@@ -404,7 +446,7 @@
                             <button type="button" 
                                     class="btn btn-primary" 
                                     @onclick="CheckoutAsync"
-                                    disabled="@(string.IsNullOrWhiteSpace(selectedBranch) || selectedBranch == currentBranchLocal || isRefreshing)">
+                                    disabled="@IsCheckoutDisabled()">
                                 @if (isProcessing)
                                 {
                                     <span class="spinner-border spinner-border-sm me-2"></span>
@@ -429,15 +471,30 @@
     [Parameter] public string? RepositoryUrl { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback OnBranchChanged { get; set; }
-    [Parameter] public EventCallback<(int RepositoryId, string BranchName)> OnCheckoutBranch { get; set; }
+    [Parameter] public EventCallback<(int RepositoryId, string BranchName, bool IsTag)> OnCheckoutBranch { get; set; }
     [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string CurrentBranchName, string DefaultBranch)> OnSyncToDefault { get; set; }
     [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string NewBranchName, string BaseBranch, bool SetUpstream)> OnCreateBranch { get; set; }
 
     private string activeTab = "local";
+    /// <summary>True for git's synthetic placeholder ref names that appear in detached HEAD state (e.g. <c>(HEAD detached at v1.0)</c>, <c>(no branch)</c>, <c>origin/(no branch)</c>). These must never be shown as selectable branches.</summary>
+    private static bool IsSyntheticGitRefName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return true;
+        var trimmed = name.Trim();
+        if (trimmed.StartsWith("(", StringComparison.Ordinal) && trimmed.EndsWith(")", StringComparison.Ordinal))
+            return true;
+        if (trimmed.EndsWith("/(no branch)", StringComparison.Ordinal))
+            return true;
+        return false;
+    }
+
     private List<string> localBranches = new();
     private List<string> remoteBranches = new();
+    private List<string> tags = new();
     private string? selectedBranch;
     private string? currentBranchLocal;
+    private string? currentTag;
     private string? defaultBranch;
     private bool isLoading = false;
     private bool isProcessing = false;
@@ -587,17 +644,27 @@
                 var data = JsonSerializer.Deserialize<BranchesResponse>(responseContent, AgentResponseJson.Options);
                 if (data != null)
                 {
-                    localBranches = data.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
-                    remoteBranches = data.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    localBranches = data.LocalBranches?.Where(b => !IsSyntheticGitRefName(b)).ToList() ?? new List<string>();
+                    remoteBranches = data.RemoteBranches?.Where(b => !IsSyntheticGitRefName(b)).ToList() ?? new List<string>();
+                    tags = data.Tags?.Where(t => !string.IsNullOrWhiteSpace(t)).ToList() ?? new List<string>();
                     currentBranchLocal = data.CurrentBranch;
+                    currentTag = data.CurrentTag;
                     defaultBranch = data.DefaultBranch;
                 }
 
-                // Set selected branch to current branch by default
-                selectedBranch = currentBranchLocal;
+                // Default the selection: tag tab pre-selects the current tag, otherwise pre-select the current branch.
+                if (!string.IsNullOrWhiteSpace(currentTag))
+                {
+                    activeTab = "tags";
+                    selectedBranch = currentTag;
+                }
+                else
+                {
+                    selectedBranch = currentBranchLocal;
+                }
 
-                // Show sync button only when we have synced/fetched remote data (not when lists are empty from no sync yet)
-                if (remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !IsCurrentBranchOnRemote())
+                // Show sync button only when we have synced/fetched remote data (not when lists are empty from no sync yet) and we are on a real branch.
+                if (string.IsNullOrWhiteSpace(currentTag) && remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !IsCurrentBranchOnRemote())
                 {
                     showSyncToDefaultButton = true;
                 }
@@ -606,8 +673,8 @@
                     showSyncToDefaultButton = false;
                 }
 
-                // If no branches were persisted, automatically fetch them (keep loading state)
-                if (localBranches.Count == 0 && remoteBranches.Count == 0)
+                // If no branches/tags were persisted, automatically fetch them (keep loading state)
+                if (localBranches.Count == 0 && remoteBranches.Count == 0 && tags.Count == 0)
                 {
                     StateHasChanged();
                     await RefreshBranchesAsync();
@@ -651,13 +718,15 @@
                 var data = JsonSerializer.Deserialize<BranchesResponse>(responseContent, AgentResponseJson.Options);
                 if (data != null)
                 {
-                    localBranches = data.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
-                    remoteBranches = data.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    localBranches = data.LocalBranches?.Where(b => !IsSyntheticGitRefName(b)).ToList() ?? new List<string>();
+                    remoteBranches = data.RemoteBranches?.Where(b => !IsSyntheticGitRefName(b)).ToList() ?? new List<string>();
+                    tags = data.Tags?.Where(t => !string.IsNullOrWhiteSpace(t)).ToList() ?? new List<string>();
                     currentBranchLocal = data.CurrentBranch;
+                    currentTag = data.CurrentTag;
                     defaultBranch = data.DefaultBranch;
                 }
-                selectedBranch = currentBranchLocal;
-                if (remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !IsCurrentBranchOnRemote())
+                selectedBranch = !string.IsNullOrWhiteSpace(currentTag) && activeTab == "tags" ? currentTag : currentBranchLocal;
+                if (string.IsNullOrWhiteSpace(currentTag) && remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !IsCurrentBranchOnRemote())
                     showSyncToDefaultButton = true;
                 else
                     showSyncToDefaultButton = false;
@@ -674,8 +743,15 @@
     private void SetActiveTab(string tab)
     {
         activeTab = tab;
-        if (tab == "local" || tab == "remote")
+        if (tab == "local" || tab == "remote" || tab == "tags")
             _focusFilterOnNextRender = true;
+        // Reset selection so the radio matches the new tab's current item.
+        if (tab == "tags")
+            selectedBranch = currentTag;
+        else if (tab == "local")
+            selectedBranch = currentBranchLocal;
+        else if (tab == "remote")
+            selectedBranch = null;
         StateHasChanged();
     }
 
@@ -739,6 +815,50 @@
         return remoteBranches.Where(b => b.Contains(term, StringComparison.OrdinalIgnoreCase));
     }
 
+    private IEnumerable<string> GetFilteredTags()
+    {
+        IEnumerable<string> filtered;
+        if (string.IsNullOrWhiteSpace(branchFilter))
+            filtered = tags;
+        else
+        {
+            var term = branchFilter.Trim();
+            filtered = tags.Where(t => t.Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+        // Surface the current tag at the top of the list so users see what is pinned right away.
+        var list = filtered.ToList();
+        if (string.IsNullOrWhiteSpace(currentTag))
+            return list;
+        var current = list.FirstOrDefault(t => string.Equals(t, currentTag, StringComparison.OrdinalIgnoreCase));
+        if (current == null)
+            return list;
+        return list.Where(t => !string.Equals(t, current, StringComparison.OrdinalIgnoreCase)).Prepend(current);
+    }
+
+    private string GetFilterCountText()
+    {
+        var filtered = activeTab switch
+        {
+            "tags" => GetFilteredTags().Count(),
+            "remote" => GetFilteredRemoteBranches().Count(),
+            _ => GetFilteredLocalBranches().Count(),
+        };
+        var noun = activeTab == "tags" ? "tag" : "branch";
+        var nounPlural = activeTab == "tags" ? "tags" : "branches";
+        if (!string.IsNullOrWhiteSpace(branchFilter))
+            return filtered == 1 ? $"1 {noun} matched" : $"{filtered} {nounPlural} matched";
+        return filtered == 1 ? $"1 {noun}" : $"{filtered} {nounPlural}";
+    }
+
+    private bool IsCheckoutDisabled()
+    {
+        if (isRefreshing || string.IsNullOrWhiteSpace(selectedBranch))
+            return true;
+        if (activeTab == "tags")
+            return selectedBranch == currentTag;
+        return selectedBranch == currentBranchLocal;
+    }
+
     /// <summary>True if the current branch exists on remote (exact match or origin/currentBranch).</summary>
     private bool IsCurrentBranchOnRemote()
     {
@@ -780,7 +900,12 @@
 
     private void SelectClosestMatchingBranch()
     {
-        var filtered = activeTab == "local" ? GetFilteredLocalBranches().ToList() : GetFilteredRemoteBranches().ToList();
+        var filtered = activeTab switch
+        {
+            "tags" => GetFilteredTags().ToList(),
+            "remote" => GetFilteredRemoteBranches().ToList(),
+            _ => GetFilteredLocalBranches().ToList(),
+        };
         if (filtered.Count == 0)
         {
             selectedBranch = null;
@@ -868,7 +993,7 @@
         var branchToCheckout = _pendingCreateName;
         DismissBranchExistsConfirmation();
         await OnCancel.InvokeAsync();
-        await OnCheckoutBranch.InvokeAsync((RepositoryId, branchToCheckout));
+        await OnCheckoutBranch.InvokeAsync((RepositoryId, branchToCheckout, false));
     }
 
     private void RequestDeleteBranch(string branch, bool isRemote)
@@ -987,9 +1112,11 @@
         if (string.IsNullOrWhiteSpace(selectedBranch))
             return;
 
+        var isTag = activeTab == "tags";
+
         // Close modal immediately and trigger checkout from parent
         await OnCancel.InvokeAsync();
-        await OnCheckoutBranch.InvokeAsync((RepositoryId, selectedBranch));
+        await OnCheckoutBranch.InvokeAsync((RepositoryId, selectedBranch, isTag));
     }
 
     private async Task HandleBranchFilterKeyDown(KeyboardEventArgs e)
@@ -1015,7 +1142,7 @@
             CreateFromFilter();
             return;
         }
-        if (string.IsNullOrWhiteSpace(selectedBranch) || selectedBranch == currentBranchLocal)
+        if (IsCheckoutDisabled())
             return;
         await CheckoutAsync();
     }
@@ -1089,17 +1216,22 @@
                 var data = JsonSerializer.Deserialize<BranchesResponse>(responseContent, AgentResponseJson.Options);
                 if (data != null)
                 {
-                    localBranches = data.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
-                    remoteBranches = data.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                    localBranches = data.LocalBranches?.Where(b => !IsSyntheticGitRefName(b)).ToList() ?? new List<string>();
+                    remoteBranches = data.RemoteBranches?.Where(b => !IsSyntheticGitRefName(b)).ToList() ?? new List<string>();
+                    tags = data.Tags?.Where(t => !string.IsNullOrWhiteSpace(t)).ToList() ?? new List<string>();
                     currentBranchLocal = data.CurrentBranch;
+                    currentTag = data.CurrentTag;
                     defaultBranch = data.DefaultBranch;
                 }
 
-                // Set selected branch to current branch by default
-                selectedBranch = currentBranchLocal;
+                // Pre-select the current item on the active tab.
+                if (activeTab == "tags")
+                    selectedBranch = currentTag;
+                else
+                    selectedBranch = currentBranchLocal;
 
-                // Show sync button if current branch doesn't exist in remote
-                if (!string.IsNullOrWhiteSpace(currentBranchLocal) && !IsCurrentBranchOnRemote())
+                // Show sync button only when on a real branch (not on a tag) and current branch is missing on remote.
+                if (string.IsNullOrWhiteSpace(currentTag) && !string.IsNullOrWhiteSpace(currentBranchLocal) && !IsCurrentBranchOnRemote())
                 {
                     showSyncToDefaultButton = true;
                 }

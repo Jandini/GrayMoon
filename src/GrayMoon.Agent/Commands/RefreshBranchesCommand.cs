@@ -47,14 +47,19 @@ public sealed class RefreshBranchesCommand(IGitService git, IAgentTokenProvider 
         var remoteBranches = await git.GetRemoteBranchesFromRefsAsync(repoPath, cancellationToken);
         var defaultBranch = await git.GetDefaultBranchNameAsync(repoPath, cancellationToken);
         var currentBranch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken);
+        var tags = await git.GetTagsAsync(repoPath, cancellationToken);
+        var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
 
         return new RefreshBranchesResponse
         {
             Success = true,
             LocalBranches = localBranches,
             RemoteBranches = remoteBranches,
-            CurrentBranch = currentBranch,
-            DefaultBranch = defaultBranch
+            // When on a tag (detached HEAD), don't echo a fake branch name.
+            CurrentBranch = currentTag == null ? currentBranch : null,
+            DefaultBranch = defaultBranch,
+            Tags = tags,
+            CurrentTag = currentTag
         };
     }
 }

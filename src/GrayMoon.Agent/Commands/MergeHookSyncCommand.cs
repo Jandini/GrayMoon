@@ -25,6 +25,10 @@ public sealed class MergeHookSyncCommand(IGitService git, ICsProjFileService csP
         var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
         var findProjectsTask = csProjFileService.FindAsync(payload.RepositoryPath, cancellationToken);
 
+        var currentTag = await git.GetCheckedOutTagAsync(payload.RepositoryPath, cancellationToken);
+        if (currentTag != null)
+            branch = "-";
+
         int? outgoing = null;
         int? incoming = null;
         int? defaultBehind = null;
@@ -84,6 +88,7 @@ public sealed class MergeHookSyncCommand(IGitService git, ICsProjFileService csP
                 RepositoryId = payload.RepositoryId,
                 Version = version,
                 Branch = branch,
+                Tag = currentTag,
                 OutgoingCommits = outgoing,
                 IncomingCommits = incoming,
                 HasUpstream = hasUpstream,

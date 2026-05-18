@@ -88,28 +88,35 @@ public static class BranchEndpoints
 
         try
         {
-            // Read branches from database
-            var branches = await dbContext.RepositoryBranches
+            // Read branches and tags from database
+            var rows = await dbContext.RepositoryBranches
                 .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
                 .ToListAsync();
 
-            var localBranches = branches
-                .Where(b => !b.IsRemote)
+            var localBranches = rows
+                .Where(b => !b.IsRemote && !b.IsTag)
                 .Select(b => b.BranchName)
                 .OrderBy(b => b)
                 .ToList();
 
-            var remoteBranches = branches
-                .Where(b => b.IsRemote)
+            var remoteBranches = rows
+                .Where(b => b.IsRemote && !b.IsTag)
                 .Select(b => b.BranchName)
                 .OrderBy(b => b)
                 .ToList();
 
-            // Get current branch from workspace repository link
+            var tags = rows
+                .Where(b => b.IsTag)
+                .Select(b => b.BranchName)
+                .OrderBy(b => b)
+                .ToList();
+
+            // Get current branch (null when on a tag) from workspace repository link
             var currentBranch = wr.BranchName;
+            var currentTag = wr.CheckedOutTag;
 
             // Default branch from persisted IsDefault (set when RefreshBranches is called)
-            var defaultBranchRow = branches.FirstOrDefault(b => b.IsDefault);
+            var defaultBranchRow = rows.FirstOrDefault(b => b.IsDefault && !b.IsTag);
             var defaultBranch = defaultBranchRow?.BranchName;
             if (defaultBranch == null && remoteBranches.Count > 0)
             {
@@ -124,7 +131,9 @@ public static class BranchEndpoints
                 localBranches,
                 remoteBranches,
                 currentBranch,
-                defaultBranch
+                defaultBranch,
+                tags,
+                currentTag
             });
         }
         catch (Exception ex)
@@ -152,6 +161,7 @@ public static class BranchEndpoints
         var workspaceId = body.WorkspaceId;
         var repositoryId = body.RepositoryId;
         var branchName = body.BranchName;
+        var isTag = body.IsTag;
 
         if (workspaceId <= 0 || repositoryId <= 0 || string.IsNullOrWhiteSpace(branchName))
             return Results.BadRequest("workspaceId, repositoryId, and branchName are required.");
@@ -175,6 +185,41 @@ public static class BranchEndpoints
         try
         {
             var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, CancellationToken.None);
+
+            if (isTag)
+            {
+                var tagArgs = new
+                {
+                    workspaceName = workspace.Name,
+                    repositoryId = repo.RepositoryId,
+                    repositoryName = repo.RepositoryName,
+                    tagName = branchName,
+                    workspaceRoot
+                };
+                var tagResponse = await agentBridge.SendCommandAsync("CheckoutTag", tagArgs, CancellationToken.None);
+                var tagCheckout = AgentResponseJson.DeserializeAgentResponse<CheckoutTagResponse>(tagResponse.Data);
+                var tagSuccess = tagCheckout?.Success ?? tagResponse.Success;
+                var tagError = tagCheckout?.ErrorMessage ?? tagResponse.Error ?? "Failed to checkout tag";
+
+                if (!tagSuccess)
+                    return Results.Ok(new CheckoutBranchApiResult(false, tagError));
+
+                // Persist pinned-to-tag state immediately so the UI gating kicks in even before the
+                // checkout hook arrives. Clear branch-only fields to avoid stale push/divergence badges.
+                wr.CheckedOutTag = tagCheckout?.CurrentTag ?? branchName.Trim();
+                wr.BranchName = null;
+                wr.BranchHasUpstream = null;
+                wr.OutgoingCommits = null;
+                wr.IncomingCommits = null;
+                wr.DefaultBranchBehindCommits = null;
+                wr.DefaultBranchAheadCommits = null;
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+
+                await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
+
+                return Results.Ok(new CheckoutBranchApiResult(true, null) { CurrentBranch = null });
+            }
+
             var args = new
             {
                 workspaceName = workspace.Name,
@@ -201,6 +246,8 @@ public static class BranchEndpoints
             {
                 await workspaceGitService.EnsureLocalBranchPersistedAsync(wr.WorkspaceRepositoryId, localBranchName, CancellationToken.None);
                 wr.BranchName = localBranchName;
+                // Switching to a real branch clears any pinned tag state.
+                wr.CheckedOutTag = null;
                 await dbContext.SaveChangesAsync(CancellationToken.None);
             }
 
@@ -365,7 +412,15 @@ public static class BranchEndpoints
             {
                 var localBranches = refreshResponse.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
                 var remoteBranches = refreshResponse.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
-                await workspaceGitService.PersistBranchesAsync(wr.WorkspaceRepositoryId, localBranches, remoteBranches, refreshResponse.DefaultBranch, CancellationToken.None);
+                var tags = refreshResponse.Tags?.Where(t => !string.IsNullOrWhiteSpace(t)).ToList() ?? new List<string>();
+                await workspaceGitService.PersistBranchesAsync(
+                    wr.WorkspaceRepositoryId,
+                    localBranches,
+                    remoteBranches,
+                    refreshResponse.DefaultBranch,
+                    tags,
+                    refreshResponse.CurrentTag,
+                    CancellationToken.None);
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
             }
 
@@ -783,6 +838,8 @@ public sealed class CheckoutBranchApiRequest
     public int WorkspaceId { get; set; }
     public int RepositoryId { get; set; }
     public string? BranchName { get; set; }
+    /// <summary>When true, <see cref="BranchName"/> is treated as a tag name and the agent dispatches a CheckoutTag command (detached HEAD). Defaults to false for backward compatibility.</summary>
+    public bool IsTag { get; set; }
 }
 
 /// <summary>API response for POST /api/branches/checkout (serialized to camelCase).</summary>

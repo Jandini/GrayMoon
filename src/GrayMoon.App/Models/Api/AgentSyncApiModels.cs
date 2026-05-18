@@ -11,6 +11,9 @@ public sealed class AgentVersionBranchResponse
     [JsonPropertyName("branch")]
     public string? Branch { get; set; }
 
+    [JsonPropertyName("tag")]
+    public string? Tag { get; set; }
+
     [JsonPropertyName("gitVersionError")]
     public string? GitVersionError { get; set; }
 
@@ -70,6 +73,12 @@ public sealed class AgentBranchesResponse
 
     [JsonPropertyName("defaultBranch")]
     public string? DefaultBranch { get; set; }
+
+    [JsonPropertyName("tags")]
+    public List<string>? Tags { get; set; }
+
+    [JsonPropertyName("currentTag")]
+    public string? CurrentTag { get; set; }
 }
 
 /// <summary>Project element in agent sync response (CsProjFileInfo shape).</summary>

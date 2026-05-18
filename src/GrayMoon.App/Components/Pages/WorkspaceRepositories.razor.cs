@@ -32,11 +32,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private CancellationTokenSource? _pushCts;
     private IReadOnlySet<int>? pushPlanRepoIds = null;
     private bool? isOutOfSync = null;
-    private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0);
-    private bool isPushRecommended => workspaceRepositories.Any(wr => (wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false);
-    /// <summary>When true, any repository on its default branch has incoming commits; header shows red Pull button and executes only Pull (commit sync) for those repos.</summary>
+    private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => !wr.IsOnTag && (wr.UnmatchedDeps ?? 0) > 0);
+    private bool isPushRecommended => workspaceRepositories.Any(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false));
+    /// <summary>When true, any repository on its default branch has incoming commits; header shows red Pull button and executes only Pull (commit sync) for those repos. Repos pinned to a tag are excluded.</summary>
     private bool hasIncomingCommits => workspaceRepositories.Any(wr =>
-        (wr.IncomingCommits ?? 0) > 0
+        !wr.IsOnTag
+        && (wr.IncomingCommits ?? 0) > 0
         && !string.IsNullOrWhiteSpace(wr.BranchName)
         && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
         && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal));
@@ -108,6 +109,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     private const int RefreshDebounceMs = 200;
     private CancellationTokenSource? _refreshDebounceCts;
+
+    /// <summary>Toast shown when the user attempts a write action against a repository that is pinned to a tag.</summary>
+    private const string TagBlockedActionMessage = "Repository is on a tag; checkout a branch first.";
+
+    /// <summary>True when the workspace repository link for <paramref name="repositoryId"/> is currently checked out at a tag.</summary>
+    private bool IsRepoOnTag(int repositoryId) =>
+        workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.IsOnTag == true;
 
     protected override async Task OnInitializedAsync()
     {
@@ -606,19 +614,31 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     private void ShowConfirmSyncCommitsLevel(List<int> repositoryIds)
     {
-        if (repositoryIds.Count <= 1)
-            _ = CommitSyncLevelAsync(repositoryIds);
+        var filtered = repositoryIds.Where(id => !IsRepoOnTag(id)).ToList();
+        if (filtered.Count == 0)
+        {
+            ToastService.Show("All repositories in this level are on tags; checkout a branch first.");
+            return;
+        }
+        if (filtered.Count <= 1)
+            _ = CommitSyncLevelAsync(filtered);
         else
-            ShowConfirm($"Do you want to sync commits for {repositoryIds.Count} repositories?", () => CommitSyncLevelAsync(repositoryIds));
+            ShowConfirm($"Do you want to sync commits for {filtered.Count} repositories?", () => CommitSyncLevelAsync(filtered));
     }
 
     private void ShowConfirmSyncLevel(List<int> repositoryIds)
     {
+        var filtered = repositoryIds.Where(id => !IsRepoOnTag(id)).ToList();
+        if (filtered.Count == 0)
+        {
+            ToastService.Show("All repositories in this level are on tags; checkout a branch first.");
+            return;
+        }
         const int confirmThreshold = 10;
-        if (repositoryIds.Count < confirmThreshold)
-            _ = SyncLevelAsync(repositoryIds);
+        if (filtered.Count < confirmThreshold)
+            _ = SyncLevelAsync(filtered);
         else
-            ShowConfirm($"Do you want to sync {repositoryIds.Count} repositories in this level?", () => SyncLevelAsync(repositoryIds));
+            ShowConfirm($"Do you want to sync {filtered.Count} repositories in this level?", () => SyncLevelAsync(filtered));
     }
 
     private void ShowConfirmSyncToDefaultLevel(List<int> repositoryIds)
@@ -630,7 +650,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             .Select(id => workspaceRepositories.FirstOrDefault(w => w.RepositoryId == id))
             .Where(wr =>
             {
-                if (wr == null || string.IsNullOrWhiteSpace(wr.BranchName))
+                if (wr == null || wr.IsOnTag || string.IsNullOrWhiteSpace(wr.BranchName))
                     return false;
                 if (string.IsNullOrWhiteSpace(wr.DefaultBranchName))
                     return true;
@@ -720,6 +740,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         if (workspace == null || isUpdating || isSyncing)
             return;
+        if (IsRepoOnTag(repositoryId))
+        {
+            ToastService.Show(TagBlockedActionMessage);
+            return;
+        }
         try
         {
             await using var scope = ServiceScopeFactory.CreateAsyncScope();
@@ -827,6 +852,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         if (workspace == null || isCommitSyncing || isSyncing || isUpdating)
             return;
+        if (IsRepoOnTag(repositoryId))
+        {
+            ToastService.Show(TagBlockedActionMessage);
+            return;
+        }
         _ = CommitSyncAsync(repositoryId);
     }
 
@@ -835,6 +865,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         if (workspace == null || isPushing || isSyncing || isUpdating)
             return;
+        if (IsRepoOnTag(repositoryId))
+        {
+            ToastService.Show(TagBlockedActionMessage);
+            return;
+        }
 
         var repo = workspaceRepositories.FirstOrDefault(r => r.RepositoryId == repositoryId);
         if (repo != null
@@ -1029,11 +1064,18 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 return;
             }
 
-            var repoIdsWithUnpushed = payload.Select(p => p.RepoId).ToHashSet();
+            // Exclude repositories pinned to a tag: they have no branch to push.
+            var taggedRepoIds = workspaceRepositories.Where(wr => wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet();
+            var repoIdsWithUnpushed = payload.Select(p => p.RepoId).Where(id => !taggedRepoIds.Contains(id)).ToHashSet();
+            if (repoIdsWithUnpushed.Count == 0)
+            {
+                ToastService.Show("No repositories to push.");
+                return;
+            }
             pushPlanRepoIds = repoIdsWithUnpushed;
 
             var repoIdsThatNeedPush = workspaceRepositories
-                .Where(wr => (wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false)
+                .Where(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false))
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
             var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoSetAsync(
@@ -1079,7 +1121,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
         var repoIdsWithIncoming = workspaceRepositories
             .Where(wr =>
-                (wr.IncomingCommits ?? 0) > 0
+                !wr.IsOnTag
+                && (wr.IncomingCommits ?? 0) > 0
                 && !string.IsNullOrWhiteSpace(wr.BranchName)
                 && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
                 && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal))
@@ -1102,8 +1145,15 @@ public sealed partial class WorkspaceRepositories : IDisposable
         if (workspace == null || workspaceRepositories.Count == 0 || isUpdating || isSyncing)
             return;
 
+        if (workspaceRepositories.All(wr => wr.IsOnTag))
+        {
+            ToastService.Show("All repositories are on tags; checkout a branch first.");
+            return;
+        }
+
         var reposOnDefault = workspaceRepositories
-            .Where(wr => !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
+            .Where(wr => !wr.IsOnTag
+                && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
                 && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal))
             .ToList();
 
@@ -1208,6 +1258,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         if (workspace == null || isUpdating || isSyncing)
             return;
+        if (IsRepoOnTag(repositoryId))
+        {
+            ToastService.Show(TagBlockedActionMessage);
+            return;
+        }
 
         _updateCts?.Cancel();
         _updateCts?.Dispose();
@@ -1604,6 +1659,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         if (workspace == null || isCommitSyncing || isSyncing || isUpdating)
             return;
+        if (IsRepoOnTag(repositoryId))
+        {
+            ToastService.Show(TagBlockedActionMessage);
+            return;
+        }
 
         _commitSyncCts?.Cancel();
         _commitSyncCts?.Dispose();
@@ -1653,6 +1713,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         if (workspace == null || isCommitSyncing || isSyncing || isUpdating || repositoryIds == null || repositoryIds.Count == 0)
             return;
+
+        repositoryIds = repositoryIds.Where(id => !IsRepoOnTag(id)).ToList();
+        if (repositoryIds.Count == 0)
+        {
+            ToastService.Show("All repositories are on tags; checkout a branch first.");
+            return;
+        }
 
         _commitSyncCts?.Cancel();
         _commitSyncCts?.Dispose();
@@ -2037,6 +2104,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
             return;
         if (string.IsNullOrWhiteSpace(repositoryName))
             return;
+        if (IsRepoOnTag(repositoryId))
+        {
+            ToastService.Show(TagBlockedActionMessage);
+            CloseSwitchBranchModal();
+            return;
+        }
 
         CloseSwitchBranchModal();
 
@@ -2108,6 +2181,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || isSyncingToDefault || isSyncing || isUpdating)
             return;
+
+        repositoryIds = repositoryIds.Where(id => !IsRepoOnTag(id)).ToList();
+        if (repositoryIds.Count == 0)
+        {
+            ToastService.Show("All repositories are on tags; checkout a branch first.");
+            return;
+        }
 
         var checkResults = _syncToDefaultCheckResults;
         _syncToDefaultCheckResults = null;
@@ -2209,9 +2289,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    private async Task CheckoutBranchAsync((int RepositoryId, string BranchName) request)
+    private async Task CheckoutBranchAsync((int RepositoryId, string BranchName, bool IsTag) request)
     {
-        var (repositoryId, branchName) = request;
+        var (repositoryId, branchName, isTag) = request;
         if (workspace == null || isCheckingOut || isSyncing || isUpdating || isCommitSyncing)
             return;
 
@@ -2221,7 +2301,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
         isCheckingOut = true;
 
-        SetCheckoutProgress("Checking out branch...");
+        SetCheckoutProgress(isTag ? "Checking out tag..." : "Checking out branch...");
 
         errorMessage = null;
         try
@@ -2233,6 +2313,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 WorkspaceId,
                 repositoryId,
                 branchName,
+                isTag,
                 ApiBaseUrl,
                 _checkoutCts.Token);
 
@@ -2242,7 +2323,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             }
             else
             {
-                repositoryErrors[repositoryId] = errMsg ?? "Failed to checkout branch.";
+                repositoryErrors[repositoryId] = errMsg ?? (isTag ? "Failed to checkout tag." : "Failed to checkout branch.");
             }
 
             await RefreshFromSync();
@@ -2253,8 +2334,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error checking out branch for repository {RepositoryId}", repositoryId);
-            repositoryErrors[repositoryId] = "Failed to checkout branch. The GrayMoon Agent may be offline. Start the Agent and try again.";
+            Logger.LogError(ex, "Error checking out {Kind} for repository {RepositoryId}", isTag ? "tag" : "branch", repositoryId);
+            repositoryErrors[repositoryId] = isTag
+                ? "Failed to checkout tag. The GrayMoon Agent may be offline. Start the Agent and try again."
+                : "Failed to checkout branch. The GrayMoon Agent may be offline. Start the Agent and try again.";
         }
         finally
         {

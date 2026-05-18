@@ -66,6 +66,11 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 branch = vr.BranchName ?? vr.EscapedBranchName ?? "-";
             }
 
+            // Detect tag/detached HEAD; if on a tag we don't have a real branch so wipe the GitVersion branch echo.
+            var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
+            if (currentTag != null)
+                branch = "-";
+
             if (version != "-" && branch != "-")
                 git.WriteSyncHooks(repoPath, workspaceId, repositoryId);
 
@@ -112,6 +117,7 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 Success = true,
                 Version = version,
                 Branch = branch,
+                Tag = currentTag,
                 Projects = projects,
                 OutgoingCommits = outgoingCommits,
                 IncomingCommits = incomingCommits,

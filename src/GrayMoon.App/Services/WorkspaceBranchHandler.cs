@@ -113,10 +113,19 @@ public sealed class WorkspaceBranchHandler(
         return (true, null);
     }
 
+    public Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(
+        int workspaceId,
+        int repositoryId,
+        string branchName,
+        string apiBaseUrl,
+        CancellationToken cancellationToken)
+        => CheckoutBranchAsync(workspaceId, repositoryId, branchName, isTag: false, apiBaseUrl, cancellationToken);
+
     public async Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(
         int workspaceId,
         int repositoryId,
         string branchName,
+        bool isTag,
         string apiBaseUrl,
         CancellationToken cancellationToken)
     {
@@ -125,11 +134,14 @@ public sealed class WorkspaceBranchHandler(
         {
             repositoryId,
             workspaceId,
-            branchName
+            branchName,
+            isTag
         };
         var json = JsonSerializer.Serialize(apiRequest);
         using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
         using var response = await httpClient.PostAsync($"{apiBaseUrl}/api/branches/checkout", content, cancellationToken);
+
+        var failureLabel = isTag ? "Failed to checkout tag." : "Failed to checkout branch.";
 
         if (response.IsSuccessStatusCode)
         {
@@ -138,7 +150,7 @@ public sealed class WorkspaceBranchHandler(
 
             if (result != null && !result.Success)
             {
-                return (false, !string.IsNullOrWhiteSpace(result.ErrorMessage) ? result.ErrorMessage : "Failed to checkout branch.");
+                return (false, !string.IsNullOrWhiteSpace(result.ErrorMessage) ? result.ErrorMessage : failureLabel);
             }
 
             return (true, null);
@@ -146,8 +158,8 @@ public sealed class WorkspaceBranchHandler(
         else
         {
             var errorText = await response.Content.ReadAsStringAsync(cancellationToken);
-            var message = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"Failed to checkout branch: {response.StatusCode}";
-            logger.LogError("Checkout failed: {StatusCode}, {Error}", response.StatusCode, errorText);
+            var message = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"{failureLabel.TrimEnd('.')}: {response.StatusCode}";
+            logger.LogError("Checkout {Kind} failed: {StatusCode}, {Error}", isTag ? "tag" : "branch", response.StatusCode, errorText);
             return (false, message);
         }
     }

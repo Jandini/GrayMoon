@@ -126,8 +126,9 @@
                                                                        LevelKey="@group.Key"
                                                                        ColSpan="@TableColSpan"
                                                                        Group="@group"
+                                                                       ActionsDisabled="@group.All(wr => wr.IsOnTag)"
                                                                        OnSyncToDefault="() => ShowConfirmSyncToDefaultLevel(group.Select(wr => wr.RepositoryId).ToList())"
-                                                                       OnSyncCommits="() => CommitSyncLevelAsync(group.Select(wr => wr.RepositoryId).ToList())"
+                                                                       OnSyncCommits="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                                        OnOpenPr="() => ShowConfirmOpenPr(group)"
                                                                        OnSyncLevel="() => ShowConfirmSyncLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                                        />

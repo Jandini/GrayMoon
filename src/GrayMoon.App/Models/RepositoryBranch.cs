@@ -29,4 +29,7 @@ public class RepositoryBranch
 
     /// <summary>True if this is the repository's default branch (e.g. main or master). Set when branches are refreshed from agent.</summary>
     public bool IsDefault { get; set; }
+
+    /// <summary>True if this row represents a Git tag rather than a branch. Tag rows always have <see cref="IsRemote"/> = false.</summary>
+    public bool IsTag { get; set; }
 }

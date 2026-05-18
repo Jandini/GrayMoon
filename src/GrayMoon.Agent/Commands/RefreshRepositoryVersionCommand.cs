@@ -26,6 +26,12 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git, IAgentToken
                 version = vr.InformationalVersion ?? "-";
                 branch = vr.BranchName ?? vr.EscapedBranchName ?? "-";
             }
+
+            // Detect tag/detached HEAD; when on a tag we don't have a real branch.
+            var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
+            if (currentTag != null)
+                branch = "-";
+
             int? defaultBehind = null;
             int? defaultAhead = null;
             if (branch != "-")
@@ -56,6 +62,7 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git, IAgentToken
             {
                 Version = version,
                 Branch = branch,
+                Tag = currentTag,
                 OutgoingCommits = outgoingCommits,
                 IncomingCommits = incomingCommits,
                 GitVersionError = versionError,
