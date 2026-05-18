@@ -2,7 +2,11 @@
 @using Microsoft.AspNetCore.Components.Web
 
 @* PR column badge: none (dark gray), create (yellow, black text), #number (green), merged (purple), closed (red). Default "none" until data loads. *@
-@if (PullRequest != null && PullRequest.IsMerged)
+@if (IsOnTag)
+{
+    <span>&nbsp;</span>
+}
+else if (PullRequest != null && PullRequest.IsMerged)
 {
     <a href="@PullRequest.HtmlUrl"
        target="_blank"
@@ -80,6 +84,8 @@ else
     [Parameter] public string? CreatePrUrl { get; set; }
     /// <summary>When false, never show "create"; show "none" until PR state has been verified via API.</summary>
     [Parameter] public bool IsPrVerified { get; set; }
+    /// <summary>True when the repository is checked out at a tag (detached HEAD); PRs require a branch, so render blank.</summary>
+    [Parameter] public bool IsOnTag { get; set; }
 
     private static string GetOpenPrMergeabilityClass(PullRequestInfo pr)
     {

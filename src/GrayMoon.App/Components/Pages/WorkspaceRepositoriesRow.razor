@@ -82,6 +82,7 @@
                     <PRBadge PullRequest="@PrInfo"
                             DefaultBranchAheadCommits="@Link.DefaultBranchAheadCommits"
                             IsPrVerified="@IsPrVerified"
+                            IsOnTag="@Link.IsOnTag"
                             CreatePrUrl="@(string.IsNullOrEmpty(repoUrl) || string.IsNullOrEmpty(Link.DefaultBranchName) ? null : $"{repoUrl}/compare/{Link.DefaultBranchName}...{Uri.EscapeDataString(Link.BranchName ?? "")}")" />
                 </span>
                 <span class="metrics-block metrics-deps">
