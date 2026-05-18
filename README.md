@@ -102,3 +102,25 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 5. Run dependency/version updates (GrayMoon updates the impacted `PackageReference` versions for you when needed).
 6. Continue working in your IDE while GrayMoon tracks changes in the background; GrayMoon UI does not need to stay open as long as the Docker app and agent services are running.
 
+## What's new
+
+### Pin a repository to a specific tag
+
+The Switch Branch dialog now has a dedicated **Tags** tab. Pick any tag and GrayMoon will check that repository out at that exact version (detached HEAD), then keep it parked there.
+
+- **What it gives you:** a clean way to freeze one consumer on a known-good release of a shared package while the rest of the workspace keeps moving forward, without forking a branch just to hold the pin.
+- **Tags are listed newest first** (creator-date descending) both when freshly fetched and when reloaded from the local cache, so the latest release is always at the top.
+- **The grid clearly marks pinned repositories:** the Branch column shows a tag icon and the tag name; the Divergence, Commits, and PR columns intentionally render blank (a tag has no upstream and no branch-relative diff, so showing "0" or "-" would be misleading).
+- **All write actions are blocked for pinned repositories** - Update, Push, Pull, Commit Sync, and Sync-to-Default - both from the per-row buttons and from the level-header actions. You get a clear toast explaining why; nothing is silently skipped. To resume normal work on that repo, just check out a branch again from the same dialog.
+- **No more confusing "Push to set upstream" hint** when a repo is on a detached HEAD - GrayMoon now recognizes the tag state end-to-end (agent, database, UI) instead of treating it as a branch without upstream.
+
+### Richer dependency badge tooltip
+
+The dependency count badge in the grid now opens a detailed popup when you hover it - both when there are updates to apply (orange badge, "x of y") and when everything is already aligned (green badge).
+
+- **What it gives you:** see exactly which workspace-internal packages a repository pulls in and at which version, without opening the dependency graph or the .csproj files.
+- **Up-to-date case (green badge):** lists every internal package dependency with its current version. Clicking the badge still opens the dependency graph as before.
+- **Mismatch case (orange badge):** lists every package that needs updating with `CurrentVersion -> NewVersion`. Clicking the badge still triggers the per-repository update flow.
+- **Copy to clipboard:** the popup has a small clipboard icon in the top-right corner that copies the list (prefixed with the repository name) so you can paste it into a PR description, chat, or ticket. The copy action does not trigger the badge's main click.
+- **Pinned repositories** show the tooltip and the Copy button but the badge itself is non-clickable - exactly what you want when the repo is intentionally frozen.
+
