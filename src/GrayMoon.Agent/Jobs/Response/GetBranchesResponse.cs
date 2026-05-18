@@ -16,6 +16,12 @@ public sealed class GetBranchesResponse
     [JsonPropertyName("defaultBranch")]
     public string? DefaultBranch { get; set; }
 
+    [JsonPropertyName("tags")]
+    public IReadOnlyList<string> Tags { get; set; } = Array.Empty<string>();
+
+    [JsonPropertyName("currentTag")]
+    public string? CurrentTag { get; set; }
+
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
 }

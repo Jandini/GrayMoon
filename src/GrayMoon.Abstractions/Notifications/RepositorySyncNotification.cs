@@ -10,6 +10,8 @@ public sealed class RepositorySyncNotification
     public int RepositoryId { get; init; }
     public string Version { get; init; } = "-";
     public string Branch { get; init; } = "-";
+    /// <summary>Tag the repository is currently checked out at (detached HEAD on a tag). Null when on a branch.</summary>
+    public string? Tag { get; init; }
     public int? OutgoingCommits { get; init; }
     public int? IncomingCommits { get; init; }
     public bool? HasUpstream { get; init; }

@@ -404,6 +404,15 @@
     opacity: 0.7;
 }
 
+/* Repository pinned to a tag: badge looks the same but the click is a no-op; tooltip still shows on hover. */
+::deep .repositories-table .dependency-badge-link--readonly {
+    cursor: default;
+}
+
+::deep .repositories-table .dependency-badge-link--readonly .build-dep-badge {
+    filter: none !important;
+}
+
 /* Rich tooltip for dependency badge (mismatch): list of packages requiring update */
 ::deep .repositories-table .dependency-badge-tooltip-wrap {
     position: relative;
@@ -416,11 +425,13 @@
     right: 0;
     left: auto;
     top: 100%;
-    margin-top: 0.25rem;
+    /* No margin-top here: a transparent gap between badge and popup would break the :hover chain when the cursor
+       crosses it. Use padding-top inside the popup instead so the popup is contiguous with the badge. */
     background: #2a2a2a;
+    background-clip: padding-box;
     border: 1px solid #555;
     border-radius: 0.25rem;
-    padding: 0.4rem 0.6rem;
+    padding: 0.65rem 0.6rem 0.4rem;
     font-size: 0.78rem;
     font-family: var(--bs-font-monospace);
     color: #f0f0f0;
@@ -434,13 +445,31 @@
     white-space: normal;
     text-align: left;
     opacity: 0;
+    /* Fade out slowly with a 0.4s delay so brief cursor jitters between the badge and the popup don't close it. */
     transition: opacity 0.15s ease 0.4s;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-wrap:hover .dependency-badge-tooltip,
+::deep .repositories-table .dependency-badge-tooltip-wrap:focus-within .dependency-badge-tooltip {
+    opacity: 1;
+    pointer-events: auto;
+    /* Wait a bit before showing so the popup doesn't appear on incidental hover (cursor passing over the badge). */
+    transition: opacity 0.1s ease 0.5s;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
 }
 
 ::deep .repositories-table .dependency-badge-tooltip-title {
     color: #aaa;
-    margin-bottom: 0.25rem;
     font-family: var(--bs-body-font-family);
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 ::deep .repositories-table .dependency-badge-tooltip-line {
@@ -465,9 +494,25 @@
     font-family: var(--bs-body-font-family);
 }
 
-::deep .repositories-table .dependency-badge-tooltip-wrap:hover .dependency-badge-tooltip {
-    opacity: 1;
-    pointer-events: auto;
+::deep .repositories-table .dependency-badge-tooltip-copy {
+    flex: 0 0 auto;
+    background: transparent;
+    border: none;
+    color: #bbb;
+    font-size: 0.95rem;
+    line-height: 1;
+    padding: 0.15rem 0.3rem;
+    border-radius: 0.2rem;
+    cursor: pointer;
+    transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-copy:hover,
+::deep .repositories-table .dependency-badge-tooltip-copy:focus-visible {
+    color: #fff;
+    background-color: transparent;
+    text-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+    outline: none;
 }
 
 ::deep .repositories-table .dependency-badge-tooltip-wrap.dependency-badge-tooltip-wrap--clicked .dependency-badge-tooltip {

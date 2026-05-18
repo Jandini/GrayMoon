@@ -26,6 +26,10 @@ public sealed class PushHookSyncCommand(IGitService git, IHubConnectionProvider 
         var version = versionResult?.InformationalVersion ?? "-";
         var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
 
+        var currentTag = await git.GetCheckedOutTagAsync(payload.RepositoryPath, cancellationToken);
+        if (currentTag != null)
+            branch = "-";
+
         var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)
         {
@@ -39,6 +43,7 @@ public sealed class PushHookSyncCommand(IGitService git, IHubConnectionProvider 
                 RepositoryId = payload.RepositoryId,
                 Version = version,
                 Branch = branch,
+                Tag = currentTag,
                 ErrorMessage = null
             };
             await connection.InvokeAsync(AgentHubMethods.SyncCommand, notification, cancellationToken);
@@ -93,12 +98,17 @@ public sealed class PushHookSyncCommand(IGitService git, IHubConnectionProvider 
                 var finalVersion = versionResult?.InformationalVersion ?? "-";
                 var finalBranch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? branch;
 
+                var finalTag = await git.GetCheckedOutTagAsync(repoPath, CancellationToken.None);
+                if (finalTag != null)
+                    finalBranch = "-";
+
                 var finalNotification = new RepositorySyncNotification
                 {
                     WorkspaceId = payload.WorkspaceId,
                     RepositoryId = payload.RepositoryId,
                     Version = finalVersion,
                     Branch = finalBranch,
+                    Tag = finalTag,
                     OutgoingCommits = outgoing,
                     IncomingCommits = incoming,
                     HasUpstream = hasUpstream,

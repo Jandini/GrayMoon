@@ -36,6 +36,9 @@ public static class Migrations
         await MigrateWorkspaceRepositoryActionsWorkflowsJsonAsync(dbContext);
         await MigrateWorkspaceRepositoriesRepositoryTypeAsync(dbContext);
         await MigrateRepositoryProviderIdAsync(dbContext);
+        await MigrateWorkspaceRepositoriesCheckedOutTagAsync(dbContext);
+        await MigrateRepositoryBranchesIsTagAsync(dbContext);
+        await MigrateRepositoryBranchesSortIndexAsync(dbContext);
     }
 
     public static async Task MigrateRepositoriesTopicsAsync(AppDbContext dbContext)
@@ -941,6 +944,94 @@ public static class Migrations
                 if (!hasColumn)
                 {
                     cmd.CommandText = "ALTER TABLE WorkspaceRepositoryPullRequests ADD COLUMN ChangedFiles INTEGER";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds CheckedOutTag column to WorkspaceRepositories so a repository can be persisted as pinned to a tag (detached HEAD).</summary>
+    public static async Task MigrateWorkspaceRepositoriesCheckedOutTagAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='CheckedOutTag'";
+                var hasColumn = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!hasColumn)
+                {
+                    cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN CheckedOutTag TEXT";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds IsTag column to RepositoryBranches so tag rows can be persisted alongside branches.</summary>
+    public static async Task MigrateRepositoryBranchesIsTagAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='RepositoryBranches'";
+                var tableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!tableExists)
+                    return;
+
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('RepositoryBranches') WHERE name='IsTag'";
+                var hasColumn = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!hasColumn)
+                {
+                    cmd.CommandText = "ALTER TABLE RepositoryBranches ADD COLUMN IsTag INTEGER NOT NULL DEFAULT 0";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds SortIndex column to RepositoryBranches so tags can be persisted in the agent-reported order (newest first).</summary>
+    public static async Task MigrateRepositoryBranchesSortIndexAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='RepositoryBranches'";
+                var tableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!tableExists)
+                    return;
+
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('RepositoryBranches') WHERE name='SortIndex'";
+                var hasColumn = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!hasColumn)
+                {
+                    cmd.CommandText = "ALTER TABLE RepositoryBranches ADD COLUMN SortIndex INTEGER NOT NULL DEFAULT 0";
                     await cmd.ExecuteNonQueryAsync();
                 }
             }

@@ -50,6 +50,12 @@ public interface IGitService
     Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct);
     /// <summary>Gets the default branch name (e.g., "main" or "master") without "origin/" prefix.</summary>
     Task<string?> GetDefaultBranchNameAsync(string repoPath, CancellationToken ct);
+    /// <summary>Gets all tag names in the repository (newest first when supported, then alphabetical).</summary>
+    Task<IReadOnlyList<string>> GetTagsAsync(string repoPath, CancellationToken ct);
+    /// <summary>Checks out the specified tag (detached HEAD). Returns (success, errorMessage).</summary>
+    Task<(bool Success, string? ErrorMessage)> CheckoutTagAsync(string repoPath, string tagName, CancellationToken ct);
+    /// <summary>Returns the tag name HEAD currently points to when the repo is in a detached HEAD state AND that commit is the exact tip of a tag; otherwise null. Uses git symbolic-ref + describe --tags --exact-match.</summary>
+    Task<string?> GetCheckedOutTagAsync(string repoPath, CancellationToken ct);
     /// <summary>Gets the default branch origin ref (e.g., "origin/main") for passing to GetCommitCountsAsync/GetCommitCountsVsDefaultAsync to avoid resolving twice.</summary>
     Task<string?> GetDefaultBranchOriginRefAsync(string repoPath, CancellationToken ct);
     /// <summary>Stages the given paths (relative to repo root) and creates a commit with the given message. Returns (success, errorMessage).</summary>

@@ -499,6 +499,8 @@ public sealed class WorkspaceProjectRepository(
         var result = new List<PushRepoPayload>();
         foreach (var link in links)
         {
+            if (!string.IsNullOrWhiteSpace(link.CheckedOutTag))
+                continue;
             var repo = link.Repository;
             var repoName = repo?.RepositoryName ?? "";
             if (string.IsNullOrEmpty(repoName)) continue;
@@ -708,6 +710,51 @@ public sealed class WorkspaceProjectRepository(
             .Select(d => new { d.DependentProjectId, d.ReferencedProjectId })
             .ToListAsync(cancellationToken);
         return rows.Select(r => (r.DependentProjectId, r.ReferencedProjectId)).ToList();
+    }
+
+    /// <summary>Returns, per dependent repository, the distinct workspace-internal package dependencies (PackageId + version as written in the .csproj). Used to populate the dependency-badge tooltip for repositories whose dependencies are up to date.</summary>
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string Version)>>> GetPackageDependencyLinesByRepoAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var projects = await dbContext.WorkspaceProjects
+            .AsNoTracking()
+            .Where(p => p.WorkspaceId == workspaceId)
+            .Select(p => new { p.ProjectId, p.RepositoryId, p.PackageId })
+            .ToListAsync(cancellationToken);
+        if (projects.Count == 0)
+            return new Dictionary<int, IReadOnlyList<(string, string)>>();
+
+        var byProjectId = projects.ToDictionary(p => p.ProjectId);
+        var projectIdSet = byProjectId.Keys.ToHashSet();
+
+        var edges = await dbContext.ProjectDependencies
+            .AsNoTracking()
+            .Where(d => projectIdSet.Contains(d.DependentProjectId) && projectIdSet.Contains(d.ReferencedProjectId))
+            .Select(d => new { d.DependentProjectId, d.ReferencedProjectId, d.Version })
+            .ToListAsync(cancellationToken);
+
+        var perRepo = new Dictionary<int, HashSet<(string PackageId, string Version)>>();
+        foreach (var e in edges)
+        {
+            if (!byProjectId.TryGetValue(e.DependentProjectId, out var dep) || !byProjectId.TryGetValue(e.ReferencedProjectId, out var refProj))
+                continue;
+            var packageId = refProj.PackageId;
+            if (string.IsNullOrWhiteSpace(packageId))
+                continue;
+            var version = e.Version ?? string.Empty;
+            if (!perRepo.TryGetValue(dep.RepositoryId, out var set))
+            {
+                set = new HashSet<(string, string)>();
+                perRepo[dep.RepositoryId] = set;
+            }
+            set.Add((packageId!, version));
+        }
+
+        return perRepo.ToDictionary(
+            kv => kv.Key,
+            kv => (IReadOnlyList<(string PackageId, string Version)>)kv.Value
+                .OrderBy(t => t.PackageId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(t => t.Version, StringComparer.OrdinalIgnoreCase)
+                .ToList());
     }
 
     /// <summary>Returns the dependency graph for the workspace: nodes (projects with labels) and edges. Suitable for Cytoscape (nodes + edges).</summary>

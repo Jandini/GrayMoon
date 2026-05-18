@@ -46,6 +46,12 @@ public sealed class CheckoutHookSyncCommand(IGitService git, ICsProjFileService 
         var version = versionResult?.InformationalVersion ?? "-";
         var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
 
+        // Detect detached HEAD / tag state. When on a tag, GitVersion's BranchName is "(no branch)";
+        // we treat that as no branch and report Tag instead so the UI can gate writes.
+        var currentTag = await git.GetCheckedOutTagAsync(payload.RepositoryPath, cancellationToken);
+        if (currentTag != null)
+            branch = "-";
+
         int? outgoing = null;
         int? incoming = null;
         int? defaultBehind = null;
@@ -97,6 +103,7 @@ public sealed class CheckoutHookSyncCommand(IGitService git, ICsProjFileService 
                 RepositoryId = payload.RepositoryId,
                 Version = version,
                 Branch = branch,
+                Tag = currentTag,
                 OutgoingCommits = outgoing,
                 IncomingCommits = incoming,
                 HasUpstream = hasUpstream,

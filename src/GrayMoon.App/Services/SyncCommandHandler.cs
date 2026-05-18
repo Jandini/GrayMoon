@@ -30,12 +30,30 @@ public sealed class SyncCommandHandler(
 
         wr.GitVersion = n.Version == "-" ? null : n.Version;
         wr.BranchName = n.Branch == "-" ? null : n.Branch;
-        if (n.OutgoingCommits.HasValue) wr.OutgoingCommits = n.OutgoingCommits;
-        if (n.IncomingCommits.HasValue) wr.IncomingCommits = n.IncomingCommits;
-        if (n.HasUpstream.HasValue) wr.BranchHasUpstream = n.HasUpstream.Value;
-        if (n.DefaultBranchBehind.HasValue) wr.DefaultBranchBehindCommits = n.DefaultBranchBehind;
-        if (n.DefaultBranchAhead.HasValue) wr.DefaultBranchAheadCommits = n.DefaultBranchAhead;
-        var hasValidVersion = n.Version != "-" && n.Branch != "-";
+
+        // Tag handling: when on a tag the repo has no branch and write actions are blocked. Clear divergence
+        // and upstream fields so the UI does not render misleading "push to set upstream" or commit-count badges.
+        if (!string.IsNullOrWhiteSpace(n.Tag))
+        {
+            wr.CheckedOutTag = n.Tag;
+            wr.BranchName = null;
+            wr.BranchHasUpstream = null;
+            wr.OutgoingCommits = null;
+            wr.IncomingCommits = null;
+            wr.DefaultBranchBehindCommits = null;
+            wr.DefaultBranchAheadCommits = null;
+        }
+        else
+        {
+            // Real branch reported: clear any persisted tag so we resume normal branch behavior.
+            wr.CheckedOutTag = null;
+            if (n.OutgoingCommits.HasValue) wr.OutgoingCommits = n.OutgoingCommits;
+            if (n.IncomingCommits.HasValue) wr.IncomingCommits = n.IncomingCommits;
+            if (n.HasUpstream.HasValue) wr.BranchHasUpstream = n.HasUpstream.Value;
+            if (n.DefaultBranchBehind.HasValue) wr.DefaultBranchBehindCommits = n.DefaultBranchBehind;
+            if (n.DefaultBranchAhead.HasValue) wr.DefaultBranchAheadCommits = n.DefaultBranchAhead;
+        }
+        var hasValidVersion = n.Version != "-" && (n.Branch != "-" || !string.IsNullOrWhiteSpace(n.Tag));
         var hasDefaultBranch = !string.IsNullOrWhiteSpace(wr.DefaultBranchName);
         // When there is an error message (e.g. fetch failed), keep status InSync so the UI does not show "retry"; the error is shown in the error badge only.
         if (!string.IsNullOrWhiteSpace(n.ErrorMessage))

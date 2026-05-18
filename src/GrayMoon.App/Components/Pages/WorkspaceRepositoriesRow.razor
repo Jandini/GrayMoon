@@ -44,7 +44,17 @@
             }
         </td>
         <td class="col-branch">
-            @if (!string.IsNullOrEmpty(Link.BranchName))
+            @if (Link.IsOnTag)
+            {
+                <div class="branch-container">
+                    <span class="branch-inner branch-inner--tag"
+                          @onclick="HandleBranchClick"
+                          title="Repository is pinned to a tag. Click to switch.">
+                        <i class="bi bi-tag me-1" aria-hidden="true"></i>@Link.CheckedOutTag
+                    </span>
+                </div>
+            }
+            else if (!string.IsNullOrEmpty(Link.BranchName))
             {
                 <div class="branch-container">
                     <span class="branch-inner @(ActionsDisabled ? "branch-inner--disabled" : "")"
@@ -64,13 +74,15 @@
                                     DefaultAhead="@Link.DefaultBranchAheadCommits"
                                     BranchName="@Link.BranchName"
                                     RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
-                                    DefaultBranchName="@Link.DefaultBranchName" />
+                                    DefaultBranchName="@Link.DefaultBranchName"
+                                    IsOnTag="@Link.IsOnTag" />
                 </span>
                 <span class="metrics-block metrics-pr text-nowrap"
                       @onmouseenter="HandlePrBadgeMouseEnter">
                     <PRBadge PullRequest="@PrInfo"
                             DefaultBranchAheadCommits="@Link.DefaultBranchAheadCommits"
                             IsPrVerified="@IsPrVerified"
+                            IsOnTag="@Link.IsOnTag"
                             CreatePrUrl="@(string.IsNullOrEmpty(repoUrl) || string.IsNullOrEmpty(Link.DefaultBranchName) ? null : $"{repoUrl}/compare/{Link.DefaultBranchName}...{Uri.EscapeDataString(Link.BranchName ?? "")}")" />
                 </span>
                 <span class="metrics-block metrics-deps">
@@ -82,16 +94,45 @@
                     }
                     else if (unmatchedDeps == 0)
                     {
-                        <a href="@graphUrl" class="dependency-badge-link" title="View dependency graph for this repository">
-                            <span class="badge build-dep-badge build-dep-badge-ok">@depCount</span>
-                        </a>
+                        <span class="dependency-badge-tooltip-wrap dependency-badge-link">
+                            <a href="@graphUrl" class="dependency-badge-graph-link">
+                                <span class="badge build-dep-badge build-dep-badge-ok">@depCount</span>
+                            </a>
+                            @if (AllDependencyLines.Count > 0)
+                            {
+                                <div class="dependency-badge-tooltip">
+                                    <div class="dependency-badge-tooltip-header">
+                                        <span class="dependency-badge-tooltip-title">Dependencies:</span>
+                                        <button type="button"
+                                                class="dependency-badge-tooltip-copy"
+                                                title="Copy list to clipboard"
+                                                aria-label="Copy list to clipboard"
+                                                @onclick="HandleCopyAllDependencies"
+                                                @onclick:preventDefault
+                                                @onclick:stopPropagation>
+                                            <i class="bi bi-clipboard" aria-hidden="true"></i>
+                                        </button>
+                                    </div>
+                                    @foreach (var line in AllDependencyLines)
+                                    {
+                                        <div class="dependency-badge-tooltip-line">
+                                            <code>@line.PackageId</code> <span class="dependency-badge-tooltip-versions">@line.Version</span>
+                                        </div>
+                                    }
+                                    <div class="dependency-badge-tooltip-footer">Click to view the dependency graph.</div>
+                                </div>
+                            }
+                        </span>
                     }
                     else
                     {
-                        <span class="dependency-badge-tooltip-wrap dependency-badge-link @(IsUpdating || IsSyncing || ActionsDisabled ? "dependency-badge-link--disabled" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
+                        var depBadgeOnTag = Link.IsOnTag;
+                        @* Rows on tags still need hover and copy on the mismatch tooltip; dependency-badge-link--disabled uses pointer-events:none which blocks that when the whole level is tag-pinned (ActionsDisabled). *@
+                        var depMismatchBadgeInactive = IsUpdating || IsSyncing || (ActionsDisabled && !depBadgeOnTag);
+                        <span class="dependency-badge-tooltip-wrap dependency-badge-link @(depMismatchBadgeInactive ? "dependency-badge-link--disabled" : "") @(depBadgeOnTag ? "dependency-badge-link--readonly" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
                               role="button"
                               tabindex="0"
-                              style="cursor: pointer;"
+                              style="cursor: @(depBadgeOnTag ? "default" : "pointer");"
                               @onclick="HandleDependencyBadgeClick"
                               @onclick:preventDefault
                               @onkeydown="OnDependencyBadgeKeydown"
@@ -100,14 +141,25 @@
                             @if (MismatchedDependencyLines.Count > 0)
                             {
                                 <div class="dependency-badge-tooltip">
-                                    <div class="dependency-badge-tooltip-title">Dependencies requiring update:</div>
+                                    <div class="dependency-badge-tooltip-header">
+                                        <span class="dependency-badge-tooltip-title">Dependencies requiring update:</span>
+                                        <button type="button"
+                                                class="dependency-badge-tooltip-copy"
+                                                title="Copy list to clipboard"
+                                                aria-label="Copy list to clipboard"
+                                                @onclick="HandleCopyDependencies"
+                                                @onclick:preventDefault
+                                                @onclick:stopPropagation>
+                                            <i class="bi bi-clipboard" aria-hidden="true"></i>
+                                        </button>
+                                    </div>
                                     @foreach (var line in MismatchedDependencyLines)
                                     {
                                         <div class="dependency-badge-tooltip-line">
                                             <code>@line.PackageId</code> <span class="dependency-badge-tooltip-versions">@line.CurrentVersion → @line.NewVersion</span>
                                         </div>
                                     }
-                                    <div class="dependency-badge-tooltip-footer">Click to update this repository only.</div>
+                                    <div class="dependency-badge-tooltip-footer">@(depBadgeOnTag ? "Repository is on a tag; checkout a branch first." : "Click to update this repository only.")</div>
                                 </div>
                             }
                         </span>
@@ -119,7 +171,8 @@
                                   Incoming="@Link.IncomingCommits"
                                   BranchHasUpstream="@Link.BranchHasUpstream"
                                   BranchName="@Link.BranchName"
-                                  Disabled="@ActionsDisabled"
+                                  Disabled="@(ActionsDisabled || Link.IsOnTag)"
+                                  IsOnTag="@Link.IsOnTag"
                                   OnPushClick="OnPushBadgeClick"
                                   OnPullClick="OnPullBadgeClick" />
                 </span>
@@ -127,7 +180,7 @@
                     <RepoSyncStatusBadge RepositoryId="repo.RepositoryId"
                                         Status="@RepoSyncStatus"
                                         IsSyncing="@IsSyncing"
-                                        Disabled="@ActionsDisabled"
+                                        Disabled="@(ActionsDisabled || Link.IsOnTag)"
                                         OnSyncClick="OnSyncClick" />
                 </span>
             </div>
@@ -160,6 +213,8 @@
     [Parameter] public bool IsPrVerified { get; set; }
     [Parameter] public RepoSyncStatus? RepoSyncStatus { get; set; }
     [Parameter] public IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> MismatchedDependencyLines { get; set; } = Array.Empty<(string, string, string)>();
+    /// <summary>All workspace-internal package dependencies of this repository (PackageId + version) used to populate the dependency-badge tooltip when everything is up to date.</summary>
+    [Parameter] public IReadOnlyList<(string PackageId, string Version)> AllDependencyLines { get; set; } = Array.Empty<(string, string)>();
     [Parameter] public bool IsVersionClicked { get; set; }
     [Parameter] public bool IsDependencyBadgeClicked { get; set; }
     [Parameter] public string? RepositoryError { get; set; }
@@ -179,6 +234,8 @@
     [Parameter] public EventCallback OnSyncClick { get; set; }
     [Parameter] public EventCallback OnDismissError { get; set; }
     [Parameter] public EventCallback OnPrBadgeMouseEnter { get; set; }
+    /// <summary>Fired when the user clicks the Copy button on the dependency-mismatch tooltip. Payload is the formatted text to copy to the clipboard.</summary>
+    [Parameter] public EventCallback<string> OnCopyDependencies { get; set; }
 
     private string RepositoryTypeTitle => Link?.RepositoryType switch
     {
@@ -203,6 +260,34 @@
 
     private async Task HandleDependencyBadgeClick()
     {
-        if (!ActionsDisabled) await OnDependencyBadgeClick.InvokeAsync();
+        if (!ActionsDisabled && Link?.IsOnTag != true) await OnDependencyBadgeClick.InvokeAsync();
+    }
+
+    private async Task HandleCopyDependencies()
+    {
+        if (MismatchedDependencyLines.Count == 0) return;
+        var sb = new System.Text.StringBuilder();
+        var repoName = Link?.Repository?.RepositoryName;
+        if (!string.IsNullOrWhiteSpace(repoName))
+            sb.AppendLine($"{repoName} - dependencies requiring update:");
+        else
+            sb.AppendLine("Dependencies requiring update:");
+        foreach (var line in MismatchedDependencyLines)
+            sb.AppendLine($"{line.PackageId}: {line.CurrentVersion} -> {line.NewVersion}");
+        await OnCopyDependencies.InvokeAsync(sb.ToString().TrimEnd());
+    }
+
+    private async Task HandleCopyAllDependencies()
+    {
+        if (AllDependencyLines.Count == 0) return;
+        var sb = new System.Text.StringBuilder();
+        var repoName = Link?.Repository?.RepositoryName;
+        if (!string.IsNullOrWhiteSpace(repoName))
+            sb.AppendLine($"{repoName} - dependencies (up to date):");
+        else
+            sb.AppendLine("Dependencies (up to date):");
+        foreach (var line in AllDependencyLines)
+            sb.AppendLine($"{line.PackageId}: {line.Version}");
+        await OnCopyDependencies.InvokeAsync(sb.ToString().TrimEnd());
     }
 }

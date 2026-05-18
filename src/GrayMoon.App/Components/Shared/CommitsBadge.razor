@@ -1,6 +1,10 @@
 @using Microsoft.AspNetCore.Components.Web
 
-@if (ShowPlaceholder)
+@if (IsOnTag)
+{
+    <span>&nbsp;</span>
+}
+else if (ShowPlaceholder)
 {
     @("-")
 }
@@ -32,18 +36,20 @@ else
     [Parameter] public EventCallback OnPushClick { get; set; }
     [Parameter] public EventCallback OnPullClick { get; set; }
     [Parameter] public bool Disabled { get; set; }
+    /// <summary>True when the repository is checked out at a tag (detached HEAD). Suppresses the "Push to set upstream" UI and renders a placeholder; the row has no branch to push.</summary>
+    [Parameter] public bool IsOnTag { get; set; }
 
     private int X => Outgoing ?? 0;
     private int Y => BranchHasUpstream == false ? 0 : (Incoming ?? 0);
-    private bool NotUpstreamed => BranchHasUpstream == false;
+    private bool NotUpstreamed => !IsOnTag && BranchHasUpstream == false;
     private bool HasCommits => Y > 0 || X > 0;
-    private bool Clickable => !Disabled && (HasCommits || NotUpstreamed);
+    private bool Clickable => !Disabled && !IsOnTag && (HasCommits || NotUpstreamed);
     private string BgColor => Y > 0 ? "#dc3545" : (X > 0 || NotUpstreamed ? "#ffc107" : "#198754");
     private string TextColor => (X > 0 || NotUpstreamed) && Y == 0 ? "#000" : "#fff";
     private string CssClass => NotUpstreamed ? "badge commits-badge commits-badge-not-upstreamed" : "badge";
     private string DisplayText => $"↑{X} ↓{Y}";
     private string Title => NotUpstreamed ? "Push to set upstream" : (Y > 0 ? "Click to pull" : "Click to push");
-    private bool ShowPlaceholder => !Outgoing.HasValue && !Incoming.HasValue && BranchHasUpstream != false;
+    private bool ShowPlaceholder => IsOnTag || (!Outgoing.HasValue && !Incoming.HasValue && BranchHasUpstream != false);
 
     private async Task HandleClick()
     {

@@ -17,6 +17,14 @@ public sealed class BranchesResponse
     [JsonPropertyName("defaultBranch")]
     public string? DefaultBranch { get; set; }
 
+    /// <summary>Tag names available in the repository. Empty when no tags are present.</summary>
+    [JsonPropertyName("tags")]
+    public List<string> Tags { get; set; } = new();
+
+    /// <summary>Tag name HEAD is currently checked out at (detached HEAD on a tag). Null when on a branch.</summary>
+    [JsonPropertyName("currentTag")]
+    public string? CurrentTag { get; set; }
+
     /// <summary>Present on refresh response; when false, ErrorMessage describes the failure (e.g. fetch failed).</summary>
     [JsonPropertyName("success")]
     public bool? Success { get; set; }
@@ -33,6 +41,19 @@ public sealed class CheckoutBranchResponse
 
     [JsonPropertyName("currentBranch")]
     public string? CurrentBranch { get; set; }
+
+    [JsonPropertyName("errorMessage")]
+    public string? ErrorMessage { get; set; }
+}
+
+/// <summary>Agent response for CheckoutTag command (camelCase).</summary>
+public sealed class CheckoutTagResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("currentTag")]
+    public string? CurrentTag { get; set; }
 
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }

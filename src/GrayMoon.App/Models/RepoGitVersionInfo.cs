@@ -4,6 +4,10 @@ public class RepoGitVersionInfo
 {
     public string Version { get; init; } = "-";
     public string Branch { get; init; } = "-";
+    /// <summary>Tag the repository is currently checked out at (detached HEAD). Null when on a branch.</summary>
+    public string? Tag { get; init; }
+    /// <summary>Tags discovered during sync (newest first when supported).</summary>
+    public IReadOnlyList<string>? Tags { get; init; }
     public int? Projects { get; init; }
     /// <summary>Outgoing commits (ahead of remote).</summary>
     public int? OutgoingCommits { get; init; }

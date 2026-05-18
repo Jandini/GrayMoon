@@ -126,8 +126,9 @@
                                                                        LevelKey="@group.Key"
                                                                        ColSpan="@TableColSpan"
                                                                        Group="@group"
+                                                                       ActionsDisabled="@group.All(wr => wr.IsOnTag)"
                                                                        OnSyncToDefault="() => ShowConfirmSyncToDefaultLevel(group.Select(wr => wr.RepositoryId).ToList())"
-                                                                       OnSyncCommits="() => CommitSyncLevelAsync(group.Select(wr => wr.RepositoryId).ToList())"
+                                                                       OnSyncCommits="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                                        OnOpenPr="() => ShowConfirmOpenPr(group)"
                                                                        OnSyncLevel="() => ShowConfirmSyncLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                                        />
@@ -139,6 +140,7 @@
                                                                   IsPrVerified="@prByRepositoryId.ContainsKey(wr.RepositoryId)"
                                                                   RepoSyncStatus="@GetRepoSyncStatus(wr.RepositoryId)"
                                                                   MismatchedDependencyLines="@GetMismatchedDependencyLines(wr.RepositoryId)"
+                                                                  AllDependencyLines="@GetAllDependencyLines(wr.RepositoryId)"
                                                                   IsVersionClicked="@(wr.GitVersion != null && clickedVersions.Contains(wr.GitVersion))"
                                                                   IsDependencyBadgeClicked="@clickedDependencyBadges.Contains(wr.RepositoryId)"
                                                                   RepositoryError="@GetRepositoryError(wr.RepositoryId)"
@@ -155,6 +157,7 @@
                                                                   OnPullBadgeClick="() => OnPullBadgeClickAsync(wr.RepositoryId)"
                                                                   OnPrBadgeMouseEnter="() => RefreshPrOnBadgeEnterAsync(wr.RepositoryId)"
                                                                   OnSyncClick="() => SyncSingleRepoAsync(wr.RepositoryId)"
+                                                                  OnCopyDependencies="CopyDependenciesToClipboard"
                                                                   OnDismissError="() => DismissRepositoryError(wr.RepositoryId)" />
                                     }
                                 }

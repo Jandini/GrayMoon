@@ -17,6 +17,9 @@ public sealed class SyncRepositoryResponse
     [JsonPropertyName("branch")]
     public string? Branch { get; set; }
 
+    [JsonPropertyName("tag")]
+    public string? Tag { get; set; }
+
     [JsonPropertyName("projects")]
     public IReadOnlyList<CsProjFileInfo>? Projects { get; set; }
 

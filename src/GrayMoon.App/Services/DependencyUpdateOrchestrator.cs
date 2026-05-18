@@ -151,8 +151,13 @@ public sealed class DependencyUpdateOrchestrator(
             return [];
         }
 
+        // Repositories pinned to a tag (detached HEAD) must never participate in update: sync/commit/version refresh corrupts persisted branch/tag state and can yield "(no branch)".
+        bool IsPinnedToTag(WorkspaceRepositoryLink link) =>
+            !string.IsNullOrWhiteSpace(link.CheckedOutTag);
+
         var levelRepoIds = workspace.Repositories
             .Where(link => link.Repository != null)
+            .Where(link => !IsPinnedToTag(link))
             .Where(link => selectedRepositoryIds == null || selectedRepositoryIds.Count == 0 || selectedRepositoryIds.Contains(link.RepositoryId))
             .GroupBy(link => link.DependencyLevel ?? 0)
             .OrderBy(g => g.Key)
@@ -162,8 +167,17 @@ public sealed class DependencyUpdateOrchestrator(
         if (levelRepoIds.Count > 0)
             return levelRepoIds;
 
+        // Do not fall back to raw selectedRepositoryIds: tag-pinned IDs would incorrectly be scheduled here after the filter yields no groups.
         if (selectedRepositoryIds is { Count: > 0 })
-            return [(0, selectedRepositoryIds)];
+        {
+            var nonTaggedFromSelection = workspace.Repositories
+                .Where(link => link.Repository != null && selectedRepositoryIds.Contains(link.RepositoryId))
+                .Where(link => !IsPinnedToTag(link))
+                .Select(link => link.RepositoryId)
+                .ToHashSet();
+            if (nonTaggedFromSelection.Count > 0)
+                return [(0, nonTaggedFromSelection)];
+        }
 
         onRepoError(0, "No repositories found for update.");
         return [];
@@ -243,6 +257,17 @@ public sealed class DependencyUpdateOrchestrator(
             .GroupBy(x => (x.RepositoryId, x.RepoName))
             .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
             .ToList();
+
+        // Never commit version-file changes or refresh versions for repos pinned to a tag.
+        var workspacePins = await workspaceRepository.GetByIdAsync(workspaceId);
+        var tagPinnedIds = workspacePins?.Repositories?
+            .Where(l => !string.IsNullOrWhiteSpace(l.CheckedOutTag))
+            .Select(l => l.RepositoryId)
+            .ToHashSet() ?? new HashSet<int>();
+        if (tagPinnedIds.Count > 0)
+            byRepo = byRepo.Where(r => !tagPinnedIds.Contains(r.RepositoryId)).ToList();
+        if (byRepo.Count == 0)
+            return true;
 
         setProgress("Committing updated versions...");
         var vfCommitResults = await workspaceGitService.CommitFilePathsAsync(

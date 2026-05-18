@@ -614,10 +614,11 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return Array.Empty<string>();
 
-        var (exitCode, stdout, stderr) = await RunProcessAsync("git", "branch --format=%(refname:short)", repoPath, ct);
+        // Use for-each-ref refs/heads to avoid the synthetic "(HEAD detached at ...)" entry that `git branch` prints in detached HEAD state.
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", "for-each-ref refs/heads --format=%(refname:short)", repoPath, ct);
         if (exitCode != 0)
         {
-            logger.LogWarning("Git branch list failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            logger.LogWarning("Git for-each-ref refs/heads failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
             return Array.Empty<string>();
         }
 
@@ -938,6 +939,82 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return defaultBranch.Substring("origin/".Length);
 
         return defaultBranch;
+    }
+
+    public async Task<IReadOnlyList<string>> GetTagsAsync(string repoPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return Array.Empty<string>();
+
+        // Newest tag first by creator date so the most recent release surfaces at the top of the picker.
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", "tag --sort=-creatordate", repoPath, ct);
+        if (exitCode != 0)
+        {
+            logger.LogDebug("Git tag list failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, exitCode, stderr);
+            return Array.Empty<string>();
+        }
+
+        var tags = (stdout ?? "")
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .ToList();
+
+        return tags;
+    }
+
+    public async Task<(bool Success, string? ErrorMessage)> CheckoutTagAsync(string repoPath, string tagName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(tagName))
+            return (false, "Invalid repository path or tag name");
+
+        static string CombineOutput(string? stdout, string? stderr)
+        {
+            var outStr = (stdout ?? "").Trim();
+            var errStr = (stderr ?? "").Trim();
+            return string.IsNullOrWhiteSpace(outStr) ? errStr
+                 : string.IsNullOrWhiteSpace(errStr) ? outStr
+                 : $"{outStr}\n{errStr}";
+        }
+
+        var name = tagName.Trim();
+        // Verify the tag exists locally to avoid ambiguous checkout against a branch with same name.
+        var (verifyExit, _, _) = await RunProcessAsync("git", $"rev-parse --verify refs/tags/{name}", repoPath, ct);
+        if (verifyExit != 0)
+            return (false, $"Tag '{name}' does not exist.");
+
+        var (exitCode, stdout, stderr) = await RunProcessAsync(
+            "git",
+            $"-c advice.detachedHead=false checkout refs/tags/{name}",
+            repoPath,
+            ct);
+        if (exitCode != 0)
+        {
+            var combined = CombineOutput(stdout, stderr);
+            logger.LogError("Git checkout tag failed for {RepoPath}. Tag={Tag}, ExitCode={ExitCode}", repoPath, name, exitCode);
+            return (false, combined);
+        }
+
+        logger.LogInformation("Git checkout tag completed for {RepoPath}. Tag={Tag}", repoPath, name);
+        return (true, null);
+    }
+
+    public async Task<string?> GetCheckedOutTagAsync(string repoPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return null;
+
+        // symbolic-ref exits 0 only when HEAD points to a branch; non-zero means detached HEAD.
+        var (symExit, _, _) = await RunProcessAsync("git", "symbolic-ref -q HEAD", repoPath, ct);
+        if (symExit == 0)
+            return null;
+
+        // describe --tags --exact-match returns the tag name only if HEAD is exactly on a tag.
+        var (descExit, stdout, _) = await RunProcessAsync("git", "describe --tags --exact-match", repoPath, ct);
+        if (descExit != 0)
+            return null;
+
+        var tag = (stdout ?? "").Trim();
+        return string.IsNullOrWhiteSpace(tag) ? null : tag;
     }
 
     public Task<string?> GetDefaultBranchOriginRefAsync(string repoPath, CancellationToken ct)

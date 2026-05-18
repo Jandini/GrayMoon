@@ -18,7 +18,7 @@ public sealed class WorkspacePushHandler(
     {
         var (payload, _) = await workspacePushService.GetPushPlanAsync(workspaceId, cancellationToken);
         var repoIdsWithUnpushed = workspaceRepositories
-            .Where(wr => (wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false)
+            .Where(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false))
             .Select(wr => wr.RepositoryId)
             .ToHashSet();
         var toPush = payload.Where(p => repoIdsWithUnpushed.Contains(p.RepoId)).ToList();

@@ -159,6 +159,13 @@ public class WorkspaceGitService(
         if (repositoryIds != null && repositoryIds.Count > 0)
             repos = repos.Where(r => repositoryIds.Contains(r.RepositoryId)).ToList();
 
+        var tagPinnedIds = workspace.Repositories
+            .Where(l => !string.IsNullOrWhiteSpace(l.CheckedOutTag))
+            .Select(l => l.RepositoryId)
+            .ToHashSet();
+        if (tagPinnedIds.Count > 0)
+            repos = repos.Where(r => !tagPinnedIds.Contains(r.RepositoryId)).ToList();
+
         if (repos.Count == 0)
         {
             _logger.LogInformation("RefreshWorkspaceProjects: no repositories for workspace {WorkspaceName}", workspace.Name);
@@ -239,6 +246,10 @@ public class WorkspaceGitService(
         if (repo == null)
             throw new InvalidOperationException($"Repository {repositoryId} not found in workspace.");
 
+        var linkForWorkspace = workspace.Repositories.FirstOrDefault(l => l.RepositoryId == repositoryId);
+        if (!string.IsNullOrWhiteSpace(linkForWorkspace?.CheckedOutTag))
+            return false;
+
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot, maxParallelOperations = _maxConcurrent };
         var response = await _agentBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
@@ -280,6 +291,10 @@ public class WorkspaceGitService(
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
+        var pinnedLink = workspace.Repositories.FirstOrDefault(l => l.RepositoryId == repositoryId && !string.IsNullOrWhiteSpace(l.CheckedOutTag));
+        if (pinnedLink != null)
+            return;
+
         onProgressMessage?.Invoke("Refreshing repository projects...");
         var refreshOk = await RefreshSingleRepositoryProjectsAsync(workspaceId, repositoryId, onRepoError: onRepoError, cancellationToken: cancellationToken);
         if (!refreshOk)
@@ -295,7 +310,15 @@ public class WorkspaceGitService(
     public async Task<(IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)> GetUpdatePlanAsync(int workspaceId, IReadOnlySet<int>? repositoryIds = null, CancellationToken cancellationToken = default)
     {
         var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, cancellationToken);
-        var withUpdates = payloads.Where(p => p.ProjectUpdates.Count > 0).ToList();
+        var tagPinnedIds = (await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId && !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            .Select(wr => wr.RepositoryId)
+            .ToListAsync(cancellationToken)).ToHashSet();
+
+        var withUpdates = payloads
+            .Where(p => p.ProjectUpdates.Count > 0 && !tagPinnedIds.Contains(p.RepoId))
+            .ToList();
         if (repositoryIds != null && repositoryIds.Count > 0)
             withUpdates = withUpdates.Where(p => repositoryIds.Contains(p.RepoId)).ToList();
         if (withUpdates.Count == 0)
@@ -322,8 +345,15 @@ public class WorkspaceGitService(
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
         var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, cancellationToken);
+        var tagPinnedIds = (await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId && !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            .Select(wr => wr.RepositoryId)
+            .ToListAsync(cancellationToken)).ToHashSet();
+
         var toSync = payloads
             .Where(p => p.ProjectUpdates.Count > 0 && (repoIdsToSync == null || repoIdsToSync.Contains(p.RepoId)))
+            .Where(p => !tagPinnedIds.Contains(p.RepoId))
             .ToList();
 
         if (toSync.Count == 0)
@@ -403,6 +433,15 @@ public class WorkspaceGitService(
         if (!_agentBridge.IsAgentConnected || reposToCommit.Count == 0)
             return Array.Empty<(int, string?)>();
 
+        var tagPinnedIds = (await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId && !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            .Select(wr => wr.RepositoryId)
+            .ToListAsync(cancellationToken)).ToHashSet();
+        reposToCommit = reposToCommit.Where(r => !tagPinnedIds.Contains(r.RepoId)).ToList();
+        if (reposToCommit.Count == 0)
+            return Array.Empty<(int, string?)>();
+
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
             return reposToCommit.Select(r => (r.RepoId, (string?)"Workspace not found.")).ToList();
@@ -469,6 +508,15 @@ public class WorkspaceGitService(
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected || reposAndPaths.Count == 0)
+            return Array.Empty<(int, string?)>();
+
+        var tagPinnedIdsFp = (await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId && !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            .Select(wr => wr.RepositoryId)
+            .ToListAsync(cancellationToken)).ToHashSet();
+        reposAndPaths = reposAndPaths.Where(r => !tagPinnedIdsFp.Contains(r.RepoId)).ToList();
+        if (reposAndPaths.Count == 0)
             return Array.Empty<(int, string?)>();
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
@@ -662,17 +710,21 @@ public class WorkspaceGitService(
         if (!response.Success || response.Data == null)
             return new RepoGitVersionInfo { Version = "-", Branch = "-", ErrorMessage = response.Error ?? "Sync failed" };
 
-        var (version, branch, gitVersionError, gitFetchError) = GetVersionBranch(response.Data);
+        var (version, branch, tag, gitVersionError, gitFetchError) = GetVersionBranch(response.Data);
         var projectsCount = GetProjects(response.Data);
         var projectsDetail = GetProjectsDetail(response.Data);
         var (outgoingCommits, incomingCommits, defaultBehind, defaultAhead) = GetCommitCounts(response.Data);
-        var (localBranches, remoteBranches, defaultBranch) = GetBranches(response.Data);
-        var hasUpstream = ComputeHasUpstream(branch, remoteBranches);
+        var (localBranches, remoteBranches, defaultBranch, tags, currentTag) = GetBranches(response.Data);
+        // Prefer Tag from the top-level response, fall back to currentTag from the branches block.
+        var resolvedTag = !string.IsNullOrWhiteSpace(tag) ? tag : currentTag;
+        var hasUpstream = string.IsNullOrWhiteSpace(resolvedTag) ? ComputeHasUpstream(branch, remoteBranches) : null;
         var combinedError = CombineRepoErrors(gitFetchError, gitVersionError);
         return new RepoGitVersionInfo
         {
             Version = version,
             Branch = branch,
+            Tag = resolvedTag,
+            Tags = tags,
             Projects = projectsCount,
             ProjectsDetail = projectsDetail,
             OutgoingCommits = outgoingCommits,
@@ -699,7 +751,7 @@ public class WorkspaceGitService(
         if (!response.Success || response.Data == null)
             return new RepoGitVersionInfo { Version = "-", Branch = "-" };
 
-        var (version, branch, gitVersionError, gitFetchError) = GetVersionBranch(response.Data);
+        var (version, branch, tag, gitVersionError, gitFetchError) = GetVersionBranch(response.Data);
         var (outgoingCommits, incomingCommits, defaultBehind, defaultAhead) = GetCommitCounts(response.Data);
         var (hasUpstream, remoteBranches, localBranches) = GetRefreshBranchesAndUpstream(response.Data);
         var combinedError = CombineRepoErrors(gitFetchError, gitVersionError);
@@ -707,11 +759,13 @@ public class WorkspaceGitService(
         {
             Version = version,
             Branch = branch,
+            Tag = tag,
             OutgoingCommits = outgoingCommits,
             IncomingCommits = incomingCommits,
             DefaultBranchBehindCommits = defaultBehind,
             DefaultBranchAheadCommits = defaultAhead,
-            HasUpstream = hasUpstream,
+            // When pinned to a tag, suppress upstream computation (no branch to compare against).
+            HasUpstream = string.IsNullOrWhiteSpace(tag) ? hasUpstream : null,
             RemoteBranches = remoteBranches,
             LocalBranches = localBranches,
             ErrorMessage = combinedError
@@ -726,10 +780,10 @@ public class WorkspaceGitService(
         return (r?.HasUpstream, remote?.Count > 0 ? remote : null, local?.Count > 0 ? local : null);
     }
 
-    private static (string version, string branch, string? gitVersionError, string? gitFetchError) GetVersionBranch(object data)
+    private static (string version, string branch, string? tag, string? gitVersionError, string? gitFetchError) GetVersionBranch(object data)
     {
         var r = AgentResponseJson.DeserializeAgentResponse<AgentVersionBranchResponse>(data);
-        return (r?.Version ?? "-", r?.Branch ?? "-", r?.GitVersionError, r?.GitFetchError);
+        return (r?.Version ?? "-", r?.Branch ?? "-", string.IsNullOrWhiteSpace(r?.Tag) ? null : r!.Tag, r?.GitVersionError, r?.GitFetchError);
     }
 
     private static string? CombineRepoErrors(string? fetchError, string? versionError)
@@ -757,13 +811,15 @@ public class WorkspaceGitService(
         return (r?.OutgoingCommits, r?.IncomingCommits, r?.DefaultBranchBehind, r?.DefaultBranchAhead);
     }
 
-    private static (IReadOnlyList<string>? LocalBranches, IReadOnlyList<string>? RemoteBranches, string? DefaultBranch) GetBranches(object data)
+    private static (IReadOnlyList<string>? LocalBranches, IReadOnlyList<string>? RemoteBranches, string? DefaultBranch, IReadOnlyList<string>? Tags, string? CurrentTag) GetBranches(object data)
     {
         var r = AgentResponseJson.DeserializeAgentResponse<AgentBranchesResponse>(data);
         var local = r?.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
         var remote = r?.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
         var defaultBranch = !string.IsNullOrWhiteSpace(r?.DefaultBranch) ? r.DefaultBranch : null;
-        return (local, remote, defaultBranch);
+        var tags = r?.Tags?.Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
+        var currentTag = !string.IsNullOrWhiteSpace(r?.CurrentTag) ? r.CurrentTag : null;
+        return (local, remote, defaultBranch, tags, currentTag);
     }
 
     private static ProjectType? ComputeRepositoryType(IReadOnlyList<SyncProjectInfo>? projects)
@@ -832,15 +888,33 @@ public class WorkspaceGitService(
             {
                 wr.GitVersion = info.Version == "-" ? null : info.Version;
                 wr.BranchName = info.Branch == "-" ? null : info.Branch;
+
+                if (!string.IsNullOrWhiteSpace(info.Tag))
+                {
+                    // Repo is pinned to a tag (detached HEAD): clear branch-only fields so the UI does
+                    // not render misleading divergence / "push to set upstream" badges.
+                    wr.CheckedOutTag = info.Tag;
+                    wr.BranchName = null;
+                    wr.BranchHasUpstream = null;
+                    wr.OutgoingCommits = null;
+                    wr.IncomingCommits = null;
+                    wr.DefaultBranchBehindCommits = null;
+                    wr.DefaultBranchAheadCommits = null;
+                }
+                else
+                {
+                    wr.CheckedOutTag = null;
+                    if (info.OutgoingCommits.HasValue) wr.OutgoingCommits = info.OutgoingCommits;
+                    if (info.IncomingCommits.HasValue) wr.IncomingCommits = info.IncomingCommits;
+                    if (info.HasUpstream.HasValue) wr.BranchHasUpstream = info.HasUpstream.Value;
+                    if (info.DefaultBranchBehindCommits.HasValue) wr.DefaultBranchBehindCommits = info.DefaultBranchBehindCommits;
+                    if (info.DefaultBranchAheadCommits.HasValue) wr.DefaultBranchAheadCommits = info.DefaultBranchAheadCommits;
+                }
+
                 if (!string.IsNullOrWhiteSpace(info.DefaultBranch))
                     wr.DefaultBranchName = info.DefaultBranch;
                 if (info.Projects.HasValue) wr.Projects = info.Projects;
-                if (info.OutgoingCommits.HasValue) wr.OutgoingCommits = info.OutgoingCommits;
-                if (info.IncomingCommits.HasValue) wr.IncomingCommits = info.IncomingCommits;
-                if (info.HasUpstream.HasValue) wr.BranchHasUpstream = info.HasUpstream.Value;
-                if (info.DefaultBranchBehindCommits.HasValue) wr.DefaultBranchBehindCommits = info.DefaultBranchBehindCommits;
-                if (info.DefaultBranchAheadCommits.HasValue) wr.DefaultBranchAheadCommits = info.DefaultBranchAheadCommits;
-                var hasValidVersion = info.Version != "-" && info.Branch != "-";
+                var hasValidVersion = info.Version != "-" && (info.Branch != "-" || !string.IsNullOrWhiteSpace(info.Tag));
                 var hasDefaultBranch = !string.IsNullOrWhiteSpace(wr.DefaultBranchName);
                 wr.SyncStatus = !hasValidVersion
                     ? RepoSyncStatus.Error
@@ -854,10 +928,10 @@ public class WorkspaceGitService(
                     wr.RepositoryType = ComputeRepositoryType(info.ProjectsDetail);
             }
 
-            // Persist branches if available (include default branch so IsDefault is set)
-            if ((info.LocalBranches != null || info.RemoteBranches != null) && wr != null)
+            // Persist branches if available (include default branch so IsDefault is set, and tags so the picker can show them)
+            if ((info.LocalBranches != null || info.RemoteBranches != null || info.Tags != null) && wr != null)
             {
-                await PersistBranchesAsync(wr.WorkspaceRepositoryId, info.LocalBranches, info.RemoteBranches, info.DefaultBranch, cancellationToken);
+                await PersistBranchesAsync(wr.WorkspaceRepositoryId, info.LocalBranches, info.RemoteBranches, info.DefaultBranch, info.Tags, info.Tag, cancellationToken);
             }
         }
 
@@ -879,11 +953,35 @@ public class WorkspaceGitService(
     }
 
     /// <summary>Persists branches for a workspace repository. Removes branches not in the fetched list, adds new ones, updates LastSeenAt for existing ones. Optionally marks the default branch (e.g. main or master).</summary>
-    public async Task PersistBranchesAsync(
+    public Task PersistBranchesAsync(
         int workspaceRepositoryId,
         IReadOnlyList<string>? localBranches,
         IReadOnlyList<string>? remoteBranches,
         string? defaultBranchName = null,
+        CancellationToken cancellationToken = default)
+        => PersistBranchesAsync(workspaceRepositoryId, localBranches, remoteBranches, defaultBranchName, tags: null, currentTag: null, cancellationToken);
+
+    /// <summary>True when a ref name is one of git's synthetic placeholders that appear in detached HEAD state (e.g. <c>(HEAD detached at v1.0)</c>, <c>(no branch)</c>, <c>origin/(no branch)</c>). These are not real branches and must never be persisted.</summary>
+    private static bool IsSyntheticGitRef(string name)
+    {
+        var trimmed = name.Trim();
+        if (trimmed.Length == 0)
+            return true;
+        if (trimmed.StartsWith("(", StringComparison.Ordinal) && trimmed.EndsWith(")", StringComparison.Ordinal))
+            return true;
+        if (trimmed.EndsWith("/(no branch)", StringComparison.Ordinal))
+            return true;
+        return false;
+    }
+
+    /// <summary>Persists branches and tags for a workspace repository. Removes branches/tags not in the fetched list, adds new ones, updates LastSeenAt for existing ones. Optionally marks the default branch (e.g. main or master) and the currently checked-out tag.</summary>
+    public async Task PersistBranchesAsync(
+        int workspaceRepositoryId,
+        IReadOnlyList<string>? localBranches,
+        IReadOnlyList<string>? remoteBranches,
+        string? defaultBranchName,
+        IReadOnlyList<string>? tags,
+        string? currentTag,
         CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
@@ -891,19 +989,36 @@ public class WorkspaceGitService(
             .Where(rb => rb.WorkspaceRepositoryId == workspaceRepositoryId)
             .ToListAsync(cancellationToken);
 
-        var fetchedBranches = new HashSet<(string Name, bool IsRemote)>();
+        var fetchedRefs = new HashSet<(string Name, bool IsRemote, bool IsTag)>();
+        // Tracks the agent-provided rank for tags so we can persist "newest first" order; branches default to 0.
+        var sortIndexByRef = new Dictionary<(string Name, bool IsRemote, bool IsTag), int>();
         if (localBranches != null)
         {
             foreach (var branch in localBranches)
             {
-                fetchedBranches.Add((branch, false));
+                if (!string.IsNullOrWhiteSpace(branch) && !IsSyntheticGitRef(branch))
+                    fetchedRefs.Add((branch, false, false));
             }
         }
         if (remoteBranches != null)
         {
             foreach (var branch in remoteBranches)
             {
-                fetchedBranches.Add((branch, true));
+                if (!string.IsNullOrWhiteSpace(branch) && !IsSyntheticGitRef(branch))
+                    fetchedRefs.Add((branch, true, false));
+            }
+        }
+        if (tags != null)
+        {
+            var rank = 0;
+            foreach (var tag in tags)
+            {
+                if (!string.IsNullOrWhiteSpace(tag))
+                {
+                    var key = (tag, false, true);
+                    if (fetchedRefs.Add(key))
+                        sortIndexByRef[key] = rank++;
+                }
             }
         }
 
@@ -911,15 +1026,18 @@ public class WorkspaceGitService(
         foreach (var b in existingBranches)
             b.IsDefault = false;
 
-        // Update existing branches or add new ones
-        foreach (var (name, isRemote) in fetchedBranches)
+        // Update existing rows or add new ones
+        foreach (var (name, isRemote, isTag) in fetchedRefs)
         {
-            var isDefault = !string.IsNullOrWhiteSpace(defaultBranchName) && string.Equals(name, defaultBranchName, StringComparison.OrdinalIgnoreCase);
-            var existing = existingBranches.FirstOrDefault(b => b.BranchName == name && b.IsRemote == isRemote);
+            var isDefault = !isTag && !string.IsNullOrWhiteSpace(defaultBranchName) && string.Equals(name, defaultBranchName, StringComparison.OrdinalIgnoreCase);
+            var sortIndex = sortIndexByRef.TryGetValue((name, isRemote, isTag), out var rank) ? rank : 0;
+            var existing = existingBranches.FirstOrDefault(b => b.BranchName == name && b.IsRemote == isRemote && b.IsTag == isTag);
             if (existing != null)
             {
                 existing.LastSeenAt = now;
                 existing.IsDefault = isDefault;
+                if (isTag)
+                    existing.SortIndex = sortIndex;
             }
             else
             {
@@ -928,17 +1046,49 @@ public class WorkspaceGitService(
                     WorkspaceRepositoryId = workspaceRepositoryId,
                     BranchName = name,
                     IsRemote = isRemote,
+                    IsTag = isTag,
                     LastSeenAt = now,
-                    IsDefault = isDefault
+                    IsDefault = isDefault,
+                    SortIndex = isTag ? sortIndex : 0
                 });
             }
         }
 
-        // Remove branches that were not fetched (no longer exist)
-        var toRemove = existingBranches.Where(b => !fetchedBranches.Contains((b.BranchName, b.IsRemote))).ToList();
+        // Remove rows that were not fetched (no longer exist). Tags are removed only when a tag list was
+        // provided so callers that pass only branches (e.g. legacy paths) do not wipe persisted tags.
+        var toRemove = existingBranches
+            .Where(b => !fetchedRefs.Contains((b.BranchName, b.IsRemote, b.IsTag)))
+            .Where(b => !b.IsTag || tags != null)
+            .Where(b => b.IsTag || (localBranches != null || remoteBranches != null))
+            .ToList();
         if (toRemove.Count > 0)
         {
             _dbContext.RepositoryBranches.RemoveRange(toRemove);
+        }
+
+        // Update WorkspaceRepositoryLink.CheckedOutTag from the agent-reported value when tags were refreshed.
+        if (tags != null)
+        {
+            var link = await _dbContext.WorkspaceRepositories
+                .FirstOrDefaultAsync(wr => wr.WorkspaceRepositoryId == workspaceRepositoryId, cancellationToken);
+            if (link != null)
+            {
+                if (!string.IsNullOrWhiteSpace(currentTag))
+                {
+                    link.CheckedOutTag = currentTag;
+                    link.BranchName = null;
+                    link.BranchHasUpstream = null;
+                    link.OutgoingCommits = null;
+                    link.IncomingCommits = null;
+                    link.DefaultBranchBehindCommits = null;
+                    link.DefaultBranchAheadCommits = null;
+                }
+                else if (!string.IsNullOrWhiteSpace(link.CheckedOutTag))
+                {
+                    // Tag list refreshed but we are no longer on a tag; clear the pinned state.
+                    link.CheckedOutTag = null;
+                }
+            }
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);

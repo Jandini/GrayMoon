@@ -27,6 +27,14 @@ public class WorkspaceRepositoryLink
     [MaxLength(200)]
     public string? BranchName { get; set; }
 
+    /// <summary>Tag name HEAD is currently checked out at (detached HEAD on a tag). Mutually exclusive with <see cref="BranchName"/>: when this is non-empty, write operations (push/pull/update/commit-sync/sync-to-default) are blocked because the repo is pinned to a fixed version.</summary>
+    [MaxLength(200)]
+    public string? CheckedOutTag { get; set; }
+
+    /// <summary>True when the repository is currently on a tag (detached HEAD) rather than on a branch. Used by UI to gate write actions.</summary>
+    [NotMapped]
+    public bool IsOnTag => !string.IsNullOrWhiteSpace(CheckedOutTag);
+
     /// <summary>Repository's default branch name (e.g. main, master, develop). Set during sync from agent and reused for divergence / PR URLs and sync-to-default logic.</summary>
     [MaxLength(200)]
     public string? DefaultBranchName { get; set; }
