@@ -2370,6 +2370,22 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
+    private async Task CopyDependenciesToClipboard(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            ToastService.Show("Dependency list copied to the clipboard");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to copy dependency list to clipboard");
+            ToastService.Show("Could not copy to clipboard.");
+        }
+    }
+
     private void OnVersionMouseLeave(string? version)
     {
         if (!string.IsNullOrEmpty(version))

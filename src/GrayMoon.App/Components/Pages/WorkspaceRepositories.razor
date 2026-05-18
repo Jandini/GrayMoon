@@ -156,6 +156,7 @@
                                                                   OnPullBadgeClick="() => OnPullBadgeClickAsync(wr.RepositoryId)"
                                                                   OnPrBadgeMouseEnter="() => RefreshPrOnBadgeEnterAsync(wr.RepositoryId)"
                                                                   OnSyncClick="() => SyncSingleRepoAsync(wr.RepositoryId)"
+                                                                  OnCopyDependencies="CopyDependenciesToClipboard"
                                                                   OnDismissError="() => DismissRepositoryError(wr.RepositoryId)" />
                                     }
                                 }
