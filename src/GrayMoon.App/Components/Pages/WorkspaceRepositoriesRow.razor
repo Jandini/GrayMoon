@@ -127,7 +127,9 @@
                     else
                     {
                         var depBadgeOnTag = Link.IsOnTag;
-                        <span class="dependency-badge-tooltip-wrap dependency-badge-link @(IsUpdating || IsSyncing || ActionsDisabled ? "dependency-badge-link--disabled" : "") @(depBadgeOnTag ? "dependency-badge-link--readonly" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
+                        @* Rows on tags still need hover and copy on the mismatch tooltip; dependency-badge-link--disabled uses pointer-events:none which blocks that when the whole level is tag-pinned (ActionsDisabled). *@
+                        var depMismatchBadgeInactive = IsUpdating || IsSyncing || (ActionsDisabled && !depBadgeOnTag);
+                        <span class="dependency-badge-tooltip-wrap dependency-badge-link @(depMismatchBadgeInactive ? "dependency-badge-link--disabled" : "") @(depBadgeOnTag ? "dependency-badge-link--readonly" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
                               role="button"
                               tabindex="0"
                               style="cursor: @(depBadgeOnTag ? "default" : "pointer");"

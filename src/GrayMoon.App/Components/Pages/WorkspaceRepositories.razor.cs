@@ -414,9 +414,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                var (payloads, _) = await WorkspacePageService.WorkspaceGitService.GetUpdatePlanAsync(WorkspaceId);
+                // Use raw sync payloads so tag-pinned repos still get mismatch lines for hover/copy in the badge tooltip.
+                // GetUpdatePlanAsync excludes tag-pinned repos on purpose so Update does not target them.
+                var payloads = await WorkspacePageService.WorkspaceProjectRepository
+                    .GetSyncDependenciesPayloadAsync(WorkspaceId);
                 var dict = new Dictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>>();
-                foreach (var p in payloads ?? Array.Empty<SyncDependenciesRepoPayload>())
+                foreach (var p in payloads.Where(p => p.ProjectUpdates.Count > 0))
                 {
                     var lines = p.ProjectUpdates
                         .SelectMany(pu => pu.PackageUpdates)
