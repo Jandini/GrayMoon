@@ -15,6 +15,7 @@ public interface IWorkspacePageService
     GitHubPullRequestService GitHubPullRequestService { get; }
     ConnectorRepository ConnectorRepository { get; }
     GitHubRepositoryService RepositoryService { get; }
+    WorkspaceProjectRepository WorkspaceProjectRepository { get; }
     IHttpClientFactory HttpClientFactory { get; }
 }
 
@@ -26,6 +27,7 @@ public sealed class WorkspacePageService(
     GitHubPullRequestService gitHubPullRequestService,
     ConnectorRepository connectorRepository,
     GitHubRepositoryService repositoryService,
+    WorkspaceProjectRepository workspaceProjectRepository,
     IHttpClientFactory httpClientFactory) : IWorkspacePageService
 {
     public WorkspaceRepository WorkspaceRepository { get; } = workspaceRepository;
@@ -35,6 +37,7 @@ public sealed class WorkspacePageService(
     public GitHubPullRequestService GitHubPullRequestService { get; } = gitHubPullRequestService;
     public ConnectorRepository ConnectorRepository { get; } = connectorRepository;
     public GitHubRepositoryService RepositoryService { get; } = repositoryService;
+    public WorkspaceProjectRepository WorkspaceProjectRepository { get; } = workspaceProjectRepository;
     public IHttpClientFactory HttpClientFactory { get; } = httpClientFactory;
 }
 

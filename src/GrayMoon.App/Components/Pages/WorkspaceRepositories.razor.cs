@@ -63,6 +63,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private CancellationTokenSource? _syncCts;
     private IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>> _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+
+    /// <summary>All workspace-internal package dependencies of each repository (PackageId + version as written in the .csproj). Used to populate the dependency-badge tooltip for repositories whose dependencies are up to date.</summary>
+    private IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string Version)>> _allDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string)>>();
     private bool isCommitSyncing = false;
     private string commitSyncProgressMessage = "Synchronizing commits...";
     private CancellationTokenSource? _commitSyncCts;
@@ -406,27 +409,40 @@ public sealed partial class WorkspaceRepositories : IDisposable
         if (!workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0))
         {
             _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
-            return;
         }
+        else
+        {
+            try
+            {
+                var (payloads, _) = await WorkspacePageService.WorkspaceGitService.GetUpdatePlanAsync(WorkspaceId);
+                var dict = new Dictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>>();
+                foreach (var p in payloads ?? Array.Empty<SyncDependenciesRepoPayload>())
+                {
+                    var lines = p.ProjectUpdates
+                        .SelectMany(pu => pu.PackageUpdates)
+                        .GroupBy(x => (x.PackageId.Trim(), x.CurrentVersion.Trim(), x.NewVersion.Trim()))
+                        .Select(g => (g.Key.Item1, g.Key.Item2, g.Key.Item3))
+                        .ToList();
+                    dict[p.RepoId] = lines;
+                }
+                _mismatchedDependencyLinesByRepo = dict;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Could not load mismatched dependency lines for workspace {WorkspaceId}", WorkspaceId);
+                _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+            }
+        }
+
         try
         {
-            var (payloads, _) = await WorkspacePageService.WorkspaceGitService.GetUpdatePlanAsync(WorkspaceId);
-            var dict = new Dictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>>();
-            foreach (var p in payloads ?? Array.Empty<SyncDependenciesRepoPayload>())
-            {
-                var lines = p.ProjectUpdates
-                    .SelectMany(pu => pu.PackageUpdates)
-                    .GroupBy(x => (x.PackageId.Trim(), x.CurrentVersion.Trim(), x.NewVersion.Trim()))
-                    .Select(g => (g.Key.Item1, g.Key.Item2, g.Key.Item3))
-                    .ToList();
-                dict[p.RepoId] = lines;
-            }
-            _mismatchedDependencyLinesByRepo = dict;
+            _allDependencyLinesByRepo = await WorkspacePageService.WorkspaceProjectRepository
+                .GetPackageDependencyLinesByRepoAsync(WorkspaceId);
         }
         catch (Exception ex)
         {
-            Logger.LogDebug(ex, "Could not load mismatched dependency lines for workspace {WorkspaceId}", WorkspaceId);
-            _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+            Logger.LogDebug(ex, "Could not load dependency listing for workspace {WorkspaceId}", WorkspaceId);
+            _allDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string)>>();
         }
     }
 
@@ -2446,6 +2462,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> GetMismatchedDependencyLines(int repositoryId)
     {
         return _mismatchedDependencyLinesByRepo.GetValueOrDefault(repositoryId) ?? Array.Empty<(string PackageId, string CurrentVersion, string NewVersion)>();
+    }
+
+    private IReadOnlyList<(string PackageId, string Version)> GetAllDependencyLines(int repositoryId)
+    {
+        return _allDependencyLinesByRepo.GetValueOrDefault(repositoryId) ?? Array.Empty<(string PackageId, string Version)>();
     }
 
     private List<WorkspaceRepositoryLink> GetFilteredWorkspaceRepositories()

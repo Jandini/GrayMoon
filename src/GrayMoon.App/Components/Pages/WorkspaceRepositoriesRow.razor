@@ -94,9 +94,35 @@
                     }
                     else if (unmatchedDeps == 0)
                     {
-                        <a href="@graphUrl" class="dependency-badge-link" title="View dependency graph for this repository">
-                            <span class="badge build-dep-badge build-dep-badge-ok">@depCount</span>
-                        </a>
+                        <span class="dependency-badge-tooltip-wrap dependency-badge-link">
+                            <a href="@graphUrl" class="dependency-badge-graph-link">
+                                <span class="badge build-dep-badge build-dep-badge-ok">@depCount</span>
+                            </a>
+                            @if (AllDependencyLines.Count > 0)
+                            {
+                                <div class="dependency-badge-tooltip">
+                                    <div class="dependency-badge-tooltip-header">
+                                        <span class="dependency-badge-tooltip-title">Dependencies:</span>
+                                        <button type="button"
+                                                class="dependency-badge-tooltip-copy"
+                                                title="Copy list to clipboard"
+                                                aria-label="Copy list to clipboard"
+                                                @onclick="HandleCopyAllDependencies"
+                                                @onclick:preventDefault
+                                                @onclick:stopPropagation>
+                                            <i class="bi bi-clipboard" aria-hidden="true"></i>
+                                        </button>
+                                    </div>
+                                    @foreach (var line in AllDependencyLines)
+                                    {
+                                        <div class="dependency-badge-tooltip-line">
+                                            <code>@line.PackageId</code> <span class="dependency-badge-tooltip-versions">@line.Version</span>
+                                        </div>
+                                    }
+                                    <div class="dependency-badge-tooltip-footer">Click to view the dependency graph.</div>
+                                </div>
+                            }
+                        </span>
                     }
                     else
                     {
@@ -185,6 +211,8 @@
     [Parameter] public bool IsPrVerified { get; set; }
     [Parameter] public RepoSyncStatus? RepoSyncStatus { get; set; }
     [Parameter] public IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> MismatchedDependencyLines { get; set; } = Array.Empty<(string, string, string)>();
+    /// <summary>All workspace-internal package dependencies of this repository (PackageId + version) used to populate the dependency-badge tooltip when everything is up to date.</summary>
+    [Parameter] public IReadOnlyList<(string PackageId, string Version)> AllDependencyLines { get; set; } = Array.Empty<(string, string)>();
     [Parameter] public bool IsVersionClicked { get; set; }
     [Parameter] public bool IsDependencyBadgeClicked { get; set; }
     [Parameter] public string? RepositoryError { get; set; }
@@ -244,6 +272,20 @@
             sb.AppendLine("Dependencies requiring update:");
         foreach (var line in MismatchedDependencyLines)
             sb.AppendLine($"{line.PackageId}: {line.CurrentVersion} -> {line.NewVersion}");
+        await OnCopyDependencies.InvokeAsync(sb.ToString().TrimEnd());
+    }
+
+    private async Task HandleCopyAllDependencies()
+    {
+        if (AllDependencyLines.Count == 0) return;
+        var sb = new System.Text.StringBuilder();
+        var repoName = Link?.Repository?.RepositoryName;
+        if (!string.IsNullOrWhiteSpace(repoName))
+            sb.AppendLine($"{repoName} - dependencies (up to date):");
+        else
+            sb.AppendLine("Dependencies (up to date):");
+        foreach (var line in AllDependencyLines)
+            sb.AppendLine($"{line.PackageId}: {line.Version}");
         await OnCopyDependencies.InvokeAsync(sb.ToString().TrimEnd());
     }
 }
