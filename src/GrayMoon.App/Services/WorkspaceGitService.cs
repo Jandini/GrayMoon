@@ -159,6 +159,13 @@ public class WorkspaceGitService(
         if (repositoryIds != null && repositoryIds.Count > 0)
             repos = repos.Where(r => repositoryIds.Contains(r.RepositoryId)).ToList();
 
+        var tagPinnedIds = workspace.Repositories
+            .Where(l => !string.IsNullOrWhiteSpace(l.CheckedOutTag))
+            .Select(l => l.RepositoryId)
+            .ToHashSet();
+        if (tagPinnedIds.Count > 0)
+            repos = repos.Where(r => !tagPinnedIds.Contains(r.RepositoryId)).ToList();
+
         if (repos.Count == 0)
         {
             _logger.LogInformation("RefreshWorkspaceProjects: no repositories for workspace {WorkspaceName}", workspace.Name);
@@ -239,6 +246,10 @@ public class WorkspaceGitService(
         if (repo == null)
             throw new InvalidOperationException($"Repository {repositoryId} not found in workspace.");
 
+        var linkForWorkspace = workspace.Repositories.FirstOrDefault(l => l.RepositoryId == repositoryId);
+        if (!string.IsNullOrWhiteSpace(linkForWorkspace?.CheckedOutTag))
+            return false;
+
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot, maxParallelOperations = _maxConcurrent };
         var response = await _agentBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
@@ -280,6 +291,10 @@ public class WorkspaceGitService(
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
+        var pinnedLink = workspace.Repositories.FirstOrDefault(l => l.RepositoryId == repositoryId && !string.IsNullOrWhiteSpace(l.CheckedOutTag));
+        if (pinnedLink != null)
+            return;
+
         onProgressMessage?.Invoke("Refreshing repository projects...");
         var refreshOk = await RefreshSingleRepositoryProjectsAsync(workspaceId, repositoryId, onRepoError: onRepoError, cancellationToken: cancellationToken);
         if (!refreshOk)
@@ -295,7 +310,15 @@ public class WorkspaceGitService(
     public async Task<(IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)> GetUpdatePlanAsync(int workspaceId, IReadOnlySet<int>? repositoryIds = null, CancellationToken cancellationToken = default)
     {
         var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, cancellationToken);
-        var withUpdates = payloads.Where(p => p.ProjectUpdates.Count > 0).ToList();
+        var tagPinnedIds = (await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId && !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            .Select(wr => wr.RepositoryId)
+            .ToListAsync(cancellationToken)).ToHashSet();
+
+        var withUpdates = payloads
+            .Where(p => p.ProjectUpdates.Count > 0 && !tagPinnedIds.Contains(p.RepoId))
+            .ToList();
         if (repositoryIds != null && repositoryIds.Count > 0)
             withUpdates = withUpdates.Where(p => repositoryIds.Contains(p.RepoId)).ToList();
         if (withUpdates.Count == 0)
@@ -322,8 +345,15 @@ public class WorkspaceGitService(
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
         var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, cancellationToken);
+        var tagPinnedIds = (await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId && !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            .Select(wr => wr.RepositoryId)
+            .ToListAsync(cancellationToken)).ToHashSet();
+
         var toSync = payloads
             .Where(p => p.ProjectUpdates.Count > 0 && (repoIdsToSync == null || repoIdsToSync.Contains(p.RepoId)))
+            .Where(p => !tagPinnedIds.Contains(p.RepoId))
             .ToList();
 
         if (toSync.Count == 0)
@@ -403,6 +433,15 @@ public class WorkspaceGitService(
         if (!_agentBridge.IsAgentConnected || reposToCommit.Count == 0)
             return Array.Empty<(int, string?)>();
 
+        var tagPinnedIds = (await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId && !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            .Select(wr => wr.RepositoryId)
+            .ToListAsync(cancellationToken)).ToHashSet();
+        reposToCommit = reposToCommit.Where(r => !tagPinnedIds.Contains(r.RepoId)).ToList();
+        if (reposToCommit.Count == 0)
+            return Array.Empty<(int, string?)>();
+
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
             return reposToCommit.Select(r => (r.RepoId, (string?)"Workspace not found.")).ToList();
@@ -469,6 +508,15 @@ public class WorkspaceGitService(
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected || reposAndPaths.Count == 0)
+            return Array.Empty<(int, string?)>();
+
+        var tagPinnedIdsFp = (await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId && !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            .Select(wr => wr.RepositoryId)
+            .ToListAsync(cancellationToken)).ToHashSet();
+        reposAndPaths = reposAndPaths.Where(r => !tagPinnedIdsFp.Contains(r.RepoId)).ToList();
+        if (reposAndPaths.Count == 0)
             return Array.Empty<(int, string?)>();
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);

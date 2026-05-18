@@ -499,6 +499,8 @@ public sealed class WorkspaceProjectRepository(
         var result = new List<PushRepoPayload>();
         foreach (var link in links)
         {
+            if (!string.IsNullOrWhiteSpace(link.CheckedOutTag))
+                continue;
             var repo = link.Repository;
             var repoName = repo?.RepositoryName ?? "";
             if (string.IsNullOrEmpty(repoName)) continue;

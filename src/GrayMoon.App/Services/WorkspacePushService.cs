@@ -110,6 +110,18 @@ public sealed class WorkspacePushService(
                 wr => wr.RepositoryId,
                 wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
 
+        var tagPinnedRepoIdsPush = links
+            .Where(wr => !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            .Select(wr => wr.RepositoryId)
+            .ToHashSet();
+        if (tagPinnedRepoIdsPush.Count > 0)
+            payload = payload.Where(p => !tagPinnedRepoIdsPush.Contains(p.RepoId)).ToList();
+        if (payload.Count == 0)
+        {
+            onProgressMessage?.Invoke("No repositories to push.");
+            return;
+        }
+
         bool synchronizedPushPossible = payload.All(p => p.RequiredPackages.All(r => r.MatchedConnectorId.HasValue));
         var missingPackagesCount = payload
             .SelectMany(p => p.RequiredPackages)
@@ -276,6 +288,9 @@ public sealed class WorkspacePushService(
         if (link?.Repository == null)
             return (false, "Repository not in workspace or not found.");
 
+        if (!string.IsNullOrWhiteSpace(link.CheckedOutTag))
+            return (false, "Repository is pinned to a tag. Checkout a branch before pushing.");
+
         var repo = link.Repository;
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
 
@@ -344,6 +359,18 @@ public sealed class WorkspacePushService(
                 wr => wr.RepositoryId,
                 wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
 
+        var tagPinnedRepoIdsInLevelOrder = links
+            .Where(wr => !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            .Select(wr => wr.RepositoryId)
+            .ToHashSet();
+        if (tagPinnedRepoIdsInLevelOrder.Count > 0)
+            payload = payload.Where(p => !tagPinnedRepoIdsInLevelOrder.Contains(p.RepoId)).ToList();
+        if (payload.Count == 0)
+        {
+            onProgressMessage?.Invoke("No repositories to push.");
+            return;
+        }
+
         var levelsAsc = payload.Select(p => p.DependencyLevel ?? 0).Distinct().OrderBy(x => x).ToList();
         foreach (var level in levelsAsc)
         {
@@ -396,6 +423,18 @@ public sealed class WorkspacePushService(
             .ToDictionary(
                 wr => wr.RepositoryId,
                 wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
+
+        var tagPinnedRepoIdsParallel = links
+            .Where(wr => !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            .Select(wr => wr.RepositoryId)
+            .ToHashSet();
+        if (tagPinnedRepoIdsParallel.Count > 0)
+            payload = payload.Where(p => !tagPinnedRepoIdsParallel.Contains(p.RepoId)).ToList();
+        if (payload.Count == 0)
+        {
+            onProgressMessage?.Invoke("No repositories to push.");
+            return;
+        }
 
         onProgressMessage?.Invoke($"Pushing {payload.Count} {(payload.Count == 1 ? "repository" : "repositories")}...");
         await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken);
@@ -467,6 +506,8 @@ public sealed class WorkspacePushService(
         var now = DateTime.UtcNow;
         foreach (var wr in links)
         {
+            if (!string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+                continue;
             if (string.IsNullOrWhiteSpace(wr.BranchName))
                 continue;
             var remoteBranchName = wr.BranchName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? wr.BranchName : "origin/" + wr.BranchName;
@@ -488,7 +529,13 @@ public sealed class WorkspacePushService(
 
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
 
-        var results = await Task.WhenAll(repos.Select(async repo =>
+        var tagPinnedInLinks = links
+            .Where(l => !string.IsNullOrWhiteSpace(l.CheckedOutTag))
+            .Select(l => l.RepositoryId)
+            .ToHashSet();
+        var results = await Task.WhenAll(repos
+            .Where(r => !tagPinnedInLinks.Contains(r.RepoId))
+            .Select(async repo =>
         {
             try
             {
@@ -513,6 +560,8 @@ public sealed class WorkspacePushService(
         var resultByRepo = results.ToDictionary(r => r.RepoId);
         foreach (var wr in links)
         {
+            if (!string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+                continue;
             if (resultByRepo.TryGetValue(wr.RepositoryId, out var r))
             {
                 wr.OutgoingCommits = r.Outgoing;
