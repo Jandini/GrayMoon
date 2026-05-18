@@ -65,7 +65,7 @@ This document summarizes the **SignalR and agent notification flow**, identifies
 **Findings:**
 
 - **Single subscription**: Only one `On("WorkspaceSynced")` registration; no duplicate handlers.
-- **Rapid events**: Multiple WorkspaceSynced events in quick succession (e.g. from API + hook) each trigger `RefreshFromSync`, so the page can do multiple full DB reloads and re-renders for one user action. **Debouncing** the SignalR callback (e.g. 150–200 ms) so that only one refresh runs after the last event in a burst keeps behavior correct and makes the UI feel snappier.
+- **Rapid events**: Multiple WorkspaceSynced events in quick succession (e.g. from API + hook) each trigger `RefreshFromSync`, so the page can do multiple full DB reloads and re-renders for one user action. **Debouncing** the SignalR callback (e.g. 150-200 ms) so that only one refresh runs after the last event in a burst keeps behavior correct and makes the UI feel snappier.
 - **Dispose**: The component disposes the hub connection and various CTSs; cancelling any pending debounce timer in `Dispose` avoids running refresh after the component is disposed.
 
 ---

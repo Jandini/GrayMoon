@@ -25,6 +25,8 @@ public class Repository
     [MaxLength(20)]
     public string Visibility { get; set; } = "Public";
 
+    public bool Archived { get; set; }
+
     [Required]
     [MaxLength(500)]
     public string CloneUrl { get; set; } = string.Empty;

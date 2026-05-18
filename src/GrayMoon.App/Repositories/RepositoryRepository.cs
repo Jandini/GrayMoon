@@ -22,6 +22,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
                 OrgName = repository.OrgName,
                 RepositoryName = repository.RepositoryName,
                 Visibility = repository.Visibility,
+                Archived = repository.Archived,
                 CloneUrl = repository.CloneUrl,
                 Topics = repository.Topics
             })
@@ -59,6 +60,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
                 OrgName = repository.OrgName,
                 RepositoryName = repository.RepositoryName,
                 Visibility = repository.Visibility,
+                Archived = repository.Archived,
                 CloneUrl = repository.CloneUrl,
                 Topics = repository.Topics
             })
@@ -76,7 +78,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
     /// <summary>
     /// Merges fetched repositories with existing ones.
     /// Matching priority: (1) stable provider ID (ConnectorId + GitHubRepositoryId), (2) CloneUrl, (3) URL-prefix rename heuristic.
-    /// Updates existing rows in-place — preserving RepositoryId and all workspace links.
+    /// Updates existing rows in-place - preserving RepositoryId and all workspace links.
     /// Adds new rows for genuinely new repositories, removes rows no longer returned by GitHub.
     /// Handles multiple simultaneous renames in a single pass.
     /// </summary>
@@ -104,7 +106,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
 
         await using var transaction = await _dbContext.Database.BeginTransactionAsync();
 
-        // Load ALL existing repository rows with AsNoTracking — never put them in the tracker here.
+        // Load ALL existing repository rows with AsNoTracking - never put them in the tracker here.
         var existing = await _dbContext.Repositories.AsNoTracking().ToListAsync();
 
         // Track which existing rows have been matched and which incoming repos have been matched.
@@ -115,7 +117,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
         var insertCount = 0;
 
         // ---------------------------------------------------------------------------
-        // PHASE A — Match by stable provider ID: (ConnectorId, GitHubRepositoryId)
+        // PHASE A - Match by stable provider ID: (ConnectorId, GitHubRepositoryId)
         // ---------------------------------------------------------------------------
         var existingByProviderId = existing
             .Where(r => r.GitHubRepositoryId > 0)
@@ -139,6 +141,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
             if (nameChanged || urlChanged
                 || !string.Equals(match.OrgName, incoming.OrgName, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(match.Visibility, incoming.Visibility, StringComparison.OrdinalIgnoreCase)
+                || match.Archived != incoming.Archived
                 || !string.Equals(match.Topics ?? string.Empty, incoming.Topics ?? string.Empty, StringComparison.Ordinal)
                 || !string.Equals(match.NodeId, incoming.NodeId, StringComparison.Ordinal))
             {
@@ -162,6 +165,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
                         .SetProperty(r => r.CloneUrl, incoming.CloneUrl)
                         .SetProperty(r => r.OrgName, incoming.OrgName)
                         .SetProperty(r => r.Visibility, incoming.Visibility)
+                    .SetProperty(r => r.Archived, incoming.Archived)
                         .SetProperty(r => r.Topics, incoming.Topics)
                         .SetProperty(r => r.NodeId, incoming.NodeId));
                 updateCount++;
@@ -169,7 +173,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
         }
 
         // ---------------------------------------------------------------------------
-        // PHASE B — Match unmatched by CloneUrl (handles legacy rows with GitHubRepositoryId = 0)
+        // PHASE B - Match unmatched by CloneUrl (handles legacy rows with GitHubRepositoryId = 0)
         // ---------------------------------------------------------------------------
         var existingByUrl = existing
             .Where(r => !matchedExistingIds.Contains(r.RepositoryId))
@@ -194,6 +198,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
                     .SetProperty(r => r.RepositoryName, incoming.RepositoryName)
                     .SetProperty(r => r.OrgName, incoming.OrgName)
                     .SetProperty(r => r.Visibility, incoming.Visibility)
+                    .SetProperty(r => r.Archived, incoming.Archived)
                     .SetProperty(r => r.Topics, incoming.Topics)
                     .SetProperty(r => r.GitHubRepositoryId, incoming.GitHubRepositoryId)
                     .SetProperty(r => r.NodeId, incoming.NodeId));
@@ -201,7 +206,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
         }
 
         // ---------------------------------------------------------------------------
-        // PHASE C — Rename heuristic for still-unmatched pairs (same org URL-prefix, different repo name)
+        // PHASE C - Rename heuristic for still-unmatched pairs (same org URL-prefix, different repo name)
         //           Crucially: remove each matched old row from the candidate pool before continuing,
         //           preventing the same existing row from matching multiple incoming repos.
         // ---------------------------------------------------------------------------
@@ -247,6 +252,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
                     .SetProperty(r => r.CloneUrl, incoming.CloneUrl)
                     .SetProperty(r => r.OrgName, incoming.OrgName)
                     .SetProperty(r => r.Visibility, incoming.Visibility)
+                    .SetProperty(r => r.Archived, incoming.Archived)
                     .SetProperty(r => r.Topics, incoming.Topics)
                     .SetProperty(r => r.GitHubRepositoryId, incoming.GitHubRepositoryId)
                     .SetProperty(r => r.NodeId, incoming.NodeId));
@@ -254,7 +260,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
         }
 
         // ---------------------------------------------------------------------------
-        // PHASE D — Insert genuinely new repositories (no match found in any phase)
+        // PHASE D - Insert genuinely new repositories (no match found in any phase)
         // ---------------------------------------------------------------------------
         for (var i = 0; i < normalized.Count; i++)
         {
@@ -268,7 +274,7 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
             await _dbContext.SaveChangesAsync();
 
         // ---------------------------------------------------------------------------
-        // PHASE E — Delete unmatched existing rows (no longer returned by the provider)
+        // PHASE E - Delete unmatched existing rows (no longer returned by the provider)
         //           Delete WorkspaceRepositoryLink rows first (ExecuteDeleteAsync respects no tracker).
         // ---------------------------------------------------------------------------
         var toDeleteIds = existing

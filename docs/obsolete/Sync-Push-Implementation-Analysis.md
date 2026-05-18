@@ -9,7 +9,7 @@ This document describes how **dependency-synchronized push** (sync push) is impl
 - **Purpose:** Push multiple repositories in a workspace while respecting inter-repo dependencies. Lower-level repos (packages consumed by others) are pushed first; the app can wait until their packages are visible in the configured NuGet registries before pushing higher-level repos.
 - **Entry point:** UI "Push" button on the Workspace Repositories page.
 - **Main orchestration:** `WorkspaceGitService.RunPushAsync` (App) and agent command `PushRepository` (Agent).
-- **Key data:** Push plan from `WorkspaceProjectRepository.GetPushPlanPayloadAsync` — one payload per repo with dependency level and list of required packages (from lower-level repos) that must be in the registry before that repo is pushed.
+- **Key data:** Push plan from `WorkspaceProjectRepository.GetPushPlanPayloadAsync` - one payload per repo with dependency level and list of required packages (from lower-level repos) that must be in the registry before that repo is pushed.
 
 ---
 
@@ -66,13 +66,13 @@ So the UI only pushes repos that have unpushed commits (and optionally only sele
 
 ## 4. App Service: `WorkspaceGitService.RunPushAsync`
 
-**Location:** `GrayMoon.App/Services/WorkspaceGitService.cs` (approx. lines 541–664).
+**Location:** `GrayMoon.App/Services/WorkspaceGitService.cs` (approx. lines 541-664).
 
 ### 4.1 Prerequisites and setup
 
 - Requires `IAgentBridge.IsAgentConnected`; throws if not.
 - Loads workspace; creates workspace directory if needed.
-- **Step 1 — Sync package registries:**  
+- **Step 1 - Sync package registries:**  
   If `PackageRegistrySyncService` is registered, calls `SyncWorkspacePackageRegistriesAsync(workspaceId)`. This updates `MatchedConnectorId` for workspace packages by checking active NuGet connectors so the push plan’s “required package → registry” is up to date.
 
 ### 4.2 Push plan and filtering
@@ -95,7 +95,7 @@ So the UI only pushes repos that have unpushed commits (and optionally only sele
   - Process **one dependency level at a time** (levels ascending).
   - For each level:
     1. **Wait for required packages:** Collect all `RequiredPackages` for repos at this level (with `MatchedConnectorId`). For each, poll `NuGetService.PackageVersionExistsAsync(connector, packageId, version)` until all are found or timeout. Timeout = `totalDeps * PushWaitDependencyTimeoutMinutesPerDependency` (from `WorkspaceOptions`, default 1.0 minute per dependency). Progress message shows “Waiting for N dependencies...” and countdown.
-    2. **Push repos at this level:** `PushReposAsync(workspace, reposAtLevel, ...)` — all repos at this level pushed in parallel (throttled by `_maxConcurrent`).
+    2. **Push repos at this level:** `PushReposAsync(workspace, reposAtLevel, ...)` - all repos at this level pushed in parallel (throttled by `_maxConcurrent`).
     3. **Refresh versions:** `RefreshVersionsAfterPushAsync(workspaceId, reposAtLevel)` so the UI sees updated versions after push.
 
 - After all levels (or after single-step push): broadcast `WorkspaceSynced` if hub is available.

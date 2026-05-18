@@ -1,4 +1,4 @@
-# GrayMoon.Agent — Parallel Jobs System
+# GrayMoon.Agent - Parallel Jobs System
 
 ## Overview
 
@@ -77,7 +77,7 @@ The Agent processes work through a single shared **job queue** consumed by a con
 public enum JobKind { Command = 0, Notify = 1 }
 ```
 
-### `JobEnvelope` — Queue Unit of Work
+### `JobEnvelope` - Queue Unit of Work
 
 The `JobEnvelope` is the single type that flows through `JobQueue`. It's a discriminated union with factory statics:
 
@@ -97,7 +97,7 @@ JobEnvelope.Notify(notifyJob)     // hook-initiated fire-and-forget
 
 ## Job Types
 
-### 1. Command Job — `ICommandJob` / `CommandJob`
+### 1. Command Job - `ICommandJob` / `CommandJob`
 
 **Origin**: App → SignalR `RequestCommand`
 
@@ -122,7 +122,7 @@ JobEnvelope.Notify(notifyJob)     // hook-initiated fire-and-forget
 
 ---
 
-### 2. Notify Job — `INotifyJob` / `NotifySyncJob`
+### 2. Notify Job - `INotifyJob` / `NotifySyncJob`
 
 **Origin**: External git post-receive hook → HTTP POST `/notify`
 
@@ -161,7 +161,7 @@ Backpressure: producers (`SignalRConnectionHostedService`, `HookListenerHostedSe
 
 ### `JobBackgroundService`
 
-Spawns exactly `MaxConcurrentCommands` independent workers (default **8**), each reading from the shared `IAsyncEnumerable<JobEnvelope>` provided by `JobQueue.ReadAllAsync()`. Because `Channel` is multi-reader-safe, all workers compete for the next available envelope — work is distributed automatically.
+Spawns exactly `MaxConcurrentCommands` independent workers (default **8**), each reading from the shared `IAsyncEnumerable<JobEnvelope>` provided by `JobQueue.ReadAllAsync()`. Because `Channel` is multi-reader-safe, all workers compete for the next available envelope - work is distributed automatically.
 
 ```
 Worker count = Math.Max(1, AgentOptions.MaxConcurrentCommands)   // default 8
@@ -212,7 +212,7 @@ App HTTP request
 
 Multiple HTTP requests can be in-flight simultaneously; each gets its own `requestId` and `TaskCompletionSource`. The workers process them concurrently up to `MaxConcurrentCommands`.
 
-Notify jobs compete for the same worker pool as command jobs. A heavy burst of git hooks will not starve command jobs — they interleave in FIFO order as workers free up.
+Notify jobs compete for the same worker pool as command jobs. A heavy burst of git hooks will not starve command jobs - they interleave in FIFO order as workers free up.
 
 ---
 

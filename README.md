@@ -82,8 +82,8 @@ docker pull jandini/graymoon:latest && docker stop graymoon || true && docker rm
 
 The app runs in a container and does not run git or access your workspace filesystem. A **host-side agent** does that: it runs on the machine where your repos live, connects to the app via SignalR, and runs git, GitVersion, and workspace I/O.
 
-1. **Download** — On the home page, use **Download Agent**. Your browser gets a **zip** of the framework-dependent build (Windows or Linux): extract it and run `graymoon-agent` / `graymoon-agent.exe`. The host needs the **.NET 8 runtime** installed for that RID.
-2. **Run on the host** — Run the agent on the same machine (or network) as your repositories, e.g. as a console app or Windows/Linux service.
+1. **Download** - On the home page, use **Download Agent**. Your browser gets a **zip** of the framework-dependent build (Windows or Linux): extract it and run `graymoon-agent` / `graymoon-agent.exe`. The host needs the **.NET 8 runtime** installed for that RID.
+2. **Run on the host** - Run the agent on the same machine (or network) as your repositories, e.g. as a console app or Windows/Linux service.
 
 When the agent is connected, the app shows an **online** badge; sync and repository operations use the agent.
 

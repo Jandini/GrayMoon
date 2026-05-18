@@ -1,4 +1,4 @@
-# Push Hook — Implementation Document
+# Push Hook - Implementation Document
 
 ## Purpose
 
@@ -16,7 +16,7 @@ Notify the GrayMoon app when a **push** is about to happen (or has been triggere
 ### 2. Dedicated push handler
 
 - **`PushHookSyncCommand`** was added in `GrayMoon.Agent/Commands/PushHookSyncCommand.cs`. It implements the push notify flow:
-  - **No fetch** — uses current local state only.
+  - **No fetch** - uses current local state only.
   - Runs **GitVersion** and **commit counts** (outgoing/incoming vs upstream, and vs default branch).
   - Optionally resolves **has upstream** via token + remote branches.
   - Builds a **`RepositorySyncNotification`** (same type as commit/checkout/merge) and sends it to the app via **SignalR `SyncCommand`**.
@@ -56,7 +56,7 @@ No new app-side handler was added; the existing **SyncCommand** / **SyncCommandH
 |----------|--------|
 | `GrayMoon.Agent/Abstractions/NotifyHookKind.cs` | Added `Push = 3`. |
 | `GrayMoon.Agent/Hosted/HookListenerHostedService.cs` | Map `/hook/push` → `NotifyHookKind.Push`. |
-| `GrayMoon.Agent/Commands/PushHookSyncCommand.cs` | **New** — push notify handler (version + commit counts only, no fetch). |
+| `GrayMoon.Agent/Commands/PushHookSyncCommand.cs` | **New** - push notify handler (version + commit counts only, no fetch). |
 | `GrayMoon.Agent/Commands/HookSyncDispatcher.cs` | Route `NotifyHookKind.Push` to `PushHookSyncCommand`. |
 | `GrayMoon.Agent/Cli/RunCommandHandler.cs` | Register `PushHookSyncCommand` in DI. |
 | `GrayMoon.Agent/Services/GitService.cs` | In `WriteSyncHooks`, add `pushCurl` and write **pre-push** hook. |

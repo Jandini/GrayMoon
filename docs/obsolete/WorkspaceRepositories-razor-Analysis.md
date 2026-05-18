@@ -1,4 +1,4 @@
-# WorkspaceRepositories.razor — Deep Analysis
+# WorkspaceRepositories.razor - Deep Analysis
 
 **File:** `src/GrayMoon.App/Components/Pages/WorkspaceRepositories.razor`  
 **Approximate size:** ~2,845 lines (markup + @code)  
@@ -229,16 +229,16 @@
 
 ## 2. Properties / Computed (used like methods)
 
-- **FilteredWorkspaceRepositories** — calls `GetFilteredWorkspaceRepositories()`.
-- **LevelGroups** — groups `workspaceRepositories` by dependency level, ordered.
-- **FilteredLevelGroups** — same grouping on filtered list.
-- **ApiBaseUrl** — `NavigationManager.BaseUri` trimmed.
+- **FilteredWorkspaceRepositories** - calls `GetFilteredWorkspaceRepositories()`.
+- **LevelGroups** - groups `workspaceRepositories` by dependency level, ordered.
+- **FilteredLevelGroups** - same grouping on filtered list.
+- **ApiBaseUrl** - `NavigationManager.BaseUri` trimmed.
 
 ---
 
 ## 3. Nested Type
 
-- **CreateBranchApiResult** — DTO for `/api/branches/create` (and set-upstream) response: `Success`, `Error`.
+- **CreateBranchApiResult** - DTO for `/api/branches/create` (and set-upstream) response: `Success`, `Error`.
 
 ---
 

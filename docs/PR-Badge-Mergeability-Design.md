@@ -1,4 +1,4 @@
-# PR Badge Mergeability – Design Document (Not Implemented)
+# PR Badge Mergeability - Design Document (Not Implemented)
 
 ## Overview
 
@@ -24,24 +24,24 @@ GitHub’s REST API exposes mergeability on pull request resources:
 - **Get a pull request:** `GET /repos/{owner}/{repo}/pulls/{pull_number}`  
   Returns the full pull request object, including:
   - **`mergeable`** (boolean or null)  
-    - `true` – can be merged without conflicts  
-    - `false` – has merge conflicts  
-    - `null` – GitHub is still computing mergeability (background job)
+    - `true` - can be merged without conflicts  
+    - `false` - has merge conflicts  
+    - `null` - GitHub is still computing mergeability (background job)
   - **`mergeable_state`** (string)  
     More detailed state; see below.
 
 - **List pull requests:** `GET /repos/{owner}/{repo}/pulls?state=all&head=owner:branch&per_page=1`  
-  The response schema includes the same top-level fields, so **list responses can include `mergeable` and `mergeable_state`** when the API returns the full pull request shape. In practice, list and get often return these fields; the **single-PR endpoint is the one that guarantees** them (see [REST API – Get a pull request](https://docs.github.com/en/rest/pulls/pulls#get-a-pull-request)).
+  The response schema includes the same top-level fields, so **list responses can include `mergeable` and `mergeable_state`** when the API returns the full pull request shape. In practice, list and get often return these fields; the **single-PR endpoint is the one that guarantees** them (see [REST API - Get a pull request](https://docs.github.com/en/rest/pulls/pulls#get-a-pull-request)).
 
 ### 1.2 `mergeable` (boolean | null)
 
-From [GitHub Docs – Checking mergeability of pull requests](https://docs.github.com/en/rest/pulls/pulls#get-a-pull-request):
+From [GitHub Docs - Checking mergeability of pull requests](https://docs.github.com/en/rest/pulls/pulls#get-a-pull-request):
 
 - When you get, create, or edit a pull request, GitHub may create a test merge commit to see if it can be merged.
 - **`mergeable`** can be:
-  - **`true`** – No conflicts; if applicable, `merge_commit_sha` is the test merge commit.
-  - **`false`** – There are merge conflicts.
-  - **`null`** – A background job is computing mergeability; after a short delay, a second request can return a non-null value.
+  - **`true`** - No conflicts; if applicable, `merge_commit_sha` is the test merge commit.
+  - **`false`** - There are merge conflicts.
+  - **`null`** - A background job is computing mergeability; after a short delay, a second request can return a non-null value.
 
 So the API **does deliver** “mergeable”, “conflict”, and “don’t know yet” via this single field (plus null).
 
@@ -106,8 +106,8 @@ On the object that represents a pull request (list item or single PR), ensure:
 
 Add to the display model used for the PR badge:
 
-- **`Mergeable`** (bool?) – null = unknown, true = mergeable, false = conflict (or blocked).
-- **`MergeableState`** (string?) – raw value from API for mapping to badge color.
+- **`Mergeable`** (bool?) - null = unknown, true = mergeable, false = conflict (or blocked).
+- **`MergeableState`** (string?) - raw value from API for mapping to badge color.
 
 ---
 
@@ -138,7 +138,7 @@ So:
 GitHub often returns `mergeable: null` and `mergeable_state: "unknown"` on first load and fills them in after a background job. Options:
 
 - **A)** Show gray “unknown” and do **not** retry; next page load or manual refresh will get the updated value.
-- **B)** After a short delay (e.g. 2–3 seconds), **retry** once per PR that is still null/unknown, then update the badge (good for real-time feel; more logic and one extra request per such PR).
+- **B)** After a short delay (e.g. 2-3 seconds), **retry** once per PR that is still null/unknown, then update the badge (good for real-time feel; more logic and one extra request per such PR).
 
 Recommendation: start with **A**; add **B** later if desired.
 

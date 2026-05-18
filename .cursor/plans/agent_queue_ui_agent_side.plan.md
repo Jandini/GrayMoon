@@ -5,7 +5,7 @@ todos: []
 isProject: false
 ---
 
-# Agent queue per workspace – UI (using agent’s job queue)
+# Agent queue per workspace - UI (using agent’s job queue)
 
 ## Clarification
 
@@ -14,9 +14,9 @@ isProject: false
 
 ## Context
 
-- **Agent queue**: [IJobQueue](src/GrayMoon.Agent/Abstractions/IJobQueue.cs) / [JobQueue](src/GrayMoon.Agent/Queue/JobQueue.cs) – a `Channel<JobEnvelope>`. Jobs are either `Command` (from app’s RequestCommand) or `Notify` (from hooks). No count or per-workspace API today.
+- **Agent queue**: [IJobQueue](src/GrayMoon.Agent/Abstractions/IJobQueue.cs) / [JobQueue](src/GrayMoon.Agent/Queue/JobQueue.cs) - a `Channel<JobEnvelope>`. Jobs are either `Command` (from app’s RequestCommand) or `Notify` (from hooks). No count or per-workspace API today.
 - **Workspace on jobs**: `NotifyJob` has `WorkspaceId` ([INotifyJob](src/GrayMoon.Agent/Abstractions/INotifyJob.cs)). Command requests often have `WorkspaceId` (e.g. [SyncRepositoryRequest](src/GrayMoon.Agent/Jobs/Requests/SyncRepositoryRequest.cs), [CommitSyncRepositoryRequest](src/GrayMoon.Agent/Jobs/Requests/CommitSyncRepositoryRequest.cs)); some (e.g. GetHostInfo) do not.
-- **App–agent comms**: Agent connects to app’s [AgentHub](src/GrayMoon.App/Hubs/AgentHub.cs). Agent calls hub methods (e.g. [ReportSemVer](src/GrayMoon.Abstractions/Agent/AgentHubMethods.cs)); app handles them in `AgentHub`. App does not reference GrayMoon.Agent, only GrayMoon.Abstractions.
+- **App-agent comms**: Agent connects to app’s [AgentHub](src/GrayMoon.App/Hubs/AgentHub.cs). Agent calls hub methods (e.g. [ReportSemVer](src/GrayMoon.Abstractions/Agent/AgentHubMethods.cs)); app handles them in `AgentHub`. App does not reference GrayMoon.Agent, only GrayMoon.Abstractions.
 
 ## Architecture
 
@@ -47,14 +47,14 @@ flowchart LR
 
 ## Implementation
 
-### 1. Abstractions – new hub method name
+### 1. Abstractions - new hub method name
 
 **File:** [AgentHubMethods.cs](src/GrayMoon.Abstractions/Agent/AgentHubMethods.cs)
 
 - Add: `public const string ReportQueueStatus = "ReportQueueStatus";`
 - Optional: define a small DTO for the payload (e.g. `AgentQueueStatusDto { int Total; Dictionary<int,int> ByWorkspace; }`) in Abstractions if you want a shared contract; otherwise app and agent can agree on (int total, Dictionary<int,int>? byWorkspace) or (int total, IEnumerable<(int workspaceId, int count)>).
 
-### 2. Agent – extract workspace ID from JobEnvelope
+### 2. Agent - extract workspace ID from JobEnvelope
 
 **File:** New helper in GrayMoon.Agent (e.g. `JobEnvelopeExtensions.cs` or inside the tracker)
 
@@ -63,9 +63,9 @@ flowchart LR
   - If `Kind == Command` and `CommandJob?.Request` has a property `WorkspaceId` (reflection or type checks for known request types) → return its value.
   - Otherwise return `null` (e.g. GetHostInfo). Jobs without a workspace can be counted only in “total”, not in any workspace.
 
-### 3. Agent – queue tracker and reporting
+### 3. Agent - queue tracker and reporting
 
-**Option A – Wrapper around the channel (recommended)**
+**Option A - Wrapper around the channel (recommended)**
 
 - New type `TrackedJobQueue : IJobQueue` in the Agent project. It holds the real `Channel<JobEnvelope>` (or the existing `JobQueue` as a dependency if you refactor it to expose the channel).
 - **EnqueueAsync**: Resolve workspace ID with `TryGetWorkspaceId(envelope)`. Increment total and, if workspace is not null, increment per-workspace count. Write to the inner channel. Then notify the app (see below).
@@ -73,11 +73,11 @@ flowchart LR
 - **Notify app**: When counts change, get `IHubConnectionProvider` (or the connection from the hosted service), and if connected, call `InvokeAsync(AgentHubMethods.ReportQueueStatus, total, byWorkspace)`. Pass a serializable representation of byWorkspace (e.g. `Dictionary<int,int>` or list of key-value pairs). Fire-and-forget (e.g. `_ = NotifyAppAsync()`) so the worker thread doesn’t block.
 - Register `TrackedJobQueue` as `IJobQueue` in the agent’s DI; remove or replace the previous `JobQueue` registration so the rest of the agent (SignalRConnectionHostedService, JobBackgroundService, HookListenerHostedService) uses the tracked queue.
 
-**Option B – Instrument existing JobQueue**
+**Option B - Instrument existing JobQueue**
 
 - If the agent’s `JobQueue` is a simple wrapper around a channel, add counting and reporting inside it (increment on write, decrement when the reader advances). Same idea as above, but without a separate “TrackedJobQueue” type.
 
-### 4. App – receive and store agent queue state
+### 4. App - receive and store agent queue state
 
 - **New singleton**: `AgentQueueStateService` (or extend `AgentConnectionTracker`). It holds:
   - `int _totalPending`
@@ -87,7 +87,7 @@ flowchart LR
 - **On agent disconnect**: In `AgentHub.OnDisconnectedAsync`, when the disconnecting client is the agent, clear queue state (total = 0, byWorkspace empty) and raise the event so the badge and page update.
 - **Expose**: `GetTotalPendingCount()`, `GetPendingCountForWorkspace(int workspaceId)`, `HasWorkspaceJobsPending(int workspaceId)`, and a way for components to subscribe (e.g. `OnQueueStateChanged(Action callback)` that invokes the callback when `QueueStateChanged` fires).
 
-### 5. App – UI (badge and workspace page)
+### 5. App - UI (badge and workspace page)
 
 - **AgentStatusBadge**: Inject `AgentQueueStateService` (or the service that holds queue state). Subscribe to queue state changes and call `InvokeAsync(StateHasChanged)`. **StateLabel**: If `State == AgentConnectionState.Online` and `GetTotalPendingCount() > 0` → `"running"`; otherwise keep current labels. **TitleText**: When showing “running”, use e.g. “Agent is running tasks”. Unsubscribe on `Dispose`.
 - **WorkspaceRepositoriesHeader**: Keep parameter `AgentTasksPendingCount` and the “Completing x agent tasks…” block (right-aligned, same row, no overlap when narrow). No change to layout/CSS.

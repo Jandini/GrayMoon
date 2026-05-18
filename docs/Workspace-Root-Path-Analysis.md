@@ -16,16 +16,16 @@
 ### How it is used today
 
 1. **WorkspaceService**
-   - **`GetRootPathAsync()`** – Reads from Settings (with in-memory cache). Used as the "global" default.
-   - **`GetRootPathForWorkspaceAsync(workspace)`** – Returns `workspace.RootPath` if set, otherwise falls back to `GetRootPathAsync()` (Settings). This is the **correct** source for command execution when a workspace is known.
+   - **`GetRootPathAsync()`** - Reads from Settings (with in-memory cache). Used as the "global" default.
+   - **`GetRootPathForWorkspaceAsync(workspace)`** - Returns `workspace.RootPath` if set, otherwise falls back to `GetRootPathAsync()` (Settings). This is the **correct** source for command execution when a workspace is known.
 
 2. **WorkspaceRepository**
-   - **AddAsync** – Sets `workspace.RootPath = await _workspaceService.GetRootPathAsync()`. New workspaces get the **current Settings value** (intended as default).
-   - **UpdateAsync** – Updates only `Name` and repository links. **Does not update `RootPath`.** So any edited "root path" in the UI is not persisted.
+   - **AddAsync** - Sets `workspace.RootPath = await _workspaceService.GetRootPathAsync()`. New workspaces get the **current Settings value** (intended as default).
+   - **UpdateAsync** - Updates only `Name` and repository links. **Does not update `RootPath`.** So any edited "root path" in the UI is not persisted.
 
-3. **Settings page** – Edits and saves the global Setting only. On save it calls `WorkspaceService.ClearCachedRootPath()` so the next `GetRootPathAsync()` re-reads from DB.
+3. **Settings page** - Edits and saves the global Setting only. On save it calls `WorkspaceService.ClearCachedRootPath()` so the next `GetRootPathAsync()` re-reads from DB.
 
-4. **AgentHub** – On agent connect: `RefreshRootPathAsync()` (refreshes cache from Settings). On disconnect: `ClearCachedRootPath()`. This only affects the **global** cache, not per-workspace `RootPath`.
+4. **AgentHub** - On agent connect: `RefreshRootPathAsync()` (refreshes cache from Settings). On disconnect: `ClearCachedRootPath()`. This only affects the **global** cache, not per-workspace `RootPath`.
 
 ---
 
@@ -34,7 +34,7 @@
 - **Commands** receive `WorkspaceRoot` from the app. The app is supposed to pass the root for the **specific workspace**. Most call sites use `GetRootPathForWorkspaceAsync(workspace)`, which is correct.
 - **One bug:** In **BranchEndpoints.cs** (Sync-to-default flow), the code uses `GetRootPathAsync(CancellationToken.None)` instead of `GetRootPathForWorkspaceAsync(workspace, ...)`. So that endpoint uses the **Settings** root, not the workspace’s `RootPath`. If the workspace has a different root (or Settings was changed), the repo can’t be found.
 - **Workspaces with `RootPath == null`** (e.g. created before the column existed, or never set) always fall back to Settings. If the user then changes the Settings path, those workspaces effectively "move" to the new path and existing repos are no longer found.
-- **Edit workspace** – The Workspaces page has `editingWorkspaceRootPath` and uses it for validation and display, but **UpdateAsync does not persist RootPath**, so changes to root path in the edit modal are never saved.
+- **Edit workspace** - The Workspaces page has `editingWorkspaceRootPath` and uses it for validation and display, but **UpdateAsync does not persist RootPath**, so changes to root path in the edit modal are never saved.
 
 ---
 
@@ -51,7 +51,7 @@
 | WorkspaceFileVersionService.cs | File versions | `GetRootPathForWorkspaceAsync(workspace)` | ✓ correct |
 | WorkspaceFiles.razor | ViewFileModal | `GetRootPathForWorkspaceAsync(workspace)` | ✓ correct |
 | **WorkspaceRepository.cs** | AddAsync | `GetRootPathAsync()` → set `workspace.RootPath` | ✓ correct (Settings as default for new workspace) |
-| **WorkspaceRepository.cs** | UpdateAsync | — | Should persist `RootPath` if we allow editing it |
+| **WorkspaceRepository.cs** | UpdateAsync | - | Should persist `RootPath` if we allow editing it |
 | Workspaces.razor | Create modal default / validation | `GetRootPathAsync()`, `editingWorkspaceRootPath` | ✓ Settings as default for new; edit should persist RootPath |
 | Settings.razor | Single global root path | AppSettingRepository | ✓ only default for new workspace |
 

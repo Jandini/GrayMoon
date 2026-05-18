@@ -96,3 +96,14 @@
     background-color: #b58900;
     color: #000000;
 }
+
+.badge-archived {
+    display: inline-block;
+    width: auto;
+    min-width: 0;
+    padding-left: 0.65em;
+    padding-right: 0.65em;
+    text-align: center;
+    background-color: #8b6fc7;
+    color: #000000;
+}

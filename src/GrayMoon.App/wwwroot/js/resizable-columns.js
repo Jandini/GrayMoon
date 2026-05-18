@@ -48,7 +48,7 @@
         if (savedWidths && savedWidths.length === ths.length) {
             ths.forEach((th, i) => {
                 if (th.classList.contains('no-resize')) {
-                    /* width controlled entirely by CSS — clear any stale inline styles */
+                    /* width controlled entirely by CSS - clear any stale inline styles */
                     th.style.width = '';
                     th.style.minWidth = '';
                     th.style.maxWidth = '';
@@ -68,7 +68,7 @@
             if (tableWidth > 0) {
                 ths.forEach(th => {
                     if (th.classList.contains('no-resize')) {
-                        /* width controlled entirely by CSS — do not set inline styles */
+                        /* width controlled entirely by CSS - do not set inline styles */
                     } else {
                         const px = th.getBoundingClientRect().width;
                         const pct = (px / tableWidth) * 100;
@@ -136,7 +136,7 @@
                 const w = th.style.width || '';
                 const mw = th.style.minWidth || '';
                 if (th.classList.contains('no-resize')) {
-                    /* width controlled entirely by CSS — clear inline styles on td too */
+                    /* width controlled entirely by CSS - clear inline styles on td too */
                     tds[i].style.width = '';
                     tds[i].style.minWidth = '';
                     tds[i].style.maxWidth = '';

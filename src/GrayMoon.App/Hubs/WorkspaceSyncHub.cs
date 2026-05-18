@@ -4,5 +4,5 @@ namespace GrayMoon.App.Hubs;
 
 public sealed class WorkspaceSyncHub : Hub
 {
-    // Hub exists for IHubContext<T>; clients subscribe via .On("WorkspaceSynced", ...)
+    // Hub exists for IHubContext<T>; clients subscribe via .On("WorkspaceSynced", ...) and .On("RepositorySynced", ...)
 }

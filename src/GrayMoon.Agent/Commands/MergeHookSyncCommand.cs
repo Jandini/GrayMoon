@@ -8,7 +8,7 @@ namespace GrayMoon.Agent.Commands;
 
 /// <summary>
 /// Handles post-merge hooks: re-runs GitVersion and gets commit counts.
-/// No git fetch — the merge already brought remote changes in; existing remote tracking refs are current enough.
+/// No git fetch - the merge already brought remote changes in; existing remote tracking refs are current enough.
 /// </summary>
 public sealed class MergeHookSyncCommand(IGitService git, ICsProjFileService csProjFileService, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<MergeHookSyncCommand> logger)
 {

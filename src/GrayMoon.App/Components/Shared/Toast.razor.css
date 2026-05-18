@@ -1,4 +1,4 @@
-/* Toast bubble – matches app dark theme, non-intrusive */
+/* Toast bubble - matches app dark theme, non-intrusive */
 .toast-bubble {
     position: fixed;
     top: calc(3.5rem + 1rem); /* Below top-row (3.5rem) + spacing (1rem) */

@@ -1,6 +1,6 @@
 /*
  * Title row: use same baseline alignment as app.css .workspace-repos-header .workspace-repos-title-row
- * (do not override with flex-end — that sat the subtitle lower than the h2 text).
+ * (do not override with flex-end - that sat the subtitle lower than the h2 text).
  * Workflow count stays in <p> like WorkspaceRepositories; status chips are siblings so they don't stretch the subtitle.
  */
 .workspace-actions-header .workspace-repos-subtitle.workspace-actions__subtitle {
@@ -85,7 +85,7 @@
     border-color: var(--border-color, #3e3e42);
 }
 
-/* Count pill colors when filter is on — match wwwroot/app.css .action-badge-* */
+/* Count pill colors when filter is on - match wwwroot/app.css .action-badge-* */
 .gha-status-filter--on .gha-status-filter__count--errors,
 .gha-status-filter--on .gha-status-filter__count--failed {
     background-color: #da3633;

@@ -34,6 +34,9 @@ public class GitHubRepositoryDto
     [JsonPropertyName("private")]
     public bool Private { get; set; }
 
+    [JsonPropertyName("archived")]
+    public bool Archived { get; set; }
+
     [JsonPropertyName("clone_url")]
     public string CloneUrl { get; set; } = string.Empty;
 

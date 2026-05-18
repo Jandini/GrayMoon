@@ -8,7 +8,7 @@ namespace GrayMoon.Agent.Commands;
 
 /// <summary>
 /// Handles post-commit and post-update hooks: re-runs GitVersion and gets commit counts.
-/// No git fetch — uses the existing remote tracking refs from the last checkout/sync.
+/// No git fetch - uses the existing remote tracking refs from the last checkout/sync.
 /// </summary>
 public sealed class CommitHookSyncCommand(IGitService git, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<CommitHookSyncCommand> logger)
 {

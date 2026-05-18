@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
 
-/// <summary>Persistence for CI action status per workspace–repository link. Single place for all action table read/write.</summary>
+/// <summary>Persistence for CI action status per workspace-repository link. Single place for all action table read/write.</summary>
 public sealed class WorkspaceActionRepository(AppDbContext dbContext, ILogger<WorkspaceActionRepository> logger)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -48,7 +48,7 @@ public sealed class WorkspaceActionRepository(AppDbContext dbContext, ILogger<Wo
         return result;
     }
 
-    /// <summary>Inserts or updates the action row for the given workspace–repo link. JSON is the source of truth; legacy scalar columns are cleared.</summary>
+    /// <summary>Inserts or updates the action row for the given workspace-repo link. JSON is the source of truth; legacy scalar columns are cleared.</summary>
     public async Task UpsertAsync(int workspaceRepositoryId, IReadOnlyList<ActionStatusInfo> workflows, string? branchName, CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;

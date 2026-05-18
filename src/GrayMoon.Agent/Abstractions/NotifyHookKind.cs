@@ -9,6 +9,6 @@ public enum NotifyHookKind
     Checkout = 1,
     /// <summary>post-merge: re-runs GitVersion and commit counts. No fetch needed.</summary>
     Merge = 2,
-    /// <summary>pre-push: re-runs GitVersion and commit counts. No fetch — uses current local state only.</summary>
+    /// <summary>pre-push: re-runs GitVersion and commit counts. No fetch - uses current local state only.</summary>
     Push = 3
 }

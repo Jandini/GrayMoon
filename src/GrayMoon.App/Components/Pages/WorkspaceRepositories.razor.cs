@@ -261,7 +261,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         ProjectType.Executable => 2,
         ProjectType.Library    => 3,
         ProjectType.Test       => 4,
-        _                      => 5 // null — no projects yet
+        _                      => 5 // null - no projects yet
     };
 
     private static IReadOnlyDictionary<int, PullRequestInfo?> BuildPrByRepositoryIdFromLinks(List<WorkspaceRepositoryLink> links)

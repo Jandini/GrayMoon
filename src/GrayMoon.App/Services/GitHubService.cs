@@ -161,7 +161,7 @@ public class GitHubService : IConnectorService
                 response.StatusCode,
                 response.RequestMessage?.RequestUri,
                 errorContent);
-            response.EnsureSuccessStatusCode();
+            ThrowGitHubApiFailure(response, errorContent);
         }
 
         return await response.Content.ReadFromJsonAsync<GitHubWorkflowDto>(_jsonOptions, cancellationToken);
@@ -189,7 +189,7 @@ public class GitHubService : IConnectorService
                 response.StatusCode,
                 response.RequestMessage?.RequestUri,
                 errorContent);
-            response.EnsureSuccessStatusCode();
+            ThrowGitHubApiFailure(response, errorContent);
         }
 
         var dto = await response.Content.ReadFromJsonAsync<GitHubContentResponse>(_jsonOptions, cancellationToken);
@@ -291,7 +291,7 @@ public class GitHubService : IConnectorService
         await PostAsync(connector, $"repos/{owner}/{repo}/actions/runs/{runId}/rerun", payload: null, cancellationToken: cancellationToken);
     }
 
-    /// <summary>POST /repos/{owner}/{repo}/actions/runs/{run_id}/cancel — cancels an in-progress workflow run.</summary>
+    /// <summary>POST /repos/{owner}/{repo}/actions/runs/{run_id}/cancel - cancels an in-progress workflow run.</summary>
     /// <remarks>409 when the run already finished is treated as success (UI/API lag vs GitHub).</remarks>
     public async Task CancelWorkflowRunAsync(Connector connector, string owner, string repo, long runId, CancellationToken cancellationToken = default)
     {
@@ -333,11 +333,7 @@ public class GitHubService : IConnectorService
             new Uri(new Uri(baseUrl), requestUri),
             errorContent);
 
-        var detail = TryParseGitHubApiUserMessage(errorContent);
-        var summary = string.IsNullOrWhiteSpace(detail)
-            ? $"GitHub returned {(int)response.StatusCode} ({response.ReasonPhrase})."
-            : detail.Trim();
-        throw new HttpRequestException(summary, inner: null, statusCode: response.StatusCode);
+        throw GitHubApiErrorHelper.CreateHttpRequestException(response.StatusCode, errorContent, response);
     }
 
     public async Task DispatchWorkflowAsync(Connector connector, string owner, string repo, long workflowId, string branch, CancellationToken cancellationToken = default)
@@ -381,7 +377,7 @@ public class GitHubService : IConnectorService
         }
         catch (HttpRequestException ex)
         {
-            var message = MapHttpStatusToMessage(ex.StatusCode, "GitHub");
+            var message = GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(ex);
             _logger.LogError(ex, "Failed to test GitHub connector connection. Status={StatusCode}", ex.StatusCode);
             var isConnectorFault = ex.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound;
             return isConnectorFault ? ConnectorTestResult.Fault(message) : ConnectorTestResult.Fail(message);
@@ -392,25 +388,6 @@ public class GitHubService : IConnectorService
             return ConnectorTestResult.Fail($"Connection error: {ex.Message}");
         }
     }
-
-    private static string MapHttpStatusToMessage(HttpStatusCode? statusCode, string service) =>
-        statusCode switch
-        {
-            HttpStatusCode.Unauthorized =>
-                $"Unauthorized (401). Your {service} token is invalid or has expired. Update it on the Connectors page.",
-            HttpStatusCode.Forbidden =>
-                $"Forbidden (403). Your {service} token does not have sufficient permissions.",
-            HttpStatusCode.NotFound =>
-                $"Not found (404). Check the API base URL for connector '{service}'.",
-            HttpStatusCode.TooManyRequests =>
-                $"Rate limited (429). Too many requests to {service}. Try again later.",
-            HttpStatusCode.ServiceUnavailable =>
-                $"{service} service is unavailable (503). Try again later.",
-            null =>
-                $"Could not connect to {service}. Check your network and API base URL.",
-            _ =>
-                $"HTTP {(int)statusCode} error connecting to {service}."
-        };
 
     public async Task<(int OrganizationCount, int RepositoryCount)> TestConnectionDetailedAsync(Connector connector)
     {
@@ -537,7 +514,7 @@ public class GitHubService : IConnectorService
                 response.StatusCode,
                 new Uri(_httpClient.BaseAddress ?? new Uri("https://api.github.com/"), requestUri),
                 errorContent);
-            response.EnsureSuccessStatusCode();
+            ThrowGitHubApiFailure(response, errorContent);
         }
 
         return await response.Content.ReadFromJsonAsync<T>(_jsonOptions);
@@ -553,7 +530,7 @@ public class GitHubService : IConnectorService
                 response.StatusCode,
                 response.RequestMessage?.RequestUri,
                 errorContent);
-            response.EnsureSuccessStatusCode();
+            ThrowGitHubApiFailure(response, errorContent);
         }
 
         return await response.Content.ReadFromJsonAsync<T>(_jsonOptions, cancellationToken);
@@ -601,39 +578,30 @@ public class GitHubService : IConnectorService
             new Uri(new Uri(baseUrl), requestUri),
             errorContent);
 
-        var detail = TryParseGitHubApiUserMessage(errorContent);
-        var summary = string.IsNullOrWhiteSpace(detail)
-            ? $"GitHub returned {(int)response.StatusCode} ({response.ReasonPhrase})."
-            : detail.Trim();
-        throw new HttpRequestException(summary, inner: null, statusCode: response.StatusCode);
+        throw GitHubApiErrorHelper.CreateHttpRequestException(response.StatusCode, errorContent, response);
+    }
+
+    private static void ThrowGitHubApiFailure(HttpResponseMessage response, string errorContent)
+    {
+        if (GitHubApiErrorHelper.IsRateLimitExhausted(response)
+            && !GitHubApiErrorHelper.LooksLikeRateLimit(response.StatusCode, GitHubApiErrorHelper.TryParseGitHubApiUserMessage(errorContent)))
+        {
+            throw GitHubApiErrorHelper.CreateHttpRequestException(
+                response.StatusCode,
+                "API rate limit exceeded. X-RateLimit-Remaining is 0.",
+                response);
+        }
+
+        throw GitHubApiErrorHelper.CreateHttpRequestException(response.StatusCode, errorContent, response);
     }
 
     private static bool IsCancelWorkflowRunAlreadyCompleted(HttpStatusCode status, string errorContent)
     {
         if (status != HttpStatusCode.Conflict)
             return false;
-        var msg = TryParseGitHubApiUserMessage(errorContent);
+        var msg = GitHubApiErrorHelper.TryParseGitHubApiUserMessage(errorContent);
         return msg != null
                && msg.Contains("Cannot cancel a workflow run that is completed", StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>Extracts the user-visible <c>message</c> field from a GitHub API JSON error body.</summary>
-    private static string? TryParseGitHubApiUserMessage(string jsonBody)
-    {
-        if (string.IsNullOrWhiteSpace(jsonBody))
-            return null;
-        try
-        {
-            using var doc = JsonDocument.Parse(jsonBody);
-            if (doc.RootElement.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String)
-                return m.GetString();
-        }
-        catch (JsonException)
-        {
-            /* not JSON */
-        }
-
-        return null;
     }
 
     private async Task<List<GitHubRepositoryDto>> GetRepositoriesPagedAsync(string requestUri)

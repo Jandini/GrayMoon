@@ -1,5 +1,6 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
+@using GrayMoon.App.Services
 @inject GitHubService GitHubService
 @inject ConnectorRepository ConnectorRepository
 @inject LoadingOverlayUiSettingsService OverlayUiSettings
@@ -21,8 +22,9 @@
                     }
                 </div>
                 <div class="loading-overlay-terminal__inner actions-gha-terminal__scroll" aria-live="polite">
-                    @foreach (var line in _visibleLines)
+                    @for (var i = 0; i < BodyLineCount; i++)
                     {
+                        var line = _visibleLineSlots[i];
                         <p class="loading-overlay-terminal__line loading-overlay-terminal__line--out actions-gha-terminal__line">
                             @if (string.IsNullOrWhiteSpace(line))
                             {
@@ -49,28 +51,23 @@
 
     private readonly List<string> _buffer = [];
     private readonly Dictionary<string, string> _stepSignatures = new(StringComparer.Ordinal);
+    private readonly string[] _visibleLineSlots = new string[BodyLineCount];
+    private Connector? _cachedConnector;
+    private string? _cachedConnectorName;
     private bool _snapshottedSteps;
     private string _caption = "Workflow · Connecting to GitHub Actions…";
     private string? _stepProgress;
     private CancellationTokenSource? _cts;
     private Task? _pollTask;
+    private bool _needsRender;
 
     private const int BodyLineCount = 8;
-
-    private IReadOnlyList<string> _visibleLines
-    {
-        get
-        {
-            List<string> take;
-            if (_buffer.Count >= BodyLineCount)
-                take = _buffer.Skip(_buffer.Count - BodyLineCount).ToList();
-            else
-                take = _buffer.ToList();
-            while (take.Count < BodyLineCount)
-                take.Insert(0, "");
-            return take;
-        }
-    }
+    /// <summary>Delay while jobs/steps are active - balances responsiveness vs API rate limits when many rows poll.</summary>
+    private const int PollIntervalActiveMs = 1_200;
+    /// <summary>Delay when waiting for GitHub to attach jobs to the run.</summary>
+    private const int PollIntervalWaitingJobsMs = 2_000;
+    /// <summary>Delay when all jobs report completed (terminal tail).</summary>
+    private const int PollIntervalIdleMs = 4_000;
 
     private string _captionTooltip =>
         string.IsNullOrWhiteSpace(_stepProgress) ? _caption : $"{_caption} · {_stepProgress}";
@@ -79,6 +76,7 @@
     {
         OverlayUiSettings.Changed += OnOverlayUiSettingsChanged;
         _buffer.Add($"Run #{RunId} · Subscribing to job updates…");
+        RefreshVisibleLineSlots();
     }
 
     private void OnOverlayUiSettingsChanged(object? sender, EventArgs e) =>
@@ -101,9 +99,14 @@
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                await PollOnceAsync(cancellationToken);
-                await InvokeAsync(StateHasChanged);
-                await Task.Delay(3000, cancellationToken);
+                var delayMs = await PollOnceAsync(cancellationToken);
+                if (_needsRender)
+                {
+                    _needsRender = false;
+                    await InvokeAsync(StateHasChanged);
+                }
+
+                await Task.Delay(delayMs, cancellationToken);
             }
         }
         catch (OperationCanceledException)
@@ -112,27 +115,35 @@
         }
     }
 
-    private async Task PollOnceAsync(CancellationToken cancellationToken)
+    /// <returns>Milliseconds to wait before the next poll.</returns>
+    private async Task<int> PollOnceAsync(CancellationToken cancellationToken)
     {
         try
         {
-            var connector = await ConnectorRepository.GetByNameAsync(ConnectorName);
+            var connector = await ResolveConnectorAsync(cancellationToken);
             if (connector == null)
             {
-                AppendUnique("Connector not found — cannot load job status.");
-                return;
+                AppendUnique("Connector not found - cannot load job status.");
+                return PollIntervalWaitingJobsMs;
             }
 
             var response = await GitHubService.GetWorkflowRunJobsAsync(connector, Owner, RepositoryName, RunId, cancellationToken);
             var jobs = response?.Jobs ?? [];
-            _caption = BuildCaption(jobs, WorkflowDisplayName);
-            _stepProgress = BuildStepProgressForCaptionJob(jobs);
+
+            var caption = BuildCaption(jobs, WorkflowDisplayName);
+            var stepProgress = BuildStepProgressForCaptionJob(jobs);
+            if (!string.Equals(_caption, caption, StringComparison.Ordinal) || !string.Equals(_stepProgress, stepProgress, StringComparison.Ordinal))
+            {
+                _caption = caption;
+                _stepProgress = stepProgress;
+                _needsRender = true;
+            }
 
             if (jobs.Count == 0)
             {
                 _stepProgress = null;
                 AppendUnique("Waiting for GitHub to assign jobs to this run…");
-                return;
+                return PollIntervalWaitingJobsMs;
             }
 
             if (!_snapshottedSteps)
@@ -145,8 +156,8 @@
                 }
 
                 var stepCount = jobs.Sum(j => j.Steps?.Count ?? 0);
-                AppendUnique($"Live · {jobs.Count} job(s), {stepCount} step(s) — streaming updates…");
-                return;
+                AppendUnique($"Live · {jobs.Count} job(s), {stepCount} step(s) - streaming updates…");
+                return DeterminePollDelayMs(jobs);
             }
 
             foreach (var job in jobs.OrderBy(j => j.Id))
@@ -162,11 +173,67 @@
                     AppendUnique(FormatStepTransition(job.Name, step));
                 }
             }
+
+            return DeterminePollDelayMs(jobs);
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             Logger.LogDebug(ex, "GHA live feed poll failed for run {RunId}", RunId);
-            AppendUnique($"Update failed: {ex.Message}");
+            var failureText = ex is HttpRequestException httpEx
+                ? GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(httpEx)
+                : ex.Message;
+            AppendUnique($"Update failed: {failureText}");
+            return PollIntervalWaitingJobsMs;
+        }
+    }
+
+    private async Task<Connector?> ResolveConnectorAsync(CancellationToken cancellationToken)
+    {
+        if (_cachedConnector != null
+            && string.Equals(_cachedConnectorName, ConnectorName, StringComparison.Ordinal))
+            return _cachedConnector;
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var connector = await ConnectorRepository.GetByNameAsync(ConnectorName);
+        if (connector != null)
+        {
+            _cachedConnector = connector;
+            _cachedConnectorName = ConnectorName;
+        }
+
+        return connector;
+    }
+
+    private static int DeterminePollDelayMs(IReadOnlyList<GitHubWorkflowJobDto> jobs)
+    {
+        foreach (var job in jobs)
+        {
+            var js = job.Status ?? "";
+            if (js.Equals("in_progress", StringComparison.OrdinalIgnoreCase)
+                || js.Equals("queued", StringComparison.OrdinalIgnoreCase)
+                || js.Equals("waiting", StringComparison.OrdinalIgnoreCase))
+            {
+                return PollIntervalActiveMs;
+            }
+
+            var steps = job.Steps;
+            if (steps == null) continue;
+            foreach (var step in steps)
+            {
+                if (string.Equals(step.Status, "in_progress", StringComparison.OrdinalIgnoreCase))
+                    return PollIntervalActiveMs;
+            }
+        }
+
+        return PollIntervalIdleMs;
+    }
+
+    private void RefreshVisibleLineSlots()
+    {
+        for (var i = 0; i < BodyLineCount; i++)
+        {
+            var bufIdx = _buffer.Count - BodyLineCount + i;
+            _visibleLineSlots[i] = bufIdx >= 0 ? _buffer[bufIdx] : "";
         }
     }
 
@@ -177,6 +244,8 @@
         _buffer.Add(line);
         while (_buffer.Count > 120)
             _buffer.RemoveAt(0);
+        RefreshVisibleLineSlots();
+        _needsRender = true;
     }
 
     private static string BuildCaption(IReadOnlyList<GitHubWorkflowJobDto> jobs, string? workflowName)
@@ -249,13 +318,13 @@
                 return $"⊘ {jobName} › {step.Name} (skipped)";
             if (string.Equals(c, "failure", StringComparison.OrdinalIgnoreCase) || string.Equals(c, "cancelled", StringComparison.OrdinalIgnoreCase))
                 return $"✗ {jobName} › {step.Name} ({c})";
-            return $"• {jobName} › {step.Name} — {c}";
+            return $"• {jobName} › {step.Name} - {c}";
         }
 
         if (string.Equals(step.Status, "in_progress", StringComparison.OrdinalIgnoreCase))
             return $"⧗ {jobName} › {step.Name}…";
 
-        return $"… {jobName} › {step.Name} — {step.Status}";
+        return $"… {jobName} › {step.Name} - {step.Status}";
     }
 
     public async ValueTask DisposeAsync()

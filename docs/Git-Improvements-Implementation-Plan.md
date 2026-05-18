@@ -1,4 +1,4 @@
-## Git Improvements – Implementation Plan
+## Git Improvements - Implementation Plan
 
 This document describes how to standardize git operations in GrayMoon so that all remote git commands are executed through a single, token-aware service used by the agent and any hook-triggered flows.
 
@@ -59,7 +59,7 @@ This document describes how to standardize git operations in GrayMoon so that al
 
 ## 3. Supported scenarios and flows
 
-### 3.1 Scenario 1 – Direct agent calls with token
+### 3.1 Scenario 1 - Direct agent calls with token
 
 - **Use case**
   - The app initiates an agent command (e.g. sync, push, clone) and already has a token from the connector.
@@ -82,7 +82,7 @@ This document describes how to standardize git operations in GrayMoon so that al
      - If git returns **unauthorized** for a provided token:
        - GitService surfaces the failure **without** retrying or re-fetching a token (the app is responsible for providing a fresh token).
 
-### 3.2 Scenario 2 – Hook-triggered / no token provided
+### 3.2 Scenario 2 - Hook-triggered / no token provided
 
 - **Use case**
   - A git hook fires (e.g. pre-push, post-receive) and calls into the agent, but does **not** have a token available.

@@ -63,6 +63,8 @@ public sealed partial class WorkspaceActions : IDisposable
     private CancellationTokenSource _cts = new();
     private HubConnection? _hubConnection;
     private CancellationTokenSource? _syncDebounceCts;
+    private CancellationTokenSource? _repositorySyncDebounceCts;
+    private readonly HashSet<int> _pendingRepositorySyncIds = [];
     private bool _autoPollRunning;
     private const int SyncDebounceMs = 500;
     private const int AutoPollIntervalMs = 5000;
@@ -228,6 +230,33 @@ public sealed partial class WorkspaceActions : IDisposable
                 }
             });
 
+            _hubConnection.On<int, int>("RepositorySynced", async (workspaceId, repositoryId) =>
+            {
+                if (workspaceId != WorkspaceId) return;
+
+                lock (_pendingRepositorySyncIds)
+                    _pendingRepositorySyncIds.Add(repositoryId);
+
+                _repositorySyncDebounceCts?.Cancel();
+                _repositorySyncDebounceCts?.Dispose();
+                _repositorySyncDebounceCts = new CancellationTokenSource();
+                var cts = _repositorySyncDebounceCts;
+                try
+                {
+                    await Task.Delay(SyncDebounceMs, cts.Token);
+                    await InvokeAsync(RefreshFromRepositorySyncAsync);
+                }
+                catch (OperationCanceledException) { /* debounced */ }
+                finally
+                {
+                    if (cts == _repositorySyncDebounceCts)
+                    {
+                        _repositorySyncDebounceCts?.Dispose();
+                        _repositorySyncDebounceCts = null;
+                    }
+                }
+            });
+
             await _hubConnection.StartAsync();
         }
     }
@@ -280,6 +309,7 @@ public sealed partial class WorkspaceActions : IDisposable
                             OrgName = link.Repository.OrgName,
                             RepositoryName = link.Repository.RepositoryName,
                             Visibility = link.Repository.Visibility,
+                                Archived = link.Repository.Archived,
                             CloneUrl = link.Repository.CloneUrl
                         },
                         WorkflowLines = workflowLines,
@@ -304,46 +334,154 @@ public sealed partial class WorkspaceActions : IDisposable
     {
         try
         {
-            await using var scope = ServiceScopeFactory.CreateAsyncScope();
-            var repo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
-            var freshWorkspace = await repo.GetByIdAsync(WorkspaceId);
-            if (freshWorkspace == null) return;
-
-            workspace = freshWorkspace;
-
-            var freshLinks = freshWorkspace.Repositories
-                .Where(l => l.Repository != null && l.Repository.Connector != null)
-                .ToDictionary(l => l.RepositoryId);
-
-            var rowsToRefresh = new List<WorkspaceActionRow>();
-
-            foreach (var row in rows)
-            {
-                if (!freshLinks.TryGetValue(row.Repo.RepositoryId, out var freshLink)) continue;
-
-                var branchChanged = !string.Equals(row.Link.BranchName, freshLink.BranchName, StringComparison.OrdinalIgnoreCase);
-                row.Link = freshLink;
-
-                if (branchChanged)
-                {
-                    row.WorkflowLines = [new WorkflowActionLine()];
-                    row.ActionLatches.Clear();
-                    row.IsVerified = false;
-                    rowsToRefresh.Add(row);
-                }
-            }
-
+            var rowsToRefresh = await ApplyFreshWorkspaceLinksAsync();
             await InvokeAsync(StateHasChanged);
 
             foreach (var row in rowsToRefresh.Where(r => !string.IsNullOrWhiteSpace(r.Link.BranchName)))
-            {
                 _ = RefreshRowAsync(row, _cts.Token);
-            }
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error refreshing from sync for workspace {WorkspaceId}", WorkspaceId);
         }
+    }
+
+    /// <summary>
+    /// After agent hook sync (e.g. push hook): refresh GitHub Actions for affected repos so running workflows and the live terminal appear.
+    /// </summary>
+    private async Task RefreshFromRepositorySyncAsync()
+    {
+        List<int> repositoryIds;
+        lock (_pendingRepositorySyncIds)
+        {
+            repositoryIds = _pendingRepositorySyncIds.ToList();
+            _pendingRepositorySyncIds.Clear();
+        }
+
+        if (repositoryIds.Count == 0)
+            return;
+
+        try
+        {
+            await ApplyFreshWorkspaceLinksAsync();
+            await InvokeAsync(StateHasChanged);
+
+            foreach (var repositoryId in repositoryIds)
+            {
+                var row = rows.FirstOrDefault(r => r.Repo.RepositoryId == repositoryId);
+                if (row == null || string.IsNullOrWhiteSpace(row.Link.BranchName))
+                    continue;
+
+                _ = RefreshRowAfterHookSyncAsync(row, _cts.Token);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error refreshing actions after repository sync for workspace {WorkspaceId}", WorkspaceId);
+        }
+    }
+
+    /// <summary>Reloads workspace links from DB; returns rows whose branch changed (need full workflow reset).</summary>
+    private async Task<List<WorkspaceActionRow>> ApplyFreshWorkspaceLinksAsync()
+    {
+        var rowsToRefresh = new List<WorkspaceActionRow>();
+
+        await using var scope = ServiceScopeFactory.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+        var freshWorkspace = await repo.GetByIdAsync(WorkspaceId);
+        if (freshWorkspace == null)
+            return rowsToRefresh;
+
+        workspace = freshWorkspace;
+
+        var freshLinks = freshWorkspace.Repositories
+            .Where(l => l.Repository != null && l.Repository.Connector != null)
+            .ToDictionary(l => l.RepositoryId);
+
+        foreach (var row in rows)
+        {
+            if (!freshLinks.TryGetValue(row.Repo.RepositoryId, out var freshLink))
+                continue;
+
+            var branchChanged = !string.Equals(row.Link.BranchName, freshLink.BranchName, StringComparison.OrdinalIgnoreCase);
+            row.Link = freshLink;
+
+            if (branchChanged)
+            {
+                row.WorkflowLines = [new WorkflowActionLine()];
+                row.ActionLatches.Clear();
+                row.IsVerified = false;
+                rowsToRefresh.Add(row);
+            }
+        }
+
+        return rowsToRefresh;
+    }
+
+    private async Task RefreshRowAfterHookSyncAsync(WorkspaceActionRow row, CancellationToken cancellationToken)
+    {
+        await TryRefreshUntilAnyWorkflowRunningAsync(row, cancellationToken);
+    }
+
+    /// <summary>GitHub may lag listing a new run after a push; retry until any workflow line is running with a run id.</summary>
+    private async Task<bool> TryRefreshUntilAnyWorkflowRunningAsync(
+        WorkspaceActionRow row,
+        CancellationToken cancellationToken)
+    {
+        const string operationLabel = "PushHookGhaVisibility";
+
+        for (var attempt = 1; attempt <= RunWorkflowVisibilityMaxAttempts; attempt++)
+        {
+            var delayMs = attempt == 1 ? RunWorkflowVisibilityFirstDelayMs : RunWorkflowVisibilityRetryDelayMs;
+            try
+            {
+                await Task.Delay(delayMs, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+
+            await RefreshRowAsync(row, cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(row.ErrorMessage))
+            {
+                Logger.LogWarning(
+                    "{Operation}: refresh failed for {Repo} after attempt {Attempt}",
+                    operationLabel,
+                    row.Repo.RepositoryName,
+                    attempt);
+                return false;
+            }
+
+            if (row.WorkflowLines.Any(line => IsLineRunningForBranch(row, line) && (line.Action?.RunId ?? 0) > 0))
+            {
+                Logger.LogInformation(
+                    "{Operation}: running workflow visible after attempt {Attempt}/{Max} for {Repo}",
+                    operationLabel,
+                    attempt,
+                    RunWorkflowVisibilityMaxAttempts,
+                    row.Repo.RepositoryName);
+                return true;
+            }
+
+            if (attempt < RunWorkflowVisibilityMaxAttempts)
+            {
+                Logger.LogDebug(
+                    "{Operation}: attempt {Attempt}/{Max} - no running workflow in API yet for {Repo}",
+                    operationLabel,
+                    attempt,
+                    RunWorkflowVisibilityMaxAttempts,
+                    row.Repo.RepositoryName);
+            }
+        }
+
+        Logger.LogDebug(
+            "{Operation}: no running workflow after {Max} attempts for {Repo} (may still be queued)",
+            operationLabel,
+            RunWorkflowVisibilityMaxAttempts,
+            row.Repo.RepositoryName);
+        return false;
     }
 
     private void StartBackgroundRefresh()
@@ -480,7 +618,7 @@ public sealed partial class WorkspaceActions : IDisposable
             if (attempt < RunWorkflowVisibilityMaxAttempts)
             {
                 Logger.LogDebug(
-                    "{Operation}: attempt {Attempt}/{Max} — workflow not running in API yet WorkflowId={WorkflowId}",
+                    "{Operation}: attempt {Attempt}/{Max} - workflow not running in API yet WorkflowId={WorkflowId}",
                     operationLabel,
                     attempt,
                     RunWorkflowVisibilityMaxAttempts,
@@ -548,7 +686,7 @@ public sealed partial class WorkspaceActions : IDisposable
             if (attempt < RunWorkflowVisibilityMaxAttempts)
             {
                 Logger.LogDebug(
-                    "{Operation}: attempt {Attempt}/{Max} — run still in progress in API WorkflowId={WorkflowId} RunId={RunId}",
+                    "{Operation}: attempt {Attempt}/{Max} - run still in progress in API WorkflowId={WorkflowId} RunId={RunId}",
                     operationLabel,
                     attempt,
                     RunWorkflowVisibilityMaxAttempts,
@@ -964,26 +1102,7 @@ public sealed partial class WorkspaceActions : IDisposable
     private static string GetFriendlyErrorMessage(Exception ex) =>
         ex switch
         {
-            HttpRequestException { StatusCode: HttpStatusCode.Unauthorized } =>
-                "Unauthorized (401). Check the connector token on the Connectors page.",
-            HttpRequestException { StatusCode: HttpStatusCode.Forbidden } =>
-                "Forbidden (403). The token does not have permission to access GitHub Actions.",
-            HttpRequestException { StatusCode: HttpStatusCode.NotFound } =>
-                "Not found (404). The repository or workflow was not found.",
-            HttpRequestException { StatusCode: HttpStatusCode.Conflict } =>
-                "Conflict (409). The workflow run may already be finished.",
-            HttpRequestException { StatusCode: HttpStatusCode.UnprocessableEntity } http422 =>
-                string.IsNullOrWhiteSpace(http422.Message)
-                    ? "GitHub rejected the workflow request (422). It may not support manual runs on this branch, or required workflow inputs are missing."
-                    : http422.Message,
-            HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } =>
-                "Rate limited (429). Too many requests to GitHub. Try again later.",
-            HttpRequestException { StatusCode: HttpStatusCode.ServiceUnavailable } =>
-                "GitHub service unavailable (503). Try again later.",
-            HttpRequestException httpEx =>
-                string.IsNullOrWhiteSpace(httpEx.Message)
-                    ? "GitHub API request failed."
-                    : httpEx.Message,
+            HttpRequestException httpEx => GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(httpEx),
             OperationCanceledException =>
                 "The operation was cancelled (for example, refresh was interrupted). Try Run again or use Refresh.",
             _ => ex.Message
@@ -1173,6 +1292,10 @@ public sealed partial class WorkspaceActions : IDisposable
         _cts.Dispose();
         _syncDebounceCts?.Cancel();
         _syncDebounceCts?.Dispose();
+        _repositorySyncDebounceCts?.Cancel();
+        _repositorySyncDebounceCts?.Dispose();
+        lock (_pendingRepositorySyncIds)
+            _pendingRepositorySyncIds.Clear();
         _ = _hubConnection?.StopAsync();
         _ = _hubConnection?.DisposeAsync().AsTask();
     }
