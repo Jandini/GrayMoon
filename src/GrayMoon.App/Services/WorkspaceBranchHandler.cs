@@ -38,6 +38,7 @@ public sealed class WorkspaceBranchHandler(
         int workspaceId,
         string newBranchName,
         string baseBranch,
+        IReadOnlySet<int>? repositoryIds,
         Action<int, int> reportProgress,
         CancellationToken cancellationToken)
     {
@@ -49,7 +50,7 @@ public sealed class WorkspaceBranchHandler(
             newBranchName,
             baseBranch,
             onProgress: (completed, total) => reportProgress(completed, total),
-            repositoryIds: null,
+            repositoryIds: repositoryIds,
             cancellationToken: cancellationToken);
     }
 

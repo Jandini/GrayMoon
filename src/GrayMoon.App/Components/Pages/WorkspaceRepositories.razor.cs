@@ -34,6 +34,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private bool? isOutOfSync = null;
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => !wr.IsOnTag && (wr.UnmatchedDeps ?? 0) > 0);
     private bool isPushRecommended => workspaceRepositories.Any(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false));
+    private bool hasTaggedRepos => workspaceRepositories.Any(wr => wr.IsOnTag);
     /// <summary>When true, any repository on its default branch has incoming commits; header shows red Pull button and executes only Pull (commit sync) for those repos. Repos pinned to a tag are excluded.</summary>
     private bool hasIncomingCommits => workspaceRepositories.Any(wr =>
         !wr.IsOnTag
@@ -1951,12 +1952,14 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    private async Task CheckoutCommonBranchAcrossWorkspaceAsync(string branchName)
+    private async Task CheckoutCommonBranchAcrossWorkspaceAsync((string BranchName, bool SkipReposOnTags) args)
     {
+        var (branchName, skipReposOnTags) = args;
         if (workspace == null || string.IsNullOrWhiteSpace(branchName) || isWorkspaceBranchesCheckingOut || isSyncing || isUpdating || isCommitSyncing || isCheckingOut)
             return;
 
         var repoIds = workspaceRepositories
+            .Where(wr => !skipReposOnTags || !wr.IsOnTag)
             .Select(wr => wr.RepositoryId)
             .Distinct()
             .ToList();
@@ -2015,9 +2018,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    private async Task CreateBranchesAsync((string NewBranchName, string BaseBranch) args)
+    private async Task CreateBranchesAsync((string NewBranchName, string BaseBranch, bool SkipReposOnTags) args)
     {
-        var (newBranchName, baseBranch) = args;
+        var (newBranchName, baseBranch, skipReposOnTags) = args;
         if (workspace == null || string.IsNullOrWhiteSpace(newBranchName) || isCreatingBranches || isSyncing || isUpdating)
             return;
 
@@ -2031,6 +2034,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
         errorMessage = null;
         StateHasChanged();
 
+        var tagFilteredRepoIds = skipReposOnTags
+            ? workspaceRepositories.Where(wr => !wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet()
+            : (IReadOnlySet<int>?)null;
+
         try
         {
             await Task.Yield();
@@ -2038,6 +2045,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 WorkspaceId,
                 newBranchName,
                 baseBranch,
+                tagFilteredRepoIds,
                 (completed, total) =>
                 {
                     SetCreateBranchesProgress($"Created {completed} of {total} branches");

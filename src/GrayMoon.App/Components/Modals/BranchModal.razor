@@ -119,14 +119,22 @@
                                 <label class="form-label mb-0" for="switch-branch-filter">Branch name</label>
                                 <span class="switch-branch-tab-count">@GetBranchCountText(GetFilteredSwitchBranches().Count(), !string.IsNullOrWhiteSpace(switchBranchFilter))</span>
                             </div>
-                            <input id="switch-branch-filter"
-                                   type="text"
-                                   class="form-control"
-                                   placeholder="search branch..."
-                                   @bind="switchBranchFilter"
-                                   @bind:event="oninput"
-                                   @bind:after="SelectClosestSwitchBranch"
-                                   @ref="switchBranchFilterInput" />
+                            <div class="input-group">
+                                <input id="switch-branch-filter"
+                                       type="text"
+                                       class="form-control"
+                                       placeholder="search branch..."
+                                       @bind="switchBranchFilter"
+                                       @bind:event="oninput"
+                                       @bind:after="SelectClosestSwitchBranch"
+                                       @ref="switchBranchFilterInput" />
+                                <button type="button"
+                                        class="btn btn-outline-secondary"
+                                        title="Fetch branches from remote"
+                                        @onclick="FetchAcrossWorkspaceAsync">
+                                    Fetch
+                                </button>
+                            </div>
                         </div>
                         <div class="branch-list border rounded">
                             @if (GetFilteredSwitchBranches().Count() == 0)
@@ -172,13 +180,17 @@
                 </div>
                 <div class="modal-footer">
                     <div class="d-flex gap-2 align-items-center me-auto">
-                        @if (activeTab == "switchbranch")
+                        @if (HasTaggedRepos)
                         {
-                            <button type="button"
-                                    class="btn btn-outline-secondary"
-                                    @onclick="FetchAcrossWorkspaceAsync">
-                                Fetch
-                            </button>
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="checkbox" id="branch-modal-skip-tags"
+                                       style="@(!skipReposOnTags ? "opacity: 0.4;" : "")"
+                                       @bind="skipReposOnTags" />
+                                <label class="form-check-label" for="branch-modal-skip-tags"
+                                       title="Repositories checked out on a tag will not be affected">
+                                    Skip repos on tags
+                                </label>
+                            </div>
                         }
                     </div>
                     @if (activeTab == "newbranch" && !showBranchExistsConfirmation)
@@ -215,14 +227,16 @@
     [Parameter] public string DefaultDisplayText { get; set; } = "multiple";
     /// <summary>Local branch name when every repo in the workspace reports the same current branch; used for Current badge and disabling redundant checkout.</summary>
     [Parameter] public string? WorkspaceUnifiedCurrentBranch { get; set; }
+    [Parameter] public bool HasTaggedRepos { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
-    [Parameter] public EventCallback<(string NewBranchName, string BaseBranch)> OnCreateBranch { get; set; }
+    [Parameter] public EventCallback<(string NewBranchName, string BaseBranch, bool SkipReposOnTags)> OnCreateBranch { get; set; }
     [Parameter] public EventCallback OnFetchBranches { get; set; }
-    [Parameter] public EventCallback<string> OnCheckoutBranch { get; set; }
+    [Parameter] public EventCallback<(string BranchName, bool SkipReposOnTags)> OnCheckoutBranch { get; set; }
 
     private string activeTab = "newbranch";
     private string newBranchName = "";
     private string selectedBaseBranch = "__default__";
+    private bool skipReposOnTags = true;
     private bool isCreating = false;
     private string? errorMessage;
     private bool showBranchExistsConfirmation = false;
@@ -361,7 +375,7 @@
             return;
 
         await OnCancel.InvokeAsync();
-        await OnCheckoutBranch.InvokeAsync(selected.BranchName);
+        await OnCheckoutBranch.InvokeAsync((selected.BranchName, skipReposOnTags));
     }
 
     private string GetSelectedBaseDisplayText()
@@ -394,6 +408,7 @@
             switchBranchFilter = "";
             selectedSwitchBranchKey = null;
             _focusSwitchFilterOnNextRender = false;
+            skipReposOnTags = true;
         }
     }
 
@@ -457,7 +472,7 @@
                 return;
             }
 
-            await OnCreateBranch.InvokeAsync((name, baseBranch));
+            await OnCreateBranch.InvokeAsync((name, baseBranch, skipReposOnTags));
         }
         finally
         {
@@ -485,7 +500,7 @@
 
         try
         {
-            await OnCreateBranch.InvokeAsync((_pendingCreateName, _pendingCreateBaseBranch));
+            await OnCreateBranch.InvokeAsync((_pendingCreateName, _pendingCreateBaseBranch, skipReposOnTags));
             DismissBranchExistsConfirmation();
         }
         finally
