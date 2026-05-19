@@ -35,8 +35,8 @@ public sealed class SyncToDefaultBranchCommand(IGitService git) : ICommandHandle
             };
         }
 
-        // Checkout default branch
-        var (checkoutSuccess, checkoutError) = await git.CheckoutBranchAsync(repoPath, defaultBranch, cancellationToken);
+        // Checkout default branch without firing post-checkout hook (orchestrated fetch/pull follows).
+        var (checkoutSuccess, checkoutError) = await git.CheckoutBranchAsync(repoPath, defaultBranch, cancellationToken, skipHooks: true);
         if (!checkoutSuccess)
         {
             return new SyncToDefaultBranchResponse

@@ -18,6 +18,8 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
     private readonly int _listenPort = options.Value.ListenPort;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly ConcurrentDictionary<string, byte> _safeRepoCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> RepoLocks = new(StringComparer.OrdinalIgnoreCase);
+    private static string? _emptyHooksPath;
 
     public string GetWorkspacePath(string root, string workspaceName)
     {
@@ -711,7 +713,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return branches!;
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct)
+    public async Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct, bool skipHooks = false)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (false, "Invalid repository path or branch name");
@@ -725,18 +727,13 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                  : $"{outStr}\n{errStr}";
         }
 
-        // First check if it's a remote branch that needs to be tracked locally
-        var (exitCheckRemote, _, _) = await RunProcessAsync("git", $"rev-parse --verify origin/{branchName}", repoPath, ct);
-        if (exitCheckRemote == 0)
-        {
-            // Remote branch exists, checkout with tracking
-            var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"checkout -b {branchName} origin/{branchName}", repoPath, ct);
-            if (exitCode != 0)
-            {
-                // Try regular checkout in case branch already exists locally
-                (exitCode, stdout, stderr) = await RunProcessAsync("git", $"checkout {branchName}", repoPath, ct);
-            }
+        var hooksPrefix = GetHooksConfigPrefix(skipHooks);
 
+        // Prefer an existing local branch; only create a tracking branch when local is missing.
+        var (exitCheckLocal, _, _) = await RunProcessAsync("git", $"rev-parse --verify refs/heads/{branchName}", repoPath, ct);
+        if (exitCheckLocal == 0)
+        {
+            var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"{hooksPrefix}checkout {branchName}", repoPath, ct);
             if (exitCode != 0)
             {
                 var combined = CombineOutput(stdout, stderr);
@@ -746,13 +743,26 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
         else
         {
-            // Local branch only
-            var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"checkout {branchName}", repoPath, ct);
-            if (exitCode != 0)
+            var (exitCheckRemote, _, _) = await RunProcessAsync("git", $"rev-parse --verify origin/{branchName}", repoPath, ct);
+            if (exitCheckRemote == 0)
             {
-                var combined = CombineOutput(stdout, stderr);
-                logger.LogError("Git checkout failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, branchName, exitCode, stdout, stderr);
-                return (false, combined);
+                var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"{hooksPrefix}checkout -b {branchName} origin/{branchName}", repoPath, ct);
+                if (exitCode != 0)
+                {
+                    var combined = CombineOutput(stdout, stderr);
+                    logger.LogError("Git checkout failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, branchName, exitCode, stdout, stderr);
+                    return (false, combined);
+                }
+            }
+            else
+            {
+                var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"{hooksPrefix}checkout {branchName}", repoPath, ct);
+                if (exitCode != 0)
+                {
+                    var combined = CombineOutput(stdout, stderr);
+                    logger.LogError("Git checkout failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, branchName, exitCode, stdout, stderr);
+                    return (false, combined);
+                }
             }
         }
 
@@ -873,6 +883,11 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             if (exitCode != 0)
             {
                 var combined = CombineOutput(stdout, stderr);
+                if (IsRemoteBranchAlreadyDeleted(combined))
+                {
+                    logger.LogInformation("Git remote branch already deleted for {RepoPath}. Branch={Branch}", repoPath, name);
+                    return (true, null);
+                }
                 logger.LogWarning("Git push --delete failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}", repoPath, name, exitCode);
                 return (false, combined);
             }
@@ -1211,6 +1226,32 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         bool? streamStderrAsStdout = null,
         bool? mirrorFailureOutputAsStderr = null)
     {
+        if (string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            var repoLock = GetRepoLock(workingDirectory);
+            await repoLock.WaitAsync(ct);
+            try
+            {
+                return await RunProcessCoreAsync(fileName, arguments, workingDirectory, ct, streamStderrAsStdout, mirrorFailureOutputAsStderr);
+            }
+            finally
+            {
+                repoLock.Release();
+            }
+        }
+
+        return await RunProcessCoreAsync(fileName, arguments, workingDirectory, ct, streamStderrAsStdout, mirrorFailureOutputAsStderr);
+    }
+
+    private async Task<(int ExitCode, string? Stdout, string? Stderr)> RunProcessCoreAsync(
+        string fileName,
+        string arguments,
+        string? workingDirectory,
+        CancellationToken ct,
+        bool? streamStderrAsStdout = null,
+        bool? mirrorFailureOutputAsStderr = null)
+    {
         var gitLike = IsGitLikeProgressStreaming(fileName, arguments);
         var stderrAsOut = streamStderrAsStdout ?? gitLike;
         var mirror = mirrorFailureOutputAsStderr ?? gitLike;
@@ -1219,6 +1260,31 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
     }
 
     private async Task<(int ExitCode, string? Stdout, string? Stderr)> RunProcessWithStdinAsync(
+        string fileName,
+        string arguments,
+        string? workingDirectory,
+        string stdinContent,
+        CancellationToken ct)
+    {
+        if (string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            var repoLock = GetRepoLock(workingDirectory);
+            await repoLock.WaitAsync(ct);
+            try
+            {
+                return await RunProcessWithStdinCoreAsync(fileName, arguments, workingDirectory, stdinContent, ct);
+            }
+            finally
+            {
+                repoLock.Release();
+            }
+        }
+
+        return await RunProcessWithStdinCoreAsync(fileName, arguments, workingDirectory, stdinContent, ct);
+    }
+
+    private async Task<(int ExitCode, string? Stdout, string? Stderr)> RunProcessWithStdinCoreAsync(
         string fileName,
         string arguments,
         string? workingDirectory,
@@ -1266,5 +1332,37 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             || output.Contains("is not recognized as an internal or external command", StringComparison.OrdinalIgnoreCase)
             || output.Contains("run 'dotnet tool restore'", StringComparison.OrdinalIgnoreCase)
             || output.Contains("run \"dotnet tool restore\"", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static SemaphoreSlim GetRepoLock(string repoPath)
+    {
+        var key = Path.GetFullPath(repoPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return RepoLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+    }
+
+    private static string EmptyHooksPath =>
+        _emptyHooksPath ??= CreateEmptyHooksPath();
+
+    private static string CreateEmptyHooksPath()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "GrayMoon-empty-hooks");
+        Directory.CreateDirectory(path);
+        return path.Replace('\\', '/');
+    }
+
+    private static string GetHooksConfigPrefix(bool skipHooks)
+    {
+        if (!skipHooks)
+            return string.Empty;
+
+        var escaped = EmptyHooksPath.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        return $"-c core.hooksPath=\"{escaped}\" ";
+    }
+
+    private static bool IsRemoteBranchAlreadyDeleted(string output)
+    {
+        return output.Contains("remote ref does not exist", StringComparison.OrdinalIgnoreCase)
+            || (output.Contains("unable to delete", StringComparison.OrdinalIgnoreCase)
+                && output.Contains("does not exist", StringComparison.OrdinalIgnoreCase));
     }
 }
