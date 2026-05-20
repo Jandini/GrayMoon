@@ -428,7 +428,9 @@ public class WorkspaceGitService(
         int workspaceId,
         IReadOnlyList<SyncDependenciesRepoPayload> reposToCommit,
         Action<int, int, int>? onProgress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? commitMessageOverride = null,
+        bool includeDepsInCommitMessage = true)
     {
         if (!_agentBridge.IsAgentConnected || reposToCommit.Count == 0)
             return Array.Empty<(int, string?)>();
@@ -462,17 +464,28 @@ public class WorkspaceGitService(
                     .Where(p => p.Length > 0)
                     .Distinct()
                     .ToList();
-                var lines = new List<string> { "chore(deps): update package versions", "" };
-                var seen = new HashSet<(string Id, string Version)>();
-                foreach (var pu in repo.ProjectUpdates)
+                var subject = string.IsNullOrWhiteSpace(commitMessageOverride)
+                    ? "chore(deps): update package versions"
+                    : commitMessageOverride.Trim();
+                string commitMessage;
+                if (includeDepsInCommitMessage)
                 {
-                    foreach (var (packageId, _, newVersion) in pu.PackageUpdates)
+                    var lines = new List<string> { subject, "" };
+                    var seen = new HashSet<(string Id, string Version)>();
+                    foreach (var pu in repo.ProjectUpdates)
                     {
-                        if (seen.Add((packageId, newVersion)))
-                            lines.Add($"- {packageId} to {newVersion}");
+                        foreach (var (packageId, _, newVersion) in pu.PackageUpdates)
+                        {
+                            if (seen.Add((packageId, newVersion)))
+                                lines.Add($"- {packageId} to {newVersion}");
+                        }
                     }
+                    commitMessage = string.Join("\r\n", lines);
                 }
-                var commitMessage = string.Join("\r\n", lines);
+                else
+                {
+                    commitMessage = subject;
+                }
 
                 var args = new
                 {
@@ -505,7 +518,8 @@ public class WorkspaceGitService(
         int workspaceId,
         IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)> reposAndPaths,
         Action<int, int, int>? onProgress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? commitMessageOverride = null)
     {
         if (!_agentBridge.IsAgentConnected || reposAndPaths.Count == 0)
             return Array.Empty<(int, string?)>();
@@ -540,7 +554,9 @@ public class WorkspaceGitService(
                     .ToList();
                 if (pathsToStage.Count == 0)
                     return (RepoId: repo.RepoId, ErrorMessage: (string?)"No paths to stage.");
-                var commitMessage = $"chore(deps): update versions ({pathsToStage.Count})";
+                var commitMessage = string.IsNullOrWhiteSpace(commitMessageOverride)
+                    ? $"chore(deps): update versions ({pathsToStage.Count})"
+                    : commitMessageOverride.Trim();
                 var args = new
                 {
                     workspaceName = workspace.Name,

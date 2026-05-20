@@ -10,12 +10,30 @@
                     <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-0">
+                    <p class="mb-3">
                         Proceed to update dependency versions in <code>.csproj</code> files to match the current versions of the referenced packages, update any configured version files that use those versions, and create git commits in each affected repository for the modified files.
                     </p>
+                    <div class="mb-3">
+                        <label for="updateDepsCommitMsg" class="form-label">Commit message <span class="text-muted">(optional)</span></label>
+                        <input id="updateDepsCommitMsg"
+                               type="text"
+                               class="form-control"
+                               placeholder="chore(deps): update package versions"
+                               @bind="_commitMessage"
+                               disabled="@IsBusy" />
+                    </div>
+                    <div class="form-check">
+                        <input id="updateDepsIncludeDeps"
+                               type="checkbox"
+                               class="form-check-input"
+                               style="@(!_includeDepsInMessage ? "opacity: 0.4;" : "")"
+                               @bind="_includeDepsInMessage"
+                               disabled="@IsBusy" />
+                        <label for="updateDepsIncludeDeps" class="form-check-label">Include updated dependencies in commit message</label>
+                    </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-warning" @onclick="OnProceed" disabled="@IsBusy">
+                    <button type="button" class="btn btn-warning" @onclick="OnProceedClick" disabled="@IsBusy">
                         @if (IsBusy)
                         {
                             <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
@@ -34,10 +52,31 @@
 @code {
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public bool IsBusy { get; set; }
-    [Parameter] public EventCallback OnProceed { get; set; }
+    [Parameter] public string? InitialCommitMessage { get; set; }
+    [Parameter] public bool InitialIncludeDeps { get; set; } = true;
+    [Parameter] public EventCallback<(string? CommitMessage, bool IncludeDeps)> OnProceed { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
 
     private ElementReference modalElement;
+    private string _commitMessage = "";
+    private bool _includeDepsInMessage = true;
+    private bool _prevIsVisible;
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !_prevIsVisible)
+        {
+            _commitMessage = InitialCommitMessage ?? "";
+            _includeDepsInMessage = InitialIncludeDeps;
+        }
+        _prevIsVisible = IsVisible;
+    }
+
+    private async Task OnProceedClick()
+    {
+        var msg = _commitMessage.Trim();
+        await OnProceed.InvokeAsync((string.IsNullOrEmpty(msg) ? null : msg, _includeDepsInMessage));
+    }
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {

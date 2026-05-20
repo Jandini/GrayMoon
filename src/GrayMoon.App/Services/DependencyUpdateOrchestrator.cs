@@ -23,13 +23,17 @@ public sealed class DependencyUpdateOrchestrator(
     /// Stops on first error and reports it via <paramref name="onRepoError"/>.
     /// </summary>
     /// <param name="repoIdsToUpdate">Optional. When set, only these repositories are considered for the update plan and all steps.</param>
+    /// <param name="commitMessage">Optional user-supplied commit subject line. When provided, replaces the default subject in all commits created during this update.</param>
+    /// <param name="includeDepsInCommitMessage">When true, the list of updated packages is appended to the commit message body.</param>
     public async Task RunAsync(
         int workspaceId,
         CancellationToken cancellationToken,
         Action<string> setProgress,
         Action<int, string> onRepoError,
         Action? onAppSideComplete = null,
-        IReadOnlySet<int>? repoIdsToUpdate = null)
+        IReadOnlySet<int>? repoIdsToUpdate = null,
+        string? commitMessage = null,
+        bool includeDepsInCommitMessage = true)
     {
         var hadError = false;
         void OnRepoError(int repoId, string msg)
@@ -73,7 +77,8 @@ public sealed class DependencyUpdateOrchestrator(
                     cancellationToken,
                     levelProgress,
                     onAppSideComplete,
-                    OnRepoError))
+                    OnRepoError,
+                    commitMessage))
             {
                 hadError = true;
                 break;
@@ -106,7 +111,9 @@ public sealed class DependencyUpdateOrchestrator(
                     if (c == t)
                         onAppSideComplete?.Invoke();
                 },
-                cancellationToken);
+                cancellationToken,
+                commitMessageOverride: commitMessage,
+                includeDepsInCommitMessage: includeDepsInCommitMessage);
             foreach (var (repoId, errMsg) in commitResults)
             {
                 if (!string.IsNullOrEmpty(errMsg))
@@ -234,7 +241,8 @@ public sealed class DependencyUpdateOrchestrator(
         CancellationToken cancellationToken,
         Action<string> setProgress,
         Action? onAppSideComplete,
-        Action<int, string> onRepoError)
+        Action<int, string> onRepoError,
+        string? commitMessageOverride = null)
     {
         setProgress("Updating version files...");
         var (_, _, fileError, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
@@ -274,7 +282,8 @@ public sealed class DependencyUpdateOrchestrator(
             workspaceId,
             byRepo,
             onProgress: (c, t, _) => setProgress($"Committed version files {c} of {t}"),
-            cancellationToken: cancellationToken);
+            cancellationToken: cancellationToken,
+            commitMessageOverride: commitMessageOverride);
 
         var committedVersionRepoIds = new List<int>();
         foreach (var (repoId, errMsg) in vfCommitResults)

@@ -104,6 +104,15 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 ## What's new
 
+### Update dependencies: custom commit message and smarter default-branch warning
+
+The workspace **Update dependencies** confirmation dialog now lets you control how git commits are created during a coordinated dependency rollout.
+
+- **Optional commit subject:** enter a custom commit message (for example `chore(deps): bump AuroraVerityReview packages`). Leave it blank to keep the default `chore(deps): update package versions` for `.csproj` commits and `chore(deps): update versions (N)` for version-file commits.
+- **Include updated dependencies in commit message:** when checked (default), each repository commit still appends the package list in the body (`- PackageId to x.y.z`). Uncheck to commit only the subject line with no dependency list.
+- **Per-workspace memory:** your last commit message and checkbox choice are remembered for the current workspace for the rest of the app session (no database persistence). Reopening the dialog restores what you last used on Proceed; Cancel does not clear it.
+- **Default-branch warning only for repos that will change:** the protected-branch warning before update now lists only repositories that are on their default branch **and** have pending dependency updates in the current plan. Repos on default with nothing to update are omitted, so you are not asked to confirm a long list of repos GrayMoon will not touch.
+
 ### Live GitHub Actions feed in synchronized push overlay
 
 When GrayMoon performs a dependency-synchronized push and is waiting for required package versions to appear in registries, the loading overlay terminal now streams live GitHub Actions updates for the repositories that were already pushed.

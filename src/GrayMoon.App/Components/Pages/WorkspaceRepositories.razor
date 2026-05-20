@@ -214,6 +214,8 @@
 
 <UpdateDependenciesModal IsVisible="@_updateModal.IsVisible"
                          IsBusy="@isUpdating"
+                         InitialCommitMessage="@_updateModal.LastCommitMessage"
+                         InitialIncludeDeps="@_updateModal.LastIncludeDeps"
                          OnProceed="@OnUpdateProceedAsync"
                          OnCancel="@CloseUpdateModal" />
 
