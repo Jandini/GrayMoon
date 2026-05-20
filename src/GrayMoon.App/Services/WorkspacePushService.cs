@@ -584,7 +584,7 @@ public sealed class WorkspacePushService(
             if (update.NewLines.Count == 0)
                 continue;
 
-            var label = $"gha:{feed.RepositoryName}";
+            var label = $"{feed.RepositoryName} [gha]";
             foreach (var line in update.NewLines)
                 _overlayCommandTerminalService.Append(label, AgentCommandStreamKind.Stdout, line);
         }
