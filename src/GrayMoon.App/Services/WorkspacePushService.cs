@@ -181,6 +181,8 @@ public sealed class WorkspacePushService(
                 var foundByIndex = new bool[totalDeps];
                 var foundLock = new object();
                 var ghaFeedByRunKey = new Dictionary<string, GhaWorkflowLiveFeedState>(StringComparer.Ordinal);
+                var noWorkflowRepoIds = new HashSet<int>();
+                var ghaDiscoveryEnabled = true;
                 var lastGhaDiscoveryUtc = DateTime.MinValue;
                 var lastGhaPollUtc = DateTime.MinValue;
                 int getFoundCount()
@@ -210,16 +212,22 @@ public sealed class WorkspacePushService(
 
                     if (_gitHubActionsService != null
                         && _ghaWorkflowLiveFeedService != null
-                        && _overlayCommandTerminalService != null)
+                        && _overlayCommandTerminalService != null
+                        && ghaDiscoveryEnabled)
                     {
                         if ((DateTime.UtcNow - lastGhaDiscoveryUtc).TotalSeconds >= 6)
                         {
                             lastGhaDiscoveryUtc = DateTime.UtcNow;
-                            await DiscoverRunningWorkflowsForLevelAsync(
+                            _ = await DiscoverRunningWorkflowsForLevelAsync(
                                 reposAtLevel,
                                 links,
                                 ghaFeedByRunKey,
+                                noWorkflowRepoIds,
                                 linkedToken);
+
+                            // Permanently disable only when every repo at this level is confirmed to have no workflows at all.
+                            if (reposAtLevel.All(r => noWorkflowRepoIds.Contains(r.RepoId)))
+                                ghaDiscoveryEnabled = false;
                         }
 
                         if (ghaFeedByRunKey.Count > 0 && (DateTime.UtcNow - lastGhaPollUtc).TotalMilliseconds >= GhaWorkflowLiveFeedService.PollIntervalActiveMs)
@@ -471,19 +479,24 @@ public sealed class WorkspacePushService(
         await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
     }
 
-    private async Task DiscoverRunningWorkflowsForLevelAsync(
+    private async Task<bool> DiscoverRunningWorkflowsForLevelAsync(
         IReadOnlyList<PushRepoPayload> reposAtLevel,
         IReadOnlyList<WorkspaceRepositoryLink> links,
         Dictionary<string, GhaWorkflowLiveFeedState> ghaFeedByRunKey,
+        ISet<int> noWorkflowRepoIds,
         CancellationToken cancellationToken)
     {
         if (_gitHubActionsService == null)
-            return;
+            return false;
 
         var linksByRepoId = links.ToDictionary(l => l.RepositoryId);
+        var hasAnyWorkflowCandidates = false;
         foreach (var repo in reposAtLevel)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (noWorkflowRepoIds.Contains(repo.RepoId))
+                continue;
 
             if (!linksByRepoId.TryGetValue(repo.RepoId, out var link)
                 || link.Repository?.Connector == null
@@ -517,7 +530,13 @@ public sealed class WorkspacePushService(
             }
 
             if (statuses == null || statuses.Count == 0)
+            {
+                noWorkflowRepoIds.Add(repo.RepoId);
+                _logger.LogDebug("Push wait: repo {RepoName} has no active GitHub Actions workflows; skipping live feed.", entry.RepositoryName);
                 continue;
+            }
+
+            hasAnyWorkflowCandidates = true;
 
             foreach (var status in statuses)
             {
@@ -544,6 +563,8 @@ public sealed class WorkspacePushService(
                 _overlayCommandTerminalService?.Append($"gha:{entry.RepositoryName}", AgentCommandStreamKind.Stdout, $"Run #{status.RunId.Value} - subscribing to job updates...");
             }
         }
+
+        return true;
     }
 
     private async Task PumpGhaLiveFeedIntoOverlayAsync(
