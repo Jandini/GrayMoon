@@ -31,7 +31,7 @@ GrayMoon is useful for:
 
 - You get one view of branch/version/PR/action status across repositories.
 - You can see GitHub Actions results for the current branch across all repositories in a workspace.
-- You can open multiple repositories (and multiple new PR pages by dependency level) in GitHub with one action.
+- You can create pull requests across one, several, or all workspace repositories from one dialog, with optional reviewers and draft support.
 - You can run coordinated dependency updates instead of editing each repo manually.
 - You can create one feature branch (for example `feature/dependency-update`) across repos, auto-update package refs, auto-commit, and push together.
 - When rolling out changes, GrayMoon can push multiple repositories in parallel so the full workflow finishes faster than pushing repo-by-repo manually.
@@ -103,6 +103,19 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 6. Continue working in your IDE while GrayMoon tracks changes in the background; GrayMoon UI does not need to stay open as long as the Docker app and agent services are running.
 
 ## What's new
+
+### Create pull requests from the workspace repositories view
+
+GrayMoon can now create GitHub pull requests without leaving the app. Use one dialog for a single repository, every repository in a dependency level, or all eligible workspace repositories.
+
+- **Three entry points:** the yellow **create** badge on a row (one repo), the dependency-level GitHub icon (repos in that level with commits ahead of default), and **Branch** split menu **New Pull Requests** (all eligible repos in the workspace).
+- **One dialog, shared fields:** title (default generated from the branch name), optional description, draft checkbox, and optional reviewers. Title rules turn branch names like `feature/ABC-123-update-dependencies.v2` into readable subjects (ticket-style tokens such as `ABC-123` stay grouped).
+- **Reviewers:** users and teams are loaded from GitHub (merged across targets when multiple repos are selected). Search supports multiple words (space/comma separated). Teams appear first in the list.
+- **Open in GitHub:** opens compare/create pages in the browser (with a confirm when more than five repositories are involved).
+- **Create flow:** a confirmation step, then a loading overlay (`Creating N pull requests...`, then `Created x of N pull requests` after the first success). Per-repository results are summarized in toasts; a single successful PR can open in the browser automatically.
+- **Branch menu:** **Branch** is a split button with **New Branch**, **Switch Branch**, and **New Pull Requests**. The main **Update** button is unchanged.
+
+Only repositories that are eligible are included: not on a tag, on a feature branch (not default), with commits ahead of default, no open PR already, and a configured GitHub connector.
 
 ### Update dependencies: custom commit message and smarter default-branch warning
 

@@ -228,6 +228,7 @@
     /// <summary>Local branch name when every repo in the workspace reports the same current branch; used for Current badge and disabling redundant checkout.</summary>
     [Parameter] public string? WorkspaceUnifiedCurrentBranch { get; set; }
     [Parameter] public bool HasTaggedRepos { get; set; }
+    [Parameter] public string? InitialTab { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback<(string NewBranchName, string BaseBranch, bool SkipReposOnTags)> OnCreateBranch { get; set; }
     [Parameter] public EventCallback OnFetchBranches { get; set; }
@@ -404,7 +405,9 @@
             selectedBaseBranch = "__default__";
             errorMessage = null;
             showBranchExistsConfirmation = false;
-            activeTab = "newbranch";
+            activeTab = string.Equals(InitialTab, "switchbranch", StringComparison.OrdinalIgnoreCase)
+                ? "switchbranch"
+                : "newbranch";
             switchBranchFilter = "";
             selectedSwitchBranchKey = null;
             _focusSwitchFilterOnNextRender = false;

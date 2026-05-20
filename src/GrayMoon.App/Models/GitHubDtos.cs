@@ -181,6 +181,9 @@ public class GitHubPullRequestDto
     [JsonPropertyName("title")]
     public string? Title { get; set; }
 
+    [JsonPropertyName("body")]
+    public string? Body { get; set; }
+
     [JsonPropertyName("head")]
     public GitHubPullRequestHeadDto? Head { get; set; }
 
@@ -198,4 +201,54 @@ public class GitHubPullRequestHeadDto
 {
     [JsonPropertyName("ref")]
     public string Ref { get; set; } = string.Empty;
+}
+
+/// <summary>Body for POST /repos/{owner}/{repo}/pulls.</summary>
+public sealed class GitHubCreatePullRequestRequestDto
+{
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = string.Empty;
+
+    [JsonPropertyName("head")]
+    public string Head { get; set; } = string.Empty;
+
+    [JsonPropertyName("base")]
+    public string Base { get; set; } = string.Empty;
+
+    [JsonPropertyName("body")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Body { get; set; }
+
+    [JsonPropertyName("draft")]
+    public bool Draft { get; set; }
+}
+
+/// <summary>Body for POST /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers.</summary>
+public sealed class GitHubRequestReviewersRequestDto
+{
+    [JsonPropertyName("reviewers")]
+    public List<string> Reviewers { get; set; } = new();
+
+    [JsonPropertyName("team_reviewers")]
+    public List<string> TeamReviewers { get; set; } = new();
+}
+
+/// <summary>Item from GET /repos/{owner}/{repo}/collaborators.</summary>
+public sealed class GitHubCollaboratorDto
+{
+    [JsonPropertyName("login")]
+    public string Login { get; set; } = string.Empty;
+
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = string.Empty;
+}
+
+/// <summary>Item from GET /repos/{owner}/{repo}/teams.</summary>
+public sealed class GitHubTeamDto
+{
+    [JsonPropertyName("slug")]
+    public string Slug { get; set; } = string.Empty;
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
 }

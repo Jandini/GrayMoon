@@ -103,6 +103,7 @@ try
     builder.Services.AddHttpClient<GitHubService>();
     builder.Services.AddHttpClient<NuGetService>();
     builder.Services.AddScoped<ConnectorServiceFactory>();
+    builder.Services.AddScoped<IPullRequestService, PullRequestService>();
 
     // Persist Data Protection keys to db volume so antiforgery and other protected data survive container restarts
     var keyRingDir = Path.Combine(Path.GetDirectoryName(GetDatabasePath(connectionString) ?? "db") ?? "db", "DataProtection-Keys");

@@ -457,6 +457,144 @@ public class GitHubService : IConnectorService
         }
     }
 
+    /// <summary>Creates a pull request via POST /repos/{owner}/{repo}/pulls. Throws on non-success.</summary>
+    public async Task<GitHubPullRequestDto> CreatePullRequestAsync(
+        Connector connector,
+        string owner,
+        string repo,
+        GitHubCreatePullRequestRequestDto body,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+        ArgumentNullException.ThrowIfNull(body);
+
+        EnsureConnectorConfigured(connector);
+
+        var requestUri = $"repos/{owner}/{repo}/pulls";
+        var payload = JsonSerializer.Serialize(body);
+
+        var dto = await PostAsync<GitHubPullRequestDto>(connector, requestUri, payload, cancellationToken);
+        if (dto == null)
+            throw new InvalidOperationException("GitHub returned an empty response when creating a pull request.");
+        return dto;
+    }
+
+    /// <summary>Requests reviewers via POST /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers. Throws on non-success.</summary>
+    public async Task RequestReviewersAsync(
+        Connector connector,
+        string owner,
+        string repo,
+        int pullNumber,
+        IReadOnlyList<string> reviewers,
+        IReadOnlyList<string> teamReviewers,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+        if (pullNumber <= 0)
+            throw new ArgumentOutOfRangeException(nameof(pullNumber));
+
+        EnsureConnectorConfigured(connector);
+
+        var body = new GitHubRequestReviewersRequestDto
+        {
+            Reviewers = reviewers?.Where(static r => !string.IsNullOrWhiteSpace(r)).ToList() ?? new List<string>(),
+            TeamReviewers = teamReviewers?.Where(static r => !string.IsNullOrWhiteSpace(r)).ToList() ?? new List<string>()
+        };
+        if (body.Reviewers.Count == 0 && body.TeamReviewers.Count == 0)
+            return;
+
+        var requestUri = $"repos/{owner}/{repo}/pulls/{pullNumber}/requested_reviewers";
+        var payload = JsonSerializer.Serialize(body);
+        await PostAsync(connector, requestUri, payload, cancellationToken);
+    }
+
+    /// <summary>Lists teams via GET /repos/{owner}/{repo}/teams. Returns empty list on 403/404.</summary>
+    public async Task<List<GitHubTeamDto>> GetTeamsAsync(
+        Connector connector,
+        string owner,
+        string repo,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+
+        EnsureConnectorConfigured(connector);
+
+        var requestUri = $"repos/{owner}/{repo}/teams?per_page=100";
+
+        try
+        {
+            return await GetAsync<List<GitHubTeamDto>>(connector, requestUri, cancellationToken)
+                ?? new List<GitHubTeamDto>();
+        }
+        catch (GitHubHttpRequestException ex) when (ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
+        {
+            _logger.LogDebug(ex, "GitHub API list teams failed (treated as empty). Owner={Owner}, Repo={Repo}", owner, repo);
+            return new List<GitHubTeamDto>();
+        }
+    }
+
+    /// <summary>Lists collaborators via GET /repos/{owner}/{repo}/collaborators. Returns empty list on 403/404.</summary>
+    public async Task<List<GitHubCollaboratorDto>> GetCollaboratorsAsync(
+        Connector connector,
+        string owner,
+        string repo,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+
+        EnsureConnectorConfigured(connector);
+
+        var requestUri = $"repos/{owner}/{repo}/collaborators?affiliation=all&per_page=100";
+
+        try
+        {
+            return await GetAsync<List<GitHubCollaboratorDto>>(connector, requestUri, cancellationToken)
+                ?? new List<GitHubCollaboratorDto>();
+        }
+        catch (GitHubHttpRequestException ex) when (ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
+        {
+            _logger.LogDebug(ex, "GitHub API list collaborators failed (treated as empty). Owner={Owner}, Repo={Repo}", owner, repo);
+            return new List<GitHubCollaboratorDto>();
+        }
+    }
+
+    private async Task<T?> PostAsync<T>(Connector connector, string requestUri, string? payload, CancellationToken cancellationToken = default)
+    {
+        var baseUrl = string.IsNullOrWhiteSpace(connector.ApiBaseUrl)
+            ? "https://api.github.com/"
+            : connector.ApiBaseUrl.TrimEnd('/') + "/";
+
+        using var response = await GitHubMutationRetryPipeline.ExecuteAsync(async ct =>
+        {
+            using var request = CreatePostRequest(connector, requestUri, payload);
+            return await _httpClient.SendAsync(request, ct);
+        }, cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError("GitHub API POST failed. Status: {StatusCode}, URL: {Url}, Response: {Response}",
+                response.StatusCode,
+                new Uri(new Uri(baseUrl), requestUri),
+                errorContent);
+            throw GitHubApiErrorHelper.CreateHttpRequestException(response.StatusCode, errorContent, response);
+        }
+
+        return await response.Content.ReadFromJsonAsync<T>(_jsonOptions, cancellationToken);
+    }
+
     private void EnsureConfigured()
     {
         if (string.IsNullOrWhiteSpace(_options.PersonalAccessToken))

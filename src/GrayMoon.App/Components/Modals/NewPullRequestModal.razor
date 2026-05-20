@@ -1,0 +1,384 @@
+@using GrayMoon.App.Services
+@inject IPullRequestService PullRequestService
+@inject ILogger<NewPullRequestModal> Logger
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDown"
+         @ref="modalElement">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        @if (Targets.Count == 1)
+                        {
+                            <text>New Pull Request - @Targets[0].RepositoryName</text>
+                        }
+                        else
+                        {
+                            <text>New Pull Request - @Targets.Count repositories</text>
+                        }
+                    </h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="HandleCancelClick" disabled="@IsBusy"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="new-pr-title">Title</label>
+                        <input id="new-pr-title"
+                               type="text"
+                               class="form-control"
+                               @bind="_title"
+                               @bind:event="oninput"
+                               @ref="titleInput"
+                               disabled="@IsBusy" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="new-pr-body">Description</label>
+                        <textarea id="new-pr-body"
+                                  class="form-control"
+                                  rows="6"
+                                  style="resize: none;"
+                                  @bind="_body"
+                                  @bind:event="oninput"
+                                  disabled="@IsBusy"></textarea>
+                        <div class="form-text text-muted">
+                            If left empty, the repository pull request template will be used if available.
+                        </div>
+                    </div>
+
+                    <div class="form-check mb-3">
+                        <input id="new-pr-draft"
+                               type="checkbox"
+                               class="form-check-input"
+                               @bind="_isDraft"
+                               disabled="@IsBusy" />
+                        <label for="new-pr-draft" class="form-check-label">Draft pull request</label>
+                    </div>
+
+                    <div class="mb-2">
+                        <div class="d-flex align-items-center justify-content-between new-pr-reviewers-label-row">
+                            <label class="form-label mb-0" for="new-pr-reviewers-filter">Reviewers <span class="text-muted">(optional)</span></label>
+                            <span class="new-pr-reviewers-count">@GetReviewerCountText()</span>
+                        </div>
+                        <div class="new-pr-reviewer-box">
+                            <input id="new-pr-reviewers-filter"
+                                   type="text"
+                                   class="new-pr-reviewer-search"
+                                   placeholder="search user or team..."
+                                   @bind="_reviewerFilter"
+                                   @bind:event="oninput"
+                                   disabled="@(IsBusy || _isLoadingReviewers)" />
+                            <div class="new-pr-reviewer-list">
+                                @if (_isLoadingReviewers)
+                                {
+                                    <div class="d-flex align-items-center gap-2 px-2 py-2 text-muted">
+                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                        Loading reviewers...
+                                    </div>
+                                }
+                                else
+                                {
+                                    var filtered = GetFilteredReviewers();
+                                    @if (filtered.Count == 0)
+                                    {
+                                        <div class="text-muted px-2 py-2">
+                                            @(_allReviewers.Count == 0
+                                                ? "No reviewers were returned by GitHub."
+                                                : "No users or teams match the filter.")
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var item in filtered)
+                                        {
+                                            var isChecked = IsReviewerSelected(item);
+                                            var key = ReviewerKey(item);
+                                            <label class="new-pr-reviewer-item d-flex align-items-center gap-2 px-2 py-1"
+                                                   for="@($"new-pr-reviewer-{key}")">
+                                                <input id="@($"new-pr-reviewer-{key}")"
+                                                       type="checkbox"
+                                                       class="form-check-input m-0"
+                                                       checked="@isChecked"
+                                                       @onchange="@((ChangeEventArgs e) => ToggleReviewer(item, e.Value is bool b && b))"
+                                                       disabled="@IsBusy" />
+                                                <span class="flex-grow-1">@item.Name</span>
+                                                @if (item.IsTeam)
+                                                {
+                                                    <span class="badge bg-secondary">team</span>
+                                                }
+                                            </label>
+                                        }
+                                    }
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer d-flex justify-content-between">
+                    <button type="button"
+                            class="btn btn-secondary"
+                            @onclick="HandleOpenInGitHubClick"
+                            disabled="@IsBusy">
+                        Open in GitHub
+                    </button>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary" @onclick="HandleCancelClick" disabled="@IsBusy">
+                            Cancel
+                        </button>
+                        <button type="button"
+                                class="btn btn-primary"
+                                @onclick="HandleCreateClick"
+                                disabled="@(IsBusy || !IsValid)">
+                            @if (IsBusy)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                            }
+                            Create
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public bool IsBusy { get; set; }
+    [Parameter] public IReadOnlyList<NewPrTargetRepo> Targets { get; set; } = Array.Empty<NewPrTargetRepo>();
+    [Parameter] public EventCallback<NewPrFormResult> OnCreate { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback OnOpenInGitHub { get; set; }
+
+    private ElementReference modalElement;
+    private ElementReference titleInput;
+
+    private string _title = string.Empty;
+    private string _body = string.Empty;
+    private bool _isDraft;
+    private string _reviewerFilter = string.Empty;
+    private List<ReviewerItem> _allReviewers = new();
+    private readonly HashSet<string> _selectedReviewerKeys = new(StringComparer.OrdinalIgnoreCase);
+    private bool _isLoadingReviewers;
+    private bool _wasVisible;
+    private bool _focusTitleOnNextRender;
+    private CancellationTokenSource? _reviewersCts;
+
+    private bool HasUnifiedHeadBranch => Targets.Count > 0
+        && Targets.Select(t => t.HeadBranch).Distinct(StringComparer.Ordinal).Count() == 1;
+
+    private bool IsValid => !string.IsNullOrWhiteSpace(_title) && Targets.Count > 0;
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !_wasVisible)
+        {
+            _title = ComputeDefaultTitle();
+            _body = string.Empty;
+            _isDraft = false;
+            _reviewerFilter = string.Empty;
+            _selectedReviewerKeys.Clear();
+            _allReviewers = new();
+            _focusTitleOnNextRender = true;
+
+            _ = LoadReviewersAsync();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible && _focusTitleOnNextRender)
+        {
+            _focusTitleOnNextRender = false;
+            try
+            {
+                await titleInput.FocusAsync();
+            }
+            catch { }
+        }
+
+        if (!IsVisible && _wasVisible)
+        {
+            _wasVisible = false;
+            _reviewersCts?.Cancel();
+            _reviewersCts?.Dispose();
+            _reviewersCts = null;
+        }
+        else if (IsVisible && !_wasVisible)
+        {
+            _wasVisible = true;
+        }
+    }
+
+    private string ComputeDefaultTitle()
+    {
+        if (Targets.Count == 0)
+            return string.Empty;
+        return PullRequestTitleHelper.BuildDefaultTitle(Targets[0].HeadBranch);
+    }
+
+    private async Task LoadReviewersAsync()
+    {
+        if (Targets.Count == 0) return;
+
+        _reviewersCts?.Cancel();
+        _reviewersCts?.Dispose();
+        _reviewersCts = new CancellationTokenSource();
+        var ct = _reviewersCts.Token;
+
+        _isLoadingReviewers = true;
+        StateHasChanged();
+
+        try
+        {
+            var users = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var teams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var tasks = Targets.SelectMany(t => new Task[]
+            {
+                FetchUsersAsync(t.RepositoryId, users, ct),
+                FetchTeamsAsync(t.RepositoryId, teams, ct)
+            }).ToList();
+
+            await Task.WhenAll(tasks);
+
+            if (ct.IsCancellationRequested) return;
+
+            _allReviewers = teams
+                .Select(t => new ReviewerItem(t, IsTeam: true))
+                .Concat(users.Select(u => new ReviewerItem(u, IsTeam: false)))
+                .OrderByDescending(r => r.IsTeam)
+                .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (OperationCanceledException)
+        {
+            // ignored
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to load reviewers for {Count} target(s)", Targets.Count);
+            _allReviewers = new();
+        }
+        finally
+        {
+            _isLoadingReviewers = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task FetchUsersAsync(int repositoryId, HashSet<string> sink, CancellationToken ct)
+    {
+        try
+        {
+            var users = await PullRequestService.GetCollaboratorLoginsAsync(repositoryId, ct);
+            lock (sink)
+            {
+                foreach (var u in users)
+                    if (!string.IsNullOrWhiteSpace(u))
+                        sink.Add(u);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "GetCollaboratorLogins failed for RepositoryId={RepositoryId}", repositoryId);
+        }
+    }
+
+    private async Task FetchTeamsAsync(int repositoryId, HashSet<string> sink, CancellationToken ct)
+    {
+        try
+        {
+            var teams = await PullRequestService.GetTeamSlugsAsync(repositoryId, ct);
+            lock (sink)
+            {
+                foreach (var t in teams)
+                    if (!string.IsNullOrWhiteSpace(t))
+                        sink.Add(t);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "GetTeamSlugs failed for RepositoryId={RepositoryId}", repositoryId);
+        }
+    }
+
+    private List<ReviewerItem> GetFilteredReviewers()
+    {
+        var q = _reviewerFilter?.Trim();
+        if (string.IsNullOrWhiteSpace(q))
+            return _allReviewers;
+        var words = q.Split(new[] { ' ', ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (words.Length == 0)
+            return _allReviewers;
+        return _allReviewers
+            .Where(r => words.Any(w => r.Name.Contains(w, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+    }
+
+    private bool IsReviewerSelected(ReviewerItem item)
+        => _selectedReviewerKeys.Contains(ReviewerKey(item));
+
+    private void ToggleReviewer(ReviewerItem item, bool isChecked)
+    {
+        var key = ReviewerKey(item);
+        if (isChecked) _selectedReviewerKeys.Add(key);
+        else _selectedReviewerKeys.Remove(key);
+    }
+
+    private static string ReviewerKey(ReviewerItem item) => (item.IsTeam ? "team:" : "user:") + item.Name;
+
+    private string GetReviewerCountText()
+    {
+        if (_isLoadingReviewers) return "loading...";
+        if (_allReviewers.Count == 0) return string.Empty;
+        var selected = _selectedReviewerKeys.Count;
+        var total = _allReviewers.Count;
+        return selected == 0
+            ? $"{total} available"
+            : $"{selected} selected of {total}";
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && !IsBusy)
+            await HandleCancelClick();
+    }
+
+    private async Task HandleCancelClick()
+    {
+        await OnCancel.InvokeAsync();
+    }
+
+    private async Task HandleOpenInGitHubClick()
+    {
+        await OnOpenInGitHub.InvokeAsync();
+    }
+
+    private async Task HandleCreateClick()
+    {
+        if (!IsValid) return;
+
+        var users = new List<string>();
+        var teams = new List<string>();
+        foreach (var item in _allReviewers)
+        {
+            if (!_selectedReviewerKeys.Contains(ReviewerKey(item))) continue;
+            if (item.IsTeam) teams.Add(item.Name);
+            else users.Add(item.Name);
+        }
+
+        var result = new NewPrFormResult(
+            Title: _title.Trim(),
+            Body: string.IsNullOrWhiteSpace(_body) ? null : _body,
+            IsDraft: _isDraft,
+            Reviewers: users,
+            TeamReviewers: teams);
+
+        await OnCreate.InvokeAsync(result);
+    }
+
+    private sealed record ReviewerItem(string Name, bool IsTeam);
+}

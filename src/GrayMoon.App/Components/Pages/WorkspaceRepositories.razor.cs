@@ -1,5 +1,6 @@
 using System.Text.Json;
 using GrayMoon.Abstractions.Exceptions;
+using GrayMoon.App.Components.Modals;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
@@ -594,42 +595,241 @@ public sealed partial class WorkspaceRepositories : IDisposable
     }
 
 
-    private void ShowConfirmOpenPr(IEnumerable<WorkspaceRepositoryLink> group)
+    // --- New Pull Request dialog -----------------------------------------------------------
+
+    private NewPullRequestModalState _newPrModal = new();
+    private bool isCreatingPullRequests;
+    private string createPrProgressMessage = "Creating Pull Requests...";
+    private CancellationTokenSource? _createPrCts;
+
+    private Task OpenPullRequestDialogForAllRepositoriesAsync()
+        => OpenPullRequestDialogCoreAsync(workspaceRepositories);
+
+    private Task OpenPullRequestDialogForRepositoryAsync(WorkspaceRepositoryLink link)
+        => OpenPullRequestDialogCoreAsync(new[] { link });
+
+    private Task OpenPullRequestDialogForRepositoriesAsync(IReadOnlyList<WorkspaceRepositoryLink> links)
+        => OpenPullRequestDialogCoreAsync(links);
+
+    private Task OpenPullRequestDialogCoreAsync(IEnumerable<WorkspaceRepositoryLink> links)
     {
-        const int confirmThreshold = 10;
-        var toOpen = new List<string>();
-        foreach (var wr in group)
+        var targets = new List<NewPrTargetRepo>();
+        foreach (var wr in links)
         {
-            if (wr.Repository == null || string.IsNullOrWhiteSpace(wr.BranchName)) continue;
-            var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(wr.Repository.CloneUrl);
-            if (string.IsNullOrEmpty(repoUrl)) continue;
+            var repo = wr.Repository;
+            if (repo == null) continue;
+            if (wr.IsOnTag) continue;
+            if (string.IsNullOrWhiteSpace(wr.BranchName)) continue;
+            if (string.IsNullOrWhiteSpace(wr.DefaultBranchName)) continue;
+            if (string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal)) continue;
+            if ((wr.DefaultBranchAheadCommits ?? 0) <= 0) continue;
+            if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(repo.CloneUrl, out var owner, out var repoName) || owner == null || repoName == null)
+                continue;
 
             var hasOpenPr = wr.PullRequest != null && string.Equals(wr.PullRequest.State, "open", StringComparison.OrdinalIgnoreCase);
-            if (hasOpenPr && !string.IsNullOrEmpty(wr.PullRequest!.HtmlUrl))
-            {
-                toOpen.Add(wr.PullRequest.HtmlUrl);
-            }
-            else if ((wr.DefaultBranchAheadCommits ?? 0) > 0)
-            {
-                if (!string.IsNullOrWhiteSpace(wr.DefaultBranchName))
-                {
-                    toOpen.Add($"{repoUrl}/compare/{wr.DefaultBranchName}...{Uri.EscapeDataString(wr.BranchName)}");
-                }
-            }
+            if (hasOpenPr) continue;
+
+            targets.Add(new NewPrTargetRepo(
+                RepositoryId: wr.RepositoryId,
+                Owner: owner,
+                RepositoryName: repoName,
+                HeadBranch: wr.BranchName!,
+                BaseBranch: wr.DefaultBranchName!,
+                CloneUrl: repo.CloneUrl));
         }
-        if (toOpen.Count == 0)
+
+        if (targets.Count == 0)
         {
-            ToastService.Show("No repositories found that have an open pull request or ahead commits to open in GitHub.");
+            ToastService.Show("No eligible repositories to create a pull request from.");
+            return Task.CompletedTask;
+        }
+
+        _newPrModal = new NewPullRequestModalState
+        {
+            IsVisible = true,
+            Targets = targets
+        };
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void CloseNewPullRequestModal()
+    {
+        _newPrModal = _newPrModal with { IsVisible = false };
+        _createPrCts?.Cancel();
+        StateHasChanged();
+    }
+
+    private async Task HandleNewPrOpenInGitHubAsync()
+    {
+        var targets = _newPrModal.Targets;
+        if (targets.Count == 0) return;
+
+        var urls = new List<string>();
+        foreach (var t in targets)
+        {
+            var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(t.CloneUrl);
+            if (string.IsNullOrEmpty(repoUrl)) continue;
+            urls.Add($"{repoUrl}/compare/{t.BaseBranch}...{Uri.EscapeDataString(t.HeadBranch)}");
+        }
+        if (urls.Count == 0)
+        {
+            ToastService.Show("No GitHub URLs are available for the selected repositories.");
             return;
         }
-        async Task OpenPrAsync()
+
+        async Task OpenAsync()
         {
-            await JSRuntime.InvokeVoidAsync("graymoonOpenUrls", toOpen);
+            await JSRuntime.InvokeVoidAsync("graymoonOpenUrls", urls);
         }
-        if (toOpen.Count < confirmThreshold)
-            _ = OpenPrAsync();
+
+        if (urls.Count > 5)
+        {
+            ShowConfirm($"Do you want to open {urls.Count} repositories in separate tabs?", OpenAsync);
+        }
         else
-            ShowConfirm($"Do you want to open pull request for {toOpen.Count} repositories?", OpenPrAsync);
+        {
+            await OpenAsync();
+        }
+    }
+
+    private Task HandleCreatePullRequestsAsync(NewPrFormResult form)
+    {
+        var targets = _newPrModal.Targets;
+        if (targets.Count == 0) return Task.CompletedTask;
+        if (string.IsNullOrWhiteSpace(form.Title))
+        {
+            ToastService.ShowError("Title is required.");
+            return Task.CompletedTask;
+        }
+
+        var requests = targets.Select(t => new CreatePullRequestRequest
+        {
+            RepositoryId = t.RepositoryId,
+            Owner = t.Owner,
+            RepositoryName = t.RepositoryName,
+            HeadBranch = t.HeadBranch,
+            BaseBranch = t.BaseBranch,
+            Title = form.Title,
+            Body = form.Body,
+            IsDraft = form.IsDraft,
+            Reviewers = form.Reviewers,
+            TeamReviewers = form.TeamReviewers
+        }).ToList();
+
+        var draftSuffix = form.IsDraft ? " as draft" : string.Empty;
+        var message = requests.Count == 1
+            ? $"Create pull request for {requests[0].RepositoryName}{draftSuffix}?"
+            : $"Create {requests.Count} pull requests{draftSuffix}?";
+
+        ShowConfirm(message, () => ExecuteCreatePullRequestsAsync(requests), "Create");
+        return Task.CompletedTask;
+    }
+
+    private async Task ExecuteCreatePullRequestsAsync(IReadOnlyList<CreatePullRequestRequest> requests)
+    {
+        if (requests.Count == 0) return;
+
+        _createPrCts?.Cancel();
+        _createPrCts = new CancellationTokenSource();
+        var ct = _createPrCts.Token;
+
+        var total = requests.Count;
+        _newPrModal = _newPrModal with { IsVisible = false };
+        isCreatingPullRequests = true;
+        createPrProgressMessage = total == 1
+            ? "Creating 1 pull request..."
+            : $"Creating {total} pull requests...";
+        StateHasChanged();
+
+        var progress = new Progress<CreatePullRequestProgress>(p =>
+        {
+            createPrProgressMessage = p.Created == 0
+                ? (p.Total == 1
+                    ? "Creating 1 pull request..."
+                    : $"Creating {p.Total} pull requests...")
+                : $"Created {p.Created} of {p.Total} pull requests";
+            _ = InvokeAsync(StateHasChanged);
+        });
+
+        IReadOnlyList<CreatePullRequestResult> results;
+        try
+        {
+            results = await PullRequestService.CreatePullRequestsAsync(requests, progress, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            isCreatingPullRequests = false;
+            StateHasChanged();
+            return;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Create pull requests failed");
+            ToastService.ShowError($"Failed to create pull requests: {ex.Message}");
+            isCreatingPullRequests = false;
+            StateHasChanged();
+            return;
+        }
+
+        isCreatingPullRequests = false;
+
+        var successCount = results.Count(r => r.Success);
+        var failedCount = results.Count - successCount;
+
+        if (successCount > 0 && failedCount == 0)
+        {
+            ToastService.Show($"Created {successCount} of {total} pull requests.");
+        }
+        else if (successCount > 0)
+        {
+            ToastService.Show($"Created {successCount} of {total} pull requests.");
+            var firstFailure = results.First(r => !r.Success);
+            ToastService.ShowError($"{firstFailure.RepositoryName}: {firstFailure.ErrorMessage}");
+        }
+        else
+        {
+            var firstFailure = results.FirstOrDefault(r => !r.Success);
+            var msg = firstFailure?.ErrorMessage ?? "Pull request creation failed.";
+            ToastService.ShowError($"No pull requests were created. {msg}");
+        }
+
+        var firstSuccess = results.FirstOrDefault(r => r.Success);
+        if (successCount == 1 && firstSuccess?.PullRequestUrl is { Length: > 0 } url)
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("graymoonOpenUrls", new[] { url });
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Failed to open created PR URL");
+            }
+        }
+
+        var refreshedIds = results.Where(r => r.Success).Select(r => r.RepositoryId).ToList();
+        if (refreshedIds.Count > 0)
+        {
+            try
+            {
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var workspacePrService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
+                await workspacePrService.RefreshPullRequestsAsync(WorkspaceId, refreshedIds, CancellationToken.None);
+                prByRepositoryId = await workspacePrService.GetPersistedPullRequestsForWorkspaceAsync(WorkspaceId, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Failed to refresh pull requests after creation");
+            }
+        }
+
+        StateHasChanged();
+    }
+
+    private sealed record NewPullRequestModalState
+    {
+        public bool IsVisible { get; init; }
+        public IReadOnlyList<NewPrTargetRepo> Targets { get; init; } = Array.Empty<NewPrTargetRepo>();
     }
 
     private void ShowConfirmSyncCommitsLevel(List<int> repositoryIds)
@@ -1850,7 +2050,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         return first;
     }
 
-    private async Task ShowBranchModalAsync()
+    private async Task ShowBranchModalAsync(string initialTab = "newbranch")
     {
         if (workspace == null || workspaceRepositories.Count == 0)
             return;
@@ -1865,7 +2065,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _branchModal = _branchModal with
         {
             IsVisible = true,
-            WorkspaceUnifiedCurrentBranch = GetUnifiedWorkspaceCurrentBranch(workspaceRepositories)
+            WorkspaceUnifiedCurrentBranch = GetUnifiedWorkspaceCurrentBranch(workspaceRepositories),
+            InitialTab = string.Equals(initialTab, "switchbranch", StringComparison.OrdinalIgnoreCase) ? "switchbranch" : "newbranch"
         };
         StateHasChanged();
     }
@@ -2583,6 +2784,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public string DefaultDisplayText { get; init; } = "multiple";
         /// <summary>Local branch name when every linked repo reports the same current branch; otherwise null.</summary>
         public string? WorkspaceUnifiedCurrentBranch { get; init; }
+        public string InitialTab { get; init; } = "newbranch";
     }
 
     private sealed record SwitchBranchModalState
