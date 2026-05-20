@@ -104,6 +104,16 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 ## What's new
 
+### Live GitHub Actions feed in synchronized push overlay
+
+When GrayMoon performs a dependency-synchronized push and is waiting for required package versions to appear in registries, the loading overlay terminal now streams live GitHub Actions updates for the repositories that were already pushed.
+
+- **Same live feed logic as Workspace Actions:** the overlay uses the same run/job/step polling path as the workspace GitHub Actions terminal, so status formatting and step transitions stay consistent.
+- **No duplicate retrieval logic:** the implementation reuses a shared service for workflow polling and step transition formatting.
+- **Only tracks real running workflows:** it subscribes when a run is actually in progress and appends updates into the overlay terminal stream.
+- **Stops retrying only when no workflows exist for a repo:** if GitHub reports no workflow definitions for that repository, GrayMoon marks that repo as "no workflows" and skips further discovery for it.
+- **Does not stop just because nothing is running yet:** repositories with workflow files but no current run continue to be checked on the normal discovery interval.
+
 ### Branch updates: PR workflows, commits visibility, and UI polish
 
 This branch adds several workflow-focused improvements in the workspace repositories view.
