@@ -104,6 +104,16 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 ## What's new
 
+### Branch updates: PR workflows, commits visibility, and UI polish
+
+This branch adds several workflow-focused improvements in the workspace repositories view.
+
+- **Dependency-level PR links are smarter:** from the level header GitHub dropdown, **Pull Requests** now opens the exact open PR for each repository (when one exists on the current branch), instead of only opening the generic repo pull-requests page.
+- **Copy open PR links in one click:** dependency-level headers now include a **Share** action that copies all open PR URLs for that level to the clipboard (one URL per line), with a confirmation toast.
+- **Better non-upstream commit visibility:** the Commits badge now shows outgoing commit count for branches without an upstream (for example `↑3`), making it clearer when a first push is needed.
+- **Loading overlay stability improvements:** overlay terminal/spinner presentation was tuned so status/timer updates do not cause visual shifting.
+- **Workspace nav polish:** workspace sidebar navigation was updated for clearer repository/dependency affordances and improved icon consistency.
+
 ### Pin a repository to a specific tag
 
 The Switch Branch dialog now has a dedicated **Tags** tab. Pick any tag and GrayMoon will check that repository out at that exact version (detached HEAD), then keep it parked there.

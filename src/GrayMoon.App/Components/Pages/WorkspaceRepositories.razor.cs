@@ -2460,6 +2460,35 @@ public sealed partial class WorkspaceRepositories : IDisposable
         return prByRepositoryId.TryGetValue(repositoryId, out var pr) ? pr : null;
     }
 
+    private IReadOnlyList<string> GetOpenPrUrlsForGroup(IEnumerable<WorkspaceRepositoryLink> group)
+    {
+        var urls = new List<string>();
+        foreach (var wr in group)
+        {
+            if (!prByRepositoryId.TryGetValue(wr.RepositoryId, out var pr) || pr == null) continue;
+            if (!string.Equals(pr.State, "open", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!string.IsNullOrEmpty(pr.HtmlUrl))
+                urls.Add(pr.HtmlUrl);
+        }
+        return urls;
+    }
+
+    private IReadOnlyDictionary<string, string> GetOpenPrPullMapForGroup(IEnumerable<WorkspaceRepositoryLink> group)
+    {
+        var map = new Dictionary<string, string>();
+        foreach (var wr in group)
+        {
+            if (wr.Repository == null) continue;
+            var baseUrl = RepositoryUrlHelper.GetRepositoryUrl(wr.Repository.CloneUrl);
+            if (string.IsNullOrEmpty(baseUrl)) continue;
+            if (!prByRepositoryId.TryGetValue(wr.RepositoryId, out var pr) || pr == null) continue;
+            if (!string.Equals(pr.State, "open", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!string.IsNullOrEmpty(pr.HtmlUrl))
+                map[baseUrl] = pr.HtmlUrl;
+        }
+        return map;
+    }
+
     private string? GetRepositoryError(int repositoryId)
     {
         return repositoryErrors.TryGetValue(repositoryId, out var err) ? err : null;

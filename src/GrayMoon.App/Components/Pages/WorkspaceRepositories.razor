@@ -131,6 +131,8 @@
                                                                        OnSyncCommits="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                                        OnOpenPr="() => ShowConfirmOpenPr(group)"
                                                                        OnSyncLevel="() => ShowConfirmSyncLevel(group.Select(wr => wr.RepositoryId).ToList())"
+                                                                       OpenPrUrls="@GetOpenPrUrlsForGroup(group)"
+                                                                       OpenPrPullMap="@GetOpenPrPullMapForGroup(group)"
                                                                        />
                                     @foreach (var wr in group)
                                     {

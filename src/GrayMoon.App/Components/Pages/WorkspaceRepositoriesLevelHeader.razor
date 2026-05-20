@@ -15,6 +15,13 @@
         </div>
         <div class="dependency-level-header-end">
             <span class="dependency-level-icons @(ActionsDisabled ? "dependency-level-icons--disabled" : "")">
+                <span class="dependency-level-copy-pr-link pr-copy-dropdown-wrap"
+                      data-pr-urls="@OpenPrUrlsJson"
+                      tabindex="0"
+                      aria-haspopup="true"
+                      aria-label="Copy open PR links to clipboard">
+                    <i class="bi bi-share" aria-hidden="true"></i>
+                </span>
                 <span class="dependency-level-sync-to-default-link"
                       role="button"
                       tabindex="@(ActionsDisabled ? -1 : 0)"
@@ -63,6 +70,7 @@
             </span>
             <span class="dependency-level-count github-dropdown-wrap"
                   data-urls="@BaseUrlsJson"
+                  data-pr-pull-map="@OpenPrPullMapJson"
                   tabindex="0"
                   aria-haspopup="true">
                 <span class="dependency-level-count-num">@RepositoryCount</span> @(RepositoryCount == 1 ? "repository" : "repositories")
@@ -81,8 +89,14 @@
     [Parameter] public EventCallback OnSyncCommits { get; set; }
     [Parameter] public EventCallback OnOpenPr { get; set; }
     [Parameter] public EventCallback OnSyncLevel { get; set; }
+    [Parameter] public IReadOnlyList<string>? OpenPrUrls { get; set; }
+    [Parameter] public IReadOnlyDictionary<string, string>? OpenPrPullMap { get; set; }
 
     private int RepositoryCount => Group?.Count() ?? 0;
+
+    private string OpenPrUrlsJson => System.Text.Json.JsonSerializer.Serialize(OpenPrUrls ?? (IReadOnlyList<string>)[]);
+
+    private string OpenPrPullMapJson => System.Text.Json.JsonSerializer.Serialize(OpenPrPullMap ?? (IReadOnlyDictionary<string, string>)new Dictionary<string, string>());
 
     private string BaseUrlsJson => System.Text.Json.JsonSerializer.Serialize(
         Group?.Select(wr => wr.Repository)
