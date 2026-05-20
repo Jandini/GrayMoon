@@ -238,8 +238,8 @@
 .loading-overlay-content {
   position: absolute;
   left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  top: calc(50% - 1.5rem); /* anchor spinner centre at 50%; 1.5rem = half spinner height */
+  transform: translateX(-50%);
   z-index: 3;
   padding: 1rem;
   background: transparent;
