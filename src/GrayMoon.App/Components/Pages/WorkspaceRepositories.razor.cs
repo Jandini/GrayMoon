@@ -1171,10 +1171,16 @@ public sealed partial class WorkspaceRepositories : IDisposable
             return;
         }
 
+        await using var scope = ServiceScopeFactory.CreateAsyncScope();
+        var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+        var (updatePlan, _) = await workspaceGitService.GetUpdatePlanAsync(WorkspaceId);
+        var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
+
         var reposOnDefault = workspaceRepositories
             .Where(wr => !wr.IsOnTag
                 && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
-                && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal))
+                && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal)
+                && repoIdsWithUpdates.Contains(wr.RepositoryId))
             .ToList();
 
         if (reposOnDefault.Count > 0)
@@ -1209,14 +1215,19 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    private async Task OnUpdateProceedAsync()
+    private async Task OnUpdateProceedAsync((string? CommitMessage, bool IncludeDeps) args)
     {
-        CloseUpdateModal();
-        await RunUpdateCoreAsync();
+        _updateModal = _updateModal with
+        {
+            IsVisible = false,
+            LastCommitMessage = args.CommitMessage,
+            LastIncludeDeps = args.IncludeDeps
+        };
+        await RunUpdateCoreAsync(args.CommitMessage, args.IncludeDeps);
     }
 
     /// <summary>Runs update (refresh, sync deps, commit per level, refresh version). Overlay shows progress.</summary>
-    private async Task RunUpdateCoreAsync()
+    private async Task RunUpdateCoreAsync(string? commitMessage = null, bool includeDepsInCommitMessage = true)
     {
         if (workspace == null || workspaceRepositories.Count == 0 || isUpdating || isSyncing)
             return;
@@ -1243,7 +1254,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     _ = InvokeAsync(StateHasChanged);
                 },
                 onAppSideComplete: () => _updateAwaitingAgentTasks = true,
-                repoIdsToUpdate: null);
+                repoIdsToUpdate: null,
+                commitMessage: commitMessage,
+                includeDepsInCommitMessage: includeDepsInCommitMessage);
 
             isUpdating = false;
             await InvokeAsync(StateHasChanged);
@@ -2584,6 +2597,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private sealed record UpdateModalState
     {
         public bool IsVisible { get; init; }
+        public string? LastCommitMessage { get; init; }
+        public bool LastIncludeDeps { get; init; } = true;
     }
 
     private sealed record UpdateSingleRepoDependenciesModalState

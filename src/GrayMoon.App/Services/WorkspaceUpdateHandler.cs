@@ -17,7 +17,9 @@ public sealed class WorkspaceUpdateHandler(
         Action<string> setProgress,
         Action<int, string> setRepositoryError,
         Action? onAppSideComplete = null,
-        IReadOnlySet<int>? repoIdsToUpdate = null)
+        IReadOnlySet<int>? repoIdsToUpdate = null,
+        string? commitMessage = null,
+        bool includeDepsInCommitMessage = true)
     {
         try
         {
@@ -27,7 +29,9 @@ public sealed class WorkspaceUpdateHandler(
                 setProgress,
                 setRepositoryError,
                 onAppSideComplete,
-                repoIdsToUpdate);
+                repoIdsToUpdate,
+                commitMessage,
+                includeDepsInCommitMessage);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
