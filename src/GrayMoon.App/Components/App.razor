@@ -170,6 +170,89 @@
             });
         })();
 
+        window.graymoonShowToast = function (message) {
+            const el = document.createElement('div');
+            el.style.cssText = 'position:fixed;top:calc(3.5rem + 1rem);left:50%;transform:translateX(-50%);z-index:9999;'
+                + 'max-width:min(90vw,420px);padding:0.5rem 1rem;background-color:#252526;color:#cccccc;'
+                + 'border:1px solid #3e3e42;border-radius:0.375rem;box-shadow:0 4px 12px rgba(0,0,0,0.35);'
+                + 'font-size:0.875rem;pointer-events:none;text-align:center;';
+            el.textContent = message;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 2500);
+        };
+
+        // PR copy dropdown: body-appended fixed-position overlay for .pr-copy-dropdown-wrap elements.
+        (function () {
+            let prPanel = null, prHideTimer = null, activePrTrigger = null;
+
+            function buildPrPanel() {
+                prPanel = document.createElement('div');
+                prPanel.className = 'gm-gh-dropdown';
+                const title = document.createElement('div');
+                title.className = 'gm-gh-dropdown-title';
+                title.textContent = 'Pull Requests\u2026';
+                prPanel.appendChild(title);
+                const row = document.createElement('div');
+                row.className = 'gm-gh-dropdown-item';
+                row.innerHTML = '<i class="bi bi-clipboard" aria-hidden="true"></i><span>Copy Links to Clipboard</span>';
+                row.addEventListener('click', async () => {
+                    if (!activePrTrigger) return;
+                    try {
+                        const urls = JSON.parse(activePrTrigger.dataset.prUrls || '[]');
+                        if (urls.length === 0) {
+                            window.graymoonShowToast('No open pull requests in this level.');
+                        } else {
+                            await navigator.clipboard.writeText(urls.join('\n'));
+                            const n = urls.length;
+                            window.graymoonShowToast(n === 1 ? '1 PR link copied to clipboard.' : `${n} PR links copied to clipboard.`);
+                        }
+                    } catch (_) {
+                        window.graymoonShowToast('Could not copy to clipboard.');
+                    }
+                    hidePr();
+                });
+                prPanel.appendChild(row);
+                prPanel.addEventListener('mouseenter', cancelPrHide);
+                prPanel.addEventListener('mouseleave', schedulePrHide);
+                document.body.appendChild(prPanel);
+            }
+
+            function showPr(trigger) {
+                if (!prPanel) buildPrPanel();
+                cancelPrHide();
+                activePrTrigger = trigger;
+                const r = trigger.getBoundingClientRect();
+                prPanel.style.top = (r.bottom + 4) + 'px';
+                prPanel.style.right = (window.innerWidth - r.right) + 'px';
+                prPanel.style.left = 'auto';
+                prPanel.classList.add('gm-gh-dropdown--visible');
+            }
+
+            function hidePr() {
+                prPanel?.classList.remove('gm-gh-dropdown--visible');
+                activePrTrigger = null;
+            }
+
+            function schedulePrHide() { prHideTimer = setTimeout(hidePr, 150); }
+            function cancelPrHide() { clearTimeout(prHideTimer); }
+
+            document.addEventListener('mouseover', e => {
+                const wrap = e.target.closest('.pr-copy-dropdown-wrap');
+                if (wrap) { showPr(wrap); return; }
+                if (prPanel && prPanel.contains(e.target)) cancelPrHide();
+            });
+
+            document.addEventListener('mouseout', e => {
+                const inWrap = !!e.target.closest('.pr-copy-dropdown-wrap');
+                const inPanel = !!(prPanel && prPanel.contains(e.target));
+                if (!inWrap && !inPanel) return;
+                const to = e.relatedTarget;
+                if (!to) { schedulePrHide(); return; }
+                if (to.closest('.pr-copy-dropdown-wrap') || (prPanel && prPanel.contains(to))) return;
+                schedulePrHide();
+            });
+        })();
+
         window.graymoonStorageGet = (key) => localStorage.getItem(key);
         window.graymoonStorageSet = (key, value) => { localStorage.setItem(key, value); };
         document.body.addEventListener('click', (e) => {
