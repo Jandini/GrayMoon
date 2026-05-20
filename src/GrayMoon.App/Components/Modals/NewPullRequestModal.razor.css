@@ -57,7 +57,7 @@
 }
 
 .new-pr-reviewer-list::-webkit-scrollbar {
-    width: 10px;
+    width: auto;
 }
 
 .new-pr-reviewer-list::-webkit-scrollbar-track {
@@ -67,13 +67,10 @@
 .new-pr-reviewer-list::-webkit-scrollbar-thumb {
     background-color: var(--text-muted);
     border-radius: 5px;
-    border: 2px solid transparent;
-    background-clip: padding-box;
 }
 
 .new-pr-reviewer-list::-webkit-scrollbar-thumb:hover {
     background-color: #8a8a8a;
-    background-clip: padding-box;
 }
 
 .new-pr-reviewer-item {

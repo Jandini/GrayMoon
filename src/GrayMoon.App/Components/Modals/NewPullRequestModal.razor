@@ -310,8 +310,11 @@
         var q = _reviewerFilter?.Trim();
         if (string.IsNullOrWhiteSpace(q))
             return _allReviewers;
+        var words = q.Split(new[] { ' ', ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (words.Length == 0)
+            return _allReviewers;
         return _allReviewers
-            .Where(r => r.Name.Contains(q, StringComparison.OrdinalIgnoreCase))
+            .Where(r => words.Any(w => r.Name.Contains(w, StringComparison.OrdinalIgnoreCase)))
             .ToList();
     }
 
