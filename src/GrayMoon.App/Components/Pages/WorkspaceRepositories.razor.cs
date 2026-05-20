@@ -737,12 +737,18 @@ public sealed partial class WorkspaceRepositories : IDisposable
         var total = requests.Count;
         _newPrModal = _newPrModal with { IsVisible = false };
         isCreatingPullRequests = true;
-        createPrProgressMessage = "Creating Pull Requests...";
+        createPrProgressMessage = total == 1
+            ? "Creating 1 pull request..."
+            : $"Creating {total} pull requests...";
         StateHasChanged();
 
         var progress = new Progress<CreatePullRequestProgress>(p =>
         {
-            createPrProgressMessage = $"Created {p.Created} of {p.Total} pull requests";
+            createPrProgressMessage = p.Created == 0
+                ? (p.Total == 1
+                    ? "Creating 1 pull request..."
+                    : $"Creating {p.Total} pull requests...")
+                : $"Created {p.Created} of {p.Total} pull requests";
             _ = InvokeAsync(StateHasChanged);
         });
 
