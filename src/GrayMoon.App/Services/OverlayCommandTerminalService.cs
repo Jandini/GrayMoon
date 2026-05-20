@@ -29,6 +29,11 @@ public sealed class OverlayCommandTerminalService
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
+    public void Append(string? streamLabel, AgentCommandStreamKind kind, string text)
+    {
+        Append(new AgentCommandStreamLine(streamLabel, kind, text));
+    }
+
     public void Clear()
     {
         lock (_lock)
