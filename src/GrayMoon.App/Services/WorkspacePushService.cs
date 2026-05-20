@@ -150,6 +150,7 @@ public sealed class WorkspacePushService(
 
         var levelsAsc = payload.Select(p => p.DependencyLevel ?? 0).Distinct().OrderBy(x => x).ToList();
         var lastLevel = levelsAsc[^1];
+        var pushedRepos = new List<PushRepoPayload>();
         foreach (var level in levelsAsc)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -219,14 +220,14 @@ public sealed class WorkspacePushService(
                         {
                             lastGhaDiscoveryUtc = DateTime.UtcNow;
                             _ = await DiscoverRunningWorkflowsForLevelAsync(
-                                reposAtLevel,
+                                pushedRepos,
                                 links,
                                 ghaFeedByRunKey,
                                 noWorkflowRepoIds,
                                 linkedToken);
 
-                            // Permanently disable only when every repo at this level is confirmed to have no workflows at all.
-                            if (reposAtLevel.All(r => noWorkflowRepoIds.Contains(r.RepoId)))
+                            // Permanently disable only when every previously-pushed repo is confirmed to have no workflows at all.
+                            if (pushedRepos.Count > 0 && pushedRepos.All(r => noWorkflowRepoIds.Contains(r.RepoId)))
                                 ghaDiscoveryEnabled = false;
                         }
 
@@ -297,6 +298,7 @@ public sealed class WorkspacePushService(
                 onAppSideComplete: level == lastLevel ? null : onAppSideComplete,
                 cancellationToken);
             await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
+            pushedRepos.AddRange(reposAtLevel);
         }
 
         await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
