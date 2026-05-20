@@ -62,63 +62,57 @@
                             <label class="form-label mb-0" for="new-pr-reviewers-filter">Reviewers <span class="text-muted">(optional)</span></label>
                             <span class="new-pr-reviewers-count">@GetReviewerCountText()</span>
                         </div>
-                        <input id="new-pr-reviewers-filter"
-                               type="text"
-                               class="form-control"
-                               placeholder="search user or team..."
-                               @bind="_reviewerFilter"
-                               @bind:event="oninput"
-                               disabled="@(IsBusy || _isLoadingReviewers)" />
-                        <div class="new-pr-reviewer-list border rounded mt-2">
-                            @if (_isLoadingReviewers)
-                            {
-                                <div class="d-flex align-items-center gap-2 p-3 text-muted">
-                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                                    Loading reviewers...
-                                </div>
-                            }
-                            else
-                            {
-                                var filtered = GetFilteredReviewers();
-                                @if (filtered.Count == 0)
+                        <div class="new-pr-reviewer-box">
+                            <input id="new-pr-reviewers-filter"
+                                   type="text"
+                                   class="new-pr-reviewer-search"
+                                   placeholder="search user or team..."
+                                   @bind="_reviewerFilter"
+                                   @bind:event="oninput"
+                                   disabled="@(IsBusy || _isLoadingReviewers)" />
+                            <div class="new-pr-reviewer-list">
+                                @if (_isLoadingReviewers)
                                 {
-                                    <div class="text-muted p-3">
-                                        @(_allReviewers.Count == 0
-                                            ? "No reviewers were returned by GitHub."
-                                            : "No users or teams match the filter.")
+                                    <div class="d-flex align-items-center gap-2 px-2 py-2 text-muted">
+                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                        Loading reviewers...
                                     </div>
                                 }
                                 else
                                 {
-                                    @foreach (var item in filtered)
+                                    var filtered = GetFilteredReviewers();
+                                    @if (filtered.Count == 0)
                                     {
-                                        var isChecked = IsReviewerSelected(item);
-                                        var key = ReviewerKey(item);
-                                        <label class="new-pr-reviewer-item d-flex align-items-center gap-2 px-2 py-1"
-                                               for="@($"new-pr-reviewer-{key}")">
-                                            <input id="@($"new-pr-reviewer-{key}")"
-                                                   type="checkbox"
-                                                   class="form-check-input m-0"
-                                                   checked="@isChecked"
-                                                   @onchange="@((ChangeEventArgs e) => ToggleReviewer(item, e.Value is bool b && b))"
-                                                   disabled="@IsBusy" />
-                                            @if (item.IsTeam)
-                                            {
-                                                <i class="bi bi-people" aria-hidden="true"></i>
-                                            }
-                                            else
-                                            {
-                                                <i class="bi bi-person" aria-hidden="true"></i>
-                                            }
-                                            <span class="flex-grow-1">@item.Name</span>
-                                            @if (item.IsTeam)
-                                            {
-                                                <span class="badge bg-secondary">team</span>
-                                            }
-                                        </label>
+                                        <div class="text-muted px-2 py-2">
+                                            @(_allReviewers.Count == 0
+                                                ? "No reviewers were returned by GitHub."
+                                                : "No users or teams match the filter.")
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var item in filtered)
+                                        {
+                                            var isChecked = IsReviewerSelected(item);
+                                            var key = ReviewerKey(item);
+                                            <label class="new-pr-reviewer-item d-flex align-items-center gap-2 px-2 py-1"
+                                                   for="@($"new-pr-reviewer-{key}")">
+                                                <input id="@($"new-pr-reviewer-{key}")"
+                                                       type="checkbox"
+                                                       class="form-check-input m-0"
+                                                       checked="@isChecked"
+                                                       @onchange="@((ChangeEventArgs e) => ToggleReviewer(item, e.Value is bool b && b))"
+                                                       disabled="@IsBusy" />
+                                                <span class="flex-grow-1">@item.Name</span>
+                                                @if (item.IsTeam)
+                                                {
+                                                    <span class="badge bg-secondary">team</span>
+                                                }
+                                            </label>
+                                        }
                                     }
                                 }
-                            }
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -252,10 +246,10 @@
 
             if (ct.IsCancellationRequested) return;
 
-            _allReviewers = users
-                .Select(u => new ReviewerItem(u, IsTeam: false))
-                .Concat(teams.Select(t => new ReviewerItem(t, IsTeam: true)))
-                .OrderBy(r => r.IsTeam)
+            _allReviewers = teams
+                .Select(t => new ReviewerItem(t, IsTeam: true))
+                .Concat(users.Select(u => new ReviewerItem(u, IsTeam: false)))
+                .OrderByDescending(r => r.IsTeam)
                 .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
