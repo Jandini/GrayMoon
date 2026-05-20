@@ -735,6 +735,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         var ct = _createPrCts.Token;
 
         var total = requests.Count;
+        _newPrModal = _newPrModal with { IsVisible = false };
         isCreatingPullRequests = true;
         createPrProgressMessage = "Creating Pull Requests...";
         StateHasChanged();
@@ -766,7 +767,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
 
         isCreatingPullRequests = false;
-        _newPrModal = _newPrModal with { IsVisible = false };
 
         var successCount = results.Count(r => r.Success);
         var failedCount = results.Count - successCount;
