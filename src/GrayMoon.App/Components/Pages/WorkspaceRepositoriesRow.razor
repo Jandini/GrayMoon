@@ -83,7 +83,7 @@
                             DefaultBranchAheadCommits="@Link.DefaultBranchAheadCommits"
                             IsPrVerified="@IsPrVerified"
                             IsOnTag="@Link.IsOnTag"
-                            CreatePrUrl="@(string.IsNullOrEmpty(repoUrl) || string.IsNullOrEmpty(Link.DefaultBranchName) ? null : $"{repoUrl}/compare/{Link.DefaultBranchName}...{Uri.EscapeDataString(Link.BranchName ?? "")}")" />
+                            OnCreateClick="@(() => OnCreatePr.InvokeAsync(Link))" />
                 </span>
                 <span class="metrics-block metrics-deps">
                     @if (depCount == 0)
@@ -234,6 +234,7 @@
     [Parameter] public EventCallback OnSyncClick { get; set; }
     [Parameter] public EventCallback OnDismissError { get; set; }
     [Parameter] public EventCallback OnPrBadgeMouseEnter { get; set; }
+    [Parameter] public EventCallback<WorkspaceRepositoryLink> OnCreatePr { get; set; }
     /// <summary>Fired when the user clicks the Copy button on the dependency-mismatch tooltip. Payload is the formatted text to copy to the clipboard.</summary>
     [Parameter] public EventCallback<string> OnCopyDependencies { get; set; }
 

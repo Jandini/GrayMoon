@@ -1,0 +1,33 @@
+.branch-menu-list {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: auto;
+    margin-top: 0.125rem;
+    z-index: 1051;
+    min-width: 100%;
+}
+
+.branch-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    background: transparent;
+    z-index: 1050;
+}
+
+.branch-menu-divider {
+    border-top-color: var(--border-color, #6c757d);
+    opacity: 0.9;
+    margin: 0.25rem 0;
+}
+
+.dropdown-toggle-split {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dropdown-toggle-split::after {
+    vertical-align: middle;
+    margin-left: 0;
+}

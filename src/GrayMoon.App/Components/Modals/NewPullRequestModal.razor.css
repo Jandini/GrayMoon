@@ -1,0 +1,29 @@
+.form-check-input:not(:checked) {
+    background-color: #6c757d;
+    border-color: #6c757d;
+}
+
+.new-pr-reviewers-count {
+    font-size: 0.8125rem;
+    color: var(--text-muted, #6c757d);
+}
+
+.new-pr-reviewer-list {
+    max-height: calc(3 * 2.25rem);
+    overflow-y: auto;
+}
+
+.new-pr-reviewer-item {
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.075));
+    margin: 0;
+}
+
+.new-pr-reviewer-item:last-child {
+    border-bottom: none;
+}
+
+.new-pr-reviewer-item:hover {
+    background-color: rgba(13, 110, 253, 0.06);
+}

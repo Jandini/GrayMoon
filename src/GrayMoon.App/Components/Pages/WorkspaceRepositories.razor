@@ -23,6 +23,7 @@
 @inject WorkspaceDependencyService WorkspaceDependencyService
 @inject WorkspaceBranchHandler WorkspaceBranchHandler
 @inject AgentQueueStateService AgentQueueStateService
+@inject IPullRequestService PullRequestService
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
 <PageTitle>Repositories - GrayMoon</PageTitle>
@@ -45,7 +46,9 @@
                                     AgentTasksPendingCount="@AgentTasksPendingCount"
                                     IsOverlayVisible="@(isLoading || isSyncing || isPushing || isUpdating || isCommitSyncing || isCheckingOut || isCreatingBranches || isCreatingBranch || isSyncingToDefault || isWorkspaceBranchesFetching || isWorkspaceBranchesCheckingOut || ShowRepositoriesFetchOverlay)"
                                     OnShowRepositories="ShowRepositoriesModalAsync"
-                                    OnShowBranch="ShowBranchModalAsync"
+                                    OnShowBranch="() => ShowBranchModalAsync()"
+                                    OnShowSwitchBranch='() => ShowBranchModalAsync("switchbranch")'
+                                    OnNewPullRequest="OpenPullRequestDialogForAllRepositoriesAsync"
                                     OnUpdate="OnUpdateClickAsync"
                                     OnPull="OnPullClickAsync"
                                     OnPush="OnPushClickAsync"
@@ -129,7 +132,7 @@
                                                                        ActionsDisabled="@group.All(wr => wr.IsOnTag)"
                                                                        OnSyncToDefault="() => ShowConfirmSyncToDefaultLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                                        OnSyncCommits="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
-                                                                       OnOpenPr="() => ShowConfirmOpenPr(group)"
+                                                                       OnOpenPr="() => OpenPullRequestDialogForRepositoriesAsync(group.ToList())"
                                                                        OnSyncLevel="() => ShowConfirmSyncLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                                        OpenPrUrls="@GetOpenPrUrlsForGroup(group)"
                                                                        OpenPrPullMap="@GetOpenPrPullMapForGroup(group)"
@@ -160,6 +163,7 @@
                                                                   OnPrBadgeMouseEnter="() => RefreshPrOnBadgeEnterAsync(wr.RepositoryId)"
                                                                   OnSyncClick="() => SyncSingleRepoAsync(wr.RepositoryId)"
                                                                   OnCopyDependencies="CopyDependenciesToClipboard"
+                                                                  OnCreatePr="OpenPullRequestDialogForRepositoryAsync"
                                                                   OnDismissError="() => DismissRepositoryError(wr.RepositoryId)" />
                                     }
                                 }
@@ -190,6 +194,7 @@
                    WorkspaceName="@(workspace?.Name)"
                    WorkspaceId="@WorkspaceId"
                    HasTaggedRepos="@hasTaggedRepos"
+                   InitialTab="@_branchModal.InitialTab"
                    CommonBranchNames="@_branchModal.CommonBranchNames"
                    CommonLocalBranchNames="@_branchModal.CommonLocalBranchNames"
                    CommonRemoteBranchNames="@_branchModal.CommonRemoteBranchNames"
@@ -243,7 +248,15 @@
                            OnProceed="@OnDefaultBranchWarningProceedAsync"
                            OnCancel="@CloseDefaultBranchWarningModal" />
 
+<NewPullRequestModal IsVisible="@_newPrModal.IsVisible"
+                     IsBusy="@isCreatingPullRequests"
+                     Targets="@_newPrModal.Targets"
+                     OnCreate="HandleCreatePullRequestsAsync"
+                     OnCancel="CloseNewPullRequestModal"
+                     OnOpenInGitHub="HandleNewPrOpenInGitHubAsync" />
+
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
+<LoadingOverlay IsVisible="@isCreatingPullRequests" Message="@createPrProgressMessage" />
 <LoadingOverlay IsVisible="@isSyncing"
                 Message="@GetOverlayMessage(syncProgressMessage, isSyncing, _syncAwaitingAgentTasks)"
                 PendingAgentTasksCount="@AgentTasksPendingCount"

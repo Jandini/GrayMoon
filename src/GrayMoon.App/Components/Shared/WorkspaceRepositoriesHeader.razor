@@ -56,14 +56,58 @@
                 }
             </div>
         </div>
-        <button class="btn btn-outline-secondary"
-                @onclick="@(() => OnShowBranch.InvokeAsync())"
-                disabled="@(IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0 || AgentTasksPendingCount > 0)">
-            Branch
-        </button>
+        <div class="btn-group position-relative">
+            <button class="btn btn-outline-secondary"
+                    @onclick="HandleBranchPrimaryClick"
+                    @onclick:stopPropagation
+                    disabled="@BranchActionsDisabled">
+                Branch
+            </button>
+            <button type="button"
+                    class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split"
+                    aria-label="Toggle Branch menu"
+                    aria-expanded="@(_branchMenuOpen ? "true" : "false")"
+                    @onclick="ToggleBranchMenu"
+                    @onclick:stopPropagation
+                    disabled="@BranchMenuToggleDisabled">
+                <span class="visually-hidden">Toggle Dropdown</span>
+            </button>
+            @if (_branchMenuOpen)
+            {
+                <div class="branch-menu-backdrop" @onclick="CloseBranchMenu"></div>
+                <ul class="dropdown-menu show shadow branch-menu-list"
+                    role="menu">
+                    <li>
+                        <button class="dropdown-item" type="button"
+                                role="menuitem"
+                                @onclick="HandleNewBranchClick"
+                                disabled="@BranchActionsDisabled">
+                            New Branch
+                        </button>
+                    </li>
+                    <li>
+                        <button class="dropdown-item" type="button"
+                                role="menuitem"
+                                @onclick="HandleSwitchBranchClick"
+                                disabled="@BranchActionsDisabled">
+                            Switch Branch
+                        </button>
+                    </li>
+                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                    <li>
+                        <button class="dropdown-item" type="button"
+                                role="menuitem"
+                                @onclick="HandleNewPullRequestClick"
+                                disabled="@BranchActionsDisabled">
+                            New Pull Requests
+                        </button>
+                    </li>
+                </ul>
+            }
+        </div>
         <button class="btn @(HasUnmatchedDependencies ? "btn-danger" : "btn-outline-secondary")"
                 @onclick="@(() => OnUpdate.InvokeAsync())"
-                disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)">
+                disabled="@UpdateDisabled">
             Update
         </button>
         @if (HasIncomingCommits)
@@ -109,6 +153,8 @@
 
     [Parameter] public EventCallback OnShowRepositories { get; set; }
     [Parameter] public EventCallback OnShowBranch { get; set; }
+    [Parameter] public EventCallback OnShowSwitchBranch { get; set; }
+    [Parameter] public EventCallback OnNewPullRequest { get; set; }
     [Parameter] public EventCallback OnUpdate { get; set; }
     [Parameter] public EventCallback OnPull { get; set; }
     [Parameter] public EventCallback OnPush { get; set; }
@@ -116,4 +162,49 @@
     [Parameter] public EventCallback<ChangeEventArgs> OnSearchChanged { get; set; }
     [Parameter] public EventCallback OnClearSearch { get; set; }
     [Parameter] public EventCallback<KeyboardEventArgs> OnSearchKeyDown { get; set; }
+
+    private bool _branchMenuOpen;
+
+    private bool UpdateDisabled =>
+        WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
+
+    private bool BranchActionsDisabled =>
+        IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0 || AgentTasksPendingCount > 0;
+
+    private bool BranchMenuToggleDisabled =>
+        IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
+
+    private void ToggleBranchMenu()
+    {
+        _branchMenuOpen = !_branchMenuOpen;
+    }
+
+    private void CloseBranchMenu()
+    {
+        _branchMenuOpen = false;
+    }
+
+    private async Task HandleBranchPrimaryClick()
+    {
+        CloseBranchMenu();
+        await OnShowBranch.InvokeAsync();
+    }
+
+    private async Task HandleNewBranchClick()
+    {
+        CloseBranchMenu();
+        await OnShowBranch.InvokeAsync();
+    }
+
+    private async Task HandleSwitchBranchClick()
+    {
+        CloseBranchMenu();
+        await OnShowSwitchBranch.InvokeAsync();
+    }
+
+    private async Task HandleNewPullRequestClick()
+    {
+        CloseBranchMenu();
+        await OnNewPullRequest.InvokeAsync();
+    }
 }

@@ -64,14 +64,14 @@ else if (PullRequest != null && string.Equals(PullRequest.State, "open", StringC
 }
 else if (IsPrVerified && (PullRequest == null || !string.Equals(PullRequest.State, "open", StringComparison.OrdinalIgnoreCase)) && (DefaultBranchAheadCommits ?? 0) > 0)
 {
-    @if (CreatePrUrl != null)
-    {
-        <a href="@CreatePrUrl" target="_blank" rel="noopener noreferrer" class="badge pr-badge pr-badge-create" title="Create pull request">create</a>
-    }
-    else
-    {
-        <span class="badge pr-badge pr-badge-create" title="Create pull request">create</span>
-    }
+    <span class="badge pr-badge pr-badge-create"
+          role="button"
+          tabindex="0"
+          title="Create pull request"
+          style="cursor: pointer;"
+          @onclick="HandleCreateClick"
+          @onclick:preventDefault
+          @onclick:stopPropagation>create</span>
 }
 else
 {
@@ -81,11 +81,20 @@ else
 @code {
     [Parameter] public PullRequestInfo? PullRequest { get; set; }
     [Parameter] public int? DefaultBranchAheadCommits { get; set; }
+    /// <summary>Deprecated. The create badge now invokes <see cref="OnCreateClick"/> instead of navigating to a URL.</summary>
     [Parameter] public string? CreatePrUrl { get; set; }
+    /// <summary>Raised when the user clicks the yellow "create" badge.</summary>
+    [Parameter] public EventCallback OnCreateClick { get; set; }
     /// <summary>When false, never show "create"; show "none" until PR state has been verified via API.</summary>
     [Parameter] public bool IsPrVerified { get; set; }
     /// <summary>True when the repository is checked out at a tag (detached HEAD); PRs require a branch, so render blank.</summary>
     [Parameter] public bool IsOnTag { get; set; }
+
+    private async Task HandleCreateClick()
+    {
+        if (OnCreateClick.HasDelegate)
+            await OnCreateClick.InvokeAsync();
+    }
 
     private static string GetOpenPrMergeabilityClass(PullRequestInfo pr)
     {
