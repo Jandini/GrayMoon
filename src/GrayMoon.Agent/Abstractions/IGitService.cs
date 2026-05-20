@@ -40,8 +40,8 @@ public interface IGitService
     Task<IReadOnlyList<string>> GetRemoteBranchesFromRefsAsync(string repoPath, CancellationToken ct);
     /// <summary>Gets all remote branch names (without 'origin/' prefix). Uses ls-remote; for post-fetch use <see cref="GetRemoteBranchesFromRefsAsync"/>.</summary>
     Task<IReadOnlyList<string>> GetRemoteBranchesAsync(string repoPath, string? bearerToken, CancellationToken ct);
-    /// <summary>Checks out the specified branch. Returns (success, errorMessage).</summary>
-    Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct);
+    /// <summary>Checks out the specified branch. Returns (success, errorMessage). When <paramref name="skipHooks"/> is true, hooks are disabled for the checkout (orchestrated flows such as sync-to-default).</summary>
+    Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct, bool skipHooks = false);
     /// <summary>Creates a new branch from the given base branch and checks it out. Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct);
     /// <summary>Deletes a local branch. Returns true if successful. Only deletes if branch is not current and is merged or force flag is set.</summary>
