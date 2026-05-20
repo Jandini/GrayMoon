@@ -145,9 +145,16 @@
                 if (!item || !activeTrigger) return;
                 const suffix = item.dataset.suffix;
                 try {
-                    const urls = JSON.parse(activeTrigger.dataset.urls || '[]')
-                        .filter(u => u)
-                        .map(u => appendSuffix(u, suffix));
+                    const baseUrls = JSON.parse(activeTrigger.dataset.urls || '[]');
+                    let urls;
+                    if (suffix === '/pulls') {
+                        const prMap = JSON.parse(activeTrigger.dataset.prPullMap || '{}');
+                        urls = baseUrls
+                            .filter(u => u)
+                            .map(u => prMap[u] || appendSuffix(u, suffix));
+                    } else {
+                        urls = baseUrls.filter(u => u).map(u => appendSuffix(u, suffix));
+                    }
                     if (urls.length) urls.forEach(u => window.open(u, '_blank', 'noopener,noreferrer'));
                 } catch (_) { }
                 hide();

@@ -274,7 +274,7 @@
     color: #707070 !important;
 }
 
-/* Copy PR links icon */
+/* Copy PR links icon: same style as other level header icons */
 ::deep .repositories-table .dependency-level-header .dependency-level-copy-pr-link,
 ::deep .repositories-table .dependency-level-header .dependency-level-copy-pr-link i {
     color: #505050 !important;
@@ -282,11 +282,10 @@
     font-weight: 400;
     display: inline-flex;
     align-items: center;
-    user-select: none;
 }
 
 ::deep .repositories-table .dependency-level-header .dependency-level-copy-pr-link i {
-    font-size: 1.0rem;
+    font-size: 1.1rem;
 }
 
 ::deep .repositories-table .dependency-level-header .dependency-level-copy-pr-link:hover,
