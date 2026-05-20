@@ -14,7 +14,11 @@ else
       style="@($"background-color: {BgColor}; color: {TextColor};{(Clickable ? " cursor: pointer;" : "")}")"
       @onclick="HandleClick"
       title="@Title">
-    @if (NotUpstreamed)
+    @if (NotUpstreamed && X > 0)
+    {
+        @($"↑{X}")
+    }
+    else if (NotUpstreamed)
     {
         <span class="commits-badge-icon-up commits-badge-icon-up--black">
             <i class="bi bi-cloud-arrow-up" aria-hidden="true"></i>
