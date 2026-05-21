@@ -155,7 +155,10 @@
     padding: 0.375rem 0.75rem;
     white-space: pre;
     overflow: hidden;
-    font: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    letter-spacing: inherit;
     line-height: 1.5;
 }
 
@@ -188,17 +191,14 @@
 
 .repo-search-token-and {
     color: var(--filter-op-and, #7ee787);
-    font-weight: 600;
 }
 
 .repo-search-token-or {
     color: var(--filter-op-or, #ffa657);
-    font-weight: 600;
 }
 
 .repo-search-token-paren {
     color: var(--filter-op-paren, #8b949e);
-    font-weight: 600;
 }
 
 .repo-search-token-field,
