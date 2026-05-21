@@ -1,0 +1,116 @@
+.filter-search-wrap {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.filter-search-wrap:has(.filter-search-input-overlay) {
+    background-color: var(--bg-input);
+    border-radius: var(--bs-border-radius, 0.375rem);
+}
+
+.filter-search-backdrop {
+    position: absolute;
+    inset: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    pointer-events: none;
+    border: 1px solid transparent;
+    border-radius: var(--bs-border-radius, 0.375rem);
+    z-index: 0;
+    scrollbar-width: none;
+}
+
+.filter-search-backdrop::-webkit-scrollbar {
+    display: none;
+}
+
+.filter-search-backdrop-inner {
+    display: block;
+    padding: 0.375rem 0.75rem;
+    white-space: pre;
+    overflow: hidden;
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    letter-spacing: inherit;
+    line-height: 1.5;
+}
+
+.filter-search-input {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+}
+
+.filter-search-input-overlay {
+    color: transparent;
+    caret-color: var(--text-primary);
+    background-color: transparent;
+    scrollbar-width: none;
+}
+
+.filter-search-input-overlay::-webkit-scrollbar {
+    display: none;
+}
+
+.filter-search-input-overlay:focus {
+    color: transparent;
+    background-color: transparent;
+}
+
+.filter-search-wrap.filter-search-invalid .filter-search-input-invalid {
+    color: var(--error);
+    caret-color: var(--error);
+}
+
+.filter-search-token-and {
+    color: var(--filter-op-and, #7ee787);
+}
+
+.filter-search-token-or {
+    color: var(--filter-op-or, #ffa657);
+}
+
+.filter-search-token-paren {
+    color: var(--filter-op-paren, #8b949e);
+}
+
+.filter-search-token-field,
+.filter-search-token-field-value {
+    color: var(--filter-field, #79c0ff);
+}
+
+.filter-search-token-text {
+    color: var(--text-primary);
+}
+
+.filter-search-token-ws {
+    white-space: pre;
+}
+
+.filter-search-wrap.has-filter .filter-search-input {
+    padding-right: 2.25rem;
+}
+
+.filter-search-wrap.has-filter .filter-search-backdrop-inner {
+    padding-right: 2.25rem;
+}
+
+.filter-search-clear {
+    position: absolute;
+    right: 0.25rem;
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 0.2rem 0.25rem;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    line-height: 1;
+    z-index: 2;
+}
+
+.filter-search-clear:hover {
+    color: var(--text-primary);
+}

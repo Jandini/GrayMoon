@@ -35,26 +35,14 @@
         }
     </div>
     <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
-        <div class="workspace-repos-search-wrapper">
-            <div class="workspace-repos-search-input-wrap @(HasFilter ? "has-filter" : null)">
-                <input id="workspace-repos-search"
-                       class="form-control workspace-repos-search"
-                       placeholder="Search repositories..."
-                       value="@SearchTerm"
-                       @oninput="OnSearchChanged"
-                       @onkeydown="OnSearchKeyDown" />
-                @if (HasFilter)
-                {
-                    <button type="button"
-                            class="workspace-repos-search-clear"
-                            title="Clear filter"
-                            aria-label="Clear repository filter"
-                            @onclick="OnClearSearch"
-                            @onclick:stopPropagation="true">
-                        <i class="bi bi-x-circle" aria-hidden="true"></i>
-                    </button>
-                }
-            </div>
+        <div class="workspace-grid-search-wrapper">
+            <FilterSearchInput Value="@(SearchTerm ?? string.Empty)"
+                               ValueChanged="OnSearchValueChangedAsync"
+                               InputId="workspace-repos-search"
+                               InputAdditionalClass="workspace-grid-search"
+                               Placeholder="Search repositories…"
+                               OnKeyDown="OnSearchKeyDown"
+                               OnClear="OnClearSearch" />
         </div>
         <div class="btn-group position-relative">
             <button class="btn btn-outline-secondary"
@@ -206,5 +194,10 @@
     {
         CloseBranchMenu();
         await OnNewPullRequest.InvokeAsync();
+    }
+
+    private async Task OnSearchValueChangedAsync(string value)
+    {
+        await OnSearchChanged.InvokeAsync(new ChangeEventArgs { Value = value });
     }
 }

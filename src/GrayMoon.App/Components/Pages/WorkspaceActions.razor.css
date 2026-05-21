@@ -48,14 +48,14 @@
     box-shadow: 0 0 0 1px var(--focus-ring-outer);
 }
 
-.workspace-actions-header .workspace-repos-search:focus,
-.workspace-actions-header .workspace-repos-search:focus-visible {
+.workspace-actions-header .workspace-grid-search:focus,
+.workspace-actions-header .workspace-grid-search:focus-visible {
     border-color: var(--focus-ring-outer) !important;
     box-shadow: none !important;
 }
 
-.workspace-actions-header .workspace-repos-search-clear:focus,
-.workspace-actions-header .workspace-repos-search-clear:focus-visible {
+.workspace-actions-header .filter-search-clear:focus,
+.workspace-actions-header .filter-search-clear:focus-visible {
     outline: none;
     box-shadow: 0 0 0 1px var(--focus-ring-outer);
     border-radius: 0.25rem;

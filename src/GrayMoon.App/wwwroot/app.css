@@ -455,40 +455,6 @@ h1:focus {
     margin-top: 0.5rem;
     margin-bottom: 0.75rem;
 }
-.workspace-repos-header .workspace-repos-search-wrapper {
-    min-width: 0;
-    flex: 1 1 0%;
-}
-.workspace-repos-header .workspace-repos-search-input-wrap {
-    min-width: 0;
-    position: relative;
-}
-.workspace-repos-header .workspace-repos-search-input-wrap.has-filter .workspace-repos-search {
-    padding-right: 2.25rem;
-}
-/* Match enabled field: Bootstrap disabled uses light secondary-bg on dark theme */
-.workspace-repos-header .workspace-repos-search:disabled {
-    background-color: var(--bg-input) !important;
-    border-color: var(--border-input) !important;
-    color: var(--text-primary) !important;
-    opacity: 1;
-}
-.workspace-repos-header .workspace-repos-search-clear {
-    position: absolute;
-    right: 0.25rem;
-    top: 50%;
-    transform: translateY(-50%);
-    padding: 0.2rem 0.25rem;
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    line-height: 1;
-    z-index: 1;
-}
-.workspace-repos-header .workspace-repos-search-clear:hover {
-    color: var(--text-primary);
-}
 
 /* Keep subtitle on one line, shrink with ellipsis when space is limited */
 .grid-page-header .d-flex > div:first-child {

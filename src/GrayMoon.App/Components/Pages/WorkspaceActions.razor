@@ -103,27 +103,14 @@
                 <span class="workspace-repos-title-spacer"></span>
             </div>
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
-                <div class="workspace-repos-search-wrapper">
-                    <div class="workspace-repos-search-input-wrap @(HasSearchFilter ? "has-filter" : null)">
-                        <input id="workspace-actions-search"
-                               class="form-control workspace-repos-search"
-                               placeholder="Search repository or workflow..."
-                               value="@searchTerm"
-                               disabled="@(isLoading || rows.Count == 0)"
-                               @oninput="OnSearchChanged"
-                               @onkeydown="OnSearchKeyDown" />
-                        @if (HasSearchFilter)
-                        {
-                            <button type="button"
-                                    class="workspace-repos-search-clear"
-                                    title="Clear filter"
-                                    aria-label="Clear search filter"
-                                    @onclick="ClearSearchFilter"
-                                    @onclick:stopPropagation="true">
-                                <i class="bi bi-x-circle" aria-hidden="true"></i>
-                            </button>
-                        }
-                    </div>
+                <div class="workspace-grid-search-wrapper">
+                    <FilterSearchInput @bind-Value="searchTerm"
+                                       InputId="workspace-actions-search"
+                                       InputAdditionalClass="workspace-grid-search"
+                                       Placeholder="Search repository or workflow..."
+                                       Disabled="@(isLoading || rows.Count == 0)"
+                                       OnKeyDown="OnSearchKeyDown"
+                                       OnClear="ClearSearchFilter" />
                 </div>
                 @if (HasFailedRows)
                 {

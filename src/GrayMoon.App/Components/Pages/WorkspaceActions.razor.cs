@@ -2,6 +2,7 @@ using System.Net;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using GrayMoon.Common.Search;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -1242,21 +1243,33 @@ public sealed partial class WorkspaceActions : IDisposable
 
     private bool LineMatchesSearch(WorkspaceActionRow row, WorkflowActionLine line)
     {
-        var words = SplitSearchWords(searchTerm);
-        if (words.Count == 0)
+        if (string.IsNullOrWhiteSpace(searchTerm))
+        {
             return true;
+        }
+
+        return FilterSearchMatcher.Matches(searchTerm, term => MatchesActionLineTerm(row, line, term));
+    }
+
+    private static bool MatchesActionLineTerm(WorkspaceActionRow row, WorkflowActionLine line, FilterSearchTerm term)
+    {
+        if (!string.IsNullOrEmpty(term.Field))
+        {
+            return term.Field switch
+            {
+                "repo" => (row.Repo.RepositoryName ?? string.Empty)
+                    .Contains(term.Value, StringComparison.OrdinalIgnoreCase),
+                "workflow" => (line.Action?.WorkflowName ?? string.Empty)
+                    .Contains(term.Value, StringComparison.OrdinalIgnoreCase),
+                _ => false,
+            };
+        }
+
         var repo = row.Repo.RepositoryName ?? string.Empty;
         var workflow = line.Action?.WorkflowName ?? string.Empty;
         var haystack = $"{repo} {workflow}";
-        return words.All(w => haystack.Contains(w, StringComparison.OrdinalIgnoreCase));
+        return haystack.Contains(term.Value, StringComparison.OrdinalIgnoreCase);
     }
-
-    private static List<string> SplitSearchWords(string term) =>
-        term
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(w => w.Trim())
-            .Where(w => w.Length > 0)
-            .ToList();
 
     private bool IsBucketVisible(ActionLineFilterBucket bucket) =>
         bucket switch

@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
+@using GrayMoon.App.Services
 @using GrayMoon.App.Components.Shared
 @using Microsoft.AspNetCore.Components.Web
 @inject WorkspaceRepository WorkspaceRepository
@@ -42,27 +43,15 @@
                 <span class="workspace-repos-title-spacer"></span>
             </div>
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions deps-header-actions">
-                <div class="workspace-repos-search-wrapper">
-                    <div class="workspace-repos-search-input-wrap @(HasSearchFilter ? "has-filter" : null)">
-                        <input id="workspace-dependencies-search"
-                               class="form-control workspace-repos-search"
-                               placeholder="Search repositories (shows each match and its dependency tree)..."
-                               value="@searchTerm"
-                               disabled="@(isLoading || graph == null || graph.Nodes.Count == 0)"
-                               @oninput="OnSearchChanged"
-                               @onkeydown="OnSearchKeyDown" />
-                        @if (HasSearchFilter)
-                        {
-                            <button type="button"
-                                    class="workspace-repos-search-clear"
-                                    title="Clear filter"
-                                    aria-label="Clear search filter"
-                                    @onclick="ClearSearchFilter"
-                                    @onclick:stopPropagation="true">
-                                <i class="bi bi-x-circle" aria-hidden="true"></i>
-                            </button>
-                        }
-                    </div>
+                <div class="workspace-grid-search-wrapper">
+                    <FilterSearchInput Value="@searchTerm"
+                                       ValueChanged="OnSearchValueChangedAsync"
+                                       InputId="workspace-dependencies-search"
+                                       InputAdditionalClass="workspace-grid-search"
+                                       Placeholder="Search repositories (shows each match and its dependency tree)..."
+                                       Disabled="@(isLoading || graph == null || graph.Nodes.Count == 0)"
+                                       OnKeyDown="OnSearchKeyDown"
+                                       OnClear="ClearSearchFilter" />
                 </div>
                 @if (graph != null && graph.Nodes.Count > 0)
                 {
@@ -214,18 +203,11 @@
         StateHasChanged();
     }
 
-    private static List<string> SplitSearchWords(string term) =>
-        term
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(w => w.Trim())
-            .Where(w => w.Length > 0)
-            .ToList();
-
-    private void OnSearchChanged(ChangeEventArgs e)
+    private async Task OnSearchValueChangedAsync(string value)
     {
-        searchTerm = e.Value?.ToString() ?? string.Empty;
+        searchTerm = value;
         showFilterMenu = false;
-        StateHasChanged();
+        await InvokeAsync(StateHasChanged);
     }
 
     private void ClearSearchFilter()
@@ -299,15 +281,14 @@
 
         if (HasSearchFilter)
         {
-            var words = SplitSearchWords(searchTerm);
-            if (words.Count == 0)
-                return (graph.Nodes, graph.Edges);
-
-            var matched = graph.Nodes.Where(n =>
+            if (string.IsNullOrWhiteSpace(searchTerm))
             {
-                var name = n.RepositoryName ?? string.Empty;
-                return words.All(w => name.Contains(w, StringComparison.OrdinalIgnoreCase));
-            }).ToList();
+                return (graph.Nodes, graph.Edges);
+            }
+
+            var matched = graph.Nodes
+                .Where(n => WorkspaceDependencyNodeSearchMatcher.Matches(n, searchTerm))
+                .ToList();
             if (matched.Count == 0)
                 return (new List<RepositoryDependencyNode>(), new List<RepositoryDependencyEdge>());
 

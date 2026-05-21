@@ -1,4 +1,9 @@
 /* Header: match workspace search toolbar */
+.repositories-page-header .workspace-grid-search-wrapper {
+    min-width: 0;
+    flex: 1 1 0%;
+}
+
 .repositories-page-header .workspace-repos-subtitle.repositories-page__subtitle {
     white-space: normal;
     overflow: visible;
