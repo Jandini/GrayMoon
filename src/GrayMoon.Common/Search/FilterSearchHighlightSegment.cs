@@ -1,6 +1,6 @@
 namespace GrayMoon.Common.Search;
 
-public enum RepositorySearchHighlightKind
+public enum FilterSearchHighlightKind
 {
     Text,
     Whitespace,
@@ -11,6 +11,6 @@ public enum RepositorySearchHighlightKind
     FieldValue,
 }
 
-public sealed record RepositorySearchHighlightSegment(
+public sealed record FilterSearchExpressionHighlightSegment(
     string Text,
-    RepositorySearchHighlightKind Kind);
+    FilterSearchHighlightKind Kind);

@@ -43,27 +43,14 @@
                 <span class="workspace-repos-title-spacer"></span>
             </div>
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
-                <div class="workspace-repos-search-wrapper">
-                    <div class="workspace-repos-search-input-wrap @(HasSearchFilter ? "has-filter" : null)">
-                        <input id="workspace-files-search"
-                               class="form-control workspace-repos-search"
-                               placeholder="Search file name, path, or repository..."
-                               value="@searchTerm"
-                               disabled="@(isLoading || files.Count == 0)"
-                               @oninput="OnSearchChanged"
-                               @onkeydown="OnSearchKeyDown" />
-                        @if (HasSearchFilter)
-                        {
-                            <button type="button"
-                                    class="workspace-repos-search-clear"
-                                    title="Clear filter"
-                                    aria-label="Clear search filter"
-                                    @onclick="ClearSearchFilter"
-                                    @onclick:stopPropagation="true">
-                                <i class="bi bi-x-circle" aria-hidden="true"></i>
-                            </button>
-                        }
-                    </div>
+                <div class="workspace-grid-search-wrapper">
+                    <FilterSearchInput @bind-Value="searchTerm"
+                                       InputId="workspace-files-search"
+                                       InputAdditionalClass="workspace-grid-search"
+                                       Placeholder="Search file name, path, or repository..."
+                                       Disabled="@(isLoading || files.Count == 0)"
+                                       OnKeyDown="OnSearchKeyDown"
+                                       OnClear="ClearSearchFilter" />
                 </div>
                 <button class="btn btn-outline-primary" @onclick="UpdateVersionsAsync"
                         disabled="@(fileVersionConfigs.Count == 0)" title="Update versions in all configured files">
@@ -211,30 +198,12 @@
 
     private IReadOnlyList<WorkspaceFileDto> GetFilteredFiles()
     {
-        var words = SplitSearchWords(searchTerm);
-        if (words.Count == 0)
-            return files;
-        return files.Where(f =>
+        if (string.IsNullOrWhiteSpace(searchTerm))
         {
-            var name = f.FileName ?? string.Empty;
-            var path = f.FilePath ?? string.Empty;
-            var repo = f.RepositoryName ?? string.Empty;
-            var haystack = $"{name} {path} {repo}";
-            return words.All(w => haystack.Contains(w, StringComparison.OrdinalIgnoreCase));
-        }).ToList();
-    }
+            return files;
+        }
 
-    private static List<string> SplitSearchWords(string term) =>
-        term
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(w => w.Trim())
-            .Where(w => w.Length > 0)
-            .ToList();
-
-    private void OnSearchChanged(ChangeEventArgs e)
-    {
-        searchTerm = e.Value?.ToString() ?? string.Empty;
-        StateHasChanged();
+        return files.Where(f => WorkspaceFileSearchMatcher.Matches(f, searchTerm)).ToList();
     }
 
     private void ClearSearchFilter()

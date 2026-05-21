@@ -37,27 +37,14 @@
                 <span class="workspace-repos-title-spacer"></span>
             </div>
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
-                <div class="workspace-repos-search-wrapper">
-                    <div class="workspace-repos-search-input-wrap @(HasSearchFilter ? "has-filter" : null)">
-                        <input id="workspace-packages-search"
-                               class="form-control workspace-repos-search"
-                               placeholder="Search package id..."
-                               value="@searchTerm"
-                               disabled="@(isLoading || packages.Count == 0)"
-                               @oninput="OnSearchChanged"
-                               @onkeydown="OnSearchKeyDown" />
-                        @if (HasSearchFilter)
-                        {
-                            <button type="button"
-                                    class="workspace-repos-search-clear"
-                                    title="Clear filter"
-                                    aria-label="Clear search filter"
-                                    @onclick="ClearSearchFilter"
-                                    @onclick:stopPropagation="true">
-                                <i class="bi bi-x-circle" aria-hidden="true"></i>
-                            </button>
-                        }
-                    </div>
+                <div class="workspace-grid-search-wrapper">
+                    <FilterSearchInput @bind-Value="searchTerm"
+                                       InputId="workspace-packages-search"
+                                       InputAdditionalClass="workspace-grid-search"
+                                       Placeholder="Search package id..."
+                                       Disabled="@(isLoading || packages.Count == 0)"
+                                       OnKeyDown="OnSearchKeyDown"
+                                       OnClear="ClearSearchFilter" />
                 </div>
                 <button class="btn btn-outline-primary"
                         @onclick="SyncRegistriesAsync"
@@ -156,27 +143,12 @@
 
     private IReadOnlyList<WorkspaceProject> GetFilteredPackages()
     {
-        var words = SplitSearchWords(searchTerm);
-        if (words.Count == 0)
-            return packages;
-        return packages.Where(p =>
+        if (string.IsNullOrWhiteSpace(searchTerm))
         {
-            var id = p.PackageId ?? string.Empty;
-            return words.All(w => id.Contains(w, StringComparison.OrdinalIgnoreCase));
-        }).ToList();
-    }
+            return packages;
+        }
 
-    private static List<string> SplitSearchWords(string term) =>
-        term
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(w => w.Trim())
-            .Where(w => w.Length > 0)
-            .ToList();
-
-    private void OnSearchChanged(ChangeEventArgs e)
-    {
-        searchTerm = e.Value?.ToString() ?? string.Empty;
-        StateHasChanged();
+        return packages.Where(p => WorkspacePackageSearchMatcher.Matches(p, searchTerm)).ToList();
     }
 
     private void ClearSearchFilter()

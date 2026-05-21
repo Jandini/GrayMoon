@@ -1,4 +1,4 @@
-window.grayMoonRepoSearch = {
+window.grayMoonFilterSearch = {
     syncScroll: function (input, backdrop) {
         if (!input || !backdrop) {
             return;

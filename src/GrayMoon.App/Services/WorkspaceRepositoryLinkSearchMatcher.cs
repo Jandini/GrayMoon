@@ -5,17 +5,17 @@ namespace GrayMoon.App.Services;
 
 public static class WorkspaceRepositoryLinkSearchMatcher
 {
-    public static bool IsValidQuery(string? query) => RepositorySearch.IsValidQuery(query);
+    public static bool IsValidQuery(string? query) => FilterSearchMatcher.IsValidQuery(query);
 
     public static bool Matches(
         WorkspaceRepositoryLink link,
         string? query,
         IReadOnlyDictionary<int, RepoSyncStatus>? syncStatusByRepositoryId = null) =>
-        RepositorySearch.Matches(query, term => MatchesTerm(link, term, syncStatusByRepositoryId));
+        FilterSearchMatcher.Matches(query, term => MatchesTerm(link, term, syncStatusByRepositoryId));
 
     private static bool MatchesTerm(
         WorkspaceRepositoryLink link,
-        RepositorySearchTerm term,
+        FilterSearchTerm term,
         IReadOnlyDictionary<int, RepoSyncStatus>? syncStatusByRepositoryId)
     {
         if (!string.IsNullOrEmpty(term.Field))

@@ -455,17 +455,6 @@ h1:focus {
     margin-top: 0.5rem;
     margin-bottom: 0.75rem;
 }
-.workspace-repos-header .workspace-repos-search-wrapper {
-    min-width: 0;
-    flex: 1 1 0%;
-}
-/* Match enabled field: Bootstrap disabled uses light secondary-bg on dark theme */
-.workspace-repos-header .workspace-repos-search:disabled {
-    background-color: var(--bg-input) !important;
-    border-color: var(--border-input) !important;
-    color: var(--text-primary) !important;
-    opacity: 1;
-}
 
 /* Keep subtitle on one line, shrink with ellipsis when space is limited */
 .grid-page-header .d-flex > div:first-child {

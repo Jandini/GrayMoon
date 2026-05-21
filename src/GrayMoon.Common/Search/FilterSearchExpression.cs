@@ -1,20 +1,20 @@
 namespace GrayMoon.Common.Search;
 
 /// <summary>
-/// Parses and evaluates boolean repository search queries:
+/// Parses and evaluates boolean filter search queries:
 /// implicit AND between terms, explicit <c>and</c>/<c>or</c>, parentheses,
 /// and <c>field:value</c> leaves (e.g. <c>topic:blazor</c>).
 /// </summary>
-public static class RepositorySearch
+public static class FilterSearchExpression
 {
     public static bool IsValidQuery(string? query) =>
         string.IsNullOrWhiteSpace(query) || Parse(query).IsValid;
 
-    public static RepositorySearchParseResult Parse(string? query)
+    public static FilterSearchParseResult Parse(string? query)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
-            return RepositorySearchParseResult.Success(null);
+            return FilterSearchParseResult.Success(null);
         }
 
         try
@@ -24,30 +24,30 @@ public static class RepositorySearch
             var expression = parser.ParseExpression();
             if (!parser.IsAtEnd)
             {
-                return RepositorySearchParseResult.Failure("Unexpected text after expression.");
+                return FilterSearchParseResult.Failure("Unexpected text after expression.");
             }
 
-            return RepositorySearchParseResult.Success(expression);
+            return FilterSearchParseResult.Success(expression);
         }
         catch (ParseException ex)
         {
-            return RepositorySearchParseResult.Failure(ex.Message);
+            return FilterSearchParseResult.Failure(ex.Message);
         }
     }
 
-    public static bool Evaluate(RepositorySearchNode node, Func<RepositorySearchTerm, bool> matchTerm) =>
+    public static bool Evaluate(FilterSearchNode node, Func<FilterSearchTerm, bool> matchTerm) =>
         node switch
         {
-            RepositorySearchTermNode t => matchTerm(t.Term),
-            RepositorySearchAndNode a => Evaluate(a.Left, matchTerm) && Evaluate(a.Right, matchTerm),
-            RepositorySearchOrNode o => Evaluate(o.Left, matchTerm) || Evaluate(o.Right, matchTerm),
+            FilterSearchTermNode t => matchTerm(t.Term),
+            FilterSearchAndNode a => Evaluate(a.Left, matchTerm) && Evaluate(a.Right, matchTerm),
+            FilterSearchOrNode o => Evaluate(o.Left, matchTerm) || Evaluate(o.Right, matchTerm),
             _ => false,
         };
 
     /// <summary>
     /// Returns whether the query matches using the expression parser, or legacy space-AND fallback when invalid.
     /// </summary>
-    public static bool Matches(string? query, Func<RepositorySearchTerm, bool> matchTerm)
+    public static bool Matches(string? query, Func<FilterSearchTerm, bool> matchTerm)
     {
         var parsed = Parse(query);
         if (parsed.IsValid)
@@ -63,17 +63,17 @@ public static class RepositorySearch
         return LegacyAllMatch(query, matchTerm);
     }
 
-    public static IReadOnlyList<RepositorySearchHighlightSegment> GetHighlightSegments(string? query)
+    public static IReadOnlyList<FilterSearchExpressionHighlightSegment> GetHighlightSegments(string? query)
     {
         if (string.IsNullOrEmpty(query))
         {
-            return Array.Empty<RepositorySearchHighlightSegment>();
+            return Array.Empty<FilterSearchExpressionHighlightSegment>();
         }
 
         return LexForHighlight(query);
     }
 
-    private static bool LegacyAllMatch(string? query, Func<RepositorySearchTerm, bool> matchTerm)
+    private static bool LegacyAllMatch(string? query, Func<FilterSearchTerm, bool> matchTerm)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -91,7 +91,7 @@ public static class RepositorySearch
         return true;
     }
 
-    private static RepositorySearchTerm ParseTermToken(string token)
+    private static FilterSearchTerm ParseTermToken(string token)
     {
         var colon = token.IndexOf(':');
         if (colon > 0)
@@ -100,11 +100,11 @@ public static class RepositorySearch
             var value = token[(colon + 1)..];
             if (!string.IsNullOrWhiteSpace(value))
             {
-                return new RepositorySearchTerm(field.ToLowerInvariant(), value);
+                return new FilterSearchTerm(field.ToLowerInvariant(), value);
             }
         }
 
-        return new RepositorySearchTerm(null, token);
+        return new FilterSearchTerm(null, token);
     }
 
     private static List<Token> Tokenize(string query)
@@ -152,9 +152,9 @@ public static class RepositorySearch
         return tokens;
     }
 
-    private static IReadOnlyList<RepositorySearchHighlightSegment> LexForHighlight(string query)
+    private static IReadOnlyList<FilterSearchExpressionHighlightSegment> LexForHighlight(string query)
     {
-        var segments = new List<RepositorySearchHighlightSegment>();
+        var segments = new List<FilterSearchExpressionHighlightSegment>();
         var i = 0;
         while (i < query.Length)
         {
@@ -167,17 +167,17 @@ public static class RepositorySearch
                     i++;
                 }
 
-                segments.Add(new RepositorySearchHighlightSegment(
+                segments.Add(new FilterSearchExpressionHighlightSegment(
                     query[wsStart..i],
-                    RepositorySearchHighlightKind.Whitespace));
+                    FilterSearchHighlightKind.Whitespace));
                 continue;
             }
 
             if (c is '(' or ')')
             {
-                segments.Add(new RepositorySearchHighlightSegment(
+                segments.Add(new FilterSearchExpressionHighlightSegment(
                     c.ToString(),
-                    RepositorySearchHighlightKind.Paren));
+                    FilterSearchHighlightKind.Paren));
                 i++;
                 continue;
             }
@@ -191,11 +191,11 @@ public static class RepositorySearch
             var text = query[start..i];
             if (IsOperator(text, "and"))
             {
-                segments.Add(new RepositorySearchHighlightSegment(text, RepositorySearchHighlightKind.OperatorAnd));
+                segments.Add(new FilterSearchExpressionHighlightSegment(text, FilterSearchHighlightKind.OperatorAnd));
             }
             else if (IsOperator(text, "or"))
             {
-                segments.Add(new RepositorySearchHighlightSegment(text, RepositorySearchHighlightKind.OperatorOr));
+                segments.Add(new FilterSearchExpressionHighlightSegment(text, FilterSearchHighlightKind.OperatorOr));
             }
             else
             {
@@ -206,7 +206,7 @@ public static class RepositorySearch
         return segments;
     }
 
-    private static void AddTermHighlightSegments(List<RepositorySearchHighlightSegment> segments, string text)
+    private static void AddTermHighlightSegments(List<FilterSearchExpressionHighlightSegment> segments, string text)
     {
         var colon = text.IndexOf(':');
         if (colon > 0)
@@ -214,17 +214,17 @@ public static class RepositorySearch
             var value = text[(colon + 1)..];
             if (!string.IsNullOrWhiteSpace(value))
             {
-                segments.Add(new RepositorySearchHighlightSegment(
+                segments.Add(new FilterSearchExpressionHighlightSegment(
                     text[..(colon + 1)],
-                    RepositorySearchHighlightKind.FieldPrefix));
-                segments.Add(new RepositorySearchHighlightSegment(
+                    FilterSearchHighlightKind.FieldPrefix));
+                segments.Add(new FilterSearchExpressionHighlightSegment(
                     value,
-                    RepositorySearchHighlightKind.FieldValue));
+                    FilterSearchHighlightKind.FieldValue));
                 return;
             }
         }
 
-        segments.Add(new RepositorySearchHighlightSegment(text, RepositorySearchHighlightKind.Text));
+        segments.Add(new FilterSearchExpressionHighlightSegment(text, FilterSearchHighlightKind.Text));
     }
 
     private static bool IsOperator(string text, string op) =>
@@ -250,25 +250,25 @@ public static class RepositorySearch
 
         public bool IsAtEnd => Peek().Kind == TokenKind.End;
 
-        public RepositorySearchNode? ParseExpression()
+        public FilterSearchNode? ParseExpression()
         {
             var expr = ParseOrExpression();
             return expr;
         }
 
-        private RepositorySearchNode ParseOrExpression()
+        private FilterSearchNode ParseOrExpression()
         {
             var left = ParseAndExpression();
             while (Match(TokenKind.Or))
             {
                 var right = ParseAndExpression();
-                left = new RepositorySearchOrNode(left, right);
+                left = new FilterSearchOrNode(left, right);
             }
 
             return left;
         }
 
-        private RepositorySearchNode ParseAndExpression()
+        private FilterSearchNode ParseAndExpression()
         {
             var left = ParsePrimary();
             while (IsAndContinuation())
@@ -279,7 +279,7 @@ public static class RepositorySearch
                 }
 
                 var right = ParsePrimary();
-                left = new RepositorySearchAndNode(left, right);
+                left = new FilterSearchAndNode(left, right);
             }
 
             return left;
@@ -291,7 +291,7 @@ public static class RepositorySearch
             return kind is TokenKind.Term or TokenKind.LParen or TokenKind.And;
         }
 
-        private RepositorySearchNode ParsePrimary()
+        private FilterSearchNode ParsePrimary()
         {
             if (Match(TokenKind.LParen))
             {
@@ -307,7 +307,7 @@ public static class RepositorySearch
             if (Peek().Kind == TokenKind.Term)
             {
                 var token = Advance();
-                return new RepositorySearchTermNode(ParseTermToken(token.Text));
+                return new FilterSearchTermNode(ParseTermToken(token.Text));
             }
 
             throw new ParseException($"Unexpected '{Peek().Text}'");

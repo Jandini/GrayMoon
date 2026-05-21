@@ -1,15 +1,15 @@
-.repo-search-wrap {
+.filter-search-wrap {
     position: relative;
     flex: 1 1 auto;
     min-width: 0;
 }
 
-.repo-search-wrap:has(.repo-search-input-overlay) {
+.filter-search-wrap:has(.filter-search-input-overlay) {
     background-color: var(--bg-input);
     border-radius: var(--bs-border-radius, 0.375rem);
 }
 
-.repo-search-backdrop {
+.filter-search-backdrop {
     position: absolute;
     inset: 0;
     overflow-x: auto;
@@ -21,11 +21,11 @@
     scrollbar-width: none;
 }
 
-.repo-search-backdrop::-webkit-scrollbar {
+.filter-search-backdrop::-webkit-scrollbar {
     display: none;
 }
 
-.repo-search-backdrop-inner {
+.filter-search-backdrop-inner {
     display: block;
     padding: 0.375rem 0.75rem;
     white-space: pre;
@@ -37,67 +37,67 @@
     line-height: 1.5;
 }
 
-.repo-search-input {
+.filter-search-input {
     position: relative;
     z-index: 1;
     width: 100%;
 }
 
-.repo-search-input-overlay {
+.filter-search-input-overlay {
     color: transparent;
     caret-color: var(--text-primary);
     background-color: transparent;
     scrollbar-width: none;
 }
 
-.repo-search-input-overlay::-webkit-scrollbar {
+.filter-search-input-overlay::-webkit-scrollbar {
     display: none;
 }
 
-.repo-search-input-overlay:focus {
+.filter-search-input-overlay:focus {
     color: transparent;
     background-color: transparent;
 }
 
-.repo-search-wrap.repo-search-invalid .repo-search-input-invalid {
+.filter-search-wrap.filter-search-invalid .filter-search-input-invalid {
     color: var(--error);
     caret-color: var(--error);
 }
 
-.repo-search-token-and {
+.filter-search-token-and {
     color: var(--filter-op-and, #7ee787);
 }
 
-.repo-search-token-or {
+.filter-search-token-or {
     color: var(--filter-op-or, #ffa657);
 }
 
-.repo-search-token-paren {
+.filter-search-token-paren {
     color: var(--filter-op-paren, #8b949e);
 }
 
-.repo-search-token-field,
-.repo-search-token-field-value {
+.filter-search-token-field,
+.filter-search-token-field-value {
     color: var(--filter-field, #79c0ff);
 }
 
-.repo-search-token-text {
+.filter-search-token-text {
     color: var(--text-primary);
 }
 
-.repo-search-token-ws {
+.filter-search-token-ws {
     white-space: pre;
 }
 
-.repo-search-wrap.has-filter .repo-search-input {
+.filter-search-wrap.has-filter .filter-search-input {
     padding-right: 2.25rem;
 }
 
-.repo-search-wrap.has-filter .repo-search-backdrop-inner {
+.filter-search-wrap.has-filter .filter-search-backdrop-inner {
     padding-right: 2.25rem;
 }
 
-.repo-search-clear {
+.filter-search-clear {
     position: absolute;
     right: 0.25rem;
     top: 50%;
@@ -111,6 +111,6 @@
     z-index: 2;
 }
 
-.repo-search-clear:hover {
+.filter-search-clear:hover {
     color: var(--text-primary);
 }

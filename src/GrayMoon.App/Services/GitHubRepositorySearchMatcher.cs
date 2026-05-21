@@ -5,12 +5,12 @@ namespace GrayMoon.App.Services;
 
 public static class GitHubRepositorySearchMatcher
 {
+    public static bool IsValidQuery(string? query) => FilterSearchMatcher.IsValidQuery(query);
+
     public static bool Matches(GitHubRepositoryEntry repository, string? query) =>
-        RepositorySearch.Matches(query, term => MatchesTerm(repository, term));
+        FilterSearchMatcher.Matches(query, term => MatchesTerm(repository, term));
 
-    public static bool IsValidQuery(string? query) => RepositorySearch.IsValidQuery(query);
-
-    private static bool MatchesTerm(GitHubRepositoryEntry repository, RepositorySearchTerm term)
+    private static bool MatchesTerm(GitHubRepositoryEntry repository, FilterSearchTerm term)
     {
         if (!string.IsNullOrEmpty(term.Field))
         {

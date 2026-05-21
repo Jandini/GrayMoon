@@ -33,25 +33,6 @@
     flex-wrap: wrap;
     width: 100%;
 }
-.workspace-repos-search-wrapper {
-    display: flex;
-    align-items: stretch;
-    min-width: 10rem;
-    width: 20rem;
-    max-width: 100%;
-    flex: 1 1 auto;
-}
-
-.workspace-repos-search-wrapper ::deep .repo-search-wrap {
-    width: 100%;
-}
-
-.workspace-repos-search-wrapper ::deep .workspace-repos-search {
-    min-width: 10rem;
-    width: 100%;
-    max-width: 100%;
-    flex: 1 1 auto;
-}
 
 
 /* Match Repositories / Workspaces: left-align all columns, status column right-aligned via col-status-badge; use global resizable-columns padding for header spacing */

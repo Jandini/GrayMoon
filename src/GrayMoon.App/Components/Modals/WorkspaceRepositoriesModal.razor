@@ -26,11 +26,11 @@
                             </div>
                         </div>
                         <div class="d-flex align-items-center mb-3">
-                            <RepositorySearchInput @bind-Value="repositorySearch"
-                                                   @bind-Value:event="oninput"
-                                                   @ref="repositorySearchInput"
-                                                   WrapperAdditionalClass="flex-grow-1 min-width-0"
-                                                   OnKeyDown="HandleKeyDown" />
+                            <FilterSearchInput @bind-Value="repositorySearch"
+                                               @ref="filterSearchInput"
+                                               WrapperAdditionalClass="flex-grow-1 min-width-0"
+                                               Placeholder="Search repositories…"
+                                               OnKeyDown="HandleKeyDown" />
                             <button type="button"
                                     class="btn btn-outline-secondary ms-2 flex-shrink-0"
                                     @onclick="OnFetchRepositories"
@@ -160,7 +160,7 @@
 }
 
 @code {
-    private RepositorySearchInput? repositorySearchInput;
+    private FilterSearchInput? filterSearchInput;
 
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public string Title { get; set; } = "Select repositories";
@@ -202,9 +202,9 @@
         if (_needsFocus)
         {
             _needsFocus = false;
-            if (repositorySearchInput != null)
+            if (filterSearchInput != null)
             {
-                await repositorySearchInput.FocusAsync();
+                await filterSearchInput.FocusAsync();
             }
         }
     }

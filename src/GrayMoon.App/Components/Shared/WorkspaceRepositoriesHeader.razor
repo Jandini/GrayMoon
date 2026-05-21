@@ -35,13 +35,14 @@
         }
     </div>
     <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
-        <div class="workspace-repos-search-wrapper">
-            <RepositorySearchInput Value="@(SearchTerm ?? string.Empty)"
-                                   ValueChanged="OnSearchValueChangedAsync"
-                                   InputId="workspace-repos-search"
-                                   InputAdditionalClass="workspace-repos-search"
-                                   OnKeyDown="OnSearchKeyDown"
-                                   OnClear="OnClearSearch" />
+        <div class="workspace-grid-search-wrapper">
+            <FilterSearchInput Value="@(SearchTerm ?? string.Empty)"
+                               ValueChanged="OnSearchValueChangedAsync"
+                               InputId="workspace-repos-search"
+                               InputAdditionalClass="workspace-grid-search"
+                               Placeholder="Search repositories…"
+                               OnKeyDown="OnSearchKeyDown"
+                               OnClear="OnClearSearch" />
         </div>
         <div class="btn-group position-relative">
             <button class="btn btn-outline-secondary"
