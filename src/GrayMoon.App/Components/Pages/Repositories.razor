@@ -34,29 +34,16 @@
                 <span class="workspace-repos-title-spacer"></span>
             </div>
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
-                <div class="workspace-repos-search-wrapper">
-                    <div class="workspace-repos-search-input-wrap @(HasSearchFilter ? "has-filter" : null)">
-                        <input id="repositories-search"
-                               class="form-control workspace-repos-search"
-                               placeholder="Search name, owner, topics, or connector (all words must match)..."
-                               value="@searchTerm"
-                               disabled="@(repositories == null || repositories.Count == 0)"
-                               @oninput="OnSearchChanged"
-                               @onkeydown="OnSearchKeyDown" />
-                        @if (HasSearchFilter)
-                        {
-                            <button type="button"
-                                    class="workspace-repos-search-clear"
-                                    title="Clear filter"
-                                    aria-label="Clear search filter"
-                                    @onclick="ClearSearchFilter"
-                                    @onclick:stopPropagation="true">
-                                <i class="bi bi-x-circle" aria-hidden="true"></i>
-                            </button>
-                        }
-                    </div>
+                <div class="workspace-grid-search-wrapper">
+                    <FilterSearchInput @bind-Value="searchTerm"
+                                       InputId="repositories-search"
+                                       InputAdditionalClass="workspace-grid-search"
+                                       Placeholder="Search repositories…"
+                                       Disabled="@(repositories == null || repositories.Count == 0)"
+                                       OnKeyDown="OnSearchKeyDown"
+                                       OnClear="ClearSearchFilter" />
                 </div>
-                <button class="btn btn-outline-secondary"
+                <button class="btn btn-outline-secondary flex-shrink-0"
                         @onclick="ReloadRepositoriesAsync"
                         disabled="@(isPersisting)">
                     Fetch
@@ -193,12 +180,6 @@
 
     private bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
 
-    private void OnSearchChanged(ChangeEventArgs e)
-    {
-        searchTerm = e.Value?.ToString() ?? string.Empty;
-        StateHasChanged();
-    }
-
     private void ClearSearchFilter()
     {
         searchTerm = string.Empty;
@@ -308,31 +289,13 @@
             return null;
         }
 
-        var words = SplitSearchWords(searchTerm);
-        if (words.Count == 0)
+        if (string.IsNullOrWhiteSpace(searchTerm))
         {
             return repositories;
         }
 
-        return repositories.Where(repository =>
-        {
-            var repoName = repository.RepositoryName ?? string.Empty;
-            var ownerName = repository.OrgName ?? string.Empty;
-            var topics = repository.Topics ?? string.Empty;
-            var connectorName = repository.ConnectorName ?? string.Empty;
-
-            return words.All(word =>
-                repoName.Contains(word, StringComparison.OrdinalIgnoreCase) ||
-                ownerName.Contains(word, StringComparison.OrdinalIgnoreCase) ||
-                topics.Contains(word, StringComparison.OrdinalIgnoreCase) ||
-                connectorName.Contains(word, StringComparison.OrdinalIgnoreCase));
-        }).ToList();
-    }
-
-    private static List<string> SplitSearchWords(string term) =>
-        term
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(w => w.Trim())
-            .Where(w => w.Length > 0)
+        return repositories
+            .Where(r => GitHubRepositorySearchMatcher.Matches(r, searchTerm))
             .ToList();
+    }
 }

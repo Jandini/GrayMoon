@@ -43,29 +43,16 @@
                 <span class="workspace-repos-title-spacer"></span>
             </div>
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
-                <div class="workspace-repos-search-wrapper">
-                    <div class="workspace-repos-search-input-wrap @(HasSearchFilter ? "has-filter" : null)">
-                        <input id="workspaces-list-search"
-                               class="form-control workspace-repos-search"
-                               placeholder="Search workspace name..."
-                               value="@searchTerm"
-                               disabled="@(workspaces == null || workspaces.Count == 0)"
-                               @oninput="OnSearchChanged"
-                               @onkeydown="OnSearchKeyDown" />
-                        @if (HasSearchFilter)
-                        {
-                            <button type="button"
-                                    class="workspace-repos-search-clear"
-                                    title="Clear filter"
-                                    aria-label="Clear search filter"
-                                    @onclick="ClearSearchFilter"
-                                    @onclick:stopPropagation="true">
-                                <i class="bi bi-x-circle" aria-hidden="true"></i>
-                            </button>
-                        }
-                    </div>
+                <div class="workspace-grid-search-wrapper">
+                    <FilterSearchInput @bind-Value="searchTerm"
+                                       InputId="workspaces-list-search"
+                                       InputAdditionalClass="workspace-grid-search"
+                                       Placeholder="Search workspaces…"
+                                       Disabled="@(workspaces == null || workspaces.Count == 0)"
+                                       OnKeyDown="OnSearchKeyDown"
+                                       OnClear="ClearSearchFilter" />
                 </div>
-                <button class="btn btn-primary" @onclick="ShowCreateModalAsync">
+                <button class="btn btn-primary flex-shrink-0" @onclick="ShowCreateModalAsync">
                     Add Workspace
                 </button>
             </div>
@@ -257,27 +244,22 @@
 
     private IReadOnlyList<WorkspaceModel> GetFilteredWorkspaces()
     {
-        if (workspaces == null) return Array.Empty<WorkspaceModel>();
-        var words = SplitSearchWords(searchTerm);
-        if (words.Count == 0) return workspaces;
-        return workspaces.Where(w =>
+        if (workspaces == null)
         {
-            var name = w.Name ?? string.Empty;
-            return words.All(word => name.Contains(word, StringComparison.OrdinalIgnoreCase));
-        }).ToList();
-    }
+            return Array.Empty<WorkspaceModel>();
+        }
 
-    private static List<string> SplitSearchWords(string term) =>
-        term
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(w => w.Trim())
-            .Where(w => w.Length > 0)
+        if (string.IsNullOrWhiteSpace(searchTerm))
+        {
+            return workspaces;
+        }
+
+        return workspaces
+            .Where(w => WorkspaceListSearchMatcher.Matches(
+                w,
+                WorkspaceService.GetWorkspacePath(w.Name, w.RootPath),
+                searchTerm))
             .ToList();
-
-    private void OnSearchChanged(ChangeEventArgs e)
-    {
-        searchTerm = e.Value?.ToString() ?? string.Empty;
-        StateHasChanged();
     }
 
     private void ClearSearchFilter()
