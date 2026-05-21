@@ -1,4 +1,6 @@
 @using GrayMoon.App.Models
+@using GrayMoon.App.Services
+@using GrayMoon.Common.Search
 
 @if (IsVisible)
 {
@@ -24,12 +26,26 @@
                                 <label class="form-check-label" for="selectedOnlySwitch">Selected only</label>
                             </div>
                         </div>
-                        <div class="d-flex align-items-center mb-1">
-                            <div class="repo-search-wrap @(!string.IsNullOrEmpty(repositorySearch) ? "has-filter" : null)">
-                                <input class="form-control repo-search-input"
-                                       placeholder="Search repositories… use topic:name for topic filter"
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="repo-search-wrap flex-grow-1 min-width-0 @GetSearchWrapClass()">
+                                @if (ShowSearchHighlight)
+                                {
+                                    <div class="repo-search-backdrop"
+                                         @ref="searchBackdrop"
+                                         aria-hidden="true">
+                                        <div class="repo-search-backdrop-inner">
+                                            @foreach (var segment in RepositorySearch.GetHighlightSegments(repositorySearch))
+                                            {
+                                                <span class="@GetHighlightClass(segment.Kind)">@segment.Text</span>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                                <input class="form-control repo-search-input @GetSearchInputClass()"
+                                       placeholder="Search repositories…"
                                        @bind="repositorySearch"
                                        @bind:event="oninput"
+                                       @onscroll="OnSearchScroll"
                                        @ref="firstInputElement" />
                                 @if (!string.IsNullOrEmpty(repositorySearch))
                                 {
@@ -44,15 +60,12 @@
                                 }
                             </div>
                             <button type="button"
-                                    class="btn btn-outline-secondary ms-2"
+                                    class="btn btn-outline-secondary ms-2 flex-shrink-0"
                                     @onclick="OnFetchRepositories"
                                     disabled="@(!HasConnectors || IsFetching)">
                                 Fetch
                             </button>
                         </div>
-                        <small class="form-text text-muted mb-3 d-block">
-                            Search by repository name, owner, topics, or connector; multiple words all must match.
-                        </small>
                         <div class="repository-list border rounded">
                             @if (Repositories == null)
                             {
@@ -174,8 +187,11 @@
     </div>
 }
 
+@inject IJSRuntime Js
+
 @code {
     private ElementReference firstInputElement;
+    private ElementReference searchBackdrop;
 
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public string Title { get; set; } = "Select repositories";
@@ -192,6 +208,8 @@
     [Parameter] public bool DefaultSelectedOnly { get; set; }
 
     private string repositorySearch = string.Empty;
+    private bool IsSearchSyntaxValid => GitHubRepositorySearchMatcher.IsValidQuery(repositorySearch);
+    private bool ShowSearchHighlight => !string.IsNullOrEmpty(repositorySearch) && IsSearchSyntaxValid;
     private bool _wasVisible;
     private bool _needsFocus;
     private bool _showOnlySelected;
@@ -219,6 +237,11 @@
             _needsFocus = false;
             await firstInputElement.FocusAsync();
         }
+
+        if (ShowSearchHighlight)
+        {
+            await OnSearchScroll();
+        }
     }
 
     private void ToggleSelectedOnly(bool value)
@@ -242,36 +265,51 @@
         }
     }
 
-    private sealed record FieldToken(string Field, string Value);
-
-    private (List<string> Words, List<FieldToken> FieldTokens) ParseSearchQuery(string query)
+    private string GetSearchWrapClass()
     {
-        var words = new List<string>();
-        var fieldTokens = new List<FieldToken>();
-
-        foreach (var token in query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        var classes = new List<string>();
+        if (!string.IsNullOrEmpty(repositorySearch))
         {
-            var colon = token.IndexOf(':');
-            if (colon > 0)
-            {
-                var field = token[..colon].ToLowerInvariant();
-                var value = token[(colon + 1)..];
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    fieldTokens.Add(new FieldToken(field, value));
-                    continue;
-                }
-            }
-            words.Add(token);
+            classes.Add("has-filter");
         }
 
-        return (words, fieldTokens);
+        if (!IsSearchSyntaxValid)
+        {
+            classes.Add("repo-search-invalid");
+        }
+
+        return string.Join(' ', classes);
     }
 
-    private bool MatchesFieldToken(GitHubRepositoryEntry repository, FieldToken token) => token.Field switch
+    private string GetSearchInputClass() =>
+        ShowSearchHighlight ? "repo-search-input-overlay" : IsSearchSyntaxValid ? "" : "repo-search-input-invalid";
+
+    private async Task OnSearchScroll()
     {
-        "topic" => (repository.Topics ?? string.Empty).Contains(token.Value, StringComparison.OrdinalIgnoreCase),
-        _ => true  // unknown prefixes are ignored so they don't break the search
+        if (!ShowSearchHighlight)
+        {
+            return;
+        }
+
+        try
+        {
+            await Js.InvokeVoidAsync("grayMoonRepoSearch.syncScroll", firstInputElement, searchBackdrop);
+        }
+        catch (JSException)
+        {
+            // Backdrop not mounted yet during prerender.
+        }
+    }
+
+    private static string GetHighlightClass(RepositorySearchHighlightKind kind) => kind switch
+    {
+        RepositorySearchHighlightKind.OperatorAnd => "repo-search-token-and",
+        RepositorySearchHighlightKind.OperatorOr => "repo-search-token-or",
+        RepositorySearchHighlightKind.Paren => "repo-search-token-paren",
+        RepositorySearchHighlightKind.FieldPrefix => "repo-search-token-field",
+        RepositorySearchHighlightKind.FieldValue => "repo-search-token-field-value",
+        RepositorySearchHighlightKind.Whitespace => "repo-search-token-ws",
+        _ => "repo-search-token-text",
     };
 
     private List<GitHubRepositoryEntry> GetFilteredRepositories()
@@ -288,28 +326,12 @@
             source = source.Where(r => _selectedOnlySnapshot.Contains(r.RepositoryId));
         }
 
-        var (words, fieldTokens) = ParseSearchQuery(repositorySearch);
-
-        if (words.Count == 0 && fieldTokens.Count == 0)
+        if (string.IsNullOrWhiteSpace(repositorySearch))
         {
             return source.ToList();
         }
 
-        return source.Where(repository =>
-        {
-            var repoName = repository.RepositoryName ?? string.Empty;
-            var ownerName = repository.OrgName ?? string.Empty;
-            var topics = repository.Topics ?? string.Empty;
-            var connectorName = repository.ConnectorName ?? string.Empty;
-
-            var plainWordsMatch = words.All(word =>
-                repoName.Contains(word, StringComparison.OrdinalIgnoreCase) ||
-                ownerName.Contains(word, StringComparison.OrdinalIgnoreCase) ||
-                topics.Contains(word, StringComparison.OrdinalIgnoreCase) ||
-                connectorName.Contains(word, StringComparison.OrdinalIgnoreCase));
-
-            return plainWordsMatch && fieldTokens.All(t => MatchesFieldToken(repository, t));
-        }).ToList();
+        return source.Where(r => GitHubRepositorySearchMatcher.Matches(r, repositorySearch)).ToList();
     }
 
     private async Task ToggleRepository(int repositoryId, bool isSelected)
