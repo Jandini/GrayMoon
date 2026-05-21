@@ -7,6 +7,9 @@ namespace GrayMoon.Common.Search;
 /// </summary>
 public static class RepositorySearch
 {
+    public static bool IsValidQuery(string? query) =>
+        string.IsNullOrWhiteSpace(query) || Parse(query).IsValid;
+
     public static RepositorySearchParseResult Parse(string? query)
     {
         if (string.IsNullOrWhiteSpace(query))

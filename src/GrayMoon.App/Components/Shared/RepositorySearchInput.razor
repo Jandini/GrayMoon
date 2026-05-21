@@ -1,0 +1,130 @@
+@using GrayMoon.Common.Search
+@inject IJSRuntime Js
+
+<div class="repo-search-wrap @GetSearchWrapClass() @WrapperAdditionalClass">
+    @if (ShowSearchHighlight)
+    {
+        <div class="repo-search-backdrop"
+             @ref="_searchBackdrop"
+             aria-hidden="true">
+            <div class="repo-search-backdrop-inner">
+                @foreach (var segment in RepositorySearch.GetHighlightSegments(Value))
+                {
+                    <span class="@GetHighlightClass(segment.Kind)">@segment.Text</span>
+                }
+            </div>
+        </div>
+    }
+    <input id="@InputId"
+           class="form-control repo-search-input @GetSearchInputClass() @InputAdditionalClass"
+           placeholder="@Placeholder"
+           value="@Value"
+           @oninput="OnInputAsync"
+           @onscroll="OnSearchScrollAsync"
+           @onkeydown="OnKeyDown"
+           @ref="_inputElement" />
+    @if (!string.IsNullOrEmpty(Value))
+    {
+        <button type="button"
+                class="repo-search-clear"
+                title="Clear filter"
+                aria-label="@ClearAriaLabel"
+                @onclick="ClearAsync"
+                @onclick:stopPropagation="true">
+            <i class="bi bi-x-circle" aria-hidden="true"></i>
+        </button>
+    }
+</div>
+
+@code {
+    private ElementReference _inputElement;
+    private ElementReference _searchBackdrop;
+
+    [Parameter] public string Value { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "Search repositories…";
+    [Parameter] public string? InputId { get; set; }
+    [Parameter] public string InputAdditionalClass { get; set; } = string.Empty;
+    [Parameter] public string WrapperAdditionalClass { get; set; } = string.Empty;
+    [Parameter] public string ClearAriaLabel { get; set; } = "Clear repository filter";
+    [Parameter] public EventCallback<KeyboardEventArgs> OnKeyDown { get; set; }
+    [Parameter] public EventCallback OnClear { get; set; }
+
+    private bool IsSearchSyntaxValid => RepositorySearch.IsValidQuery(Value);
+
+    private bool ShowSearchHighlight => !string.IsNullOrEmpty(Value) && IsSearchSyntaxValid;
+
+    public ValueTask FocusAsync() => _inputElement.FocusAsync();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (ShowSearchHighlight)
+        {
+            await OnSearchScrollAsync();
+        }
+    }
+
+    private string GetSearchWrapClass()
+    {
+        var classes = new List<string>();
+        if (!string.IsNullOrEmpty(Value))
+        {
+            classes.Add("has-filter");
+        }
+
+        if (!IsSearchSyntaxValid)
+        {
+            classes.Add("repo-search-invalid");
+        }
+
+        return string.Join(' ', classes);
+    }
+
+    private string GetSearchInputClass() =>
+        ShowSearchHighlight ? "repo-search-input-overlay" : IsSearchSyntaxValid ? string.Empty : "repo-search-input-invalid";
+
+    private async Task OnInputAsync(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString() ?? string.Empty;
+        Value = value;
+        await ValueChanged.InvokeAsync(value);
+    }
+
+    private async Task ClearAsync()
+    {
+        Value = string.Empty;
+        await ValueChanged.InvokeAsync(Value);
+        if (OnClear.HasDelegate)
+        {
+            await OnClear.InvokeAsync();
+        }
+    }
+
+    private async Task OnSearchScrollAsync()
+    {
+        if (!ShowSearchHighlight)
+        {
+            return;
+        }
+
+        try
+        {
+            await Js.InvokeVoidAsync("grayMoonRepoSearch.syncScroll", _inputElement, _searchBackdrop);
+        }
+        catch (JSException)
+        {
+            // Backdrop not mounted yet during prerender.
+        }
+    }
+
+    private static string GetHighlightClass(RepositorySearchHighlightKind kind) => kind switch
+    {
+        RepositorySearchHighlightKind.OperatorAnd => "repo-search-token-and",
+        RepositorySearchHighlightKind.OperatorOr => "repo-search-token-or",
+        RepositorySearchHighlightKind.Paren => "repo-search-token-paren",
+        RepositorySearchHighlightKind.FieldPrefix => "repo-search-token-field",
+        RepositorySearchHighlightKind.FieldValue => "repo-search-token-field-value",
+        RepositorySearchHighlightKind.Whitespace => "repo-search-token-ws",
+        _ => "repo-search-token-text",
+    };
+}

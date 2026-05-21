@@ -2725,25 +2725,14 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     private List<WorkspaceRepositoryLink> GetFilteredWorkspaceRepositories()
     {
-        var words = searchTerm
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(w => w.Trim())
-            .Where(w => w.Length > 0)
-            .ToList();
-
-        if (words.Count == 0)
-            return workspaceRepositories;
-
-        return workspaceRepositories.Where(wr =>
+        if (string.IsNullOrWhiteSpace(searchTerm))
         {
-            var repoName = wr.Repository?.RepositoryName ?? string.Empty;
-            var branchName = wr.BranchName ?? string.Empty;
-            var version = wr.GitVersion ?? string.Empty;
-            var levelTitle = wr.DependencyLevel == null ? "No dependencies" : $"Level {wr.DependencyLevel}";
-            var syncText = SyncBadgeLabels.GetSyncBadgeText(repoSyncStatus.TryGetValue(wr.RepositoryId, out var s) ? s : RepoSyncStatus.NeedsSync);
-            var searchable = $"{repoName} {branchName} {version} {levelTitle} {syncText}";
-            return words.All(word => searchable.Contains(word, StringComparison.OrdinalIgnoreCase));
-        }).ToList();
+            return workspaceRepositories;
+        }
+
+        return workspaceRepositories
+            .Where(wr => WorkspaceRepositoryLinkSearchMatcher.Matches(wr, searchTerm, repoSyncStatus))
+            .ToList();
     }
 
     private sealed record ConfirmModalState

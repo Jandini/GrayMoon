@@ -8,8 +8,7 @@ public static class GitHubRepositorySearchMatcher
     public static bool Matches(GitHubRepositoryEntry repository, string? query) =>
         RepositorySearch.Matches(query, term => MatchesTerm(repository, term));
 
-    public static bool IsValidQuery(string? query) =>
-        string.IsNullOrWhiteSpace(query) || RepositorySearch.Parse(query).IsValid;
+    public static bool IsValidQuery(string? query) => RepositorySearch.IsValidQuery(query);
 
     private static bool MatchesTerm(GitHubRepositoryEntry repository, RepositorySearchTerm term)
     {

@@ -1,6 +1,5 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services
-@using GrayMoon.Common.Search
 
 @if (IsVisible)
 {
@@ -27,38 +26,11 @@
                             </div>
                         </div>
                         <div class="d-flex align-items-center mb-3">
-                            <div class="repo-search-wrap flex-grow-1 min-width-0 @GetSearchWrapClass()">
-                                @if (ShowSearchHighlight)
-                                {
-                                    <div class="repo-search-backdrop"
-                                         @ref="searchBackdrop"
-                                         aria-hidden="true">
-                                        <div class="repo-search-backdrop-inner">
-                                            @foreach (var segment in RepositorySearch.GetHighlightSegments(repositorySearch))
-                                            {
-                                                <span class="@GetHighlightClass(segment.Kind)">@segment.Text</span>
-                                            }
-                                        </div>
-                                    </div>
-                                }
-                                <input class="form-control repo-search-input @GetSearchInputClass()"
-                                       placeholder="Search repositories…"
-                                       @bind="repositorySearch"
-                                       @bind:event="oninput"
-                                       @onscroll="OnSearchScroll"
-                                       @ref="firstInputElement" />
-                                @if (!string.IsNullOrEmpty(repositorySearch))
-                                {
-                                    <button type="button"
-                                            class="repo-search-clear"
-                                            title="Clear filter"
-                                            aria-label="Clear repository filter"
-                                            @onclick="() => repositorySearch = string.Empty"
-                                            @onclick:stopPropagation="true">
-                                        <i class="bi bi-x-circle" aria-hidden="true"></i>
-                                    </button>
-                                }
-                            </div>
+                            <RepositorySearchInput @bind-Value="repositorySearch"
+                                                   @bind-Value:event="oninput"
+                                                   @ref="repositorySearchInput"
+                                                   WrapperAdditionalClass="flex-grow-1 min-width-0"
+                                                   OnKeyDown="HandleKeyDown" />
                             <button type="button"
                                     class="btn btn-outline-secondary ms-2 flex-shrink-0"
                                     @onclick="OnFetchRepositories"
@@ -187,11 +159,8 @@
     </div>
 }
 
-@inject IJSRuntime Js
-
 @code {
-    private ElementReference firstInputElement;
-    private ElementReference searchBackdrop;
+    private RepositorySearchInput? repositorySearchInput;
 
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public string Title { get; set; } = "Select repositories";
@@ -208,8 +177,6 @@
     [Parameter] public bool DefaultSelectedOnly { get; set; }
 
     private string repositorySearch = string.Empty;
-    private bool IsSearchSyntaxValid => GitHubRepositorySearchMatcher.IsValidQuery(repositorySearch);
-    private bool ShowSearchHighlight => !string.IsNullOrEmpty(repositorySearch) && IsSearchSyntaxValid;
     private bool _wasVisible;
     private bool _needsFocus;
     private bool _showOnlySelected;
@@ -235,12 +202,10 @@
         if (_needsFocus)
         {
             _needsFocus = false;
-            await firstInputElement.FocusAsync();
-        }
-
-        if (ShowSearchHighlight)
-        {
-            await OnSearchScroll();
+            if (repositorySearchInput != null)
+            {
+                await repositorySearchInput.FocusAsync();
+            }
         }
     }
 
@@ -264,53 +229,6 @@
             await OnSave.InvokeAsync();
         }
     }
-
-    private string GetSearchWrapClass()
-    {
-        var classes = new List<string>();
-        if (!string.IsNullOrEmpty(repositorySearch))
-        {
-            classes.Add("has-filter");
-        }
-
-        if (!IsSearchSyntaxValid)
-        {
-            classes.Add("repo-search-invalid");
-        }
-
-        return string.Join(' ', classes);
-    }
-
-    private string GetSearchInputClass() =>
-        ShowSearchHighlight ? "repo-search-input-overlay" : IsSearchSyntaxValid ? "" : "repo-search-input-invalid";
-
-    private async Task OnSearchScroll()
-    {
-        if (!ShowSearchHighlight)
-        {
-            return;
-        }
-
-        try
-        {
-            await Js.InvokeVoidAsync("grayMoonRepoSearch.syncScroll", firstInputElement, searchBackdrop);
-        }
-        catch (JSException)
-        {
-            // Backdrop not mounted yet during prerender.
-        }
-    }
-
-    private static string GetHighlightClass(RepositorySearchHighlightKind kind) => kind switch
-    {
-        RepositorySearchHighlightKind.OperatorAnd => "repo-search-token-and",
-        RepositorySearchHighlightKind.OperatorOr => "repo-search-token-or",
-        RepositorySearchHighlightKind.Paren => "repo-search-token-paren",
-        RepositorySearchHighlightKind.FieldPrefix => "repo-search-token-field",
-        RepositorySearchHighlightKind.FieldValue => "repo-search-token-field-value",
-        RepositorySearchHighlightKind.Whitespace => "repo-search-token-ws",
-        _ => "repo-search-token-text",
-    };
 
     private List<GitHubRepositoryEntry> GetFilteredRepositories()
     {
