@@ -104,6 +104,16 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 ## What's new
 
+### Boolean search filters across workspace and catalog pages
+
+GrayMoon grid and list pages now share one search experience: syntax highlighting inside the search box, boolean operators, and field-specific tokens where useful.
+
+- **Where it works:** workspace **Repositories** (grid), **Projects**, **Packages**, **Files**, **Dependencies**, **Actions**, and the workspace header search; global **Repositories** and **Connectors** lists; **Workspaces** list; and the **Select repositories** modal when editing workspace membership.
+- **Operators:** combine terms with `and`, `or`, and parentheses. Spaces between terms mean implicit `and` (`api web` is the same as `api and web`). `and` binds tighter than `or`, so `a or b and c` means `a or (b and c)` unless you group with `( )`.
+- **Syntax highlighting:** `and`, `or`, and `()` appear in distinct colors inside the input. Invalid syntax turns the typed text red and falls back to simple word matching so you still get results.
+- **Field tokens (page-specific):** examples include `topic:blazor` on repository lists; `repo:name` on Files and Actions; `type:GitHub` and `status:Ok` on Connectors; `path:` on Workspaces; `type:` / `framework:` on Projects and Packages. Plain words still search all main text columns on that page (names, paths, connectors, workflow names, and so on).
+- **Examples:** `api or web`; `(topic:blazor or topic:angular) and acme`; `type:GitHub and status:Error`; `path:repos and dev`.
+
 ### GitHub API log in the loading overlay terminal
 
 Every GitHub REST call made by the app is now mirrored into the loading overlay command terminal, alongside existing agent command output and GitHub Actions lines during synchronized push.
