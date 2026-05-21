@@ -118,12 +118,12 @@ Every GitHub REST call made by the app is now mirrored into the loading overlay 
 
 GrayMoon can now create GitHub pull requests without leaving the app. Use one dialog for a single repository, every repository in a dependency level, or all eligible workspace repositories.
 
-- **Three entry points:** the yellow **create** badge on a row (one repo), the dependency-level GitHub icon (repos in that level with commits ahead of default), and **Branch** split menu **New Pull Requests** (all eligible repos in the workspace).
+- **Three entry points:** the yellow **create** badge on a row (one repo), the dependency-level GitHub icon (repos in that level with commits ahead of default), and **Branch** split menu **Create PRs...** (all eligible repos in the workspace).
 - **One dialog, shared fields:** title (default generated from the branch name), optional description, draft checkbox, and optional reviewers. Title rules turn branch names like `feature/ABC-123-update-dependencies.v2` into readable subjects (ticket-style tokens such as `ABC-123` stay grouped).
 - **Reviewers:** users and teams are loaded from GitHub (merged across targets when multiple repos are selected). Search supports multiple words (space/comma separated). Teams appear first in the list.
 - **Open in GitHub:** opens compare/create pages in the browser (with a confirm when more than five repositories are involved).
 - **Create flow:** a confirmation step, then a loading overlay (`Creating N pull requests...`, then `Created x of N pull requests` after the first success). Per-repository results are summarized in toasts; a single successful PR can open in the browser automatically.
-- **Branch menu:** **Branch** is a split button with **New Branch**, **Switch Branch**, and **New Pull Requests**. The main **Update** button is unchanged.
+- **Branch menu:** **Branch** is a split button with **New Branch**, **Switch Branch**, and **Create PRs...**. The main **Update** button is unchanged.
 
 Only repositories that are eligible are included: not on a tag, on a feature branch (not default), with commits ahead of default, no open PR already, and a configured GitHub connector.
 
