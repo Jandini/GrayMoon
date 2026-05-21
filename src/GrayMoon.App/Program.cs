@@ -100,7 +100,9 @@ try
     builder.Services.AddHostedService<TokenHealthBackgroundService>();
 
     // Connector services
-    builder.Services.AddHttpClient<GitHubService>();
+    builder.Services.AddTransient<GitHubOverlayLoggingHandler>();
+    builder.Services.AddHttpClient<GitHubService>()
+        .AddHttpMessageHandler<GitHubOverlayLoggingHandler>();
     builder.Services.AddHttpClient<NuGetService>();
     builder.Services.AddScoped<ConnectorServiceFactory>();
     builder.Services.AddScoped<IPullRequestService, PullRequestService>();

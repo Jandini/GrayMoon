@@ -104,16 +104,26 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 ## What's new
 
+### GitHub API log in the loading overlay terminal
+
+Every GitHub REST call made by the app is now mirrored into the loading overlay command terminal, alongside existing agent command output and GitHub Actions lines during synchronized push.
+
+- **Toggle:** use the terminal icon in the overlay top bar (same control as agent/git logs). The feed is always collected; it is visible when the overlay is open and the terminal is enabled.
+- **Two lines per request:** an outbound line (`-> GET /repos/...`) in green, then a response line (`<- 200 (124ms)`) in gray for success or red for errors. A short body preview (up to 80 characters) may appear on a third indented line for JSON/text responses.
+- **Covers all GitHub operations:** pull request create, repository fetch, workflow polling, and any other call through `GitHubService` - not only push-time GHA updates.
+- **Safe by design:** no request bodies, no auth headers, and no tokens in the log. Query strings drop sensitive keys; response previews redact common secret field patterns. Logging never affects HTTP behavior if the terminal fails to append.
+- **Retries are visible:** Polly retries on rate limits or transient errors show as separate request/response pairs, which helps when diagnosing 429 storms.
+
 ### Create pull requests from the workspace repositories view
 
 GrayMoon can now create GitHub pull requests without leaving the app. Use one dialog for a single repository, every repository in a dependency level, or all eligible workspace repositories.
 
-- **Three entry points:** the yellow **create** badge on a row (one repo), the dependency-level GitHub icon (repos in that level with commits ahead of default), and **Branch** split menu **New Pull Requests** (all eligible repos in the workspace).
+- **Three entry points:** the yellow **create** badge on a row (one repo), the dependency-level GitHub icon (repos in that level with commits ahead of default), and **Branch** split menu **Create PRs...** (all eligible repos in the workspace).
 - **One dialog, shared fields:** title (default generated from the branch name), optional description, draft checkbox, and optional reviewers. Title rules turn branch names like `feature/ABC-123-update-dependencies.v2` into readable subjects (ticket-style tokens such as `ABC-123` stay grouped).
 - **Reviewers:** users and teams are loaded from GitHub (merged across targets when multiple repos are selected). Search supports multiple words (space/comma separated). Teams appear first in the list.
 - **Open in GitHub:** opens compare/create pages in the browser (with a confirm when more than five repositories are involved).
 - **Create flow:** a confirmation step, then a loading overlay (`Creating N pull requests...`, then `Created x of N pull requests` after the first success). Per-repository results are summarized in toasts; a single successful PR can open in the browser automatically.
-- **Branch menu:** **Branch** is a split button with **New Branch**, **Switch Branch**, and **New Pull Requests**. The main **Update** button is unchanged.
+- **Branch menu:** **Branch** is a split button with **New Branch**, **Switch Branch**, and **Create PRs...**. The main **Update** button is unchanged.
 
 Only repositories that are eligible are included: not on a tag, on a feature branch (not default), with commits ahead of default, no open PR already, and a configured GitHub connector.
 

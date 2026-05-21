@@ -48,12 +48,12 @@
 }
 
 .new-pr-reviewer-list {
-    max-height: calc(3 * 2.2rem);
+    max-height: calc(3 * 2.1rem);
     overflow-y: auto;
-    background-color: var(--bg-input);
+    background-color: color-mix(in srgb, var(--bg-input) 85%, #000 15%);
     color: var(--text-primary);
-    scrollbar-color: var(--text-muted) transparent;
-    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 152, 158, 0.55) transparent;
+    scrollbar-width: auto;
 }
 
 .new-pr-reviewer-list::-webkit-scrollbar {
@@ -65,7 +65,7 @@
 }
 
 .new-pr-reviewer-list::-webkit-scrollbar-thumb {
-    background-color: var(--text-muted);
+    background-color: rgba(148, 152, 158, 0.55);
     border-radius: 5px;
 }
 
@@ -87,4 +87,27 @@
 
 .new-pr-reviewer-item:hover {
     background-color: rgba(255, 255, 255, 0.04);
+}
+
+.new-pr-body {
+    resize: none;
+    scrollbar-color: rgba(148, 152, 158, 0.55) transparent;
+    scrollbar-width: auto;
+}
+
+.new-pr-body::-webkit-scrollbar {
+    width: auto;
+}
+
+.new-pr-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.new-pr-body::-webkit-scrollbar-thumb {
+    background-color: rgba(148, 152, 158, 0.55);
+    border-radius: 3px;
+}
+
+.new-pr-body::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(148, 152, 158, 0.8);
 }

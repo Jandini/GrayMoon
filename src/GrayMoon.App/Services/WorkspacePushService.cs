@@ -492,7 +492,6 @@ public sealed class WorkspacePushService(
             return false;
 
         var linksByRepoId = links.ToDictionary(l => l.RepositoryId);
-        var hasAnyWorkflowCandidates = false;
         foreach (var repo in reposAtLevel)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -537,8 +536,6 @@ public sealed class WorkspacePushService(
                 _logger.LogDebug("Push wait: repo {RepoName} has no active GitHub Actions workflows; skipping live feed.", entry.RepositoryName);
                 continue;
             }
-
-            hasAnyWorkflowCandidates = true;
 
             foreach (var status in statuses)
             {

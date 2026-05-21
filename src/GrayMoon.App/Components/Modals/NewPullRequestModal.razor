@@ -37,9 +37,8 @@
                     <div class="mb-3">
                         <label class="form-label" for="new-pr-body">Description</label>
                         <textarea id="new-pr-body"
-                                  class="form-control"
+                                  class="form-control new-pr-body"
                                   rows="6"
-                                  style="resize: none;"
                                   @bind="_body"
                                   @bind:event="oninput"
                                   disabled="@IsBusy"></textarea>
