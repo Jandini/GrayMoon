@@ -50,10 +50,10 @@
                             <small class="text-muted mt-2 d-block">
                                 The script will download, install, and start the agent service automatically.
                             </small>
-                            <div class="alert alert-warning mt-3" role="alert">
-                                <strong>Required:</strong> The Windows service requires the <span class="fw-bold text-danger">.NET 8 (x64) runtime</span> on the host.<br />
-                                <a href="@AgentDotnet8RuntimeUrl" target="_blank" rel="noopener noreferrer" class="fw-bold">Download the .NET 8 runtime</a>
-                            </div>
+                            <p class="mb-0 small agent-runtime-note mt-2 d-block">
+                                The Windows service requires the .NET 8 (x64) runtime on the host.
+                                <a href="@AgentDotnet8RuntimeUrl" target="_blank" rel="noopener noreferrer">Download the .NET 8 runtime</a>
+                            </p>
                         </div>
                         <div class="tab-pane @(ActiveTab == "uninstall" ? "show active" : "")" role="tabpanel">
                             <p class="mb-3">Run this PowerShell command as Administrator to uninstall the GrayMoon Agent Windows service:</p>
@@ -120,9 +120,9 @@
     {
         var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
         var installUrl = $"{baseUrl}/api/agent/install";
-        installCommand = $"irm '{installUrl}' | iex";
+        installCommand = $"irm {installUrl} | iex";
         var uninstallUrl = $"{baseUrl}/api/agent/uninstall";
-        uninstallCommand = $"irm '{uninstallUrl}' | iex";
+        uninstallCommand = $"irm {uninstallUrl} | iex";
         SetDefaultTab();
     }
 
