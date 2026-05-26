@@ -113,10 +113,10 @@ public static class GrayMoonServiceLogonRights
     public static void AddAccountRight(byte[] sidBytes, string rightName)
     {
         if (sidBytes == null || sidBytes.Length == 0)
-            throw new ArgumentException("SID is empty.", nameof(sidBytes));
+            throw new ArgumentException("SID is empty.", "sidBytes");
 
         if (string.IsNullOrWhiteSpace(rightName))
-            throw new ArgumentException("Right name is empty.", nameof(rightName));
+            throw new ArgumentException("Right name is empty.", "rightName");
 
         LSA_OBJECT_ATTRIBUTES attributes = new LSA_OBJECT_ATTRIBUTES();
         attributes.Length = (uint)Marshal.SizeOf(typeof(LSA_OBJECT_ATTRIBUTES));
@@ -225,16 +225,16 @@ public static class GrayMoonNativeServiceInstaller
         string password)
     {
         if (string.IsNullOrWhiteSpace(name))
-            throw new ArgumentException("Service name is empty.", nameof(name));
+            throw new ArgumentException("Service name is empty.", "name");
 
         if (string.IsNullOrWhiteSpace(displayName))
-            throw new ArgumentException("Service display name is empty.", nameof(displayName));
+            throw new ArgumentException("Service display name is empty.", "displayName");
 
         if (string.IsNullOrWhiteSpace(pathName))
-            throw new ArgumentException("Service path is empty.", nameof(pathName));
+            throw new ArgumentException("Service path is empty.", "pathName");
 
         if (string.IsNullOrWhiteSpace(startName))
-            throw new ArgumentException("Service account is empty.", nameof(startName));
+            throw new ArgumentException("Service account is empty.", "startName");
 
         IntPtr scm = IntPtr.Zero;
         IntPtr service = IntPtr.Zero;
