@@ -251,7 +251,7 @@ function New-Win32ServiceWithLogon {
         Name = $Name
         DisplayName = $DisplayName
         PathName = $PathName
-        ServiceType = [uint8]16
+        ServiceType = [uint32]16
         ErrorControl = [uint32]1
         StartMode = 'Automatic'
         DesktopInteract = $false
