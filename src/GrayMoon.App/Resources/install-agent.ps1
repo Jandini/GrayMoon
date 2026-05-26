@@ -34,12 +34,12 @@ $hubUrl = 'http://localhost:8384/hub/agent'
 $zipPath = Join-Path $env:TEMP 'graymoon-agent-windows-install.zip'
 
 # Native credential validation
-if (-not ('GrayMoonNativeLogonValidator' -as [type])) {
+if (-not ('GrayMoonNativeLogonValidatorV2' -as [type])) {
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 
-public static class GrayMoonNativeLogonValidator
+public static class GrayMoonNativeLogonValidatorV2
 {
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern bool LogonUser(
@@ -59,14 +59,15 @@ public static class GrayMoonNativeLogonValidator
 # Native LSA rights helper.
 # IMPORTANT:
 # Add-Type cannot replace an already loaded type in the same PowerShell process.
-# If you edit this C# code and re-run it, open a fresh Administrator PowerShell window.
-if (-not ('GrayMoonServiceLogonRights' -as [type])) {
+# If you edit this C# code and re-run it, open a fresh Administrator PowerShell window
+# or change the class name again.
+if (-not ('GrayMoonServiceLogonRightsV2' -as [type])) {
 Add-Type @"
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
-public static class GrayMoonServiceLogonRights
+public static class GrayMoonServiceLogonRightsV2
 {
     [StructLayout(LayoutKind.Sequential)]
     private struct LSA_UNICODE_STRING
@@ -177,13 +178,13 @@ public static class GrayMoonServiceLogonRights
 
 # Native Windows service creation helper.
 # This avoids Win32_Service.Create and therefore avoids the CIM ServiceType mismatch.
-if (-not ('GrayMoonNativeServiceInstaller' -as [type])) {
+if (-not ('GrayMoonNativeServiceInstallerV2' -as [type])) {
 Add-Type @"
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
-public static class GrayMoonNativeServiceInstaller
+public static class GrayMoonNativeServiceInstallerV2
 {
     private const uint SC_MANAGER_CREATE_SERVICE = 0x00000002;
 
@@ -327,7 +328,7 @@ function Test-UserCredentials {
 
     # LOGON32_LOGON_INTERACTIVE = 2
     # LOGON32_PROVIDER_DEFAULT = 0
-    $ok = [GrayMoonNativeLogonValidator]::LogonUser(
+    $ok = [GrayMoonNativeLogonValidatorV2]::LogonUser(
         $identity.UserName,
         $identity.Domain,
         $Password,
@@ -337,7 +338,7 @@ function Test-UserCredentials {
     )
 
     if ($ok -and $tokenHandle -ne [IntPtr]::Zero) {
-        [void][GrayMoonNativeLogonValidator]::CloseHandle($tokenHandle)
+        [void][GrayMoonNativeLogonValidatorV2]::CloseHandle($tokenHandle)
     }
 
     return $ok
@@ -356,7 +357,7 @@ function Grant-ServiceLogonRight {
         $sidBytes = New-Object byte[] $sidObj.BinaryLength
         $sidObj.GetBinaryForm($sidBytes, 0)
 
-        [GrayMoonServiceLogonRights]::AddAccountRight($sidBytes, 'SeServiceLogonRight')
+        [GrayMoonServiceLogonRightsV2]::AddAccountRight($sidBytes, 'SeServiceLogonRight')
     }
     catch {
         throw "Failed to grant 'Log on as a service' to '$AccountName'. $($_.Exception.Message)"
@@ -439,7 +440,7 @@ function New-WindowsServiceWithLogon {
         [string]$StartPassword
     )
 
-    [GrayMoonNativeServiceInstaller]::CreateOwnProcessAutoService(
+    [GrayMoonNativeServiceInstallerV2]::CreateOwnProcessAutoService(
         $Name,
         $DisplayName,
         $PathName,
