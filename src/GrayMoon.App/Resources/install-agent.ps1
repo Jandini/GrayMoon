@@ -258,8 +258,8 @@ function New-Win32ServiceWithLogon {
         StartName = $StartName
         StartPassword = $StartPassword
         LoadOrderGroup = ''
-        LoadOrderGroupDependencies = ''
-        ServiceDependencies = ''
+        LoadOrderGroupDependencies = $null
+        ServiceDependencies = $null
     }
     if ($out.ReturnValue -ne 0) {
         throw "Win32_Service.Create failed with return code $($out.ReturnValue)."
