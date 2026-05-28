@@ -107,8 +107,7 @@ public static class GrayMoonServiceLogonRights
     [DllImport("advapi32.dll")]
     private static extern int LsaNtStatusToWinError(uint Status);
 
-    private const uint POLICY_CREATE_ACCOUNT = 0x00000010;
-    private const uint POLICY_LOOKUP_NAMES   = 0x00000800;
+    private const uint POLICY_ALL_ACCESS = 0x000F0FFF;
 
     public static void AddAccountRight(byte[] sidBytes, string rightName)
     {
@@ -121,37 +120,36 @@ public static class GrayMoonServiceLogonRights
         LSA_OBJECT_ATTRIBUTES attributes = new LSA_OBJECT_ATTRIBUTES();
         attributes.Length = (uint)Marshal.SizeOf(typeof(LSA_OBJECT_ATTRIBUTES));
 
+        GCHandle sidHandle = GCHandle.Alloc(sidBytes, GCHandleType.Pinned);
         IntPtr policyHandle = IntPtr.Zero;
-        IntPtr sidPtr = IntPtr.Zero;
         IntPtr rightPtr = IntPtr.Zero;
-
-        uint status = LsaOpenPolicy(
-            IntPtr.Zero,
-            ref attributes,
-            POLICY_CREATE_ACCOUNT | POLICY_LOOKUP_NAMES,
-            out policyHandle);
-
-        if (status != 0)
-        {
-            int error = LsaNtStatusToWinError(status);
-            throw new Win32Exception(error, "LsaOpenPolicy failed.");
-        }
 
         try
         {
-            sidPtr = Marshal.AllocHGlobal(sidBytes.Length);
-            Marshal.Copy(sidBytes, 0, sidPtr, sidBytes.Length);
+            uint status = LsaOpenPolicy(
+                IntPtr.Zero,
+                ref attributes,
+                POLICY_ALL_ACCESS,
+                out policyHandle);
+
+            if (status != 0)
+            {
+                int error = LsaNtStatusToWinError(status);
+                throw new Win32Exception(error, "LsaOpenPolicy failed.");
+            }
 
             rightPtr = Marshal.StringToHGlobalUni(rightName);
 
-            LSA_UNICODE_STRING right = new LSA_UNICODE_STRING();
-            right.Length = (ushort)(rightName.Length * 2);
-            right.MaximumLength = (ushort)((rightName.Length + 1) * 2);
-            right.Buffer = rightPtr;
+            LSA_UNICODE_STRING[] rights = new LSA_UNICODE_STRING[1];
+            rights[0].Buffer = rightPtr;
+            rights[0].Length = (ushort)(rightName.Length * 2);
+            rights[0].MaximumLength = (ushort)((rightName.Length + 1) * 2);
 
-            LSA_UNICODE_STRING[] rights = new LSA_UNICODE_STRING[] { right };
-
-            status = LsaAddAccountRights(policyHandle, sidPtr, rights, 1);
+            status = LsaAddAccountRights(
+                policyHandle,
+                sidHandle.AddrOfPinnedObject(),
+                rights,
+                1);
 
             if (status != 0)
             {
@@ -164,11 +162,11 @@ public static class GrayMoonServiceLogonRights
             if (rightPtr != IntPtr.Zero)
                 Marshal.FreeHGlobal(rightPtr);
 
-            if (sidPtr != IntPtr.Zero)
-                Marshal.FreeHGlobal(sidPtr);
-
             if (policyHandle != IntPtr.Zero)
                 LsaClose(policyHandle);
+
+            if (sidHandle.IsAllocated)
+                sidHandle.Free();
         }
     }
 }
@@ -343,23 +341,132 @@ function Test-UserCredentials {
     return $ok
 }
 
+function Grant-ServiceLogonRight-Secedit {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AccountSidString
+    )
+
+    $secedit = Join-Path $env:WINDIR 'System32\secedit.exe'
+    if (-not (Test-Path -LiteralPath $secedit)) {
+        throw 'secedit.exe was not found.'
+    }
+
+    $guid = [guid]::NewGuid().ToString('N')
+    $infFile = Join-Path $env:TEMP "graymoon-secpol-$guid.inf"
+    $dbFile = Join-Path $env:TEMP "graymoon-secedit-$guid.sdb"
+    $logFile = Join-Path $env:TEMP "graymoon-secedit-$guid.log"
+    $sidToken = "*$AccountSidString"
+
+    try {
+        & $secedit /export /cfg $infFile /areas USER_RIGHTS | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "secedit export exited with code $LASTEXITCODE."
+        }
+
+        if (-not (Test-Path -LiteralPath $infFile)) {
+            throw "secedit export did not create '$infFile'."
+        }
+
+        $lines = @(Get-Content -LiteralPath $infFile -Encoding Unicode)
+        $updated = $false
+        $privilegeLineIndex = -1
+
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '(?i)^\s*SeServiceLogonRight\s*=') {
+                $privilegeLineIndex = $i
+                break
+            }
+        }
+
+        if ($privilegeLineIndex -ge 0) {
+            $line = $lines[$privilegeLineIndex]
+            if ($line -match [regex]::Escape($AccountSidString)) {
+                return
+            }
+
+            $value = ($line -split '=', 2)[1].Trim()
+            if ([string]::IsNullOrWhiteSpace($value)) {
+                $lines[$privilegeLineIndex] = "SeServiceLogonRight = $sidToken"
+            }
+            else {
+                $lines[$privilegeLineIndex] = "SeServiceLogonRight = $value,$sidToken"
+            }
+
+            $updated = $true
+        }
+        else {
+            $sectionIndex = -1
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -match '^\[Privilege Rights\]\s*$') {
+                    $sectionIndex = $i
+                    break
+                }
+            }
+
+            if ($sectionIndex -ge 0) {
+                $before = $lines[0..$sectionIndex]
+                $after = @()
+                if ($sectionIndex -lt ($lines.Count - 1)) {
+                    $after = $lines[($sectionIndex + 1)..($lines.Count - 1)]
+                }
+
+                $lines = $before + @("SeServiceLogonRight = $sidToken") + $after
+            }
+            else {
+                $lines = $lines + @('[Privilege Rights]', "SeServiceLogonRight = $sidToken")
+            }
+
+            $updated = $true
+        }
+
+        if (-not $updated) {
+            return
+        }
+
+        $lines | Set-Content -LiteralPath $infFile -Encoding Unicode
+
+        & $secedit /configure /db $dbFile /cfg $infFile /areas USER_RIGHTS /log $logFile | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            $logText = ''
+            if (Test-Path -LiteralPath $logFile) {
+                $logText = Get-Content -LiteralPath $logFile -Raw -ErrorAction SilentlyContinue
+            }
+
+            throw "secedit configure exited with code $LASTEXITCODE. $logText"
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $infFile, $dbFile, $logFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Grant-ServiceLogonRight {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$AccountName
+        [System.Security.Principal.SecurityIdentifier]$AccountSid
     )
 
+    $sidBytes = New-Object byte[] $AccountSid.BinaryLength
+    $AccountSid.GetBinaryForm($sidBytes, 0)
+    $sidString = $AccountSid.Value
+    $lsaError = $null
+
     try {
-        $ntAccount = New-Object System.Security.Principal.NTAccount($AccountName)
-        $sidObj = $ntAccount.Translate([System.Security.Principal.SecurityIdentifier])
-
-        $sidBytes = New-Object byte[] $sidObj.BinaryLength
-        $sidObj.GetBinaryForm($sidBytes, 0)
-
         [GrayMoonServiceLogonRights]::AddAccountRight($sidBytes, 'SeServiceLogonRight')
+        return
     }
     catch {
-        throw "Failed to grant 'Log on as a service' to '$AccountName'. $($_.Exception.Message)"
+        $lsaError = $_.Exception.Message
+    }
+
+    Write-Host "LSA grant failed ($lsaError). Trying secedit..." -ForegroundColor Yellow
+
+    try {
+        Grant-ServiceLogonRight-Secedit -AccountSidString $sidString
+    }
+    catch {
+        throw "Failed to grant 'Log on as a service' (SID: $sidString). LSA: $lsaError. Secedit: $($_.Exception.Message)"
     }
 }
 
@@ -608,7 +715,7 @@ else {
             }
 
             Write-Host 'Granting "Log on as a service" right...' -ForegroundColor Yellow
-            Grant-ServiceLogonRight -AccountName $currentUser
+            Grant-ServiceLogonRight -AccountSid ([System.Security.Principal.WindowsIdentity]::GetCurrent().User)
 
             Write-Host 'Creating Windows service...' -ForegroundColor Yellow
 
