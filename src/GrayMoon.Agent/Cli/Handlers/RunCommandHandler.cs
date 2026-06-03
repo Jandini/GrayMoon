@@ -66,7 +66,6 @@ internal static class RunCommandHandler
 
         builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection(AgentOptions.SectionName));
 
-        // Determine log file path
         var logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GrayMoon", "logs");
         Directory.CreateDirectory(logDirectory);
         var logFilePath = Path.Combine(logDirectory, "graymoon-agent-.log");

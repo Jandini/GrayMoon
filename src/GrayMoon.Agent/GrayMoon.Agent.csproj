@@ -2,7 +2,7 @@
 
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
-		<TargetFramework>net8.0</TargetFramework>
+		<TargetFramework>net10.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<RootNamespace>GrayMoon.Agent</RootNamespace>
@@ -36,14 +36,14 @@
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
 
-		<PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.11" />
+		<PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.*" />
 		<PackageReference Include="System.CommandLine" Version="2.0.2" />
-		<PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
-		<PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
-		<PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
-		<PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
-		<PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="8.0.1" />
+		<PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.*" />
+		<PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="10.0.*" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.*" />
+		<PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.*" />
+		<PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.*" />
+		<PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.*" />
 		<PackageReference Include="Polly" Version="8.4.2" />
 		<PackageReference Include="Serilog.Enrichers.Environment" Version="3.0.1" />
 		<PackageReference Include="Serilog.Extensions.Hosting" Version="8.0.0" />

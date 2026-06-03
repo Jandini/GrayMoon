@@ -2,12 +2,9 @@ using System.CommandLine;
 
 namespace GrayMoon.Agent.Cli;
 
-/// <summary>
-/// Shared CLI option definitions for run and install verbs. Single place to avoid repetition.
-/// </summary>
 internal static class AgentCliOptions
 {
-    public static readonly Option<string> HubUrl = new("--hub-url", "-u")
+    public static readonly Option<string?> HubUrl = new("--hub-url", "-u")
     {
         Description = "SignalR hub URL the agent connects to",
         Arity = ArgumentArity.ZeroOrOne
@@ -25,8 +22,15 @@ internal static class AgentCliOptions
         Arity = ArgumentArity.ZeroOrOne
     };
 
+    // Install-only: not added to the run command.
+    public static readonly Option<string?> Account = new("--account")
+    {
+        Description = "Windows account to run the service as (default: current user)",
+        Arity = ArgumentArity.ZeroOrOne
+    };
+
     /// <summary>
-    /// Adds the shared run/install options to a command. Call once per command that needs them.
+    /// Adds the shared run/install options to a command.
     /// </summary>
     public static void AddTo(Command command)
     {
@@ -42,7 +46,7 @@ internal static class AgentCliOptions
     }
 
     /// <summary>
-    /// Applies parsed CLI values over the given options; only overrides when option was explicitly provided.
+    /// Applies parsed CLI values over the given options; only overrides when explicitly provided.
     /// </summary>
     public static void ApplyTo(AgentOptions options, ParseResult parseResult)
     {
@@ -55,8 +59,7 @@ internal static class AgentCliOptions
     }
 
     /// <summary>
-    /// Builds the argument string for the run verb (for service install), e.g. "run --hub-url ...".
-    /// Includes only options that were explicitly passed so the service runs with the same settings.
+    /// Builds the run-verb argument string for service registration, e.g. "run --hub-url ...".
     /// </summary>
     public static string BuildRunArguments(ParseResult parseResult)
     {
