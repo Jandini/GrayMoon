@@ -25,7 +25,7 @@ if (Test-Path -LiteralPath $agentExe) {
     & $agentExe uninstall
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'ERROR: Agent uninstall failed.' -ForegroundColor Red
-        exit $LASTEXITCODE
+        return
     }
 }
 

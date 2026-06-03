@@ -60,4 +60,10 @@ if (-not (Test-Path -LiteralPath $agentExe)) {
 # Delegate all service management (create/update, rights grant, start) to the agent.
 Write-Host 'Installing service...' -ForegroundColor Yellow
 & $agentExe install --hub-url $hubUrl
-exit $LASTEXITCODE
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Installation failed. Correct any errors above and run the script again." -ForegroundColor Red
+    return
+}
+Write-Host ''
+Write-Host 'Installation completed!' -ForegroundColor Green
+Write-Host ''
