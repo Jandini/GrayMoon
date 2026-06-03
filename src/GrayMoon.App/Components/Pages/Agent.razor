@@ -51,8 +51,8 @@
                                 The script will download, install, and start the agent service automatically.
                             </small>
                             <p class="mb-0 small agent-runtime-note mt-2 d-block">
-                                The Windows service requires the .NET 8 (x64) runtime on the host.
-                                <a href="@AgentDotnet8RuntimeUrl" target="_blank" rel="noopener noreferrer">Download the .NET 8 runtime</a>
+                                The Windows service requires the .NET 10 (x64) runtime on the host.
+                                <a href="@AgentDotnet10RuntimeUrl" target="_blank" rel="noopener noreferrer">Download the .NET 10 runtime</a>
                             </p>
                         </div>
                         <div class="tab-pane @(ActiveTab == "uninstall" ? "show active" : "")" role="tabpanel">
@@ -106,7 +106,7 @@
         </div>
     </div>
 @code {
-    private const string AgentDotnet8RuntimeUrl = "https://aka.ms/dotnet-core-applaunch?framework=Microsoft.NETCore.App&framework_version=8.0.0&arch=x64&rid=win-x64&os=win10";
+    private const string AgentDotnet10RuntimeUrl = "https://aka.ms/dotnet-core-applaunch?framework=Microsoft.NETCore.App&framework_version=10.0.0&arch=x64&rid=win-x64&os=win10";
 
     private sealed record HostInfoDto(string? DotnetVersion, string? GitVersion, string? GitVersionToolVersion);
 
@@ -201,10 +201,10 @@
             return;
         }
         builder.OpenElement(0, "a");
-        builder.AddAttribute(1, "href", AgentDotnet8RuntimeUrl);
+        builder.AddAttribute(1, "href", AgentDotnet10RuntimeUrl);
         builder.AddAttribute(2, "target", "_blank");
         builder.AddAttribute(3, "rel", "noopener noreferrer");
-        builder.AddContent(4, "Download .NET 8 runtime");
+        builder.AddContent(4, "Download .NET 10 runtime");
         builder.CloseElement();
     };
 
