@@ -8,7 +8,7 @@ Log.Logger = new LoggerConfiguration()
 try
 {
     var cliArgs = Environment.GetCommandLineArgs().Skip(1).ToArray();
-    var effectiveArgs = cliArgs.Length == 0 || cliArgs[0] is not ("run" or "install" or "uninstall")
+    var effectiveArgs = cliArgs.Length == 0 || cliArgs[0] is not ("run" or "install" or "uninstall" or "stop" or "start")
         ? new[] { "run" }.Concat(cliArgs).ToArray()
         : cliArgs;
     var rootCommand = AgentCli.Build();

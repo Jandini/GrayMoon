@@ -9,8 +9,7 @@ namespace GrayMoon.Agent.Cli;
 internal static class AgentCli
 {
     /// <summary>
-    /// Builds the root command with verbs: run (default), install, uninstall.
-    /// Shared options (hub-url, listen-port, workspace-root, concurrency) are defined once and attached to run and install.
+    /// Builds the root command with verbs: run (default), install, uninstall, stop, start.
     /// </summary>
     public static RootCommand Build()
     {
@@ -23,12 +22,21 @@ internal static class AgentCli
 
         var installCommand = new Command("install", "Install the agent as a Windows service or systemd unit.");
         AgentCliOptions.AddTo(installCommand);
+        installCommand.Options.Add(AgentCliOptions.Account);
         installCommand.SetAction(InstallAsync);
         root.Subcommands.Add(installCommand);
 
         var uninstallCommand = new Command("uninstall", "Remove the agent Windows service or systemd unit.");
         uninstallCommand.SetAction(UninstallAsync);
         root.Subcommands.Add(uninstallCommand);
+
+        var stopCommand = new Command("stop", "Stop the GrayMoon Agent Windows service.");
+        stopCommand.SetAction((_, ct) => StopCommandHandler.StopAsync(ct));
+        root.Subcommands.Add(stopCommand);
+
+        var startCommand = new Command("start", "Start the GrayMoon Agent Windows service.");
+        startCommand.SetAction((_, ct) => StartCommandHandler.StartAsync(ct));
+        root.Subcommands.Add(startCommand);
 
         return root;
     }
@@ -49,21 +57,22 @@ internal static class AgentCli
 
     private static async Task<int> InstallAsync(ParseResult parseResult, CancellationToken cancellationToken)
     {
-        var services = new ServiceCollection()
-            .AddLogging(b => b.AddConsole().SetMinimumLevel(LogLevel.Warning))
-            .AddSingleton<ICommandLineService, CommandLineService>()
-            .BuildServiceProvider();
-        var commandLine = services.GetRequiredService<ICommandLineService>();
+        var commandLine = BuildCommandLineService();
         return await InstallCommandHandler.InstallAsync(parseResult, cancellationToken, commandLine).ConfigureAwait(false);
     }
 
     private static async Task<int> UninstallAsync(ParseResult parseResult, CancellationToken cancellationToken)
     {
+        var commandLine = BuildCommandLineService();
+        return await UninstallCommandHandler.UninstallAsync(cancellationToken, commandLine).ConfigureAwait(false);
+    }
+
+    private static ICommandLineService BuildCommandLineService()
+    {
         var services = new ServiceCollection()
             .AddLogging(b => b.AddConsole().SetMinimumLevel(LogLevel.Warning))
             .AddSingleton<ICommandLineService, CommandLineService>()
             .BuildServiceProvider();
-        var commandLine = services.GetRequiredService<ICommandLineService>();
-        return await UninstallCommandHandler.UninstallAsync(cancellationToken, commandLine).ConfigureAwait(false);
+        return services.GetRequiredService<ICommandLineService>();
     }
 }

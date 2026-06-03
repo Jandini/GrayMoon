@@ -1,3 +1,6 @@
+using System.Runtime.Versioning;
+using System.ServiceProcess;
+using GrayMoon.Agent.Platform.Windows;
 using GrayMoon.Common;
 
 namespace GrayMoon.Agent.Cli;
@@ -7,7 +10,7 @@ internal static class UninstallCommandHandler
     public static async Task<int> UninstallAsync(CancellationToken cancellationToken, ICommandLineService commandLine)
     {
         if (OperatingSystem.IsWindows())
-            return await UninstallWindowsAsync(cancellationToken, commandLine).ConfigureAwait(false);
+            return UninstallWindows();
         if (OperatingSystem.IsLinux())
             return await UninstallSystemdAsync(cancellationToken, commandLine).ConfigureAwait(false);
 
@@ -15,16 +18,46 @@ internal static class UninstallCommandHandler
         return 1;
     }
 
-    private static async Task<int> UninstallWindowsAsync(CancellationToken cancellationToken, ICommandLineService commandLine)
+    [SupportedOSPlatform("windows")]
+    private static int UninstallWindows()
     {
-        var result = await commandLine.RunAsync("sc", $"delete {InstallCommandHandler.ServiceName}", null, null, cancellationToken).ConfigureAwait(false);
-        if (result.ExitCode != 0)
+        using var controller = new ServiceController(InstallCommandHandler.ServiceName);
+        try
         {
-            Console.Error.WriteLine($"Failed to delete Windows service: {result.Stderr?.TrimEnd() ?? "unknown"}");
-            return result.ExitCode;
+            _ = controller.Status;
         }
-        Console.WriteLine($"Windows service '{InstallCommandHandler.ServiceName}' removed.");
-        return 0;
+        catch (InvalidOperationException)
+        {
+            Console.WriteLine("Service not found.");
+            return 0;
+        }
+
+        if (controller.Status == ServiceControllerStatus.Running)
+        {
+            Console.WriteLine("Stopping service...");
+            try
+            {
+                controller.Stop();
+                controller.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(30));
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to stop service: {ex.Message}");
+                return 1;
+            }
+        }
+
+        try
+        {
+            WindowsServiceManager.RemoveService(InstallCommandHandler.ServiceName);
+            Console.WriteLine($"Service '{InstallCommandHandler.ServiceName}' removed.");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to remove service: {ex.Message}");
+            return 1;
+        }
     }
 
     private static async Task<int> UninstallSystemdAsync(CancellationToken cancellationToken, ICommandLineService commandLine)
