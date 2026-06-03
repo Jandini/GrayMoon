@@ -76,6 +76,18 @@
     text-overflow: ellipsis;
 }
 
+.agent-runtime-note {
+    color: var(--text-primary);
+}
+
+.agent-runtime-note a {
+    color: var(--text-primary);
+}
+
+.agent-runtime-note a:hover {
+    color: #fff;
+}
+
 .host-info-grid {
     display: grid;
     grid-template-columns: auto 1fr;

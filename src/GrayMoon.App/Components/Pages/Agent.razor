@@ -50,7 +50,7 @@
                             <small class="text-muted mt-2 d-block">
                                 The script will download, install, and start the agent service automatically.
                             </small>
-                            <p class="mb-0 small text-muted mt-2 d-block">
+                            <p class="mb-0 small agent-runtime-note mt-2 d-block">
                                 The Windows service requires the .NET 8 (x64) runtime on the host.
                                 <a href="@AgentDotnet8RuntimeUrl" target="_blank" rel="noopener noreferrer">Download the .NET 8 runtime</a>
                             </p>
@@ -120,9 +120,9 @@
     {
         var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
         var installUrl = $"{baseUrl}/api/agent/install";
-        installCommand = $"Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('{installUrl}'))";
+        installCommand = $"irm {installUrl} | iex";
         var uninstallUrl = $"{baseUrl}/api/agent/uninstall";
-        uninstallCommand = $"Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('{uninstallUrl}'))";
+        uninstallCommand = $"irm {uninstallUrl} | iex";
         SetDefaultTab();
     }
 

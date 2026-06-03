@@ -195,4 +195,3 @@ The dependency count badge in the grid now opens a detailed popup when you hover
 - **Mismatch case (orange badge):** lists every package that needs updating with `CurrentVersion -> NewVersion`. Clicking the badge still triggers the per-repository update flow.
 - **Copy to clipboard:** the popup has a small clipboard icon in the top-right corner that copies the list (prefixed with the repository name) so you can paste it into a PR description, chat, or ticket. The copy action does not trigger the badge's main click.
 - **Pinned repositories** show the tooltip and the Copy button but the badge itself is non-clickable - exactly what you want when the repo is intentionally frozen.
-
