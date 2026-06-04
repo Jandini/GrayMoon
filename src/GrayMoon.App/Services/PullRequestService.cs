@@ -1,6 +1,7 @@
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services;
 
@@ -24,8 +25,11 @@ public interface IPullRequestService
 public sealed class PullRequestService(
     AppDbContext dbContext,
     GitHubService gitHubService,
+    IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<PullRequestService> logger) : IPullRequestService
 {
+    private int MaxConcurrency => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
+
     public async Task<CreatePullRequestResult> CreatePullRequestAsync(
         CreatePullRequestRequest request,
         CancellationToken cancellationToken)
@@ -51,6 +55,14 @@ public sealed class PullRequestService(
         if (repo?.Connector is not { } connector)
             return Fail(request, "GitHub connector not configured for this repository.");
 
+        return await ExecuteCreatePullRequestAsync(request, connector, cancellationToken);
+    }
+
+    private async Task<CreatePullRequestResult> ExecuteCreatePullRequestAsync(
+        CreatePullRequestRequest request,
+        Connector connector,
+        CancellationToken cancellationToken)
+    {
         if (connector.ConnectorType != ConnectorType.GitHub)
             return Fail(request, "Repository connector is not a GitHub connector.");
 
@@ -127,42 +139,72 @@ public sealed class PullRequestService(
     {
         ArgumentNullException.ThrowIfNull(requests);
 
-        var results = new List<CreatePullRequestResult>(requests.Count);
-        var created = 0;
-        var failed = 0;
         var total = requests.Count;
-
         progress?.Report(new CreatePullRequestProgress { Created = 0, Failed = 0, Total = total });
 
-        foreach (var request in requests)
+        var ids = requests.Select(r => r.RepositoryId).Distinct().ToList();
+        var repoById = await dbContext.Repositories
+            .AsNoTracking()
+            .Include(r => r.Connector)
+            .Where(r => ids.Contains(r.RepositoryId))
+            .ToDictionaryAsync(r => r.RepositoryId, cancellationToken);
+
+        var results = new CreatePullRequestResult[requests.Count];
+        var created = 0;
+        var failed = 0;
+
+        using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
+        var tasks = requests.Select(async (request, index) =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            progress?.Report(new CreatePullRequestProgress
+            await semaphore.WaitAsync(cancellationToken);
+            try
             {
-                Created = created,
-                Failed = failed,
-                Total = total,
-                CurrentRepositoryName = request.RepositoryName
-            });
+                CreatePullRequestResult result;
 
-            var result = await CreatePullRequestAsync(request, cancellationToken);
-            results.Add(result);
+                if (string.IsNullOrWhiteSpace(request.Title))
+                    result = Fail(request, "Title is required.");
+                else if (string.IsNullOrWhiteSpace(request.Owner))
+                    result = Fail(request, "Repository owner is required.");
+                else if (string.IsNullOrWhiteSpace(request.RepositoryName))
+                    result = Fail(request, "Repository name is required.");
+                else if (string.IsNullOrWhiteSpace(request.HeadBranch))
+                    result = Fail(request, "Head branch is required.");
+                else if (string.IsNullOrWhiteSpace(request.BaseBranch))
+                    result = Fail(request, "Base branch is required.");
+                else if (!repoById.TryGetValue(request.RepositoryId, out var repo) || repo?.Connector is not { } connector)
+                    result = Fail(request, "GitHub connector not configured for this repository.");
+                else
+                    result = await ExecuteCreatePullRequestAsync(request, connector, cancellationToken);
 
-            if (result.Success)
-                created++;
-            else
-                failed++;
+                results[index] = result;
 
-            progress?.Report(new CreatePullRequestProgress
+                int c, f;
+                if (result.Success)
+                {
+                    c = Interlocked.Increment(ref created);
+                    f = Volatile.Read(ref failed);
+                }
+                else
+                {
+                    f = Interlocked.Increment(ref failed);
+                    c = Volatile.Read(ref created);
+                }
+
+                progress?.Report(new CreatePullRequestProgress
+                {
+                    Created = c,
+                    Failed = f,
+                    Total = total,
+                    CurrentRepositoryName = request.RepositoryName
+                });
+            }
+            finally
             {
-                Created = created,
-                Failed = failed,
-                Total = total,
-                CurrentRepositoryName = request.RepositoryName
-            });
-        }
+                semaphore.Release();
+            }
+        });
 
+        await Task.WhenAll(tasks);
         return results;
     }
 
