@@ -162,7 +162,9 @@ public static class BranchEndpoints
 
         var workspaceId = body.WorkspaceId;
         var repositoryId = body.RepositoryId;
-        var branchName = body.BranchName;
+        var branchName = body.BranchName?.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) == true
+            ? body.BranchName.Substring("origin/".Length)
+            : body.BranchName;
         var isTag = body.IsTag;
 
         if (workspaceId <= 0 || repositoryId <= 0 || string.IsNullOrWhiteSpace(branchName))
@@ -273,6 +275,7 @@ public static class BranchEndpoints
         GitHubRepositoryRepository repoRepository,
         WorkspacePullRequestRepository workspacePullRequestRepository,
         AppDbContext dbContext,
+        WorkspaceGitService workspaceGitService,
         IHubContext<WorkspaceSyncHub> hubContext,
         ConnectorHealthService connectorHealthService,
         ILoggerFactory loggerFactory)
@@ -331,14 +334,32 @@ public static class BranchEndpoints
             if (!commandSuccess)
                 return Results.Problem(errorMessage, statusCode: 500);
 
-            // Sync prunes the previous local branch; remove it from persistence
-            var toRemove = await dbContext.RepositoryBranches
-                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && !rb.IsRemote && rb.BranchName == currentBranchName)
-                .ToListAsync(CancellationToken.None);
-            if (toRemove.Count > 0)
+            // Persist the full branch state returned by the agent (fetch --prune was run, so stale remote branches are gone)
+            if (syncResponse?.LocalBranches != null)
             {
-                dbContext.RepositoryBranches.RemoveRange(toRemove);
-                await dbContext.SaveChangesAsync(CancellationToken.None);
+                var localBranches = syncResponse.LocalBranches.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
+                var remoteBranches = syncResponse.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+                var tags = syncResponse.Tags?.Where(t => !string.IsNullOrWhiteSpace(t)).ToList() ?? new List<string>();
+                await workspaceGitService.PersistBranchesAsync(
+                    wr.WorkspaceRepositoryId,
+                    localBranches,
+                    remoteBranches,
+                    syncResponse.DefaultBranch,
+                    tags,
+                    syncResponse.CurrentTag,
+                    CancellationToken.None);
+            }
+            else
+            {
+                // Fallback for older agents: prune only the previous local branch
+                var toRemove = await dbContext.RepositoryBranches
+                    .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && !rb.IsRemote && rb.BranchName == currentBranchName)
+                    .ToListAsync(CancellationToken.None);
+                if (toRemove.Count > 0)
+                {
+                    dbContext.RepositoryBranches.RemoveRange(toRemove);
+                    await dbContext.SaveChangesAsync(CancellationToken.None);
+                }
             }
 
             // Broadcast update to refresh UI
