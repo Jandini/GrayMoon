@@ -336,7 +336,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var logArgs = "";
         if (string.IsNullOrWhiteSpace(bearerToken))
         {
-            args = $"fetch origin {refArgs}";
+            args = $"fetch origin --prune {refArgs}";
             logArgs = args;
         }
         else
@@ -345,7 +345,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
             var headerValue = "Authorization: Basic " + base64;
             var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
-            args = $"-c core.askpass=true -c credential.helper= -c \"http.extraHeader={escaped}\" fetch origin {refArgs}";
+            args = $"-c core.askpass=true -c credential.helper= -c \"http.extraHeader={escaped}\" fetch origin --prune {refArgs}";
             logArgs = "***";
         }
 

@@ -69,6 +69,25 @@ public sealed class SyncCommandHandler(
 
         await dbContext.SaveChangesAsync();
 
+        // Prune remote branches from DB that no longer exist in git (fetch --prune ran on the agent side)
+        if (n.RemoteBranches != null)
+        {
+            var freshRemotes = n.RemoteBranches
+                .Where(b => !string.IsNullOrWhiteSpace(b))
+                .Select(b => b.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? b : "origin/" + b)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var dbRemotes = await dbContext.RepositoryBranches
+                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsRemote)
+                .ToListAsync();
+            var stale = dbRemotes.Where(rb => !freshRemotes.Contains(rb.BranchName ?? "")).ToList();
+            if (stale.Count > 0)
+            {
+                dbContext.RepositoryBranches.RemoveRange(stale);
+                await dbContext.SaveChangesAsync();
+                logger.LogInformation("SyncCommand pruned {Count} stale remote branch(es) for repo {RepositoryId}", stale.Count, n.RepositoryId);
+            }
+        }
+
         if (n.Projects is { Count: > 0 })
         {
             var syncProjects = n.Projects

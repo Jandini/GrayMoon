@@ -67,9 +67,10 @@ public sealed class CheckoutHookSyncCommand(IGitService git, ICsProjFileService 
         }
 
         bool? hasUpstream = null;
+        IReadOnlyList<string>? remoteBranches = null;
         if (branch != "-")
         {
-            var remoteBranches = await git.GetRemoteBranchesFromRefsAsync(payload.RepositoryPath, cancellationToken);
+            remoteBranches = await git.GetRemoteBranchesFromRefsAsync(payload.RepositoryPath, cancellationToken);
             hasUpstream = remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
         }
 
@@ -110,7 +111,9 @@ public sealed class CheckoutHookSyncCommand(IGitService git, ICsProjFileService 
                 DefaultBranchBehind = defaultBehind,
                 DefaultBranchAhead = defaultAhead,
                 Projects = syncProjects,
-                ErrorMessage = fetchError
+                ErrorMessage = fetchError,
+                // Include remote branches when fetch succeeded so the app can prune deleted remote branches from the DB
+                RemoteBranches = fetchError == null && remoteBranches != null ? remoteBranches.ToList() : null
             };
             await connection.InvokeAsync(AgentHubMethods.SyncCommand, notification, cancellationToken);
             logger.LogInformation("CheckoutHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}, hasUpstream={HasUpstream}",
