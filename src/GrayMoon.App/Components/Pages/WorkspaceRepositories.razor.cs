@@ -1112,7 +1112,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         try
         {
             var repoIdsThatNeedPush = workspaceRepositories
-                .Where(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false))
+                .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
             var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoAsync(
@@ -1295,7 +1295,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             pushPlanRepoIds = repoIdsWithUnpushed;
 
             var repoIdsThatNeedPush = workspaceRepositories
-                .Where(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false))
+                .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
             var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoSetAsync(

@@ -355,6 +355,8 @@ public sealed class WorkspacePushService(
         if (!success)
         {
             var rawErr = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage;
+            if (IsNonFastForwardRejection(rawErr))
+                await FetchAfterRejectionAsync(workspaceId, repositoryId, repo.RepositoryName, workspace.Name, workspaceRoot, cancellationToken);
             return (false, FormatPushError(rawErr));
         }
 
@@ -622,6 +624,8 @@ public sealed class WorkspacePushService(
                 if (!success)
                 {
                     var rawErr = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage;
+                    if (IsNonFastForwardRejection(rawErr))
+                        await FetchAfterRejectionAsync(workspace.WorkspaceId, repo.RepoId, repo.RepoName, workspace.Name, workspaceRoot, cancellationToken);
                     onRepoError?.Invoke(repo.RepoId, FormatPushError(rawErr));
                 }
                 var c = Interlocked.Increment(ref completed);
@@ -637,13 +641,38 @@ public sealed class WorkspacePushService(
         await Task.WhenAll(pushTasks);
     }
 
+    private static bool IsNonFastForwardRejection(string? err) =>
+        err != null &&
+        (err.Contains("non-fast-forward", StringComparison.OrdinalIgnoreCase) ||
+         (err.Contains("[rejected]", StringComparison.OrdinalIgnoreCase) && err.Contains("fetch first", StringComparison.OrdinalIgnoreCase)));
+
     private static string FormatPushError(string? rawError)
     {
         var err = rawError ?? "Push failed";
-        if (err.Contains("non-fast-forward", StringComparison.OrdinalIgnoreCase) ||
-            (err.Contains("[rejected]", StringComparison.OrdinalIgnoreCase) && err.Contains("fetch first", StringComparison.OrdinalIgnoreCase)))
-            return "Push rejected: remote has new commits not present locally. Fetch or pull before pushing.";
+        if (IsNonFastForwardRejection(err))
+            return "Push rejected: remote has new commits. Fetching latest state — pull and retry.";
         return err;
+    }
+
+    private async Task FetchAfterRejectionAsync(int workspaceId, int repositoryId, string repoName, string workspaceName, string? workspaceRoot, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _agentBridge.SendCommandAsync("RefreshBranches", new
+            {
+                workspaceName,
+                repositoryId,
+                repositoryName = repoName,
+                workspaceRoot
+            }, cancellationToken);
+            await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId,
+                [new PushRepoPayload(repositoryId, repoName, null, [])],
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Fetch after push rejection failed for repo {RepoId}", repositoryId);
+        }
     }
 
     private async Task UpdateCommitCountsAndUpstreamAfterPushAsync(int workspaceId, IReadOnlyList<PushRepoPayload> repos, CancellationToken cancellationToken)
