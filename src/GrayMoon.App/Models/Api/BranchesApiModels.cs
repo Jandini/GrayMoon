@@ -106,6 +106,18 @@ public sealed class SyncToDefaultBranchResponse
 
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
+
+    [JsonPropertyName("localBranches")]
+    public List<string>? LocalBranches { get; set; }
+
+    [JsonPropertyName("remoteBranches")]
+    public List<string>? RemoteBranches { get; set; }
+
+    [JsonPropertyName("tags")]
+    public List<string>? Tags { get; set; }
+
+    [JsonPropertyName("currentTag")]
+    public string? CurrentTag { get; set; }
 }
 
 /// <summary>API response for POST /api/branches/delete (camelCase).</summary>

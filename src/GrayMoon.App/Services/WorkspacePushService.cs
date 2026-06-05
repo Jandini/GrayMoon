@@ -354,8 +354,8 @@ public sealed class WorkspacePushService(
         var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data) is { Success: true };
         if (!success)
         {
-            var err = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage ?? "Push failed";
-            return (false, err);
+            var rawErr = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage;
+            return (false, FormatPushError(rawErr));
         }
 
         await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId,
@@ -621,8 +621,8 @@ public sealed class WorkspacePushService(
                 var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data) is { Success: true };
                 if (!success)
                 {
-                    var err = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage ?? "Push failed";
-                    onRepoError?.Invoke(repo.RepoId, err);
+                    var rawErr = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage;
+                    onRepoError?.Invoke(repo.RepoId, FormatPushError(rawErr));
                 }
                 var c = Interlocked.Increment(ref completed);
                 onProgressMessage?.Invoke($"Pushed {c} of {total}");
@@ -635,6 +635,15 @@ public sealed class WorkspacePushService(
             }
         });
         await Task.WhenAll(pushTasks);
+    }
+
+    private static string FormatPushError(string? rawError)
+    {
+        var err = rawError ?? "Push failed";
+        if (err.Contains("non-fast-forward", StringComparison.OrdinalIgnoreCase) ||
+            (err.Contains("[rejected]", StringComparison.OrdinalIgnoreCase) && err.Contains("fetch first", StringComparison.OrdinalIgnoreCase)))
+            return "Push rejected: remote has new commits not present locally. Fetch or pull before pushing.";
+        return err;
     }
 
     private async Task UpdateCommitCountsAndUpstreamAfterPushAsync(int workspaceId, IReadOnlyList<PushRepoPayload> repos, CancellationToken cancellationToken)
