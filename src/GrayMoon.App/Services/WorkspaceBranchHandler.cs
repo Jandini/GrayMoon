@@ -169,29 +169,11 @@ public sealed class WorkspaceBranchHandler(
         int workspaceId,
         int repositoryId,
         string? currentBranchName,
-        bool hasUpstream,
         string apiBaseUrl,
         CancellationToken cancellationToken)
     {
         var httpClient = httpClientFactory.CreateClient();
         var baseUrl = apiBaseUrl;
-
-        if (hasUpstream)
-        {
-            var deleteRequest = new { workspaceId, repositoryId, branchName = currentBranchName, isRemote = true };
-            var deleteJson = JsonSerializer.Serialize(deleteRequest);
-            using var deleteContent = new StringContent(deleteJson, System.Text.Encoding.UTF8, "application/json");
-            using var deleteResponse = await httpClient.PostAsync($"{baseUrl}/api/branches/delete", deleteContent, cancellationToken);
-            if (!deleteResponse.IsSuccessStatusCode)
-            {
-                var deleteError = await deleteResponse.Content.ReadAsStringAsync(cancellationToken);
-                if (deleteError.IndexOf("not exist", StringComparison.OrdinalIgnoreCase) < 0 &&
-                    deleteError.IndexOf("not found", StringComparison.OrdinalIgnoreCase) < 0)
-                {
-                    logger.LogWarning("Delete remote branch failed for repo {RepositoryId}: {StatusCode}", repositoryId, deleteResponse.StatusCode);
-                }
-            }
-        }
 
         var apiRequest = new { workspaceId, repositoryId, currentBranchName };
         var json = JsonSerializer.Serialize(apiRequest);

@@ -2366,7 +2366,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 ToastService.Show("Skipped sync to default: commits ahead of default branch and PR is not merged.");
                 return;
             }
-            await SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, hasUpstream, defaultBranch);
+            await SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, defaultBranch);
         }
         catch (Exception ex)
         {
@@ -2375,7 +2375,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    private async Task SyncToDefaultSingleRepoAfterCheckAsync(int repositoryId, string repositoryName, string currentBranchName, bool deleteRemoteFirst, string? defaultBranchName = null)
+    private async Task SyncToDefaultSingleRepoAfterCheckAsync(int repositoryId, string repositoryName, string currentBranchName, string? defaultBranchName = null)
     {
         if (workspace == null || isSyncingToDefault || isSyncing || isUpdating)
             return;
@@ -2391,7 +2391,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 WorkspaceId,
                 repositoryId,
                 currentBranchName,
-                deleteRemoteFirst,
                 ApiBaseUrl,
                 CancellationToken.None);
 
@@ -2467,13 +2466,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 await semaphore.WaitAsync();
                 try
                 {
-                    var hasUpstream = resultByRepo.TryGetValue(repositoryId, out var r) && r.HasUpstream == true;
-
                     var (success, errMsg) = await WorkspaceBranchHandler.SyncToDefaultSingleAsync(
                         WorkspaceId,
                         repositoryId,
                         currentBranchName,
-                        hasUpstream,
                         ApiBaseUrl,
                         CancellationToken.None);
 
