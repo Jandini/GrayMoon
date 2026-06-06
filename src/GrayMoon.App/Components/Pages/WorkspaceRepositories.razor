@@ -248,6 +248,14 @@
                            OnProceed="@OnDefaultBranchWarningProceedAsync"
                            OnCancel="@CloseDefaultBranchWarningModal" />
 
+<SyncToDefaultOptionsModal IsVisible="@_syncToDefaultOptionsModal.IsVisible"
+                           Message="@_syncToDefaultOptionsModal.Message"
+                           RepoItems="@_syncToDefaultOptionsModal.RepoItems"
+                           DeleteRemoteBranches="@_syncToDefaultOptionsModal.DeleteRemoteBranches"
+                           DeleteRemoteBranchesChanged="@(v => _syncToDefaultOptionsModal = _syncToDefaultOptionsModal with { DeleteRemoteBranches = v })"
+                           OnProceed="@OnSyncToDefaultOptionsProceedAsync"
+                           OnCancel="@CloseSyncToDefaultOptionsModal" />
+
 <NewPullRequestModal IsVisible="@_newPrModal.IsVisible"
                      IsBusy="@isCreatingPullRequests"
                      Targets="@_newPrModal.Targets"

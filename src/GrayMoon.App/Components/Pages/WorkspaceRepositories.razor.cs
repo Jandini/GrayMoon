@@ -101,6 +101,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private PushWithDependenciesModalState _pushWithDependenciesModal = new();
     private ConfirmModalState _confirmModal = new();
     private DefaultBranchWarningModalState _defaultBranchWarningModal = new();
+    private SyncToDefaultOptionsModalState _syncToDefaultOptionsModal = new();
     private string searchTerm = string.Empty;
 
     private bool _syncAwaitingAgentTasks;
@@ -594,6 +595,34 @@ public sealed partial class WorkspaceRepositories : IDisposable
             await action();
     }
 
+    private void ShowSyncToDefaultOptions(string message, IReadOnlyList<(string RepoName, string BranchName, bool HasRemote)> repoItems, Func<bool, Task> onProceed, bool defaultDeleteRemote = true)
+    {
+        _syncToDefaultOptionsModal = _syncToDefaultOptionsModal with
+        {
+            IsVisible = true,
+            Message = message,
+            RepoItems = repoItems,
+            DeleteRemoteBranches = defaultDeleteRemote,
+            PendingAction = onProceed
+        };
+        StateHasChanged();
+    }
+
+    private void CloseSyncToDefaultOptionsModal()
+    {
+        _syncToDefaultOptionsModal = _syncToDefaultOptionsModal with { IsVisible = false, PendingAction = null };
+        StateHasChanged();
+    }
+
+    private async Task OnSyncToDefaultOptionsProceedAsync()
+    {
+        var action = _syncToDefaultOptionsModal.PendingAction;
+        var deleteRemote = _syncToDefaultOptionsModal.DeleteRemoteBranches;
+        CloseSyncToDefaultOptionsModal();
+        if (action != null)
+            await action(deleteRemote);
+    }
+
 
     // --- New Pull Request dialog -----------------------------------------------------------
 
@@ -930,9 +959,16 @@ public sealed partial class WorkspaceRepositories : IDisposable
             _syncToDefaultCheckResults = checkResults.Where(r => safeRepoIds.Contains(r.RepoId)).ToList();
             var safeCount = safeRepoIds.Count;
             var message = safeCount == 1
-                ? "This will checkout the default branch, remove the current branch locally, and pull the latest. If the branch had an upstream, the remote branch may be deleted. Uncommitted local changes can block checkout."
-                : $"This will sync {safeCount} repositories to their default branch: checkout default, remove the current branch locally, and pull. If a branch had an upstream, the remote branch may be deleted. Uncommitted local changes can block checkout for that repo.";
-            ShowConfirm(message, () => SyncToDefaultLevelAsync(safeRepoIds), "Proceed");
+                ? "This will checkout the default branch, remove the current branch locally, and pull the latest. Uncommitted local changes can block checkout."
+                : $"This will sync {safeCount} repositories to their default branch: checkout default, remove the current branch locally, and pull. Uncommitted local changes can block checkout for that repo.";
+            var repoItems = _syncToDefaultCheckResults
+                .Select(r =>
+                {
+                    var wr2 = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == r.RepoId);
+                    return (RepoName: wr2?.Repository?.RepositoryName ?? r.RepoId.ToString(), BranchName: wr2?.BranchName ?? "", HasRemote: r.HasUpstream == true);
+                })
+                .ToList();
+            ShowSyncToDefaultOptions(message, repoItems, deleteRemote => SyncToDefaultLevelAsync(safeRepoIds, deleteRemote));
         }
         catch (Exception ex)
         {
@@ -1112,7 +1148,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         try
         {
             var repoIdsThatNeedPush = workspaceRepositories
-                .Where(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false))
+                .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
             var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoAsync(
@@ -1295,7 +1331,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             pushPlanRepoIds = repoIdsWithUnpushed;
 
             var repoIdsThatNeedPush = workspaceRepositories
-                .Where(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false))
+                .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
             var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoSetAsync(
@@ -2366,7 +2402,19 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 ToastService.Show("Skipped sync to default: commits ahead of default branch and PR is not merged.");
                 return;
             }
-            await SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, hasUpstream, defaultBranch);
+
+            if (hasUpstream)
+            {
+                var branchName = wr?.BranchName ?? currentBranchName;
+                ShowSyncToDefaultOptions(
+                    "This will checkout the default branch, remove the current branch locally, and pull the latest.",
+                    [(repositoryName!, branchName, true)],
+                    deleteRemote => SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemote, defaultBranch));
+            }
+            else
+            {
+                await SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemoteBranch: false, defaultBranch);
+            }
         }
         catch (Exception ex)
         {
@@ -2375,7 +2423,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    private async Task SyncToDefaultSingleRepoAfterCheckAsync(int repositoryId, string repositoryName, string currentBranchName, bool deleteRemoteFirst, string? defaultBranchName = null)
+    private async Task SyncToDefaultSingleRepoAfterCheckAsync(int repositoryId, string repositoryName, string currentBranchName, bool deleteRemoteBranch = false, string? defaultBranchName = null)
     {
         if (workspace == null || isSyncingToDefault || isSyncing || isUpdating)
             return;
@@ -2391,7 +2439,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 WorkspaceId,
                 repositoryId,
                 currentBranchName,
-                deleteRemoteFirst,
+                deleteRemoteBranch,
                 ApiBaseUrl,
                 CancellationToken.None);
 
@@ -2418,7 +2466,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    private async Task SyncToDefaultLevelAsync(List<int> repositoryIds)
+    private async Task SyncToDefaultLevelAsync(List<int> repositoryIds, bool deleteRemoteBranch = false)
     {
         if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || isSyncingToDefault || isSyncing || isUpdating)
             return;
@@ -2467,13 +2515,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 await semaphore.WaitAsync();
                 try
                 {
-                    var hasUpstream = resultByRepo.TryGetValue(repositoryId, out var r) && r.HasUpstream == true;
-
                     var (success, errMsg) = await WorkspaceBranchHandler.SyncToDefaultSingleAsync(
                         WorkspaceId,
                         repositoryId,
                         currentBranchName,
-                        hasUpstream,
+                        deleteRemoteBranch,
                         ApiBaseUrl,
                         CancellationToken.None);
 
@@ -2749,6 +2795,15 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public string Message { get; init; } = "";
         public IReadOnlyList<(string RepoName, string DefaultBranchName)> RepoItems { get; init; } = Array.Empty<(string, string)>();
         public Func<Task>? PendingAction { get; init; }
+    }
+
+    private sealed record SyncToDefaultOptionsModalState
+    {
+        public bool IsVisible { get; init; }
+        public string Message { get; init; } = "";
+        public IReadOnlyList<(string RepoName, string BranchName, bool HasRemote)> RepoItems { get; init; } = Array.Empty<(string, string, bool)>();
+        public bool DeleteRemoteBranches { get; init; } = true;
+        public Func<bool, Task>? PendingAction { get; init; }
     }
 
     private sealed class RepositoriesModalState

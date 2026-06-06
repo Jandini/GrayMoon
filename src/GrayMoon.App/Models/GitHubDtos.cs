@@ -163,6 +163,16 @@ public sealed class GitHubContentResponse
     public string? Content { get; set; }
 }
 
+public sealed class GitHubUserDto
+{
+    [JsonPropertyName("login")]
+    public string? Login { get; set; }
+
+    /// <summary>"User" for human accounts, "Bot" for GitHub Apps and automation accounts.</summary>
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+}
+
 /// <summary>Pull request list item from GET /repos/{owner}/{repo}/pulls.</summary>
 public class GitHubPullRequestDto
 {
@@ -195,6 +205,9 @@ public class GitHubPullRequestDto
 
     [JsonPropertyName("changed_files")]
     public int? ChangedFiles { get; set; }
+
+    [JsonPropertyName("user")]
+    public GitHubUserDto? User { get; set; }
 }
 
 public class GitHubPullRequestHeadDto

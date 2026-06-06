@@ -15,4 +15,16 @@ public sealed class SyncToDefaultBranchResponse
 
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
+
+    [JsonPropertyName("localBranches")]
+    public IReadOnlyList<string>? LocalBranches { get; set; }
+
+    [JsonPropertyName("remoteBranches")]
+    public IReadOnlyList<string>? RemoteBranches { get; set; }
+
+    [JsonPropertyName("tags")]
+    public IReadOnlyList<string>? Tags { get; set; }
+
+    [JsonPropertyName("currentTag")]
+    public string? CurrentTag { get; set; }
 }

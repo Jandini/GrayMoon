@@ -24,7 +24,7 @@ public sealed class SyncToDefaultBranchCommand(IGitService git) : ICommandHandle
             };
         }
 
-        // Get default branch
+        // Resolve default branch name first (needed for safety check before remote delete)
         var defaultBranch = await git.GetDefaultBranchNameAsync(repoPath, cancellationToken);
         if (string.IsNullOrWhiteSpace(defaultBranch))
         {
@@ -32,6 +32,21 @@ public sealed class SyncToDefaultBranchCommand(IGitService git) : ICommandHandle
             {
                 Success = false,
                 ErrorMessage = "Could not determine default branch"
+            };
+        }
+
+        // If the user confirmed remote branch deletion, delete it before fetch so --prune removes the tracking ref
+        if (request.DeleteRemoteBranch && !string.Equals(currentBranchName, defaultBranch, StringComparison.OrdinalIgnoreCase))
+            await git.DeleteBranchAsync(repoPath, currentBranchName, isRemote: true, force: false, cancellationToken);
+
+        // Fetch to update remote-tracking refs and prune deleted remote branches
+        var (fetchSuccess, fetchError) = await git.FetchAsync(repoPath, includeTags: true, request.BearerToken, cancellationToken);
+        if (!fetchSuccess)
+        {
+            return new SyncToDefaultBranchResponse
+            {
+                Success = false,
+                ErrorMessage = fetchError ?? "Failed to fetch from origin"
             };
         }
 
@@ -66,11 +81,20 @@ public sealed class SyncToDefaultBranchCommand(IGitService git) : ICommandHandle
             };
         }
 
+        var localBranches = await git.GetLocalBranchesAsync(repoPath, cancellationToken);
+        var remoteBranches = await git.GetRemoteBranchesFromRefsAsync(repoPath, cancellationToken);
+        var tags = await git.GetTagsAsync(repoPath, cancellationToken);
+        var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
+
         return new SyncToDefaultBranchResponse
         {
             Success = true,
             CurrentBranch = defaultBranch,
-            DefaultBranch = defaultBranch
+            DefaultBranch = defaultBranch,
+            LocalBranches = localBranches,
+            RemoteBranches = remoteBranches,
+            Tags = tags,
+            CurrentTag = currentTag
         };
     }
 }

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
@@ -14,6 +15,9 @@ public sealed class WorkspacePullRequestService(
     IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<WorkspacePullRequestService> logger)
 {
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
+    private readonly ConcurrentDictionary<(int RepoId, string Branch), (PullRequestInfo? Result, DateTime FetchedAt)> _cache = new();
+
     private int MaxConcurrency => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
 
     /// <summary>Returns persisted PR state for the workspace keyed by RepositoryId. Used when building grid from cache.</summary>
@@ -43,7 +47,16 @@ public sealed class WorkspacePullRequestService(
             await semaphore.WaitAsync(cancellationToken);
             try
             {
-                var pr = await gitHubPullRequestService.GetPullRequestForBranchAsync(wr.Repository!, wr.Repository!.Connector, wr.BranchName, cancellationToken);
+                var branch = wr.BranchName!;
+                var cacheKey = (wr.RepositoryId, branch);
+                if (_cache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow - cached.FetchedAt < CacheTtl)
+                {
+                    logger.LogTrace("PR cache hit for repo {RepositoryId}, branch {Branch}", wr.RepositoryId, branch);
+                    return;
+                }
+
+                var pr = await gitHubPullRequestService.GetPullRequestForBranchAsync(wr.Repository!, wr.Repository!.Connector, branch, cancellationToken);
+                _cache[cacheKey] = (pr, DateTime.UtcNow);
                 await pullRequestRepository.UpsertAsync(wr.WorkspaceRepositoryId, pr, cancellationToken);
             }
             catch (Exception ex)

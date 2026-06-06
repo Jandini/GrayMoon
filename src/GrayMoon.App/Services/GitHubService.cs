@@ -400,7 +400,7 @@ public class GitHubService : IConnectorService
         return (organizations.Count, repositories.Count);
     }
 
-    /// <summary>Gets the pull request for the given branch in the repo, if any. Uses GET /repos/{owner}/{repo}/pulls?state=all&amp;head=owner:branch&amp;per_page=1. Returns null when no PR or API error.</summary>
+    /// <summary>Gets the pull request for the given branch in the repo, if any. Fetches up to 5 and returns the first one opened by a human (user.type != "Bot"), falling back to the first match when all are bots. Returns null when no PR or API error.</summary>
     public async Task<GitHubPullRequestDto?> GetPullRequestForBranchAsync(Connector connector, string owner, string repo, string branch, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(owner))
@@ -413,17 +413,21 @@ public class GitHubService : IConnectorService
         EnsureConnectorConfigured(connector);
 
         var head = $"{owner}:{Uri.EscapeDataString(branch)}";
-        var requestUri = $"repos/{owner}/{repo}/pulls?state=all&head={head}&per_page=1";
+        var requestUri = $"repos/{owner}/{repo}/pulls?state=all&head={head}&per_page=5";
 
         try
         {
             var list = await GetAsync<List<GitHubPullRequestDto>>(connector, requestUri, cancellationToken);
-            var pr = list?.FirstOrDefault();
-            if (pr == null)
+            if (list == null || list.Count == 0)
                 return null;
-            if (pr.Head != null && !string.Equals(pr.Head.Ref, branch, StringComparison.OrdinalIgnoreCase))
+
+            var matching = list.Where(pr => pr.Head == null || string.Equals(pr.Head.Ref, branch, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (matching.Count == 0)
                 return null;
-            return pr;
+
+            // Prefer a PR opened by a human; fall back to first match if all are bots
+            return matching.FirstOrDefault(pr => !string.Equals(pr.User?.Type, "Bot", StringComparison.OrdinalIgnoreCase))
+                ?? matching[0];
         }
         catch (Exception ex)
         {

@@ -19,6 +19,8 @@ public sealed class RepositorySyncNotification
     public int? DefaultBranchAhead { get; init; }
     public List<RepositorySyncProjectNotification>? Projects { get; init; }
     public string? ErrorMessage { get; init; }
+    /// <summary>Remote branch names (with "origin/" prefix) currently present in local refs after fetch --prune. When set, the app prunes stale remote branches from the DB.</summary>
+    public List<string>? RemoteBranches { get; init; }
 }
 
 public sealed class RepositorySyncProjectNotification
