@@ -19,4 +19,8 @@ public sealed class SyncToDefaultBranchRequest : WorkspaceCommandRequest
     /// <summary>When true, delete the previous local branch with -D (force). Set from PR merged status by the App.</summary>
     [JsonPropertyName("forceDeleteLocalBranch")]
     public bool ForceDeleteLocalBranch { get; set; }
+
+    /// <summary>When true, delete the remote branch before fetching. Set from user confirmation in the UI.</summary>
+    [JsonPropertyName("deleteRemoteBranch")]
+    public bool DeleteRemoteBranch { get; set; }
 }

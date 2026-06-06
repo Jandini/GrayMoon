@@ -1,0 +1,85 @@
+@using Microsoft.AspNetCore.Components.Web
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDown"
+         @ref="_modalElement">
+        <div class="modal-dialog modal-dialog-scrollable default-branch-warning-modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Sync to Default</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2 small">@Message</p>
+                    @if (RepoItems.Count > 0)
+                    {
+                        <div class="default-branch-warning-scroll small mb-3">
+                            <ul class="list-unstyled mb-0 ps-0">
+                                @foreach (var item in RepoItems)
+                                {
+                                    <li class="mb-1">
+                                        <code>@item.RepoName</code>
+                                        <span class="text-muted">(@item.BranchName)</span>
+                                        @if (item.HasRemote)
+                                        {
+                                            <span class="badge bg-secondary ms-1" style="font-size:0.65em;">remote</span>
+                                        }
+                                    </li>
+                                }
+                            </ul>
+                        </div>
+                    }
+                    @if (RepoItems.Any(r => r.HasRemote))
+                    {
+                        <div class="form-check mt-1">
+                            <input class="form-check-input" type="checkbox" id="deleteRemoteCheck"
+                                   checked="@DeleteRemoteBranches"
+                                   @onchange="OnDeleteRemoteChanged" />
+                            <label class="form-check-label small" for="deleteRemoteCheck">
+                                Delete remote branch@(RepoItems.Count(r => r.HasRemote) > 1 ? "es" : "")
+                            </label>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" @onclick="OnProceed">Proceed</button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public string Message { get; set; } = "";
+    [Parameter] public IReadOnlyList<(string RepoName, string BranchName, bool HasRemote)> RepoItems { get; set; } = Array.Empty<(string, string, bool)>();
+    [Parameter] public bool DeleteRemoteBranches { get; set; } = true;
+    [Parameter] public EventCallback<bool> DeleteRemoteBranchesChanged { get; set; }
+    [Parameter] public EventCallback OnProceed { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private ElementReference _modalElement;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible)
+            await _modalElement.FocusAsync();
+    }
+
+    private async Task OnDeleteRemoteChanged(ChangeEventArgs e)
+    {
+        var val = e.Value is bool b ? b : bool.TryParse(e.Value?.ToString(), out var p) && p;
+        await DeleteRemoteBranchesChanged.InvokeAsync(val);
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            await OnCancel.InvokeAsync();
+        else if (e.Key == "Enter")
+            await OnProceed.InvokeAsync();
+    }
+}

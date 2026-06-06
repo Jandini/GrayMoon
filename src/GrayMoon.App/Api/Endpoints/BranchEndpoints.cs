@@ -287,6 +287,7 @@ public static class BranchEndpoints
         var workspaceId = body.WorkspaceId;
         var repositoryId = body.RepositoryId;
         var currentBranchName = body.CurrentBranchName;
+        var deleteRemoteBranch = body.DeleteRemoteBranch;
 
         if (workspaceId <= 0 || repositoryId <= 0 || string.IsNullOrWhiteSpace(currentBranchName))
             return Results.BadRequest("workspaceId, repositoryId, and currentBranchName are required.");
@@ -322,7 +323,8 @@ public static class BranchEndpoints
                 currentBranchName,
                 bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
                 workspaceRoot,
-                forceDeleteLocalBranch
+                forceDeleteLocalBranch,
+                deleteRemoteBranch
             };
             var response = await agentBridge.SendCommandAsync("SyncToDefaultBranch", args, CancellationToken.None);
 
@@ -884,6 +886,7 @@ public sealed class SyncToDefaultBranchApiRequest
     public int WorkspaceId { get; set; }
     public int RepositoryId { get; set; }
     public string? CurrentBranchName { get; set; }
+    public bool DeleteRemoteBranch { get; set; }
 }
 
 public sealed class CommonBranchesApiRequest

@@ -24,6 +24,21 @@ public sealed class SyncToDefaultBranchCommand(IGitService git) : ICommandHandle
             };
         }
 
+        // Resolve default branch name first (needed for safety check before remote delete)
+        var defaultBranch = await git.GetDefaultBranchNameAsync(repoPath, cancellationToken);
+        if (string.IsNullOrWhiteSpace(defaultBranch))
+        {
+            return new SyncToDefaultBranchResponse
+            {
+                Success = false,
+                ErrorMessage = "Could not determine default branch"
+            };
+        }
+
+        // If the user confirmed remote branch deletion, delete it before fetch so --prune removes the tracking ref
+        if (request.DeleteRemoteBranch && !string.Equals(currentBranchName, defaultBranch, StringComparison.OrdinalIgnoreCase))
+            await git.DeleteBranchAsync(repoPath, currentBranchName, isRemote: true, force: false, cancellationToken);
+
         // Fetch to update remote-tracking refs and prune deleted remote branches
         var (fetchSuccess, fetchError) = await git.FetchAsync(repoPath, includeTags: true, request.BearerToken, cancellationToken);
         if (!fetchSuccess)
@@ -32,17 +47,6 @@ public sealed class SyncToDefaultBranchCommand(IGitService git) : ICommandHandle
             {
                 Success = false,
                 ErrorMessage = fetchError ?? "Failed to fetch from origin"
-            };
-        }
-
-        // Get default branch
-        var defaultBranch = await git.GetDefaultBranchNameAsync(repoPath, cancellationToken);
-        if (string.IsNullOrWhiteSpace(defaultBranch))
-        {
-            return new SyncToDefaultBranchResponse
-            {
-                Success = false,
-                ErrorMessage = "Could not determine default branch"
             };
         }
 
