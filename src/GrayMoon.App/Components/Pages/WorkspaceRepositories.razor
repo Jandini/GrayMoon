@@ -52,6 +52,7 @@
                                     OnShowSwitchBranch='() => ShowBranchModalAsync("switchbranch")'
                                     OnNewPullRequest="OpenPullRequestDialogForAllRepositoriesAsync"
                                     OnUpdate="OnUpdateClickAsync"
+                                    OnUpdateAndPush="OnUpdateAndPushClickAsync"
                                     OnPull="OnPullClickAsync"
                                     OnPush="OnPushClickAsync"
                                     OnSync="SyncAsync"
@@ -225,6 +226,13 @@
                          InitialIncludeDeps="@_updateModal.LastIncludeDeps"
                          OnProceed="@OnUpdateProceedAsync"
                          OnCancel="@CloseUpdateModal" />
+
+<UpdateDependenciesModal IsVisible="@_updateAndPushModal.IsVisible"
+                         IsBusy="@isUpdating"
+                         InitialCommitMessage="@_updateAndPushModal.LastCommitMessage"
+                         InitialIncludeDeps="@_updateAndPushModal.LastIncludeDeps"
+                         OnProceed="@OnUpdateAndPushProceedAsync"
+                         OnCancel="@CloseUpdateAndPushModal" />
 
 <UpdateSingleRepositoryDependenciesModal IsVisible="@_updateSingleRepoModal.IsVisible"
                           Payload="@_updateSingleRepoModal.Payload"

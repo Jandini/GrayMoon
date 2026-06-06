@@ -102,11 +102,47 @@
                 </ul>
             }
         </div>
-        <button class="btn @(HasUnmatchedDependencies ? "btn-danger" : "btn-outline-secondary")"
-                @onclick="@(() => OnUpdate.InvokeAsync())"
-                disabled="@UpdateDisabled">
-            Update
-        </button>
+        <div class="btn-group position-relative">
+            <button class="btn @(HasUnmatchedDependencies ? "btn-danger" : "btn-outline-secondary")"
+                    @onclick="HandleUpdatePrimaryClick"
+                    @onclick:stopPropagation
+                    disabled="@UpdateDisabled">
+                Update
+            </button>
+            <button type="button"
+                    class="btn @(HasUnmatchedDependencies ? "btn-danger" : "btn-outline-secondary") dropdown-toggle dropdown-toggle-split"
+                    aria-label="Toggle Update menu"
+                    aria-expanded="@(_updateMenuOpen ? "true" : "false")"
+                    @onclick="ToggleUpdateMenu"
+                    @onclick:stopPropagation
+                    disabled="@UpdateDisabled">
+                <span class="visually-hidden">Toggle Dropdown</span>
+            </button>
+            @if (_updateMenuOpen)
+            {
+                <div class="branch-menu-backdrop" @onclick="CloseUpdateMenu"></div>
+                <ul class="dropdown-menu show shadow branch-menu-list"
+                    role="menu">
+                    <li>
+                        <button class="dropdown-item" type="button"
+                                role="menuitem"
+                                @onclick="HandleUpdatePrimaryClick"
+                                disabled="@UpdateDisabled">
+                            Update
+                        </button>
+                    </li>
+                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                    <li>
+                        <button class="dropdown-item" type="button"
+                                role="menuitem"
+                                @onclick="HandleUpdateAndPushClick"
+                                disabled="@UpdateDisabled">
+                            Update &amp; Push...
+                        </button>
+                    </li>
+                </ul>
+            }
+        </div>
         @if (HasIncomingCommits)
         {
             <button class="btn btn-danger"
@@ -154,6 +190,7 @@
     [Parameter] public EventCallback OnShowSwitchBranch { get; set; }
     [Parameter] public EventCallback OnNewPullRequest { get; set; }
     [Parameter] public EventCallback OnUpdate { get; set; }
+    [Parameter] public EventCallback OnUpdateAndPush { get; set; }
     [Parameter] public EventCallback OnPull { get; set; }
     [Parameter] public EventCallback OnPush { get; set; }
     [Parameter] public EventCallback OnSync { get; set; }
@@ -162,6 +199,7 @@
     [Parameter] public EventCallback<KeyboardEventArgs> OnSearchKeyDown { get; set; }
 
     private bool _branchMenuOpen;
+    private bool _updateMenuOpen;
 
     private bool UpdateDisabled =>
         WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
@@ -180,6 +218,22 @@
     private void CloseBranchMenu()
     {
         _branchMenuOpen = false;
+    }
+
+    private void ToggleUpdateMenu() => _updateMenuOpen = !_updateMenuOpen;
+
+    private void CloseUpdateMenu() => _updateMenuOpen = false;
+
+    private async Task HandleUpdatePrimaryClick()
+    {
+        CloseUpdateMenu();
+        await OnUpdate.InvokeAsync();
+    }
+
+    private async Task HandleUpdateAndPushClick()
+    {
+        CloseUpdateMenu();
+        await OnUpdateAndPush.InvokeAsync();
     }
 
     private async Task HandleBranchPrimaryClick()
