@@ -2129,6 +2129,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _newFeatureModal = _newFeatureModal with
         {
             IsVisible = true,
+            WorkspaceName = workspace?.Name,
             CommonBranchNames = _branchModal.CommonBranchNames,
             DefaultDisplayText = _branchModal.DefaultDisplayText,
         };
@@ -3096,6 +3097,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private sealed record NewFeatureModalState
     {
         public bool IsVisible { get; init; }
+        public string? WorkspaceName { get; init; }
         public IReadOnlyList<string> CommonBranchNames { get; init; } = Array.Empty<string>();
         public string DefaultDisplayText { get; init; } = "multiple";
     }

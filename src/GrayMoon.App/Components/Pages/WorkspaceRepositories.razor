@@ -265,7 +265,7 @@
                      OnOpenInGitHub="HandleNewPrOpenInGitHubAsync" />
 
 <NewFeatureModal IsVisible="@_newFeatureModal.IsVisible"
-                 WorkspaceName="@(workspace?.Name)"
+                 WorkspaceName="@_newFeatureModal.WorkspaceName"
                  WorkspaceId="@WorkspaceId"
                  CommonBranchNames="@_newFeatureModal.CommonBranchNames"
                  DefaultDisplayText="@_newFeatureModal.DefaultDisplayText"
