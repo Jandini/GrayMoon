@@ -770,7 +770,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, null);
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct)
+    public async Task<(bool Success, string? ErrorMessage)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct, bool skipHooks = false)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(newBranchName) || string.IsNullOrWhiteSpace(baseBranchName))
             return (false, "Invalid repository path or branch name");
@@ -796,9 +796,11 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (exitRemote == 0)
             startPoint = remoteCandidate;
 
+        var hooksPrefix = GetHooksConfigPrefix(skipHooks);
+
         // Create and checkout new branch from the chosen start point in a single checkout, so we only
         // trigger one post-checkout hook instead of first checking out the base branch and then the new branch.
-        var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"checkout -b {newBranchName} --no-track {startPoint}", repoPath, ct);
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"{hooksPrefix}checkout -b {newBranchName} --no-track {startPoint}", repoPath, ct);
         if (exitCode != 0)
         {
             // Branch may already exist (e.g. persistence out of date); try checkout existing
@@ -806,7 +808,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             if (verifyExit == 0)
             {
                 logger.LogWarning("Branch {Branch} already exists in {RepoPath}; checking out existing branch.", newBranchName, repoPath);
-                var (coExit, coOut, coErr) = await RunProcessAsync("git", $"checkout {newBranchName}", repoPath, ct);
+                var (coExit, coOut, coErr) = await RunProcessAsync("git", $"{hooksPrefix}checkout {newBranchName}", repoPath, ct);
                 if (coExit != 0)
                 {
                     var combined = CombineOutput(coOut, coErr);

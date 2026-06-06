@@ -2160,7 +2160,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
         CloseNewFeatureModal();
 
-        // Step 1: Create branches
         var tagFilteredRepoIds = request.SkipReposOnTags
             ? workspaceRepositories.Where(wr => !wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet()
             : (IReadOnlySet<int>?)null;
@@ -2169,95 +2168,68 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _createBranchesCts?.Dispose();
         _createBranchesCts = new CancellationTokenSource();
         isCreatingBranches = true;
+        isUpdating = request.UpdateDependencies;
         SetCreateBranchesProgress("Creating branches...");
         errorMessage = null;
         StateHasChanged();
 
+        // Phases 1 + 2: branch creation (hooks suppressed, state persisted inline) then update.
+        // NewFeatureOrchestrator guarantees all CheckedOutTag fields are null before the update
+        // runs, so DependencyUpdateOrchestrator never skips previously tag-pinned repos.
         try
         {
             await Task.Yield();
-            await WorkspaceBranchHandler.CreateBranchesAsync(
+            await NewFeatureOrchestrator.RunAsync(
                 WorkspaceId,
                 request.NewBranchName,
                 request.BaseBranch,
                 tagFilteredRepoIds,
-                (completed, total) =>
+                request.UpdateDependencies,
+                commitMessage: null,
+                setProgress: msg =>
+                {
+                    if (msg.StartsWith("Creating", StringComparison.OrdinalIgnoreCase))
+                        SetCreateBranchesProgress(msg);
+                    else
+                        SetUpdateProgress(msg);
+                    _ = InvokeAsync(StateHasChanged);
+                },
+                reportBranchProgress: (completed, total) =>
                 {
                     SetCreateBranchesProgress($"Created {completed} of {total} branches");
-                    if (completed == total)
-                        _creatingBranchesAwaitingAgentTasks = true;
+                    _ = InvokeAsync(StateHasChanged);
+                },
+                setRepositoryError: (repoId, msg) =>
+                {
+                    repositoryErrors[repoId] = msg;
                     _ = InvokeAsync(StateHasChanged);
                 },
                 _createBranchesCts.Token);
+
+            isCreatingBranches = false;
+            isUpdating = false;
+            await InvokeAsync(StateHasChanged);
             await RefreshFromSync();
         }
         catch (OperationCanceledException)
         {
+            isCreatingBranches = false;
+            isUpdating = false;
             await ReloadWorkspaceDataAfterCancelAsync();
             return;
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "New Feature: branch creation failed for workspace {WorkspaceId}", WorkspaceId);
-            ShowOperationError("Branch Creation Failed", "Could not create branches. The GrayMoon Agent may be offline. Start the Agent and try again.");
+            Logger.LogError(ex, "New Feature: orchestration failed for workspace {WorkspaceId}", WorkspaceId);
+            ShowOperationError("New Feature Failed", "Could not complete the New Feature workflow. The GrayMoon Agent may be offline or a dependency update failed. Check individual repository errors for details.");
             return;
         }
         finally
         {
-            _creatingBranchesAwaitingAgentTasks = false;
             isCreatingBranches = false;
+            isUpdating = false;
+            _updateAwaitingAgentTasks = false;
             await InvokeAsync(StateHasChanged);
-        }
-
-        // Step 2: Update dependencies
-        if (request.UpdateDependencies)
-        {
-            _updateCts?.Cancel();
-            _updateCts?.Dispose();
-            _updateCts = new CancellationTokenSource();
-            isUpdating = true;
-            SetUpdateProgress("Updating dependencies...");
-            errorMessage = null;
-            StateHasChanged();
-
-            try
-            {
-                await Task.Yield();
-                await WorkspaceUpdateHandler.RunUpdateAsync(
-                    WorkspaceId,
-                    _updateCts.Token,
-                    SetUpdateProgress,
-                    (repoId, msg) =>
-                    {
-                        repositoryErrors[repoId] = msg;
-                        _ = InvokeAsync(StateHasChanged);
-                    },
-                    onAppSideComplete: () => _updateAwaitingAgentTasks = true,
-                    repoIdsToUpdate: null,
-                    commitMessage: null,
-                    includeDepsInCommitMessage: true);
-                isUpdating = false;
-                await InvokeAsync(StateHasChanged);
-                await RefreshFromSync();
-            }
-            catch (OperationCanceledException)
-            {
-                isUpdating = false;
-                await ReloadWorkspaceDataAfterCancelAsync();
-                return;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "New Feature: dependency update failed for workspace {WorkspaceId}", WorkspaceId);
-                ShowOperationError("Dependency Update Failed", "Dependency update failed. Check individual repository errors for details.");
-                return;
-            }
-            finally
-            {
-                _updateAwaitingAgentTasks = false;
-                isUpdating = false;
-                await InvokeAsync(StateHasChanged);
-            }
         }
 
         // Step 3: Push changes
@@ -2532,7 +2504,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
                         _creatingBranchesAwaitingAgentTasks = true;
                     _ = InvokeAsync(StateHasChanged);
                 },
-                _createBranchesCts.Token);
+                syncState: false,
+                cancellationToken: _createBranchesCts.Token);
             await RefreshFromSync();
         }
         catch (OperationCanceledException)

@@ -40,7 +40,8 @@ public sealed class WorkspaceBranchHandler(
         string baseBranch,
         IReadOnlySet<int>? repositoryIds,
         Action<int, int> reportProgress,
-        CancellationToken cancellationToken)
+        bool syncState = false,
+        CancellationToken cancellationToken = default)
     {
         await using var scope = serviceScopeFactory.CreateAsyncScope();
         var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
@@ -51,6 +52,7 @@ public sealed class WorkspaceBranchHandler(
             baseBranch,
             onProgress: (completed, total) => reportProgress(completed, total),
             repositoryIds: repositoryIds,
+            syncState: syncState,
             cancellationToken: cancellationToken);
     }
 
