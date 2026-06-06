@@ -16,7 +16,7 @@
                 </div>
                 <div class="modal-body">
                     <p class="text-muted mb-3" style="font-size: 0.9em;">
-                        Creates a new branch across all workspace repositories. Optionally updates package dependencies with commits, then pushes all changes using a synchronized push.
+                        Creates a new branch across all repositories, updates package dependencies with commits, and pushes — so your team can start working immediately. Uncheck any step to skip it.
                     </p>
 
                     @if (errorMessage != null)
@@ -150,8 +150,8 @@
     private string newBranchName = "";
     private string selectedBaseBranch = "__default__";
     private bool skipReposOnTags = true;
-    private bool updateDependencies = false;
-    private bool pushChanges = false;
+    private bool updateDependencies = true;
+    private bool pushChanges = true;
     private bool isCreating = false;
     private string? errorMessage;
     private bool showBranchExistsConfirmation = false;
@@ -200,8 +200,8 @@
             showBranchExistsConfirmation = false;
             showBasedOnDropdown = false;
             skipReposOnTags = true;
-            updateDependencies = false;
-            pushChanges = false;
+            updateDependencies = true;
+            pushChanges = true;
         }
     }
 
