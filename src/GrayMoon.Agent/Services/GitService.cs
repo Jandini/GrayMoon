@@ -798,7 +798,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         // Create and checkout new branch from the chosen start point in a single checkout, so we only
         // trigger one post-checkout hook instead of first checking out the base branch and then the new branch.
-        var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"checkout -b {newBranchName} {startPoint}", repoPath, ct);
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"checkout -b {newBranchName} --no-track {startPoint}", repoPath, ct);
         if (exitCode != 0)
         {
             // Branch may already exist (e.g. persistence out of date); try checkout existing
