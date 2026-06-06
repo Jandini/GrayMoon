@@ -11,12 +11,12 @@
         <div class="modal-dialog new-feature-modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">@(string.IsNullOrEmpty(WorkspaceName) ? "New Feature" : $"New Feature — {WorkspaceName}")</h5>
+                    <h5 class="modal-title">New Feature</h5>
                     <button type="button" class="btn-close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body">
                     <p class="text-muted mb-3" style="font-size: 0.9em;">
-                        Creates a new branch across all workspace repositories, updates package dependencies with commits, and pushes all changes using a synchronized push. Uncheck any step to skip it.
+                        Creates a new branch across all workspace repositories, updates package dependencies with commits, and pushes all changes using a synchronized push.
                     </p>
 
                     @if (errorMessage != null)
@@ -110,14 +110,16 @@
 
                     <div class="form-check mb-3">
                         <input class="form-check-input" type="checkbox" id="new-feature-update-deps"
-                               @bind="updateDependencies" />
+                               checked="@updateDependencies"
+                               @onchange="OnUpdateDependenciesChanged" />
                         <label class="form-check-label" for="new-feature-update-deps">Update dependencies</label>
                         <div class="form-text">Bump package versions and commit changes per dependency level</div>
                     </div>
 
                     <div class="form-check mb-0">
                         <input class="form-check-input" type="checkbox" id="new-feature-push"
-                               @bind="pushChanges" />
+                               @bind="pushChanges"
+                               disabled="@(!updateDependencies)" />
                         <label class="form-check-label" for="new-feature-push">Push changes</label>
                         <div class="form-text">Push all repositories using synchronized push (waits for NuGet availability per level)</div>
                     </div>
@@ -179,6 +181,13 @@
     {
         selectedBaseBranch = value;
         showBasedOnDropdown = false;
+    }
+
+    private void OnUpdateDependenciesChanged(ChangeEventArgs e)
+    {
+        updateDependencies = (bool)(e.Value ?? false);
+        if (!updateDependencies)
+            pushChanges = false;
     }
 
     private void DismissBranchExistsConfirmation()
