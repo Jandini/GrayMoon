@@ -68,6 +68,15 @@
                     <li>
                         <button class="dropdown-item" type="button"
                                 role="menuitem"
+                                @onclick="HandleNewFeatureClick"
+                                disabled="@BranchActionsDisabled">
+                            New Feature
+                        </button>
+                    </li>
+                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                    <li>
+                        <button class="dropdown-item" type="button"
+                                role="menuitem"
                                 @onclick="HandleNewBranchClick"
                                 disabled="@BranchActionsDisabled">
                             New Branch
@@ -140,6 +149,7 @@
     [Parameter] public bool IsOverlayVisible { get; set; }
 
     [Parameter] public EventCallback OnShowRepositories { get; set; }
+    [Parameter] public EventCallback OnNewFeature { get; set; }
     [Parameter] public EventCallback OnShowBranch { get; set; }
     [Parameter] public EventCallback OnShowSwitchBranch { get; set; }
     [Parameter] public EventCallback OnNewPullRequest { get; set; }
@@ -176,6 +186,12 @@
     {
         CloseBranchMenu();
         await OnShowBranch.InvokeAsync();
+    }
+
+    private async Task HandleNewFeatureClick()
+    {
+        CloseBranchMenu();
+        await OnNewFeature.InvokeAsync();
     }
 
     private async Task HandleNewBranchClick()

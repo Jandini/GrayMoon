@@ -46,6 +46,7 @@
                                     AgentTasksPendingCount="@AgentTasksPendingCount"
                                     IsOverlayVisible="@(isLoading || isSyncing || isPushing || isUpdating || isCommitSyncing || isCheckingOut || isCreatingBranches || isCreatingBranch || isSyncingToDefault || isWorkspaceBranchesFetching || isWorkspaceBranchesCheckingOut || ShowRepositoriesFetchOverlay)"
                                     OnShowRepositories="ShowRepositoriesModalAsync"
+                                    OnNewFeature="ShowNewFeatureModalAsync"
                                     OnShowBranch="() => ShowBranchModalAsync()"
                                     OnShowSwitchBranch='() => ShowBranchModalAsync("switchbranch")'
                                     OnNewPullRequest="OpenPullRequestDialogForAllRepositoriesAsync"
@@ -262,6 +263,20 @@
                      OnCreate="HandleCreatePullRequestsAsync"
                      OnCancel="CloseNewPullRequestModal"
                      OnOpenInGitHub="HandleNewPrOpenInGitHubAsync" />
+
+<NewFeatureModal IsVisible="@_newFeatureModal.IsVisible"
+                 WorkspaceName="@(workspace?.Name)"
+                 WorkspaceId="@WorkspaceId"
+                 CommonBranchNames="@_newFeatureModal.CommonBranchNames"
+                 DefaultDisplayText="@_newFeatureModal.DefaultDisplayText"
+                 HasTaggedRepos="@hasTaggedRepos"
+                 OnCreate="HandleNewFeatureCreateAsync"
+                 OnCancel="CloseNewFeatureModal" />
+
+<OperationErrorModal IsVisible="@_operationErrorModal.IsVisible"
+                     Title="@_operationErrorModal.Title"
+                     Message="@_operationErrorModal.Message"
+                     OnClose="CloseOperationErrorModal" />
 
 <LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
 <LoadingOverlay IsVisible="@isCreatingPullRequests" Message="@createPrProgressMessage" />
