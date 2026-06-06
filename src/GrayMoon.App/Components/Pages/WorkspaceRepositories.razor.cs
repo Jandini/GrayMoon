@@ -2332,7 +2332,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _createBranchesCts?.Dispose();
         _createBranchesCts = new CancellationTokenSource();
         isCreatingBranches = true;
-        isUpdating = request.UpdateDependencies;
+        isUpdating = false;
         SetCreateBranchesProgress("Creating branches...");
         errorMessage = null;
         StateHasChanged();
@@ -2353,9 +2353,16 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 setProgress: msg =>
                 {
                     if (msg.StartsWith("Creating", StringComparison.OrdinalIgnoreCase))
+                    {
                         SetCreateBranchesProgress(msg);
+                    }
                     else
+                    {
+                        // Transition overlay: branch creation phase done, update phase starting.
+                        isCreatingBranches = false;
+                        isUpdating = true;
                         SetUpdateProgress(msg);
+                    }
                     _ = InvokeAsync(StateHasChanged);
                 },
                 reportBranchProgress: (completed, total) =>
