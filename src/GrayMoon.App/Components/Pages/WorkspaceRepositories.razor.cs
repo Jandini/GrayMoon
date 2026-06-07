@@ -114,6 +114,41 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     private int AgentTasksPendingCount => AgentQueueStateService.GetPendingCountForWorkspace(WorkspaceId);
 
+    private bool IsAnyOverlayVisible =>
+        isLoading || isCreatingPullRequests || isSyncing || isPushing || isUpdating ||
+        isCommitSyncing || isCheckingOut || ShowRepositoriesFetchOverlay ||
+        isCreatingBranches || isCreatingBranch || isSyncingToDefault ||
+        isWorkspaceBranchesFetching || isWorkspaceBranchesCheckingOut;
+
+    private string? ActiveOverlayMessage =>
+        isLoading ? "Loading workspace..." :
+        isCreatingPullRequests ? createPrProgressMessage :
+        isSyncing ? GetOverlayMessage(syncProgressMessage, isSyncing, _syncAwaitingAgentTasks) :
+        isPushing ? GetOverlayMessage(pushProgressMessage, isPushing, _pushAwaitingAgentTasks) :
+        isUpdating ? GetOverlayMessage(updateProgressMessage, isUpdating, _updateAwaitingAgentTasks) :
+        isCommitSyncing ? GetOverlayMessage(commitSyncProgressMessage, isCommitSyncing, _commitSyncAwaitingAgentTasks) :
+        isCheckingOut ? checkoutProgressMessage :
+        ShowRepositoriesFetchOverlay ? RepositoriesFetchOverlayMessage :
+        isCreatingBranches ? GetOverlayMessage(createBranchesProgressMessage, isCreatingBranches, _creatingBranchesAwaitingAgentTasks) :
+        isCreatingBranch ? createBranchMessage :
+        isSyncingToDefault ? GetOverlayMessage(syncToDefaultMessage, isSyncingToDefault, _syncToDefaultAwaitingAgentTasks) :
+        isWorkspaceBranchesFetching ? workspaceBranchesFetchProgressMessage :
+        isWorkspaceBranchesCheckingOut ? workspaceBranchesCheckoutProgressMessage :
+        null;
+
+    // Returns default(EventCallback) (HasDelegate == false) for operations with no abort:
+    // isLoading, isCreatingPullRequests, isCreatingBranches, isCreatingBranch, isSyncingToDefault.
+    private EventCallback ActiveOverlayAbort =>
+        isSyncing ? EventCallback.Factory.Create(this, (Action)AbortSyncAsync) :
+        isPushing ? EventCallback.Factory.Create(this, (Action)AbortPushAsync) :
+        isUpdating ? EventCallback.Factory.Create(this, (Action)AbortUpdateAsync) :
+        isCommitSyncing ? EventCallback.Factory.Create(this, (Action)AbortCommitSyncAsync) :
+        isCheckingOut ? EventCallback.Factory.Create(this, (Action)AbortCheckoutAsync) :
+        ShowRepositoriesFetchOverlay ? EventCallback.Factory.Create(this, (Action)AbortFetchRepositories) :
+        isWorkspaceBranchesFetching ? EventCallback.Factory.Create(this, (Action)AbortWorkspaceBranchesFetchAsync) :
+        isWorkspaceBranchesCheckingOut ? EventCallback.Factory.Create(this, (Action)AbortWorkspaceBranchesCheckoutAsync) :
+        default;
+
     private const int RefreshDebounceMs = 200;
     private CancellationTokenSource? _refreshDebounceCts;
 
@@ -1612,6 +1647,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 includeDepsInCommitMessage: includeDepsInCommitMessage);
 
             isUpdating = false;
+            isPushing = true;
+            SetPushProgress("Preparing push...");
             await InvokeAsync(StateHasChanged);
             await RefreshFromSync();
         }
@@ -1643,6 +1680,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 WorkspaceId, workspaceRepositories, CancellationToken.None);
             if (!hasUnpushed)
             {
+                isPushing = false;
+                await InvokeAsync(StateHasChanged);
                 ToastService.Show("Update complete. Nothing to push.");
                 return;
             }
@@ -1650,6 +1689,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
             pushRepoIds = payload.Select(p => p.RepoId).Where(id => !taggedRepoIds.Contains(id)).ToHashSet();
             if (pushRepoIds.Count == 0)
             {
+                isPushing = false;
+                await InvokeAsync(StateHasChanged);
                 ToastService.Show("Update complete. Nothing to push.");
                 return;
             }
@@ -1663,6 +1704,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
         catch (Exception ex)
         {
+            isPushing = false;
+            await InvokeAsync(StateHasChanged);
             Logger.LogError(ex, "Update & Push: failed to get push plan for workspace {WorkspaceId}", WorkspaceId);
             ShowOperationError("Push Failed", "Update succeeded but push plan could not be determined. The GrayMoon Agent may be offline.");
             return;
@@ -2379,6 +2422,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
             isCreatingBranches = false;
             isUpdating = false;
+            if (request.PushChanges)
+            {
+                isPushing = true;
+                SetPushProgress("Preparing push...");
+            }
             await InvokeAsync(StateHasChanged);
             await RefreshFromSync();
         }
@@ -2414,6 +2462,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     WorkspaceId, workspaceRepositories, CancellationToken.None);
                 if (!hasUnpushed)
                 {
+                    isPushing = false;
+                    await InvokeAsync(StateHasChanged);
                     ToastService.Show("No repositories to push.");
                     return;
                 }
@@ -2421,6 +2471,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 pushRepoIds = payload.Select(p => p.RepoId).Where(id => !taggedRepoIds.Contains(id)).ToHashSet();
                 if (pushRepoIds.Count == 0)
                 {
+                    isPushing = false;
+                    await InvokeAsync(StateHasChanged);
                     ToastService.Show("No repositories to push.");
                     return;
                 }
@@ -2434,6 +2486,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
             }
             catch (Exception ex)
             {
+                isPushing = false;
+                await InvokeAsync(StateHasChanged);
                 Logger.LogError(ex, "New Feature: failed to get push plan for workspace {WorkspaceId}", WorkspaceId);
                 ShowOperationError("Push Failed", "Could not determine push plan. The GrayMoon Agent may be offline.");
                 return;
@@ -2442,8 +2496,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
             _pushCts?.Cancel();
             _pushCts?.Dispose();
             _pushCts = new CancellationTokenSource();
-            isPushing = true;
-            StateHasChanged();
 
             try
             {
