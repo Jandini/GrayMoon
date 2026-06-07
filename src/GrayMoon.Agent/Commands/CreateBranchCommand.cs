@@ -54,7 +54,7 @@ public sealed class CreateBranchCommand(IGitService git, IAgentTokenProvider tok
         string? fetchError = null;
         if (token != null)
         {
-            var (fetchSuccess, err) = await git.FetchMinimalAsync(repoPath, "-", defaultRef, token, cancellationToken);
+            var (fetchSuccess, err) = await git.FetchMinimalAsync(repoPath, "-", defaultRef, token, cancellationToken, skipUpstreamCheck: true);
             if (!fetchSuccess)
                 fetchError = err;
         }
@@ -74,7 +74,7 @@ public sealed class CreateBranchCommand(IGitService git, IAgentTokenProvider tok
         bool? hasUpstream = null;
         if (branch != "-")
         {
-            var (o, i, _) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
+            var (o, i, _) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken, skipUpstreamCheck: true);
             outgoing = o;
             incoming = i;
             var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);

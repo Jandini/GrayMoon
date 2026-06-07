@@ -284,7 +284,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, null);
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> FetchMinimalAsync(string repoPath, string branchName, string? defaultBranchOriginRef, string? bearerToken, CancellationToken ct)
+    public async Task<(bool Success, string? ErrorMessage)> FetchMinimalAsync(string repoPath, string branchName, string? defaultBranchOriginRef, string? bearerToken, CancellationToken ct, bool skipUpstreamCheck = false)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return (true, null);
@@ -300,7 +300,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         // Resolve the upstream ref (e.g. origin/main) and use that as the fetch target for the
         // current branch rather than the branch name itself. This avoids fetching non-upstreamed
         // local branches and ensures we are always fetching the configured remote tracking ref.
-        var upstreamRef = await GetUpstreamRefAsync(repoPath, ct);
+        var upstreamRef = skipUpstreamCheck ? null : await GetUpstreamRefAsync(repoPath, ct);
         logger.LogDebug("Git minimal fetch upstream ref for {RepoPath}: {UpstreamRef}", repoPath, upstreamRef ?? "<none>");
 
         if (!string.IsNullOrWhiteSpace(upstreamRef))
@@ -374,7 +374,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, null);
     }
 
-    public async Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct)
+    public async Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (null, null, false);
@@ -383,7 +383,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         // Resolve upstream ref (e.g. origin/main) once for this branch. When there is no upstream
         // configured we fall back to comparing against the default branch only.
-        var upstreamRef = await GetUpstreamRefAsync(repoPath, ct);
+        var upstreamRef = skipUpstreamCheck ? null : await GetUpstreamRefAsync(repoPath, ct);
         if (string.IsNullOrWhiteSpace(upstreamRef))
         {
             var defaultBranch = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
