@@ -263,6 +263,8 @@
                            RepoItems="@_syncToDefaultOptionsModal.RepoItems"
                            DeleteRemoteBranches="@_syncToDefaultOptionsModal.DeleteRemoteBranches"
                            DeleteRemoteBranchesChanged="@(v => _syncToDefaultOptionsModal = _syncToDefaultOptionsModal with { DeleteRemoteBranches = v })"
+                           AllowForceDeleteLocalBranch="@_syncToDefaultOptionsModal.AllowForceDeleteLocalBranch"
+                           AllowForceDeleteLocalBranchChanged="@(v => _syncToDefaultOptionsModal = _syncToDefaultOptionsModal with { AllowForceDeleteLocalBranch = v })"
                            OnProceed="@OnSyncToDefaultOptionsProceedAsync"
                            OnCancel="@CloseSyncToDefaultOptionsModal" />
 

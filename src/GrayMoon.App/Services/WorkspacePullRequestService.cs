@@ -27,7 +27,7 @@ public sealed class WorkspacePullRequestService(
     }
 
     /// <summary>Fetches PR from API for the given repos and persists. Call after sync, refresh, push, or hooks.</summary>
-    public async Task RefreshPullRequestsAsync(int workspaceId, IReadOnlyList<int> repositoryIds, CancellationToken cancellationToken = default)
+    public async Task RefreshPullRequestsAsync(int workspaceId, IReadOnlyList<int> repositoryIds, bool force = false, CancellationToken cancellationToken = default)
     {
         if (repositoryIds.Count == 0) return;
 
@@ -49,7 +49,7 @@ public sealed class WorkspacePullRequestService(
             {
                 var branch = wr.BranchName!;
                 var cacheKey = (wr.RepositoryId, branch);
-                if (_cache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow - cached.FetchedAt < CacheTtl)
+                if (!force && _cache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow - cached.FetchedAt < CacheTtl)
                 {
                     logger.LogTrace("PR cache hit for repo {RepositoryId}, branch {Branch}", wr.RepositoryId, branch);
                     return;
@@ -79,6 +79,6 @@ public sealed class WorkspacePullRequestService(
             .Where(wr => wr.WorkspaceId == workspaceId)
             .Select(wr => wr.RepositoryId)
             .ToListAsync(cancellationToken);
-        await RefreshPullRequestsAsync(workspaceId, repoIds, cancellationToken);
+        await RefreshPullRequestsAsync(workspaceId, repoIds, cancellationToken: cancellationToken);
     }
 }

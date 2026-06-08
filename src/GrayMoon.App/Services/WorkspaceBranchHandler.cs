@@ -172,13 +172,14 @@ public sealed class WorkspaceBranchHandler(
         int repositoryId,
         string? currentBranchName,
         bool deleteRemoteBranch,
+        bool allowForceDeleteLocalBranch,
         string apiBaseUrl,
         CancellationToken cancellationToken)
     {
         var httpClient = httpClientFactory.CreateClient();
         var baseUrl = apiBaseUrl;
 
-        var apiRequest = new { workspaceId, repositoryId, currentBranchName, deleteRemoteBranch };
+        var apiRequest = new { workspaceId, repositoryId, currentBranchName, deleteRemoteBranch, allowForceDeleteLocalBranch };
         var json = JsonSerializer.Serialize(apiRequest);
         using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
         using var response = await httpClient.PostAsync($"{baseUrl}/api/branches/sync-to-default", content, cancellationToken);

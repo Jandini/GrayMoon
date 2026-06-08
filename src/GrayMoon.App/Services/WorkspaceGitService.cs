@@ -962,7 +962,7 @@ public class WorkspaceGitService(
         if (!persistDependencyLevel)
             await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
 
-        await _workspacePullRequestService.RefreshPullRequestsAsync(workspaceId, repoIds, cancellationToken);
+        await _workspacePullRequestService.RefreshPullRequestsAsync(workspaceId, repoIds, cancellationToken: cancellationToken);
 
         _logger.LogInformation("Persistence: saved WorkspaceRepository link versions. WorkspaceId={WorkspaceId}, RepoCount={RepoCount}",
             workspaceId, resultList.Count);

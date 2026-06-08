@@ -637,7 +637,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             await action();
     }
 
-    private void ShowSyncToDefaultOptions(string message, IReadOnlyList<(string RepoName, string BranchName, bool HasRemote)> repoItems, Func<bool, Task> onProceed, bool defaultDeleteRemote = true)
+    private void ShowSyncToDefaultOptions(string message, IReadOnlyList<(string RepoName, string BranchName, bool HasRemote)> repoItems, Func<bool, bool, Task> onProceed, bool defaultDeleteRemote = true)
     {
         _syncToDefaultOptionsModal = _syncToDefaultOptionsModal with
         {
@@ -645,6 +645,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             Message = message,
             RepoItems = repoItems,
             DeleteRemoteBranches = defaultDeleteRemote,
+            AllowForceDeleteLocalBranch = true,
             PendingAction = onProceed
         };
         StateHasChanged();
@@ -660,9 +661,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         var action = _syncToDefaultOptionsModal.PendingAction;
         var deleteRemote = _syncToDefaultOptionsModal.DeleteRemoteBranches;
+        var allowForce = _syncToDefaultOptionsModal.AllowForceDeleteLocalBranch;
         CloseSyncToDefaultOptionsModal();
         if (action != null)
-            await action(deleteRemote);
+            await action(deleteRemote, allowForce);
     }
 
 
@@ -887,7 +889,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
                 var workspacePrService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
-                await workspacePrService.RefreshPullRequestsAsync(WorkspaceId, refreshedIds, CancellationToken.None);
+                await workspacePrService.RefreshPullRequestsAsync(WorkspaceId, refreshedIds, cancellationToken: CancellationToken.None);
                 prByRepositoryId = await workspacePrService.GetPersistedPullRequestsForWorkspaceAsync(WorkspaceId, CancellationToken.None);
             }
             catch (Exception ex)
@@ -1012,7 +1014,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     return (RepoName: wr2?.Repository?.RepositoryName ?? r.RepoId.ToString(), BranchName: wr2?.BranchName ?? "", HasRemote: r.HasUpstream == true);
                 })
                 .ToList();
-            ShowSyncToDefaultOptions(message, repoItems, deleteRemote => SyncToDefaultLevelAsync(safeRepoIds, deleteRemote));
+            ShowSyncToDefaultOptions(message, repoItems, (deleteRemote, allowForce) => SyncToDefaultLevelAsync(safeRepoIds, deleteRemote, allowForce));
         }
         catch (Exception ex)
         {
@@ -2834,11 +2836,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 ShowSyncToDefaultOptions(
                     "This will checkout the default branch, remove the current branch locally, and pull the latest.",
                     [(repositoryName!, branchName, true)],
-                    deleteRemote => SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemote, defaultBranch));
+                    (deleteRemote, allowForce) => SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemote, defaultBranch, allowForce));
             }
             else
             {
-                await SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemoteBranch: false, defaultBranch);
+                await SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemoteBranch: false, defaultBranch, allowForceDeleteLocalBranch: true);
             }
         }
         catch (Exception ex)
@@ -2848,7 +2850,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    private async Task SyncToDefaultSingleRepoAfterCheckAsync(int repositoryId, string repositoryName, string currentBranchName, bool deleteRemoteBranch = false, string? defaultBranchName = null)
+    private async Task SyncToDefaultSingleRepoAfterCheckAsync(int repositoryId, string repositoryName, string currentBranchName, bool deleteRemoteBranch = false, string? defaultBranchName = null, bool allowForceDeleteLocalBranch = true)
     {
         if (workspace == null || isSyncingToDefault || isSyncing || isUpdating)
             return;
@@ -2865,6 +2867,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 repositoryId,
                 currentBranchName,
                 deleteRemoteBranch,
+                allowForceDeleteLocalBranch,
                 ApiBaseUrl,
                 CancellationToken.None);
 
@@ -2891,7 +2894,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    private async Task SyncToDefaultLevelAsync(List<int> repositoryIds, bool deleteRemoteBranch = false)
+    private async Task SyncToDefaultLevelAsync(List<int> repositoryIds, bool deleteRemoteBranch = false, bool allowForceDeleteLocalBranch = true)
     {
         if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || isSyncingToDefault || isSyncing || isUpdating)
             return;
@@ -2945,6 +2948,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                         repositoryId,
                         currentBranchName,
                         deleteRemoteBranch,
+                        allowForceDeleteLocalBranch,
                         ApiBaseUrl,
                         CancellationToken.None);
 
@@ -3228,7 +3232,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public string Message { get; init; } = "";
         public IReadOnlyList<(string RepoName, string BranchName, bool HasRemote)> RepoItems { get; init; } = Array.Empty<(string, string, bool)>();
         public bool DeleteRemoteBranches { get; init; } = true;
-        public Func<bool, Task>? PendingAction { get; init; }
+        public bool AllowForceDeleteLocalBranch { get; init; } = true;
+        public Func<bool, bool, Task>? PendingAction { get; init; }
     }
 
     private sealed class RepositoriesModalState
