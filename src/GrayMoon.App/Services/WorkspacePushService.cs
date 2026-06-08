@@ -288,6 +288,8 @@ public sealed class WorkspacePushService(
                 }
             }
 
+            await TryRestoreReposAtLevelAsync(workspace.Name, workspaceRoot, reposAtLevel, cancellationToken);
+
             levelProgress?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
             await PushReposAsync(
                 workspace,
@@ -587,6 +589,30 @@ public sealed class WorkspacePushService(
             foreach (var line in update.NewLines)
                 _overlayCommandTerminalService.Append(label, AgentCommandStreamKind.Stdout, line);
         }
+    }
+
+    private async Task TryRestoreReposAtLevelAsync(
+        string workspaceName,
+        string? workspaceRoot,
+        IReadOnlyList<PushRepoPayload> repos,
+        CancellationToken cancellationToken)
+    {
+        var tasks = repos.Select(async repo =>
+        {
+            try
+            {
+                await _agentBridge.SendCommandAsync(
+                    "DotnetRestore",
+                    new { workspaceName, repositoryName = repo.RepoName, workspaceRoot },
+                    cancellationToken);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "dotnet restore failed for {RepoName} in workspace {WorkspaceName}, continuing", repo.RepoName, workspaceName);
+            }
+        });
+        await Task.WhenAll(tasks);
     }
 
     private async Task PushReposAsync(
