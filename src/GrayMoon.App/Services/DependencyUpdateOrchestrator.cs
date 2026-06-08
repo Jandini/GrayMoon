@@ -101,6 +101,7 @@ public sealed class DependencyUpdateOrchestrator(
             if (hadError)
                 break;
 
+            levelProgress("Restoring packages...");
             await workspaceGitService.RestoreDependenciesAsync(
                 workspaceId,
                 reposAtLevel.Select(r => (

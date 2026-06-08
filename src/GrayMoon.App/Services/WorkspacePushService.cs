@@ -288,6 +288,7 @@ public sealed class WorkspacePushService(
                 }
             }
 
+            levelProgress?.Invoke("Restoring packages...");
             await TryRestoreReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, cancellationToken);
 
             levelProgress?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
