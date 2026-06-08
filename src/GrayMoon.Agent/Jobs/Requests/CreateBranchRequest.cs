@@ -15,4 +15,10 @@ public sealed class CreateBranchRequest : WorkspaceCommandRequest
 
     [JsonPropertyName("baseBranchName")]
     public string? BaseBranchName { get; set; }
+
+    [JsonPropertyName("repositoryId")]
+    public int RepositoryId { get; set; }
+
+    [JsonPropertyName("skipHooks")]
+    public bool SkipHooks { get; set; }
 }

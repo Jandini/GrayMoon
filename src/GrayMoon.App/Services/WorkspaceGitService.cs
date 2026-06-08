@@ -962,7 +962,7 @@ public class WorkspaceGitService(
         if (!persistDependencyLevel)
             await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
 
-        await _workspacePullRequestService.RefreshPullRequestsAsync(workspaceId, repoIds, cancellationToken);
+        await _workspacePullRequestService.RefreshPullRequestsAsync(workspaceId, repoIds, cancellationToken: cancellationToken);
 
         _logger.LogInformation("Persistence: saved WorkspaceRepository link versions. WorkspaceId={WorkspaceId}, RepoCount={RepoCount}",
             workspaceId, resultList.Count);
@@ -1110,13 +1110,14 @@ public class WorkspaceGitService(
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    /// <summary>Creates a new branch in all workspace repos (in parallel), then checks it out. baseBranch is "__default__" to use each repo's default, or a branch name. When <paramref name="repositoryIds"/> is set, only those repos are included.</summary>
+    /// <summary>Creates a new branch in all workspace repos (in parallel), then checks it out. baseBranch is "__default__" to use each repo's default, or a branch name. When <paramref name="repositoryIds"/> is set, only those repos are included. When <paramref name="syncState"/> is true, hooks are suppressed and the agent returns full state inline so the app can persist it without waiting for async hook syncs.</summary>
     public async Task CreateBranchesAsync(
         int workspaceId,
         string newBranchName,
         string baseBranch,
         Action<int, int>? onProgress = null,
         IReadOnlySet<int>? repositoryIds = null,
+        bool syncState = false,
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
@@ -1172,14 +1173,36 @@ public class WorkspaceGitService(
                     repositoryName = repo.RepositoryName,
                     newBranchName,
                     baseBranchName,
-                    workspaceRoot
+                    workspaceRoot,
+                    repositoryId = wr.RepositoryId,
+                    skipHooks = syncState
                 };
                 var response = await _agentBridge.SendCommandAsync("CreateBranch", args, cancellationToken);
                 var createResponse = AgentResponseJson.DeserializeAgentResponse<CreateBranchResponse>(response.Data);
                 var success = createResponse?.Success ?? response.Success;
 
                 if (success)
-                    wr.BranchName = newBranchName;
+                {
+                    wr.BranchName = createResponse?.Branch ?? newBranchName;
+                    if (syncState && createResponse != null)
+                    {
+                        // Hooks were suppressed — persist all state returned inline so the next
+                        // step (dependency update) sees a complete, consistent database.
+                        wr.CheckedOutTag = null;
+                        if (createResponse.Version != null)
+                            wr.GitVersion = createResponse.Version;
+                        if (createResponse.OutgoingCommits.HasValue)
+                            wr.OutgoingCommits = createResponse.OutgoingCommits;
+                        if (createResponse.IncomingCommits.HasValue)
+                            wr.IncomingCommits = createResponse.IncomingCommits;
+                        if (createResponse.HasUpstream.HasValue)
+                            wr.BranchHasUpstream = createResponse.HasUpstream;
+                        if (createResponse.DefaultBranchBehind.HasValue)
+                            wr.DefaultBranchBehindCommits = createResponse.DefaultBranchBehind;
+                        if (createResponse.DefaultBranchAhead.HasValue)
+                            wr.DefaultBranchAheadCommits = createResponse.DefaultBranchAhead;
+                    }
+                }
             }
             finally
             {

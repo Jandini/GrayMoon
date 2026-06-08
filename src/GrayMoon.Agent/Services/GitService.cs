@@ -284,7 +284,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, null);
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> FetchMinimalAsync(string repoPath, string branchName, string? defaultBranchOriginRef, string? bearerToken, CancellationToken ct)
+    public async Task<(bool Success, string? ErrorMessage)> FetchMinimalAsync(string repoPath, string branchName, string? defaultBranchOriginRef, string? bearerToken, CancellationToken ct, bool skipUpstreamCheck = false)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return (true, null);
@@ -300,7 +300,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         // Resolve the upstream ref (e.g. origin/main) and use that as the fetch target for the
         // current branch rather than the branch name itself. This avoids fetching non-upstreamed
         // local branches and ensures we are always fetching the configured remote tracking ref.
-        var upstreamRef = await GetUpstreamRefAsync(repoPath, ct);
+        var upstreamRef = skipUpstreamCheck ? null : await GetUpstreamRefAsync(repoPath, ct);
         logger.LogDebug("Git minimal fetch upstream ref for {RepoPath}: {UpstreamRef}", repoPath, upstreamRef ?? "<none>");
 
         if (!string.IsNullOrWhiteSpace(upstreamRef))
@@ -374,7 +374,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, null);
     }
 
-    public async Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct)
+    public async Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (null, null, false);
@@ -383,7 +383,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         // Resolve upstream ref (e.g. origin/main) once for this branch. When there is no upstream
         // configured we fall back to comparing against the default branch only.
-        var upstreamRef = await GetUpstreamRefAsync(repoPath, ct);
+        var upstreamRef = skipUpstreamCheck ? null : await GetUpstreamRefAsync(repoPath, ct);
         if (string.IsNullOrWhiteSpace(upstreamRef))
         {
             var defaultBranch = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
@@ -770,7 +770,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, null);
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct)
+    public async Task<(bool Success, string? ErrorMessage)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct, bool skipHooks = false)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(newBranchName) || string.IsNullOrWhiteSpace(baseBranchName))
             return (false, "Invalid repository path or branch name");
@@ -796,9 +796,11 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (exitRemote == 0)
             startPoint = remoteCandidate;
 
+        var hooksPrefix = GetHooksConfigPrefix(skipHooks);
+
         // Create and checkout new branch from the chosen start point in a single checkout, so we only
         // trigger one post-checkout hook instead of first checking out the base branch and then the new branch.
-        var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"checkout -b {newBranchName} {startPoint}", repoPath, ct);
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", $"{hooksPrefix}checkout -b {newBranchName} --no-track {startPoint}", repoPath, ct);
         if (exitCode != 0)
         {
             // Branch may already exist (e.g. persistence out of date); try checkout existing
@@ -806,7 +808,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             if (verifyExit == 0)
             {
                 logger.LogWarning("Branch {Branch} already exists in {RepoPath}; checking out existing branch.", newBranchName, repoPath);
-                var (coExit, coOut, coErr) = await RunProcessAsync("git", $"checkout {newBranchName}", repoPath, ct);
+                var (coExit, coOut, coErr) = await RunProcessAsync("git", $"{hooksPrefix}checkout {newBranchName}", repoPath, ct);
                 if (coExit != 0)
                 {
                     var combined = CombineOutput(coOut, coErr);

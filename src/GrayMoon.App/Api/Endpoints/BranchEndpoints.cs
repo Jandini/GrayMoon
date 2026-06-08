@@ -274,6 +274,7 @@ public static class BranchEndpoints
         WorkspaceRepository workspaceRepository,
         GitHubRepositoryRepository repoRepository,
         WorkspacePullRequestRepository workspacePullRequestRepository,
+        WorkspacePullRequestService workspacePullRequestService,
         AppDbContext dbContext,
         WorkspaceGitService workspaceGitService,
         IHubContext<WorkspaceSyncHub> hubContext,
@@ -312,8 +313,11 @@ public static class BranchEndpoints
         {
             await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, CancellationToken.None);
 
+            await workspacePullRequestService.RefreshPullRequestsAsync(workspaceId, [repositoryId], force: true, CancellationToken.None);
             var prByRepo = await workspacePullRequestRepository.GetByWorkspaceIdAsync(workspaceId, CancellationToken.None);
-            var forceDeleteLocalBranch = prByRepo.TryGetValue(repositoryId, out var pr) && pr?.IsMerged == true;
+            var forceDeleteLocalBranch = body.AllowForceDeleteLocalBranch
+                && prByRepo.TryGetValue(repositoryId, out var pr)
+                && (pr?.IsMerged == true || pr?.IsClosed == true);
 
             var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, CancellationToken.None);
             var args = new
@@ -887,6 +891,7 @@ public sealed class SyncToDefaultBranchApiRequest
     public int RepositoryId { get; set; }
     public string? CurrentBranchName { get; set; }
     public bool DeleteRemoteBranch { get; set; }
+    public bool AllowForceDeleteLocalBranch { get; set; } = true;
 }
 
 public sealed class CommonBranchesApiRequest

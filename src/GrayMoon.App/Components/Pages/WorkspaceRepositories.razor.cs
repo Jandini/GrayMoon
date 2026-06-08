@@ -97,6 +97,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private string workspaceBranchesCheckoutProgressMessage = "Checking out branch across workspace...";
     private CancellationTokenSource? _workspaceBranchesCheckoutCts;
     private UpdateModalState _updateModal = new();
+    private UpdateModalState _updateAndPushModal = new();
     private UpdateSingleRepoDependenciesModalState _updateSingleRepoModal = new();
     private PushWithDependenciesModalState _pushWithDependenciesModal = new();
     private ConfirmModalState _confirmModal = new();
@@ -112,6 +113,41 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private bool _creatingBranchesAwaitingAgentTasks;
 
     private int AgentTasksPendingCount => AgentQueueStateService.GetPendingCountForWorkspace(WorkspaceId);
+
+    private bool IsAnyOverlayVisible =>
+        isLoading || isCreatingPullRequests || isSyncing || isPushing || isUpdating ||
+        isCommitSyncing || isCheckingOut || ShowRepositoriesFetchOverlay ||
+        isCreatingBranches || isCreatingBranch || isSyncingToDefault ||
+        isWorkspaceBranchesFetching || isWorkspaceBranchesCheckingOut;
+
+    private string? ActiveOverlayMessage =>
+        isLoading ? "Loading workspace..." :
+        isCreatingPullRequests ? createPrProgressMessage :
+        isSyncing ? GetOverlayMessage(syncProgressMessage, isSyncing, _syncAwaitingAgentTasks) :
+        isPushing ? GetOverlayMessage(pushProgressMessage, isPushing, _pushAwaitingAgentTasks) :
+        isUpdating ? GetOverlayMessage(updateProgressMessage, isUpdating, _updateAwaitingAgentTasks) :
+        isCommitSyncing ? GetOverlayMessage(commitSyncProgressMessage, isCommitSyncing, _commitSyncAwaitingAgentTasks) :
+        isCheckingOut ? checkoutProgressMessage :
+        ShowRepositoriesFetchOverlay ? RepositoriesFetchOverlayMessage :
+        isCreatingBranches ? GetOverlayMessage(createBranchesProgressMessage, isCreatingBranches, _creatingBranchesAwaitingAgentTasks) :
+        isCreatingBranch ? createBranchMessage :
+        isSyncingToDefault ? GetOverlayMessage(syncToDefaultMessage, isSyncingToDefault, _syncToDefaultAwaitingAgentTasks) :
+        isWorkspaceBranchesFetching ? workspaceBranchesFetchProgressMessage :
+        isWorkspaceBranchesCheckingOut ? workspaceBranchesCheckoutProgressMessage :
+        null;
+
+    // Returns default(EventCallback) (HasDelegate == false) for operations with no abort:
+    // isLoading, isCreatingPullRequests, isCreatingBranches, isCreatingBranch, isSyncingToDefault.
+    private EventCallback ActiveOverlayAbort =>
+        isSyncing ? EventCallback.Factory.Create(this, (Action)AbortSyncAsync) :
+        isPushing ? EventCallback.Factory.Create(this, (Action)AbortPushAsync) :
+        isUpdating ? EventCallback.Factory.Create(this, (Action)AbortUpdateAsync) :
+        isCommitSyncing ? EventCallback.Factory.Create(this, (Action)AbortCommitSyncAsync) :
+        isCheckingOut ? EventCallback.Factory.Create(this, (Action)AbortCheckoutAsync) :
+        ShowRepositoriesFetchOverlay ? EventCallback.Factory.Create(this, (Action)AbortFetchRepositories) :
+        isWorkspaceBranchesFetching ? EventCallback.Factory.Create(this, (Action)AbortWorkspaceBranchesFetchAsync) :
+        isWorkspaceBranchesCheckingOut ? EventCallback.Factory.Create(this, (Action)AbortWorkspaceBranchesCheckoutAsync) :
+        default;
 
     private const int RefreshDebounceMs = 200;
     private CancellationTokenSource? _refreshDebounceCts;
@@ -534,6 +570,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
         StateHasChanged();
     }
 
+    private void CloseUpdateAndPushModal()
+    {
+        _updateAndPushModal = _updateAndPushModal with { IsVisible = false };
+        StateHasChanged();
+    }
+
     private void CloseConfirmModal()
     {
         _confirmModal = _confirmModal with
@@ -595,7 +637,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             await action();
     }
 
-    private void ShowSyncToDefaultOptions(string message, IReadOnlyList<(string RepoName, string BranchName, bool HasRemote)> repoItems, Func<bool, Task> onProceed, bool defaultDeleteRemote = true)
+    private void ShowSyncToDefaultOptions(string message, IReadOnlyList<(string RepoName, string BranchName, bool HasRemote)> repoItems, Func<bool, bool, Task> onProceed, bool defaultDeleteRemote = true)
     {
         _syncToDefaultOptionsModal = _syncToDefaultOptionsModal with
         {
@@ -603,6 +645,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             Message = message,
             RepoItems = repoItems,
             DeleteRemoteBranches = defaultDeleteRemote,
+            AllowForceDeleteLocalBranch = true,
             PendingAction = onProceed
         };
         StateHasChanged();
@@ -618,9 +661,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         var action = _syncToDefaultOptionsModal.PendingAction;
         var deleteRemote = _syncToDefaultOptionsModal.DeleteRemoteBranches;
+        var allowForce = _syncToDefaultOptionsModal.AllowForceDeleteLocalBranch;
         CloseSyncToDefaultOptionsModal();
         if (action != null)
-            await action(deleteRemote);
+            await action(deleteRemote, allowForce);
     }
 
 
@@ -628,6 +672,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     private NewPullRequestModalState _newPrModal = new();
     private bool isCreatingPullRequests;
+    private NewFeatureModalState _newFeatureModal = new();
+    private OperationErrorModalState _operationErrorModal = new();
     private string createPrProgressMessage = "Creating Pull Requests...";
     private CancellationTokenSource? _createPrCts;
 
@@ -843,7 +889,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
                 var workspacePrService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
-                await workspacePrService.RefreshPullRequestsAsync(WorkspaceId, refreshedIds, CancellationToken.None);
+                await workspacePrService.RefreshPullRequestsAsync(WorkspaceId, refreshedIds, cancellationToken: CancellationToken.None);
                 prByRepositoryId = await workspacePrService.GetPersistedPullRequestsForWorkspaceAsync(WorkspaceId, CancellationToken.None);
             }
             catch (Exception ex)
@@ -968,7 +1014,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     return (RepoName: wr2?.Repository?.RepositoryName ?? r.RepoId.ToString(), BranchName: wr2?.BranchName ?? "", HasRemote: r.HasUpstream == true);
                 })
                 .ToList();
-            ShowSyncToDefaultOptions(message, repoItems, deleteRemote => SyncToDefaultLevelAsync(safeRepoIds, deleteRemote));
+            ShowSyncToDefaultOptions(message, repoItems, (deleteRemote, allowForce) => SyncToDefaultLevelAsync(safeRepoIds, deleteRemote, allowForce));
         }
         catch (Exception ex)
         {
@@ -1513,6 +1559,171 @@ public sealed partial class WorkspaceRepositories : IDisposable
             _updateAwaitingAgentTasks = false;
             isUpdating = false;
             await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task OnUpdateAndPushClickAsync()
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || isUpdating || isSyncing)
+            return;
+
+        if (workspaceRepositories.All(wr => wr.IsOnTag))
+        {
+            ToastService.Show("All repositories are on tags; checkout a branch first.");
+            return;
+        }
+
+        await using var scope = ServiceScopeFactory.CreateAsyncScope();
+        var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+        var (updatePlan, _) = await workspaceGitService.GetUpdatePlanAsync(WorkspaceId);
+        var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
+
+        var reposOnDefault = workspaceRepositories
+            .Where(wr => !wr.IsOnTag
+                && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
+                && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal)
+                && repoIdsWithUpdates.Contains(wr.RepositoryId))
+            .ToList();
+
+        if (reposOnDefault.Count > 0)
+        {
+            var repoItems = reposOnDefault
+                .Select(wr => (wr.Repository?.RepositoryName ?? $"repo {wr.RepositoryId}", wr.DefaultBranchName!))
+                .ToList();
+            ShowDefaultBranchWarning(
+                "The following repositories are on their default branch. Update will commit dependency changes directly to the default (protected) branch.",
+                repoItems,
+                OpenUpdateAndPushModalAsync);
+            return;
+        }
+
+        await OpenUpdateAndPushModalAsync();
+    }
+
+    private async Task OpenUpdateAndPushModalAsync()
+    {
+        _updateAndPushModal = _updateAndPushModal with { IsVisible = true };
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnUpdateAndPushProceedAsync((string? CommitMessage, bool IncludeDeps) args)
+    {
+        _updateAndPushModal = _updateAndPushModal with
+        {
+            IsVisible = false,
+            LastCommitMessage = args.CommitMessage,
+            LastIncludeDeps = args.IncludeDeps
+        };
+        await RunUpdateAndPushCoreAsync(args.CommitMessage, args.IncludeDeps);
+    }
+
+    private async Task RunUpdateAndPushCoreAsync(string? commitMessage = null, bool includeDepsInCommitMessage = true)
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || isUpdating || isSyncing)
+            return;
+
+        _updateCts?.Cancel();
+        _updateCts?.Dispose();
+        _updateCts = new CancellationTokenSource();
+
+        isUpdating = true;
+        SetUpdateProgress("Updating dependencies...");
+        errorMessage = null;
+        try
+        {
+            StateHasChanged();
+            await Task.Yield();
+
+            await WorkspaceUpdateHandler.RunUpdateAsync(
+                WorkspaceId,
+                _updateCts.Token,
+                SetUpdateProgress,
+                (repoId, msg) =>
+                {
+                    repositoryErrors[repoId] = msg;
+                    _ = InvokeAsync(StateHasChanged);
+                },
+                onAppSideComplete: () => _updateAwaitingAgentTasks = true,
+                repoIdsToUpdate: null,
+                commitMessage: commitMessage,
+                includeDepsInCommitMessage: includeDepsInCommitMessage);
+
+            isUpdating = false;
+            isPushing = true;
+            SetPushProgress("Preparing push...");
+            await InvokeAsync(StateHasChanged);
+            await RefreshFromSync();
+        }
+        catch (OperationCanceledException)
+        {
+            isUpdating = false;
+            await ReloadWorkspaceDataAfterCancelAsync();
+            return;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Update & Push: update failed for workspace {WorkspaceId}", WorkspaceId);
+            errorMessage = "Update failed. The GrayMoon Agent may be offline. Start the Agent and try again.";
+            return;
+        }
+        finally
+        {
+            _updateAwaitingAgentTasks = false;
+            isUpdating = false;
+            await InvokeAsync(StateHasChanged);
+        }
+
+        // Phase 2: determine push plan using fresh workspaceRepositories loaded by RefreshFromSync()
+        IReadOnlySet<int> pushRepoIds;
+        IReadOnlySet<string> requiredPackageIds;
+        try
+        {
+            var (payload, hasUnpushed) = await WorkspacePushHandler.GetPushPlanAsync(
+                WorkspaceId, workspaceRepositories, CancellationToken.None);
+            if (!hasUnpushed)
+            {
+                isPushing = false;
+                await InvokeAsync(StateHasChanged);
+                ToastService.Show("Update complete. Nothing to push.");
+                return;
+            }
+            var taggedRepoIds = workspaceRepositories.Where(wr => wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet();
+            pushRepoIds = payload.Select(p => p.RepoId).Where(id => !taggedRepoIds.Contains(id)).ToHashSet();
+            if (pushRepoIds.Count == 0)
+            {
+                isPushing = false;
+                await InvokeAsync(StateHasChanged);
+                ToastService.Show("Update complete. Nothing to push.");
+                return;
+            }
+            var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoSetAsync(
+                WorkspaceId, pushRepoIds, CancellationToken.None);
+            requiredPackageIds = depInfo?.PayloadForRepo?.RequiredPackages
+                .Select(r => r.PackageId?.Trim())
+                .Where(id => !string.IsNullOrEmpty(id))
+                .Cast<string>()
+                .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex)
+        {
+            isPushing = false;
+            await InvokeAsync(StateHasChanged);
+            Logger.LogError(ex, "Update & Push: failed to get push plan for workspace {WorkspaceId}", WorkspaceId);
+            ShowOperationError("Push Failed", "Update succeeded but push plan could not be determined. The GrayMoon Agent may be offline.");
+            return;
+        }
+
+        // Phase 3: execute push
+        try
+        {
+            await ExecutePushAsync(pushRepoIds, synchronizedPush: true, requiredPackageIds);
+        }
+        catch (SynchronizedPushNotPossibleException ex)
+        {
+            ShowConfirm(
+                $"Synchronized push could not be completed because {ex.MissingPackagesCount} required package mappings are missing. Check NuGet connector configuration and token, then retry. Continue with normal push?",
+                () => ExecutePushAsync(pushRepoIds, synchronizedPush: false, requiredPackageIds),
+                confirmButtonText: "Continue");
         }
     }
 
@@ -2112,6 +2323,221 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _branchModal = _branchModal with { IsVisible = false };
     }
 
+    private async Task ShowNewFeatureModalAsync()
+    {
+        if (workspace == null || workspaceRepositories.Count == 0)
+            return;
+        try
+        {
+            await LoadCommonBranchesForBranchModalAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not load common branches for new feature modal");
+        }
+        _newFeatureModal = _newFeatureModal with
+        {
+            IsVisible = true,
+            WorkspaceName = workspace?.Name,
+            CommonBranchNames = _branchModal.CommonBranchNames,
+            DefaultDisplayText = _branchModal.DefaultDisplayText,
+        };
+        StateHasChanged();
+    }
+
+    private void CloseNewFeatureModal()
+    {
+        _newFeatureModal = _newFeatureModal with { IsVisible = false };
+    }
+
+    private void ShowOperationError(string title, string message)
+    {
+        _operationErrorModal = _operationErrorModal with { IsVisible = true, Title = title, Message = message };
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void CloseOperationErrorModal()
+    {
+        _operationErrorModal = _operationErrorModal with { IsVisible = false };
+        StateHasChanged();
+    }
+
+    private async Task HandleNewFeatureCreateAsync(NewFeatureRequest request)
+    {
+        if (workspace == null || isCreatingBranches || isSyncing || isUpdating || isPushing)
+            return;
+
+        CloseNewFeatureModal();
+
+        var tagFilteredRepoIds = request.SkipReposOnTags
+            ? workspaceRepositories.Where(wr => !wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet()
+            : (IReadOnlySet<int>?)null;
+
+        _createBranchesCts?.Cancel();
+        _createBranchesCts?.Dispose();
+        _createBranchesCts = new CancellationTokenSource();
+        isCreatingBranches = true;
+        isUpdating = false;
+        SetCreateBranchesProgress("Creating branches...");
+        errorMessage = null;
+        StateHasChanged();
+
+        // Phases 1 + 2: branch creation (hooks suppressed, state persisted inline) then update.
+        // NewFeatureOrchestrator guarantees all CheckedOutTag fields are null before the update
+        // runs, so DependencyUpdateOrchestrator never skips previously tag-pinned repos.
+        try
+        {
+            await Task.Yield();
+            await NewFeatureOrchestrator.RunAsync(
+                WorkspaceId,
+                request.NewBranchName,
+                request.BaseBranch,
+                tagFilteredRepoIds,
+                request.UpdateDependencies,
+                commitMessage: null,
+                setProgress: msg =>
+                {
+                    if (msg.StartsWith("Creating", StringComparison.OrdinalIgnoreCase))
+                    {
+                        SetCreateBranchesProgress(msg);
+                    }
+                    else
+                    {
+                        // Transition overlay: branch creation phase done, update phase starting.
+                        isCreatingBranches = false;
+                        isUpdating = true;
+                        SetUpdateProgress(msg);
+                    }
+                    _ = InvokeAsync(StateHasChanged);
+                },
+                reportBranchProgress: (completed, total) =>
+                {
+                    SetCreateBranchesProgress($"Created {completed} of {total} branches");
+                    _ = InvokeAsync(StateHasChanged);
+                },
+                setRepositoryError: (repoId, msg) =>
+                {
+                    repositoryErrors[repoId] = msg;
+                    _ = InvokeAsync(StateHasChanged);
+                },
+                _createBranchesCts.Token);
+
+            isCreatingBranches = false;
+            isUpdating = false;
+            if (request.PushChanges)
+            {
+                isPushing = true;
+                SetPushProgress("Preparing push...");
+            }
+            await InvokeAsync(StateHasChanged);
+            await RefreshFromSync();
+        }
+        catch (OperationCanceledException)
+        {
+            isCreatingBranches = false;
+            isUpdating = false;
+            await ReloadWorkspaceDataAfterCancelAsync();
+            return;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "New Feature: orchestration failed for workspace {WorkspaceId}", WorkspaceId);
+            ShowOperationError("New Feature Failed", "Could not complete the New Feature workflow. The GrayMoon Agent may be offline or a dependency update failed. Check individual repository errors for details.");
+            return;
+        }
+        finally
+        {
+            isCreatingBranches = false;
+            isUpdating = false;
+            _updateAwaitingAgentTasks = false;
+            await InvokeAsync(StateHasChanged);
+        }
+
+        // Step 3: Push changes
+        if (request.PushChanges)
+        {
+            IReadOnlySet<int> pushRepoIds;
+            IReadOnlySet<string> requiredPackageIds;
+            try
+            {
+                var (payload, hasUnpushed) = await WorkspacePushHandler.GetPushPlanAsync(
+                    WorkspaceId, workspaceRepositories, CancellationToken.None);
+                if (!hasUnpushed)
+                {
+                    isPushing = false;
+                    await InvokeAsync(StateHasChanged);
+                    ToastService.Show("No repositories to push.");
+                    return;
+                }
+                var taggedRepoIds = workspaceRepositories.Where(wr => wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet();
+                pushRepoIds = payload.Select(p => p.RepoId).Where(id => !taggedRepoIds.Contains(id)).ToHashSet();
+                if (pushRepoIds.Count == 0)
+                {
+                    isPushing = false;
+                    await InvokeAsync(StateHasChanged);
+                    ToastService.Show("No repositories to push.");
+                    return;
+                }
+                var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoSetAsync(
+                    WorkspaceId, pushRepoIds, CancellationToken.None);
+                requiredPackageIds = depInfo?.PayloadForRepo?.RequiredPackages
+                    .Select(r => r.PackageId?.Trim())
+                    .Where(id => !string.IsNullOrEmpty(id))
+                    .Cast<string>()
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                isPushing = false;
+                await InvokeAsync(StateHasChanged);
+                Logger.LogError(ex, "New Feature: failed to get push plan for workspace {WorkspaceId}", WorkspaceId);
+                ShowOperationError("Push Failed", "Could not determine push plan. The GrayMoon Agent may be offline.");
+                return;
+            }
+
+            _pushCts?.Cancel();
+            _pushCts?.Dispose();
+            _pushCts = new CancellationTokenSource();
+
+            try
+            {
+                await WorkspacePushHandler.RunPushWithDependenciesAsync(
+                    WorkspaceId,
+                    pushRepoIds,
+                    synchronizedPush: true,
+                    requiredPackageIds,
+                    SetPushProgress,
+                    ToastService.Show,
+                    onAppSideComplete: () => _pushAwaitingAgentTasks = true,
+                    _pushCts.Token);
+            }
+            catch (SynchronizedPushNotPossibleException ex)
+            {
+                ShowOperationError("Push Failed",
+                    $"Synchronized push could not complete: {ex.MissingPackagesCount} required package mapping(s) are missing. Check NuGet connector configuration and token, then retry.");
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                ToastService.Show("Push cancelled.");
+                return;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "New Feature: push failed for workspace {WorkspaceId}", WorkspaceId);
+                ShowOperationError("Push Failed", "Push failed. Check individual repository errors for details.");
+                return;
+            }
+            finally
+            {
+                _pushAwaitingAgentTasks = false;
+                isPushing = false;
+                await RefreshFromSync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
     private async Task LoadCommonBranchesForBranchModalAsync(CancellationToken cancellationToken)
     {
         var data = await WorkspaceBranchHandler.GetCommonBranchesAsync(
@@ -2303,7 +2729,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
                         _creatingBranchesAwaitingAgentTasks = true;
                     _ = InvokeAsync(StateHasChanged);
                 },
-                _createBranchesCts.Token);
+                syncState: false,
+                cancellationToken: _createBranchesCts.Token);
             await RefreshFromSync();
         }
         catch (OperationCanceledException)
@@ -2409,11 +2836,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 ShowSyncToDefaultOptions(
                     "This will checkout the default branch, remove the current branch locally, and pull the latest.",
                     [(repositoryName!, branchName, true)],
-                    deleteRemote => SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemote, defaultBranch));
+                    (deleteRemote, allowForce) => SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemote, defaultBranch, allowForce));
             }
             else
             {
-                await SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemoteBranch: false, defaultBranch);
+                await SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemoteBranch: false, defaultBranch, allowForceDeleteLocalBranch: true);
             }
         }
         catch (Exception ex)
@@ -2423,7 +2850,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    private async Task SyncToDefaultSingleRepoAfterCheckAsync(int repositoryId, string repositoryName, string currentBranchName, bool deleteRemoteBranch = false, string? defaultBranchName = null)
+    private async Task SyncToDefaultSingleRepoAfterCheckAsync(int repositoryId, string repositoryName, string currentBranchName, bool deleteRemoteBranch = false, string? defaultBranchName = null, bool allowForceDeleteLocalBranch = true)
     {
         if (workspace == null || isSyncingToDefault || isSyncing || isUpdating)
             return;
@@ -2440,6 +2867,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 repositoryId,
                 currentBranchName,
                 deleteRemoteBranch,
+                allowForceDeleteLocalBranch,
                 ApiBaseUrl,
                 CancellationToken.None);
 
@@ -2466,7 +2894,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    private async Task SyncToDefaultLevelAsync(List<int> repositoryIds, bool deleteRemoteBranch = false)
+    private async Task SyncToDefaultLevelAsync(List<int> repositoryIds, bool deleteRemoteBranch = false, bool allowForceDeleteLocalBranch = true)
     {
         if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || isSyncingToDefault || isSyncing || isUpdating)
             return;
@@ -2520,6 +2948,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                         repositoryId,
                         currentBranchName,
                         deleteRemoteBranch,
+                        allowForceDeleteLocalBranch,
                         ApiBaseUrl,
                         CancellationToken.None);
 
@@ -2803,7 +3232,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public string Message { get; init; } = "";
         public IReadOnlyList<(string RepoName, string BranchName, bool HasRemote)> RepoItems { get; init; } = Array.Empty<(string, string, bool)>();
         public bool DeleteRemoteBranches { get; init; } = true;
-        public Func<bool, Task>? PendingAction { get; init; }
+        public bool AllowForceDeleteLocalBranch { get; init; } = true;
+        public Func<bool, bool, Task>? PendingAction { get; init; }
     }
 
     private sealed class RepositoriesModalState
@@ -2863,6 +3293,21 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public int RepoId { get; init; }
         public string? BranchName { get; init; }
         public string? RepoName { get; init; }
+    }
+
+    private sealed record NewFeatureModalState
+    {
+        public bool IsVisible { get; init; }
+        public string? WorkspaceName { get; init; }
+        public IReadOnlyList<string> CommonBranchNames { get; init; } = Array.Empty<string>();
+        public string DefaultDisplayText { get; init; } = "multiple";
+    }
+
+    private sealed record OperationErrorModalState
+    {
+        public bool IsVisible { get; init; }
+        public string Title { get; init; } = "Operation Failed";
+        public string Message { get; init; } = "";
     }
 }
 

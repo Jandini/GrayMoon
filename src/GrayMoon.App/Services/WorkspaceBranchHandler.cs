@@ -40,7 +40,8 @@ public sealed class WorkspaceBranchHandler(
         string baseBranch,
         IReadOnlySet<int>? repositoryIds,
         Action<int, int> reportProgress,
-        CancellationToken cancellationToken)
+        bool syncState = false,
+        CancellationToken cancellationToken = default)
     {
         await using var scope = serviceScopeFactory.CreateAsyncScope();
         var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
@@ -51,6 +52,7 @@ public sealed class WorkspaceBranchHandler(
             baseBranch,
             onProgress: (completed, total) => reportProgress(completed, total),
             repositoryIds: repositoryIds,
+            syncState: syncState,
             cancellationToken: cancellationToken);
     }
 
@@ -170,13 +172,14 @@ public sealed class WorkspaceBranchHandler(
         int repositoryId,
         string? currentBranchName,
         bool deleteRemoteBranch,
+        bool allowForceDeleteLocalBranch,
         string apiBaseUrl,
         CancellationToken cancellationToken)
     {
         var httpClient = httpClientFactory.CreateClient();
         var baseUrl = apiBaseUrl;
 
-        var apiRequest = new { workspaceId, repositoryId, currentBranchName, deleteRemoteBranch };
+        var apiRequest = new { workspaceId, repositoryId, currentBranchName, deleteRemoteBranch, allowForceDeleteLocalBranch };
         var json = JsonSerializer.Serialize(apiRequest);
         using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
         using var response = await httpClient.PostAsync($"{baseUrl}/api/branches/sync-to-default", content, cancellationToken);

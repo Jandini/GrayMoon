@@ -22,6 +22,7 @@
 @inject WorkspacePushHandler WorkspacePushHandler
 @inject WorkspaceDependencyService WorkspaceDependencyService
 @inject WorkspaceBranchHandler WorkspaceBranchHandler
+@inject NewFeatureOrchestrator NewFeatureOrchestrator
 @inject AgentQueueStateService AgentQueueStateService
 @inject IPullRequestService PullRequestService
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
@@ -46,10 +47,12 @@
                                     AgentTasksPendingCount="@AgentTasksPendingCount"
                                     IsOverlayVisible="@(isLoading || isSyncing || isPushing || isUpdating || isCommitSyncing || isCheckingOut || isCreatingBranches || isCreatingBranch || isSyncingToDefault || isWorkspaceBranchesFetching || isWorkspaceBranchesCheckingOut || ShowRepositoriesFetchOverlay)"
                                     OnShowRepositories="ShowRepositoriesModalAsync"
+                                    OnNewFeature="ShowNewFeatureModalAsync"
                                     OnShowBranch="() => ShowBranchModalAsync()"
                                     OnShowSwitchBranch='() => ShowBranchModalAsync("switchbranch")'
                                     OnNewPullRequest="OpenPullRequestDialogForAllRepositoriesAsync"
                                     OnUpdate="OnUpdateClickAsync"
+                                    OnUpdateAndPush="OnUpdateAndPushClickAsync"
                                     OnPull="OnPullClickAsync"
                                     OnPush="OnPushClickAsync"
                                     OnSync="SyncAsync"
@@ -224,6 +227,13 @@
                          OnProceed="@OnUpdateProceedAsync"
                          OnCancel="@CloseUpdateModal" />
 
+<UpdateDependenciesModal IsVisible="@_updateAndPushModal.IsVisible"
+                         IsBusy="@isUpdating"
+                         InitialCommitMessage="@_updateAndPushModal.LastCommitMessage"
+                         InitialIncludeDeps="@_updateAndPushModal.LastIncludeDeps"
+                         OnProceed="@OnUpdateAndPushProceedAsync"
+                         OnCancel="@CloseUpdateAndPushModal" />
+
 <UpdateSingleRepositoryDependenciesModal IsVisible="@_updateSingleRepoModal.IsVisible"
                           Payload="@_updateSingleRepoModal.Payload"
                           RepoName="@_updateSingleRepoModal.RepoName"
@@ -253,6 +263,8 @@
                            RepoItems="@_syncToDefaultOptionsModal.RepoItems"
                            DeleteRemoteBranches="@_syncToDefaultOptionsModal.DeleteRemoteBranches"
                            DeleteRemoteBranchesChanged="@(v => _syncToDefaultOptionsModal = _syncToDefaultOptionsModal with { DeleteRemoteBranches = v })"
+                           AllowForceDeleteLocalBranch="@_syncToDefaultOptionsModal.AllowForceDeleteLocalBranch"
+                           AllowForceDeleteLocalBranchChanged="@(v => _syncToDefaultOptionsModal = _syncToDefaultOptionsModal with { AllowForceDeleteLocalBranch = v })"
                            OnProceed="@OnSyncToDefaultOptionsProceedAsync"
                            OnCancel="@CloseSyncToDefaultOptionsModal" />
 
@@ -263,39 +275,20 @@
                      OnCancel="CloseNewPullRequestModal"
                      OnOpenInGitHub="HandleNewPrOpenInGitHubAsync" />
 
-<LoadingOverlay IsVisible="@isLoading" Message="Loading workspace..." />
-<LoadingOverlay IsVisible="@isCreatingPullRequests" Message="@createPrProgressMessage" />
-<LoadingOverlay IsVisible="@isSyncing"
-                Message="@GetOverlayMessage(syncProgressMessage, isSyncing, _syncAwaitingAgentTasks)"
-                PendingAgentTasksCount="@AgentTasksPendingCount"
-                OnAbort="AbortSyncAsync" />
-<LoadingOverlay IsVisible="@isPushing"
-                Message="@GetOverlayMessage(pushProgressMessage, isPushing, _pushAwaitingAgentTasks)"
-                PendingAgentTasksCount="@AgentTasksPendingCount"
-                OnAbort="AbortPushAsync" />
-<LoadingOverlay IsVisible="@isUpdating"
-                Message="@GetOverlayMessage(updateProgressMessage, isUpdating, _updateAwaitingAgentTasks)"
-                PendingAgentTasksCount="@AgentTasksPendingCount"
-                OnAbort="AbortUpdateAsync" />
-<LoadingOverlay IsVisible="@isCommitSyncing"
-                Message="@GetOverlayMessage(commitSyncProgressMessage, isCommitSyncing, _commitSyncAwaitingAgentTasks)"
-                PendingAgentTasksCount="@AgentTasksPendingCount"
-                OnAbort="AbortCommitSyncAsync" />
-<LoadingOverlay IsVisible="@isCheckingOut"
-                Message="@checkoutProgressMessage"
-                PendingAgentTasksCount="@AgentTasksPendingCount"
-                OnAbort="AbortCheckoutAsync" />
-<LoadingOverlay IsVisible="@ShowRepositoriesFetchOverlay" Message="@RepositoriesFetchOverlayMessage" OnAbort="AbortFetchRepositories" />
-<LoadingOverlay IsVisible="@isCreatingBranches"
-                Message="@GetOverlayMessage(createBranchesProgressMessage, isCreatingBranches, _creatingBranchesAwaitingAgentTasks)"
-                PendingAgentTasksCount="@AgentTasksPendingCount" />
-<LoadingOverlay IsVisible="@isCreatingBranch" Message="@createBranchMessage" />
-<LoadingOverlay IsVisible="@isSyncingToDefault"
-                Message="@GetOverlayMessage(syncToDefaultMessage, isSyncingToDefault, _syncToDefaultAwaitingAgentTasks)"
-                PendingAgentTasksCount="@AgentTasksPendingCount" />
-<LoadingOverlay IsVisible="@isWorkspaceBranchesFetching"
-                Message="@workspaceBranchesFetchProgressMessage"
-                OnAbort="AbortWorkspaceBranchesFetchAsync" />
-<LoadingOverlay IsVisible="@isWorkspaceBranchesCheckingOut"
-                Message="@workspaceBranchesCheckoutProgressMessage"
-                OnAbort="AbortWorkspaceBranchesCheckoutAsync" />
+<NewFeatureModal IsVisible="@_newFeatureModal.IsVisible"
+                 WorkspaceName="@_newFeatureModal.WorkspaceName"
+                 WorkspaceId="@WorkspaceId"
+                 CommonBranchNames="@_newFeatureModal.CommonBranchNames"
+                 DefaultDisplayText="@_newFeatureModal.DefaultDisplayText"
+                 HasTaggedRepos="@hasTaggedRepos"
+                 OnCreate="HandleNewFeatureCreateAsync"
+                 OnCancel="CloseNewFeatureModal" />
+
+<OperationErrorModal IsVisible="@_operationErrorModal.IsVisible"
+                     Title="@_operationErrorModal.Title"
+                     Message="@_operationErrorModal.Message"
+                     OnClose="CloseOperationErrorModal" />
+
+<LoadingOverlay IsVisible="@IsAnyOverlayVisible"
+               Message="@ActiveOverlayMessage"
+               OnAbort="@ActiveOverlayAbort" />

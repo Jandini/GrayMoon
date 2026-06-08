@@ -23,9 +23,9 @@ public interface IGitService
     /// Fetches only the refs needed for commit counts: the current branch and the default origin branch (when available),
     /// instead of fetching all remote branches and tags. Returns (success, errorMessage).
     /// </summary>
-    Task<(bool Success, string? ErrorMessage)> FetchMinimalAsync(string repoPath, string branchName, string? defaultBranchOriginRef, string? bearerToken, CancellationToken ct);
+    Task<(bool Success, string? ErrorMessage)> FetchMinimalAsync(string repoPath, string branchName, string? defaultBranchOriginRef, string? bearerToken, CancellationToken ct, bool skipUpstreamCheck = false);
     /// <summary>Returns (outgoing count, incoming count, hasUpstream) for the current branch vs origin/branchName. When the branch has no upstream, returns (null, null) or (aheadOfDefault, null) and hasUpstream false. When <paramref name="defaultBranchOriginRef"/> is provided and branch has no upstream, uses it instead of resolving default again.</summary>
-    Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct);
+    Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false);
     /// <summary>Returns (behind, ahead, defaultBranchName) for the current branch vs the default branch. DefaultBranchName is without "origin/" prefix. When <paramref name="defaultBranchOriginRef"/> is provided, uses it instead of resolving.</summary>
     Task<(int? DefaultBehind, int? DefaultAhead, string? DefaultBranchName)> GetCommitCountsVsDefaultAsync(string repoPath, string? defaultBranchOriginRef, CancellationToken ct);
     /// <summary>Pulls from origin. Returns (success, mergeConflict, errorMessage).</summary>
@@ -43,7 +43,7 @@ public interface IGitService
     /// <summary>Checks out the specified branch. Returns (success, errorMessage). When <paramref name="skipHooks"/> is true, hooks are disabled for the checkout (orchestrated flows such as sync-to-default).</summary>
     Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct, bool skipHooks = false);
     /// <summary>Creates a new branch from the given base branch and checks it out. Returns (success, errorMessage).</summary>
-    Task<(bool Success, string? ErrorMessage)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct);
+    Task<(bool Success, string? ErrorMessage)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct, bool skipHooks = false);
     /// <summary>Deletes a local branch. Returns true if successful. Only deletes if branch is not current and is merged or force flag is set.</summary>
     Task<bool> DeleteLocalBranchAsync(string repoPath, string branchName, bool force, CancellationToken ct);
     /// <summary>Deletes a local or remote branch. Returns (success, errorMessage). For remote, runs git push origin --delete. For local, when <paramref name="force"/> is true, uses git branch -D.</summary>

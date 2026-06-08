@@ -42,6 +42,14 @@
                             </label>
                         </div>
                     }
+                    <div class="form-check mt-1">
+                        <input class="form-check-input" type="checkbox" id="forceDeleteLocalCheck"
+                               checked="@AllowForceDeleteLocalBranch"
+                               @onchange="OnAllowForceDeleteLocalChanged" />
+                        <label class="form-check-label small" for="forceDeleteLocalCheck">
+                            Delete local branch@(RepoItems.Count > 1 ? "es" : "") and use force delete (-D) for closed/merged PRs
+                        </label>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-primary" @onclick="OnProceed">Proceed</button>
@@ -58,6 +66,8 @@
     [Parameter] public IReadOnlyList<(string RepoName, string BranchName, bool HasRemote)> RepoItems { get; set; } = Array.Empty<(string, string, bool)>();
     [Parameter] public bool DeleteRemoteBranches { get; set; } = true;
     [Parameter] public EventCallback<bool> DeleteRemoteBranchesChanged { get; set; }
+    [Parameter] public bool AllowForceDeleteLocalBranch { get; set; } = true;
+    [Parameter] public EventCallback<bool> AllowForceDeleteLocalBranchChanged { get; set; }
     [Parameter] public EventCallback OnProceed { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
 
@@ -73,6 +83,12 @@
     {
         var val = e.Value is bool b ? b : bool.TryParse(e.Value?.ToString(), out var p) && p;
         await DeleteRemoteBranchesChanged.InvokeAsync(val);
+    }
+
+    private async Task OnAllowForceDeleteLocalChanged(ChangeEventArgs e)
+    {
+        var val = e.Value is bool b ? b : bool.TryParse(e.Value?.ToString(), out var p) && p;
+        await AllowForceDeleteLocalBranchChanged.InvokeAsync(val);
     }
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
