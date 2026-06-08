@@ -103,7 +103,12 @@ public sealed class DependencyUpdateOrchestrator(
 
             await workspaceGitService.RestoreDependenciesAsync(
                 workspaceId,
-                reposAtLevel.Select(r => r.RepoName),
+                reposAtLevel.Select(r => (
+                    r.RepoName,
+                    (IReadOnlyList<string>)r.ProjectUpdates
+                        .Select(p => p.ProjectPath!)
+                        .Where(p => !string.IsNullOrWhiteSpace(p))
+                        .ToList())),
                 cancellationToken);
 
             levelProgress("Committing...");

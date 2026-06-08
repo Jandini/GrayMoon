@@ -416,29 +416,31 @@ public class WorkspaceGitService(
     }
 
     /// <summary>
-    /// Fires <c>dotnet restore --force --no-cache</c> for each named repo in the workspace.
+    /// Fires <c>dotnet restore --force --no-cache &lt;project.csproj&gt;</c> for each specified project file.
     /// Best-effort: errors are logged and swallowed so the caller's workflow is never interrupted.
     /// </summary>
-    public async Task RestoreDependenciesAsync(int workspaceId, IEnumerable<string> repoNames, CancellationToken cancellationToken)
+    public async Task RestoreDependenciesAsync(int workspaceId, IEnumerable<(string RepoName, IReadOnlyList<string> ProjectPaths)> repos, CancellationToken cancellationToken)
     {
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return;
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
-        var tasks = repoNames.Select(async repositoryName =>
-        {
-            try
+        var tasks = repos
+            .Where(r => r.ProjectPaths.Count > 0)
+            .Select(async r =>
             {
-                await _agentBridge.SendCommandAsync(
-                    "DotnetRestore",
-                    new { workspaceName = workspace.Name, repositoryName, workspaceRoot },
-                    cancellationToken);
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "dotnet restore failed for {RepoName} in workspace {WorkspaceName}, continuing", repositoryName, workspace.Name);
-            }
-        });
+                try
+                {
+                    await _agentBridge.SendCommandAsync(
+                        "DotnetRestore",
+                        new { workspaceName = workspace.Name, repositoryName = r.RepoName, projectPaths = r.ProjectPaths, workspaceRoot },
+                        cancellationToken);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "dotnet restore failed for {RepoName} in workspace {WorkspaceName}, continuing", r.RepoName, workspace.Name);
+                }
+            });
         await Task.WhenAll(tasks);
     }
 

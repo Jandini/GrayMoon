@@ -9,4 +9,7 @@ public sealed class DotnetRestoreRequest : WorkspaceCommandRequest
 
     [JsonPropertyName("repositoryName")]
     public string? RepositoryName { get; set; }
+
+    [JsonPropertyName("projectPaths")]
+    public IReadOnlyList<string>? ProjectPaths { get; set; }
 }
