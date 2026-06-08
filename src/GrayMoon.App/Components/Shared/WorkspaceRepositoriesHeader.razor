@@ -160,14 +160,14 @@
             </button>
         }
         <div class="btn-group position-relative">
-            <button class="btn @(IsOutOfSync == true ? "btn-danger" : "btn-primary")"
+            <button class="btn @(IsOutOfSync == true ? "btn-danger" : "btn-outline-primary")"
                     @onclick="@(() => OnSync.InvokeAsync())"
                     @onclick:stopPropagation
                     disabled="@(IsSyncing || IsUpdating || IsPushing || IsRestoringPackages || RepositoriesCount == 0)">
                 Sync
             </button>
             <button type="button"
-                    class="btn @(IsOutOfSync == true ? "btn-danger" : "btn-primary") dropdown-toggle dropdown-toggle-split"
+                    class="btn @(IsOutOfSync == true ? "btn-danger" : "btn-outline-primary") dropdown-toggle dropdown-toggle-split"
                     aria-label="Toggle Sync menu"
                     aria-expanded="@(_syncMenuOpen ? "true" : "false")"
                     @onclick="ToggleSyncMenu"
@@ -178,7 +178,7 @@
             @if (_syncMenuOpen)
             {
                 <div class="branch-menu-backdrop" @onclick="CloseSyncMenu"></div>
-                <ul class="dropdown-menu show shadow branch-menu-list"
+                <ul class="dropdown-menu show shadow branch-menu-list dropdown-menu-end"
                     role="menu">
                     <li>
                         <button class="dropdown-item" type="button"
