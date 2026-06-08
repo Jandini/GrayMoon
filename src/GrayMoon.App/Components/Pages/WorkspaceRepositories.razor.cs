@@ -96,6 +96,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private bool isWorkspaceBranchesCheckingOut = false;
     private string workspaceBranchesCheckoutProgressMessage = "Checking out branch across workspace...";
     private CancellationTokenSource? _workspaceBranchesCheckoutCts;
+    private bool isRestoringPackages = false;
+    private string? restorePackagesProgressMessage;
+    private CancellationTokenSource? _restorePackagesCts;
     private UpdateModalState _updateModal = new();
     private UpdateModalState _updateAndPushModal = new();
     private UpdateSingleRepoDependenciesModalState _updateSingleRepoModal = new();
@@ -118,7 +121,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         isLoading || isCreatingPullRequests || isSyncing || isPushing || isUpdating ||
         isCommitSyncing || isCheckingOut || ShowRepositoriesFetchOverlay ||
         isCreatingBranches || isCreatingBranch || isSyncingToDefault ||
-        isWorkspaceBranchesFetching || isWorkspaceBranchesCheckingOut;
+        isWorkspaceBranchesFetching || isWorkspaceBranchesCheckingOut || isRestoringPackages;
 
     private string? ActiveOverlayMessage =>
         isLoading ? "Loading workspace..." :
@@ -134,6 +137,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         isSyncingToDefault ? GetOverlayMessage(syncToDefaultMessage, isSyncingToDefault, _syncToDefaultAwaitingAgentTasks) :
         isWorkspaceBranchesFetching ? workspaceBranchesFetchProgressMessage :
         isWorkspaceBranchesCheckingOut ? workspaceBranchesCheckoutProgressMessage :
+        isRestoringPackages ? restorePackagesProgressMessage :
         null;
 
     // Returns default(EventCallback) (HasDelegate == false) for operations with no abort:
@@ -147,6 +151,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         ShowRepositoriesFetchOverlay ? EventCallback.Factory.Create(this, (Action)AbortFetchRepositories) :
         isWorkspaceBranchesFetching ? EventCallback.Factory.Create(this, (Action)AbortWorkspaceBranchesFetchAsync) :
         isWorkspaceBranchesCheckingOut ? EventCallback.Factory.Create(this, (Action)AbortWorkspaceBranchesCheckoutAsync) :
+        isRestoringPackages ? EventCallback.Factory.Create(this, (Action)AbortRestorePackages) :
         default;
 
     private const int RefreshDebounceMs = 200;
@@ -252,6 +257,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _workspaceBranchesFetchCts?.Dispose();
         _workspaceBranchesCheckoutCts?.Cancel();
         _workspaceBranchesCheckoutCts?.Dispose();
+        _restorePackagesCts?.Cancel();
+        _restorePackagesCts?.Dispose();
     }
 
     /// <summary>Called when WorkspaceSynced is received (or after Update): reload from a fresh scope so the grid gets current DB values (no stale DbContext).</summary>
@@ -3308,6 +3315,64 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public bool IsVisible { get; init; }
         public string Title { get; init; } = "Operation Failed";
         public string Message { get; init; } = "";
+    }
+
+    private void SetRestorePackagesProgress(string message)
+    {
+        restorePackagesProgressMessage = message;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void AbortRestorePackages() => _restorePackagesCts?.Cancel();
+
+    private async Task RestorePackagesAsync()
+    {
+        if (workspace == null || isRestoringPackages)
+            return;
+
+        _restorePackagesCts?.Cancel();
+        _restorePackagesCts?.Dispose();
+        _restorePackagesCts = new CancellationTokenSource();
+
+        isRestoringPackages = true;
+        SetRestorePackagesProgress("Restoring packages...");
+        try
+        {
+            StateHasChanged();
+            await Task.Yield();
+
+            int count;
+            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
+            {
+                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                count = await workspaceGitService.RestoreAllWorkspacePackagesAsync(
+                    WorkspaceId,
+                    SetRestorePackagesProgress,
+                    _restorePackagesCts.Token);
+            }
+
+            if (count > 0)
+                ToastService.Show($"Restored packages in {count} {(count == 1 ? "project" : "projects")}");
+        }
+        catch (OperationCanceledException)
+        {
+            ToastService.Show("Restore cancelled.");
+        }
+        catch (AgentNotConnectedException ex)
+        {
+            Logger.LogError(ex, "Restore packages failed (agent not connected) for workspace {WorkspaceId}", WorkspaceId);
+            ToastService.ShowError($"Restore failed. {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Restore packages failed for workspace {WorkspaceId}", WorkspaceId);
+            ToastService.ShowError($"Restore failed: {ex.Message}");
+        }
+        finally
+        {
+            isRestoringPackages = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 }
 

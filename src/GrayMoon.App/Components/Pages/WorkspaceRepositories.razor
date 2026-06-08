@@ -45,7 +45,8 @@
                                     IsPushing="@isPushing"
                                     IsCommitSyncing="@isCommitSyncing"
                                     AgentTasksPendingCount="@AgentTasksPendingCount"
-                                    IsOverlayVisible="@(isLoading || isSyncing || isPushing || isUpdating || isCommitSyncing || isCheckingOut || isCreatingBranches || isCreatingBranch || isSyncingToDefault || isWorkspaceBranchesFetching || isWorkspaceBranchesCheckingOut || ShowRepositoriesFetchOverlay)"
+                                    IsRestoringPackages="@isRestoringPackages"
+                                    IsOverlayVisible="@(isLoading || isSyncing || isPushing || isUpdating || isCommitSyncing || isCheckingOut || isCreatingBranches || isCreatingBranch || isSyncingToDefault || isWorkspaceBranchesFetching || isWorkspaceBranchesCheckingOut || ShowRepositoriesFetchOverlay || isRestoringPackages)"
                                     OnShowRepositories="ShowRepositoriesModalAsync"
                                     OnNewFeature="ShowNewFeatureModalAsync"
                                     OnShowBranch="() => ShowBranchModalAsync()"
@@ -56,6 +57,7 @@
                                     OnPull="OnPullClickAsync"
                                     OnPush="OnPushClickAsync"
                                     OnSync="SyncAsync"
+                                    OnRestorePackages="@RestorePackagesAsync"
                                     OnSearchChanged="OnSearchChanged"
                                     OnClearSearch="ClearSearchFilter"
                                     OnSearchKeyDown="OnSearchKeyDown" />

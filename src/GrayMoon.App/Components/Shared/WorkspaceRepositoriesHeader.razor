@@ -159,11 +159,38 @@
                 Push
             </button>
         }
-        <button class="btn @(IsOutOfSync == true ? "btn-danger" : "btn-primary")"
-                @onclick="@(() => OnSync.InvokeAsync())"
-                disabled="@(IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0)">
-            Sync
-        </button>
+        <div class="btn-group position-relative">
+            <button class="btn @(IsOutOfSync == true ? "btn-danger" : "btn-primary")"
+                    @onclick="@(() => OnSync.InvokeAsync())"
+                    @onclick:stopPropagation
+                    disabled="@(IsSyncing || IsUpdating || IsPushing || IsRestoringPackages || RepositoriesCount == 0)">
+                Sync
+            </button>
+            <button type="button"
+                    class="btn @(IsOutOfSync == true ? "btn-danger" : "btn-primary") dropdown-toggle dropdown-toggle-split"
+                    aria-label="Toggle Sync menu"
+                    aria-expanded="@(_syncMenuOpen ? "true" : "false")"
+                    @onclick="ToggleSyncMenu"
+                    @onclick:stopPropagation
+                    disabled="@(IsSyncing || IsUpdating || IsPushing || IsRestoringPackages || RepositoriesCount == 0)">
+                <span class="visually-hidden">Toggle Dropdown</span>
+            </button>
+            @if (_syncMenuOpen)
+            {
+                <div class="branch-menu-backdrop" @onclick="CloseSyncMenu"></div>
+                <ul class="dropdown-menu show shadow branch-menu-list"
+                    role="menu">
+                    <li>
+                        <button class="dropdown-item" type="button"
+                                role="menuitem"
+                                @onclick="HandleRestorePackagesClick"
+                                disabled="@(IsSyncing || IsUpdating || IsPushing || IsRestoringPackages || RepositoriesCount == 0)">
+                            Restore Packages
+                        </button>
+                    </li>
+                </ul>
+            }
+        </div>
     </div>
 </div>
 
@@ -181,6 +208,7 @@
     [Parameter] public bool IsUpdating { get; set; }
     [Parameter] public bool IsPushing { get; set; }
     [Parameter] public bool IsCommitSyncing { get; set; }
+    [Parameter] public bool IsRestoringPackages { get; set; }
     [Parameter] public int AgentTasksPendingCount { get; set; }
     [Parameter] public bool IsOverlayVisible { get; set; }
 
@@ -194,12 +222,14 @@
     [Parameter] public EventCallback OnPull { get; set; }
     [Parameter] public EventCallback OnPush { get; set; }
     [Parameter] public EventCallback OnSync { get; set; }
+    [Parameter] public EventCallback OnRestorePackages { get; set; }
     [Parameter] public EventCallback<ChangeEventArgs> OnSearchChanged { get; set; }
     [Parameter] public EventCallback OnClearSearch { get; set; }
     [Parameter] public EventCallback<KeyboardEventArgs> OnSearchKeyDown { get; set; }
 
     private bool _branchMenuOpen;
     private bool _updateMenuOpen;
+    private bool _syncMenuOpen;
 
     private bool UpdateDisabled =>
         WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
@@ -223,6 +253,16 @@
     private void ToggleUpdateMenu() => _updateMenuOpen = !_updateMenuOpen;
 
     private void CloseUpdateMenu() => _updateMenuOpen = false;
+
+    private void ToggleSyncMenu() => _syncMenuOpen = !_syncMenuOpen;
+
+    private void CloseSyncMenu() => _syncMenuOpen = false;
+
+    private async Task HandleRestorePackagesClick()
+    {
+        CloseSyncMenu();
+        await OnRestorePackages.InvokeAsync();
+    }
 
     private async Task HandleUpdatePrimaryClick()
     {
