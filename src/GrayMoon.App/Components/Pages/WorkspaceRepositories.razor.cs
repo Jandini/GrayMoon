@@ -1569,6 +1569,41 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
+    private async Task OnUpdateFilesClickAsync()
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || isUpdating || isSyncing)
+            return;
+        _updateCts?.Cancel();
+        _updateCts?.Dispose();
+        _updateCts = new CancellationTokenSource();
+        isUpdating = true;
+        updateProgressMessage = "Updating file versions...";
+        errorMessage = null;
+        StateHasChanged();
+        try
+        {
+            var (updated, failed, error, _) = await FileVersionService.UpdateAllVersionsAsync(
+                WorkspaceId, selectedRepositoryIds: null, cancellationToken: _updateCts.Token);
+            if (error != null)
+                errorMessage = error;
+            else if (failed > 0)
+                errorMessage = $"Updated {updated} line(s). {failed} file(s) could not be updated - check logs.";
+            else
+                ToastService.Show("Versions updated in configured files.");
+        }
+        catch (OperationCanceledException) { /* user aborted */ }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating file versions for WorkspaceId={WorkspaceId}", WorkspaceId);
+            errorMessage = "Failed to update file versions. Please try again.";
+        }
+        finally
+        {
+            isUpdating = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
     private async Task OnUpdateAndPushClickAsync()
     {
         if (workspace == null || workspaceRepositories.Count == 0 || isUpdating || isSyncing)

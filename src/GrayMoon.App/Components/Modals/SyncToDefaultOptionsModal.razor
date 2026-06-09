@@ -22,12 +22,14 @@
                                     <li class="mb-1">
                                         <div>
                                             <code>@item.RepoName</code>
+                                        </div>
+                                        <div class="text-muted ps-1">
+                                            @item.BranchName
                                             @if (item.HasRemote)
                                             {
                                                 <span class="badge bg-secondary ms-1" style="font-size:0.65em;">remote</span>
                                             }
                                         </div>
-                                        <div class="text-muted ps-1">@item.BranchName</div>
                                     </li>
                                 }
                             </ul>
