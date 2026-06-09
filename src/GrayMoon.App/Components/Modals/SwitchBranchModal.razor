@@ -100,6 +100,7 @@
                                         @foreach (var tag in GetFilteredTags())
                                         {
                                             <div class="branch-item p-2 @(selectedBranch == tag ? "bg-light" : "")"
+                                                 id="@(tag == currentTag ? "switch-branch-current-tag" : null)"
                                                  style="cursor: pointer;"
                                                  @onclick='() => SelectBranch(tag)'>
                                                 <div class="d-flex align-items-center justify-content-between">
@@ -474,8 +475,11 @@
     [Parameter] public EventCallback<(int RepositoryId, string BranchName, bool IsTag)> OnCheckoutBranch { get; set; }
     [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string CurrentBranchName, string DefaultBranch)> OnSyncToDefault { get; set; }
     [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string NewBranchName, string BaseBranch, bool SetUpstream)> OnCreateBranch { get; set; }
+    /// <summary>Tab to activate when the modal opens. Null defaults to "local", but callers can pass "tags" to jump straight to the Tags tab (e.g. from the upgrade badge).</summary>
+    [Parameter] public string? InitialTab { get; set; }
 
     private string activeTab = "local";
+    private bool _scrollToCurrentTag;
     /// <summary>True for git's synthetic placeholder ref names that appear in detached HEAD state (e.g. <c>(HEAD detached at v1.0)</c>, <c>(no branch)</c>, <c>origin/(no branch)</c>). These must never be shown as selectable branches.</summary>
     private static bool IsSyntheticGitRefName(string? name)
     {
@@ -536,8 +540,8 @@
         {
             if (!_prevVisible)
             {
-                // Modal just opened: reset New Branch tab and always start on Locals
-                activeTab = "local";
+                // Modal just opened: reset to InitialTab when provided (e.g. "tags" from upgrade badge), otherwise Locals
+                activeTab = InitialTab ?? "local";
                 newBranchName = "";
                 selectedBaseBranch = "__default__";
                 showBasedOnDropdown = false;
@@ -615,6 +619,16 @@
             }
             catch { }
         }
+        // Scroll current tag into view when Tags tab opens so it is visible even if many newer tags are above it
+        if (IsVisible && _scrollToCurrentTag && activeTab == "tags" && !string.IsNullOrWhiteSpace(currentTag))
+        {
+            _scrollToCurrentTag = false;
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("scrollElementIntoViewById", "switch-branch-current-tag");
+            }
+            catch { }
+        }
     }
 
     private async Task LoadBranchesAsync()
@@ -657,6 +671,7 @@
                 {
                     activeTab = "tags";
                     selectedBranch = currentTag;
+                    _scrollToCurrentTag = true;
                 }
                 else
                 {
@@ -747,7 +762,11 @@
             _focusFilterOnNextRender = true;
         // Reset selection so the radio matches the new tab's current item.
         if (tab == "tags")
+        {
             selectedBranch = currentTag;
+            if (!string.IsNullOrWhiteSpace(currentTag))
+                _scrollToCurrentTag = true;
+        }
         else if (tab == "local")
             selectedBranch = currentBranchLocal;
         else if (tab == "remote")
@@ -817,22 +836,10 @@
 
     private IEnumerable<string> GetFilteredTags()
     {
-        IEnumerable<string> filtered;
         if (string.IsNullOrWhiteSpace(branchFilter))
-            filtered = tags;
-        else
-        {
-            var term = branchFilter.Trim();
-            filtered = tags.Where(t => t.Contains(term, StringComparison.OrdinalIgnoreCase));
-        }
-        // Surface the current tag at the top of the list so users see what is pinned right away.
-        var list = filtered.ToList();
-        if (string.IsNullOrWhiteSpace(currentTag))
-            return list;
-        var current = list.FirstOrDefault(t => string.Equals(t, currentTag, StringComparison.OrdinalIgnoreCase));
-        if (current == null)
-            return list;
-        return list.Where(t => !string.Equals(t, current, StringComparison.OrdinalIgnoreCase)).Prepend(current);
+            return tags;
+        var term = branchFilter.Trim();
+        return tags.Where(t => t.Contains(term, StringComparison.OrdinalIgnoreCase));
     }
 
     private string GetFilterCountText()

@@ -169,6 +169,7 @@
                                                                   OnSyncClick="() => SyncSingleRepoAsync(wr.RepositoryId)"
                                                                   OnCopyDependencies="CopyDependenciesToClipboard"
                                                                   OnCreatePr="OpenPullRequestDialogForRepositoryAsync"
+                                                                  OnUpgradeClick="ShowSwitchBranchModalOnTagsTab"
                                                                   OnDismissError="() => DismissRepositoryError(wr.RepositoryId)" />
                                     }
                                 }
@@ -216,6 +217,7 @@
                    RepositoryName="@_switchBranchModal.RepositoryName"
                    CurrentBranch="@_switchBranchModal.CurrentBranch"
                    RepositoryUrl="@_switchBranchModal.RepositoryUrl"
+                   InitialTab="@_switchBranchModal.InitialTab"
                    OnCancel="@CloseSwitchBranchModal"
                    OnBranchChanged="@OnBranchChangedAsync"
                    OnCheckoutBranch="@CheckoutBranchAsync"

@@ -39,6 +39,7 @@ public static class Migrations
         await MigrateWorkspaceRepositoriesCheckedOutTagAsync(dbContext);
         await MigrateRepositoryBranchesIsTagAsync(dbContext);
         await MigrateRepositoryBranchesSortIndexAsync(dbContext);
+        await MigrateWorkspaceRepositoriesHasNewerTagAsync(dbContext);
     }
 
     public static async Task MigrateRepositoriesTopicsAsync(AppDbContext dbContext)
@@ -1001,6 +1002,32 @@ public static class Migrations
                 if (!hasColumn)
                 {
                     cmd.CommandText = "ALTER TABLE RepositoryBranches ADD COLUMN IsTag INTEGER NOT NULL DEFAULT 0";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds HasNewerTag column to WorkspaceRepositories so the UI can show an "upgrade" badge when a newer tag exists for a tag-pinned repo.</summary>
+    public static async Task MigrateWorkspaceRepositoriesHasNewerTagAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='HasNewerTag'";
+                var hasColumn = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+                if (!hasColumn)
+                {
+                    cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN HasNewerTag INTEGER";
                     await cmd.ExecuteNonQueryAsync();
                 }
             }

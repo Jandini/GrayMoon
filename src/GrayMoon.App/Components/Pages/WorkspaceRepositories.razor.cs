@@ -2282,8 +2282,28 @@ public sealed partial class WorkspaceRepositories : IDisposable
             RepositoryId = 0,
             RepositoryName = null,
             CurrentBranch = null,
-            RepositoryUrl = null
+            RepositoryUrl = null,
+            InitialTab = null
         };
+    }
+
+    private void ShowSwitchBranchModalOnTagsTab(WorkspaceRepositoryLink link)
+    {
+        var wr = workspaceRepositories.FirstOrDefault(r => r.RepositoryId == link.RepositoryId);
+        var repo = wr?.Repository;
+        if (repo == null)
+            return;
+
+        _switchBranchModal = _switchBranchModal with
+        {
+            IsVisible = true,
+            RepositoryId = link.RepositoryId,
+            RepositoryName = repo.RepositoryName,
+            CurrentBranch = null,
+            RepositoryUrl = repo.CloneUrl,
+            InitialTab = "tags"
+        };
+        StateHasChanged();
     }
 
     /// <summary>When every workspace repo has the same non-empty <see cref="WorkspaceRepositoryLink.BranchName"/>, returns that name; otherwise null.</summary>
@@ -3275,6 +3295,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public string? RepositoryName { get; init; }
         public string? CurrentBranch { get; init; }
         public string? RepositoryUrl { get; init; }
+        public string? InitialTab { get; init; }
     }
 
     private sealed record UpdateModalState

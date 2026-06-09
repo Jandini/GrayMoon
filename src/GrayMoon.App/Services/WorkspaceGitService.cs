@@ -1168,11 +1168,20 @@ public class WorkspaceGitService(
                     link.IncomingCommits = null;
                     link.DefaultBranchBehindCommits = null;
                     link.DefaultBranchAheadCommits = null;
+                    // Determine if a newer tag exists: SortIndex 0 = newest. If currentTag is not at index 0, there is a newer tag.
+                    var tagIdx = -1;
+                    for (var i = 0; i < tags.Count; i++)
+                    {
+                        if (string.Equals(tags[i], currentTag, StringComparison.OrdinalIgnoreCase))
+                        { tagIdx = i; break; }
+                    }
+                    link.HasNewerTag = tagIdx > 0;
                 }
                 else if (!string.IsNullOrWhiteSpace(link.CheckedOutTag))
                 {
                     // Tag list refreshed but we are no longer on a tag; clear the pinned state.
                     link.CheckedOutTag = null;
+                    link.HasNewerTag = null;
                 }
             }
         }

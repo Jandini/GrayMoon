@@ -979,6 +979,46 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return tags;
     }
 
+    public async Task<(bool Success, string? ErrorMessage)> FetchTagsAsync(string repoPath, string? bearerToken, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return (true, null);
+
+        string args;
+        if (string.IsNullOrWhiteSpace(bearerToken))
+        {
+            args = "fetch origin --tags";
+        }
+        else
+        {
+            var credentials = "x-access-token:" + bearerToken;
+            var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
+            var headerValue = "Authorization: Basic " + base64;
+            var escaped = headerValue.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            args = $"-c http.extraHeader=\"{escaped}\" fetch origin --tags";
+        }
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var (exitCode, stdout, stderr) = await FetchRetryPipeline.ExecuteAsync(
+            async cancellationToken => await RunProcessAsync("git", args, repoPath, cancellationToken),
+            ct);
+        sw.Stop();
+        if (exitCode != 0)
+        {
+            var output = (stdout ?? "").Trim();
+            var errorOutput = (stderr ?? "").Trim();
+            var combined = string.IsNullOrWhiteSpace(output) ? errorOutput :
+                           string.IsNullOrWhiteSpace(errorOutput) ? output :
+                           $"{output}\n{errorOutput}";
+            if (string.IsNullOrWhiteSpace(combined))
+                combined = $"Git fetch tags failed (exit code {exitCode})";
+            logger.LogWarning("Git fetch tags failed in {ElapsedMs}ms for {RepoPath}. ExitCode={ExitCode}", sw.ElapsedMilliseconds, repoPath, exitCode);
+            return (false, combined);
+        }
+        logger.LogDebug("Git fetch tags completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
+        return (true, null);
+    }
+
     public async Task<(bool Success, string? ErrorMessage)> CheckoutTagAsync(string repoPath, string tagName, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(tagName))

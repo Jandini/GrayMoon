@@ -35,6 +35,9 @@ public class WorkspaceRepositoryLink
     [NotMapped]
     public bool IsOnTag => !string.IsNullOrWhiteSpace(CheckedOutTag);
 
+    /// <summary>True when the repository is on a tag and at least one newer tag exists (i.e. the checked-out tag is not the most recently created). Null when unknown or not on a tag. Updated when tags are fetched during checkout sync.</summary>
+    public bool? HasNewerTag { get; set; }
+
     /// <summary>Repository's default branch name (e.g. main, master, develop). Set during sync from agent and reused for divergence / PR URLs and sync-to-default logic.</summary>
     [MaxLength(200)]
     public string? DefaultBranchName { get; set; }
