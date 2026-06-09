@@ -5,7 +5,7 @@
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
          @onkeydown="HandleKeyDown"
          @ref="_modalElement">
-        <div class="modal-dialog modal-dialog-scrollable default-branch-warning-modal">
+        <div class="modal-dialog modal-dialog-scrollable modal-lg default-branch-warning-modal">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Sync to Default</h5>
@@ -20,12 +20,14 @@
                                 @foreach (var item in RepoItems)
                                 {
                                     <li class="mb-1">
-                                        <code>@item.RepoName</code>
-                                        <span class="text-muted">(@item.BranchName)</span>
-                                        @if (item.HasRemote)
-                                        {
-                                            <span class="badge bg-secondary ms-1" style="font-size:0.65em;">remote</span>
-                                        }
+                                        <div>
+                                            <code>@item.RepoName</code>
+                                            @if (item.HasRemote)
+                                            {
+                                                <span class="badge bg-secondary ms-1" style="font-size:0.65em;">remote</span>
+                                            }
+                                        </div>
+                                        <div class="text-muted ps-1">@item.BranchName</div>
                                     </li>
                                 }
                             </ul>
@@ -47,7 +49,7 @@
                                checked="@AllowForceDeleteLocalBranch"
                                @onchange="OnAllowForceDeleteLocalChanged" />
                         <label class="form-check-label small" for="forceDeleteLocalCheck">
-                            Delete local branch@(RepoItems.Count > 1 ? "es" : "") and use force delete (-D) for closed/merged PRs
+                            Delete local branches
                         </label>
                     </div>
                 </div>

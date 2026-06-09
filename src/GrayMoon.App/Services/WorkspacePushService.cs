@@ -288,6 +288,9 @@ public sealed class WorkspacePushService(
                 }
             }
 
+            levelProgress?.Invoke("Restoring packages...");
+            await TryRestoreReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, cancellationToken);
+
             levelProgress?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
             await PushReposAsync(
                 workspace,
@@ -587,6 +590,67 @@ public sealed class WorkspacePushService(
             foreach (var line in update.NewLines)
                 _overlayCommandTerminalService.Append(label, AgentCommandStreamKind.Stdout, line);
         }
+    }
+
+    private async Task TryRestoreReposAtLevelAsync(
+        int workspaceId,
+        string workspaceName,
+        string? workspaceRoot,
+        IReadOnlyList<PushRepoPayload> repos,
+        CancellationToken cancellationToken)
+    {
+        var repoIdSet = repos.Select(r => r.RepoId).ToHashSet();
+        var repoNameById = repos.ToDictionary(r => r.RepoId, r => r.RepoName);
+
+        var projects = await _dbContext.WorkspaceProjects
+            .AsNoTracking()
+            .Where(p => p.WorkspaceId == workspaceId && repoIdSet.Contains(p.RepositoryId))
+            .ToListAsync(cancellationToken);
+
+        if (projects.Count == 0) return;
+
+        var projectIdToRepoId = projects.ToDictionary(p => p.ProjectId, p => p.RepositoryId);
+        var projectIdSet = projectIdToRepoId.Keys.ToHashSet();
+
+        var deps = await _dbContext.ProjectDependencies
+            .AsNoTracking()
+            .Where(d => projectIdSet.Contains(d.DependentProjectId))
+            .ToListAsync(cancellationToken);
+
+        var projectFilePathById = projects.ToDictionary(p => p.ProjectId, p => p.ProjectFilePath);
+
+        var pathsByRepoId = new Dictionary<int, List<string>>();
+        foreach (var dep in deps)
+        {
+            var depRepoId = projectIdToRepoId.GetValueOrDefault(dep.DependentProjectId, -1);
+            var refRepoId = projectIdToRepoId.GetValueOrDefault(dep.ReferencedProjectId, -1);
+            if (depRepoId < 0 || refRepoId < 0 || depRepoId == refRepoId) continue;
+            if (!projectFilePathById.TryGetValue(dep.DependentProjectId, out var filePath) || string.IsNullOrWhiteSpace(filePath)) continue;
+            if (!pathsByRepoId.TryGetValue(depRepoId, out var list))
+                pathsByRepoId[depRepoId] = list = [];
+            if (!list.Contains(filePath))
+                list.Add(filePath);
+        }
+
+        if (pathsByRepoId.Count == 0) return;
+
+        var tasks = pathsByRepoId.Select(async kvp =>
+        {
+            if (!repoNameById.TryGetValue(kvp.Key, out var repositoryName)) return;
+            try
+            {
+                await _agentBridge.SendCommandAsync(
+                    "DotnetRestore",
+                    new { workspaceName, repositoryName, projectPaths = (IReadOnlyList<string>)kvp.Value, workspaceRoot },
+                    cancellationToken);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "dotnet restore failed for {RepoName} in workspace {WorkspaceName}, continuing", repositoryName, workspaceName);
+            }
+        });
+        await Task.WhenAll(tasks);
     }
 
     private async Task PushReposAsync(

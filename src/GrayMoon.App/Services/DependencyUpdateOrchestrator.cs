@@ -101,6 +101,17 @@ public sealed class DependencyUpdateOrchestrator(
             if (hadError)
                 break;
 
+            levelProgress("Restoring packages...");
+            await workspaceGitService.RestoreDependenciesAsync(
+                workspaceId,
+                reposAtLevel.Select(r => (
+                    r.RepoName,
+                    (IReadOnlyList<string>)r.ProjectUpdates
+                        .Select(p => p.ProjectPath!)
+                        .Where(p => !string.IsNullOrWhiteSpace(p))
+                        .ToList())),
+                cancellationToken);
+
             levelProgress("Committing...");
             var commitResults = await workspaceGitService.CommitDependencyUpdatesAsync(
                 workspaceId,

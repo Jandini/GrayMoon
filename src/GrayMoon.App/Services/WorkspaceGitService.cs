@@ -415,6 +415,76 @@ public class WorkspaceGitService(
         return toSync.Count;
     }
 
+    /// <summary>
+    /// Fires <c>dotnet restore --force --no-cache &lt;project.csproj&gt;</c> for each specified project file.
+    /// Best-effort: errors are logged and swallowed so the caller's workflow is never interrupted.
+    /// </summary>
+    public async Task RestoreDependenciesAsync(int workspaceId, IEnumerable<(string RepoName, IReadOnlyList<string> ProjectPaths)> repos, CancellationToken cancellationToken)
+    {
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null) return;
+        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var tasks = repos
+            .Where(r => r.ProjectPaths.Count > 0)
+            .Select(async r =>
+            {
+                try
+                {
+                    await _agentBridge.SendCommandAsync(
+                        "DotnetRestore",
+                        new { workspaceName = workspace.Name, repositoryName = r.RepoName, projectPaths = r.ProjectPaths, workspaceRoot },
+                        cancellationToken);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "dotnet restore failed for {RepoName} in workspace {WorkspaceName}, continuing", r.RepoName, workspace.Name);
+                }
+            });
+        await Task.WhenAll(tasks);
+    }
+
+    /// <summary>
+    /// Fires <c>dotnet restore --force --no-cache</c> for all tracked project files across all workspace
+    /// repositories, skipping repos pinned to a tag. Best-effort: individual restore errors are logged and swallowed.
+    /// Returns the total number of project files targeted for restore.
+    /// </summary>
+    public async Task<int> RestoreAllWorkspacePackagesAsync(
+        int workspaceId,
+        Action<string> setProgress,
+        CancellationToken cancellationToken)
+    {
+        if (!_agentBridge.IsAgentConnected)
+            throw new AgentNotConnectedException();
+
+        setProgress("Restoring packages...");
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            return 0;
+
+        var tagPinnedIds = workspace.Repositories
+            .Where(l => !string.IsNullOrWhiteSpace(l.CheckedOutTag))
+            .Select(l => l.RepositoryId)
+            .ToHashSet();
+
+        var projects = await _workspaceProjectRepository.GetByWorkspaceIdAsync(workspaceId);
+        var repoGroups = projects
+            .Where(p => p.Repository != null
+                        && !string.IsNullOrWhiteSpace(p.ProjectFilePath)
+                        && !tagPinnedIds.Contains(p.RepositoryId))
+            .GroupBy(p => (p.RepositoryId, RepoName: p.Repository!.RepositoryName))
+            .Select(g => (g.Key.RepoName, ProjectPaths: (IReadOnlyList<string>)g.Select(p => p.ProjectFilePath!).ToList()))
+            .ToList();
+
+        var totalCount = repoGroups.Sum(r => r.ProjectPaths.Count);
+        if (totalCount == 0)
+            return 0;
+
+        await RestoreDependenciesAsync(workspaceId, repoGroups, cancellationToken);
+        return totalCount;
+    }
+
     /// <summary>Broadcasts WorkspaceSynced so the grid refreshes. Call after SyncDependenciesAsync (which already recomputes and persists UnmatchedDeps).</summary>
     public async Task RecomputeAndBroadcastWorkspaceSyncedAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
