@@ -11,6 +11,7 @@ GrayMoon helps you work across many repositories as one coordinated workspace:
 - keep repository status and activity up to date while you work in your IDE (checkout/commit/push/merge events are tracked)
 - track versions and dependency drift
 - update `PackageReference` versions automatically
+- run `dotnet restore --force --no-cache` so NuGet does not fall back to stale cached packages after dependency changes
 - one-click sync back to default branch after merge (single repo or multiple repos by dependency level)
 - synchronize pushes to reduce CI failures caused by missing dependency versions
 - group repositories by dependency levels and type (services vs packages/libraries) for easier dependency visualization
@@ -33,6 +34,7 @@ GrayMoon is useful for:
 - You can see GitHub Actions results for the current branch across all repositories in a workspace.
 - You can create pull requests across one, several, or all workspace repositories from one dialog, with optional reviewers and draft support.
 - You can run coordinated dependency updates instead of editing each repo manually.
+- After package refs change, GrayMoon can force a fresh NuGet restore so local builds match the versions you just rolled out (not what happened to be cached).
 - You can create one feature branch (for example `feature/dependency-update`) across repos, auto-update package refs, auto-commit, and push together.
 - When rolling out changes, GrayMoon can push multiple repositories in parallel so the full workflow finishes faster than pushing repo-by-repo manually.
 - GrayMoon tracks changed files across repositories so you can avoid unnecessary PRs when changes are only dependency-version updates.
@@ -103,6 +105,16 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 6. Continue working in your IDE while GrayMoon tracks changes in the background; GrayMoon UI does not need to stay open as long as the Docker app and agent services are running.
 
 ## What's new
+
+### Workspace `dotnet restore` for fresh NuGet resolution
+
+GrayMoon now runs `dotnet restore --force --no-cache` on workspace projects so dependency rollouts do not silently reuse stale local NuGet cache entries.
+
+- **Why it matters:** after GrayMoon updates `PackageReference` versions across repositories, `dotnet` can still resolve older packages from the global or local NuGet cache. That leads to mismatched builds, false confidence that a rollout worked, and confusing drift between what is in `.csproj` files and what MSBuild actually restores. Forcing restore without cache makes NuGet fetch the versions you just wrote instead of falling back to cached artifacts.
+- **Restore Packages (manual):** **Sync** is now a split button. Open the dropdown and choose **Restore Packages** to restore every tracked `.csproj` in the workspace (repos pinned to a tag are skipped). A loading overlay shows progress and can be cancelled.
+- **Automatic during Update:** after dependency versions are applied at each dependency level and before commits are created, GrayMoon restores the updated projects so commit and build state match the new package refs.
+- **Automatic during Push:** before each dependency level is pushed during synchronized push, GrayMoon restores projects that have cross-repository project references at that level, so downstream consumers pick up freshly published packages instead of cached ones.
+- **Best-effort by design:** per-project restore failures are logged but do not abort the wider Update, Push, or manual restore workflow.
 
 ### Boolean search filters across workspace and catalog pages
 
