@@ -52,6 +52,16 @@ public sealed class CheckoutHookSyncCommand(IGitService git, ICsProjFileService 
         if (currentTag != null)
             branch = "-";
 
+        // When on a tag, fetch remote tags so the app can compare and show an "upgrade" badge.
+        IReadOnlyList<string>? remoteTags = null;
+        if (currentTag != null && token != null)
+        {
+            var (fetchTagsSuccess, fetchTagsError) = await git.FetchTagsAsync(payload.RepositoryPath, token, cancellationToken);
+            if (!fetchTagsSuccess)
+                logger.LogWarning("CheckoutHookSync: tag fetch failed for repo {RepositoryId}: {Error}", payload.RepositoryId, fetchTagsError);
+            remoteTags = await git.GetTagsAsync(payload.RepositoryPath, cancellationToken);
+        }
+
         int? outgoing = null;
         int? incoming = null;
         int? defaultBehind = null;
@@ -113,7 +123,9 @@ public sealed class CheckoutHookSyncCommand(IGitService git, ICsProjFileService 
                 Projects = syncProjects,
                 ErrorMessage = fetchError,
                 // Include remote branches when fetch succeeded so the app can prune deleted remote branches from the DB
-                RemoteBranches = fetchError == null && remoteBranches != null ? remoteBranches.ToList() : null
+                RemoteBranches = fetchError == null && remoteBranches != null ? remoteBranches.ToList() : null,
+                // Include tag list when on a tag so the app can persist tags and compute HasNewerTag
+                RemoteTags = remoteTags?.ToList()
             };
             await connection.InvokeAsync(AgentHubMethods.SyncCommand, notification, cancellationToken);
             logger.LogInformation("CheckoutHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}, hasUpstream={HasUpstream}",

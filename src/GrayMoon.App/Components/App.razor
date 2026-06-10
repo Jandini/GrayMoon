@@ -44,6 +44,10 @@
             if (element && element.scrollIntoView)
                 element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         };
+        window.scrollElementIntoViewById = (id) => {
+            const el = document.getElementById(id);
+            if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        };
         window.getAgentDownloadInfo = () => {
             const ua = navigator.userAgent.toLowerCase();
             const platform = (navigator.platform || '').toLowerCase();

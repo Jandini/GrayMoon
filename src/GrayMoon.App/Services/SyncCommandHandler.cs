@@ -47,6 +47,7 @@ public sealed class SyncCommandHandler(
         {
             // Real branch reported: clear any persisted tag so we resume normal branch behavior.
             wr.CheckedOutTag = null;
+            wr.HasNewerTag = null;
             if (n.OutgoingCommits.HasValue) wr.OutgoingCommits = n.OutgoingCommits;
             if (n.IncomingCommits.HasValue) wr.IncomingCommits = n.IncomingCommits;
             if (n.HasUpstream.HasValue) wr.BranchHasUpstream = n.HasUpstream.Value;
@@ -68,6 +69,20 @@ public sealed class SyncCommandHandler(
         }
 
         await dbContext.SaveChangesAsync();
+
+        // Persist tags and compute HasNewerTag when the agent includes a tag list (checkout-to-tag sync)
+        if (n.RemoteTags != null)
+        {
+            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+            await workspaceGitService.PersistBranchesAsync(
+                wr.WorkspaceRepositoryId,
+                localBranches: null,
+                remoteBranches: null,
+                defaultBranchName: null,
+                tags: n.RemoteTags,
+                currentTag: n.Tag,
+                cancellationToken: default);
+        }
 
         // Prune remote branches from DB that no longer exist in git (fetch --prune ran on the agent side)
         if (n.RemoteBranches != null)

@@ -21,6 +21,8 @@ public sealed class RepositorySyncNotification
     public string? ErrorMessage { get; init; }
     /// <summary>Remote branch names (with "origin/" prefix) currently present in local refs after fetch --prune. When set, the app prunes stale remote branches from the DB.</summary>
     public List<string>? RemoteBranches { get; init; }
+    /// <summary>All tag names ordered newest-first (SortIndex 0 = newest), populated on checkout-to-tag so the app can persist tag state and compute HasNewerTag. Null when not on a tag or when tag fetch was skipped.</summary>
+    public List<string>? RemoteTags { get; init; }
 }
 
 public sealed class RepositorySyncProjectNotification

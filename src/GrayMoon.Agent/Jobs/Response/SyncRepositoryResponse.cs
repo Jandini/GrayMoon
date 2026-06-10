@@ -49,4 +49,7 @@ public sealed class SyncRepositoryResponse
 
     [JsonPropertyName("defaultBranchAhead")]
     public int? DefaultBranchAhead { get; set; }
+
+    [JsonPropertyName("tags")]
+    public IReadOnlyList<string>? Tags { get; set; }
 }

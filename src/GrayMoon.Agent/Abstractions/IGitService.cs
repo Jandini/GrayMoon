@@ -52,6 +52,8 @@ public interface IGitService
     Task<string?> GetDefaultBranchNameAsync(string repoPath, CancellationToken ct);
     /// <summary>Gets all tag names in the repository (newest first when supported, then alphabetical).</summary>
     Task<IReadOnlyList<string>> GetTagsAsync(string repoPath, CancellationToken ct);
+    /// <summary>Fetches only tags from origin (git fetch origin --tags). Does not touch branches. Returns (success, errorMessage).</summary>
+    Task<(bool Success, string? ErrorMessage)> FetchTagsAsync(string repoPath, string? bearerToken, CancellationToken ct);
     /// <summary>Checks out the specified tag (detached HEAD). Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> CheckoutTagAsync(string repoPath, string tagName, CancellationToken ct);
     /// <summary>Returns the tag name HEAD currently points to when the repo is in a detached HEAD state AND that commit is the exact tip of a tag; otherwise null. Uses git symbolic-ref + describe --tags --exact-match.</summary>

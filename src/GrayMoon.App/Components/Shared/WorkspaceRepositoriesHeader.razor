@@ -135,6 +135,15 @@
                     <li>
                         <button class="dropdown-item" type="button"
                                 role="menuitem"
+                                @onclick="HandleUpdateFilesClick"
+                                disabled="@UpdateDisabled">
+                            Update Files
+                        </button>
+                    </li>
+                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                    <li>
+                        <button class="dropdown-item" type="button"
+                                role="menuitem"
                                 @onclick="HandleUpdateAndPushClick"
                                 disabled="@UpdateDisabled">
                             Update &amp; Push...
@@ -218,6 +227,7 @@
     [Parameter] public EventCallback OnShowSwitchBranch { get; set; }
     [Parameter] public EventCallback OnNewPullRequest { get; set; }
     [Parameter] public EventCallback OnUpdate { get; set; }
+    [Parameter] public EventCallback OnUpdateFiles { get; set; }
     [Parameter] public EventCallback OnUpdateAndPush { get; set; }
     [Parameter] public EventCallback OnPull { get; set; }
     [Parameter] public EventCallback OnPush { get; set; }
@@ -268,6 +278,12 @@
     {
         CloseUpdateMenu();
         await OnUpdate.InvokeAsync();
+    }
+
+    private async Task HandleUpdateFilesClick()
+    {
+        CloseUpdateMenu();
+        await OnUpdateFiles.InvokeAsync();
     }
 
     private async Task HandleUpdateAndPushClick()

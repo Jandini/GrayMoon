@@ -19,6 +19,7 @@
 @inject WorkspaceCommitSyncHandler WorkspaceCommitSyncHandler
 @inject WorkspaceSyncHandler WorkspaceSyncHandler
 @inject WorkspaceUpdateHandler WorkspaceUpdateHandler
+@inject WorkspaceFileVersionService FileVersionService
 @inject WorkspacePushHandler WorkspacePushHandler
 @inject WorkspaceDependencyService WorkspaceDependencyService
 @inject WorkspaceBranchHandler WorkspaceBranchHandler
@@ -53,6 +54,7 @@
                                     OnShowSwitchBranch='() => ShowBranchModalAsync("switchbranch")'
                                     OnNewPullRequest="OpenPullRequestDialogForAllRepositoriesAsync"
                                     OnUpdate="OnUpdateClickAsync"
+                                    OnUpdateFiles="OnUpdateFilesClickAsync"
                                     OnUpdateAndPush="OnUpdateAndPushClickAsync"
                                     OnPull="OnPullClickAsync"
                                     OnPush="OnPushClickAsync"
@@ -169,6 +171,7 @@
                                                                   OnSyncClick="() => SyncSingleRepoAsync(wr.RepositoryId)"
                                                                   OnCopyDependencies="CopyDependenciesToClipboard"
                                                                   OnCreatePr="OpenPullRequestDialogForRepositoryAsync"
+                                                                  OnUpgradeClick="ShowSwitchBranchModalOnTagsTab"
                                                                   OnDismissError="() => DismissRepositoryError(wr.RepositoryId)" />
                                     }
                                 }
@@ -216,6 +219,7 @@
                    RepositoryName="@_switchBranchModal.RepositoryName"
                    CurrentBranch="@_switchBranchModal.CurrentBranch"
                    RepositoryUrl="@_switchBranchModal.RepositoryUrl"
+                   InitialTab="@_switchBranchModal.InitialTab"
                    OnCancel="@CloseSwitchBranchModal"
                    OnBranchChanged="@OnBranchChangedAsync"
                    OnCheckoutBranch="@CheckoutBranchAsync"

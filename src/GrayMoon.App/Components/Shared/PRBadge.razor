@@ -2,7 +2,18 @@
 @using Microsoft.AspNetCore.Components.Web
 
 @* PR column badge: none (dark gray), create (yellow, black text), #number (green), merged (purple), closed (red). Default "none" until data loads. *@
-@if (IsOnTag)
+@if (IsOnTag && HasNewerTag)
+{
+    <span class="badge pr-badge pr-badge-create"
+          role="button"
+          tabindex="0"
+          title="Newer tag available — click to upgrade"
+          style="cursor: pointer;"
+          @onclick="HandleUpgradeClick"
+          @onclick:preventDefault
+          @onclick:stopPropagation>upgrade</span>
+}
+else if (IsOnTag)
 {
     <span>&nbsp;</span>
 }
@@ -89,11 +100,21 @@ else
     [Parameter] public bool IsPrVerified { get; set; }
     /// <summary>True when the repository is checked out at a tag (detached HEAD); PRs require a branch, so render blank.</summary>
     [Parameter] public bool IsOnTag { get; set; }
+    /// <summary>True when the repo is on a tag and at least one newer tag exists. Shows the yellow "upgrade" badge.</summary>
+    [Parameter] public bool HasNewerTag { get; set; }
+    /// <summary>Raised when the user clicks the yellow "upgrade" badge.</summary>
+    [Parameter] public EventCallback OnUpgradeClick { get; set; }
 
     private async Task HandleCreateClick()
     {
         if (OnCreateClick.HasDelegate)
             await OnCreateClick.InvokeAsync();
+    }
+
+    private async Task HandleUpgradeClick()
+    {
+        if (OnUpgradeClick.HasDelegate)
+            await OnUpgradeClick.InvokeAsync();
     }
 
     private static string GetOpenPrMergeabilityClass(PullRequestInfo pr)
