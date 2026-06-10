@@ -4,8 +4,7 @@ on:
   push:
     branches: ["*"]
     tags: ["*"]
-  #pull_request:
-  #  branches: ["main"]
+  workflow_dispatch:
 
 env:
   # Push to Docker Hub only on main, on tag push, or when commit message contains "prerelease"
