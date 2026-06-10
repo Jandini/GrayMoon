@@ -54,19 +54,30 @@ public sealed class GhaStepLogFeedService(
         {
             var content = StripTimestamp(raw);
 
+            // GitHub runner writes ##[group] markers for step boundaries (older format);
+            // user-created groups within a step use ::group:: (newer format)
             if (content.StartsWith("##[group]", StringComparison.Ordinal))
             {
                 currentName = content.Substring("##[group]".Length).TrimEnd('\r');
                 currentLines = [];
                 inGroup = true;
             }
-            else if (content.StartsWith("##[endgroup]", StringComparison.Ordinal))
+            else if (content.StartsWith("##[endgroup]", StringComparison.Ordinal)
+                     || content.StartsWith("::endgroup::", StringComparison.Ordinal))
             {
                 inGroup = false;
             }
-            else if (inGroup && !string.IsNullOrEmpty(content))
+            else if (content.StartsWith("::group::", StringComparison.Ordinal))
             {
-                currentLines.Add(content.TrimEnd('\r'));
+                currentName = content.Substring("::group::".Length).TrimEnd('\r');
+                currentLines = [];
+                inGroup = true;
+            }
+            else if (inGroup)
+            {
+                var stripped = content.TrimEnd('\r');
+                if (!string.IsNullOrEmpty(stripped))
+                    currentLines.Add(stripped);
             }
         }
 
@@ -77,9 +88,10 @@ public sealed class GhaStepLogFeedService(
 
     private static string StripTimestamp(string line)
     {
-        // Lines start with "2024-01-15T12:00:00.0000000Z " (29 chars before content)
-        if (line.Length > 29 && line[28] == 'Z' && line[29] == ' ')
-            return line.Substring(30);
+        // Lines start with "2024-01-15T12:00:00.0000000Z " — 28-char timestamp + space
+        // Index 27 = 'Z', index 28 = ' ', content starts at index 29
+        if (line.Length > 28 && line[27] == 'Z' && line[28] == ' ')
+            return line.Substring(29);
         // Fallback: skip to first space
         var spaceIdx = line.IndexOf(' ');
         return spaceIdx >= 0 ? line.Substring(spaceIdx + 1) : line;
