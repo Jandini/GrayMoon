@@ -1306,7 +1306,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             ShowConfirm(
                 $"Synchronized push could not be completed because {ex.MissingPackagesCount} required package mappings are missing. Check NuGet connector configuration and token, then retry. Continue with normal push?",
-                () => ExecutePushAsync(
+                async () => await ExecutePushAsync(
                     repoIds,
                     synchronizedPush: false,
                     requiredPackageIds: requiredPackageIds),
@@ -1314,13 +1314,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    private async Task ExecutePushAsync(
+    private async Task<bool> ExecutePushAsync(
         IReadOnlySet<int> repoIds,
         bool synchronizedPush,
         IReadOnlySet<string> requiredPackageIds)
     {
         if (workspace == null)
-            return;
+            return false;
 
         _pushCts?.Cancel();
         _pushCts?.Dispose();
@@ -1338,10 +1338,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 ToastService.Show,
                 onAppSideComplete: () => _pushAwaitingAgentTasks = true,
                 _pushCts.Token);
+            return true;
         }
         catch (OperationCanceledException)
         {
             ToastService.Show("Push cancelled.");
+            return false;
         }
         finally
         {
@@ -1799,17 +1801,21 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
 
         // Phase 3: execute push
+        bool pushCompleted = false;
         try
         {
-            await ExecutePushAsync(pushRepoIds, synchronizedPush: true, requiredPackageIds);
+            pushCompleted = await ExecutePushAsync(pushRepoIds, synchronizedPush: true, requiredPackageIds);
         }
         catch (SynchronizedPushNotPossibleException ex)
         {
             ShowConfirm(
                 $"Synchronized push could not be completed because {ex.MissingPackagesCount} required package mappings are missing. Check NuGet connector configuration and token, then retry. Continue with normal push?",
-                () => ExecutePushAsync(pushRepoIds, synchronizedPush: false, requiredPackageIds),
+                async () => await ExecutePushAsync(pushRepoIds, synchronizedPush: false, requiredPackageIds),
                 confirmButtonText: "Continue");
         }
+
+        if (pushCompleted)
+            await RestorePackagesAsync();
     }
 
     private async Task HandleDependencyBadgeKeydown(KeyboardEventArgs e, int repositoryId, int unmatchedDeps)
@@ -2640,6 +2646,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 await RefreshFromSync();
                 await InvokeAsync(StateHasChanged);
             }
+
+            // Only reached on success (all catch blocks return early)
+            await RestorePackagesAsync();
         }
     }
 
