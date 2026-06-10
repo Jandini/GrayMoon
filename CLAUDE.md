@@ -43,16 +43,29 @@ GrayMoon is a **two-process** system — never combine them:
 
 - **GrayMoon.App** (`src/GrayMoon.App`) — ASP.NET Core 8 + Blazor Server, runs in Docker. Exposes the web UI and two SignalR hubs (`/hub/agent`, `/hubs/workspace-sync`). Never touches the local filesystem or runs git directly. SQLite database via EF Core at `/app/db` (volume-mounted). Uses `EnsureCreated()` — no incremental migrations yet.
 - **GrayMoon.Agent** (`src/GrayMoon.Agent`) — .NET console app / tool that runs on the developer's host machine. Connects to the App via SignalR, executes all git and filesystem operations, and exposes a local HTTP listener on `127.0.0.1:9191` for git hook callbacks.
-- **GrayMoon.Abstractions** (`src/GrayMoon.Abstractions`) — Shared interfaces and DTOs used by both App and Agent.
+- **GrayMoon.Abstractions** (`src/GrayMoon.Abstractions`) — Shared interfaces and DTOs used by both App and Agent. `Agent/AgentHubMethods.cs` contains all SignalR hub method name constants (`RequestCommand`, `ResponseCommand`, `SyncCommand`, etc.).
 - **GrayMoon.Common** (`src/GrayMoon.Common`) — Shared utilities (e.g. the boolean filter-search expression parser tested in `GrayMoon.Common.Tests`).
 
 ### App → Agent command flow
 
-The App sends commands to the Agent over SignalR using a `requestId` (GUID). `AgentBridge` calls `AgentResponseDelivery.WaitAsync(requestId)` (a `TaskCompletionSource`) then fires `RequestCommand` to the Agent. The Agent enqueues a `JobEnvelope` into a bounded `Channel<JobEnvelope>`, runs it in one of up to 8 concurrent workers, and calls back `ResponseCommand` with the same `requestId`. `AgentResponseDelivery.Complete` resolves the TCS, unblocking the App's awaiter.
+The App sends commands to the Agent over SignalR using a `requestId` (GUID). `AgentBridge` calls `AgentResponseDelivery.WaitAsync(requestId)` (a `TaskCompletionSource`) then fires `RequestCommand` to the Agent. The Agent enqueues a `JobEnvelope` into a bounded `Channel<JobEnvelope>`, runs it in one of up to 16 concurrent workers, and calls back `ResponseCommand` with the same `requestId`. `AgentResponseDelivery.Complete` resolves the TCS, unblocking the App's awaiter.
 
 ### Agent → App sync (hook-driven)
 
 Git hooks (`post-commit`, `post-checkout`, `post-merge`, `pre-push`) POST JSON to the Agent's local HTTP listener (`/hook/notify` or `/hook/push`). The Agent processes these as `NotifyJobs` and pushes partial state updates back to the App via `SyncCommand` on the SignalR connection. `SyncCommandHandler` persists only non-null fields (partial update semantics) then broadcasts `WorkspaceSynced` to all browser clients.
+
+### Agent command structure
+
+The Agent uses `System.CommandLine`. Each agent operation is a class in `src/GrayMoon.Agent/Commands/`. To add a new operation: create a command class there, register it in the CLI entry point, and add the corresponding hub method constant to `GrayMoon.Abstractions/Agent/AgentHubMethods.cs`.
+
+### App layer structure
+
+The App is organized into:
+- `Components/Pages/` — Blazor Server pages and interactive components
+- `Components/Shared/` and `Components/Modals/` — reusable UI components
+- `Services/` — 40+ domain services (GitHub API, workspace operations, push orchestration, dependency update, etc.)
+- `Data/` — EF Core `DbContext`, entity models, and repository classes
+- `Endpoints/` — REST API endpoints grouped by domain (Agent, Branch, Commit, Connector, Sync, Workspace)
 
 ### Dependency levels
 
