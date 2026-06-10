@@ -13,6 +13,20 @@
     width: 100%;
 }
 
+.actions-gha-terminal__wrap--split {
+    display: flex;
+    flex-direction: row;
+}
+
+.actions-gha-terminal__pane {
+    flex: 1 1 50%;
+    min-width: 0;
+}
+
+.actions-gha-terminal__pane--left {
+    border-right: 1px solid rgba(148, 152, 158, 0.18);
+}
+
 .actions-gha-terminal__terminal.loading-overlay-terminal {
     position: relative;
     inset: auto;

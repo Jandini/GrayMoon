@@ -1,13 +1,17 @@
 @using GrayMoon.App.Services
 @inject GhaWorkflowLiveFeedService GhaWorkflowLiveFeedService
+@inject GhaStepLogFeedService GhaStepLogFeedService
 @inject LoadingOverlayUiSettingsService OverlayUiSettings
 @implements IAsyncDisposable
 
 @if (RunId > 0 && !string.IsNullOrWhiteSpace(ConnectorName) && !string.IsNullOrWhiteSpace(Owner) && !string.IsNullOrWhiteSpace(RepositoryName))
 {
+    var schemeClass = OverlayUiSettings.TerminalColorScheme == TerminalColorScheme.Yellow
+        ? "loading-overlay-terminal--scheme-yellow"
+        : "";
     <div class="actions-gha-terminal">
-        <div class="actions-gha-terminal__wrap">
-            <div class="loading-overlay-terminal @(OverlayUiSettings.TerminalColorScheme == TerminalColorScheme.Yellow ? "loading-overlay-terminal--scheme-yellow" : "") actions-gha-terminal__terminal">
+        <div class="actions-gha-terminal__wrap actions-gha-terminal__wrap--split">
+            <div class="loading-overlay-terminal @schemeClass actions-gha-terminal__terminal actions-gha-terminal__pane actions-gha-terminal__pane--left">
                 <div class="actions-gha-terminal__caption" title="@_captionTooltip">
                     <span class="actions-gha-terminal__caption-main">
                         <span class="actions-gha-terminal__caption-prefix">▶</span><span class="actions-gha-terminal__caption-text">@_caption</span>
@@ -34,6 +38,29 @@
                     }
                 </div>
             </div>
+            <div class="loading-overlay-terminal @schemeClass actions-gha-terminal__terminal actions-gha-terminal__pane actions-gha-terminal__pane--right">
+                <div class="actions-gha-terminal__caption" title="@_logCaption">
+                    <span class="actions-gha-terminal__caption-main">
+                        <span class="actions-gha-terminal__caption-prefix">▶</span><span class="actions-gha-terminal__caption-text">@_logCaption</span>
+                    </span>
+                </div>
+                <div class="loading-overlay-terminal__inner actions-gha-terminal__scroll" aria-live="polite">
+                    @for (var i = 0; i < BodyLineCount; i++)
+                    {
+                        var line = _logVisibleSlots[i];
+                        <p class="loading-overlay-terminal__line loading-overlay-terminal__line--out actions-gha-terminal__line">
+                            @if (string.IsNullOrWhiteSpace(line))
+                            {
+                                <span class="loading-overlay-terminal__text">&nbsp;</span>
+                            }
+                            else
+                            {
+                                <span class="loading-overlay-terminal__prefix">[log]</span><span class="loading-overlay-terminal__text">@line</span>
+                            }
+                        </p>
+                    }
+                </div>
+            </div>
         </div>
     </div>
 }
@@ -45,16 +72,26 @@
     [Parameter] public long RunId { get; set; }
     [Parameter] public string? WorkflowDisplayName { get; set; }
 
+    // Left panel — step transitions
     private readonly List<string> _buffer = [];
     private readonly string[] _visibleLineSlots = new string[BodyLineCount];
     private GhaWorkflowLiveFeedState? _feedState;
     private string _caption = "Workflow · Connecting to GitHub Actions…";
     private string? _stepProgress;
+
+    // Right panel — current step log lines
+    private readonly List<string> _logBuffer = [];
+    private readonly string[] _logVisibleSlots = new string[BodyLineCount];
+    private readonly GhaStepLogFeedState _logFeedState = new();
+    private string _logCaption = "Step log · Waiting for active step…";
+    private long _lastLogPollTick;
+
     private CancellationTokenSource? _cts;
     private Task? _pollTask;
     private bool _needsRender;
 
     private const int BodyLineCount = 8;
+    private const int LogPollIntervalMs = 4_000;
     private string _captionTooltip =>
         string.IsNullOrWhiteSpace(_stepProgress) ? _caption : $"{_caption} · {_stepProgress}";
 
@@ -62,7 +99,8 @@
     {
         OverlayUiSettings.Changed += OnOverlayUiSettingsChanged;
         _buffer.Add($"Run #{RunId} · Subscribing to job updates…");
-        RefreshVisibleLineSlots();
+        RefreshSlots(_buffer, _visibleLineSlots);
+        RefreshSlots(_logBuffer, _logVisibleSlots);
     }
 
     private void OnOverlayUiSettingsChanged(object? sender, EventArgs e) =>
@@ -125,29 +163,60 @@
         }
 
         foreach (var line in update.NewLines)
-            AppendUnique(line);
+            Append(line, _buffer, _visibleLineSlots);
+        if (update.NewLines.Count > 0)
+            _needsRender = true;
+
+        // Poll step logs at a slower rate, only when a job is in progress
+        var nowTick = Environment.TickCount64;
+        if (nowTick - _lastLogPollTick >= LogPollIntervalMs && _feedState.CurrentInProgressJobId != null)
+        {
+            _lastLogPollTick = nowTick;
+            await PollStepLogsOnceAsync(cancellationToken);
+        }
 
         return update.DelayMs;
     }
 
-    private void RefreshVisibleLineSlots()
+    private async Task PollStepLogsOnceAsync(CancellationToken cancellationToken)
+    {
+        if (_feedState == null) return;
+
+        var logUpdate = await GhaStepLogFeedService.PollStepLogsAsync(_feedState, _logFeedState, cancellationToken);
+
+        if (logUpdate.StepChanged)
+        {
+            _logBuffer.Clear();
+            _logCaption = string.IsNullOrWhiteSpace(logUpdate.StepName)
+                ? "Step log · Waiting for active step…"
+                : logUpdate.StepName;
+            RefreshSlots(_logBuffer, _logVisibleSlots);
+            _needsRender = true;
+        }
+
+        foreach (var line in logUpdate.NewLines)
+            Append(line, _logBuffer, _logVisibleSlots);
+        if (logUpdate.NewLines.Count > 0)
+            _needsRender = true;
+    }
+
+    private static void RefreshSlots(List<string> buffer, string[] slots)
     {
         for (var i = 0; i < BodyLineCount; i++)
         {
-            var bufIdx = _buffer.Count - BodyLineCount + i;
-            _visibleLineSlots[i] = bufIdx >= 0 ? _buffer[bufIdx] : "";
+            var bufIdx = buffer.Count - BodyLineCount + i;
+            slots[i] = bufIdx >= 0 ? buffer[bufIdx] : "";
         }
     }
 
-    private void AppendUnique(string line)
+    private static void Append(string line, List<string> buffer, string[] slots)
     {
-        if (_buffer.Count > 0 && string.Equals(_buffer[^1], line, StringComparison.Ordinal))
+        if (buffer.Count > 0 && string.Equals(buffer[^1], line, StringComparison.Ordinal))
             return;
-        _buffer.Add(line);
-        while (_buffer.Count > 120)
-            _buffer.RemoveAt(0);
-        RefreshVisibleLineSlots();
-        _needsRender = true;
+        buffer.Add(line);
+        while (buffer.Count > 120)
+            buffer.RemoveAt(0);
+        RefreshSlots(buffer, slots);
     }
 
     public async ValueTask DisposeAsync()

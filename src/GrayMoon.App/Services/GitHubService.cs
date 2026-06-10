@@ -269,6 +269,23 @@ public class GitHubService : IConnectorService
             cancellationToken);
     }
 
+    /// <summary>Downloads the plain-text log for a single job (follows the 302 redirect to the CDN URL). Returns null if unavailable.</summary>
+    public async Task<string?> GetJobLogsAsync(Connector connector, string owner, string repo, long jobId, CancellationToken cancellationToken = default)
+    {
+        EnsureConnectorConfigured(connector);
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+        if (jobId <= 0)
+            throw new ArgumentException("Job id is required.", nameof(jobId));
+
+        using var response = await GetResponseAsync(connector, $"repos/{owner}/{repo}/actions/jobs/{jobId}/logs", cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            return null;
+        return await response.Content.ReadAsStringAsync(cancellationToken);
+    }
+
     public async Task RerunWorkflowRunAsync(Connector connector, string owner, string repo, long runId, CancellationToken cancellationToken = default)
     {
         EnsureConnectorConfigured(connector);

@@ -68,6 +68,7 @@ try
     builder.Services.AddScoped<GitHubRepositoryService>();
     builder.Services.AddScoped<GitHubActionsService>();
     builder.Services.AddScoped<GhaWorkflowLiveFeedService>();
+    builder.Services.AddScoped<GhaStepLogFeedService>();
     builder.Services.AddScoped<GitHubPullRequestService>();
     builder.Services.AddScoped<WorkspacePullRequestRepository>();
     builder.Services.AddScoped<WorkspacePullRequestService>();

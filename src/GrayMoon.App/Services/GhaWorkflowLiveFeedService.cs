@@ -38,6 +38,9 @@ public sealed class GhaWorkflowLiveFeedService(
             var stepProgress = BuildStepProgressForCaptionJob(jobs);
             state.LastCaption = caption;
             state.LastStepProgress = stepProgress;
+            state.CurrentInProgressJobId = jobs
+                .FirstOrDefault(j => string.Equals(j.Status, "in_progress", StringComparison.OrdinalIgnoreCase))
+                ?.Id;
 
             if (jobs.Count == 0)
             {
@@ -234,6 +237,7 @@ public sealed class GhaWorkflowLiveFeedState
     internal Dictionary<string, string> StepSignatures { get; } = new(StringComparer.Ordinal);
     internal string LastCaption { get; set; } = "Workflow - Connecting to GitHub Actions...";
     internal string? LastStepProgress { get; set; }
+    internal long? CurrentInProgressJobId { get; set; }
 }
 
 public sealed record GhaWorkflowLiveFeedUpdate(
