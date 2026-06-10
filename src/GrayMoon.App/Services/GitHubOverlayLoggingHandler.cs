@@ -85,8 +85,14 @@ internal sealed partial class GitHubOverlayLoggingHandler(OverlayCommandTerminal
             if (!IsTextualContent(content.Headers.ContentType?.MediaType))
                 return null;
 
+            // Skip preview for responses whose size is unknown or exceeds the buffer limit.
+            // Attempting LoadIntoBufferAsync on a stream larger than MaxBufferBytes partially
+            // consumes the network stream, corrupting the response body for the actual caller.
+            var contentLength = content.Headers.ContentLength;
+            if (contentLength is null or > MaxBufferBytes)
+                return null;
+
             // Buffer the response so the original caller can still consume it normally.
-            // Throws if body exceeds MaxBufferBytes; we swallow and skip the preview.
             await content.LoadIntoBufferAsync(MaxBufferBytes);
 
             var raw = await content.ReadAsStringAsync(cancellationToken);

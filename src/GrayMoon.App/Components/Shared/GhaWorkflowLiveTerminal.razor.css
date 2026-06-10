@@ -13,6 +13,20 @@
     width: 100%;
 }
 
+.actions-gha-terminal__wrap--split {
+    display: flex;
+    flex-direction: row;
+}
+
+.actions-gha-terminal__pane {
+    flex: 1 1 50%;
+    min-width: 0;
+}
+
+.actions-gha-terminal__pane--left {
+    border-right: 1px solid rgba(148, 152, 158, 0.18);
+}
+
 .actions-gha-terminal__terminal.loading-overlay-terminal {
     position: relative;
     inset: auto;
@@ -36,7 +50,7 @@
     font-weight: 400;
     line-height: 1.45;
     letter-spacing: 0.02em;
-    padding: 0.35rem 0.65rem;
+    padding: calc(0.35rem + 2px) 0.65rem 0.35rem 0.65rem;
     border-bottom: 1px solid rgba(148, 152, 158, 0.18);
     white-space: nowrap;
     overflow: hidden;
@@ -71,11 +85,11 @@
 .actions-gha-terminal__scroll.loading-overlay-terminal__inner {
     --gha-line: calc(0.78rem * 1.45);
     flex: none;
-    height: calc(8 * var(--gha-line));
-    max-height: calc(8 * var(--gha-line));
-    min-height: calc(8 * var(--gha-line));
+    height: calc(8 * var(--gha-line) + 0.3rem);
+    max-height: calc(8 * var(--gha-line) + 0.3rem);
+    min-height: calc(8 * var(--gha-line) + 0.3rem);
     overflow: hidden;
-    padding: 0 0.65rem 0.25rem;
+    padding: 0.3rem 0.65rem 0.25rem;
     display: flex;
     flex-direction: column;
     justify-content: flex-end;

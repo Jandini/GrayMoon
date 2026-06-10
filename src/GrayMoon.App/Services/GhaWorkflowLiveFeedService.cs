@@ -11,14 +11,33 @@ public sealed class GhaWorkflowLiveFeedService(
     ConnectorRepository connectorRepository,
     ILogger<GhaWorkflowLiveFeedService> logger)
 {
-    public const int PollIntervalActiveMs = 1_200;
-    public const int PollIntervalWaitingJobsMs = 2_000;
-    public const int PollIntervalIdleMs = 4_000;
+    public const int PollIntervalActiveMs = 2_000;
+    public const int PollIntervalWaitingJobsMs = 3_000;
+    public const int PollIntervalIdleMs = 15_000;
+
+    // Shared across all terminals in the same circuit — one 429 pauses all of them.
+    private DateTimeOffset? _rateLimitedUntil;
 
     public async Task<GhaWorkflowLiveFeedUpdate> PollOnceAsync(
         GhaWorkflowLiveFeedState state,
         CancellationToken cancellationToken)
     {
+        // Gate: skip the API call while rate-limited; stagger per-RunId so terminals don't all resume simultaneously.
+        if (_rateLimitedUntil.HasValue)
+        {
+            var remaining = (int)(_rateLimitedUntil.Value - DateTimeOffset.UtcNow).TotalMilliseconds;
+            if (remaining > 0)
+            {
+                var jitter = (int)(state.RunId % 2_000);
+                return new GhaWorkflowLiveFeedUpdate(
+                    Caption: state.LastCaption,
+                    StepProgress: state.LastStepProgress,
+                    NewLines: [],
+                    DelayMs: Math.Min(remaining + jitter, 60_000));
+            }
+            _rateLimitedUntil = null;
+        }
+
         try
         {
             var connector = await ResolveConnectorAsync(state, cancellationToken);
@@ -31,13 +50,15 @@ public sealed class GhaWorkflowLiveFeedService(
                     DelayMs: PollIntervalWaitingJobsMs);
             }
 
-            var response = await gitHubService.GetWorkflowRunJobsAsync(connector, state.Owner, state.RepositoryName, state.RunId, cancellationToken);
+            var response = await gitHubService.GetWorkflowRunJobsAsync(connector, state.Owner, state.RepositoryName, state.RunId, cancellationToken, skipRateLimitRetry: true);
             var jobs = response?.Jobs ?? [];
 
             var caption = BuildCaption(jobs, state.WorkflowDisplayName);
             var stepProgress = BuildStepProgressForCaptionJob(jobs);
             state.LastCaption = caption;
             state.LastStepProgress = stepProgress;
+            state.ActiveJob = GetCaptionJob(jobs);
+            state.CurrentInProgressJobId = state.ActiveJob?.Id;
 
             if (jobs.Count == 0)
             {
@@ -66,6 +87,7 @@ public sealed class GhaWorkflowLiveFeedService(
                 foreach (var job in jobs.OrderBy(j => j.Id))
                 {
                     var steps = job.Steps ?? [];
+                    var totalSteps = steps.Count;
                     foreach (var step in steps.OrderBy(s => s.Number))
                     {
                         var key = $"{job.Id}:{step.Number}";
@@ -74,7 +96,7 @@ public sealed class GhaWorkflowLiveFeedService(
                             continue;
 
                         state.StepSignatures[key] = sig;
-                        newLines.Add(FormatStepTransition(job.Name, step));
+                        newLines.Add(FormatStepTransition(job.Name, step, totalSteps));
                     }
                 }
             }
@@ -88,6 +110,27 @@ public sealed class GhaWorkflowLiveFeedService(
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             logger.LogDebug(ex, "GHA live feed poll failed for run {RunId}", state.RunId);
+
+            if (ex is GitHubHttpRequestException ghEx
+                && GitHubApiErrorHelper.LooksLikeRateLimit(ghEx.StatusCode, ghEx.Message))
+            {
+                var resetEpoch = ghEx.RateLimit?.ResetEpochUtcSeconds;
+                var resumeAt = resetEpoch.HasValue
+                    ? DateTimeOffset.FromUnixTimeSeconds(resetEpoch.Value).AddSeconds(5)
+                    : DateTimeOffset.UtcNow.AddSeconds(60);
+                _rateLimitedUntil = resumeAt;
+                var waitMs = (int)Math.Clamp((resumeAt - DateTimeOffset.UtcNow).TotalMilliseconds, 60_000, 600_000);
+                var jitter = (int)(state.RunId % 2_000);
+                var label = resetEpoch.HasValue
+                    ? resumeAt.UtcDateTime.ToString("HH:mm") + " UTC"
+                    : "~60s";
+                return new GhaWorkflowLiveFeedUpdate(
+                    Caption: state.LastCaption,
+                    StepProgress: state.LastStepProgress,
+                    NewLines: [$"Rate limited — pausing until {label}"],
+                    DelayMs: Math.Min(waitMs + jitter, 600_000));
+            }
+
             var failureText = ex is HttpRequestException httpEx
                 ? GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(httpEx)
                 : ex.Message;
@@ -120,6 +163,10 @@ public sealed class GhaWorkflowLiveFeedService(
 
     private static int DeterminePollDelayMs(IReadOnlyList<GitHubWorkflowJobDto> jobs)
     {
+        // All jobs finished — workflow is done; parent will remove the terminal on next sync.
+        if (jobs.Count > 0 && jobs.All(j => string.Equals(j.Status, "completed", StringComparison.OrdinalIgnoreCase)))
+            return PollIntervalIdleMs;
+
         foreach (var job in jobs)
         {
             var js = job.Status ?? "";
@@ -199,24 +246,40 @@ public sealed class GhaWorkflowLiveFeedService(
         return $"Step {y} of {y}";
     }
 
-    private static string FormatStepTransition(string jobName, GitHubWorkflowJobStepDto step)
+    private static string FormatStepTransition(string jobName, GitHubWorkflowJobStepDto step, int totalSteps)
     {
+        var num = totalSteps > 0 ? $"[{step.Number}/{totalSteps}] " : "";
+
         if (string.Equals(step.Status, "completed", StringComparison.OrdinalIgnoreCase))
         {
+            var dur = FormatDuration(step.StartedAt, step.CompletedAt);
+            var suffix = dur.Length > 0 ? $" ({dur})" : "";
             var c = step.Conclusion ?? "";
             if (string.Equals(c, "success", StringComparison.OrdinalIgnoreCase))
-                return $"OK {jobName} > {step.Name}";
+                return $"OK  {num}{jobName} > {step.Name}{suffix}";
             if (string.Equals(c, "skipped", StringComparison.OrdinalIgnoreCase))
-                return $"SKIP {jobName} > {step.Name} (skipped)";
+                return $"SKIP {num}{jobName} > {step.Name}";
             if (string.Equals(c, "failure", StringComparison.OrdinalIgnoreCase) || string.Equals(c, "cancelled", StringComparison.OrdinalIgnoreCase))
-                return $"FAIL {jobName} > {step.Name} ({c})";
-            return $"INFO {jobName} > {step.Name} - {c}";
+                return $"FAIL {num}{jobName} > {step.Name}{suffix}";
+            return $"INFO {num}{jobName} > {step.Name} · {c}";
         }
 
         if (string.Equals(step.Status, "in_progress", StringComparison.OrdinalIgnoreCase))
-            return $"RUN {jobName} > {step.Name}...";
+            return $"RUN  {num}{jobName} > {step.Name}";
 
-        return $"WAIT {jobName} > {step.Name} - {step.Status}";
+        return $"WAIT {num}{jobName} > {step.Name} · {step.Status}";
+    }
+
+    private static string FormatDuration(DateTimeOffset? start, DateTimeOffset? end)
+    {
+        if (start == null || end == null) return "";
+        var elapsed = end.Value - start.Value;
+        if (elapsed < TimeSpan.Zero) return "";
+        if (elapsed.TotalSeconds < 60)
+            return elapsed.TotalSeconds < 10
+                ? $"{elapsed.TotalSeconds:F1}s"
+                : $"{(int)elapsed.TotalSeconds}s";
+        return $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds}s";
     }
 }
 
@@ -234,6 +297,8 @@ public sealed class GhaWorkflowLiveFeedState
     internal Dictionary<string, string> StepSignatures { get; } = new(StringComparer.Ordinal);
     internal string LastCaption { get; set; } = "Workflow - Connecting to GitHub Actions...";
     internal string? LastStepProgress { get; set; }
+    internal long? CurrentInProgressJobId { get; set; }
+    internal GitHubWorkflowJobDto? ActiveJob { get; set; }
 }
 
 public sealed record GhaWorkflowLiveFeedUpdate(

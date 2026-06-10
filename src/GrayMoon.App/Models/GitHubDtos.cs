@@ -148,6 +148,12 @@ public sealed class GitHubWorkflowJobStepDto
 
     [JsonPropertyName("number")]
     public long Number { get; set; }
+
+    [JsonPropertyName("started_at")]
+    public DateTimeOffset? StartedAt { get; set; }
+
+    [JsonPropertyName("completed_at")]
+    public DateTimeOffset? CompletedAt { get; set; }
 }
 
 /// <summary>Single file from GET /repos/{owner}/{repo}/contents/{path}.</summary>
