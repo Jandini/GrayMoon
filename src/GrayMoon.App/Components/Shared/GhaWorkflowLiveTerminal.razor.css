@@ -85,11 +85,11 @@
 .actions-gha-terminal__scroll.loading-overlay-terminal__inner {
     --gha-line: calc(0.78rem * 1.45);
     flex: none;
-    height: calc(8 * var(--gha-line));
-    max-height: calc(8 * var(--gha-line));
-    min-height: calc(8 * var(--gha-line));
+    height: calc(8 * var(--gha-line) + 0.3rem);
+    max-height: calc(8 * var(--gha-line) + 0.3rem);
+    min-height: calc(8 * var(--gha-line) + 0.3rem);
     overflow: hidden;
-    padding: 0 0.65rem 0.25rem;
+    padding: 0.3rem 0.65rem 0.25rem;
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
