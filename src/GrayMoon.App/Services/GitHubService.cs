@@ -94,6 +94,31 @@ public class GitHubService : IConnectorService
             })
             .Build();
 
+    /// <summary>
+    /// Retry pipeline for live-feed polls: retries 502/503 but NOT 429 —
+    /// the polling loop owns rate-limit backoff so retrying here just wastes quota.
+    /// </summary>
+    private static readonly ResiliencePipeline<HttpResponseMessage> GitHubLiveFeedRetryPipeline =
+        new ResiliencePipelineBuilder<HttpResponseMessage>()
+            .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
+            {
+                ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                    .HandleResult(r => r.StatusCode is HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable)
+                    .Handle<HttpRequestException>()
+                    .Handle<TaskCanceledException>(),
+                MaxRetryAttempts = 2,
+                Delay = TimeSpan.FromSeconds(1),
+                BackoffType = DelayBackoffType.Exponential,
+                UseJitter = true,
+                OnRetry = static args =>
+                {
+                    if (args.Outcome.Result is HttpResponseMessage prev)
+                        prev.Dispose();
+                    return ValueTask.CompletedTask;
+                }
+            })
+            .Build();
+
     public async Task<List<GitHubOrganizationDto>> GetOrganizationsAsync()
     {
         EnsureConfigured();
@@ -253,7 +278,7 @@ public class GitHubService : IConnectorService
     }
 
     /// <summary>Lists jobs for a workflow run (steps, status).</summary>
-    public async Task<GitHubWorkflowJobsResponse?> GetWorkflowRunJobsAsync(Connector connector, string owner, string repo, long runId, CancellationToken cancellationToken = default)
+    public async Task<GitHubWorkflowJobsResponse?> GetWorkflowRunJobsAsync(Connector connector, string owner, string repo, long runId, CancellationToken cancellationToken = default, bool skipRateLimitRetry = false)
     {
         EnsureConnectorConfigured(connector);
         if (string.IsNullOrWhiteSpace(owner))
@@ -266,7 +291,8 @@ public class GitHubService : IConnectorService
         return await GetAsync<GitHubWorkflowJobsResponse>(
             connector,
             $"repos/{owner}/{repo}/actions/runs/{runId}/jobs?per_page=100",
-            cancellationToken);
+            cancellationToken,
+            skipRateLimitRetry);
     }
 
     /// <summary>Downloads the plain-text log for a single job (follows the 302 redirect to the CDN URL). Returns null if unavailable.</summary>
@@ -659,9 +685,10 @@ public class GitHubService : IConnectorService
         return request;
     }
 
-    private async Task<HttpResponseMessage> GetResponseAsync(Connector connector, string requestUri, CancellationToken cancellationToken)
+    private async Task<HttpResponseMessage> GetResponseAsync(Connector connector, string requestUri, CancellationToken cancellationToken, bool skipRateLimitRetry = false)
     {
-        return await GitHubGetRetryPipeline.ExecuteAsync(async (ct) =>
+        var pipeline = skipRateLimitRetry ? GitHubLiveFeedRetryPipeline : GitHubGetRetryPipeline;
+        return await pipeline.ExecuteAsync(async (ct) =>
         {
             using var request = CreateGetRequest(connector, requestUri);
             return await _httpClient.SendAsync(request, ct);
@@ -684,9 +711,9 @@ public class GitHubService : IConnectorService
         return await response.Content.ReadFromJsonAsync<T>(_jsonOptions);
     }
 
-    private async Task<T?> GetAsync<T>(Connector connector, string requestUri, CancellationToken cancellationToken = default)
+    private async Task<T?> GetAsync<T>(Connector connector, string requestUri, CancellationToken cancellationToken = default, bool skipRateLimitRetry = false)
     {
-        using var response = await GetResponseAsync(connector, requestUri, cancellationToken);
+        using var response = await GetResponseAsync(connector, requestUri, cancellationToken, skipRateLimitRetry);
         if (!response.IsSuccessStatusCode)
         {
             var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);

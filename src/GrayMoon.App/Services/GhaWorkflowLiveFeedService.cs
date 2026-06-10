@@ -11,14 +11,33 @@ public sealed class GhaWorkflowLiveFeedService(
     ConnectorRepository connectorRepository,
     ILogger<GhaWorkflowLiveFeedService> logger)
 {
-    public const int PollIntervalActiveMs = 1_200;
-    public const int PollIntervalWaitingJobsMs = 2_000;
-    public const int PollIntervalIdleMs = 4_000;
+    public const int PollIntervalActiveMs = 2_000;
+    public const int PollIntervalWaitingJobsMs = 3_000;
+    public const int PollIntervalIdleMs = 15_000;
+
+    // Shared across all terminals in the same circuit — one 429 pauses all of them.
+    private DateTimeOffset? _rateLimitedUntil;
 
     public async Task<GhaWorkflowLiveFeedUpdate> PollOnceAsync(
         GhaWorkflowLiveFeedState state,
         CancellationToken cancellationToken)
     {
+        // Gate: skip the API call while rate-limited; stagger per-RunId so terminals don't all resume simultaneously.
+        if (_rateLimitedUntil.HasValue)
+        {
+            var remaining = (int)(_rateLimitedUntil.Value - DateTimeOffset.UtcNow).TotalMilliseconds;
+            if (remaining > 0)
+            {
+                var jitter = (int)(state.RunId % 2_000);
+                return new GhaWorkflowLiveFeedUpdate(
+                    Caption: state.LastCaption,
+                    StepProgress: state.LastStepProgress,
+                    NewLines: [],
+                    DelayMs: Math.Min(remaining + jitter, 60_000));
+            }
+            _rateLimitedUntil = null;
+        }
+
         try
         {
             var connector = await ResolveConnectorAsync(state, cancellationToken);
@@ -31,7 +50,7 @@ public sealed class GhaWorkflowLiveFeedService(
                     DelayMs: PollIntervalWaitingJobsMs);
             }
 
-            var response = await gitHubService.GetWorkflowRunJobsAsync(connector, state.Owner, state.RepositoryName, state.RunId, cancellationToken);
+            var response = await gitHubService.GetWorkflowRunJobsAsync(connector, state.Owner, state.RepositoryName, state.RunId, cancellationToken, skipRateLimitRetry: true);
             var jobs = response?.Jobs ?? [];
 
             var caption = BuildCaption(jobs, state.WorkflowDisplayName);
@@ -91,6 +110,27 @@ public sealed class GhaWorkflowLiveFeedService(
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             logger.LogDebug(ex, "GHA live feed poll failed for run {RunId}", state.RunId);
+
+            if (ex is GitHubHttpRequestException ghEx
+                && GitHubApiErrorHelper.LooksLikeRateLimit(ghEx.StatusCode, ghEx.Message))
+            {
+                var resetEpoch = ghEx.RateLimit?.ResetEpochUtcSeconds;
+                var resumeAt = resetEpoch.HasValue
+                    ? DateTimeOffset.FromUnixTimeSeconds(resetEpoch.Value).AddSeconds(5)
+                    : DateTimeOffset.UtcNow.AddSeconds(60);
+                _rateLimitedUntil = resumeAt;
+                var waitMs = (int)Math.Clamp((resumeAt - DateTimeOffset.UtcNow).TotalMilliseconds, 60_000, 600_000);
+                var jitter = (int)(state.RunId % 2_000);
+                var label = resetEpoch.HasValue
+                    ? resumeAt.UtcDateTime.ToString("HH:mm") + " UTC"
+                    : "~60s";
+                return new GhaWorkflowLiveFeedUpdate(
+                    Caption: state.LastCaption,
+                    StepProgress: state.LastStepProgress,
+                    NewLines: [$"Rate limited — pausing until {label}"],
+                    DelayMs: Math.Min(waitMs + jitter, 600_000));
+            }
+
             var failureText = ex is HttpRequestException httpEx
                 ? GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(httpEx)
                 : ex.Message;
@@ -123,6 +163,10 @@ public sealed class GhaWorkflowLiveFeedService(
 
     private static int DeterminePollDelayMs(IReadOnlyList<GitHubWorkflowJobDto> jobs)
     {
+        // All jobs finished — workflow is done; parent will remove the terminal on next sync.
+        if (jobs.Count > 0 && jobs.All(j => string.Equals(j.Status, "completed", StringComparison.OrdinalIgnoreCase)))
+            return PollIntervalIdleMs;
+
         foreach (var job in jobs)
         {
             var js = job.Status ?? "";
