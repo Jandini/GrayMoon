@@ -1,6 +1,7 @@
 @using GrayMoon.App.Services
 @using GrayMoon.App.Models
 @inject GhaWorkflowLiveFeedService GhaWorkflowLiveFeedService
+@inject GhaStepLogFeedService GhaStepLogFeedService
 @inject LoadingOverlayUiSettingsService OverlayUiSettings
 @implements IAsyncDisposable
 
@@ -11,6 +12,8 @@
         : "";
     <div class="actions-gha-terminal">
         <div class="actions-gha-terminal__wrap actions-gha-terminal__wrap--split">
+
+            <!-- LEFT: step-status board -->
             <div class="loading-overlay-terminal @schemeClass actions-gha-terminal__terminal actions-gha-terminal__pane actions-gha-terminal__pane--left">
                 <div class="actions-gha-terminal__caption" title="@_captionTooltip">
                     <span class="actions-gha-terminal__caption-main">
@@ -24,30 +27,7 @@
                 <div class="loading-overlay-terminal__inner actions-gha-terminal__scroll" aria-live="polite">
                     @for (var i = 0; i < BodyLineCount; i++)
                     {
-                        var line = _visibleLineSlots[i];
-                        <p class="loading-overlay-terminal__line loading-overlay-terminal__line--out actions-gha-terminal__line">
-                            @if (string.IsNullOrWhiteSpace(line))
-                            {
-                                <span class="loading-overlay-terminal__text">&nbsp;</span>
-                            }
-                            else
-                            {
-                                <span class="loading-overlay-terminal__prefix">[gha]</span><span class="loading-overlay-terminal__text">@line</span>
-                            }
-                        </p>
-                    }
-                </div>
-            </div>
-            <div class="loading-overlay-terminal @schemeClass actions-gha-terminal__terminal actions-gha-terminal__pane actions-gha-terminal__pane--right">
-                <div class="actions-gha-terminal__caption" title="@_logCaption">
-                    <span class="actions-gha-terminal__caption-main">
-                        <span class="actions-gha-terminal__caption-prefix">▶</span><span class="actions-gha-terminal__caption-text">@_logCaption</span>
-                    </span>
-                </div>
-                <div class="loading-overlay-terminal__inner actions-gha-terminal__scroll" aria-live="polite">
-                    @for (var i = 0; i < BodyLineCount; i++)
-                    {
-                        var line = _logVisibleSlots[i];
+                        var line = _boardSlots[i];
                         <p class="loading-overlay-terminal__line loading-overlay-terminal__line--out actions-gha-terminal__line">
                             @if (string.IsNullOrWhiteSpace(line))
                             {
@@ -61,6 +41,32 @@
                     }
                 </div>
             </div>
+
+            <!-- RIGHT: step execution log (neutral white/gray palette) -->
+            <div class="loading-overlay-terminal actions-gha-terminal__terminal actions-gha-terminal__pane actions-gha-terminal__pane--right actions-gha-terminal__pane--log">
+                <div class="actions-gha-terminal__caption" title="@_logCaption">
+                    <span class="actions-gha-terminal__caption-main">
+                        <span class="actions-gha-terminal__caption-prefix">▶</span><span class="actions-gha-terminal__caption-text">@_logCaption</span>
+                    </span>
+                </div>
+                <div class="loading-overlay-terminal__inner actions-gha-terminal__scroll" aria-live="polite">
+                    @for (var i = 0; i < BodyLineCount; i++)
+                    {
+                        var line = _logSlots[i];
+                        <p class="loading-overlay-terminal__line loading-overlay-terminal__line--out actions-gha-terminal__line">
+                            @if (string.IsNullOrWhiteSpace(line))
+                            {
+                                <span class="loading-overlay-terminal__text">&nbsp;</span>
+                            }
+                            else
+                            {
+                                <span class="loading-overlay-terminal__prefix">[log]</span><span class="loading-overlay-terminal__text">@line</span>
+                            }
+                        </p>
+                    }
+                </div>
+            </div>
+
         </div>
     </div>
 }
@@ -72,17 +78,20 @@
     [Parameter] public long RunId { get; set; }
     [Parameter] public string? WorkflowDisplayName { get; set; }
 
-    // Left panel — step transitions (history)
-    private readonly List<string> _buffer = [];
-    private readonly string[] _visibleLineSlots = new string[BodyLineCount];
-    private GhaWorkflowLiveFeedState? _feedState;
+    // Left panel: step-status board — computed each poll from feed state, no buffer needed
+    private readonly string[] _boardSlots = new string[BodyLineCount];
     private string _caption = "Workflow · Connecting to GitHub Actions…";
     private string? _stepProgress;
 
-    // Right panel — step-status board (snapshot of current job's steps)
-    private readonly string[] _logVisibleSlots = new string[BodyLineCount];
-    private string _logCaption = "Steps · Waiting…";
+    // Right panel: step execution logs — circular buffer fed by GhaStepLogFeedService
+    private readonly List<string> _logBuffer = [];
+    private readonly string[] _logSlots = new string[BodyLineCount];
+    private readonly GhaStepLogFeedState _logFeedState = new();
+    private string _logCaption = "Step log · Waiting…";
+    private long _lastLogPollTick;
+    private const int LogPollIntervalMs = 3_000;
 
+    private GhaWorkflowLiveFeedState? _feedState;
     private CancellationTokenSource? _cts;
     private Task? _pollTask;
     private bool _needsRender;
@@ -94,8 +103,6 @@
     protected override void OnInitialized()
     {
         OverlayUiSettings.Changed += OnOverlayUiSettingsChanged;
-        _buffer.Add($"Run #{RunId} · Subscribing to job updates…");
-        RefreshSlots(_buffer, _visibleLineSlots);
     }
 
     private void OnOverlayUiSettingsChanged(object? sender, EventArgs e) =>
@@ -132,17 +139,12 @@
                     _needsRender = false;
                     await InvokeAsync(StateHasChanged);
                 }
-
                 await Task.Delay(delayMs, cancellationToken);
             }
         }
-        catch (OperationCanceledException)
-        {
-            /* disposed */
-        }
+        catch (OperationCanceledException) { /* disposed */ }
     }
 
-    /// <returns>Milliseconds to wait before the next poll.</returns>
     private async Task<int> PollOnceAsync(CancellationToken cancellationToken)
     {
         if (_feedState == null)
@@ -157,34 +159,33 @@
             _needsRender = true;
         }
 
-        foreach (var line in update.NewLines)
-            Append(line, _buffer, _visibleLineSlots);
-        if (update.NewLines.Count > 0)
-            _needsRender = true;
+        // Left panel: rebuild step-status board from already-fetched job data
+        UpdateBoard();
 
-        // Right panel: rebuild step-status board from already-fetched job data
-        UpdateStepBoard();
+        // Right panel: poll step logs at a slower rate, only when a job is active
+        var nowTick = Environment.TickCount64;
+        if (nowTick - _lastLogPollTick >= LogPollIntervalMs && _feedState.CurrentInProgressJobId != null)
+        {
+            _lastLogPollTick = nowTick;
+            await PollStepLogsAsync(cancellationToken);
+        }
 
         return update.DelayMs;
     }
 
-    private void UpdateStepBoard()
+    private void UpdateBoard()
     {
         var job = _feedState?.ActiveJob;
         var steps = job?.Steps;
 
         if (job == null || steps == null || steps.Count == 0)
         {
-            _logCaption = "Steps · Waiting…";
-            for (var i = 0; i < BodyLineCount; i++)
-                _logVisibleSlots[i] = "";
+            for (var i = 0; i < BodyLineCount; i++) _boardSlots[i] = "";
             _needsRender = true;
             return;
         }
 
-        _logCaption = job.Name ?? "Job";
-
-        // Scroll window: keep the active (in_progress) step visible in the middle
+        // Scroll window to keep the active (▶) step visible
         var activeIdx = steps.FindIndex(s =>
             string.Equals(s.Status, "in_progress", StringComparison.OrdinalIgnoreCase));
         if (activeIdx < 0)
@@ -197,18 +198,41 @@
 
         for (var i = 0; i < BodyLineCount; i++)
         {
-            var stepIdx = startIdx + i;
-            if (stepIdx >= steps.Count)
-            {
-                _logVisibleSlots[i] = "";
-            }
-            else
-            {
-                var step = steps[stepIdx];
-                _logVisibleSlots[i] = $"{StepIcon(step)} {step.Name}";
-            }
+            var si = startIdx + i;
+            _boardSlots[i] = si < steps.Count ? $"{StepIcon(steps[si])} {steps[si].Name}" : "";
         }
 
+        _needsRender = true;
+    }
+
+    private async Task PollStepLogsAsync(CancellationToken cancellationToken)
+    {
+        if (_feedState == null) return;
+
+        var logUpdate = await GhaStepLogFeedService.PollStepLogsAsync(_feedState, _logFeedState, cancellationToken);
+
+        if (logUpdate.StepChanged)
+        {
+            _logBuffer.Clear();
+            _logCaption = string.IsNullOrWhiteSpace(logUpdate.StepName)
+                ? "Step log · Waiting…"
+                : logUpdate.StepName;
+            RefreshSlots(_logBuffer, _logSlots);
+            _needsRender = true;
+        }
+
+        foreach (var line in logUpdate.NewLines)
+            AppendLog(line);
+    }
+
+    private void AppendLog(string line)
+    {
+        if (_logBuffer.Count > 0 && string.Equals(_logBuffer[^1], line, StringComparison.Ordinal))
+            return;
+        _logBuffer.Add(line);
+        while (_logBuffer.Count > 200)
+            _logBuffer.RemoveAt(0);
+        RefreshSlots(_logBuffer, _logSlots);
         _needsRender = true;
     }
 
@@ -220,10 +244,10 @@
         {
             return (step.Conclusion ?? "").ToLowerInvariant() switch
             {
-                "success"              => "✓",
+                "success"                => "✓",
                 "failure" or "cancelled" => "✗",
-                "skipped"              => "↩",
-                _                      => "·"
+                "skipped"                => "↩",
+                _                        => "·"
             };
         }
         return "○";
@@ -233,19 +257,9 @@
     {
         for (var i = 0; i < BodyLineCount; i++)
         {
-            var bufIdx = buffer.Count - BodyLineCount + i;
-            slots[i] = bufIdx >= 0 ? buffer[bufIdx] : "";
+            var idx = buffer.Count - BodyLineCount + i;
+            slots[i] = idx >= 0 ? buffer[idx] : "";
         }
-    }
-
-    private static void Append(string line, List<string> buffer, string[] slots)
-    {
-        if (buffer.Count > 0 && string.Equals(buffer[^1], line, StringComparison.Ordinal))
-            return;
-        buffer.Add(line);
-        while (buffer.Count > 120)
-            buffer.RemoveAt(0);
-        RefreshSlots(buffer, slots);
     }
 
     public async ValueTask DisposeAsync()
@@ -257,10 +271,7 @@
             if (_pollTask != null)
                 await _pollTask;
         }
-        catch (OperationCanceledException)
-        {
-            /* ok */
-        }
+        catch (OperationCanceledException) { /* ok */ }
         finally
         {
             _cts?.Dispose();

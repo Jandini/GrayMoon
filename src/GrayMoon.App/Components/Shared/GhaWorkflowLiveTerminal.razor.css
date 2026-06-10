@@ -113,3 +113,16 @@
     white-space: nowrap;
     box-sizing: border-box;
 }
+
+/* Right log panel: neutral white/gray palette (no green/yellow tint) */
+.actions-gha-terminal__pane--log .loading-overlay-terminal__line--out .loading-overlay-terminal__text {
+    color: rgba(210, 212, 208, 0.84);
+}
+
+.actions-gha-terminal__pane--log .actions-gha-terminal__caption-prefix {
+    color: rgba(148, 155, 148, 0.78);
+}
+
+.actions-gha-terminal__pane--log .actions-gha-terminal__caption-text {
+    color: rgba(180, 184, 180, 0.72);
+}
