@@ -1,6 +1,6 @@
 @using GrayMoon.App.Services
+@using GrayMoon.App.Models
 @inject GhaWorkflowLiveFeedService GhaWorkflowLiveFeedService
-@inject GhaStepLogFeedService GhaStepLogFeedService
 @inject LoadingOverlayUiSettingsService OverlayUiSettings
 @implements IAsyncDisposable
 
@@ -55,7 +55,7 @@
                             }
                             else
                             {
-                                <span class="loading-overlay-terminal__prefix">[log]</span><span class="loading-overlay-terminal__text">@line</span>
+                                <span class="loading-overlay-terminal__prefix">[job]</span><span class="loading-overlay-terminal__text">@line</span>
                             }
                         </p>
                     }
@@ -72,26 +72,22 @@
     [Parameter] public long RunId { get; set; }
     [Parameter] public string? WorkflowDisplayName { get; set; }
 
-    // Left panel — step transitions
+    // Left panel — step transitions (history)
     private readonly List<string> _buffer = [];
     private readonly string[] _visibleLineSlots = new string[BodyLineCount];
     private GhaWorkflowLiveFeedState? _feedState;
     private string _caption = "Workflow · Connecting to GitHub Actions…";
     private string? _stepProgress;
 
-    // Right panel — current step log lines
-    private readonly List<string> _logBuffer = [];
+    // Right panel — step-status board (snapshot of current job's steps)
     private readonly string[] _logVisibleSlots = new string[BodyLineCount];
-    private readonly GhaStepLogFeedState _logFeedState = new();
-    private string _logCaption = "Step log · Waiting for active step…";
-    private long _lastLogPollTick;
+    private string _logCaption = "Steps · Waiting…";
 
     private CancellationTokenSource? _cts;
     private Task? _pollTask;
     private bool _needsRender;
 
     private const int BodyLineCount = 8;
-    private const int LogPollIntervalMs = 4_000;
     private string _captionTooltip =>
         string.IsNullOrWhiteSpace(_stepProgress) ? _caption : $"{_caption} · {_stepProgress}";
 
@@ -100,7 +96,6 @@
         OverlayUiSettings.Changed += OnOverlayUiSettingsChanged;
         _buffer.Add($"Run #{RunId} · Subscribing to job updates…");
         RefreshSlots(_buffer, _visibleLineSlots);
-        RefreshSlots(_logBuffer, _logVisibleSlots);
     }
 
     private void OnOverlayUiSettingsChanged(object? sender, EventArgs e) =>
@@ -167,37 +162,71 @@
         if (update.NewLines.Count > 0)
             _needsRender = true;
 
-        // Poll step logs at a slower rate, only when a job is in progress
-        var nowTick = Environment.TickCount64;
-        if (nowTick - _lastLogPollTick >= LogPollIntervalMs && _feedState.CurrentInProgressJobId != null)
-        {
-            _lastLogPollTick = nowTick;
-            await PollStepLogsOnceAsync(cancellationToken);
-        }
+        // Right panel: rebuild step-status board from already-fetched job data
+        UpdateStepBoard();
 
         return update.DelayMs;
     }
 
-    private async Task PollStepLogsOnceAsync(CancellationToken cancellationToken)
+    private void UpdateStepBoard()
     {
-        if (_feedState == null) return;
+        var job = _feedState?.ActiveJob;
+        var steps = job?.Steps;
 
-        var logUpdate = await GhaStepLogFeedService.PollStepLogsAsync(_feedState, _logFeedState, cancellationToken);
-
-        if (logUpdate.StepChanged)
+        if (job == null || steps == null || steps.Count == 0)
         {
-            _logBuffer.Clear();
-            _logCaption = string.IsNullOrWhiteSpace(logUpdate.StepName)
-                ? "Step log · Waiting for active step…"
-                : logUpdate.StepName;
-            RefreshSlots(_logBuffer, _logVisibleSlots);
+            _logCaption = "Steps · Waiting…";
+            for (var i = 0; i < BodyLineCount; i++)
+                _logVisibleSlots[i] = "";
             _needsRender = true;
+            return;
         }
 
-        foreach (var line in logUpdate.NewLines)
-            Append(line, _logBuffer, _logVisibleSlots);
-        if (logUpdate.NewLines.Count > 0)
-            _needsRender = true;
+        _logCaption = job.Name ?? "Job";
+
+        // Scroll window: keep the active (in_progress) step visible in the middle
+        var activeIdx = steps.FindIndex(s =>
+            string.Equals(s.Status, "in_progress", StringComparison.OrdinalIgnoreCase));
+        if (activeIdx < 0)
+            activeIdx = steps.FindLastIndex(s =>
+                string.Equals(s.Status, "completed", StringComparison.OrdinalIgnoreCase));
+
+        var startIdx = 0;
+        if (steps.Count > BodyLineCount && activeIdx >= 0)
+            startIdx = Math.Max(0, Math.Min(activeIdx - BodyLineCount / 2 + 1, steps.Count - BodyLineCount));
+
+        for (var i = 0; i < BodyLineCount; i++)
+        {
+            var stepIdx = startIdx + i;
+            if (stepIdx >= steps.Count)
+            {
+                _logVisibleSlots[i] = "";
+            }
+            else
+            {
+                var step = steps[stepIdx];
+                _logVisibleSlots[i] = $"{StepIcon(step)} {step.Name}";
+            }
+        }
+
+        _needsRender = true;
+    }
+
+    private static string StepIcon(GitHubWorkflowJobStepDto step)
+    {
+        if (string.Equals(step.Status, "in_progress", StringComparison.OrdinalIgnoreCase))
+            return "▶";
+        if (string.Equals(step.Status, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return (step.Conclusion ?? "").ToLowerInvariant() switch
+            {
+                "success"              => "✓",
+                "failure" or "cancelled" => "✗",
+                "skipped"              => "↩",
+                _                      => "·"
+            };
+        }
+        return "○";
     }
 
     private static void RefreshSlots(List<string> buffer, string[] slots)
