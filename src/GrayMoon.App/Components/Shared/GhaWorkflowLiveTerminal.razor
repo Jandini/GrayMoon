@@ -1,7 +1,6 @@
 @using GrayMoon.App.Services
 @using GrayMoon.App.Models
 @inject GhaWorkflowLiveFeedService GhaWorkflowLiveFeedService
-@inject GhaStepLogFeedService GhaStepLogFeedService
 @inject LoadingOverlayUiSettingsService OverlayUiSettings
 @implements IAsyncDisposable
 
@@ -13,11 +12,11 @@
     <div class="actions-gha-terminal">
         <div class="actions-gha-terminal__wrap actions-gha-terminal__wrap--split">
 
-            <!-- LEFT: step-status board -->
+            <!-- LEFT: step-status board (snapshot of all steps with icons) -->
             <div class="loading-overlay-terminal @schemeClass actions-gha-terminal__terminal actions-gha-terminal__pane actions-gha-terminal__pane--left">
-                <div class="actions-gha-terminal__caption" title="@_captionTooltip">
+                <div class="actions-gha-terminal__caption" title="@_boardCaption">
                     <span class="actions-gha-terminal__caption-main">
-                        <span class="actions-gha-terminal__caption-prefix">▶</span><span class="actions-gha-terminal__caption-text">@_caption</span>
+                        <span class="actions-gha-terminal__caption-prefix">▶</span><span class="actions-gha-terminal__caption-text">@_boardCaption</span>
                     </span>
                     @if (!string.IsNullOrWhiteSpace(_stepProgress))
                     {
@@ -42,17 +41,17 @@
                 </div>
             </div>
 
-            <!-- RIGHT: step execution log (neutral white/gray palette) -->
-            <div class="loading-overlay-terminal actions-gha-terminal__terminal actions-gha-terminal__pane actions-gha-terminal__pane--right actions-gha-terminal__pane--log">
-                <div class="actions-gha-terminal__caption" title="@_logCaption">
+            <!-- RIGHT: enriched step-transition history (scrolling log of state changes) -->
+            <div class="loading-overlay-terminal @schemeClass actions-gha-terminal__terminal actions-gha-terminal__pane actions-gha-terminal__pane--right">
+                <div class="actions-gha-terminal__caption" title="@_caption">
                     <span class="actions-gha-terminal__caption-main">
-                        <span class="actions-gha-terminal__caption-prefix">▶</span><span class="actions-gha-terminal__caption-text">@_logCaption</span>
+                        <span class="actions-gha-terminal__caption-prefix">▶</span><span class="actions-gha-terminal__caption-text">@_caption</span>
                     </span>
                 </div>
                 <div class="loading-overlay-terminal__inner actions-gha-terminal__scroll" aria-live="polite">
                     @for (var i = 0; i < BodyLineCount; i++)
                     {
-                        var line = _logSlots[i];
+                        var line = _visibleLineSlots[i];
                         <p class="loading-overlay-terminal__line loading-overlay-terminal__line--out actions-gha-terminal__line">
                             @if (string.IsNullOrWhiteSpace(line))
                             {
@@ -60,7 +59,7 @@
                             }
                             else
                             {
-                                <span class="loading-overlay-terminal__prefix">[log]</span><span class="loading-overlay-terminal__text">@line</span>
+                                <span class="loading-overlay-terminal__prefix">[gha]</span><span class="loading-overlay-terminal__text">@line</span>
                             }
                         </p>
                     }
@@ -78,18 +77,15 @@
     [Parameter] public long RunId { get; set; }
     [Parameter] public string? WorkflowDisplayName { get; set; }
 
-    // Left panel: step-status board — computed each poll from feed state, no buffer needed
+    // Left panel: step-status board (snapshot, recomputed each poll)
     private readonly string[] _boardSlots = new string[BodyLineCount];
-    private string _caption = "Workflow · Connecting to GitHub Actions…";
+    private string _boardCaption = "Steps · Waiting…";
     private string? _stepProgress;
 
-    // Right panel: step execution logs — circular buffer fed by GhaStepLogFeedService
-    private readonly List<string> _logBuffer = [];
-    private readonly string[] _logSlots = new string[BodyLineCount];
-    private readonly GhaStepLogFeedState _logFeedState = new();
-    private string _logCaption = "Step log · Waiting…";
-    private long _lastLogPollTick;
-    private const int LogPollIntervalMs = 3_000;
+    // Right panel: scrolling step-transition history (fed by feed service NewLines)
+    private readonly List<string> _buffer = [];
+    private readonly string[] _visibleLineSlots = new string[BodyLineCount];
+    private string _caption = "Workflow · Connecting to GitHub Actions…";
 
     private GhaWorkflowLiveFeedState? _feedState;
     private CancellationTokenSource? _cts;
@@ -97,8 +93,6 @@
     private bool _needsRender;
 
     private const int BodyLineCount = 8;
-    private string _captionTooltip =>
-        string.IsNullOrWhiteSpace(_stepProgress) ? _caption : $"{_caption} · {_stepProgress}";
 
     protected override void OnInitialized()
     {
@@ -151,26 +145,42 @@
             return GhaWorkflowLiveFeedService.PollIntervalWaitingJobsMs;
 
         var update = await GhaWorkflowLiveFeedService.PollOnceAsync(_feedState, cancellationToken);
-        if (!string.Equals(_caption, update.Caption, StringComparison.Ordinal)
-            || !string.Equals(_stepProgress, update.StepProgress, StringComparison.Ordinal))
+
+        // Right panel: append new step-transition lines
+        foreach (var line in update.NewLines)
+            AppendLine(line);
+
+        // Right panel: caption tracks current step
+        if (!string.Equals(_caption, update.Caption, StringComparison.Ordinal))
         {
             _caption = update.Caption;
+            _needsRender = true;
+        }
+
+        // Left panel: caption shows job name + step progress
+        var jobName = _feedState.ActiveJob?.Name ?? "Steps";
+        var newBoardCaption = jobName;
+        if (!string.Equals(_boardCaption, newBoardCaption, StringComparison.Ordinal)
+            || !string.Equals(_stepProgress, update.StepProgress, StringComparison.Ordinal))
+        {
+            _boardCaption = newBoardCaption;
             _stepProgress = update.StepProgress;
             _needsRender = true;
         }
 
-        // Left panel: rebuild step-status board from already-fetched job data
+        // Left panel: rebuild step-status board
         UpdateBoard();
 
-        // Right panel: poll step logs at a slower rate, only when a job is active
-        var nowTick = Environment.TickCount64;
-        if (nowTick - _lastLogPollTick >= LogPollIntervalMs && _feedState.CurrentInProgressJobId != null)
-        {
-            _lastLogPollTick = nowTick;
-            await PollStepLogsAsync(cancellationToken);
-        }
-
         return update.DelayMs;
+    }
+
+    private void AppendLine(string line)
+    {
+        _buffer.Add(line);
+        while (_buffer.Count > 200)
+            _buffer.RemoveAt(0);
+        RefreshSlots();
+        _needsRender = true;
     }
 
     private void UpdateBoard()
@@ -185,7 +195,6 @@
             return;
         }
 
-        // Scroll window to keep the active (▶) step visible
         var activeIdx = steps.FindIndex(s =>
             string.Equals(s.Status, "in_progress", StringComparison.OrdinalIgnoreCase));
         if (activeIdx < 0)
@@ -202,37 +211,6 @@
             _boardSlots[i] = si < steps.Count ? $"{StepIcon(steps[si])} {steps[si].Name}" : "";
         }
 
-        _needsRender = true;
-    }
-
-    private async Task PollStepLogsAsync(CancellationToken cancellationToken)
-    {
-        if (_feedState == null) return;
-
-        var logUpdate = await GhaStepLogFeedService.PollStepLogsAsync(_feedState, _logFeedState, cancellationToken);
-
-        if (logUpdate.StepChanged)
-        {
-            _logBuffer.Clear();
-            _logCaption = string.IsNullOrWhiteSpace(logUpdate.StepName)
-                ? "Step log · Waiting…"
-                : logUpdate.StepName;
-            RefreshSlots(_logBuffer, _logSlots);
-            _needsRender = true;
-        }
-
-        foreach (var line in logUpdate.NewLines)
-            AppendLog(line);
-    }
-
-    private void AppendLog(string line)
-    {
-        if (_logBuffer.Count > 0 && string.Equals(_logBuffer[^1], line, StringComparison.Ordinal))
-            return;
-        _logBuffer.Add(line);
-        while (_logBuffer.Count > 200)
-            _logBuffer.RemoveAt(0);
-        RefreshSlots(_logBuffer, _logSlots);
         _needsRender = true;
     }
 
@@ -253,12 +231,12 @@
         return "○";
     }
 
-    private static void RefreshSlots(List<string> buffer, string[] slots)
+    private void RefreshSlots()
     {
         for (var i = 0; i < BodyLineCount; i++)
         {
-            var idx = buffer.Count - BodyLineCount + i;
-            slots[i] = idx >= 0 ? buffer[idx] : "";
+            var idx = _buffer.Count - BodyLineCount + i;
+            _visibleLineSlots[i] = idx >= 0 ? _buffer[idx] : "";
         }
     }
 

@@ -68,6 +68,7 @@ public sealed class GhaWorkflowLiveFeedService(
                 foreach (var job in jobs.OrderBy(j => j.Id))
                 {
                     var steps = job.Steps ?? [];
+                    var totalSteps = steps.Count;
                     foreach (var step in steps.OrderBy(s => s.Number))
                     {
                         var key = $"{job.Id}:{step.Number}";
@@ -76,7 +77,7 @@ public sealed class GhaWorkflowLiveFeedService(
                             continue;
 
                         state.StepSignatures[key] = sig;
-                        newLines.Add(FormatStepTransition(job.Name, step));
+                        newLines.Add(FormatStepTransition(job.Name, step, totalSteps));
                     }
                 }
             }
@@ -201,24 +202,40 @@ public sealed class GhaWorkflowLiveFeedService(
         return $"Step {y} of {y}";
     }
 
-    private static string FormatStepTransition(string jobName, GitHubWorkflowJobStepDto step)
+    private static string FormatStepTransition(string jobName, GitHubWorkflowJobStepDto step, int totalSteps)
     {
+        var num = totalSteps > 0 ? $"[{step.Number}/{totalSteps}] " : "";
+
         if (string.Equals(step.Status, "completed", StringComparison.OrdinalIgnoreCase))
         {
+            var dur = FormatDuration(step.StartedAt, step.CompletedAt);
+            var suffix = dur.Length > 0 ? $" ({dur})" : "";
             var c = step.Conclusion ?? "";
             if (string.Equals(c, "success", StringComparison.OrdinalIgnoreCase))
-                return $"OK {jobName} > {step.Name}";
+                return $"OK  {num}{jobName} > {step.Name}{suffix}";
             if (string.Equals(c, "skipped", StringComparison.OrdinalIgnoreCase))
-                return $"SKIP {jobName} > {step.Name} (skipped)";
+                return $"SKIP {num}{jobName} > {step.Name}";
             if (string.Equals(c, "failure", StringComparison.OrdinalIgnoreCase) || string.Equals(c, "cancelled", StringComparison.OrdinalIgnoreCase))
-                return $"FAIL {jobName} > {step.Name} ({c})";
-            return $"INFO {jobName} > {step.Name} - {c}";
+                return $"FAIL {num}{jobName} > {step.Name}{suffix}";
+            return $"INFO {num}{jobName} > {step.Name} · {c}";
         }
 
         if (string.Equals(step.Status, "in_progress", StringComparison.OrdinalIgnoreCase))
-            return $"RUN {jobName} > {step.Name}...";
+            return $"RUN  {num}{jobName} > {step.Name}";
 
-        return $"WAIT {jobName} > {step.Name} - {step.Status}";
+        return $"WAIT {num}{jobName} > {step.Name} · {step.Status}";
+    }
+
+    private static string FormatDuration(DateTimeOffset? start, DateTimeOffset? end)
+    {
+        if (start == null || end == null) return "";
+        var elapsed = end.Value - start.Value;
+        if (elapsed < TimeSpan.Zero) return "";
+        if (elapsed.TotalSeconds < 60)
+            return elapsed.TotalSeconds < 10
+                ? $"{elapsed.TotalSeconds:F1}s"
+                : $"{(int)elapsed.TotalSeconds}s";
+        return $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds}s";
     }
 }
 
