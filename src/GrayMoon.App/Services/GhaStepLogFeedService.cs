@@ -19,10 +19,43 @@ public sealed class GhaStepLogFeedService(
             var logText = await gitHubService.GetJobLogsAsync(
                 connector, feedState.Owner, feedState.RepositoryName, jobId.Value, cancellationToken);
 
-            if (string.IsNullOrEmpty(logText))
+            if (logText == null)
+            {
+                // API returned non-200 — surface a single diagnostic line the first time
+                if (logState.LastStepName != "__api_error__")
+                {
+                    logState.LastStepName = "__api_error__";
+                    logState.LastLineIndex = 0;
+                    return new GhaStepLogUpdate("Log · API error", ["Log not available — check server log for HTTP status"], true);
+                }
                 return GhaStepLogUpdate.Empty;
+            }
+
+            if (logText.Length == 0)
+            {
+                if (logState.LastStepName != "__empty__")
+                {
+                    logState.LastStepName = "__empty__";
+                    logState.LastLineIndex = 0;
+                    return new GhaStepLogUpdate("Log · No output", ["Log file returned empty — no step output yet"], true);
+                }
+                return GhaStepLogUpdate.Empty;
+            }
 
             var (stepName, lines) = ParseCurrentStepLines(logText);
+
+            if (stepName == null)
+            {
+                var preview = logText.Length > 300 ? logText[..300] : logText;
+                logger.LogWarning("GHA step log: no ##[group] markers in {Length}-char log for job {JobId}. First 300 chars: [{Preview}]", logText.Length, jobId, preview);
+                if (logState.LastStepName != "__no_groups__")
+                {
+                    logState.LastStepName = "__no_groups__";
+                    logState.LastLineIndex = 0;
+                    return new GhaStepLogUpdate("Log · Parsing", [$"Log returned {logText.Length} chars but no ##[group] markers found"], true);
+                }
+                return GhaStepLogUpdate.Empty;
+            }
 
             var stepChanged = !string.Equals(stepName, logState.LastStepName, StringComparison.Ordinal);
             if (stepChanged)
@@ -38,7 +71,7 @@ public sealed class GhaStepLogFeedService(
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
-            logger.LogDebug(ex, "GHA step log poll failed for job {JobId}", jobId);
+            logger.LogWarning(ex, "GHA step log poll failed for job {JobId}", jobId);
             return GhaStepLogUpdate.Empty;
         }
     }
@@ -48,30 +81,35 @@ public sealed class GhaStepLogFeedService(
         var rawLines = logText.Split('\n');
         string? currentName = null;
         var currentLines = new List<string>();
+        string? lastClosedName = null;
+        List<string> lastClosedLines = [];
         var inGroup = false;
 
         foreach (var raw in rawLines)
         {
             var content = StripTimestamp(raw);
 
-            // GitHub runner writes ##[group] markers for step boundaries (older format);
-            // user-created groups within a step use ::group:: (newer format)
             if (content.StartsWith("##[group]", StringComparison.Ordinal))
             {
-                currentName = content.Substring("##[group]".Length).TrimEnd('\r');
+                currentName = content["##[group]".Length..].TrimEnd('\r');
+                currentLines = [];
+                inGroup = true;
+            }
+            else if (content.StartsWith("::group::", StringComparison.Ordinal))
+            {
+                currentName = content["::group::".Length..].TrimEnd('\r');
                 currentLines = [];
                 inGroup = true;
             }
             else if (content.StartsWith("##[endgroup]", StringComparison.Ordinal)
                      || content.StartsWith("::endgroup::", StringComparison.Ordinal))
             {
+                if (inGroup && currentName != null)
+                {
+                    lastClosedName = currentName;
+                    lastClosedLines = new List<string>(currentLines);
+                }
                 inGroup = false;
-            }
-            else if (content.StartsWith("::group::", StringComparison.Ordinal))
-            {
-                currentName = content.Substring("::group::".Length).TrimEnd('\r');
-                currentLines = [];
-                inGroup = true;
             }
             else if (inGroup)
             {
@@ -81,9 +119,15 @@ public sealed class GhaStepLogFeedService(
             }
         }
 
-        return inGroup && currentName != null
-            ? (currentName, currentLines)
-            : (null, []);
+        // Prefer the open group — this is the currently running step
+        if (inGroup && currentName != null)
+            return (currentName, currentLines);
+
+        // Fall back to most recently completed step
+        if (lastClosedName != null)
+            return (lastClosedName, lastClosedLines);
+
+        return (null, []);
     }
 
     private static string StripTimestamp(string line)

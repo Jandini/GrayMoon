@@ -282,8 +282,13 @@ public class GitHubService : IConnectorService
 
         using var response = await GetResponseAsync(connector, $"repos/{owner}/{repo}/actions/jobs/{jobId}/logs", cancellationToken);
         if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("GetJobLogsAsync: HTTP {StatusCode} for job {JobId}", (int)response.StatusCode, jobId);
             return null;
-        return await response.Content.ReadAsStringAsync(cancellationToken);
+        }
+        var text = await response.Content.ReadAsStringAsync(cancellationToken);
+        _logger.LogDebug("GetJobLogsAsync: {Length} chars for job {JobId}", text.Length, jobId);
+        return text;
     }
 
     public async Task RerunWorkflowRunAsync(Connector connector, string owner, string repo, long runId, CancellationToken cancellationToken = default)
