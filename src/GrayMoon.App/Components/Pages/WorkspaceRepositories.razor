@@ -137,7 +137,7 @@
                                                                        ColSpan="@TableColSpan"
                                                                        Group="@group"
                                                                        ActionsDisabled="@group.All(wr => wr.IsOnTag)"
-                                                                       OnSyncToDefault="() => ShowConfirmSyncToDefaultLevel(group.Select(wr => wr.RepositoryId).ToList())"
+                                                                       OnSyncToDefault="async () => await ShowConfirmSyncToDefaultLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                                        OnSyncCommits="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
                                                                        OnOpenPr="() => OpenPullRequestDialogForRepositoriesAsync(group.ToList())"
                                                                        OnSyncLevel="() => ShowConfirmSyncLevel(group.Select(wr => wr.RepositoryId).ToList())"

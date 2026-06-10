@@ -450,6 +450,15 @@ public static class BranchEndpoints
                     tags,
                     refreshResponse.CurrentTag,
                     CancellationToken.None);
+                if (string.IsNullOrWhiteSpace(refreshResponse.CurrentTag))
+                {
+                    var hasUpstream = ComputeBranchHasUpstream(refreshResponse.CurrentBranch, remoteBranches);
+                    if (hasUpstream.HasValue)
+                    {
+                        wr.BranchHasUpstream = hasUpstream.Value;
+                        await dbContext.SaveChangesAsync(CancellationToken.None);
+                    }
+                }
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
             }
 

@@ -943,7 +943,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             ShowConfirm($"Do you want to sync {filtered.Count} repositories in this level?", () => SyncLevelAsync(filtered));
     }
 
-    private void ShowConfirmSyncToDefaultLevel(List<int> repositoryIds)
+    private async Task ShowConfirmSyncToDefaultLevel(List<int> repositoryIds)
     {
         if (workspace == null || repositoryIds == null || repositoryIds.Count == 0)
             return;
@@ -968,12 +968,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
             return;
         }
 
-        CheckBranchesAndConfirmSyncToDefaultLevel(nonDefaultRepoIds);
+        await CheckBranchesAndConfirmSyncToDefaultLevel(nonDefaultRepoIds);
     }
 
-    private void CheckBranchesAndConfirmSyncToDefaultLevel(List<int> repositoryIds)
+    private async Task CheckBranchesAndConfirmSyncToDefaultLevel(List<int> repositoryIds)
     {
-        if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || isSyncingToDefault)
+        if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || isSyncingToDefault || isWorkspaceBranchesFetching)
             return;
 
         _syncToDefaultCheckResults = null;
@@ -1014,6 +1014,49 @@ public sealed partial class WorkspaceRepositories : IDisposable
             var message = safeCount == 1
                 ? "This will checkout the default branch, remove the current branch locally, and pull the latest. Uncommitted local changes can block checkout."
                 : $"This will sync {safeCount} repositories to their default branch: checkout default, remove the current branch locally, and pull. Uncommitted local changes can block checkout for that repo.";
+
+            // Fetch to get up-to-date remote branch state before showing the dialog
+            _workspaceBranchesFetchCts?.Cancel();
+            _workspaceBranchesFetchCts?.Dispose();
+            _workspaceBranchesFetchCts = new CancellationTokenSource();
+            isWorkspaceBranchesFetching = true;
+            workspaceBranchesFetchProgressMessage = safeCount == 1 ? "Fetching latest branch state..." : $"Fetching latest branch state for {safeCount} repositories...";
+            await InvokeAsync(StateHasChanged);
+
+            try
+            {
+                await WorkspaceBranchHandler.FetchBranchesForWorkspaceAsync(
+                    WorkspaceId,
+                    safeRepoIds,
+                    ApiBaseUrl,
+                    (done, total) =>
+                    {
+                        workspaceBranchesFetchProgressMessage = done <= 0 ? "Fetching latest branch state..." : $"Fetched {done} of {total}...";
+                        _ = InvokeAsync(StateHasChanged);
+                    },
+                    _workspaceBranchesFetchCts.Token);
+                await RefreshFromSync();
+            }
+            catch (OperationCanceledException)
+            {
+                ToastService.Show("Fetch cancelled.");
+                return;
+            }
+            finally
+            {
+                isWorkspaceBranchesFetching = false;
+                await InvokeAsync(StateHasChanged);
+            }
+
+            // Rebuild check results with fresh HasUpstream from DB (remote branch may have been deleted)
+            _syncToDefaultCheckResults = _syncToDefaultCheckResults
+                .Select(r =>
+                {
+                    var wr2 = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == r.RepoId);
+                    return (r.RepoId, r.DefaultAhead, HasUpstream: wr2?.BranchHasUpstream);
+                })
+                .ToList();
+
             var repoItems = _syncToDefaultCheckResults
                 .Select(r =>
                 {
@@ -1263,7 +1306,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             ShowConfirm(
                 $"Synchronized push could not be completed because {ex.MissingPackagesCount} required package mappings are missing. Check NuGet connector configuration and token, then retry. Continue with normal push?",
-                () => ExecutePushAsync(
+                async () => await ExecutePushAsync(
                     repoIds,
                     synchronizedPush: false,
                     requiredPackageIds: requiredPackageIds),
@@ -1271,13 +1314,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    private async Task ExecutePushAsync(
+    private async Task<bool> ExecutePushAsync(
         IReadOnlySet<int> repoIds,
         bool synchronizedPush,
         IReadOnlySet<string> requiredPackageIds)
     {
         if (workspace == null)
-            return;
+            return false;
 
         _pushCts?.Cancel();
         _pushCts?.Dispose();
@@ -1295,10 +1338,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 ToastService.Show,
                 onAppSideComplete: () => _pushAwaitingAgentTasks = true,
                 _pushCts.Token);
+            return true;
         }
         catch (OperationCanceledException)
         {
             ToastService.Show("Push cancelled.");
+            return false;
         }
         finally
         {
@@ -1756,17 +1801,21 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
 
         // Phase 3: execute push
+        bool pushCompleted = false;
         try
         {
-            await ExecutePushAsync(pushRepoIds, synchronizedPush: true, requiredPackageIds);
+            pushCompleted = await ExecutePushAsync(pushRepoIds, synchronizedPush: true, requiredPackageIds);
         }
         catch (SynchronizedPushNotPossibleException ex)
         {
             ShowConfirm(
                 $"Synchronized push could not be completed because {ex.MissingPackagesCount} required package mappings are missing. Check NuGet connector configuration and token, then retry. Continue with normal push?",
-                () => ExecutePushAsync(pushRepoIds, synchronizedPush: false, requiredPackageIds),
+                async () => await ExecutePushAsync(pushRepoIds, synchronizedPush: false, requiredPackageIds),
                 confirmButtonText: "Continue");
         }
+
+        if (pushCompleted)
+            await RestorePackagesAsync();
     }
 
     private async Task HandleDependencyBadgeKeydown(KeyboardEventArgs e, int repositoryId, int unmatchedDeps)
@@ -2597,6 +2646,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 await RefreshFromSync();
                 await InvokeAsync(StateHasChanged);
             }
+
+            // Only reached on success (all catch blocks return early)
+            await RestorePackagesAsync();
         }
     }
 
@@ -3005,11 +3057,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 await semaphore.WaitAsync();
                 try
                 {
+                    var repoHasRemote = !resultByRepo.TryGetValue(repositoryId, out var repoCheck) || repoCheck.HasUpstream == true;
                     var (success, errMsg) = await WorkspaceBranchHandler.SyncToDefaultSingleAsync(
                         WorkspaceId,
                         repositoryId,
                         currentBranchName,
-                        deleteRemoteBranch,
+                        deleteRemoteBranch && repoHasRemote,
                         allowForceDeleteLocalBranch,
                         ApiBaseUrl,
                         CancellationToken.None);
