@@ -83,8 +83,11 @@
     private string _boardCaption = "Steps · Waiting…";
     private string? _stepProgress;
 
-    // Right panel: last 8 lines of current step's raw log (overwritten each poll)
+    // Right panel: accumulated log lines streamed in incrementally
     private readonly string[] _rawLogSlots = new string[BodyLineCount];
+    private readonly List<string> _accumulatedLogLines = [];
+    private int _logLineCount;
+    private long? _logJobId;
     private string _caption = "Workflow · Connecting to GitHub Actions…";
 
     private GhaWorkflowLiveFeedState? _feedState;
@@ -146,9 +149,21 @@
 
         var update = await GhaWorkflowLiveFeedService.PollOnceAsync(_feedState, cancellationToken);
 
-        // Right panel: pull last 8 lines of current step's log
-        var logLines = await GhaStepLogFeedService.PollStepLogTailAsync(_feedState, BodyLineCount, cancellationToken);
-        UpdateRawLogSlots(logLines);
+        // Right panel: accumulate new log lines (reset when active job changes)
+        if (_feedState.CurrentInProgressJobId != _logJobId)
+        {
+            _logJobId = _feedState.CurrentInProgressJobId;
+            _logLineCount = 0;
+            _accumulatedLogLines.Clear();
+        }
+
+        var newLines = await GhaStepLogFeedService.PollStepLogNewLinesAsync(_feedState, _logLineCount, cancellationToken);
+        if (newLines.Length > 0)
+        {
+            _accumulatedLogLines.AddRange(newLines);
+            _logLineCount = _accumulatedLogLines.Count;
+            UpdateRawLogSlots();
+        }
 
         // Right panel: caption tracks current step
         if (!string.Equals(_caption, update.Caption, StringComparison.Ordinal))
@@ -174,13 +189,14 @@
         return update.DelayMs;
     }
 
-    private void UpdateRawLogSlots(string[] lines)
+    private void UpdateRawLogSlots()
     {
-        var offset = BodyLineCount - lines.Length;
+        var count = _accumulatedLogLines.Count;
+        var offset = Math.Max(0, count - BodyLineCount);
         var changed = false;
         for (var i = 0; i < BodyLineCount; i++)
         {
-            var newVal = i < offset ? "" : lines[i - offset];
+            var newVal = i + offset < count ? _accumulatedLogLines[i + offset] : "";
             if (!string.Equals(_rawLogSlots[i], newVal, StringComparison.Ordinal))
             {
                 _rawLogSlots[i] = newVal;
