@@ -106,6 +106,16 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 ## What's new
 
+### Raw log output in the GitHub Actions live terminal
+
+The right pane of the GitHub Actions live terminal (visible while a workflow run is in progress on the Workspace Actions page) now shows the actual log text from the current job instead of a formatted list of step-transition events.
+
+- **What it shows:** the last 8 lines of the running job's log, pulled directly from the GitHub API and displayed as-is with timestamps stripped. No interpretation or reformatting — you see exactly what GitHub recorded.
+- **Why it works this way:** the GitHub Actions API does not expose a streaming log endpoint; it returns the full accumulated log for a job in one download. GrayMoon fetches that text on each poll cycle and tails it to the 8 most recent non-blank lines.
+- **Left pane is unchanged:** the left pane still shows a live step-status board (step names with run/success/fail/skip icons) scrolled to the active step. The right pane is now the raw log tail.
+- **White text:** raw log lines are rendered in white to distinguish them visually from the step-status board and from the green/yellow terminal output used elsewhere in the overlay.
+- **Poll rate:** the right pane updates on the same adaptive interval as the step board — every 2 seconds when a job is actively running, 3 seconds when waiting, and 15 seconds when idle.
+
 ### Workspace `dotnet restore` for fresh NuGet resolution
 
 GrayMoon now runs `dotnet restore --force --no-cache` on workspace projects so dependency rollouts do not silently reuse stale local NuGet cache entries.

@@ -41,14 +41,14 @@ CI pushes to Docker Hub on commits to `main`, on tag pushes, or on any branch co
 
 GrayMoon is a **two-process** system — never combine them:
 
-- **GrayMoon.App** (`src/GrayMoon.App`) — ASP.NET Core 8 + Blazor Server, runs in Docker. Exposes the web UI and two SignalR hubs (`/hub/agent`, `/hubs/workspace-sync`). Never touches the local filesystem or runs git directly. SQLite database via EF Core at `/app/db` (volume-mounted). Uses `EnsureCreated()` — no incremental migrations yet.
-- **GrayMoon.Agent** (`src/GrayMoon.Agent`) — .NET console app / tool that runs on the developer's host machine. Connects to the App via SignalR, executes all git and filesystem operations, and exposes a local HTTP listener on `127.0.0.1:9191` for git hook callbacks.
+- **GrayMoon.App** (`src/GrayMoon.App`) — ASP.NET Core 8 + Blazor Server, runs in Docker. Exposes the web UI and two SignalR hubs (`/hub/agent` for App↔Agent commands, `/hubs/workspace-sync` for browser broadcast). Never touches the local filesystem or runs git directly. SQLite database via EF Core at `/app/db` (volume-mounted). Uses `EnsureCreated()` — no incremental migrations. **New DB columns must be nullable or have a default value.**
+- **GrayMoon.Agent** (`src/GrayMoon.Agent`) — .NET console app / tool that runs on the developer's host machine. Connects to the App via SignalR, executes all git and filesystem operations, and exposes a local HTTP listener on `127.0.0.1:9191` for git hook callbacks. Job queue: bounded channel with up to 16 concurrent workers.
 - **GrayMoon.Abstractions** (`src/GrayMoon.Abstractions`) — Shared interfaces and DTOs used by both App and Agent. `Agent/AgentHubMethods.cs` contains all SignalR hub method name constants (`RequestCommand`, `ResponseCommand`, `SyncCommand`, etc.).
-- **GrayMoon.Common** (`src/GrayMoon.Common`) — Shared utilities (e.g. the boolean filter-search expression parser tested in `GrayMoon.Common.Tests`).
+- **GrayMoon.Common** (`src/GrayMoon.Common`) — Shared utilities including `CommandLineService` (process execution wrapper) and `Search/FilterSearchExpression` (boolean expression parser used by every UI grid).
 
 ### App → Agent command flow
 
-The App sends commands to the Agent over SignalR using a `requestId` (GUID). `AgentBridge` calls `AgentResponseDelivery.WaitAsync(requestId)` (a `TaskCompletionSource`) then fires `RequestCommand` to the Agent. The Agent enqueues a `JobEnvelope` into a bounded `Channel<JobEnvelope>`, runs it in one of up to 16 concurrent workers, and calls back `ResponseCommand` with the same `requestId`. `AgentResponseDelivery.Complete` resolves the TCS, unblocking the App's awaiter.
+The App sends commands to the Agent over SignalR using a `requestId` (GUID). `AgentBridge` calls `AgentResponseDelivery.WaitAsync(requestId)` (a `TaskCompletionSource`) then fires `RequestCommand` to the Agent. The Agent enqueues a `JobEnvelope` into a bounded `Channel<JobEnvelope>`, runs it in one of up to 16 concurrent workers, and calls back `ResponseCommand` with the same `requestId`. `AgentResponseDelivery.Complete` resolves the TCS, unblocking the App's awaiter. Intermediate output streams via `CommandOutput` events for the loading overlay terminal.
 
 ### Agent → App sync (hook-driven)
 
@@ -63,9 +63,26 @@ The Agent uses `System.CommandLine`. Each agent operation is a class in `src/Gra
 The App is organized into:
 - `Components/Pages/` — Blazor Server pages and interactive components
 - `Components/Shared/` and `Components/Modals/` — reusable UI components
-- `Services/` — 40+ domain services (GitHub API, workspace operations, push orchestration, dependency update, etc.)
+- `Services/` — 60+ domain services (GitHub API, workspace operations, push orchestration, dependency update, etc.)
 - `Data/` — EF Core `DbContext`, entity models, and repository classes
-- `Endpoints/` — REST API endpoints grouped by domain (Agent, Branch, Commit, Connector, Sync, Workspace)
+- `Api/Endpoints/` — REST API endpoints grouped by domain (Agent, Branch, Commit, Connector, Sync, Workspace)
+
+### Orchestrators
+
+Three orchestrators coordinate multi-step workflows across repositories:
+- `DependencyUpdateOrchestrator` — drives level-by-level package version updates: updates `.csproj` files, runs `dotnet restore --force --no-cache`, commits each level, then moves to the next.
+- `PushOrchestrator` — synchronized push: pushes level-by-level, waits for NuGet availability between levels so downstream consumers get the correct package version before their push starts.
+- `NewFeatureOrchestrator` — automates branch creation, optional dependency update, commit, and push across selected repositories in one workflow.
+
+### GHA live feed services
+
+`GhaWorkflowLiveFeedService` polls `GetWorkflowRunJobsAsync` (jobs + steps) on adaptive intervals (2 s active, 3 s waiting, 15 s idle). It tracks step-status transitions and feeds the left pane of `GhaWorkflowLiveTerminal`. Rate limit state (`_rateLimitedUntil`) is shared across all terminals in the same Blazor circuit so one 429 pauses all.
+
+`GhaStepLogFeedService` polls `GetJobLogsAsync` (the full job log text) and supports two modes: incremental group-parsed step output (`PollStepLogsAsync`) and a raw tail (`PollStepLogTailAsync`) that strips timestamps, filters blank lines, and returns the last N lines of the full log without parsing group markers.
+
+### Filter search expression (GrayMoon.Common)
+
+`FilterSearchExpression` parses boolean queries (`and`, `or`, parentheses, field prefixes like `repo:`, `type:`). All workspace grid and catalog pages use `FilterSearchInput` + a per-page `ISearchMatcher` implementation. `and` binds tighter than `or`; spaces imply `and`. Parse errors fall back to implicit-and word matching so users always see results.
 
 ### Dependency levels
 
@@ -78,3 +95,7 @@ Connector tokens are AES-256-GCM encrypted at rest via `AesGcmTokenProtector` (b
 ### Database schema
 
 Schema is owned by EF Core but applied via `EnsureCreated()`. Core tables: `Connectors`, `Repositories`, `Workspaces`, `WorkspaceRepositories` (join with live state), `WorkspaceRepositoryPullRequest` (1:1 with link), `WorkspaceProject`, `ProjectDependency`, `WorkspaceFile`, `WorkspaceFileVersionConfig`, `RepositoryBranch`, `Settings`.
+
+### CSS conventions for the loading overlay terminal
+
+Global terminal styles live in `wwwroot/css/loading-overlay.css`. The embedded GHA terminal in `WorkspaceActions` has a split-pane layout (`actions-gha-terminal__pane--left` / `--right`) in `GhaWorkflowLiveTerminal.razor.css`. Line color variants: `--out` (green/yellow by scheme), `--err` (red), `--cmd` (gray), `--raw` (white). Scheme toggling uses `.loading-overlay-terminal--scheme-yellow`. High-specificity overrides needed to beat the running-row `td { color }` inheritance use `!important` in `loading-overlay.css`.
