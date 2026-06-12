@@ -1,6 +1,7 @@
 @using GrayMoon.App.Services
 @using GrayMoon.App.Models
 @inject GhaWorkflowLiveFeedService GhaWorkflowLiveFeedService
+@inject GhaStepLogFeedService GhaStepLogFeedService
 @inject LoadingOverlayUiSettingsService OverlayUiSettings
 @implements IAsyncDisposable
 
@@ -41,7 +42,7 @@
                 </div>
             </div>
 
-            <!-- RIGHT: enriched step-transition history (scrolling log of state changes) -->
+            <!-- RIGHT: last 8 lines of current step's raw log output -->
             <div class="loading-overlay-terminal @schemeClass actions-gha-terminal__terminal actions-gha-terminal__pane actions-gha-terminal__pane--right">
                 <div class="actions-gha-terminal__caption" title="@_caption">
                     <span class="actions-gha-terminal__caption-main">
@@ -51,15 +52,15 @@
                 <div class="loading-overlay-terminal__inner actions-gha-terminal__scroll" aria-live="polite">
                     @for (var i = 0; i < BodyLineCount; i++)
                     {
-                        var line = _visibleLineSlots[i];
-                        <p class="loading-overlay-terminal__line loading-overlay-terminal__line--out actions-gha-terminal__line">
+                        var line = _rawLogSlots[i];
+                        <p class="loading-overlay-terminal__line loading-overlay-terminal__line--raw actions-gha-terminal__line">
                             @if (string.IsNullOrWhiteSpace(line))
                             {
                                 <span class="loading-overlay-terminal__text">&nbsp;</span>
                             }
                             else
                             {
-                                <span class="loading-overlay-terminal__prefix">[gha]</span><span class="loading-overlay-terminal__text">@line</span>
+                                <span class="loading-overlay-terminal__text">@line</span>
                             }
                         </p>
                     }
@@ -82,9 +83,8 @@
     private string _boardCaption = "Steps · Waiting…";
     private string? _stepProgress;
 
-    // Right panel: scrolling step-transition history (fed by feed service NewLines)
-    private readonly List<string> _buffer = [];
-    private readonly string[] _visibleLineSlots = new string[BodyLineCount];
+    // Right panel: last 8 lines of current step's raw log (overwritten each poll)
+    private readonly string[] _rawLogSlots = new string[BodyLineCount];
     private string _caption = "Workflow · Connecting to GitHub Actions…";
 
     private GhaWorkflowLiveFeedState? _feedState;
@@ -146,9 +146,9 @@
 
         var update = await GhaWorkflowLiveFeedService.PollOnceAsync(_feedState, cancellationToken);
 
-        // Right panel: append new step-transition lines
-        foreach (var line in update.NewLines)
-            AppendLine(line);
+        // Right panel: pull last 8 lines of current step's log
+        var logLines = await GhaStepLogFeedService.PollStepLogTailAsync(_feedState, BodyLineCount, cancellationToken);
+        UpdateRawLogSlots(logLines);
 
         // Right panel: caption tracks current step
         if (!string.Equals(_caption, update.Caption, StringComparison.Ordinal))
@@ -174,13 +174,21 @@
         return update.DelayMs;
     }
 
-    private void AppendLine(string line)
+    private void UpdateRawLogSlots(string[] lines)
     {
-        _buffer.Add(line);
-        while (_buffer.Count > 200)
-            _buffer.RemoveAt(0);
-        RefreshSlots();
-        _needsRender = true;
+        var offset = BodyLineCount - lines.Length;
+        var changed = false;
+        for (var i = 0; i < BodyLineCount; i++)
+        {
+            var newVal = i < offset ? "" : lines[i - offset];
+            if (!string.Equals(_rawLogSlots[i], newVal, StringComparison.Ordinal))
+            {
+                _rawLogSlots[i] = newVal;
+                changed = true;
+            }
+        }
+        if (changed)
+            _needsRender = true;
     }
 
     private void UpdateBoard()
@@ -229,15 +237,6 @@
             };
         }
         return "○";
-    }
-
-    private void RefreshSlots()
-    {
-        for (var i = 0; i < BodyLineCount; i++)
-        {
-            var idx = _buffer.Count - BodyLineCount + i;
-            _visibleLineSlots[i] = idx >= 0 ? _buffer[idx] : "";
-        }
     }
 
     public async ValueTask DisposeAsync()

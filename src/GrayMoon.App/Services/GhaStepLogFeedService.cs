@@ -76,6 +76,34 @@ public sealed class GhaStepLogFeedService(
         }
     }
 
+    public async Task<string[]> PollStepLogTailAsync(
+        GhaWorkflowLiveFeedState feedState,
+        int tailLines,
+        CancellationToken cancellationToken)
+    {
+        var connector = feedState.CachedConnector;
+        var jobId = feedState.CurrentInProgressJobId;
+        if (connector == null || jobId == null)
+            return [];
+
+        try
+        {
+            var logText = await gitHubService.GetJobLogsAsync(
+                connector, feedState.Owner, feedState.RepositoryName, jobId.Value, cancellationToken);
+
+            if (string.IsNullOrEmpty(logText))
+                return [];
+
+            var (_, lines) = ParseCurrentStepLines(logText);
+            return lines.TakeLast(tailLines).ToArray();
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogDebug(ex, "GHA step log tail poll failed for job {JobId}", jobId);
+            return [];
+        }
+    }
+
     private static (string? stepName, IReadOnlyList<string> lines) ParseCurrentStepLines(string logText)
     {
         var rawLines = logText.Split('\n');
