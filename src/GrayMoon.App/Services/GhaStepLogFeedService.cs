@@ -94,8 +94,12 @@ public sealed class GhaStepLogFeedService(
             if (string.IsNullOrEmpty(logText))
                 return [];
 
-            var (_, lines) = ParseCurrentStepLines(logText);
-            return lines.TakeLast(tailLines).ToArray();
+            return logText
+                .Split('\n')
+                .Select(l => StripTimestamp(l).TrimEnd('\r'))
+                .Where(l => !string.IsNullOrWhiteSpace(l))
+                .TakeLast(tailLines)
+                .ToArray();
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
