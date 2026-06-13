@@ -56,28 +56,22 @@
                                 </div>
                                 @foreach (var entry in job.Entries)
                                 {
-                                    @if (entry is GhaLogGroupEntry group)
+                                    @if (entry is GhaLogGroupEntry group && ShouldShowEntry(group))
                                     {
-                                        @if (!_showErrorsOnly || group.HasError)
-                                        {
-                                            <details class="gha-log-group @(group.HasError ? "gha-log-group--error" : "")"
-                                                     open>
-                                                <summary class="gha-log-group__header">@((MarkupString)group.Title)</summary>
-                                                <div class="gha-log-group__lines">
-                                                    @foreach (var line in group.Lines)
-                                                    {
-                                                        <div class="gha-log-line gha-log-line--@KindClass(line.Kind)">@((MarkupString)line.HtmlContent)</div>
-                                                    }
-                                                </div>
-                                            </details>
-                                        }
+                                        <details class="gha-log-group @(group.HasError ? "gha-log-group--error" : "")"
+                                                 open="@(!_allCollapsed)">
+                                            <summary class="gha-log-group__header">@((MarkupString)group.Title)</summary>
+                                            <div class="gha-log-group__lines">
+                                                @foreach (var line in group.Lines)
+                                                {
+                                                    <div class="gha-log-line gha-log-line--@KindClass(line.Kind)">@((MarkupString)line.HtmlContent)</div>
+                                                }
+                                            </div>
+                                        </details>
                                     }
-                                    else if (entry is GhaLogLineEntry topLine)
+                                    else if (entry is GhaLogLineEntry topLine && ShouldShowEntry(topLine))
                                     {
-                                        @if (!_showErrorsOnly || topLine.Kind == GhaLogLineKind.Error)
-                                        {
-                                            <div class="gha-log-line gha-log-line--@KindClass(topLine.Kind)">@((MarkupString)topLine.HtmlContent)</div>
-                                        }
+                                        <div class="gha-log-line gha-log-line--@KindClass(topLine.Kind)">@((MarkupString)topLine.HtmlContent)</div>
                                     }
                                 }
                             }
@@ -98,16 +92,30 @@
                                 @onclick="DownloadLogsAsync">
                             Download
                         </button>
-                        @if (HasAnyErrors)
+                        @{ var ec = ErrorCount; var wc = WarningCount; }
+                        @if (ec > 0)
                         {
                             <button type="button"
-                                    class="btn @(_showErrorsOnly ? "btn-danger" : "btn-outline-danger")"
-                                    @onclick="() => { _showErrorsOnly = !_showErrorsOnly; }">
-                                @(_showErrorsOnly ? "Show All" : "Show Errors")
+                                    class="btn @(_filterErrors ? "btn-danger" : "btn-outline-danger")"
+                                    @onclick="() => { _filterErrors = !_filterErrors; }">
+                                @Pluralise(ec, "Error")
+                            </button>
+                        }
+                        @if (wc > 0)
+                        {
+                            <button type="button"
+                                    class="btn @(_filterWarnings ? "btn-warning" : "btn-outline-warning")"
+                                    @onclick="() => { _filterWarnings = !_filterWarnings; }">
+                                @Pluralise(wc, "Warning")
                             </button>
                         }
                     </div>
-                    <div>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary"
+                                disabled="@(_jobs.Count == 0 || _isLoading)"
+                                @onclick="() => _allCollapsed = !_allCollapsed">
+                            @(_allCollapsed ? "Expand" : "Collapse")
+                        </button>
                         <button type="button" class="btn btn-outline-secondary" @onclick="CloseAsync">Close</button>
                     </div>
                 </div>
@@ -130,15 +138,33 @@
     private bool _wasVisible;
     private bool _isLoading;
     private bool _isLoadingMore;
-    private bool _showErrorsOnly;
+    private bool _allCollapsed;
+    private bool _filterErrors;
+    private bool _filterWarnings;
     private bool _loadTriggered;
     private bool _autoSelectInitialized;
     private string? _errorMessage;
     private List<JobLogEntry> _jobs = [];
     private ElementReference _contentRef;
 
-    private bool HasAnyErrors => _jobs.Any(j => j.Entries.Any(e =>
+    private int ErrorCount => _jobs.Sum(j => j.Entries.Count(e =>
         (e is GhaLogGroupEntry g && g.HasError) || (e is GhaLogLineEntry l && l.Kind == GhaLogLineKind.Error)));
+
+    private int WarningCount => _jobs.Sum(j => j.Entries.Count(e =>
+        (e is GhaLogGroupEntry g && g.HasWarning) || (e is GhaLogLineEntry l && l.Kind == GhaLogLineKind.Warning)));
+
+    private bool ShouldShowEntry(GhaLogEntry entry)
+    {
+        if (!_filterErrors && !_filterWarnings) return true;
+        return entry switch
+        {
+            GhaLogGroupEntry g => (_filterErrors && g.HasError) || (_filterWarnings && g.HasWarning),
+            GhaLogLineEntry  l => (_filterErrors && l.Kind == GhaLogLineKind.Error) || (_filterWarnings && l.Kind == GhaLogLineKind.Warning),
+            _                  => false,
+        };
+    }
+
+    private static string Pluralise(int n, string singular) => n == 1 ? $"1 {singular}" : $"{n} {singular}s";
 
     protected override void OnParametersSet()
     {
@@ -147,7 +173,9 @@
             _wasVisible = true;
             _isLoading = true;
             _isLoadingMore = false;
-            _showErrorsOnly = false;
+            _allCollapsed = false;
+            _filterErrors = false;
+            _filterWarnings = false;
             _loadTriggered = false;
             _autoSelectInitialized = false;
             _errorMessage = null;

@@ -9,7 +9,7 @@ public abstract record GhaLogEntry;
 
 public record GhaLogLineEntry(GhaLogLineKind Kind, string HtmlContent) : GhaLogEntry;
 
-public record GhaLogGroupEntry(string Title, bool HasError, List<GhaLogLineEntry> Lines) : GhaLogEntry;
+public record GhaLogGroupEntry(string Title, bool HasError, bool HasWarning, List<GhaLogLineEntry> Lines) : GhaLogEntry;
 
 public static class GhaLogParser
 {
@@ -27,6 +27,7 @@ public static class GhaLogParser
     {
         public required string Title { get; init; }
         public bool HasError { get; set; }
+        public bool HasWarning { get; set; }
         public List<GhaLogLineEntry> Lines { get; } = [];
     }
 
@@ -60,7 +61,7 @@ public static class GhaLogParser
             if (content.StartsWith("##[group]".AsSpan(), StringComparison.OrdinalIgnoreCase))
             {
                 if (current != null)
-                    entries.Add(new GhaLogGroupEntry(current.Title, current.HasError, current.Lines));
+                    entries.Add(new GhaLogGroupEntry(current.Title, current.HasError, current.HasWarning, current.Lines));
 
                 sb.Clear();
                 AppendHtmlEncoded(content["##[group]".Length..], sb);
@@ -76,7 +77,8 @@ public static class GhaLogParser
             if (current != null)
             {
                 current.Lines.Add(new GhaLogLineEntry(kind, html));
-                if (kind == GhaLogLineKind.Error) current.HasError = true;
+                if (kind == GhaLogLineKind.Error)   current.HasError   = true;
+                if (kind == GhaLogLineKind.Warning) current.HasWarning = true;
             }
             else
             {
@@ -85,7 +87,7 @@ public static class GhaLogParser
         }
 
         if (current != null)
-            entries.Add(new GhaLogGroupEntry(current.Title, current.HasError, current.Lines));
+            entries.Add(new GhaLogGroupEntry(current.Title, current.HasError, current.HasWarning, current.Lines));
 
         return entries;
     }
