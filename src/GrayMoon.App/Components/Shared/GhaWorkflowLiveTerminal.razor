@@ -39,7 +39,7 @@
                                 <span class="loading-overlay-terminal__text actions-gha-terminal__step-text">@line</span>
                                 @if (!string.IsNullOrWhiteSpace(timing))
                                 {
-                                    <span class="actions-gha-terminal__step-timing">@timing</span>
+                                    <span class="actions-gha-terminal__step-timing@(i == _spinnerBoardIdx ? " actions-gha-terminal__step-timing--active" : "")">@timing</span>
                                 }
                             }
                         </p>
@@ -64,9 +64,7 @@
 
     // Spinner — runs on its own 200ms loop, independent of the API poll
     private static readonly char[] SpinnerFrames = ['⠋', '⠙', '⠸', '⠴', '⠦', '⠧'];
-    private const int MaxDots = 60;
     private int _spinnerFrame;
-    private int _spinnerDots;
     private string? _spinnerStepKey;
     private int _spinnerBoardIdx = -1;  // board slot index of current in-progress step (-1 = none)
     private string _spinnerText = "";   // "  ...⠙" suffix appended to the in-progress slot
@@ -133,10 +131,7 @@
                         return;
 
                     _spinnerFrame = (_spinnerFrame + 1) % SpinnerFrames.Length;
-                    if (_spinnerFrame == 0 && _spinnerDots < MaxDots)
-                        _spinnerDots++;
-
-                    _spinnerText = $"  {new string('⠒', _spinnerDots)}{SpinnerFrames[_spinnerFrame]}";
+                    _spinnerText = $"  {SpinnerFrames[_spinnerFrame]}";
                     StateHasChanged();
                 });
             }
@@ -231,7 +226,6 @@
                     // New step started — reset spinner
                     _spinnerStepKey = stepKey;
                     _spinnerFrame   = 0;
-                    _spinnerDots    = 0;
                     _spinnerText    = "";
                 }
                 newSpinnerIdx  = i;

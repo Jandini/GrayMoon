@@ -201,6 +201,17 @@
   color: rgba(220, 190, 72, 0.9) !important;
 }
 
+/* Active (in-progress) step elapsed time - matches step text color; !important to beat running-row td { color } inheritance */
+.grid-page-body .table.actions-table tbody tr.actions-row-running-terminal .actions-gha-terminal .loading-overlay-terminal:not(.loading-overlay-terminal--scheme-yellow) .actions-gha-terminal__step-timing--active {
+  color: rgba(120, 210, 150, 0.88) !important;
+  opacity: 1 !important;
+}
+
+.grid-page-body .table.actions-table tbody tr.actions-row-running-terminal .actions-gha-terminal .loading-overlay-terminal--scheme-yellow .actions-gha-terminal__step-timing--active {
+  color: rgba(220, 190, 72, 0.9) !important;
+  opacity: 1 !important;
+}
+
 /* Brand at top-left of overlay - same position and font as sidebar header; above full-height terminal */
 .loading-overlay__brand {
   position: absolute;

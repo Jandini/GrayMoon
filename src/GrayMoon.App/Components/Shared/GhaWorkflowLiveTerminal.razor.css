@@ -114,3 +114,7 @@
     padding-left: 0.65rem;
     opacity: 0.65;
 }
+
+.actions-gha-terminal__step-timing--active {
+    opacity: 1;
+}
