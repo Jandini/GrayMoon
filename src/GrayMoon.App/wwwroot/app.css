@@ -56,6 +56,17 @@
     --warning: #dcdcaa;
     --error: #f48771;
     --info: #4fc1ff;
+
+    /* Layout dimensions (mobile-first; overridden at >= 641px) */
+    --sidebar-width: 0px;
+    --topbar-height: 2.75rem;
+}
+
+@media (min-width: 641px) {
+    :root {
+        --sidebar-width: 180px;
+        --topbar-height: 3.5rem;
+    }
 }
 
 html, body {

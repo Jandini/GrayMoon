@@ -17,10 +17,13 @@
   transition: opacity 140ms ease;
 }
 
-/* Page-scoped variant: fixed to the full viewport so short content pages are fully covered. */
+/* Page-scoped variant: fixed below the top bar and right of the sidebar, always full remaining height. */
 .loading-overlay--page {
   position: fixed;
-  inset: 0;
+  top: var(--topbar-height);
+  left: var(--sidebar-width);
+  right: 0;
+  bottom: 0;
   /* z-index below Bootstrap modals (1050+) so dialogs stay interactive above the overlay */
   z-index: 100;
 }
