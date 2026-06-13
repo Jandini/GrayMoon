@@ -1,0 +1,233 @@
+@using GrayMoon.App.Repositories
+@inject GitHubService GitHubService
+@inject ConnectorRepository ConnectorRepository
+@inject IJSRuntime JS
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onkeydown="HandleKeyDown">
+        <div class="modal-dialog modal-xl gha-logs-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        @(WorkflowDisplayName ?? "Workflow Logs")
+                        <span class="text-muted fw-normal fs-6 ms-2">@RepositoryName</span>
+                        @if (RunId > 0)
+                        {
+                            <span class="text-muted fw-normal fs-6 ms-2">#@RunId</span>
+                        }
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseAsync"></button>
+                </div>
+                <div class="modal-body p-0">
+                    @if (_isLoading)
+                    {
+                        <div class="d-flex justify-content-center align-items-center gha-logs-loading">
+                            <span class="spinner-border text-secondary" role="status"></span>
+                        </div>
+                    }
+                    else if (_errorMessage != null)
+                    {
+                        <div class="alert alert-danger m-3">@_errorMessage</div>
+                    }
+                    else if (_jobs.Count == 0)
+                    {
+                        <div class="alert alert-secondary m-3">No job logs available for this run.</div>
+                    }
+                    else
+                    {
+                        @if (_jobs.Count > 1)
+                        {
+                            <div class="gha-logs-tabs" role="tablist">
+                                @for (var ji = 0; ji < _jobs.Count; ji++)
+                                {
+                                    var idx = ji;
+                                    var job = _jobs[ji];
+                                    var isActive = idx == _selectedJobIndex;
+                                    var hasError = string.Equals(job.Meta.Conclusion, "failure", StringComparison.OrdinalIgnoreCase)
+                                               || string.Equals(job.Meta.Conclusion, "cancelled", StringComparison.OrdinalIgnoreCase);
+                                    var tabClass = "gha-logs-tab"
+                                        + (isActive ? " gha-logs-tab--active" : "")
+                                        + (hasError ? " gha-logs-tab--error" : "");
+                                    var icon = JobIcon(job.Meta);
+                                    <button type="button"
+                                            role="tab"
+                                            class="@tabClass"
+                                            aria-selected="@isActive"
+                                            title="@job.Meta.Name"
+                                            @onclick="() => SelectJob(idx)">
+                                        @icon @job.Meta.Name
+                                    </button>
+                                }
+                            </div>
+                        }
+                        <div class="gha-logs-content" @ref="_contentRef">
+                            @if (_selectedJobIndex < _jobs.Count)
+                            {
+                                var entries = _jobs[_selectedJobIndex].Entries;
+                                @foreach (var entry in entries)
+                                {
+                                    @if (entry is GhaLogGroupEntry group)
+                                    {
+                                        <details class="gha-log-group @(group.HasError ? "gha-log-group--error" : "")"
+                                                 open="@(ShouldOpenGroup(group) ? "" : null)">
+                                            <summary class="gha-log-group__header">@((MarkupString)group.Title)</summary>
+                                            <div class="gha-log-group__lines">
+                                                @foreach (var line in group.Lines)
+                                                {
+                                                    <div class="gha-log-line gha-log-line--@KindClass(line.Kind)">@((MarkupString)line.HtmlContent)</div>
+                                                }
+                                            </div>
+                                        </details>
+                                    }
+                                    else if (entry is GhaLogLineEntry topLine)
+                                    {
+                                        <div class="gha-log-line gha-log-line--@KindClass(topLine.Kind)">@((MarkupString)topLine.HtmlContent)</div>
+                                    }
+                                }
+                            }
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CloseAsync">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public string ConnectorName { get; set; } = string.Empty;
+    [Parameter] public string Owner { get; set; } = string.Empty;
+    [Parameter] public string RepositoryName { get; set; } = string.Empty;
+    [Parameter] public long RunId { get; set; }
+    [Parameter] public string? WorkflowDisplayName { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private record JobLogEntry(GitHubWorkflowJobDto Meta, List<GhaLogEntry> Entries);
+
+    private bool _wasVisible;
+    private bool _isLoading;
+    private bool _loadTriggered;
+    private bool _autoSelectInitialized;
+    private string? _errorMessage;
+    private List<JobLogEntry> _jobs = [];
+    private int _selectedJobIndex;
+    private ElementReference _contentRef;
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !_wasVisible)
+        {
+            _wasVisible = true;
+            _isLoading = true;
+            _loadTriggered = false;
+            _autoSelectInitialized = false;
+            _errorMessage = null;
+            _jobs = [];
+            _selectedJobIndex = 0;
+        }
+        else if (!IsVisible)
+        {
+            _wasVisible = false;
+            _loadTriggered = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_isLoading && IsVisible && RunId > 0 && !_loadTriggered)
+        {
+            _loadTriggered = true;
+            await LoadLogsAsync();
+        }
+
+        if (!_autoSelectInitialized && !_isLoading && _jobs.Count > 0)
+        {
+            _autoSelectInitialized = true;
+            try { await JS.InvokeVoidAsync("ghaLogs.initAutoSelect", _contentRef); } catch { }
+        }
+    }
+
+    private async Task LoadLogsAsync()
+    {
+        try
+        {
+            var connector = await ConnectorRepository.GetByNameAsync(ConnectorName);
+            if (connector == null)
+            {
+                _errorMessage = $"Connector \"{ConnectorName}\" not found.";
+                _isLoading = false;
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            var jobsResponse = await GitHubService.GetWorkflowRunJobsAsync(connector, Owner, RepositoryName, RunId);
+            var jobs = jobsResponse?.Jobs ?? [];
+
+            var result = new List<JobLogEntry>();
+            foreach (var job in jobs)
+            {
+                var rawLog = await GitHubService.GetJobLogsAsync(connector, Owner, RepositoryName, job.Id);
+                var entries = rawLog != null
+                    ? GhaLogParser.ParseJobLog(rawLog)
+                    : [new GhaLogLineEntry(GhaLogLineKind.Normal, "Log not available.")];
+                result.Add(new JobLogEntry(job, entries));
+            }
+
+            _jobs = result;
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void SelectJob(int index)
+    {
+        _selectedJobIndex = index;
+        _autoSelectInitialized = false;
+    }
+
+    private async Task CloseAsync() => await OnClose.InvokeAsync();
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await CloseAsync();
+    }
+
+    private static bool ShouldOpenGroup(GhaLogGroupEntry group) => group.HasError || group.Lines.Count <= 200;
+
+    private static string KindClass(GhaLogLineKind kind) => kind switch
+    {
+        GhaLogLineKind.Error   => "error",
+        GhaLogLineKind.Warning => "warning",
+        GhaLogLineKind.Command => "command",
+        GhaLogLineKind.Debug   => "debug",
+        _                      => "normal",
+    };
+
+    private static string JobIcon(GitHubWorkflowJobDto job)
+    {
+        if (string.Equals(job.Status, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return job.Conclusion?.ToLowerInvariant() switch
+            {
+                "success"   => "✓",
+                "failure"   => "✗",
+                "cancelled" => "✗",
+                "skipped"   => "↩",
+                _           => "·",
+            };
+        }
+        if (string.Equals(job.Status, "in_progress", StringComparison.OrdinalIgnoreCase)) return "▶";
+        return "○";
+    }
+}

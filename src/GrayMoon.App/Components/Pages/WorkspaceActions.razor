@@ -280,54 +280,64 @@
                                                 <td class="col-actions ps-3">
                                                     @if (string.IsNullOrWhiteSpace(row.ErrorMessage))
                                                     {
-                                                        @if (CanRerun(row, line))
-                                                        {
-                                                            <button class="btn btn-outline-primary action-run-btn"
-                                                                    @onclick="() => RerunWorkflowAsync(row, line)"
-                                                                    disabled="@line.RunInProgress"
-                                                                    title="Re-run failed workflow: @line.Action?.WorkflowName">
-                                                                @if (line.RunInProgress)
-                                                                {
-                                                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                                                                }
-                                                                else
-                                                                {
-                                                                    @:Re-run
-                                                                }
-                                                            </button>
-                                                        }
-                                                        else if (CanAbort(row, line))
-                                                        {
-                                                            <button class="btn btn-outline-primary action-run-btn"
-                                                                    @onclick="() => AbortWorkflowAsync(row, line)"
-                                                                    disabled="@line.AbortInProgress"
-                                                                    title="Cancel this workflow run on GitHub">
-                                                                @if (line.AbortInProgress)
-                                                                {
-                                                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                                                                }
-                                                                else
-                                                                {
-                                                                    @:Abort
-                                                                }
-                                                            </button>
-                                                        }
-                                                        else if (CanRun(row, line))
-                                                        {
-                                                            <button class="btn btn-outline-primary action-run-btn"
-                                                                    @onclick="() => RunWorkflowAsync(row, line)"
-                                                                    disabled="@IsRunWorkflowBusy(row, line)"
-                                                                    title="@($"Run workflow: {line.Action?.WorkflowName}")">
-                                                                @if (line.RunInProgress)
-                                                                {
-                                                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                                                                }
-                                                                else
-                                                                {
-                                                                    @:Run
-                                                                }
-                                                            </button>
-                                                        }
+                                                        <div class="d-flex gap-2 align-items-center">
+                                                            @if (CanRerun(row, line))
+                                                            {
+                                                                <button class="btn btn-outline-primary action-run-btn"
+                                                                        @onclick="() => RerunWorkflowAsync(row, line)"
+                                                                        disabled="@line.RunInProgress"
+                                                                        title="Re-run failed workflow: @line.Action?.WorkflowName">
+                                                                    @if (line.RunInProgress)
+                                                                    {
+                                                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        @:Re-run
+                                                                    }
+                                                                </button>
+                                                            }
+                                                            else if (CanAbort(row, line))
+                                                            {
+                                                                <button class="btn btn-outline-primary action-run-btn"
+                                                                        @onclick="() => AbortWorkflowAsync(row, line)"
+                                                                        disabled="@line.AbortInProgress"
+                                                                        title="Cancel this workflow run on GitHub">
+                                                                    @if (line.AbortInProgress)
+                                                                    {
+                                                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        @:Abort
+                                                                    }
+                                                                </button>
+                                                            }
+                                                            else if (CanRun(row, line))
+                                                            {
+                                                                <button class="btn btn-outline-primary action-run-btn"
+                                                                        @onclick="() => RunWorkflowAsync(row, line)"
+                                                                        disabled="@IsRunWorkflowBusy(row, line)"
+                                                                        title="@($"Run workflow: {line.Action?.WorkflowName}")">
+                                                                    @if (line.RunInProgress)
+                                                                    {
+                                                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        @:Run
+                                                                    }
+                                                                </button>
+                                                            }
+                                                            @if (line.Action?.RunId != null)
+                                                            {
+                                                                <button class="btn btn-outline-secondary action-run-btn"
+                                                                        @onclick="() => OpenLogsModal(row, line)"
+                                                                        title="View logs for @line.Action!.WorkflowName">
+                                                                    Logs
+                                                                </button>
+                                                            }
+                                                        </div>
                                                     }
                                                 </td>
                                             </tr>
@@ -359,3 +369,11 @@
 </div>
 
 <LoadingOverlay IsVisible="@isRerunningAll" Message="@RerunAllOverlayMessage" />
+
+<GhaLogsModal IsVisible="@_logsModalVisible"
+              ConnectorName="@(_logsConnectorName ?? "")"
+              Owner="@(_logsOwner ?? "")"
+              RepositoryName="@(_logsRepo ?? "")"
+              RunId="@_logsRunId"
+              WorkflowDisplayName="@_logsWorkflowName"
+              OnClose="CloseLogsModal" />
