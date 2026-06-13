@@ -106,6 +106,19 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 ## What's new
 
+### Background jobs on the workspace repositories page
+
+Long-running workspace operations now run as **background jobs** instead of blocking the page with an inline loading overlay. Sync, push, dependency update, restore packages, branch checkout/switch, commit sync, sync-to-default, and pull-request creation all use the same job pipeline.
+
+- **Keep working in the app:** start an operation on the workspace **Repositories** page, then navigate to **Projects**, **Actions**, or another workspace view. The job keeps running on the server for your browser tab. When you return to **Repositories**, the loading overlay reappears with the same progress message and live terminal output.
+- **Page-scoped overlay:** the spinner and terminal sit over the main content area (not full-screen), so the sidebar and workspace navigation stay usable while a job runs.
+- **Per-job terminal:** agent command output and GitHub API request/response lines stream into that job's own terminal buffer. Toggle the terminal icon in the overlay top bar as before; output is not mixed with other pages or stale global logs.
+- **Abort:** use **Abort** on the overlay to cancel the in-flight job. Closing the browser tab cancels all running jobs for that session.
+- **One job per page:** only one running job is allowed per workspace repositories URL at a time. Starting the same kind of work again while one is already running reuses the existing handle instead of launching a duplicate.
+- **Safer grid refresh:** while a job is running, automatic grid refresh from agent hook sync is paused so in-progress operations are not overwritten by stale database reads.
+
+Initial page load and repository fetch still use a short inline overlay on the page itself; only orchestration work (git, restore, push, GitHub calls) runs as a background job.
+
 ### Raw log output in the GitHub Actions live terminal
 
 The right pane of the GitHub Actions live terminal (visible while a workflow run is in progress on the Workspace Actions page) now shows the actual log text from the current job instead of a formatted list of step-transition events.
