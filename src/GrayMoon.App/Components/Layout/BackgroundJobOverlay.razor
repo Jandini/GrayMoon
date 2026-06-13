@@ -1,7 +1,6 @@
 @using GrayMoon.App.Services
 @inject IBackgroundJobService JobService
 @inject NavigationManager Nav
-@inject AgentQueueStateService AgentQueueStateService
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @implements IDisposable
 
@@ -11,8 +10,6 @@
                     PageScoped="true"
                     Message="@_job.DisplayMessage"
                     TerminalBuffer="@_job.Terminal"
-                    ShowTaskCountInSpinner="true"
-                    PendingAgentTasksCount="@AgentQueueStateService.GetTotalPendingCount()"
                     OnAbort="@HandleAbort" />
 }
 

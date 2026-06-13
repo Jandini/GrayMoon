@@ -17,9 +17,9 @@
   transition: opacity 140ms ease;
 }
 
-/* Page-scoped variant: constrained to the article content area (article.content must have position:relative). */
+/* Page-scoped variant: fixed to the full viewport so short content pages are fully covered. */
 .loading-overlay--page {
-  position: absolute;
+  position: fixed;
   inset: 0;
   /* z-index below Bootstrap modals (1050+) so dialogs stay interactive above the overlay */
   z-index: 100;
@@ -293,20 +293,6 @@
   position: absolute;
   inset: 0;
   margin: 0;
-}
-
-.loading-overlay-spinner-count {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: "Nunito", sans-serif;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #555;
-  line-height: 1;
-  pointer-events: none;
 }
 
 .loading-overlay__message {

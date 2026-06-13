@@ -54,10 +54,6 @@
                 <div class="spinner-border" role="status">
                     <span class="visually-hidden">Loading...</span>
                 </div>
-                @if (IsVisible && ShowTaskCountInSpinner && DisplayTaskCount > 0)
-                {
-                    <span class="loading-overlay-spinner-count" aria-hidden="true">@DisplayTaskCount</span>
-                }
             </div>
             @if (hasMessage)
             {
@@ -87,12 +83,6 @@
     [Parameter] public string? Message { get; set; }
     [Parameter] public EventCallback OnAbort { get; set; }
 
-    /// <summary>When set, used for spinner count (e.g. workspace-scoped). When null, fall back to total pending.</summary>
-    [Parameter] public int? PendingAgentTasksCount { get; set; }
-
-    /// <summary>When true, show task count inside spinner. Default false.</summary>
-    [Parameter] public bool ShowTaskCountInSpinner { get; set; } = false;
-
     /// <summary>When false, the live command terminal is never shown regardless of user toggle.</summary>
     [Parameter] public bool ShowCommandTerminal { get; set; } = true;
 
@@ -105,8 +95,6 @@
     private JobTerminalBuffer? _subscribedBuffer;
 
     private bool ShouldShowCommandTerminal => ShowCommandTerminal && CommandTerminalOverlayPreference.IsVisible;
-
-    private int DisplayTaskCount => !IsVisible ? 0 : (PendingAgentTasksCount ?? AgentQueueStateService.GetTotalPendingCount());
 
     private ElementReference _terminalScroll;
     private IReadOnlyList<OverlayTerminalLine> _terminalLines = Array.Empty<OverlayTerminalLine>();
