@@ -19,10 +19,10 @@
                     </h5>
                     <button type="button" class="btn-close" @onclick="CloseAsync"></button>
                 </div>
-                <div class="modal-body p-0">
+                <div class="modal-body">
                     @if (_isLoading)
                     {
-                        <div class="d-flex justify-content-center align-items-center gha-logs-loading">
+                        <div class="gha-logs-loading">
                             <span class="spinner-border text-secondary" role="status"></span>
                         </div>
                     }
@@ -36,36 +36,16 @@
                     }
                     else
                     {
-                        @if (_jobs.Count > 1)
-                        {
-                            <div class="gha-logs-tabs" role="tablist">
-                                @for (var ji = 0; ji < _jobs.Count; ji++)
-                                {
-                                    var idx = ji;
-                                    var job = _jobs[ji];
-                                    var isActive = idx == _selectedJobIndex;
-                                    var hasError = string.Equals(job.Meta.Conclusion, "failure", StringComparison.OrdinalIgnoreCase)
-                                               || string.Equals(job.Meta.Conclusion, "cancelled", StringComparison.OrdinalIgnoreCase);
-                                    var tabClass = "gha-logs-tab"
-                                        + (isActive ? " gha-logs-tab--active" : "")
-                                        + (hasError ? " gha-logs-tab--error" : "");
-                                    var icon = JobIcon(job.Meta);
-                                    <button type="button"
-                                            role="tab"
-                                            class="@tabClass"
-                                            aria-selected="@isActive"
-                                            title="@job.Meta.Name"
-                                            @onclick="() => SelectJob(idx)">
-                                        @icon @job.Meta.Name
-                                    </button>
-                                }
-                            </div>
-                        }
                         <div class="gha-logs-content" @ref="_contentRef">
-                            @if (_selectedJobIndex < _jobs.Count)
+                            @foreach (var job in _jobs)
                             {
-                                var entries = _jobs[_selectedJobIndex].Entries;
-                                @foreach (var entry in entries)
+                                <div class="gha-log-job">
+                                    <span class="gha-log-job__pill gha-log-job__pill--@JobStatusClass(job.Meta)">
+                                        <span class="gha-log-job__icon-dot">@JobIcon(job.Meta)</span>
+                                        <span class="gha-log-job__name">@job.Meta.Name</span>
+                                    </span>
+                                </div>
+                                @foreach (var entry in job.Entries)
                                 {
                                     @if (entry is GhaLogGroupEntry group)
                                     {
@@ -89,8 +69,17 @@
                         </div>
                     }
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" @onclick="CloseAsync">Close</button>
+                <div class="modal-footer d-flex justify-content-between">
+                    <div>
+                        <button type="button" class="btn btn-outline-secondary"
+                                disabled="@(_jobs.Count == 0 || _isLoading)"
+                                @onclick="DownloadLogsAsync">
+                            Download
+                        </button>
+                    </div>
+                    <div>
+                        <button type="button" class="btn btn-outline-secondary" @onclick="CloseAsync">Close</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -106,7 +95,7 @@
     [Parameter] public string? WorkflowDisplayName { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
 
-    private record JobLogEntry(GitHubWorkflowJobDto Meta, List<GhaLogEntry> Entries);
+    private record JobLogEntry(GitHubWorkflowJobDto Meta, List<GhaLogEntry> Entries, string? RawLog);
 
     private bool _wasVisible;
     private bool _isLoading;
@@ -114,7 +103,6 @@
     private bool _autoSelectInitialized;
     private string? _errorMessage;
     private List<JobLogEntry> _jobs = [];
-    private int _selectedJobIndex;
     private ElementReference _contentRef;
 
     protected override void OnParametersSet()
@@ -127,7 +115,6 @@
             _autoSelectInitialized = false;
             _errorMessage = null;
             _jobs = [];
-            _selectedJobIndex = 0;
         }
         else if (!IsVisible)
         {
@@ -174,7 +161,7 @@
                 var entries = rawLog != null
                     ? GhaLogParser.ParseJobLog(rawLog)
                     : [new GhaLogLineEntry(GhaLogLineKind.Normal, "Log not available.")];
-                result.Add(new JobLogEntry(job, entries));
+                result.Add(new JobLogEntry(job, entries, rawLog));
             }
 
             _jobs = result;
@@ -190,10 +177,13 @@
         }
     }
 
-    private void SelectJob(int index)
+    private async Task DownloadLogsAsync()
     {
-        _selectedJobIndex = index;
-        _autoSelectInitialized = false;
+        var parts = _jobs.Select(j =>
+            (_jobs.Count > 1 ? $"=== JOB: {j.Meta.Name} ===\n" : "") + (j.RawLog ?? "(no log available)"));
+        var combined = string.Join("\n\n", parts);
+        var filename = $"{(WorkflowDisplayName ?? "logs").Replace(' ', '-').Replace('/', '-')}-{RunId}.log";
+        try { await JS.InvokeVoidAsync("ghaLogs.downloadText", filename, combined); } catch { }
     }
 
     private async Task CloseAsync() => await OnClose.InvokeAsync();
@@ -213,6 +203,16 @@
         GhaLogLineKind.Debug   => "debug",
         _                      => "normal",
     };
+
+    private static string JobStatusClass(GitHubWorkflowJobDto job) =>
+        job.Conclusion?.ToLowerInvariant() switch
+        {
+            "success"   => "success",
+            "failure"   => "failure",
+            "cancelled" => "aborted",
+            "skipped"   => "skipped",
+            _ => string.Equals(job.Status, "in_progress", StringComparison.OrdinalIgnoreCase) ? "running" : "none",
+        };
 
     private static string JobIcon(GitHubWorkflowJobDto job)
     {

@@ -3,65 +3,44 @@
     margin: 1rem auto;
 }
 
+/* Fixed-height flex column so the modal never grows/shrinks when content loads */
 ::deep .modal-content {
+    display: flex;
+    flex-direction: column;
+    height: 85vh;
     max-height: calc(100vh - 2rem);
 }
 
-.gha-logs-loading {
-    height: 12rem;
-}
-
-/* Job tabs */
-.gha-logs-tabs {
-    background: #252526;
-    border-bottom: 1px solid #3e3e42;
+/* Body fills remaining space between header and footer, never overflows */
+::deep .modal-body {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
     display: flex;
-    flex-wrap: wrap;
-    gap: 0;
-    overflow-x: auto;
+    flex-direction: column;
+    padding: 0;
 }
 
-.gha-logs-tab {
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: #aaa;
-    cursor: pointer;
-    font-size: 0.8rem;
-    padding: 0.4rem 1rem;
-    white-space: nowrap;
-    transition: color 0.1s;
+/* Loading spinner occupies the same space as the content area */
+.gha-logs-loading {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.gha-logs-tab:hover {
-    color: #ddd;
-    background: #2d2d2d;
-}
-
-.gha-logs-tab--active {
-    color: #fff;
-    border-bottom-color: #0d6efd;
-}
-
-.gha-logs-tab--error {
-    color: #f87171;
-}
-
-.gha-logs-tab--error.gha-logs-tab--active {
-    border-bottom-color: #f87171;
-}
-
-/* Log content area */
+/* Scrollable log content area */
 .gha-logs-content {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
     background: #1e1e1e;
     color: #d4d4d4;
     font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
     font-size: 0.8rem;
-    height: 65vh;
     line-height: 1.5;
-    min-height: 300px;
-    overflow-y: auto;
-    padding: 0.5rem 0;
     scrollbar-color: #5a5a5a #1e1e1e;
     scrollbar-width: auto;
     user-select: text;
@@ -84,10 +63,62 @@
     background: #6a6a6a;
 }
 
-/* Collapsible groups (steps) */
+/* ── Job badge headers ──────────────────────────────────────── */
+
+.gha-log-job {
+    padding: 0.55rem 0.85rem 0.35rem;
+    border-top: 1px solid #2d2d2d;
+    background: #1e1e1e;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.gha-log-job:first-child {
+    border-top: none;
+}
+
+/* Pill-shaped badge — reuses action-badge colour palette */
+.gha-log-job__pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.18rem 0.75rem 0.18rem 0.22rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    user-select: none;
+    letter-spacing: 0.01em;
+}
+
+/* Inner circle — like the count badge in the status filter chips */
+.gha-log-job__icon-dot {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.35rem;
+    height: 1.35rem;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.22);
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.gha-log-job__pill--success { background: #238636; color: #fff; }
+.gha-log-job__pill--failure { background: #da3633; color: #fff; }
+.gha-log-job__pill--aborted { background: #8957e5; color: #fff; }
+.gha-log-job__pill--running { background: #d29922; color: #000; }
+.gha-log-job__pill--running .gha-log-job__icon-dot { background: rgba(0, 0, 0, 0.18); }
+.gha-log-job__pill--skipped { background: #495057; color: rgba(255, 255, 255, 0.7); }
+.gha-log-job__pill--none    { background: #495057; color: rgba(255, 255, 255, 0.7); }
+
+/* ── Collapsible step groups ────────────────────────────────── */
+
 .gha-log-group {
     border-left: 2px solid #3e3e42;
-    margin: 0.15rem 0;
+    margin: 0.12rem 0;
 }
 
 .gha-log-group__header {
@@ -97,7 +128,7 @@
     font-size: 0.8rem;
     font-weight: 500;
     list-style: none;
-    padding: 0.25rem 0.75rem;
+    padding: 0.25rem 0.85rem;
     user-select: none;
 }
 
@@ -107,8 +138,8 @@
 
 .gha-log-group__header::before {
     content: "▶ ";
-    font-size: 0.65rem;
-    opacity: 0.7;
+    font-size: 0.62rem;
+    opacity: 0.65;
 }
 
 .gha-log-group[open] > .gha-log-group__header::before {
@@ -125,16 +156,20 @@
     margin-left: -2px;
 }
 
+/* Indented lines inside an open group */
 .gha-log-group__lines {
-    padding: 0.1rem 0;
+    padding-left: 1.25rem;
+    padding-bottom: 0.15rem;
 }
 
-/* Individual log lines */
+/* ── Individual log lines ───────────────────────────────────── */
+
 .gha-log-line {
     font-family: inherit;
-    padding: 0.04rem 0.75rem;
+    padding: 0.04rem 1rem;
     white-space: pre-wrap;
-    word-break: break-all;
+    overflow-wrap: break-word;
+    word-break: break-word;
 }
 
 .gha-log-line--normal {
@@ -150,9 +185,18 @@
     color: #fbbf24;
 }
 
+/* Command lines: distinct background + left accent + $ prefix */
 .gha-log-line--command {
     color: #94a3b8;
-    opacity: 0.85;
+    background: rgba(148, 163, 184, 0.07);
+    border-left: 2px solid #4a5568;
+    padding-left: calc(1rem - 2px);
+}
+
+.gha-log-line--command::before {
+    content: "$ ";
+    opacity: 0.5;
+    font-weight: 600;
 }
 
 .gha-log-line--debug {
@@ -160,7 +204,8 @@
     opacity: 0.75;
 }
 
-/* ANSI foreground color spans */
+/* ── ANSI foreground color spans ────────────────────────────── */
+
 .ansi-30 { color: #555; }
 .ansi-31 { color: #f87171; }
 .ansi-32 { color: #86efac; }
