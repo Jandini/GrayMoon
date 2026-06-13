@@ -1,0 +1,57 @@
+@using GrayMoon.App.Services
+@inject IBackgroundJobService JobService
+@inject NavigationManager Nav
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@implements IDisposable
+
+@if (_job is { State: BackgroundJobState.Running })
+{
+    <LoadingOverlay IsVisible="true"
+                    PageScoped="true"
+                    Message="@_job.DisplayMessage"
+                    TerminalBuffer="@_job.Terminal"
+                    OnAbort="@HandleAbort" />
+}
+
+@code {
+    private BackgroundJobHandle? _job;
+
+    protected override void OnInitialized()
+    {
+        JobService.Changed += OnJobChanged;
+        Nav.LocationChanged += OnLocationChanged;
+        UpdateJob();
+    }
+
+    private void OnJobChanged()
+    {
+        _ = InvokeAsync(() =>
+        {
+            UpdateJob();
+            StateHasChanged();
+        });
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        _ = InvokeAsync(() =>
+        {
+            UpdateJob();
+            StateHasChanged();
+        });
+    }
+
+    private void UpdateJob()
+    {
+        var key = new Uri(Nav.Uri).AbsolutePath.ToLowerInvariant();
+        _job = JobService.GetJob(key);
+    }
+
+    private void HandleAbort() => _job?.Abort();
+
+    public void Dispose()
+    {
+        JobService.Changed -= OnJobChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

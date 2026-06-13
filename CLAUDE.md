@@ -2,13 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Line endings
+## Coding conventions
 
-Always use **Windows (CRLF)** in generated or edited code. Do not use LF-only.
+- **Line endings:** Always use **Windows (CRLF)** in generated or edited code. Do not use LF-only.
+- **Hyphens only:** Never use em dash (U+2014) or en dash (U+2013) anywhere - user-visible strings, UI markup, comments, XML docs, logs, CSS, or Markdown. ASCII hyphen-minus (`-`) only.
+- **Primary constructors:** Prefer C# 12 primary constructors (`public sealed class MyService(ILogger<MyService> logger)`) for classes that only capture constructor parameters. Keep an explicit constructor only when the body has non-trivial side effects.
 
 ## Task completion
 
-When you complete a task, write a single sentence summarizing what was done.
+When you complete a task, write a single sentence summarizing what was done. Keep it to one sentence - never write a multi-line summary.
 
 ## Commands
 
@@ -43,7 +45,7 @@ GrayMoon is a **two-process** system — never combine them:
 
 - **GrayMoon.App** (`src/GrayMoon.App`) — ASP.NET Core 8 + Blazor Server, runs in Docker. Exposes the web UI and two SignalR hubs (`/hub/agent` for App↔Agent commands, `/hubs/workspace-sync` for browser broadcast). Never touches the local filesystem or runs git directly. SQLite database via EF Core at `/app/db` (volume-mounted). Uses `EnsureCreated()` — no incremental migrations. **New DB columns must be nullable or have a default value.**
 - **GrayMoon.Agent** (`src/GrayMoon.Agent`) — .NET console app / tool that runs on the developer's host machine. Connects to the App via SignalR, executes all git and filesystem operations, and exposes a local HTTP listener on `127.0.0.1:9191` for git hook callbacks. Job queue: bounded channel with up to 16 concurrent workers.
-- **GrayMoon.Abstractions** (`src/GrayMoon.Abstractions`) — Shared interfaces and DTOs used by both App and Agent. `Agent/AgentHubMethods.cs` contains all SignalR hub method name constants (`RequestCommand`, `ResponseCommand`, `SyncCommand`, etc.).
+- **GrayMoon.Abstractions** (`src/GrayMoon.Abstractions`) — Shared interfaces and DTOs used by both App and Agent. `Agent/AgentHubMethods.cs` contains all SignalR hub method name constants (`RequestCommand`, `ResponseCommand`, `SyncCommand`, `CommandOutput`, `ReportSemVer`, `ReportQueueStatus`).
 - **GrayMoon.Common** (`src/GrayMoon.Common`) — Shared utilities including `CommandLineService` (process execution wrapper) and `Search/FilterSearchExpression` (boolean expression parser used by every UI grid).
 
 ### App → Agent command flow
@@ -95,6 +97,16 @@ Connector tokens are AES-256-GCM encrypted at rest via `AesGcmTokenProtector` (b
 ### Database schema
 
 Schema is owned by EF Core but applied via `EnsureCreated()`. Core tables: `Connectors`, `Repositories`, `Workspaces`, `WorkspaceRepositories` (join with live state), `WorkspaceRepositoryPullRequest` (1:1 with link), `WorkspaceProject`, `ProjectDependency`, `WorkspaceFile`, `WorkspaceFileVersionConfig`, `RepositoryBranch`, `Settings`.
+
+### Background job system
+
+Long-running App-side operations (restore, update, push orchestration) run as background jobs so they survive page navigation within the same browser tab.
+
+- **`BackgroundJobService`** (Blazor-circuit-scoped) — keyed by URL absolute path (`/workspace/123/repositories`). `StartJob` is idempotent: if a job for that key is already `Running` it returns the existing handle. Disposing the service (tab closed) cancels all jobs.
+- **`BackgroundJobHandle`** — state machine (`Running` → `Completed` / `Faulted` / `Aborted`). Exposes `ReportProgress(string)` for mid-job status updates, `Abort()` for user cancellation, and a `JobTerminalBuffer Terminal` that holds up to 800 log lines.
+- **`TerminalSinkContext`** — `AsyncLocal`-based ambient context. `AgentBridge.SendCommandAsync` checks `TerminalSinkContext.Current` and routes all `CommandOutput` streaming lines to the active job's terminal automatically, without threading the buffer through every service call. Wrap a job's `Task.Run` body with `using var _ = TerminalSinkContext.Use(handle.Terminal)`.
+- **`BackgroundJobOverlay`** layout component — reads `IBackgroundJobService.GetJob(currentPath)` on every navigation and renders `LoadingOverlay` when the job is `Running`. It also reads `AgentQueueStateService.GetTotalPendingCount()` to show pending agent tasks in the spinner.
+- **`AgentQueueStateService`** — receives `ReportQueueStatus` SignalR events from the Agent (total + per-workspace pending counts). Use `HasWorkspaceJobsPending(workspaceId)` to disable workspace actions while the agent queue is busy.
 
 ### CSS conventions for the loading overlay terminal
 

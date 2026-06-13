@@ -9,7 +9,7 @@
 @implements IAsyncDisposable
 @implements IDisposable
 
-<div class="loading-overlay @(IsVisible ? "show" : "") @(MatrixPreference.UseMatrixEffect ? "loading-overlay--matrix" : "loading-overlay--simple") @(!OverlayUiSettings.TransparentBackdrop ? "loading-overlay--backdrop-opaque" : "")" aria-hidden="@(!IsVisible)">
+<div class="loading-overlay @(PageScoped ? "loading-overlay--page" : "") @(IsVisible ? "show" : "") @(MatrixPreference.UseMatrixEffect ? "loading-overlay--matrix" : "loading-overlay--simple") @(!OverlayUiSettings.TransparentBackdrop ? "loading-overlay--backdrop-opaque" : "")" aria-hidden="@(!IsVisible)">
     @if (MatrixPreference.UseMatrixEffect)
     {
         <canvas id="@_canvasId" class="matrix-canvas"></canvas>
@@ -29,10 +29,6 @@
         </div>
     }
     <div class="loading-overlay__brand">
-        <span class="navbar-brand-content">
-            <img src="moon.svg" alt="GrayMoon" class="navbar-brand-icon" />
-            <span class="navbar-brand-title">GrayMoon</span>
-        </span>
         @if (ShowCommandTerminal)
         {
             <button type="button"
@@ -58,10 +54,6 @@
                 <div class="spinner-border" role="status">
                     <span class="visually-hidden">Loading...</span>
                 </div>
-                @if (IsVisible && ShowTaskCountInSpinner && DisplayTaskCount > 0)
-                {
-                    <span class="loading-overlay-spinner-count" aria-hidden="true">@DisplayTaskCount</span>
-                }
             </div>
             @if (hasMessage)
             {
@@ -91,18 +83,18 @@
     [Parameter] public string? Message { get; set; }
     [Parameter] public EventCallback OnAbort { get; set; }
 
-    /// <summary>When set, used for spinner count (e.g. workspace-scoped). When null, fall back to total pending.</summary>
-    [Parameter] public int? PendingAgentTasksCount { get; set; }
-
-    /// <summary>When true, show task count inside spinner. Default false.</summary>
-    [Parameter] public bool ShowTaskCountInSpinner { get; set; } = false;
-
     /// <summary>When false, the live command terminal is never shown regardless of user toggle.</summary>
     [Parameter] public bool ShowCommandTerminal { get; set; } = true;
 
-    private bool ShouldShowCommandTerminal => ShowCommandTerminal && CommandTerminalOverlayPreference.IsVisible;
+    /// <summary>When true, the overlay is scoped to the article content area (position:absolute) instead of full-screen (position:fixed).</summary>
+    [Parameter] public bool PageScoped { get; set; }
 
-    private int DisplayTaskCount => !IsVisible ? 0 : (PendingAgentTasksCount ?? AgentQueueStateService.GetTotalPendingCount());
+    /// <summary>When set, terminal output is read from this per-job buffer instead of the global OverlayCommandTerminalService.</summary>
+    [Parameter] public JobTerminalBuffer? TerminalBuffer { get; set; }
+
+    private JobTerminalBuffer? _subscribedBuffer;
+
+    private bool ShouldShowCommandTerminal => ShowCommandTerminal && CommandTerminalOverlayPreference.IsVisible;
 
     private ElementReference _terminalScroll;
     private IReadOnlyList<OverlayTerminalLine> _terminalLines = Array.Empty<OverlayTerminalLine>();
@@ -129,12 +121,22 @@
 
     protected override void OnParametersSet()
     {
+        // Manage subscription to the per-job TerminalBuffer (swapped when parameter changes).
+        if (TerminalBuffer != _subscribedBuffer)
+        {
+            if (_subscribedBuffer != null)
+                _subscribedBuffer.Changed -= OnJobTerminalChanged;
+            _subscribedBuffer = TerminalBuffer;
+            if (_subscribedBuffer != null)
+                _subscribedBuffer.Changed += OnJobTerminalChanged;
+        }
+
         if (IsVisible && !_prevIsVisibleForTerminal)
         {
-            if (AgentQueueStateService.GetTotalPendingCount() == 0)
+            if (TerminalBuffer == null && AgentQueueStateService.GetTotalPendingCount() == 0)
                 CommandTerminal.Clear();
 
-            _terminalLines = CommandTerminal.GetSnapshot();
+            _terminalLines = TerminalBuffer?.GetSnapshot() ?? CommandTerminal.GetSnapshot();
             _lastScrolledLineCount = -1;
         }
 
@@ -148,11 +150,18 @@
         OverlayUiSettings.Changed += OnOverlayUiSettingsChanged;
         AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         CommandTerminal.Changed += OnTerminalChanged;
-        _terminalLines = CommandTerminal.GetSnapshot();
+        _terminalLines = TerminalBuffer?.GetSnapshot() ?? CommandTerminal.GetSnapshot();
+    }
+
+    private void OnJobTerminalChanged()
+    {
+        _terminalLines = _subscribedBuffer?.GetSnapshot() ?? Array.Empty<OverlayTerminalLine>();
+        _ = InvokeAsync(StateHasChanged);
     }
 
     private void OnTerminalChanged(object? sender, EventArgs e)
     {
+        if (TerminalBuffer != null) return; // job buffer takes precedence
         _terminalLines = CommandTerminal.GetSnapshot();
         _ = InvokeAsync(StateHasChanged);
     }
@@ -278,6 +287,8 @@
         OverlayUiSettings.Changed -= OnOverlayUiSettingsChanged;
         AgentQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
         CommandTerminal.Changed -= OnTerminalChanged;
+        if (_subscribedBuffer != null)
+            _subscribedBuffer.Changed -= OnJobTerminalChanged;
     }
 
     public async ValueTask DisposeAsync()

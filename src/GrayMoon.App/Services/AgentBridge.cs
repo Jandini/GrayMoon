@@ -15,7 +15,6 @@ public interface IAgentBridge
 public sealed class AgentBridge(
     IHubContext<AgentHub> hubContext,
     AgentConnectionTracker connectionTracker,
-    OverlayCommandTerminalService overlayCommandTerminal,
     ILogger<AgentBridge> logger) : IAgentBridge
 {
     public bool IsAgentConnected => connectionTracker.GetAgentConnectionId() != null;
@@ -29,7 +28,9 @@ public sealed class AgentBridge(
         var requestId = Guid.NewGuid().ToString("N");
         var argsJson = args != null ? JsonSerializer.SerializeToElement(args) : (JsonElement?)null;
 
-        var task = AgentResponseDelivery.WaitAsync(requestId, cancellationToken, overlayCommandTerminal.Append);
+        var sink = TerminalSinkContext.Current;
+        Action<AgentCommandStreamLine>? onLine = sink != null ? sink.Append : null;
+        var task = AgentResponseDelivery.WaitAsync(requestId, cancellationToken, onLine);
 
         try
         {

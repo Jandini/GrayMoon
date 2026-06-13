@@ -13,7 +13,8 @@ public sealed class DependencyUpdateOrchestrator(
     WorkspaceGitService workspaceGitService,
     WorkspaceFileVersionService fileVersionService,
     WorkspaceRepository workspaceRepository,
-    IOptions<WorkspaceOptions> workspaceOptions)
+    IOptions<WorkspaceOptions> workspaceOptions,
+    IServiceScopeFactory scopeFactory)
 {
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 8);
 
@@ -209,7 +210,9 @@ public sealed class DependencyUpdateOrchestrator(
             await refreshSemaphore.WaitAsync(cancellationToken);
             try
             {
-                var (refreshSuccess, refreshError) = await workspaceGitService.SyncSingleRepositoryAsync(repoId, workspaceId, cancellationToken);
+                await using var scope = scopeFactory.CreateAsyncScope();
+                var svc = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                var (refreshSuccess, refreshError) = await svc.SyncSingleRepositoryAsync(repoId, workspaceId, cancellationToken);
                 var c = Interlocked.Increment(ref completedRefresh);
                 setProgress($"Updating version {c} of {totalRefresh}...");
                 return (RepoId: repoId, Success: refreshSuccess, Error: refreshError);

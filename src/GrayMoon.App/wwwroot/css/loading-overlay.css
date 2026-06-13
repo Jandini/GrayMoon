@@ -17,6 +17,17 @@
   transition: opacity 140ms ease;
 }
 
+/* Page-scoped variant: fixed below the top bar and right of the sidebar, always full remaining height. */
+.loading-overlay--page {
+  position: fixed;
+  top: var(--topbar-height);
+  left: var(--sidebar-width);
+  right: 0;
+  bottom: 0;
+  /* z-index below Bootstrap modals (1050+) so dialogs stay interactive above the overlay */
+  z-index: 100;
+}
+
 .loading-overlay.show {
   opacity: 1;
   pointer-events: all; /* blocks clicks while loading */
@@ -190,6 +201,17 @@
   color: rgba(220, 190, 72, 0.9) !important;
 }
 
+/* Active (in-progress) step elapsed time - matches step text color; !important to beat running-row td { color } inheritance */
+.grid-page-body .table.actions-table tbody tr.actions-row-running-terminal .actions-gha-terminal .loading-overlay-terminal:not(.loading-overlay-terminal--scheme-yellow) .actions-gha-terminal__step-timing--active {
+  color: rgba(120, 210, 150, 0.88) !important;
+  opacity: 1 !important;
+}
+
+.grid-page-body .table.actions-table tbody tr.actions-row-running-terminal .actions-gha-terminal .loading-overlay-terminal--scheme-yellow .actions-gha-terminal__step-timing--active {
+  color: rgba(220, 190, 72, 0.9) !important;
+  opacity: 1 !important;
+}
+
 /* Brand at top-left of overlay - same position and font as sidebar header; above full-height terminal */
 .loading-overlay__brand {
   position: absolute;
@@ -285,20 +307,6 @@
   position: absolute;
   inset: 0;
   margin: 0;
-}
-
-.loading-overlay-spinner-count {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: "Nunito", sans-serif;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #555;
-  line-height: 1;
-  pointer-events: none;
 }
 
 .loading-overlay__message {

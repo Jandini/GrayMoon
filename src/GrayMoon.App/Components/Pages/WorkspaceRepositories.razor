@@ -26,6 +26,7 @@
 @inject NewFeatureOrchestrator NewFeatureOrchestrator
 @inject AgentQueueStateService AgentQueueStateService
 @inject IPullRequestService PullRequestService
+@inject IBackgroundJobService JobService
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
 <PageTitle>Repositories - GrayMoon</PageTitle>
@@ -41,13 +42,13 @@
                                     IsPushRecommended="@isPushRecommended"
                                     HasIncomingCommits="@hasIncomingCommits"
                                     IsOutOfSync="@isOutOfSync"
-                                    IsSyncing="@isSyncing"
-                                    IsUpdating="@isUpdating"
-                                    IsPushing="@isPushing"
-                                    IsCommitSyncing="@isCommitSyncing"
+                                    IsSyncing="@IsJobRunning"
+                                    IsUpdating="@IsJobRunning"
+                                    IsPushing="@IsJobRunning"
+                                    IsCommitSyncing="@IsJobRunning"
                                     AgentTasksPendingCount="@AgentTasksPendingCount"
-                                    IsRestoringPackages="@isRestoringPackages"
-                                    IsOverlayVisible="@(isLoading || isSyncing || isPushing || isUpdating || isCommitSyncing || isCheckingOut || isCreatingBranches || isCreatingBranch || isSyncingToDefault || isWorkspaceBranchesFetching || isWorkspaceBranchesCheckingOut || ShowRepositoriesFetchOverlay || isRestoringPackages)"
+                                    IsRestoringPackages="@IsJobRunning"
+                                    IsOverlayVisible="@(isLoading || IsJobRunning || ShowRepositoriesFetchOverlay)"
                                     OnShowRepositories="ShowRepositoriesModalAsync"
                                     OnNewFeature="ShowNewFeatureModalAsync"
                                     OnShowBranch="() => ShowBranchModalAsync()"
@@ -156,8 +157,8 @@
                                                                   IsVersionClicked="@(wr.GitVersion != null && clickedVersions.Contains(wr.GitVersion))"
                                                                   IsDependencyBadgeClicked="@clickedDependencyBadges.Contains(wr.RepositoryId)"
                                                                   RepositoryError="@GetRepositoryError(wr.RepositoryId)"
-                                                                  IsSyncing="@isSyncing"
-                                                                  IsUpdating="@isUpdating"
+                                                                  IsSyncing="@IsJobRunning"
+                                                                  IsUpdating="@IsJobRunning"
                                                                   ColSpan="@TableColSpan"
                                                                   OnVersionClick="() => CopyVersionToClipboard(wr.GitVersion!)"
                                                                   OnVersionMouseLeave="() => OnVersionMouseLeave(wr.GitVersion)"
@@ -227,14 +228,14 @@
                    OnCreateBranch="@CreateSingleBranchAsync" />
 
 <UpdateDependenciesModal IsVisible="@_updateModal.IsVisible"
-                         IsBusy="@isUpdating"
+                         IsBusy="@IsJobRunning"
                          InitialCommitMessage="@_updateModal.LastCommitMessage"
                          InitialIncludeDeps="@_updateModal.LastIncludeDeps"
                          OnProceed="@OnUpdateProceedAsync"
                          OnCancel="@CloseUpdateModal" />
 
 <UpdateDependenciesModal IsVisible="@_updateAndPushModal.IsVisible"
-                         IsBusy="@isUpdating"
+                         IsBusy="@IsJobRunning"
                          InitialCommitMessage="@_updateAndPushModal.LastCommitMessage"
                          InitialIncludeDeps="@_updateAndPushModal.LastIncludeDeps"
                          OnProceed="@OnUpdateAndPushProceedAsync"
@@ -275,7 +276,7 @@
                            OnCancel="@CloseSyncToDefaultOptionsModal" />
 
 <NewPullRequestModal IsVisible="@_newPrModal.IsVisible"
-                     IsBusy="@isCreatingPullRequests"
+                     IsBusy="@IsJobRunning"
                      Targets="@_newPrModal.Targets"
                      OnCreate="HandleCreatePullRequestsAsync"
                      OnCancel="CloseNewPullRequestModal"
@@ -295,6 +296,12 @@
                      Message="@_operationErrorModal.Message"
                      OnClose="CloseOperationErrorModal" />
 
-<LoadingOverlay IsVisible="@IsAnyOverlayVisible"
-               Message="@ActiveOverlayMessage"
-               OnAbort="@ActiveOverlayAbort" />
+@if (isLoading)
+{
+    <LoadingOverlay IsVisible="true" PageScoped="true" Message="Loading workspace..." ShowCommandTerminal="false" />
+}
+@if (ShowRepositoriesFetchOverlay)
+{
+    <LoadingOverlay IsVisible="true" PageScoped="true" Message="@RepositoriesFetchOverlayMessage" ShowCommandTerminal="false"
+                   OnAbort="@EventCallback.Factory.Create(this, (Action)AbortFetchRepositories)" />
+}
