@@ -1278,9 +1278,13 @@ public class WorkspaceGitService(
         if (useDefaultBase)
         {
             var wrIds = links.Select(l => l.WorkspaceRepositoryId).ToList();
-            defaultBranchByWrId = await _dbContext.RepositoryBranches
+            var defaultRows = await _dbContext.RepositoryBranches
                 .Where(rb => wrIds.Contains(rb.WorkspaceRepositoryId) && rb.IsDefault)
-                .ToDictionaryAsync(rb => rb.WorkspaceRepositoryId, rb => rb.BranchName, cancellationToken);
+                .Select(rb => new { rb.WorkspaceRepositoryId, rb.BranchName })
+                .ToListAsync(cancellationToken);
+            defaultBranchByWrId = new Dictionary<int, string>();
+            foreach (var row in defaultRows)
+                defaultBranchByWrId.TryAdd(row.WorkspaceRepositoryId, row.BranchName);
         }
 
         async Task ProcessOne(WorkspaceRepositoryLink wr)
