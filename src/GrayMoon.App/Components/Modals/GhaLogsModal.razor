@@ -36,10 +36,23 @@
                     }
                     else
                     {
+                        <div class="gha-logs-job-nav">
+                            @foreach (var navJob in _jobs)
+                            {
+                                var jobId = $"gha-job-{navJob.Meta.Id}";
+                                <button type="button"
+                                        class="gha-log-job__pill gha-log-job__pill--@JobStatusClass(navJob.Meta) gha-logs-job-nav__btn"
+                                        title="Scroll to @navJob.Meta.Name"
+                                        @onclick="() => ScrollToJobAsync(jobId)">
+                                    <span class="gha-log-job__icon-dot">@JobIcon(navJob.Meta)</span>
+                                    <span class="gha-log-job__name">@navJob.Meta.Name</span>
+                                </button>
+                            }
+                        </div>
                         <div class="gha-logs-content" @ref="_contentRef">
                             @foreach (var job in _jobs)
                             {
-                                <div class="gha-log-job">
+                                <div class="gha-log-job" id="@($"gha-job-{job.Meta.Id}")">
                                     <span class="gha-log-job__pill gha-log-job__pill--@JobStatusClass(job.Meta)">
                                         <span class="gha-log-job__icon-dot">@JobIcon(job.Meta)</span>
                                         <span class="gha-log-job__name">@job.Meta.Name</span>
@@ -175,6 +188,11 @@
             _isLoading = false;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    private async Task ScrollToJobAsync(string jobId)
+    {
+        try { await JS.InvokeVoidAsync("ghaLogs.scrollToJob", _contentRef, jobId); } catch { }
     }
 
     private async Task DownloadLogsAsync()

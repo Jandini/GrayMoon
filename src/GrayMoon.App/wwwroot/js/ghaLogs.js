@@ -23,5 +23,11 @@ window.ghaLogs = {
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
         }, 200);
+    },
+
+    scrollToJob: function (contentEl, jobId) {
+        if (!contentEl) return;
+        const jobEl = document.getElementById(jobId);
+        if (jobEl) contentEl.scrollTo({ top: jobEl.offsetTop, behavior: 'smooth' });
     }
 };
