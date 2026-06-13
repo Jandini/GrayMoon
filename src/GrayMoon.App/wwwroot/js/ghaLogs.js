@@ -9,6 +9,31 @@ window.ghaLogs = {
                 window.graymoonShowToast('Copied!');
             } catch (_) { }
         });
+        el.addEventListener('keydown', function (e) {
+            const handler = ghaLogs._scrollHandlers(el)[e.key];
+            if (!handler) return;
+            e.preventDefault();
+            e.stopPropagation();
+            handler();
+        });
+        el.focus({ preventScroll: true });
+    },
+
+    scrollContent: function (el, key) {
+        if (!el) return;
+        const handler = ghaLogs._scrollHandlers(el)[key];
+        if (handler) handler();
+    },
+
+    _scrollHandlers: function (el) {
+        return {
+            ArrowUp:   function () { el.scrollBy(0, -20); },
+            ArrowDown: function () { el.scrollBy(0,  20); },
+            PageUp:    function () { el.scrollBy(0, -el.clientHeight); },
+            PageDown:  function () { el.scrollBy(0,  el.clientHeight); },
+            Home:      function () { el.scrollTo(0, 0); },
+            End:       function () { el.scrollTo(0, el.scrollHeight); },
+        };
     },
 
     downloadText: function (filename, content) {

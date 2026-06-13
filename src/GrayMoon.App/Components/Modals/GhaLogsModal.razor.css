@@ -18,10 +18,10 @@
 }
 
 .gha-logs-dialog {
-    width: calc(100vw - 2rem);
-    max-width: calc(100vw - 2rem);
+    width: calc(100vw - 1rem);
+    max-width: calc(100vw - 1rem);
     max-height: calc(100vh - 2rem);
-    margin: 1rem;
+    margin: 1rem 0.5rem;
 }
 
 /* Fixed-height flex column so the modal never grows/shrinks when content loads */

@@ -36,7 +36,7 @@
                     }
                     else
                     {
-                        <div class="gha-logs-content" @ref="_contentRef">
+                        <div class="gha-logs-content" @ref="_contentRef" tabindex="-1">
                             <div class="gha-log-job">
                                 @foreach (var navJob in _jobs)
                                 {
@@ -273,7 +273,9 @@
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Escape") await CloseAsync();
+        if (e.Key == "Escape") { await CloseAsync(); return; }
+        if (e.Key is "ArrowUp" or "ArrowDown" or "PageUp" or "PageDown" or "Home" or "End")
+            try { await JS.InvokeVoidAsync("ghaLogs.scrollContent", _contentRef, e.Key); } catch { }
     }
 
     private static string KindClass(GhaLogLineKind kind) => kind switch
