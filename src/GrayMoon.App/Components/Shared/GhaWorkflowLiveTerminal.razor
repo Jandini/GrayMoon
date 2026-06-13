@@ -10,10 +10,8 @@
         ? "loading-overlay-terminal--scheme-yellow"
         : "";
     <div class="actions-gha-terminal">
-        <div class="actions-gha-terminal__wrap actions-gha-terminal__wrap--split">
-
-            <!-- LEFT: step-status board (snapshot of all steps with icons) -->
-            <div class="loading-overlay-terminal @schemeClass actions-gha-terminal__terminal actions-gha-terminal__pane actions-gha-terminal__pane--left">
+        <div class="actions-gha-terminal__wrap">
+            <div class="loading-overlay-terminal @schemeClass actions-gha-terminal__terminal">
                 <div class="actions-gha-terminal__caption" title="@_boardCaption">
                     <span class="actions-gha-terminal__caption-main">
                         <span class="actions-gha-terminal__caption-prefix">▶</span><span class="actions-gha-terminal__caption-text">@_boardCaption</span>
@@ -40,32 +38,6 @@
                     }
                 </div>
             </div>
-
-            <!-- RIGHT: per-step duration -->
-            <div class="loading-overlay-terminal @schemeClass actions-gha-terminal__terminal actions-gha-terminal__pane actions-gha-terminal__pane--right">
-                <div class="actions-gha-terminal__caption">
-                    <span class="actions-gha-terminal__caption-main">
-                        <span class="actions-gha-terminal__caption-prefix">▶</span><span class="actions-gha-terminal__caption-text">Duration</span>
-                    </span>
-                </div>
-                <div class="loading-overlay-terminal__inner actions-gha-terminal__scroll" aria-live="polite">
-                    @for (var i = 0; i < BodyLineCount; i++)
-                    {
-                        var timing = _timingSlots[i];
-                        <p class="loading-overlay-terminal__line loading-overlay-terminal__line--out actions-gha-terminal__line actions-gha-terminal__line--timing">
-                            @if (string.IsNullOrWhiteSpace(timing))
-                            {
-                                <span class="loading-overlay-terminal__text">&nbsp;</span>
-                            }
-                            else
-                            {
-                                <span class="loading-overlay-terminal__text">@timing</span>
-                            }
-                        </p>
-                    }
-                </div>
-            </div>
-
         </div>
     </div>
 }
@@ -77,13 +49,9 @@
     [Parameter] public long RunId { get; set; }
     [Parameter] public string? WorkflowDisplayName { get; set; }
 
-    // Left panel: step-status board (snapshot, recomputed each poll)
     private readonly string[] _boardSlots = new string[BodyLineCount];
     private string _boardCaption = "Steps · Waiting…";
     private string? _stepProgress;
-
-    // Right panel: per-step duration aligned with left board
-    private readonly string[] _timingSlots = new string[BodyLineCount];
 
     private GhaWorkflowLiveFeedState? _feedState;
     private CancellationTokenSource? _cts;
@@ -144,18 +112,14 @@
 
         var update = await GhaWorkflowLiveFeedService.PollOnceAsync(_feedState, cancellationToken);
 
-        // Left panel: caption shows job name + step progress
-        var jobName = _feedState.ActiveJob?.Name ?? "Steps";
-        var newBoardCaption = jobName;
-        if (!string.Equals(_boardCaption, newBoardCaption, StringComparison.Ordinal)
+        if (!string.Equals(_boardCaption, update.Caption, StringComparison.Ordinal)
             || !string.Equals(_stepProgress, update.StepProgress, StringComparison.Ordinal))
         {
-            _boardCaption = newBoardCaption;
+            _boardCaption = update.Caption;
             _stepProgress = update.StepProgress;
             _needsRender = true;
         }
 
-        // Left panel: rebuild step-status board
         UpdateBoard();
 
         return update.DelayMs;
@@ -180,7 +144,7 @@
 
         if (job == null || steps == null || steps.Count == 0)
         {
-            for (var i = 0; i < BodyLineCount; i++) { _boardSlots[i] = ""; _timingSlots[i] = ""; }
+            for (var i = 0; i < BodyLineCount; i++) _boardSlots[i] = "";
             _needsRender = true;
             return;
         }
@@ -201,17 +165,18 @@
             if (si < steps.Count)
             {
                 var step = steps[si];
-                _boardSlots[i] = $"{StepIcon(step)} {step.Name}";
-                _timingSlots[i] = step.Status.Equals("completed", StringComparison.OrdinalIgnoreCase)
+                var timing = step.Status.Equals("completed", StringComparison.OrdinalIgnoreCase)
                     ? FormatDuration(step.StartedAt, step.CompletedAt)
                     : step.Status.Equals("in_progress", StringComparison.OrdinalIgnoreCase)
                         ? FormatDuration(step.StartedAt, DateTimeOffset.UtcNow)
                         : "";
+                _boardSlots[i] = string.IsNullOrEmpty(timing)
+                    ? $"{StepIcon(step)} {step.Name}"
+                    : $"{StepIcon(step)} {step.Name}  {timing}";
             }
             else
             {
                 _boardSlots[i] = "";
-                _timingSlots[i] = "";
             }
         }
 
