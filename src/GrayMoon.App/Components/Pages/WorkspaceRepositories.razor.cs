@@ -1176,7 +1176,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         try
         {
-            await WorkspacePushHandler.RunPushWithDependenciesAsync(
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var pushHandler = scope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
+            await pushHandler.RunPushWithDependenciesAsync(
                 WorkspaceId,
                 repoIds,
                 synchronizedPush,
@@ -1554,24 +1556,26 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
         JobService.StartJob(PageJobKey, "Updating dependencies...", async (job, ct) =>
         {
-            // Phase 1: update
+            // Phase 1: update - fresh scope so DbContext does not compete with circuit page loads
             try
             {
-                await WorkspaceUpdateHandler.RunUpdateAsync(
-                    WorkspaceId,
-                    ct,
-                    job.ReportProgress,
-                    (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
-                    onAppSideComplete: () => { },
-                    repoIdsToUpdate: null,
-                    commitMessage: commitMessage,
-                    includeDepsInCommitMessage: includeDepsInCommitMessage);
-
-                await InvokeAsync(async () =>
+                await using (var updateScope = ServiceScopeFactory.CreateAsyncScope())
                 {
-                    if (_disposed) return;
-                    await RefreshFromSync();
-                });
+                    var updateHandler = updateScope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
+                    await updateHandler.RunUpdateAsync(
+                        WorkspaceId,
+                        ct,
+                        job.ReportProgress,
+                        (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
+                        onAppSideComplete: () => { },
+                        repoIdsToUpdate: null,
+                        commitMessage: commitMessage,
+                        includeDepsInCommitMessage: includeDepsInCommitMessage);
+                }
+
+                // Unconditional reload so workspaceRepositories is current for Phase 2
+                await ReloadWorkspaceDataFromFreshScopeAsync();
+                _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromWorkspace(); StateHasChanged(); } });
             }
             catch (OperationCanceledException)
             {
@@ -1585,13 +1589,16 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 throw;
             }
 
-            // Phase 2: determine push plan using fresh workspaceRepositories loaded by RefreshFromSync
+            // Phase 2: determine push plan using fresh workspaceRepositories loaded above
             job.ReportProgress("Preparing push...");
             IReadOnlySet<int> pushRepoIds;
             IReadOnlySet<string> requiredPackageIds;
             try
             {
-                var (payload, hasUnpushed) = await WorkspacePushHandler.GetPushPlanAsync(
+                await using var planScope = ServiceScopeFactory.CreateAsyncScope();
+                var planPushHandler = planScope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
+                var planDepService = planScope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
+                var (payload, hasUnpushed) = await planPushHandler.GetPushPlanAsync(
                     WorkspaceId, workspaceRepositories, ct);
                 if (!hasUnpushed)
                 {
@@ -1605,7 +1612,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     SafeInvoke(() => ToastService.Show("Update complete. Nothing to push."));
                     return;
                 }
-                var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoSetAsync(
+                var depInfo = await planDepService.GetPushDependencyInfoForRepoSetAsync(
                     WorkspaceId, pushRepoIds, ct);
                 requiredPackageIds = depInfo?.PayloadForRepo?.RequiredPackages
                     .Select(r => r.PackageId?.Trim())
@@ -2312,26 +2319,29 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                await NewFeatureOrchestrator.RunAsync(
-                    WorkspaceId,
-                    request.NewBranchName,
-                    request.BaseBranch,
-                    tagFilteredRepoIds,
-                    request.UpdateDependencies,
-                    commitMessage: null,
-                    setProgress: msg => job.ReportProgress(msg),
-                    reportBranchProgress: (completed, total) =>
-                    {
-                        job.ReportProgress($"Created {completed} of {total} branches");
-                    },
-                    setRepositoryError: (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
-                    ct);
-
-                await InvokeAsync(async () =>
+                // Fresh scope so DbContext does not compete with circuit page loads
+                await using (var orchestratorScope = ServiceScopeFactory.CreateAsyncScope())
                 {
-                    if (_disposed) return;
-                    await RefreshFromSync();
-                });
+                    var orchestrator = orchestratorScope.ServiceProvider.GetRequiredService<NewFeatureOrchestrator>();
+                    await orchestrator.RunAsync(
+                        WorkspaceId,
+                        request.NewBranchName,
+                        request.BaseBranch,
+                        tagFilteredRepoIds,
+                        request.UpdateDependencies,
+                        commitMessage: null,
+                        setProgress: msg => job.ReportProgress(msg),
+                        reportBranchProgress: (completed, total) =>
+                        {
+                            job.ReportProgress($"Created {completed} of {total} branches");
+                        },
+                        setRepositoryError: (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
+                        ct);
+                }
+
+                // Unconditional reload so workspaceRepositories is current for Phase 3
+                await ReloadWorkspaceDataFromFreshScopeAsync();
+                _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromWorkspace(); StateHasChanged(); } });
             }
             catch (OperationCanceledException)
             {
@@ -2354,7 +2364,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
             IReadOnlySet<string> requiredPackageIds;
             try
             {
-                var (payload, hasUnpushed) = await WorkspacePushHandler.GetPushPlanAsync(
+                await using var planScope = ServiceScopeFactory.CreateAsyncScope();
+                var planPushHandler = planScope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
+                var planDepService = planScope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
+                var (payload, hasUnpushed) = await planPushHandler.GetPushPlanAsync(
                     WorkspaceId, workspaceRepositories, ct);
                 if (!hasUnpushed)
                 {
@@ -2368,7 +2381,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     SafeInvoke(() => ToastService.Show("No repositories to push."));
                     return;
                 }
-                var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoSetAsync(
+                var depInfo = await planDepService.GetPushDependencyInfoForRepoSetAsync(
                     WorkspaceId, pushRepoIds, ct);
                 requiredPackageIds = depInfo?.PayloadForRepo?.RequiredPackages
                     .Select(r => r.PackageId?.Trim())
