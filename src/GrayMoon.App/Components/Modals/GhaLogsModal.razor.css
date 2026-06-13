@@ -1,3 +1,22 @@
+/* Outer modal overlay — styled scrollbar for when min-height forces overflow */
+.modal {
+    scrollbar-color: #5a5a5a transparent;
+    scrollbar-width: thin;
+}
+
+.modal::-webkit-scrollbar {
+    width: 8px;
+}
+
+.modal::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.modal::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
 .gha-logs-dialog {
     width: calc(100vw - 2rem);
     max-width: calc(100vw - 2rem);
@@ -11,6 +30,7 @@
     flex-direction: column;
     height: calc(100vh - 2rem);
     max-height: calc(100vh - 2rem);
+    min-height: 360px;
 }
 
 /* Body fills remaining space between header and footer, never overflows */
