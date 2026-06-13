@@ -50,7 +50,6 @@
                                                 class="gha-log-job__pill gha-log-job__pill--@(isCurrent ? JobStatusClass(navJob.Meta) : "other")"
                                                 title="@navJob.Meta.Name"
                                                 @onclick="() => ScrollToJobAsync(navJobAnchorId)">
-                                            <span class="gha-log-job__icon-dot">@JobIcon(navJob.Meta)</span>
                                             <span class="gha-log-job__name">@navJob.Meta.Name</span>
                                         </button>
                                     }
@@ -59,20 +58,26 @@
                                 {
                                     @if (entry is GhaLogGroupEntry group)
                                     {
-                                        <details class="gha-log-group @(group.HasError ? "gha-log-group--error" : "")"
-                                                 open>
-                                            <summary class="gha-log-group__header">@((MarkupString)group.Title)</summary>
-                                            <div class="gha-log-group__lines">
-                                                @foreach (var line in group.Lines)
-                                                {
-                                                    <div class="gha-log-line gha-log-line--@KindClass(line.Kind)">@((MarkupString)line.HtmlContent)</div>
-                                                }
-                                            </div>
-                                        </details>
+                                        @if (!_showErrorsOnly || group.HasError)
+                                        {
+                                            <details class="gha-log-group @(group.HasError ? "gha-log-group--error" : "")"
+                                                     open>
+                                                <summary class="gha-log-group__header">@((MarkupString)group.Title)</summary>
+                                                <div class="gha-log-group__lines">
+                                                    @foreach (var line in group.Lines)
+                                                    {
+                                                        <div class="gha-log-line gha-log-line--@KindClass(line.Kind)">@((MarkupString)line.HtmlContent)</div>
+                                                    }
+                                                </div>
+                                            </details>
+                                        }
                                     }
                                     else if (entry is GhaLogLineEntry topLine)
                                     {
-                                        <div class="gha-log-line gha-log-line--@KindClass(topLine.Kind)">@((MarkupString)topLine.HtmlContent)</div>
+                                        @if (!_showErrorsOnly || topLine.Kind == GhaLogLineKind.Error)
+                                        {
+                                            <div class="gha-log-line gha-log-line--@KindClass(topLine.Kind)">@((MarkupString)topLine.HtmlContent)</div>
+                                        }
                                     }
                                 }
                             }
@@ -87,12 +92,20 @@
                     }
                 </div>
                 <div class="modal-footer d-flex justify-content-between">
-                    <div>
+                    <div class="d-flex gap-2">
                         <button type="button" class="btn btn-outline-secondary"
                                 disabled="@(_jobs.Count == 0 || _isLoading)"
                                 @onclick="DownloadLogsAsync">
                             Download
                         </button>
+                        @if (HasAnyErrors)
+                        {
+                            <button type="button"
+                                    class="btn @(_showErrorsOnly ? "btn-danger" : "btn-outline-danger")"
+                                    @onclick="() => { _showErrorsOnly = !_showErrorsOnly; }">
+                                @(_showErrorsOnly ? "Show All" : "Show Errors")
+                            </button>
+                        }
                     </div>
                     <div>
                         <button type="button" class="btn btn-outline-secondary" @onclick="CloseAsync">Close</button>
@@ -117,11 +130,15 @@
     private bool _wasVisible;
     private bool _isLoading;
     private bool _isLoadingMore;
+    private bool _showErrorsOnly;
     private bool _loadTriggered;
     private bool _autoSelectInitialized;
     private string? _errorMessage;
     private List<JobLogEntry> _jobs = [];
     private ElementReference _contentRef;
+
+    private bool HasAnyErrors => _jobs.Any(j => j.Entries.Any(e =>
+        (e is GhaLogGroupEntry g && g.HasError) || (e is GhaLogLineEntry l && l.Kind == GhaLogLineKind.Error)));
 
     protected override void OnParametersSet()
     {
@@ -130,6 +147,7 @@
             _wasVisible = true;
             _isLoading = true;
             _isLoadingMore = false;
+            _showErrorsOnly = false;
             _loadTriggered = false;
             _autoSelectInitialized = false;
             _errorMessage = null;
@@ -242,20 +260,4 @@
             _ => string.Equals(job.Status, "in_progress", StringComparison.OrdinalIgnoreCase) ? "running" : "none",
         };
 
-    private static string JobIcon(GitHubWorkflowJobDto job)
-    {
-        if (string.Equals(job.Status, "completed", StringComparison.OrdinalIgnoreCase))
-        {
-            return job.Conclusion?.ToLowerInvariant() switch
-            {
-                "success"   => "✓",
-                "failure"   => "✗",
-                "cancelled" => "✗",
-                "skipped"   => "↩",
-                _           => "·",
-            };
-        }
-        if (string.Equals(job.Status, "in_progress", StringComparison.OrdinalIgnoreCase)) return "▶";
-        return "○";
-    }
 }

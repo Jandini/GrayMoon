@@ -1,14 +1,15 @@
 .gha-logs-dialog {
-    max-width: min(95vw, 1500px);
+    width: calc(100vw - 2rem);
+    max-width: calc(100vw - 2rem);
     max-height: calc(100vh - 2rem);
-    margin: 1rem auto;
+    margin: 1rem;
 }
 
 /* Fixed-height flex column so the modal never grows/shrinks when content loads */
 ::deep .modal-content {
     display: flex;
     flex-direction: column;
-    height: 85vh;
+    height: calc(100vh - 2rem);
     max-height: calc(100vh - 2rem);
 }
 
@@ -107,8 +108,7 @@
 .gha-log-job__pill {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.18rem 0.75rem 0.18rem 0.22rem;
+    padding: 0.18rem 0.75rem;
     border-radius: 999px;
     font-size: 0.78rem;
     font-weight: 500;
@@ -122,29 +122,10 @@
     filter: brightness(1.15);
 }
 
-/* Inner circle — like the count badge in the status filter chips */
-.gha-log-job__icon-dot {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.35rem;
-    height: 1.35rem;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.22);
-    font-size: 0.68rem;
-    font-weight: 700;
-    line-height: 1;
-    flex-shrink: 0;
-}
-
 /* Non-current job pills: gray */
 .gha-log-job__pill--other {
     background: #383838;
     color: rgba(255, 255, 255, 0.5);
-}
-
-.gha-log-job__pill--other .gha-log-job__icon-dot {
-    background: rgba(255, 255, 255, 0.12);
 }
 
 /* Status-colored pills (current job) */
@@ -152,7 +133,6 @@
 .gha-log-job__pill--failure { background: #da3633; color: #fff; }
 .gha-log-job__pill--aborted { background: #8957e5; color: #fff; }
 .gha-log-job__pill--running { background: #d29922; color: #000; }
-.gha-log-job__pill--running .gha-log-job__icon-dot { background: rgba(0, 0, 0, 0.18); }
 .gha-log-job__pill--skipped { background: #495057; color: rgba(255, 255, 255, 0.7); }
 .gha-log-job__pill--none    { background: #495057; color: rgba(255, 255, 255, 0.7); }
 
