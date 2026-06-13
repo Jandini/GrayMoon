@@ -51,10 +51,7 @@
                                                 title="@navJob.Meta.Name"
                                                 @onclick="() => ScrollToJobAsync(navJobAnchorId)">
                                             <span class="gha-log-job__icon-dot">@JobIcon(navJob.Meta)</span>
-                                            @if (isCurrent)
-                                            {
-                                                <span class="gha-log-job__name">@navJob.Meta.Name</span>
-                                            }
+                                            <span class="gha-log-job__name">@navJob.Meta.Name</span>
                                         </button>
                                     }
                                 </div>
@@ -63,7 +60,7 @@
                                     @if (entry is GhaLogGroupEntry group)
                                     {
                                         <details class="gha-log-group @(group.HasError ? "gha-log-group--error" : "")"
-                                                 open="@(group.HasError ? "" : null)">
+                                                 open>
                                             <summary class="gha-log-group__header">@((MarkupString)group.Title)</summary>
                                             <div class="gha-log-group__lines">
                                                 @foreach (var line in group.Lines)
