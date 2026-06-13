@@ -77,6 +77,13 @@
                                 }
                             }
                         </div>
+                        @if (_isLoadingMore)
+                        {
+                            <div class="gha-logs-loadmore">
+                                <span class="spinner-border spinner-border-sm text-secondary" role="status"></span>
+                                <span class="text-muted small ms-2">Loading more jobs…</span>
+                            </div>
+                        }
                     }
                 </div>
                 <div class="modal-footer d-flex justify-content-between">
@@ -109,6 +116,7 @@
 
     private bool _wasVisible;
     private bool _isLoading;
+    private bool _isLoadingMore;
     private bool _loadTriggered;
     private bool _autoSelectInitialized;
     private string? _errorMessage;
@@ -121,10 +129,11 @@
         {
             _wasVisible = true;
             _isLoading = true;
+            _isLoadingMore = false;
             _loadTriggered = false;
             _autoSelectInitialized = false;
             _errorMessage = null;
-            _jobs = [];
+            _jobs.Clear();
         }
         else if (!IsVisible)
         {
@@ -164,17 +173,22 @@
             var jobsResponse = await GitHubService.GetWorkflowRunJobsAsync(connector, Owner, RepositoryName, RunId);
             var jobs = jobsResponse?.Jobs ?? [];
 
-            var result = new List<JobLogEntry>();
-            foreach (var job in jobs)
+            for (int jobIdx = 0; jobIdx < jobs.Count; jobIdx++)
             {
+                var job = jobs[jobIdx];
                 var rawLog = await GitHubService.GetJobLogsAsync(connector, Owner, RepositoryName, job.Id);
                 var entries = rawLog != null
                     ? GhaLogParser.ParseJobLog(rawLog)
                     : [new GhaLogLineEntry(GhaLogLineKind.Normal, "Log not available.")];
-                result.Add(new JobLogEntry(job, entries, rawLog));
-            }
+                _jobs.Add(new JobLogEntry(job, entries, rawLog));
 
-            _jobs = result;
+                if (jobIdx == 0)
+                {
+                    _isLoading = false;
+                    _isLoadingMore = jobs.Count > 1;
+                }
+                await InvokeAsync(StateHasChanged);
+            }
         }
         catch (Exception ex)
         {
@@ -183,6 +197,7 @@
         finally
         {
             _isLoading = false;
+            _isLoadingMore = false;
             await InvokeAsync(StateHasChanged);
         }
     }

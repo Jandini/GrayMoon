@@ -1,6 +1,5 @@
 using System.Net;
 using System.Text;
-using System.Text.RegularExpressions;
 
 namespace GrayMoon.App.Services;
 
@@ -12,13 +11,17 @@ public record GhaLogLineEntry(GhaLogLineKind Kind, string HtmlContent) : GhaLogE
 
 public record GhaLogGroupEntry(string Title, bool HasError, List<GhaLogLineEntry> Lines) : GhaLogEntry;
 
-public static partial class GhaLogParser
+public static class GhaLogParser
 {
-    [GeneratedRegex(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z ", RegexOptions.None)]
-    private static partial Regex TimestampRx();
+    private static readonly string[] _ansiSpanTable = BuildAnsiSpanTable();
 
-    [GeneratedRegex(@"\x1B\[([0-9;]*)m", RegexOptions.None)]
-    private static partial Regex AnsiRx();
+    private static string[] BuildAnsiSpanTable()
+    {
+        var t = new string[128];
+        for (int c = 30; c <= 37; c++) t[c] = $"<span class=\"ansi-{c}\">";
+        for (int c = 90; c <= 97; c++) t[c] = $"<span class=\"ansi-{c}\">";
+        return t;
+    }
 
     private sealed class GroupBuilder
     {
@@ -42,26 +45,33 @@ public static partial class GhaLogParser
         if (string.IsNullOrEmpty(rawLog)) return entries;
 
         GroupBuilder? current = null;
+        var sb = new StringBuilder(256);
 
-        foreach (var raw in rawLog.Split('\n'))
+        var remaining = rawLog.AsSpan();
+        while (!remaining.IsEmpty)
         {
-            var line = raw.TrimEnd('\r');
-            var content = TimestampRx().Replace(line, "", 1);
+            int nl = remaining.IndexOf('\n');
+            var raw = nl >= 0 ? remaining[..nl] : remaining;
+            remaining = nl >= 0 ? remaining[(nl + 1)..] : default;
 
-            if (content.StartsWith("##[group]", StringComparison.OrdinalIgnoreCase))
+            var line = (!raw.IsEmpty && raw[^1] == '\r') ? raw[..^1] : raw;
+            var content = StripTimestamp(line);
+
+            if (content.StartsWith("##[group]".AsSpan(), StringComparison.OrdinalIgnoreCase))
             {
                 if (current != null)
                     entries.Add(new GhaLogGroupEntry(current.Title, current.HasError, current.Lines));
 
-                current = new GroupBuilder { Title = WebUtility.HtmlEncode(content["##[group]".Length..]) };
+                sb.Clear();
+                AppendHtmlEncoded(content["##[group]".Length..], sb);
+                current = new GroupBuilder { Title = sb.ToString() };
                 continue;
             }
 
-            // ##[endgroup] is just a metadata/content separator — ignore it
-            if (content.TrimEnd().Equals("##[endgroup]", StringComparison.OrdinalIgnoreCase))
+            if (content.TrimEnd().Equals("##[endgroup]".AsSpan(), StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            var (kind, html) = ParseLineContent(content);
+            var (kind, html) = ParseLineContent(content, sb);
 
             if (current != null)
             {
@@ -80,49 +90,101 @@ public static partial class GhaLogParser
         return entries;
     }
 
-    private static (GhaLogLineKind Kind, string Html) ParseLineContent(string content)
+    private static ReadOnlySpan<char> StripTimestamp(ReadOnlySpan<char> line)
     {
-        // ##[...] prefix (older / GitHub internal format)
-        if (content.StartsWith("##[error]", StringComparison.OrdinalIgnoreCase))
-            return (GhaLogLineKind.Error, ProcessAnsiColors(content["##[error]".Length..]));
-        if (content.StartsWith("##[warning]", StringComparison.OrdinalIgnoreCase))
-            return (GhaLogLineKind.Warning, ProcessAnsiColors(content["##[warning]".Length..]));
-        if (content.StartsWith("##[command]", StringComparison.OrdinalIgnoreCase))
-            return (GhaLogLineKind.Command, ProcessAnsiColors(content["##[command]".Length..]));
-        if (content.StartsWith("##[debug]", StringComparison.OrdinalIgnoreCase))
-            return (GhaLogLineKind.Debug, ProcessAnsiColors(content["##[debug]".Length..]));
+        // Format: YYYY-MM-DDTHH:MM:SS.{fractional}Z  (minimum 23 chars)
+        if (line.Length < 23 ||
+            line[4] != '-' || line[7] != '-' || line[10] != 'T' ||
+            line[13] != ':' || line[16] != ':' || line[19] != '.')
+            return line;
 
-        // [...]  prefix (format GitHub Actions runner uses for run: steps)
-        if (content.StartsWith("[error]", StringComparison.OrdinalIgnoreCase))
-            return (GhaLogLineKind.Error, ProcessAnsiColors(content["[error]".Length..]));
-        if (content.StartsWith("[warning]", StringComparison.OrdinalIgnoreCase))
-            return (GhaLogLineKind.Warning, ProcessAnsiColors(content["[warning]".Length..]));
-        if (content.StartsWith("[command]", StringComparison.OrdinalIgnoreCase))
-            return (GhaLogLineKind.Command, ProcessAnsiColors(content["[command]".Length..]));
-        if (content.StartsWith("[debug]", StringComparison.OrdinalIgnoreCase))
-            return (GhaLogLineKind.Debug, ProcessAnsiColors(content["[debug]".Length..]));
+        if (!IsDigit4(line, 0) || !IsDigit2(line, 5) || !IsDigit2(line, 8) ||
+            !IsDigit2(line, 11) || !IsDigit2(line, 14) || !IsDigit2(line, 17))
+            return line;
 
-        return (GhaLogLineKind.Normal, ProcessAnsiColors(content));
+        int i = 20;
+        while (i < line.Length && char.IsAsciiDigit(line[i])) i++;
+        if (i == 20) return line; // no fractional digits
+
+        if (i + 1 >= line.Length || line[i] != 'Z' || line[i + 1] != ' ') return line;
+        return line[(i + 2)..];
     }
 
-    private static string ProcessAnsiColors(string text)
+    private static bool IsDigit4(ReadOnlySpan<char> s, int pos) =>
+        char.IsAsciiDigit(s[pos]) && char.IsAsciiDigit(s[pos + 1]) &&
+        char.IsAsciiDigit(s[pos + 2]) && char.IsAsciiDigit(s[pos + 3]);
+
+    private static bool IsDigit2(ReadOnlySpan<char> s, int pos) =>
+        char.IsAsciiDigit(s[pos]) && char.IsAsciiDigit(s[pos + 1]);
+
+    private static (GhaLogLineKind Kind, string Html) ParseLineContent(ReadOnlySpan<char> content, StringBuilder sb)
     {
-        if (!text.Contains('\x1B'))
-            return WebUtility.HtmlEncode(text);
+        // ##[...] prefix (older / GitHub internal format)
+        if (content.StartsWith("##[error]".AsSpan(), StringComparison.OrdinalIgnoreCase))
+            return (GhaLogLineKind.Error, ProcessAnsiColors(content["##[error]".Length..], sb));
+        if (content.StartsWith("##[warning]".AsSpan(), StringComparison.OrdinalIgnoreCase))
+            return (GhaLogLineKind.Warning, ProcessAnsiColors(content["##[warning]".Length..], sb));
+        if (content.StartsWith("##[command]".AsSpan(), StringComparison.OrdinalIgnoreCase))
+            return (GhaLogLineKind.Command, ProcessAnsiColors(content["##[command]".Length..], sb));
+        if (content.StartsWith("##[debug]".AsSpan(), StringComparison.OrdinalIgnoreCase))
+            return (GhaLogLineKind.Debug, ProcessAnsiColors(content["##[debug]".Length..], sb));
 
-        var sb = new StringBuilder();
-        bool inSpan = false;
-        int lastIndex = 0;
+        // [...] prefix (format GitHub Actions runner uses for run: steps)
+        if (content.StartsWith("[error]".AsSpan(), StringComparison.OrdinalIgnoreCase))
+            return (GhaLogLineKind.Error, ProcessAnsiColors(content["[error]".Length..], sb));
+        if (content.StartsWith("[warning]".AsSpan(), StringComparison.OrdinalIgnoreCase))
+            return (GhaLogLineKind.Warning, ProcessAnsiColors(content["[warning]".Length..], sb));
+        if (content.StartsWith("[command]".AsSpan(), StringComparison.OrdinalIgnoreCase))
+            return (GhaLogLineKind.Command, ProcessAnsiColors(content["[command]".Length..], sb));
+        if (content.StartsWith("[debug]".AsSpan(), StringComparison.OrdinalIgnoreCase))
+            return (GhaLogLineKind.Debug, ProcessAnsiColors(content["[debug]".Length..], sb));
 
-        foreach (Match m in AnsiRx().Matches(text))
+        return (GhaLogLineKind.Normal, ProcessAnsiColors(content, sb));
+    }
+
+    private static string ProcessAnsiColors(ReadOnlySpan<char> text, StringBuilder sb)
+    {
+        sb.Clear();
+
+        if (text.IndexOf('\x1B') < 0)
         {
-            if (m.Index > lastIndex)
-                sb.Append(WebUtility.HtmlEncode(text[lastIndex..m.Index]));
+            AppendHtmlEncoded(text, sb);
+            return sb.ToString();
+        }
 
-            var codeStr = m.Groups[1].Value;
-            var code = 0;
-            if (!string.IsNullOrEmpty(codeStr))
-                _ = int.TryParse(codeStr.Split(';')[0], out code);
+        bool inSpan = false;
+        int start = 0, i = 0;
+
+        while (i < text.Length)
+        {
+            if (text[i] != '\x1B' || i + 1 >= text.Length || text[i + 1] != '[')
+            {
+                i++;
+                continue;
+            }
+
+            int seqStart = i;
+            int j = i + 2;
+            while (j < text.Length && (text[j] == ';' || char.IsAsciiDigit(text[j]))) j++;
+
+            // Not a valid SGR sequence — treat the ESC as literal and advance past it
+            if (j >= text.Length || text[j] != 'm')
+            {
+                i++;
+                continue;
+            }
+
+            if (seqStart > start) AppendHtmlEncoded(text[start..seqStart], sb);
+
+            // Extract first semicolon-delimited code only (matches original behavior)
+            int paramStart = seqStart + 2;
+            int code = 0;
+            if (j > paramStart)
+            {
+                int semi = text[paramStart..j].IndexOf(';');
+                var firstCode = semi >= 0 ? text[paramStart..(paramStart + semi)] : text[paramStart..j];
+                int.TryParse(firstCode, out code);
+            }
 
             if (code == 0)
             {
@@ -131,18 +193,62 @@ public static partial class GhaLogParser
             else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97))
             {
                 if (inSpan) sb.Append("</span>");
-                sb.Append($"<span class=\"ansi-{code}\">");
+                sb.Append(_ansiSpanTable[code]);
                 inSpan = true;
             }
+            // All other codes silently consumed — matches original behavior
 
-            lastIndex = m.Index + m.Length;
+            start = j + 1;
+            i = start;
         }
 
-        if (lastIndex < text.Length)
-            sb.Append(WebUtility.HtmlEncode(text[lastIndex..]));
-        if (inSpan)
-            sb.Append("</span>");
+        if (start < text.Length) AppendHtmlEncoded(text[start..], sb);
+        if (inSpan) sb.Append("</span>");
 
         return sb.ToString();
+    }
+
+    private static void AppendHtmlEncoded(ReadOnlySpan<char> text, StringBuilder sb)
+    {
+        int start = 0;
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            string? entity = c switch
+            {
+                '&'  => "&amp;",
+                '<'  => "&lt;",
+                '>'  => "&gt;",
+                '"'  => "&quot;",
+                '\'' => "&#39;",
+                _    => null
+            };
+
+            bool isSafe = c >= 0x20 && c <= 0x7E && entity == null;
+            if (isSafe) continue;
+
+            if (i > start) sb.Append(text[start..i]);
+
+            if (entity != null)
+            {
+                sb.Append(entity);
+                start = i + 1;
+                continue;
+            }
+
+            // Non-ASCII / control char: find the full unsafe run and delegate to WebUtility
+            int runEnd = i + 1;
+            while (runEnd < text.Length)
+            {
+                char n = text[runEnd];
+                if (n >= 0x20 && n <= 0x7E && n != '&' && n != '<' && n != '>' && n != '"' && n != '\'') break;
+                runEnd++;
+            }
+            sb.Append(WebUtility.HtmlEncode(text[i..runEnd].ToString()));
+            i = runEnd - 1;
+            start = runEnd;
+        }
+
+        if (start < text.Length) sb.Append(text[start..]);
     }
 }

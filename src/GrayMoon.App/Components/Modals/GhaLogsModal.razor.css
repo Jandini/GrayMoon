@@ -31,6 +31,17 @@
     justify-content: center;
 }
 
+/* Shown below the log content while subsequent jobs are still loading */
+.gha-logs-loadmore {
+    display: flex;
+    align-items: center;
+    padding: 0.4rem 0.75rem;
+    background: #1e1e1e;
+    color: #6b7280;
+    font-size: 0.8rem;
+    border-top: 1px solid #2d2d2d;
+}
+
 /* Scrollable log content area.
    position: relative makes it the offsetParent for child anchors,
    so offsetTop is correct for scrollTo() calculations. */
