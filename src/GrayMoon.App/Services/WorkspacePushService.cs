@@ -192,6 +192,11 @@ public sealed class WorkspacePushService(
                 }
                 var lastPollUtc = DateTime.MinValue;
 
+                // Prefetch all connectors for this level once to avoid concurrent DbContext reads in the polling loop
+                var connectorByIdForLevel = new Dictionary<int, Connector?>();
+                foreach (var cid in requiredForLevel.Select(r => r.MatchedConnectorId!.Value).Distinct())
+                    connectorByIdForLevel[cid] = await _connectorRepository!.GetByIdAsync(cid);
+
                 while (getFoundCount() < totalDeps)
                 {
                     linkedToken.ThrowIfCancellationRequested();
@@ -254,7 +259,7 @@ public sealed class WorkspacePushService(
                                 await Task.WhenAll(chunk.Select(async i =>
                                 {
                                     var req = requiredForLevel[i];
-                                    var connector = await _connectorRepository.GetByIdAsync(req.MatchedConnectorId!.Value);
+                                    connectorByIdForLevel.TryGetValue(req.MatchedConnectorId!.Value, out var connector);
                                     if (connector == null)
                                     {
                                         _logger.LogWarning("Push wait: package {PackageId} {Version} has no connector (MatchedConnectorId={ConnectorId}).", req.PackageId, req.Version, req.MatchedConnectorId);
@@ -666,6 +671,7 @@ public sealed class WorkspacePushService(
         var total = repos.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var rejectedRepos = new System.Collections.Concurrent.ConcurrentBag<(int RepoId, string RepoName)>();
         var pushTasks = repos.Select(async repo =>
         {
             await semaphore.WaitAsync(cancellationToken);
@@ -689,7 +695,7 @@ public sealed class WorkspacePushService(
                 {
                     var rawErr = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage;
                     if (IsNonFastForwardRejection(rawErr))
-                        await FetchAfterRejectionAsync(workspace.WorkspaceId, repo.RepoId, repo.RepoName, workspace.Name, workspaceRoot, cancellationToken);
+                        rejectedRepos.Add((repo.RepoId, repo.RepoName));
                     onRepoError?.Invoke(repo.RepoId, FormatPushError(rawErr));
                 }
                 var c = Interlocked.Increment(ref completed);
@@ -703,6 +709,8 @@ public sealed class WorkspacePushService(
             }
         });
         await Task.WhenAll(pushTasks);
+        foreach (var (repoId, repoName) in rejectedRepos)
+            await FetchAfterRejectionAsync(workspace.WorkspaceId, repoId, repoName, workspace.Name, workspaceRoot, cancellationToken);
     }
 
     private static bool IsNonFastForwardRejection(string? err) =>

@@ -868,17 +868,24 @@ public sealed partial class WorkspaceRepositories : IDisposable
             {
                 try
                 {
-                    await using var scope = ServiceScopeFactory.CreateAsyncScope();
-                    var branchHandler = scope.ServiceProvider.GetRequiredService<WorkspaceBranchHandler>();
-                    await branchHandler.FetchBranchesForWorkspaceAsync(
-                        WorkspaceId,
-                        safeRepoIds,
-                        ApiBaseUrl,
-                        (done, total) =>
+                    var fetchDone = 0;
+                    using var fetchSemaphore = new System.Threading.SemaphoreSlim(8);
+                    await Task.WhenAll(safeRepoIds.Select(async repoId =>
+                    {
+                        await fetchSemaphore.WaitAsync(ct);
+                        try
                         {
-                            job.ReportProgress(done <= 0 ? "Fetching latest branch state..." : $"Fetched {done} of {total}...");
-                        },
-                        ct);
+                            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                            var gitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                            await gitService.RefreshBranchesForRepositoryAsync(repoId, WorkspaceId, ct);
+                        }
+                        finally
+                        {
+                            fetchSemaphore.Release();
+                            var c = Interlocked.Increment(ref fetchDone);
+                            job.ReportProgress($"Fetched {c} of {safeRepoIds.Count}...");
+                        }
+                    }));
 
                     await InvokeAsync(async () =>
                     {
@@ -2476,19 +2483,28 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                await using var scope = ServiceScopeFactory.CreateAsyncScope();
-                var branchHandler = scope.ServiceProvider.GetRequiredService<WorkspaceBranchHandler>();
-                var result = await branchHandler.FetchBranchesForWorkspaceAsync(
-                    WorkspaceId,
-                    repoIds,
-                    ApiBaseUrl,
-                    (completed, total) =>
+                var fetchAllDone = 0;
+                var successCount = 0;
+                var failureCount = 0;
+                using var fetchAllSemaphore = new System.Threading.SemaphoreSlim(8);
+                await Task.WhenAll(repoIds.Select(async repoId =>
+                {
+                    await fetchAllSemaphore.WaitAsync(ct);
+                    try
                     {
-                        job.ReportProgress(completed <= 0
-                            ? "Fetching branches..."
-                            : $"Fetched branches in {completed} of {total} repositories...");
-                    },
-                    ct);
+                        await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                        var gitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                        var ok = await gitService.RefreshBranchesForRepositoryAsync(repoId, WorkspaceId, ct);
+                        if (ok) Interlocked.Increment(ref successCount);
+                        else Interlocked.Increment(ref failureCount);
+                    }
+                    finally
+                    {
+                        fetchAllSemaphore.Release();
+                        var c = Interlocked.Increment(ref fetchAllDone);
+                        job.ReportProgress($"Fetched branches in {c} of {repoIds.Count} repositories...");
+                    }
+                }));
 
                 await InvokeAsync(async () =>
                 {
@@ -2498,8 +2514,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     StateHasChanged();
                 });
 
-                if (result.FailureCount > 0)
-                    SafeInvoke(() => ToastService.Show($"Fetched branches for {result.SuccessCount} repositories. {result.FailureCount} failed."));
+                if (failureCount > 0)
+                    SafeInvoke(() => ToastService.Show($"Fetched branches for {successCount} repositories. {failureCount} failed."));
             }
             catch (OperationCanceledException)
             {

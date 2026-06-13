@@ -754,6 +754,56 @@ public class WorkspaceGitService(
         return (true, null);
     }
 
+    /// <summary>Refreshes branches for a single repository by calling the agent directly. Routes CommandOutput to TerminalSinkContext when called within a background job.</summary>
+    public async Task<bool> RefreshBranchesForRepositoryAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var repo = await _repositoryRepository.GetByIdAsync(repositoryId, cancellationToken);
+        if (repo == null) return false;
+
+        var wr = await _dbContext.WorkspaceRepositories
+            .FirstOrDefaultAsync(x => x.WorkspaceId == workspaceId && x.RepositoryId == repositoryId, cancellationToken);
+        if (wr == null) return false;
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null) return false;
+
+        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var response = await _agentBridge.SendCommandAsync("RefreshBranches", new
+        {
+            workspaceName = workspace.Name,
+            repositoryId = repo.RepositoryId,
+            repositoryName = repo.RepositoryName,
+            workspaceRoot
+        }, cancellationToken);
+
+        if (!response.Success) return false;
+
+        var refreshResponse = AgentResponseJson.DeserializeAgentResponse<BranchesResponse>(response.Data);
+        if (refreshResponse == null) return false;
+
+        var localBranches = refreshResponse.LocalBranches.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
+        var remoteBranches = refreshResponse.RemoteBranches.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
+        var tags = refreshResponse.Tags.Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
+
+        await PersistBranchesAsync(wr.WorkspaceRepositoryId, localBranches, remoteBranches, refreshResponse.DefaultBranch, tags, refreshResponse.CurrentTag, cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(refreshResponse.CurrentTag))
+        {
+            var branch = refreshResponse.CurrentBranch?.Trim();
+            if (!string.IsNullOrWhiteSpace(branch))
+            {
+                var hasUpstream = remoteBranches.Any(r => !string.IsNullOrEmpty(r) &&
+                    (string.Equals(r, branch, StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(r, "origin/" + branch, StringComparison.OrdinalIgnoreCase)
+                     || r.EndsWith("/" + branch, StringComparison.OrdinalIgnoreCase)));
+                wr.BranchHasUpstream = hasUpstream;
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+        }
+
+        return true;
+    }
+
     public async Task<IReadOnlyDictionary<int, RepoSyncStatus>> GetRepoSyncStatusAsync(
         int workspaceId,
         Action<int, RepoSyncStatus>? onProgress = null,
@@ -1223,6 +1273,16 @@ public class WorkspaceGitService(
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
 
+        // Prefetch all default branches before the parallel section to avoid concurrent DbContext reads
+        Dictionary<int, string>? defaultBranchByWrId = null;
+        if (useDefaultBase)
+        {
+            var wrIds = links.Select(l => l.WorkspaceRepositoryId).ToList();
+            defaultBranchByWrId = await _dbContext.RepositoryBranches
+                .Where(rb => wrIds.Contains(rb.WorkspaceRepositoryId) && rb.IsDefault)
+                .ToDictionaryAsync(rb => rb.WorkspaceRepositoryId, rb => rb.BranchName, cancellationToken);
+        }
+
         async Task ProcessOne(WorkspaceRepositoryLink wr)
         {
             await semaphore.WaitAsync(cancellationToken);
@@ -1235,11 +1295,7 @@ public class WorkspaceGitService(
                 string baseBranchName;
                 if (useDefaultBase)
                 {
-                    var defaultRow = await _dbContext.RepositoryBranches
-                        .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsDefault)
-                        .Select(rb => rb.BranchName)
-                        .FirstOrDefaultAsync(cancellationToken);
-                    baseBranchName = defaultRow ?? "main";
+                    baseBranchName = defaultBranchByWrId?.GetValueOrDefault(wr.WorkspaceRepositoryId) ?? "main";
                 }
                 else
                 {
