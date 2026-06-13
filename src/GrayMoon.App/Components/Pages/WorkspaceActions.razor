@@ -329,7 +329,7 @@
                                                                     }
                                                                 </button>
                                                             }
-                                                            @if (line.Action?.RunId != null)
+                                                            @if (line.Action?.RunId != null && !IsLineRunningForBranch(row, line))
                                                             {
                                                                 <button class="btn btn-outline-secondary action-run-btn"
                                                                         @onclick="() => OpenLogsModal(row, line)"
