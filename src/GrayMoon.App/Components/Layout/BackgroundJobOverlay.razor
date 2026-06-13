@@ -2,6 +2,7 @@
 @inject IBackgroundJobService JobService
 @inject NavigationManager Nav
 @inject AgentQueueStateService AgentQueueStateService
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
 @implements IDisposable
 
 @if (_job is { State: BackgroundJobState.Running })
