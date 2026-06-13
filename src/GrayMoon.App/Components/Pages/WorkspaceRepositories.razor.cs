@@ -868,7 +868,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
             {
                 try
                 {
-                    await WorkspaceBranchHandler.FetchBranchesForWorkspaceAsync(
+                    await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                    var branchHandler = scope.ServiceProvider.GetRequiredService<WorkspaceBranchHandler>();
+                    await branchHandler.FetchBranchesForWorkspaceAsync(
                         WorkspaceId,
                         safeRepoIds,
                         ApiBaseUrl,
@@ -1213,7 +1215,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                var (success, pushError) = await WorkspacePushHandler.PushSingleRepositoryWithUpstreamAsync(
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var pushHandler = scope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
+                var (success, pushError) = await pushHandler.PushSingleRepositoryWithUpstreamAsync(
                     WorkspaceId,
                     repositoryId,
                     branchName,
@@ -1421,15 +1425,19 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                await WorkspaceUpdateHandler.RunUpdateAsync(
-                    WorkspaceId,
-                    ct,
-                    job.ReportProgress,
-                    (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
-                    onAppSideComplete: () => { },
-                    repoIdsToUpdate: null,
-                    commitMessage: commitMessage,
-                    includeDepsInCommitMessage: includeDepsInCommitMessage);
+                await using (var updateScope = ServiceScopeFactory.CreateAsyncScope())
+                {
+                    var updateHandler = updateScope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
+                    await updateHandler.RunUpdateAsync(
+                        WorkspaceId,
+                        ct,
+                        job.ReportProgress,
+                        (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
+                        onAppSideComplete: () => { },
+                        repoIdsToUpdate: null,
+                        commitMessage: commitMessage,
+                        includeDepsInCommitMessage: includeDepsInCommitMessage);
+                }
 
                 await InvokeAsync(async () =>
                 {
@@ -1464,7 +1472,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                var (updated, failed, error, _) = await FileVersionService.UpdateAllVersionsAsync(
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
+                var (updated, failed, error, _) = await fileVersionService.UpdateAllVersionsAsync(
                     WorkspaceId, selectedRepositoryIds: null, cancellationToken: ct);
 
                 SafeInvoke(() =>
@@ -1833,7 +1843,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                repoGitInfos = await WorkspaceSyncHandler.RunSyncAsync(
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var syncHandler = scope.ServiceProvider.GetRequiredService<WorkspaceSyncHandler>();
+                repoGitInfos = await syncHandler.RunSyncAsync(
                     WorkspaceId,
                     repositoryIds: null,
                     skipDependencyLevelPersistence: isRetryAfterError,
@@ -1914,7 +1926,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                repoGitInfos = await WorkspaceSyncHandler.RunSyncAsync(
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var syncHandler = scope.ServiceProvider.GetRequiredService<WorkspaceSyncHandler>();
+                repoGitInfos = await syncHandler.RunSyncAsync(
                     WorkspaceId,
                     repositoryIds,
                     skipDependencyLevelPersistence: true,
@@ -1994,7 +2008,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                repoGitInfos = await WorkspaceSyncHandler.RunSyncAsync(
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var syncHandler = scope.ServiceProvider.GetRequiredService<WorkspaceSyncHandler>();
+                repoGitInfos = await syncHandler.RunSyncAsync(
                     WorkspaceId,
                     new[] { repositoryId },
                     skipDependencyLevelPersistence: true,
@@ -2078,7 +2094,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                await WorkspaceCommitSyncHandler.CommitSyncAsync(
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var commitSyncHandler = scope.ServiceProvider.GetRequiredService<WorkspaceCommitSyncHandler>();
+                await commitSyncHandler.CommitSyncAsync(
                     WorkspaceId,
                     repositoryId,
                     ApiBaseUrl,
@@ -2131,7 +2149,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                await WorkspaceCommitSyncHandler.CommitSyncLevelAsync(
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var commitSyncHandler = scope.ServiceProvider.GetRequiredService<WorkspaceCommitSyncHandler>();
+                await commitSyncHandler.CommitSyncLevelAsync(
                     WorkspaceId,
                     repositoryIds,
                     ApiBaseUrl,
@@ -2456,7 +2476,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                var result = await WorkspaceBranchHandler.FetchBranchesForWorkspaceAsync(
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var branchHandler = scope.ServiceProvider.GetRequiredService<WorkspaceBranchHandler>();
+                var result = await branchHandler.FetchBranchesForWorkspaceAsync(
                     WorkspaceId,
                     repoIds,
                     ApiBaseUrl,
@@ -2513,7 +2535,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                var result = await WorkspaceBranchHandler.CheckoutBranchForWorkspaceAsync(
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var branchHandler = scope.ServiceProvider.GetRequiredService<WorkspaceBranchHandler>();
+                var result = await branchHandler.CheckoutBranchForWorkspaceAsync(
                     WorkspaceId,
                     repoIds,
                     branchName,
@@ -2579,7 +2603,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                await WorkspaceBranchHandler.CreateBranchesAsync(
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var branchHandler = scope.ServiceProvider.GetRequiredService<WorkspaceBranchHandler>();
+                await branchHandler.CreateBranchesAsync(
                     WorkspaceId,
                     newBranchName,
                     baseBranch,
@@ -2632,7 +2658,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                var (success, err) = await WorkspaceBranchHandler.CreateSingleBranchAsync(
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var branchHandler = scope.ServiceProvider.GetRequiredService<WorkspaceBranchHandler>();
+                var (success, err) = await branchHandler.CreateSingleBranchAsync(
                     WorkspaceId,
                     repositoryId,
                     newBranchName,
@@ -2730,7 +2758,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                var (success, errMsg) = await WorkspaceBranchHandler.SyncToDefaultSingleAsync(
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var branchHandler = scope.ServiceProvider.GetRequiredService<WorkspaceBranchHandler>();
+                var (success, errMsg) = await branchHandler.SyncToDefaultSingleAsync(
                     WorkspaceId,
                     repositoryId,
                     currentBranchName,
@@ -2807,7 +2837,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     try
                     {
                         var repoHasRemote = !resultByRepo.TryGetValue(repositoryId, out var repoCheck) || repoCheck.HasUpstream == true;
-                        var (success, errMsg) = await WorkspaceBranchHandler.SyncToDefaultSingleAsync(
+                        await using var taskScope = ServiceScopeFactory.CreateAsyncScope();
+                        var taskBranchHandler = taskScope.ServiceProvider.GetRequiredService<WorkspaceBranchHandler>();
+                        var (success, errMsg) = await taskBranchHandler.SyncToDefaultSingleAsync(
                             WorkspaceId,
                             repositoryId,
                             currentBranchName,
@@ -2874,7 +2906,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             try
             {
-                var (success, errMsg) = await WorkspaceBranchHandler.CheckoutBranchAsync(
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var branchHandler = scope.ServiceProvider.GetRequiredService<WorkspaceBranchHandler>();
+                var (success, errMsg) = await branchHandler.CheckoutBranchAsync(
                     WorkspaceId,
                     repositoryId,
                     branchName,
