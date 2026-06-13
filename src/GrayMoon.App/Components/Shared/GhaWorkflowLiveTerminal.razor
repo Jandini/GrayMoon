@@ -136,7 +136,7 @@
                     if (_spinnerFrame == 0 && _spinnerDots < MaxDots)
                         _spinnerDots++;
 
-                    _spinnerText = $"  {new string('.', _spinnerDots)}{SpinnerFrames[_spinnerFrame]}";
+                    _spinnerText = $"  {new string('⠂', _spinnerDots)}{SpinnerFrames[_spinnerFrame]}";
                     StateHasChanged();
                 });
             }
