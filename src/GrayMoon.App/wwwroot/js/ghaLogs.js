@@ -23,14 +23,5 @@ window.ghaLogs = {
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
         }, 200);
-    },
-
-    scrollToJob: function (contentEl, anchorId) {
-        if (!contentEl) return;
-        // The anchor div is a direct child of the scroll container and has position: relative
-        // as its offsetParent (because the container is position: relative).
-        // offsetTop gives the natural position — not affected by sticky children.
-        const anchor = document.getElementById(anchorId);
-        if (anchor) contentEl.scrollTo({ top: anchor.offsetTop, behavior: 'smooth' });
     }
 };

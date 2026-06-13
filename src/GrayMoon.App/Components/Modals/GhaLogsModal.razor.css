@@ -113,15 +113,11 @@
     align-items: center;
     gap: 0.35rem;
     padding: 0.45rem 0.75rem;
-    border-top: 1px solid #2d2d2d;
+    border-bottom: 1px solid #2d2d2d;
     background: #1a1a1a;
     position: sticky;
     top: 0;
     z-index: 1;
-}
-
-.gha-job-anchor:first-of-type + .gha-log-job {
-    border-top: none;
 }
 
 /* Pill-shaped badge — reuses action-badge colour palette */

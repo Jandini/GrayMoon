@@ -37,24 +37,22 @@
                     else
                     {
                         <div class="gha-logs-content" @ref="_contentRef">
-                            @foreach (var job in _jobs)
+                            <div class="gha-log-job">
+                                @foreach (var navJob in _jobs)
+                                {
+                                    var isSelected = navJob.Meta.Id == _selectedJobId;
+                                    <button type="button"
+                                            class="gha-log-job__pill gha-log-job__pill--@(isSelected ? JobStatusClass(navJob.Meta) : "other")"
+                                            title="@navJob.Meta.Name"
+                                            @onclick="() => _selectedJobId = navJob.Meta.Id">
+                                        <span class="gha-log-job__name">@navJob.Meta.Name</span>
+                                    </button>
+                                }
+                            </div>
+                            @{ var selectedJob = SelectedJob; }
+                            @if (selectedJob != null)
                             {
-                                <!-- Zero-height anchor: stable offsetTop relative to the scroll container -->
-                                <div id="@($"gha-job-{job.Meta.Id}")" class="gha-job-anchor"></div>
-                                <div class="gha-log-job">
-                                    @foreach (var navJob in _jobs)
-                                    {
-                                        var isCurrent = navJob.Meta.Id == job.Meta.Id;
-                                        var navJobAnchorId = $"gha-job-{navJob.Meta.Id}";
-                                        <button type="button"
-                                                class="gha-log-job__pill gha-log-job__pill--@(isCurrent ? JobStatusClass(navJob.Meta) : "other")"
-                                                title="@navJob.Meta.Name"
-                                                @onclick="() => ScrollToJobAsync(navJobAnchorId)">
-                                            <span class="gha-log-job__name">@navJob.Meta.Name</span>
-                                        </button>
-                                    }
-                                </div>
-                                @foreach (var entry in job.Entries)
+                                @foreach (var entry in selectedJob.Entries)
                                 {
                                     @if (entry is GhaLogGroupEntry group && ShouldShowEntry(group))
                                     {
@@ -144,14 +142,17 @@
     private bool _loadTriggered;
     private bool _autoSelectInitialized;
     private string? _errorMessage;
+    private long? _selectedJobId;
     private List<JobLogEntry> _jobs = [];
     private ElementReference _contentRef;
 
-    private int ErrorCount => _jobs.Sum(j => j.Entries.Count(e =>
-        (e is GhaLogGroupEntry g && g.HasError) || (e is GhaLogLineEntry l && l.Kind == GhaLogLineKind.Error)));
+    private JobLogEntry? SelectedJob => _jobs.FirstOrDefault(j => j.Meta.Id == _selectedJobId);
 
-    private int WarningCount => _jobs.Sum(j => j.Entries.Count(e =>
-        (e is GhaLogGroupEntry g && g.HasWarning) || (e is GhaLogLineEntry l && l.Kind == GhaLogLineKind.Warning)));
+    private int ErrorCount => SelectedJob == null ? 0 : SelectedJob.Entries.Count(e =>
+        (e is GhaLogGroupEntry g && g.HasError) || (e is GhaLogLineEntry l && l.Kind == GhaLogLineKind.Error));
+
+    private int WarningCount => SelectedJob == null ? 0 : SelectedJob.Entries.Count(e =>
+        (e is GhaLogGroupEntry g && g.HasWarning) || (e is GhaLogLineEntry l && l.Kind == GhaLogLineKind.Warning));
 
     private bool ShouldShowEntry(GhaLogEntry entry)
     {
@@ -179,6 +180,7 @@
             _loadTriggered = false;
             _autoSelectInitialized = false;
             _errorMessage = null;
+            _selectedJobId = null;
             _jobs.Clear();
         }
         else if (!IsVisible)
@@ -227,6 +229,7 @@
                     ? GhaLogParser.ParseJobLog(rawLog)
                     : [new GhaLogLineEntry(GhaLogLineKind.Normal, "Log not available.")];
                 _jobs.Add(new JobLogEntry(job, entries, rawLog));
+                AutoSelectJob();
 
                 if (jobIdx == 0)
                 {
@@ -248,9 +251,13 @@
         }
     }
 
-    private async Task ScrollToJobAsync(string anchorId)
+    private void AutoSelectJob()
     {
-        try { await JS.InvokeVoidAsync("ghaLogs.scrollToJob", _contentRef, anchorId); } catch { }
+        if (_selectedJobId != null) return;
+        _selectedJobId =
+            _jobs.FirstOrDefault(j => string.Equals(j.Meta.Status, "in_progress", StringComparison.OrdinalIgnoreCase))?.Meta.Id
+            ?? _jobs.FirstOrDefault(j => string.Equals(j.Meta.Conclusion, "failure", StringComparison.OrdinalIgnoreCase))?.Meta.Id
+            ?? _jobs.FirstOrDefault()?.Meta.Id;
     }
 
     private async Task DownloadLogsAsync()
