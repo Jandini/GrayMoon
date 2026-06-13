@@ -84,6 +84,13 @@ public sealed partial class WorkspaceActions : IDisposable
     private bool _showNone;
     private string searchTerm = string.Empty;
 
+    private bool _logsModalVisible;
+    private string? _logsConnectorName;
+    private string? _logsOwner;
+    private string? _logsRepo;
+    private long _logsRunId;
+    private string? _logsWorkflowName;
+
     private enum ActionLineFilterBucket
     {
         Failed,
@@ -150,6 +157,23 @@ public sealed partial class WorkspaceActions : IDisposable
             searchTerm = string.Empty;
             StateHasChanged();
         }
+    }
+
+    internal void OpenLogsModal(WorkspaceActionRow row, WorkflowActionLine line)
+    {
+        _logsConnectorName = row.Repo.ConnectorName;
+        _logsOwner = row.Repo.OrgName ?? "";
+        _logsRepo = row.Repo.RepositoryName;
+        _logsRunId = line.Action!.RunId!.Value;
+        _logsWorkflowName = line.Action.WorkflowName;
+        _logsModalVisible = true;
+        StateHasChanged();
+    }
+
+    internal void CloseLogsModal()
+    {
+        _logsModalVisible = false;
+        StateHasChanged();
     }
 
     internal void ToggleShowErrors()

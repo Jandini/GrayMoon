@@ -1,0 +1,258 @@
+/* Outer modal overlay — styled scrollbar for when min-height forces overflow */
+.modal {
+    scrollbar-color: #5a5a5a transparent;
+    scrollbar-width: thin;
+}
+
+.modal::-webkit-scrollbar {
+    width: 8px;
+}
+
+.modal::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.modal::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.gha-logs-dialog {
+    width: calc(100vw - 1rem);
+    max-width: calc(100vw - 1rem);
+    max-height: calc(100vh - 2rem);
+    margin: 1rem 0.5rem;
+}
+
+/* Fixed-height flex column so the modal never grows/shrinks when content loads */
+::deep .modal-content {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 2rem);
+    max-height: calc(100vh - 2rem);
+    min-height: 360px;
+}
+
+/* Body fills remaining space between header and footer, never overflows */
+::deep .modal-body {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+}
+
+/* Loading spinner occupies the same space as the content area */
+.gha-logs-loading {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Shown below the log content while subsequent jobs are still loading */
+.gha-logs-loadmore {
+    display: flex;
+    align-items: center;
+    padding: 0.4rem 0.75rem;
+    background: #1e1e1e;
+    color: #6b7280;
+    font-size: 0.8rem;
+    border-top: 1px solid #2d2d2d;
+}
+
+/* Scrollable log content area.
+   position: relative makes it the offsetParent for child anchors,
+   so offsetTop is correct for scrollTo() calculations. */
+.gha-logs-content {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    position: relative;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    scrollbar-color: #5a5a5a #1e1e1e;
+    scrollbar-width: auto;
+    user-select: text;
+}
+
+.gha-logs-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.gha-logs-content::-webkit-scrollbar-track {
+    background: #1e1e1e;
+}
+
+.gha-logs-content::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.gha-logs-content::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}
+
+/* Zero-height scroll anchor — must not have position: sticky */
+.gha-job-anchor {
+    height: 0;
+    overflow: hidden;
+}
+
+/* ── Job badge headers ──────────────────────────────────────── */
+
+.gha-log-job {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid #2d2d2d;
+    background: #1a1a1a;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+/* Pill-shaped badge — reuses action-badge colour palette */
+.gha-log-job__pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.18rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    border: none;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: filter 0.12s;
+}
+
+.gha-log-job__pill:hover {
+    filter: brightness(1.15);
+}
+
+/* Non-current job pills: gray */
+.gha-log-job__pill--other {
+    background: #383838;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* Status-colored pills (current job) */
+.gha-log-job__pill--success { background: #238636; color: #fff; }
+.gha-log-job__pill--failure { background: #da3633; color: #fff; }
+.gha-log-job__pill--aborted { background: #8957e5; color: #fff; }
+.gha-log-job__pill--running { background: #d29922; color: #000; }
+.gha-log-job__pill--skipped { background: #495057; color: rgba(255, 255, 255, 0.7); }
+.gha-log-job__pill--none    { background: #495057; color: rgba(255, 255, 255, 0.7); }
+
+/* ── Collapsible step groups ────────────────────────────────── */
+
+.gha-log-group {
+    border-left: 2px solid #3e3e42;
+    margin: 0.12rem 0;
+}
+
+.gha-log-group__header {
+    background: #252526;
+    color: #9cdcfe;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 500;
+    list-style: none;
+    padding: 0.25rem 0.85rem;
+    user-select: none;
+}
+
+.gha-log-group__header::-webkit-details-marker {
+    display: none;
+}
+
+.gha-log-group__header::before {
+    content: "▶ ";
+    font-size: 0.62rem;
+    opacity: 0.65;
+}
+
+.gha-log-group[open] > .gha-log-group__header::before {
+    content: "▼ ";
+}
+
+.gha-log-group__header:hover {
+    background: #2d2d2d;
+}
+
+.gha-log-group--error > .gha-log-group__header {
+    color: #f87171;
+    border-left: 2px solid #f87171;
+    margin-left: -2px;
+}
+
+/* Indented lines inside an open group */
+.gha-log-group__lines {
+    padding-left: 1.25rem;
+    padding-bottom: 0.15rem;
+}
+
+/* ── Individual log lines ───────────────────────────────────── */
+
+.gha-log-line {
+    font-family: inherit;
+    padding: 0.04rem 1rem;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    word-break: break-word;
+}
+
+.gha-log-line--normal {
+    color: #d4d4d4;
+}
+
+.gha-log-line--error {
+    color: #f87171;
+    background: rgba(248, 113, 113, 0.06);
+}
+
+.gha-log-line--warning {
+    color: #fbbf24;
+}
+
+.gha-log-line--command {
+    color: #94a3b8;
+}
+
+.gha-log-line--command::before {
+    content: "$ ";
+    opacity: 0.5;
+    font-weight: 600;
+}
+
+.gha-log-line--debug {
+    color: #6b7280;
+    opacity: 0.75;
+}
+
+/* ── ANSI foreground color spans ────────────────────────────── */
+
+.ansi-30 { color: #555; }
+.ansi-31 { color: #f87171; }
+.ansi-32 { color: #86efac; }
+.ansi-33 { color: #fbbf24; }
+.ansi-34 { color: #60a5fa; }
+.ansi-35 { color: #c084fc; }
+.ansi-36 { color: #67e8f9; }
+.ansi-37 { color: #d4d4d4; }
+.ansi-90 { color: #6b7280; }
+.ansi-91 { color: #fca5a5; }
+.ansi-92 { color: #bbf7d0; }
+.ansi-93 { color: #fde68a; }
+.ansi-94 { color: #93c5fd; }
+.ansi-95 { color: #d8b4fe; }
+.ansi-96 { color: #a5f3fc; }
+.ansi-97 { color: #f5f5f5; }
