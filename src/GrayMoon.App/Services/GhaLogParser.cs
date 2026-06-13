@@ -27,53 +27,46 @@ public static partial class GhaLogParser
         public List<GhaLogLineEntry> Lines { get; } = [];
     }
 
+    // GitHub Actions log format:
+    //   ##[group]Step Name    ← starts a new section; closes previous one
+    //   metadata lines...     ← inside the "header" of the group
+    //   ##[endgroup]          ← separates metadata from output; NOT a section closer
+    //   actual output lines   ← still belong to the same section
+    //   ##[group]Next step    ← THIS closes the previous section and starts the next
+    //
+    // So ##[endgroup] is simply ignored for structural purposes.
+    // Everything from ##[group] to just before the next ##[group] (or EOF) = one collapsible unit.
     public static List<GhaLogEntry> ParseJobLog(string rawLog)
     {
         var entries = new List<GhaLogEntry>();
         if (string.IsNullOrEmpty(rawLog)) return entries;
 
-        var stack = new Stack<GroupBuilder>();
+        GroupBuilder? current = null;
 
         foreach (var raw in rawLog.Split('\n'))
         {
             var line = raw.TrimEnd('\r');
             var content = TimestampRx().Replace(line, "", 1);
 
-            if (content.TrimEnd().Equals("##[endgroup]", StringComparison.OrdinalIgnoreCase))
+            if (content.StartsWith("##[group]", StringComparison.OrdinalIgnoreCase))
             {
-                if (stack.Count > 0)
-                {
-                    var g = stack.Pop();
-                    if (stack.Count == 0)
-                    {
-                        entries.Add(new GhaLogGroupEntry(g.Title, g.HasError, g.Lines));
-                    }
-                    else
-                    {
-                        // Nested group: flatten into parent with a sub-header line
-                        var parent = stack.Peek();
-                        parent.Lines.Add(new GhaLogLineEntry(GhaLogLineKind.Normal,
-                            $"<span class=\"gha-sub-group-header\">▸ {g.Title}</span>"));
-                        parent.Lines.AddRange(g.Lines);
-                        if (g.HasError) parent.HasError = true;
-                    }
-                }
+                if (current != null)
+                    entries.Add(new GhaLogGroupEntry(current.Title, current.HasError, current.Lines));
+
+                current = new GroupBuilder { Title = WebUtility.HtmlEncode(content["##[group]".Length..]) };
                 continue;
             }
 
-            if (content.StartsWith("##[group]", StringComparison.OrdinalIgnoreCase))
-            {
-                stack.Push(new GroupBuilder { Title = WebUtility.HtmlEncode(content["##[group]".Length..]) });
+            // ##[endgroup] is just a metadata/content separator — ignore it
+            if (content.TrimEnd().Equals("##[endgroup]", StringComparison.OrdinalIgnoreCase))
                 continue;
-            }
 
             var (kind, html) = ParseLineContent(content);
 
-            if (stack.Count > 0)
+            if (current != null)
             {
-                var top = stack.Peek();
-                top.Lines.Add(new GhaLogLineEntry(kind, html));
-                if (kind == GhaLogLineKind.Error) top.HasError = true;
+                current.Lines.Add(new GhaLogLineEntry(kind, html));
+                if (kind == GhaLogLineKind.Error) current.HasError = true;
             }
             else
             {
@@ -81,19 +74,15 @@ public static partial class GhaLogParser
             }
         }
 
-        // Flush any unclosed groups (top of stack = innermost)
-        while (stack.Count > 0)
-        {
-            var g = stack.Pop();
-            entries.Insert(0, new GhaLogGroupEntry(g.Title, g.HasError, g.Lines));
-        }
+        if (current != null)
+            entries.Add(new GhaLogGroupEntry(current.Title, current.HasError, current.Lines));
 
         return entries;
     }
 
     private static (GhaLogLineKind Kind, string Html) ParseLineContent(string content)
     {
-        // Detect markers with ##[...] prefix (older GitHub format)
+        // ##[...] prefix (older / GitHub internal format)
         if (content.StartsWith("##[error]", StringComparison.OrdinalIgnoreCase))
             return (GhaLogLineKind.Error, ProcessAnsiColors(content["##[error]".Length..]));
         if (content.StartsWith("##[warning]", StringComparison.OrdinalIgnoreCase))
@@ -103,7 +92,7 @@ public static partial class GhaLogParser
         if (content.StartsWith("##[debug]", StringComparison.OrdinalIgnoreCase))
             return (GhaLogLineKind.Debug, ProcessAnsiColors(content["##[debug]".Length..]));
 
-        // Detect markers with [...]  prefix (format used by GitHub Actions runner for run: steps)
+        // [...]  prefix (format GitHub Actions runner uses for run: steps)
         if (content.StartsWith("[error]", StringComparison.OrdinalIgnoreCase))
             return (GhaLogLineKind.Error, ProcessAnsiColors(content["[error]".Length..]));
         if (content.StartsWith("[warning]", StringComparison.OrdinalIgnoreCase))

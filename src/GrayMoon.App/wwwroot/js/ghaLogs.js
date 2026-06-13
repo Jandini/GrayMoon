@@ -25,9 +25,12 @@ window.ghaLogs = {
         }, 200);
     },
 
-    scrollToJob: function (contentEl, jobId) {
+    scrollToJob: function (contentEl, anchorId) {
         if (!contentEl) return;
-        const jobEl = document.getElementById(jobId);
-        if (jobEl) contentEl.scrollTo({ top: jobEl.offsetTop, behavior: 'smooth' });
+        // The anchor div is a direct child of the scroll container and has position: relative
+        // as its offsetParent (because the container is position: relative).
+        // offsetTop gives the natural position — not affected by sticky children.
+        const anchor = document.getElementById(anchorId);
+        if (anchor) contentEl.scrollTo({ top: anchor.offsetTop, behavior: 'smooth' });
     }
 };

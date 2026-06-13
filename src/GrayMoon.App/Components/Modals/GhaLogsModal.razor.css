@@ -31,12 +31,15 @@
     justify-content: center;
 }
 
-/* Scrollable log content area */
+/* Scrollable log content area.
+   position: relative makes it the offsetParent for child anchors,
+   so offsetTop is correct for scrollTo() calculations. */
 .gha-logs-content {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
+    position: relative;
     background: #1e1e1e;
     color: #d4d4d4;
     font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
@@ -64,18 +67,28 @@
     background: #6a6a6a;
 }
 
+/* Zero-height scroll anchor — must not have position: sticky */
+.gha-job-anchor {
+    height: 0;
+    overflow: hidden;
+}
+
 /* ── Job badge headers ──────────────────────────────────────── */
 
 .gha-log-job {
-    padding: 0.55rem 0.85rem 0.35rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.45rem 0.75rem;
     border-top: 1px solid #2d2d2d;
-    background: #1e1e1e;
+    background: #1a1a1a;
     position: sticky;
     top: 0;
     z-index: 1;
 }
 
-.gha-log-job:first-child {
+.gha-job-anchor:first-of-type + .gha-log-job {
     border-top: none;
 }
 
@@ -88,8 +101,14 @@
     border-radius: 999px;
     font-size: 0.78rem;
     font-weight: 500;
-    user-select: none;
+    border: none;
     letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: filter 0.12s;
+}
+
+.gha-log-job__pill:hover {
+    filter: brightness(1.15);
 }
 
 /* Inner circle — like the count badge in the status filter chips */
@@ -107,6 +126,18 @@
     flex-shrink: 0;
 }
 
+/* Non-current job pills: compact (icon only), gray */
+.gha-log-job__pill--other {
+    background: #383838;
+    color: rgba(255, 255, 255, 0.5);
+    padding: 0.18rem 0.22rem;
+}
+
+.gha-log-job__pill--other .gha-log-job__icon-dot {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+/* Status-colored pills (current job) */
 .gha-log-job__pill--success { background: #238636; color: #fff; }
 .gha-log-job__pill--failure { background: #da3633; color: #fff; }
 .gha-log-job__pill--aborted { background: #8957e5; color: #fff; }
@@ -115,42 +146,7 @@
 .gha-log-job__pill--skipped { background: #495057; color: rgba(255, 255, 255, 0.7); }
 .gha-log-job__pill--none    { background: #495057; color: rgba(255, 255, 255, 0.7); }
 
-/* ── Job navigation bar ─────────────────────────────────────── */
-
-.gha-logs-job-nav {
-    background: #181818;
-    border-bottom: 1px solid #2d2d2d;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-    padding: 0.5rem 0.75rem;
-    flex-shrink: 0;
-}
-
-.gha-logs-job-nav__btn {
-    cursor: pointer;
-    border: none;
-    transition: filter 0.1s;
-}
-
-.gha-logs-job-nav__btn:hover {
-    filter: brightness(1.15);
-}
-
-.gha-logs-job-nav__btn:focus-visible {
-    outline: 2px solid #60a5fa;
-    outline-offset: 2px;
-}
-
-/* ── Sub-group header (nested group flattened into parent) ───── */
-
-.gha-sub-group-header {
-    color: #7ca8d0;
-    font-style: italic;
-    font-size: 0.78rem;
-}
-
-/* ── Collapsible step groups ─────────────────────────────────── */
+/* ── Collapsible step groups ────────────────────────────────── */
 
 .gha-log-group {
     border-left: 2px solid #3e3e42;
@@ -221,12 +217,8 @@
     color: #fbbf24;
 }
 
-/* Command lines: distinct background + left accent + $ prefix */
 .gha-log-line--command {
     color: #94a3b8;
-    background: rgba(148, 163, 184, 0.07);
-    border-left: 2px solid #4a5568;
-    padding-left: calc(1rem - 2px);
 }
 
 .gha-log-line--command::before {

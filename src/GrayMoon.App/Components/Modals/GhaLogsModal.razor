@@ -36,34 +36,34 @@
                     }
                     else
                     {
-                        <div class="gha-logs-job-nav">
-                            @foreach (var navJob in _jobs)
-                            {
-                                var jobId = $"gha-job-{navJob.Meta.Id}";
-                                <button type="button"
-                                        class="gha-log-job__pill gha-log-job__pill--@JobStatusClass(navJob.Meta) gha-logs-job-nav__btn"
-                                        title="Scroll to @navJob.Meta.Name"
-                                        @onclick="() => ScrollToJobAsync(jobId)">
-                                    <span class="gha-log-job__icon-dot">@JobIcon(navJob.Meta)</span>
-                                    <span class="gha-log-job__name">@navJob.Meta.Name</span>
-                                </button>
-                            }
-                        </div>
                         <div class="gha-logs-content" @ref="_contentRef">
                             @foreach (var job in _jobs)
                             {
-                                <div class="gha-log-job" id="@($"gha-job-{job.Meta.Id}")">
-                                    <span class="gha-log-job__pill gha-log-job__pill--@JobStatusClass(job.Meta)">
-                                        <span class="gha-log-job__icon-dot">@JobIcon(job.Meta)</span>
-                                        <span class="gha-log-job__name">@job.Meta.Name</span>
-                                    </span>
+                                <!-- Zero-height anchor: stable offsetTop relative to the scroll container -->
+                                <div id="@($"gha-job-{job.Meta.Id}")" class="gha-job-anchor"></div>
+                                <div class="gha-log-job">
+                                    @foreach (var navJob in _jobs)
+                                    {
+                                        var isCurrent = navJob.Meta.Id == job.Meta.Id;
+                                        var navJobAnchorId = $"gha-job-{navJob.Meta.Id}";
+                                        <button type="button"
+                                                class="gha-log-job__pill gha-log-job__pill--@(isCurrent ? JobStatusClass(navJob.Meta) : "other")"
+                                                title="@navJob.Meta.Name"
+                                                @onclick="() => ScrollToJobAsync(navJobAnchorId)">
+                                            <span class="gha-log-job__icon-dot">@JobIcon(navJob.Meta)</span>
+                                            @if (isCurrent)
+                                            {
+                                                <span class="gha-log-job__name">@navJob.Meta.Name</span>
+                                            }
+                                        </button>
+                                    }
                                 </div>
                                 @foreach (var entry in job.Entries)
                                 {
                                     @if (entry is GhaLogGroupEntry group)
                                     {
                                         <details class="gha-log-group @(group.HasError ? "gha-log-group--error" : "")"
-                                                 open="@(ShouldOpenGroup(group) ? "" : null)">
+                                                 open="@(group.HasError ? "" : null)">
                                             <summary class="gha-log-group__header">@((MarkupString)group.Title)</summary>
                                             <div class="gha-log-group__lines">
                                                 @foreach (var line in group.Lines)
@@ -190,9 +190,9 @@
         }
     }
 
-    private async Task ScrollToJobAsync(string jobId)
+    private async Task ScrollToJobAsync(string anchorId)
     {
-        try { await JS.InvokeVoidAsync("ghaLogs.scrollToJob", _contentRef, jobId); } catch { }
+        try { await JS.InvokeVoidAsync("ghaLogs.scrollToJob", _contentRef, anchorId); } catch { }
     }
 
     private async Task DownloadLogsAsync()
@@ -210,8 +210,6 @@
     {
         if (e.Key == "Escape") await CloseAsync();
     }
-
-    private static bool ShouldOpenGroup(GhaLogGroupEntry group) => group.HasError || group.Lines.Count <= 200;
 
     private static string KindClass(GhaLogLineKind kind) => kind switch
     {
