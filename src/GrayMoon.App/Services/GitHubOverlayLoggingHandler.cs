@@ -11,8 +11,7 @@ namespace GrayMoon.App.Services;
 /// response bodies. Never reads request bodies or any auth header. Append failures are
 /// swallowed so the HTTP pipeline is never affected by terminal issues.
 /// </summary>
-internal sealed partial class GitHubOverlayLoggingHandler(OverlayCommandTerminalService overlayTerminal)
-    : DelegatingHandler
+internal sealed partial class GitHubOverlayLoggingHandler : DelegatingHandler
 {
     private const string Label = "github";
     private const int MaxBodyChars = 80;
@@ -138,7 +137,7 @@ internal sealed partial class GitHubOverlayLoggingHandler(OverlayCommandTerminal
     {
         try
         {
-            overlayTerminal.Append(Label, kind, text);
+            TerminalSinkContext.Current?.Append(Label, kind, text);
         }
         catch
         {

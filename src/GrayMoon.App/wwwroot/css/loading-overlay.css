@@ -17,6 +17,14 @@
   transition: opacity 140ms ease;
 }
 
+/* Page-scoped variant: constrained to the article content area (article.content must have position:relative). */
+.loading-overlay--page {
+  position: absolute;
+  inset: 0;
+  /* z-index below Bootstrap modals (1050+) so dialogs stay interactive above the overlay */
+  z-index: 100;
+}
+
 .loading-overlay.show {
   opacity: 1;
   pointer-events: all; /* blocks clicks while loading */

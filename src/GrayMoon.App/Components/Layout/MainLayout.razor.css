@@ -11,6 +11,11 @@ main {
     flex-direction: column;
 }
 
+/* Required so position:absolute overlays inside <article> are bounded to the content area. */
+article.content {
+    position: relative;
+}
+
 
 .sidebar {
     background-color: var(--bg-secondary);
