@@ -114,6 +114,6 @@
     box-sizing: border-box;
 }
 
-.loading-overlay-terminal__line--raw .loading-overlay-terminal__text {
-    color: rgba(255, 255, 255, 0.94) !important;
+.actions-gha-terminal__line--timing {
+    text-align: right;
 }

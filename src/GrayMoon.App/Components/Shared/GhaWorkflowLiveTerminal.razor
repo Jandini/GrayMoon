@@ -1,7 +1,6 @@
 @using GrayMoon.App.Services
 @using GrayMoon.App.Models
 @inject GhaWorkflowLiveFeedService GhaWorkflowLiveFeedService
-@inject GhaStepLogFeedService GhaStepLogFeedService
 @inject LoadingOverlayUiSettingsService OverlayUiSettings
 @implements IAsyncDisposable
 
@@ -42,25 +41,25 @@
                 </div>
             </div>
 
-            <!-- RIGHT: last 8 lines of current step's raw log output -->
+            <!-- RIGHT: per-step duration -->
             <div class="loading-overlay-terminal @schemeClass actions-gha-terminal__terminal actions-gha-terminal__pane actions-gha-terminal__pane--right">
-                <div class="actions-gha-terminal__caption" title="@_caption">
+                <div class="actions-gha-terminal__caption">
                     <span class="actions-gha-terminal__caption-main">
-                        <span class="actions-gha-terminal__caption-prefix">▶</span><span class="actions-gha-terminal__caption-text">@_caption</span>
+                        <span class="actions-gha-terminal__caption-prefix">▶</span><span class="actions-gha-terminal__caption-text">Duration</span>
                     </span>
                 </div>
                 <div class="loading-overlay-terminal__inner actions-gha-terminal__scroll" aria-live="polite">
                     @for (var i = 0; i < BodyLineCount; i++)
                     {
-                        var line = _rawLogSlots[i];
-                        <p class="loading-overlay-terminal__line loading-overlay-terminal__line--raw actions-gha-terminal__line">
-                            @if (string.IsNullOrWhiteSpace(line))
+                        var timing = _timingSlots[i];
+                        <p class="loading-overlay-terminal__line loading-overlay-terminal__line--out actions-gha-terminal__line actions-gha-terminal__line--timing">
+                            @if (string.IsNullOrWhiteSpace(timing))
                             {
                                 <span class="loading-overlay-terminal__text">&nbsp;</span>
                             }
                             else
                             {
-                                <span class="loading-overlay-terminal__text">@line</span>
+                                <span class="loading-overlay-terminal__text">@timing</span>
                             }
                         </p>
                     }
@@ -83,12 +82,8 @@
     private string _boardCaption = "Steps · Waiting…";
     private string? _stepProgress;
 
-    // Right panel: accumulated log lines streamed in incrementally
-    private readonly string[] _rawLogSlots = new string[BodyLineCount];
-    private readonly List<string> _accumulatedLogLines = [];
-    private int _logLineCount;
-    private long? _logJobId;
-    private string _caption = "Workflow · Connecting to GitHub Actions…";
+    // Right panel: per-step duration aligned with left board
+    private readonly string[] _timingSlots = new string[BodyLineCount];
 
     private GhaWorkflowLiveFeedState? _feedState;
     private CancellationTokenSource? _cts;
@@ -149,29 +144,6 @@
 
         var update = await GhaWorkflowLiveFeedService.PollOnceAsync(_feedState, cancellationToken);
 
-        // Right panel: accumulate new log lines (reset when active job changes)
-        if (_feedState.CurrentInProgressJobId != _logJobId)
-        {
-            _logJobId = _feedState.CurrentInProgressJobId;
-            _logLineCount = 0;
-            _accumulatedLogLines.Clear();
-        }
-
-        var newLines = await GhaStepLogFeedService.PollStepLogNewLinesAsync(_feedState, _logLineCount, cancellationToken);
-        if (newLines.Length > 0)
-        {
-            _accumulatedLogLines.AddRange(newLines);
-            _logLineCount = _accumulatedLogLines.Count;
-            UpdateRawLogSlots();
-        }
-
-        // Right panel: caption tracks current step
-        if (!string.Equals(_caption, update.Caption, StringComparison.Ordinal))
-        {
-            _caption = update.Caption;
-            _needsRender = true;
-        }
-
         // Left panel: caption shows job name + step progress
         var jobName = _feedState.ActiveJob?.Name ?? "Steps";
         var newBoardCaption = jobName;
@@ -189,22 +161,16 @@
         return update.DelayMs;
     }
 
-    private void UpdateRawLogSlots()
+    private static string FormatDuration(DateTimeOffset? start, DateTimeOffset? end)
     {
-        var count = _accumulatedLogLines.Count;
-        var offset = Math.Max(0, count - BodyLineCount);
-        var changed = false;
-        for (var i = 0; i < BodyLineCount; i++)
-        {
-            var newVal = i + offset < count ? _accumulatedLogLines[i + offset] : "";
-            if (!string.Equals(_rawLogSlots[i], newVal, StringComparison.Ordinal))
-            {
-                _rawLogSlots[i] = newVal;
-                changed = true;
-            }
-        }
-        if (changed)
-            _needsRender = true;
+        if (start == null || end == null) return "";
+        var elapsed = end.Value - start.Value;
+        if (elapsed < TimeSpan.Zero) return "";
+        if (elapsed.TotalSeconds < 60)
+            return elapsed.TotalSeconds < 10
+                ? $"{elapsed.TotalSeconds:F1}s"
+                : $"{(int)elapsed.TotalSeconds}s";
+        return $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds}s";
     }
 
     private void UpdateBoard()
@@ -214,7 +180,7 @@
 
         if (job == null || steps == null || steps.Count == 0)
         {
-            for (var i = 0; i < BodyLineCount; i++) _boardSlots[i] = "";
+            for (var i = 0; i < BodyLineCount; i++) { _boardSlots[i] = ""; _timingSlots[i] = ""; }
             _needsRender = true;
             return;
         }
@@ -232,7 +198,21 @@
         for (var i = 0; i < BodyLineCount; i++)
         {
             var si = startIdx + i;
-            _boardSlots[i] = si < steps.Count ? $"{StepIcon(steps[si])} {steps[si].Name}" : "";
+            if (si < steps.Count)
+            {
+                var step = steps[si];
+                _boardSlots[i] = $"{StepIcon(step)} {step.Name}";
+                _timingSlots[i] = step.Status.Equals("completed", StringComparison.OrdinalIgnoreCase)
+                    ? FormatDuration(step.StartedAt, step.CompletedAt)
+                    : step.Status.Equals("in_progress", StringComparison.OrdinalIgnoreCase)
+                        ? FormatDuration(step.StartedAt, DateTimeOffset.UtcNow)
+                        : "";
+            }
+            else
+            {
+                _boardSlots[i] = "";
+                _timingSlots[i] = "";
+            }
         }
 
         _needsRender = true;
