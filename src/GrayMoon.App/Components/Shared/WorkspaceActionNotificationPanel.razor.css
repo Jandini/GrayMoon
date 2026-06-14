@@ -37,6 +37,12 @@
     white-space: nowrap;
     flex: 1;
     margin-right: 0.5rem;
+    text-decoration: none;
+}
+
+.workspace-action-card__title:hover {
+    color: #ffffff;
+    text-decoration: underline;
 }
 
 .workspace-action-card__desc {
