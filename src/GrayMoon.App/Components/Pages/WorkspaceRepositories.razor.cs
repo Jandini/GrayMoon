@@ -865,7 +865,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             if (blocked.Count == 0)
                 ToastService.Show("No repositories to sync.");
-            return Task.CompletedTask;
+            return;
         }
 
         _syncToDefaultCheckResults = checkResults.Where(r => safeRepoIds.Contains(r.RepoId)).ToList();
@@ -936,8 +936,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     throw;
                 }
             });
-
-        return Task.CompletedTask;
     }
 
     /// <summary>
