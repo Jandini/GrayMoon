@@ -135,16 +135,23 @@
 }
 
 .gha-log-job__pill:hover {
-    filter: brightness(1.15);
+    filter: brightness(1.2);
 }
 
-/* Non-current job pills: gray */
-.gha-log-job__pill--other {
-    background: #383838;
-    color: rgba(255, 255, 255, 0.5);
+/* Non-current job pills: dimmed */
+.gha-log-job__pill:not(.gha-log-job__pill--selected) {
+    opacity: 0.5;
 }
 
-/* Status-colored pills (current job) */
+/* Selected pill: full brightness + subtle ring */
+.gha-log-job__pill--selected {
+    opacity: 1;
+    outline: 2px solid rgba(255, 255, 255, 0.35);
+    outline-offset: 1px;
+}
+
+/* Status-colored pills */
+.gha-log-job__pill--other   { background: #383838; color: rgba(255, 255, 255, 0.5); }
 .gha-log-job__pill--success { background: #238636; color: #fff; }
 .gha-log-job__pill--failure { background: #da3633; color: #fff; }
 .gha-log-job__pill--aborted { background: #8957e5; color: #fff; }

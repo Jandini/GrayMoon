@@ -42,9 +42,9 @@
                                 {
                                     var isSelected = navJob.Meta.Id == _selectedJobId;
                                     <button type="button"
-                                            class="gha-log-job__pill gha-log-job__pill--@(isSelected ? JobStatusClass(navJob.Meta) : "other")"
+                                            class="@PillClass(navJob.Meta, isSelected)"
                                             title="@navJob.Meta.Name"
-                                            @onclick="() => _selectedJobId = navJob.Meta.Id">
+                                            @onclick="() => SelectJob(navJob.Meta.Id)">
                                         <span class="gha-log-job__name">@navJob.Meta.Name</span>
                                     </button>
                                 }
@@ -90,6 +90,11 @@
                                 @onclick="DownloadLogsAsync">
                             Download
                         </button>
+                        <button type="button" class="btn btn-outline-secondary"
+                                disabled="@(_jobs.Count == 0 || _isLoading)"
+                                @onclick="() => _allCollapsed = !_allCollapsed">
+                            @(_allCollapsed ? "Expand" : "Collapse")
+                        </button>
                         @{ var ec = ErrorCount; var wc = WarningCount; }
                         @if (ec > 0)
                         {
@@ -109,11 +114,18 @@
                         }
                     </div>
                     <div class="d-flex gap-2">
-                        <button type="button" class="btn btn-outline-secondary"
-                                disabled="@(_jobs.Count == 0 || _isLoading)"
-                                @onclick="() => _allCollapsed = !_allCollapsed">
-                            @(_allCollapsed ? "Expand" : "Collapse")
-                        </button>
+                        @if (IsSelectedJobFailed)
+                        {
+                            <button type="button" class="btn btn-danger"
+                                    disabled="@_isRerunning"
+                                    @onclick="RerunJobAsync">
+                                @if (_isRerunning)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                                }
+                                Re-run Job
+                            </button>
+                        }
                         <button type="button" class="btn btn-outline-secondary" @onclick="CloseAsync">Close</button>
                     </div>
                 </div>
@@ -130,23 +142,29 @@
     [Parameter] public long RunId { get; set; }
     [Parameter] public string? WorkflowDisplayName { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnRerunTriggered { get; set; }
 
     private record JobLogEntry(GitHubWorkflowJobDto Meta, List<GhaLogEntry> Entries, string? RawLog);
 
     private bool _wasVisible;
     private bool _isLoading;
     private bool _isLoadingMore;
+    private bool _isRerunning;
     private bool _allCollapsed;
     private bool _filterErrors;
     private bool _filterWarnings;
     private bool _loadTriggered;
     private bool _autoSelectInitialized;
+    private bool _scrollToTopAfterRender;
     private string? _errorMessage;
     private long? _selectedJobId;
     private List<JobLogEntry> _jobs = [];
     private ElementReference _contentRef;
 
     private JobLogEntry? SelectedJob => _jobs.FirstOrDefault(j => j.Meta.Id == _selectedJobId);
+
+    private bool IsSelectedJobFailed => string.Equals(
+        SelectedJob?.Meta.Conclusion, "failure", StringComparison.OrdinalIgnoreCase);
 
     private int ErrorCount => SelectedJob == null ? 0 : SelectedJob.Entries.Count(e =>
         (e is GhaLogGroupEntry g && g.HasError) || (e is GhaLogLineEntry l && l.Kind == GhaLogLineKind.Error));
@@ -174,6 +192,7 @@
             _wasVisible = true;
             _isLoading = true;
             _isLoadingMore = false;
+            _isRerunning = false;
             _allCollapsed = false;
             _filterErrors = false;
             _filterWarnings = false;
@@ -203,6 +222,12 @@
             _autoSelectInitialized = true;
             try { await JS.InvokeVoidAsync("ghaLogs.initAutoSelect", _contentRef); } catch { }
         }
+
+        if (_scrollToTopAfterRender)
+        {
+            _scrollToTopAfterRender = false;
+            try { await JS.InvokeVoidAsync("ghaLogs.scrollContent", _contentRef, "Home"); } catch { }
+        }
     }
 
     private async Task LoadLogsAsync()
@@ -219,7 +244,10 @@
             }
 
             var jobsResponse = await GitHubService.GetWorkflowRunJobsAsync(connector, Owner, RepositoryName, RunId);
-            var jobs = jobsResponse?.Jobs ?? [];
+            var jobs = (jobsResponse?.Jobs ?? [])
+                .OrderBy(j => j.StartedAt ?? j.CreatedAt ?? DateTimeOffset.MaxValue)
+                .ThenBy(j => j.Id)
+                .ToList();
 
             for (int jobIdx = 0; jobIdx < jobs.Count; jobIdx++)
             {
@@ -269,6 +297,28 @@
         try { await JS.InvokeVoidAsync("ghaLogs.downloadText", filename, combined); } catch { }
     }
 
+    private async Task RerunJobAsync()
+    {
+        var job = SelectedJob;
+        if (job == null) return;
+        var connector = await ConnectorRepository.GetByNameAsync(ConnectorName);
+        if (connector == null) return;
+        _isRerunning = true;
+        try
+        {
+            await GitHubService.RerunJobAsync(connector, Owner, RepositoryName, job.Meta.Id);
+            await OnRerunTriggered.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isRerunning = false;
+        }
+    }
+
     private async Task CloseAsync() => await OnClose.InvokeAsync();
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
@@ -286,6 +336,24 @@
         GhaLogLineKind.Debug   => "debug",
         _                      => "normal",
     };
+
+    private void SelectJob(long jobId)
+    {
+        _selectedJobId = jobId;
+        _filterWarnings = false;
+        var job = _jobs.FirstOrDefault(j => j.Meta.Id == jobId);
+        var isFailed = string.Equals(job?.Meta.Conclusion, "failure", StringComparison.OrdinalIgnoreCase);
+        _filterErrors = isFailed;
+        _scrollToTopAfterRender = true;
+    }
+
+    private string PillClass(GitHubWorkflowJobDto job, bool isSelected)
+    {
+        var status = JobStatusClass(job);
+        return isSelected
+            ? $"gha-log-job__pill gha-log-job__pill--{status} gha-log-job__pill--selected"
+            : $"gha-log-job__pill gha-log-job__pill--{status}";
+    }
 
     private static string JobStatusClass(GitHubWorkflowJobDto job) =>
         job.Conclusion?.ToLowerInvariant() switch

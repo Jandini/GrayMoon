@@ -131,6 +131,12 @@ public sealed class GitHubWorkflowJobDto
     [JsonPropertyName("conclusion")]
     public string? Conclusion { get; set; }
 
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset? CreatedAt { get; set; }
+
+    [JsonPropertyName("started_at")]
+    public DateTimeOffset? StartedAt { get; set; }
+
     [JsonPropertyName("steps")]
     public List<GitHubWorkflowJobStepDto> Steps { get; set; } = new();
 }
