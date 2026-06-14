@@ -63,7 +63,7 @@
     private string? _stepProgress;
 
     // Spinner — runs on its own 200ms loop, independent of the API poll
-    private static readonly char[] SpinnerFrames = ['⠋', '⠙', '⠸', '⠴', '⠦', '⠧'];
+    private static readonly char[] SpinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧'];
     private int _spinnerFrame;
     private string? _spinnerStepKey;
     private int _spinnerBoardIdx = -1;  // board slot index of current in-progress step (-1 = none)
@@ -75,7 +75,7 @@
     private Task? _spinnerTask;
 
     private const int BodyLineCount = 8;
-    private const int SpinnerFrameMs = 200; // 6 frames × 200ms = 1.2s per revolution
+    private const int SpinnerFrameMs = 200; // 8 frames × 200ms = 1.6s per revolution
 
     protected override void OnInitialized()
     {

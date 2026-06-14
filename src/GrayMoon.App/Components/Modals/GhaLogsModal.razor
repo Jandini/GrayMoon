@@ -42,9 +42,9 @@
                                 {
                                     var isSelected = navJob.Meta.Id == _selectedJobId;
                                     <button type="button"
-                                            class="gha-log-job__pill gha-log-job__pill--@(isSelected ? JobStatusClass(navJob.Meta) : "other")"
+                                            class="@PillClass(navJob.Meta, isSelected)"
                                             title="@navJob.Meta.Name"
-                                            @onclick="() => _selectedJobId = navJob.Meta.Id">
+                                            @onclick="() => SelectJob(navJob.Meta.Id)">
                                         <span class="gha-log-job__name">@navJob.Meta.Name</span>
                                     </button>
                                 }
@@ -286,6 +286,21 @@
         GhaLogLineKind.Debug   => "debug",
         _                      => "normal",
     };
+
+    private void SelectJob(long jobId)
+    {
+        _selectedJobId = jobId;
+        _filterErrors = false;
+        _filterWarnings = false;
+    }
+
+    private string PillClass(GitHubWorkflowJobDto job, bool isSelected)
+    {
+        var status = JobStatusClass(job);
+        return isSelected
+            ? $"gha-log-job__pill gha-log-job__pill--{status} gha-log-job__pill--selected"
+            : $"gha-log-job__pill gha-log-job__pill--{status}";
+    }
 
     private static string JobStatusClass(GitHubWorkflowJobDto job) =>
         job.Conclusion?.ToLowerInvariant() switch
