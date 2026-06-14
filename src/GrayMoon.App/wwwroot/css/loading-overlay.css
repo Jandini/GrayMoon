@@ -212,18 +212,17 @@
   opacity: 1 !important;
 }
 
-/* Brand at top-left of overlay - same position and font as sidebar header; above full-height terminal */
+/* Terminal toggle - top-right of overlay; above full-height terminal */
 .loading-overlay__brand {
   position: absolute;
   top: 0;
-  left: 0;
+  right: 0;
   height: var(--loading-overlay-top-bar-height, 3.5rem);
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: flex-end;
   gap: 0.35rem;
-  padding-left: 0.75rem;
-  padding-right: 1rem;
+  padding-right: 0.75rem;
   z-index: 3;
   color: var(--text-primary, #cccccc);
   pointer-events: none;
