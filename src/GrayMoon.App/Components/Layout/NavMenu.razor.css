@@ -208,5 +208,8 @@
     .nav-collapse-toggle {
         flex-shrink: 0;
         border-top: 1px solid var(--border-color);
+        min-height: 2.75rem;
+        display: flex;
+        align-items: stretch;
     }
 }
