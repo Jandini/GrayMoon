@@ -39,39 +39,46 @@
                     <div class="notif-repo-list">
                         @foreach (var repo in n.Repos)
                         {
-                            <div class="notif-repo-row">
-                                <span class="notif-repo-name">@repo.RepositoryName</span>
+                            <div class="notif-repo-row" @key="repo.RepositoryId">
+                                <span class="notif-repo-name" title="@repo.RepositoryName">@repo.RepositoryName</span>
                                 @if (repo.UnmatchedDeps > 0)
                                 {
-                                    <span class="badge notif-badge--update"
-                                          @onmouseenter="() => _hoveredDepBadge = (n.WorkspaceId, repo.RepositoryId)"
-                                          @onmouseleave="() => _hoveredDepBadge = null">
-                                        @repo.UnmatchedDeps update@(repo.UnmatchedDeps == 1 ? "" : "s")
+                                    <span @key="@($"upd-{repo.RepositoryId}")"
+                                          class="badge notif-dep-badge"
+                                          @onmouseenter="() => ShowDepTooltip(n.WorkspaceId, repo.RepositoryId)"
+                                          @onmouseleave="() => _ = HideDepTooltipAsync()">
+                                        @repo.UnmatchedDeps of @repo.TotalDeps
                                     </span>
                                 }
                                 @if (repo.OutgoingCommits > 0 || repo.NewBranchNoPush)
                                 {
-                                    <span class="badge notif-badge--commits">
-                                        @(repo.OutgoingCommits > 0
-                                            ? $"{repo.OutgoingCommits} commit{(repo.OutgoingCommits == 1 ? "" : "s")}"
-                                            : "new branch")
-                                    </span>
+                                    <CommitsBadge @key="@($"cmt-{repo.RepositoryId}")"
+                                                  RepositoryId="repo.RepositoryId"
+                                                  Outgoing="repo.OutgoingCommits"
+                                                  Incoming="repo.IncomingCommits"
+                                                  BranchHasUpstream="@(repo.NewBranchNoPush ? false : null)"
+                                                  Disabled="true" />
                                 }
                             </div>
                         }
                     </div>
-                    @if (GetHoveredRepo(n) is { MismatchedDeps.Count: > 0 } hoveredRepo)
-                    {
-                        <div class="notif-dep-tooltip">
-                            <span class="notif-dep-tooltip-title">Dependencies requiring update:</span>
-                            @foreach (var dep in hoveredRepo.MismatchedDeps)
-                            {
-                                <div class="notif-dep-tooltip-line">
-                                    <code>@dep.PackageId</code><span class="notif-dep-tooltip-versions">@dep.CurrentVersion - @dep.NewVersion</span>
-                                </div>
-                            }
+                }
+                @if (GetHoveredRepo(n) is { MismatchedDeps.Count: > 0 } hoveredRepo)
+                {
+                    <div class="notif-dep-tooltip notif-dep-tooltip--visible"
+                         @onmouseenter="() => ShowDepTooltip(n.WorkspaceId, _hoveredDepBadge?.RepoId ?? 0)"
+                         @onmouseleave="() => _ = HideDepTooltipAsync()">
+                        <div class="dependency-badge-tooltip-header">
+                            <span class="dependency-badge-tooltip-title">Dependencies requiring update:</span>
                         </div>
-                    }
+                        @foreach (var dep in hoveredRepo.MismatchedDeps)
+                        {
+                            <div class="dependency-badge-tooltip-line">
+                                <code>@dep.PackageId</code> <span class="dependency-badge-tooltip-versions">@dep.CurrentVersion &rarr; @dep.NewVersion</span>
+                            </div>
+                        }
+                        <div class="dependency-badge-tooltip-footer">Click to update this repository only.</div>
+                    </div>
                 }
                 <div class="workspace-action-card__actions">
                     @if (n.HasUnmatchedDependencies)
@@ -141,6 +148,7 @@
     private bool _disposed;
     private readonly HashSet<int> _openUpdateMenus = new();
     private (int WorkspaceId, int RepoId)? _hoveredDepBadge;
+    private CancellationTokenSource? _tooltipHideCts;
 
     private static string WorkspaceJobKey(int workspaceId) => $"/workspaces/{workspaceId}";
 
@@ -148,6 +156,28 @@
     {
         if (_hoveredDepBadge is not { } h || h.WorkspaceId != n.WorkspaceId) return null;
         return n.Repos.FirstOrDefault(r => r.RepositoryId == h.RepoId);
+    }
+
+    private void ShowDepTooltip(int workspaceId, int repoId)
+    {
+        _tooltipHideCts?.Cancel();
+        _tooltipHideCts = null;
+        _hoveredDepBadge = (workspaceId, repoId);
+    }
+
+    private async Task HideDepTooltipAsync()
+    {
+        _tooltipHideCts?.Cancel();
+        _tooltipHideCts = new CancellationTokenSource();
+        var cts = _tooltipHideCts;
+        try
+        {
+            await Task.Delay(120, cts.Token);
+            if (_disposed) return;
+            _hoveredDepBadge = null;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException) { }
     }
     private bool IsWorkspaceJobRunning(int workspaceId) => JobService.IsRunning(WorkspaceJobKey(workspaceId));
 
@@ -241,6 +271,8 @@
     {
         if (_disposed) return;
         _openUpdateMenus.Clear();
+        _tooltipHideCts?.Cancel();
+        _tooltipHideCts = null;
         _hoveredDepBadge = null;
         _ = InvokeAsync(StateHasChanged);
     }
@@ -248,6 +280,7 @@
     public void Dispose()
     {
         _disposed = true;
+        _tooltipHideCts?.Cancel();
         PendingActionsService.Changed -= OnServiceChanged;
         JobService.Changed -= OnServiceChanged;
         NavigationManager.LocationChanged -= OnLocationChanged;

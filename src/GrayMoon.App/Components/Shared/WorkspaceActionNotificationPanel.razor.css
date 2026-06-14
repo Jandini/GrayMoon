@@ -6,7 +6,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.625rem;
-    width: 320px;
+    width: 400px;
     max-width: calc(100vw - 2.5rem);
     pointer-events: none;
 }
@@ -49,7 +49,7 @@
 .workspace-action-card__desc {
     font-size: 0.8125rem;
     color: var(--text-muted, #858585);
-    margin: 0 0 0.625rem;
+    margin: 0 0 0.5rem;
     line-height: 1.35;
 }
 
@@ -61,7 +61,7 @@
 }
 
 .notif-repo-list {
-    max-height: 8rem;
+    max-height: 9rem;
     overflow-y: auto;
     margin: 0 0 0.5rem;
     scrollbar-width: thin;
@@ -71,8 +71,8 @@
 .notif-repo-row {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
-    padding: 0.125rem 0;
+    gap: 0.3rem;
+    padding: 0.1rem 0;
 }
 
 .notif-repo-name {
@@ -81,63 +81,73 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-primary, #cccccc);
-    font-size: 0.78rem;
+    font-size: 0.75rem;
 }
 
-.notif-badge--update {
-    background-color: var(--bs-danger, #dc3545);
+.notif-dep-badge {
+    background-color: #dc3545;
     color: #fff;
-    font-size: 0.68rem;
+    font-size: 0.7rem;
+    font-weight: 400;
     cursor: default;
     flex-shrink: 0;
 }
 
-.notif-badge--commits {
-    background-color: var(--bs-warning, #ffc107);
-    color: #1a1a1a;
-    font-size: 0.68rem;
-    cursor: default;
-    flex-shrink: 0;
-}
-
+/* Tooltip - conditionally rendered when a dep badge is hovered */
 .notif-dep-tooltip {
     position: absolute;
     right: calc(100% + 0.5rem);
     bottom: 0;
-    width: 260px;
+    width: 30rem;
     background: #2a2a2a;
+    background-clip: padding-box;
     border: 1px solid #555;
     border-radius: 0.25rem;
-    padding: 0.5rem 0.6rem;
-    font-size: 0.76rem;
+    padding: 0.65rem 0.6rem 0.4rem;
+    font-size: 0.78rem;
     font-family: var(--bs-font-monospace);
     color: #f0f0f0;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
     z-index: 9991;
-    pointer-events: none;
+    pointer-events: auto;
     overflow-y: auto;
-    max-height: 12rem;
+    overflow-x: hidden;
+    white-space: normal;
+    max-height: 14rem;
+    animation: notif-tooltip-fade-in 0.1s ease forwards;
 }
 
-.notif-dep-tooltip-title {
-    display: block;
+/* Reuse the same inner element classes as WorkspaceRepositories tooltip */
+.notif-dep-tooltip .dependency-badge-tooltip-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.notif-dep-tooltip .dependency-badge-tooltip-title {
+    color: #aaa;
+    font-family: var(--bs-body-font-family);
+    font-size: 0.78rem;
+}
+
+.notif-dep-tooltip .dependency-badge-tooltip-line {
+    margin-bottom: 0.15rem;
+}
+
+.notif-dep-tooltip .dependency-badge-tooltip-versions {
+    color: #aaa;
     font-size: 0.72rem;
-    color: #999;
-    margin-bottom: 0.3rem;
-    font-family: var(--bs-font-sans-serif);
 }
 
-.notif-dep-tooltip-line {
-    padding: 0.1rem 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.notif-dep-tooltip-versions {
-    font-size: 0.7rem;
+.notif-dep-tooltip .dependency-badge-tooltip-footer {
     color: #888;
-    margin-left: 0.4rem;
+    font-size: 0.72rem;
+    margin-top: 0.35rem;
+    padding-top: 0.25rem;
+    border-top: 1px solid #444;
+    font-family: var(--bs-body-font-family);
 }
 
 @keyframes notif-slide-in {
@@ -149,4 +159,9 @@
         opacity: 1;
         transform: translateX(0);
     }
+}
+
+@keyframes notif-tooltip-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }

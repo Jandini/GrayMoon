@@ -6,7 +6,9 @@ public sealed record NotificationRepo(
     int RepositoryId,
     string RepositoryName,
     int UnmatchedDeps,
+    int TotalDeps,
     int OutgoingCommits,
+    int IncomingCommits,
     bool NewBranchNoPush,
     IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> MismatchedDeps);
 
@@ -77,7 +79,9 @@ public sealed class WorkspacePendingActionsService
                     wr.RepositoryId,
                     wr.Repository?.RepositoryName ?? $"Repo {wr.RepositoryId}",
                     wr.UnmatchedDeps ?? 0,
+                    wr.Dependencies ?? 0,
                     wr.OutgoingCommits ?? 0,
+                    wr.IncomingCommits ?? 0,
                     wr.BranchHasUpstream == false,
                     depLines);
             })
