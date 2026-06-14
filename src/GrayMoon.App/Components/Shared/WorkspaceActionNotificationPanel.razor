@@ -33,7 +33,7 @@
                 <div class="workspace-action-card__actions">
                     @if (n.HasUnmatchedDependencies)
                     {
-                        <div class="btn-group position-relative">
+                        <div class="btn-group dropup position-relative">
                             <button class="btn btn-danger btn-sm"
                                     disabled="@IsJobRunning"
                                     @onclick="() => _ = RunUpdateAsync(n.WorkspaceId)">
@@ -51,7 +51,7 @@
                             @if (_openUpdateMenus.Contains(n.WorkspaceId))
                             {
                                 <div class="branch-menu-backdrop" @onclick="() => CloseUpdateMenu(n.WorkspaceId)"></div>
-                                <ul class="dropdown-menu show shadow branch-menu-list" role="menu">
+                                <ul class="dropdown-menu show shadow branch-menu-list bottom-100 mb-1" role="menu">
                                     <li>
                                         <button class="dropdown-item" type="button" role="menuitem"
                                                 disabled="@IsJobRunning"
