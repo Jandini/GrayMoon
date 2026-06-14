@@ -206,33 +206,29 @@ article.content {
     }
 
     /* Collapsed nav items: icon only, centered - scoped to .sidebar to avoid Bootstrap tabs */
+    /* Remove px-3 padding so active/hover highlight spans the full sidebar width */
     .page--navbar-collapsed .sidebar ::deep .nav-item {
         padding-left: 0 !important;
         padding-right: 0 !important;
-        display: flex;
-        justify-content: center;
     }
 
+    /* Center the 1.25rem icon in the 3.5rem sidebar via symmetric nav-link padding:
+       (3.5rem - 1.25rem) / 2 = 1.125rem. Transitions from 0 as icon barely moves. */
     .page--navbar-collapsed .sidebar ::deep .nav-link {
-        justify-content: center !important;
-        padding: 0 !important;
-        width: 3rem !important;
+        padding-left: 1.125rem !important;
+        padding-right: 1.125rem !important;
     }
 
     .page--navbar-collapsed .sidebar ::deep .nav-link > i:first-child {
         margin-right: 0 !important;
     }
 
-    .page--navbar-collapsed .sidebar ::deep .nav-link.active {
-        padding: 0 !important;
-    }
-
-    .page--navbar-collapsed .sidebar ::deep .nav-link:hover {
-        padding: 0 !important;
-    }
-
+    /* Text fades and collapses - max-width/opacity are transitionable; display:none is not */
     .page--navbar-collapsed .sidebar ::deep .nav-link-text {
-        display: none;
+        opacity: 0;
+        max-width: 0 !important;
+        overflow: hidden;
+        pointer-events: none;
     }
 
     .top-row {
