@@ -141,14 +141,6 @@
     font-size: 0.72rem;
 }
 
-.notif-dep-tooltip .dependency-badge-tooltip-footer {
-    color: #888;
-    font-size: 0.72rem;
-    margin-top: 0.35rem;
-    padding-top: 0.25rem;
-    border-top: 1px solid #444;
-    font-family: var(--bs-body-font-family);
-}
 
 @keyframes notif-slide-in {
     from {
