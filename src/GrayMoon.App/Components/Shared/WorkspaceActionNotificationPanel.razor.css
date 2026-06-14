@@ -6,7 +6,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.625rem;
-    width: 320px;
+    width: 400px;
     max-width: calc(100vw - 2.5rem);
     pointer-events: none;
 }
@@ -19,6 +19,7 @@
     padding: 0.75rem 0.875rem;
     pointer-events: all;
     animation: notif-slide-in 0.28s ease-out both;
+    position: relative;
 }
 
 .workspace-action-card__header {
@@ -48,7 +49,7 @@
 .workspace-action-card__desc {
     font-size: 0.8125rem;
     color: var(--text-muted, #858585);
-    margin: 0 0 0.625rem;
+    margin: 0 0 0.5rem;
     line-height: 1.35;
 }
 
@@ -57,6 +58,104 @@
     gap: 0.4rem;
     flex-wrap: wrap;
     align-items: center;
+}
+
+.notif-repo-list {
+    max-height: 9rem;
+    overflow-y: auto;
+    margin: 0 0 0.5rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color, #3e3e42) transparent;
+}
+
+.notif-repo-row {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.1rem 0;
+}
+
+.notif-repo-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary, #cccccc);
+    font-size: 0.75rem;
+}
+
+.notif-dep-badge {
+    background-color: #dc3545;
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 400;
+    cursor: default;
+    flex-shrink: 0;
+}
+
+/* Tooltip - conditionally rendered when a dep badge is hovered */
+.notif-dep-tooltip {
+    position: absolute;
+    right: calc(100% + 0.5rem);
+    bottom: 0;
+    width: 30rem;
+    background: #2a2a2a;
+    background-clip: padding-box;
+    border: 1px solid #555;
+    border-radius: 0.25rem;
+    padding: 0.65rem 0.6rem 0.4rem;
+    font-size: 0.78rem;
+    font-family: var(--bs-font-monospace);
+    color: #f0f0f0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    z-index: 9991;
+    pointer-events: auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+    white-space: normal;
+    max-height: 14rem;
+    animation: notif-tooltip-fade-in 0.1s ease forwards;
+}
+
+/* Reuse the same inner element classes as WorkspaceRepositories tooltip */
+.notif-dep-tooltip .dependency-badge-tooltip-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.notif-dep-tooltip .dependency-badge-tooltip-title {
+    color: #aaa;
+    font-family: var(--bs-body-font-family);
+    font-size: 0.78rem;
+}
+
+.notif-dep-tooltip .dependency-badge-tooltip-line {
+    margin-bottom: 0.15rem;
+}
+
+.notif-dep-tooltip .dependency-badge-tooltip-versions {
+    color: #aaa;
+    font-size: 0.72rem;
+}
+
+
+.btn-group > .btn-warning + .btn-danger.dropdown-toggle-split {
+    border-left-color: rgba(255, 255, 255, 0.4);
+}
+
+.branch-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    background: transparent;
+    z-index: 1050;
+}
+
+.branch-menu-list {
+    z-index: 1051;
+    min-width: 100%;
 }
 
 @keyframes notif-slide-in {
@@ -68,4 +167,9 @@
         opacity: 1;
         transform: translateX(0);
     }
+}
+
+@keyframes notif-tooltip-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }

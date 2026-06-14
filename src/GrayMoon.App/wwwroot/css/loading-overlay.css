@@ -26,6 +26,8 @@
   bottom: 0;
   /* z-index below Bootstrap modals (1050+) so dialogs stay interactive above the overlay */
   z-index: 100;
+  /* Sync left edge with sidebar width transition so the overlay tracks the sidebar on expand */
+  transition: opacity 140ms ease, left 0.2s ease;
 }
 
 .loading-overlay.show {

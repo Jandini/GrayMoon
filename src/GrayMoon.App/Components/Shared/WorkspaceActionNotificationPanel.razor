@@ -1,5 +1,6 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @implements IDisposable
+@using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
 @using Microsoft.AspNetCore.SignalR.Client
 @inject WorkspacePendingActionsService PendingActionsService
@@ -8,6 +9,7 @@
 @inject IBackgroundJobService JobService
 @inject IToastService ToastService
 @inject ILogger<WorkspaceActionNotificationPanel> Logger
+@inject WorkspaceFileVersionService FileVersionService
 
 @{
     var currentPath = new Uri(NavigationManager.Uri).AbsolutePath.ToLowerInvariant();
@@ -33,62 +35,158 @@
                     </button>
                 </div>
                 <p class="workspace-action-card__desc">@GetDescription(n)</p>
+                @if (n.Repos.Count > 0)
+                {
+                    <div class="notif-repo-list">
+                        @foreach (var repo in n.Repos)
+                        {
+                            <div class="notif-repo-row" @key="repo.RepositoryId">
+                                <span class="notif-repo-name" title="@repo.RepositoryName">@repo.RepositoryName</span>
+                                @if (repo.UnmatchedDeps > 0)
+                                {
+                                    <span @key="@($"upd-{repo.RepositoryId}")"
+                                          class="badge notif-dep-badge"
+                                          @onmouseenter="() => ShowDepTooltip(n.WorkspaceId, repo.RepositoryId)"
+                                          @onmouseleave="() => _ = HideDepTooltipAsync()">
+                                        @repo.UnmatchedDeps of @repo.TotalDeps
+                                    </span>
+                                }
+                                @if (repo.OutgoingCommits > 0 || repo.NewBranchNoPush)
+                                {
+                                    <CommitsBadge @key="@($"cmt-{repo.RepositoryId}")"
+                                                  RepositoryId="repo.RepositoryId"
+                                                  Outgoing="repo.OutgoingCommits"
+                                                  Incoming="repo.IncomingCommits"
+                                                  BranchHasUpstream="@(repo.NewBranchNoPush ? false : null)"
+                                                  Disabled="true" />
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+                @if (GetHoveredRepo(n) is { MismatchedDeps.Count: > 0 } hoveredRepo)
+                {
+                    <div class="notif-dep-tooltip notif-dep-tooltip--visible"
+                         @onmouseenter="() => ShowDepTooltip(n.WorkspaceId, _hoveredDepBadge?.RepoId ?? 0)"
+                         @onmouseleave="() => _ = HideDepTooltipAsync()">
+                        <div class="dependency-badge-tooltip-header">
+                            <span class="dependency-badge-tooltip-title">Dependencies requiring update:</span>
+                        </div>
+                        @foreach (var dep in hoveredRepo.MismatchedDeps)
+                        {
+                            <div class="dependency-badge-tooltip-line">
+                                <code>@dep.PackageId</code> <span class="dependency-badge-tooltip-versions">@dep.CurrentVersion &rarr; @dep.NewVersion</span>
+                            </div>
+                        }
+                    </div>
+                }
                 <div class="workspace-action-card__actions">
-                    @if (n.HasUnmatchedDependencies)
+                    @if (n.HasUnmatchedDependencies && n.IsPushRecommended && !n.HasIncomingCommits)
                     {
                         <div class="btn-group dropup position-relative">
-                            <button class="btn btn-danger btn-sm"
+                            <button class="btn btn-warning btn-sm"
                                     disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                    @onclick="() => _ = RunUpdateAsync(n.WorkspaceId)">
-                                Update
+                                    @onclick="() => _ = RunUpdateAndPushAsync(n.WorkspaceId)">
+                                Push Updated
                             </button>
                             <button type="button"
                                     class="btn btn-danger btn-sm dropdown-toggle dropdown-toggle-split"
-                                    aria-label="Toggle Update menu"
-                                    aria-expanded="@(_openUpdateMenus.Contains(n.WorkspaceId) ? "true" : "false")"
+                                    aria-label="Toggle Push Updated menu"
+                                    aria-expanded="@(_openPushUpdatedMenus.Contains(n.WorkspaceId) ? "true" : "false")"
                                     disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                    @onclick="() => ToggleUpdateMenu(n.WorkspaceId)"
+                                    @onclick="() => TogglePushUpdatedMenu(n.WorkspaceId)"
                                     @onclick:stopPropagation>
                                 <span class="visually-hidden">Toggle Dropdown</span>
                             </button>
-                            @if (_openUpdateMenus.Contains(n.WorkspaceId))
+                            @if (_openPushUpdatedMenus.Contains(n.WorkspaceId))
                             {
-                                <div class="branch-menu-backdrop" @onclick="() => CloseUpdateMenu(n.WorkspaceId)"></div>
+                                <div class="branch-menu-backdrop" @onclick="() => ClosePushUpdatedMenu(n.WorkspaceId)"></div>
                                 <ul class="dropdown-menu show shadow branch-menu-list bottom-100 mb-1" role="menu">
                                     <li>
                                         <button class="dropdown-item" type="button" role="menuitem"
                                                 disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                                @onclick="() => { CloseUpdateMenu(n.WorkspaceId); _ = RunUpdateAsync(n.WorkspaceId); }">
-                                            Update
+                                                @onclick="() => { ClosePushUpdatedMenu(n.WorkspaceId); _ = RunUpdateAsync(n.WorkspaceId); }">
+                                            Update Only
                                         </button>
                                     </li>
                                     <li><hr class="dropdown-divider branch-menu-divider" /></li>
                                     <li>
                                         <button class="dropdown-item" type="button" role="menuitem"
                                                 disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                                @onclick="() => { CloseUpdateMenu(n.WorkspaceId); _ = RunUpdateAndPushAsync(n.WorkspaceId); }">
-                                            Update &amp; Push
+                                                @onclick="() => { ClosePushUpdatedMenu(n.WorkspaceId); _ = RunUpdateFilesAsync(n.WorkspaceId); }">
+                                            Update Files
+                                        </button>
+                                    </li>
+                                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                                    <li>
+                                        <button class="dropdown-item" type="button" role="menuitem"
+                                                disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                                @onclick="() => { ClosePushUpdatedMenu(n.WorkspaceId); _ = RunPushAsync(n.WorkspaceId); }">
+                                            Push Only
                                         </button>
                                     </li>
                                 </ul>
                             }
                         </div>
                     }
-                    @if (n.HasIncomingCommits)
+                    else
                     {
-                        <button class="btn btn-danger btn-sm"
-                                disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                @onclick="() => _ = RunPullAsync(n.WorkspaceId)">
-                            Pull
-                        </button>
-                    }
-                    else if (n.IsPushRecommended)
-                    {
-                        <button class="btn btn-warning btn-sm"
-                                disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                @onclick="() => _ = RunPushAsync(n.WorkspaceId)">
-                            Push
-                        </button>
+                        @if (n.HasUnmatchedDependencies)
+                        {
+                            <div class="btn-group dropup position-relative">
+                                <button class="btn btn-danger btn-sm"
+                                        disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                        @onclick="() => _ = RunUpdateAsync(n.WorkspaceId)">
+                                    Update
+                                </button>
+                                <button type="button"
+                                        class="btn btn-danger btn-sm dropdown-toggle dropdown-toggle-split"
+                                        aria-label="Toggle Update menu"
+                                        aria-expanded="@(_openUpdateMenus.Contains(n.WorkspaceId) ? "true" : "false")"
+                                        disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                        @onclick="() => ToggleUpdateMenu(n.WorkspaceId)"
+                                        @onclick:stopPropagation>
+                                    <span class="visually-hidden">Toggle Dropdown</span>
+                                </button>
+                                @if (_openUpdateMenus.Contains(n.WorkspaceId))
+                                {
+                                    <div class="branch-menu-backdrop" @onclick="() => CloseUpdateMenu(n.WorkspaceId)"></div>
+                                    <ul class="dropdown-menu show shadow branch-menu-list bottom-100 mb-1" role="menu">
+                                        <li>
+                                            <button class="dropdown-item" type="button" role="menuitem"
+                                                    disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                                    @onclick="() => { CloseUpdateMenu(n.WorkspaceId); _ = RunUpdateAsync(n.WorkspaceId); }">
+                                                Update
+                                            </button>
+                                        </li>
+                                        <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                                        <li>
+                                            <button class="dropdown-item" type="button" role="menuitem"
+                                                    disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                                    @onclick="() => { CloseUpdateMenu(n.WorkspaceId); _ = RunUpdateAndPushAsync(n.WorkspaceId); }">
+                                                Update &amp; Push
+                                            </button>
+                                        </li>
+                                    </ul>
+                                }
+                            </div>
+                        }
+                        @if (n.HasIncomingCommits)
+                        {
+                            <button class="btn btn-danger btn-sm"
+                                    disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                    @onclick="() => _ = RunPullAsync(n.WorkspaceId)">
+                                Pull
+                            </button>
+                        }
+                        else if (n.IsPushRecommended)
+                        {
+                            <button class="btn btn-warning btn-sm"
+                                    disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                    @onclick="() => _ = RunPushAsync(n.WorkspaceId)">
+                                Push
+                            </button>
+                        }
                     }
                 </div>
             </div>
@@ -100,8 +198,39 @@
     private HubConnection? _hubConnection;
     private bool _disposed;
     private readonly HashSet<int> _openUpdateMenus = new();
+    private readonly HashSet<int> _openPushUpdatedMenus = new();
+    private (int WorkspaceId, int RepoId)? _hoveredDepBadge;
+    private CancellationTokenSource? _tooltipHideCts;
 
     private static string WorkspaceJobKey(int workspaceId) => $"/workspaces/{workspaceId}";
+
+    private NotificationRepo? GetHoveredRepo(WorkspaceNotification n)
+    {
+        if (_hoveredDepBadge is not { } h || h.WorkspaceId != n.WorkspaceId) return null;
+        return n.Repos.FirstOrDefault(r => r.RepositoryId == h.RepoId);
+    }
+
+    private void ShowDepTooltip(int workspaceId, int repoId)
+    {
+        _tooltipHideCts?.Cancel();
+        _tooltipHideCts = null;
+        _hoveredDepBadge = (workspaceId, repoId);
+    }
+
+    private async Task HideDepTooltipAsync()
+    {
+        _tooltipHideCts?.Cancel();
+        _tooltipHideCts = new CancellationTokenSource();
+        var cts = _tooltipHideCts;
+        try
+        {
+            await Task.Delay(120, cts.Token);
+            if (_disposed) return;
+            _hoveredDepBadge = null;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException) { }
+    }
     private bool IsWorkspaceJobRunning(int workspaceId) => JobService.IsRunning(WorkspaceJobKey(workspaceId));
 
     private static int GetSuppressedWorkspaceId(string lowerPath)
@@ -121,6 +250,14 @@
     }
 
     private void CloseUpdateMenu(int workspaceId) => _openUpdateMenus.Remove(workspaceId);
+
+    private void TogglePushUpdatedMenu(int workspaceId)
+    {
+        if (!_openPushUpdatedMenus.Remove(workspaceId))
+            _openPushUpdatedMenus.Add(workspaceId);
+    }
+
+    private void ClosePushUpdatedMenu(int workspaceId) => _openPushUpdatedMenus.Remove(workspaceId);
 
     private static string GetDescription(WorkspaceNotification n)
     {
@@ -160,7 +297,18 @@
                     return;
                 }
                 var links = workspace.Repositories.ToList();
-                var notification = WorkspacePendingActionsService.ComputeNotification(workspaceId, workspace.Name, links);
+
+                var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
+                var mismatchPayloads = await projectRepo.GetSyncDependenciesPayloadAsync(workspaceId);
+                var mismatchedDeps = mismatchPayloads.ToDictionary(
+                    p => p.RepoId,
+                    p => (IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>)p.ProjectUpdates
+                        .SelectMany(u => u.PackageUpdates)
+                        .GroupBy(x => x.PackageId)
+                        .Select(g => g.First())
+                        .ToList());
+
+                var notification = WorkspacePendingActionsService.ComputeNotification(workspaceId, workspace.Name, links, mismatchedDeps);
                 PendingActionsService.OnWorkspaceSynced(notification, workspaceId);
             }
             catch (Exception ex)
@@ -183,12 +331,17 @@
     {
         if (_disposed) return;
         _openUpdateMenus.Clear();
+        _openPushUpdatedMenus.Clear();
+        _tooltipHideCts?.Cancel();
+        _tooltipHideCts = null;
+        _hoveredDepBadge = null;
         _ = InvokeAsync(StateHasChanged);
     }
 
     public void Dispose()
     {
         _disposed = true;
+        _tooltipHideCts?.Cancel();
         PendingActionsService.Changed -= OnServiceChanged;
         JobService.Changed -= OnServiceChanged;
         NavigationManager.LocationChanged -= OnLocationChanged;
@@ -271,6 +424,38 @@
             {
                 Logger.LogError(ex, "Notification panel Update & Push (push phase) failed for workspace {WorkspaceId}", workspaceId);
                 if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Push failed after update."));
+                throw;
+            }
+        });
+        return Task.CompletedTask;
+    }
+
+    private Task RunUpdateFilesAsync(int workspaceId)
+    {
+        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        PendingActionsService.Dismiss(workspaceId);
+        JobService.StartJob(WorkspaceJobKey(workspaceId), "Updating file versions...", async (job, ct) =>
+        {
+            try
+            {
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
+                var (updated, failed, error, _) = await fileVersionService.UpdateAllVersionsAsync(
+                    workspaceId, selectedRepositoryIds: null, cancellationToken: ct);
+
+                if (!_disposed)
+                    await InvokeAsync(() =>
+                    {
+                        if (error != null) ToastService.ShowError(error);
+                        else if (failed > 0) ToastService.Show($"Updated {updated} line(s). {failed} file(s) could not be updated - check logs.");
+                        else ToastService.Show("Versions updated in configured files.");
+                    });
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Notification panel Update Files failed for workspace {WorkspaceId}", workspaceId);
+                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Update Files failed."));
                 throw;
             }
         });
