@@ -153,6 +153,11 @@
     z-index: 1050;
 }
 
+.branch-menu-list {
+    z-index: 1051;
+    min-width: 100%;
+}
+
 @keyframes notif-slide-in {
     from {
         opacity: 0;
