@@ -12,7 +12,10 @@
 @{
     var currentPath = new Uri(NavigationManager.Uri).AbsolutePath.ToLowerInvariant();
     var suppressedId = GetSuppressedWorkspaceId(currentPath);
-    var visible = PendingActionsService.Notifications.Where(n => n.WorkspaceId != suppressedId).ToList();
+    var visible = PendingActionsService.Notifications
+        .Where(n => n.WorkspaceId != suppressedId)
+        .Where(n => !IsWorkspaceJobRunning(n.WorkspaceId))
+        .ToList();
 }
 
 @if (visible.Count > 0)
@@ -35,7 +38,7 @@
                     {
                         <div class="btn-group dropup position-relative">
                             <button class="btn btn-danger btn-sm"
-                                    disabled="@IsJobRunning"
+                                    disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
                                     @onclick="() => _ = RunUpdateAsync(n.WorkspaceId)">
                                 Update
                             </button>
@@ -43,7 +46,7 @@
                                     class="btn btn-danger btn-sm dropdown-toggle dropdown-toggle-split"
                                     aria-label="Toggle Update menu"
                                     aria-expanded="@(_openUpdateMenus.Contains(n.WorkspaceId) ? "true" : "false")"
-                                    disabled="@IsJobRunning"
+                                    disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
                                     @onclick="() => ToggleUpdateMenu(n.WorkspaceId)"
                                     @onclick:stopPropagation>
                                 <span class="visually-hidden">Toggle Dropdown</span>
@@ -54,7 +57,7 @@
                                 <ul class="dropdown-menu show shadow branch-menu-list bottom-100 mb-1" role="menu">
                                     <li>
                                         <button class="dropdown-item" type="button" role="menuitem"
-                                                disabled="@IsJobRunning"
+                                                disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
                                                 @onclick="() => { CloseUpdateMenu(n.WorkspaceId); _ = RunUpdateAsync(n.WorkspaceId); }">
                                             Update
                                         </button>
@@ -62,7 +65,7 @@
                                     <li><hr class="dropdown-divider branch-menu-divider" /></li>
                                     <li>
                                         <button class="dropdown-item" type="button" role="menuitem"
-                                                disabled="@IsJobRunning"
+                                                disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
                                                 @onclick="() => { CloseUpdateMenu(n.WorkspaceId); _ = RunUpdateAndPushAsync(n.WorkspaceId); }">
                                             Update &amp; Push
                                         </button>
@@ -74,7 +77,7 @@
                     @if (n.HasIncomingCommits)
                     {
                         <button class="btn btn-danger btn-sm"
-                                disabled="@IsJobRunning"
+                                disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
                                 @onclick="() => _ = RunPullAsync(n.WorkspaceId)">
                             Pull
                         </button>
@@ -82,7 +85,7 @@
                     else if (n.IsPushRecommended)
                     {
                         <button class="btn btn-warning btn-sm"
-                                disabled="@IsJobRunning"
+                                disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
                                 @onclick="() => _ = RunPushAsync(n.WorkspaceId)">
                             Push
                         </button>
@@ -98,8 +101,8 @@
     private bool _disposed;
     private readonly HashSet<int> _openUpdateMenus = new();
 
-    private string CurrentPageJobKey => new Uri(NavigationManager.Uri).AbsolutePath.ToLowerInvariant();
-    private bool IsJobRunning => JobService.IsRunning(CurrentPageJobKey);
+    private static string WorkspaceJobKey(int workspaceId) => $"/workspaces/{workspaceId}";
+    private bool IsWorkspaceJobRunning(int workspaceId) => JobService.IsRunning(WorkspaceJobKey(workspaceId));
 
     private static int GetSuppressedWorkspaceId(string lowerPath)
     {
@@ -195,8 +198,9 @@
 
     private Task RunUpdateAsync(int workspaceId)
     {
-        if (IsJobRunning) return Task.CompletedTask;
-        JobService.StartJob(CurrentPageJobKey, "Updating dependencies...", async (job, ct) =>
+        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        PendingActionsService.Dismiss(workspaceId);
+        JobService.StartJob(WorkspaceJobKey(workspaceId), "Updating dependencies...", async (job, ct) =>
         {
             try
             {
@@ -225,8 +229,9 @@
 
     private Task RunUpdateAndPushAsync(int workspaceId)
     {
-        if (IsJobRunning) return Task.CompletedTask;
-        JobService.StartJob(CurrentPageJobKey, "Updating dependencies...", async (job, ct) =>
+        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        PendingActionsService.Dismiss(workspaceId);
+        JobService.StartJob(WorkspaceJobKey(workspaceId), "Updating dependencies...", async (job, ct) =>
         {
             List<WorkspaceRepositoryLink> freshLinks;
             try
@@ -274,8 +279,9 @@
 
     private Task RunPushAsync(int workspaceId)
     {
-        if (IsJobRunning) return Task.CompletedTask;
-        JobService.StartJob(CurrentPageJobKey, "Preparing push...", async (job, ct) =>
+        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        PendingActionsService.Dismiss(workspaceId);
+        JobService.StartJob(WorkspaceJobKey(workspaceId), "Preparing push...", async (job, ct) =>
         {
             try
             {
@@ -348,9 +354,10 @@
 
     private Task RunPullAsync(int workspaceId)
     {
-        if (IsJobRunning) return Task.CompletedTask;
+        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        PendingActionsService.Dismiss(workspaceId);
         var apiBaseUrl = NavigationManager.BaseUri.TrimEnd('/');
-        JobService.StartJob(CurrentPageJobKey, "Synchronizing commits...", async (job, ct) =>
+        JobService.StartJob(WorkspaceJobKey(workspaceId), "Synchronizing commits...", async (job, ct) =>
         {
             try
             {
