@@ -84,6 +84,7 @@ try
     builder.Services.AddScoped<WorkspacePushService>();
     builder.Services.AddScoped<WorkspacePushHandler>();
     builder.Services.AddScoped<WorkspaceDependencyService>();
+    builder.Services.AddScoped<WorkspacePendingActionsService>();
     builder.Services.AddScoped<WorkspaceBranchHandler>();
     builder.Services.AddScoped<NewFeatureOrchestrator>();
     builder.Services.AddScoped<IBackgroundJobService, BackgroundJobService>();

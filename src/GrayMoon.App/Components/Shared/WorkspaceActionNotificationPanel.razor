@@ -1,0 +1,408 @@
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@implements IDisposable
+@using GrayMoon.App.Repositories
+@using Microsoft.AspNetCore.SignalR.Client
+@inject WorkspacePendingActionsService PendingActionsService
+@inject IServiceScopeFactory ServiceScopeFactory
+@inject NavigationManager NavigationManager
+@inject IBackgroundJobService JobService
+@inject IToastService ToastService
+@inject ILogger<WorkspaceActionNotificationPanel> Logger
+
+@{
+    var currentPath = new Uri(NavigationManager.Uri).AbsolutePath.ToLowerInvariant();
+    var suppressedId = GetSuppressedWorkspaceId(currentPath);
+    var visible = PendingActionsService.Notifications.Where(n => n.WorkspaceId != suppressedId).ToList();
+}
+
+@if (visible.Count > 0)
+{
+    <div class="workspace-action-panel">
+        @foreach (var n in visible)
+        {
+            <div class="workspace-action-card">
+                <div class="workspace-action-card__header">
+                    <span class="workspace-action-card__title">@n.WorkspaceName</span>
+                    <button class="btn-close btn-close-white"
+                            style="font-size: 0.7rem; flex-shrink: 0;"
+                            aria-label="Dismiss"
+                            @onclick="() => PendingActionsService.Dismiss(n.WorkspaceId)">
+                    </button>
+                </div>
+                <p class="workspace-action-card__desc">@GetDescription(n)</p>
+                <div class="workspace-action-card__actions">
+                    @if (n.HasUnmatchedDependencies)
+                    {
+                        <div class="btn-group position-relative">
+                            <button class="btn btn-danger btn-sm"
+                                    disabled="@IsJobRunning"
+                                    @onclick="() => _ = RunUpdateAsync(n.WorkspaceId)">
+                                Update
+                            </button>
+                            <button type="button"
+                                    class="btn btn-danger btn-sm dropdown-toggle dropdown-toggle-split"
+                                    aria-label="Toggle Update menu"
+                                    aria-expanded="@(_openUpdateMenus.Contains(n.WorkspaceId) ? "true" : "false")"
+                                    disabled="@IsJobRunning"
+                                    @onclick="() => ToggleUpdateMenu(n.WorkspaceId)"
+                                    @onclick:stopPropagation>
+                                <span class="visually-hidden">Toggle Dropdown</span>
+                            </button>
+                            @if (_openUpdateMenus.Contains(n.WorkspaceId))
+                            {
+                                <div class="branch-menu-backdrop" @onclick="() => CloseUpdateMenu(n.WorkspaceId)"></div>
+                                <ul class="dropdown-menu show shadow branch-menu-list" role="menu">
+                                    <li>
+                                        <button class="dropdown-item" type="button" role="menuitem"
+                                                disabled="@IsJobRunning"
+                                                @onclick="() => { CloseUpdateMenu(n.WorkspaceId); _ = RunUpdateAsync(n.WorkspaceId); }">
+                                            Update
+                                        </button>
+                                    </li>
+                                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                                    <li>
+                                        <button class="dropdown-item" type="button" role="menuitem"
+                                                disabled="@IsJobRunning"
+                                                @onclick="() => { CloseUpdateMenu(n.WorkspaceId); _ = RunUpdateAndPushAsync(n.WorkspaceId); }">
+                                            Update &amp; Push
+                                        </button>
+                                    </li>
+                                </ul>
+                            }
+                        </div>
+                    }
+                    @if (n.HasIncomingCommits)
+                    {
+                        <button class="btn btn-danger btn-sm"
+                                disabled="@IsJobRunning"
+                                @onclick="() => _ = RunPullAsync(n.WorkspaceId)">
+                            Pull
+                        </button>
+                    }
+                    else if (n.IsPushRecommended)
+                    {
+                        <button class="btn btn-warning btn-sm"
+                                disabled="@IsJobRunning"
+                                @onclick="() => _ = RunPushAsync(n.WorkspaceId)">
+                            Push
+                        </button>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private HubConnection? _hubConnection;
+    private bool _disposed;
+    private readonly HashSet<int> _openUpdateMenus = new();
+
+    private string CurrentPageJobKey => new Uri(NavigationManager.Uri).AbsolutePath.ToLowerInvariant();
+    private bool IsJobRunning => JobService.IsRunning(CurrentPageJobKey);
+
+    private static int GetSuppressedWorkspaceId(string lowerPath)
+    {
+        var segments = lowerPath.Trim('/').Split('/');
+        if (segments.Length == 2
+            && segments[0] == "workspaces"
+            && int.TryParse(segments[1], out var id))
+            return id;
+        return -1;
+    }
+
+    private void ToggleUpdateMenu(int workspaceId)
+    {
+        if (!_openUpdateMenus.Remove(workspaceId))
+            _openUpdateMenus.Add(workspaceId);
+    }
+
+    private void CloseUpdateMenu(int workspaceId) => _openUpdateMenus.Remove(workspaceId);
+
+    private static string GetDescription(WorkspaceNotification n)
+    {
+        var parts = new List<string>(3);
+        if (n.HasUnmatchedDependencies) parts.Add("dependency updates pending");
+        if (n.HasIncomingCommits) parts.Add("incoming commits to pull");
+        else if (n.IsPushRecommended) parts.Add("commits ready to push");
+        return string.Join(", ", parts);
+    }
+
+    protected override void OnInitialized()
+    {
+        PendingActionsService.Changed += OnServiceChanged;
+        JobService.Changed += OnServiceChanged;
+        NavigationManager.LocationChanged += OnLocationChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(NavigationManager.ToAbsoluteUri("/hubs/workspace-sync"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hubConnection.On<int>("WorkspaceSynced", async (workspaceId) =>
+        {
+            try
+            {
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+                var workspace = await workspaceRepo.GetByIdAsync(workspaceId);
+                if (workspace == null)
+                {
+                    PendingActionsService.OnWorkspaceSynced(null, workspaceId);
+                    return;
+                }
+                var links = workspace.Repositories.ToList();
+                var notification = WorkspacePendingActionsService.ComputeNotification(workspaceId, workspace.Name, links);
+                PendingActionsService.OnWorkspaceSynced(notification, workspaceId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Failed to process WorkspaceSynced for workspace {WorkspaceId}", workspaceId);
+            }
+        });
+
+        try { await _hubConnection.StartAsync(); }
+        catch (Exception ex) { Logger.LogDebug(ex, "Notification panel hub connection failed"); }
+    }
+
+    private void OnServiceChanged()
+    {
+        if (_disposed) return;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        if (_disposed) return;
+        _openUpdateMenus.Clear();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        PendingActionsService.Changed -= OnServiceChanged;
+        JobService.Changed -= OnServiceChanged;
+        NavigationManager.LocationChanged -= OnLocationChanged;
+        _ = _hubConnection?.StopAsync();
+        _ = _hubConnection?.DisposeAsync().AsTask();
+    }
+
+    private Task RunUpdateAsync(int workspaceId)
+    {
+        if (IsJobRunning) return Task.CompletedTask;
+        JobService.StartJob(CurrentPageJobKey, "Updating dependencies...", async (job, ct) =>
+        {
+            try
+            {
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var updateHandler = scope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
+                await updateHandler.RunUpdateAsync(
+                    workspaceId,
+                    ct,
+                    job.ReportProgress,
+                    (_, _) => { },
+                    onAppSideComplete: () => { },
+                    repoIdsToUpdate: null,
+                    commitMessage: null,
+                    includeDepsInCommitMessage: true);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Notification panel Update failed for workspace {WorkspaceId}", workspaceId);
+                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Update failed. Start the Agent and try again."));
+                throw;
+            }
+        });
+        return Task.CompletedTask;
+    }
+
+    private Task RunUpdateAndPushAsync(int workspaceId)
+    {
+        if (IsJobRunning) return Task.CompletedTask;
+        JobService.StartJob(CurrentPageJobKey, "Updating dependencies...", async (job, ct) =>
+        {
+            List<WorkspaceRepositoryLink> freshLinks;
+            try
+            {
+                await using var updateScope = ServiceScopeFactory.CreateAsyncScope();
+                var updateHandler = updateScope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
+                await updateHandler.RunUpdateAsync(
+                    workspaceId,
+                    ct,
+                    job.ReportProgress,
+                    (_, _) => { },
+                    onAppSideComplete: () => { },
+                    repoIdsToUpdate: null,
+                    commitMessage: null,
+                    includeDepsInCommitMessage: true);
+
+                await using var reloadScope = ServiceScopeFactory.CreateAsyncScope();
+                var workspaceRepo = reloadScope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+                var ws = await workspaceRepo.GetByIdAsync(workspaceId);
+                freshLinks = ws?.Repositories.ToList() ?? new List<WorkspaceRepositoryLink>();
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Notification panel Update & Push (update phase) failed for workspace {WorkspaceId}", workspaceId);
+                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Update failed. Start the Agent and try again."));
+                throw;
+            }
+
+            job.ReportProgress("Preparing push...");
+            try
+            {
+                await ExecutePushAsync(workspaceId, freshLinks, job, ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Notification panel Update & Push (push phase) failed for workspace {WorkspaceId}", workspaceId);
+                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Push failed after update."));
+                throw;
+            }
+        });
+        return Task.CompletedTask;
+    }
+
+    private Task RunPushAsync(int workspaceId)
+    {
+        if (IsJobRunning) return Task.CompletedTask;
+        JobService.StartJob(CurrentPageJobKey, "Preparing push...", async (job, ct) =>
+        {
+            try
+            {
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+                var ws = await workspaceRepo.GetByIdAsync(workspaceId);
+                if (ws == null) return;
+                var links = ws.Repositories.ToList();
+                await ExecutePushAsync(workspaceId, links, job, ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Notification panel Push failed for workspace {WorkspaceId}", workspaceId);
+                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Push failed."));
+                throw;
+            }
+        });
+        return Task.CompletedTask;
+    }
+
+    private async Task ExecutePushAsync(
+        int workspaceId,
+        List<WorkspaceRepositoryLink> links,
+        BackgroundJobHandle job,
+        CancellationToken ct)
+    {
+        await using var scope = ServiceScopeFactory.CreateAsyncScope();
+        var pushHandler = scope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
+        var depService = scope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
+
+        var (payload, hasUnpushed) = await pushHandler.GetPushPlanAsync(workspaceId, links, ct);
+        if (!hasUnpushed)
+        {
+            if (!_disposed) _ = InvokeAsync(() => ToastService.Show("Nothing to push."));
+            return;
+        }
+
+        var taggedIds = links.Where(wr => wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet();
+        var pushRepoIds = payload.Select(p => p.RepoId).Where(id => !taggedIds.Contains(id)).ToHashSet();
+        if (pushRepoIds.Count == 0)
+        {
+            if (!_disposed) _ = InvokeAsync(() => ToastService.Show("Nothing to push."));
+            return;
+        }
+
+        var repoIdsThatNeedPush = links
+            .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
+            .Select(wr => wr.RepositoryId)
+            .ToHashSet();
+        var depInfo = await depService.GetPushDependencyInfoForRepoSetAsync(workspaceId, pushRepoIds, ct);
+        bool synchronizedPush = WorkspaceDependencyService.ShouldShowSynchronizedPushModal(depInfo, repoIdsThatNeedPush);
+
+        var requiredPackageIds = depInfo?.PayloadForRepo?.RequiredPackages
+            .Select(r => r.PackageId?.Trim())
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Cast<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        await pushHandler.RunPushWithDependenciesAsync(
+            workspaceId,
+            pushRepoIds,
+            synchronizedPush,
+            requiredPackageIds,
+            job.ReportProgress,
+            ToastService.Show,
+            onAppSideComplete: () => { },
+            ct);
+    }
+
+    private Task RunPullAsync(int workspaceId)
+    {
+        if (IsJobRunning) return Task.CompletedTask;
+        var apiBaseUrl = NavigationManager.BaseUri.TrimEnd('/');
+        JobService.StartJob(CurrentPageJobKey, "Synchronizing commits...", async (job, ct) =>
+        {
+            try
+            {
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+                var ws = await workspaceRepo.GetByIdAsync(workspaceId);
+                if (ws == null) return;
+                var links = ws.Repositories.ToList();
+
+                var repoIds = links
+                    .Where(wr =>
+                        !wr.IsOnTag
+                        && (wr.IncomingCommits ?? 0) > 0
+                        && !string.IsNullOrWhiteSpace(wr.BranchName)
+                        && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
+                        && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal))
+                    .Select(wr => wr.RepositoryId)
+                    .ToList();
+                if (repoIds.Count == 0) return;
+
+                var commitSyncHandler = scope.ServiceProvider.GetRequiredService<WorkspaceCommitSyncHandler>();
+                if (repoIds.Count == 1)
+                {
+                    await commitSyncHandler.CommitSyncAsync(
+                        workspaceId,
+                        repoIds[0],
+                        apiBaseUrl,
+                        ct,
+                        msg => { job.ReportProgress(msg); return Task.CompletedTask; },
+                        (_, _) => { },
+                        _ => { });
+                }
+                else
+                {
+                    await commitSyncHandler.CommitSyncLevelAsync(
+                        workspaceId,
+                        repoIds,
+                        apiBaseUrl,
+                        ct,
+                        (done, total) => { job.ReportProgress($"Pulled {done} of {total}"); return Task.CompletedTask; },
+                        (_, _) => { },
+                        _ => { });
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Notification panel Pull failed for workspace {WorkspaceId}", workspaceId);
+                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Pull failed."));
+                throw;
+            }
+        });
+        return Task.CompletedTask;
+    }
+}
