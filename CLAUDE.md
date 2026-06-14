@@ -58,7 +58,7 @@ Git hooks (`post-commit`, `post-checkout`, `post-merge`, `pre-push`) POST JSON t
 
 ### Agent command structure
 
-The Agent uses `System.CommandLine`. Each agent operation is a class in `src/GrayMoon.Agent/Commands/`. To add a new operation: create a command class there, register it in the CLI entry point, and add the corresponding hub method constant to `GrayMoon.Abstractions/Agent/AgentHubMethods.cs`.
+The Agent uses `System.CommandLine`. Each agent operation implements `ICommandHandler<TRequest, TResponse>` in `src/GrayMoon.Agent/Commands/`. To add a new command: (1) define request/response DTOs, (2) create the handler class, (3) register it via `AddSingleton<ICommandHandler<TRequest, TResponse>, YourCommand>()` in `RunCommandHandler.cs`, (4) add it to the dispatcher dictionary in `CommandDispatcher.cs`, (5) add the hub method constant to `AgentHubMethods.cs`, (6) call via `AgentBridge.SendCommandAsync` on the App side.
 
 ### App layer structure
 
@@ -98,6 +98,8 @@ Connector tokens are AES-256-GCM encrypted at rest via `AesGcmTokenProtector` (b
 
 Schema is owned by EF Core but applied via `EnsureCreated()`. Core tables: `Connectors`, `Repositories`, `Workspaces`, `WorkspaceRepositories` (join with live state), `WorkspaceRepositoryPullRequest` (1:1 with link), `WorkspaceProject`, `ProjectDependency`, `WorkspaceFile`, `WorkspaceFileVersionConfig`, `RepositoryBranch`, `Settings`.
 
+After `EnsureCreated()`, startup calls `Migrations.RunAllAsync(dbContext)` (`src/GrayMoon.App/Migrations.cs`). Each migration is an idempotent `ALTER TABLE` guarded by `pragma_table_info()`. Add new columns there - no EF Core migration assembly is used.
+
 ### Background job system
 
 Long-running App-side operations (restore, update, push orchestration) run as background jobs so they survive page navigation within the same browser tab.
@@ -107,6 +109,14 @@ Long-running App-side operations (restore, update, push orchestration) run as ba
 - **`TerminalSinkContext`** — `AsyncLocal`-based ambient context. `AgentBridge.SendCommandAsync` checks `TerminalSinkContext.Current` and routes all `CommandOutput` streaming lines to the active job's terminal automatically, without threading the buffer through every service call. Wrap a job's `Task.Run` body with `using var _ = TerminalSinkContext.Use(handle.Terminal)`.
 - **`BackgroundJobOverlay`** layout component — reads `IBackgroundJobService.GetJob(currentPath)` on every navigation and renders `LoadingOverlay` when the job is `Running`. It also reads `AgentQueueStateService.GetTotalPendingCount()` to show pending agent tasks in the spinner.
 - **`AgentQueueStateService`** — receives `ReportQueueStatus` SignalR events from the Agent (total + per-workspace pending counts). Use `HasWorkspaceJobsPending(workspaceId)` to disable workspace actions while the agent queue is busy.
+
+### Toast service
+
+`IToastService` (singleton). Call `Show(message)` / `ShowError(message)` from any service or component. The `Toast` component auto-dismisses after 2.5 s (normal) or 6 s (error).
+
+### REST API registration
+
+`ApiEndpointRegistration.MapApiEndpoints()` is called in `Program.cs`. Each feature adds a static extension method (e.g., `MapWorkspaceEndpoints()`). Add new API groups there rather than scattering `app.Map*` calls.
 
 ### CSS conventions for the loading overlay terminal
 
