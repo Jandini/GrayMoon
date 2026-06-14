@@ -176,6 +176,38 @@ public sealed partial class WorkspaceActions : IDisposable
         StateHasChanged();
     }
 
+    internal void OnLogsRerunTriggered()
+    {
+        var runId = _logsRunId;
+        var row = rows.FirstOrDefault(r => r.WorkflowLines.Any(l => l.Action?.RunId == runId));
+        var line = row?.WorkflowLines.FirstOrDefault(l => l.Action?.RunId == runId);
+        var workflowId = line?.Action?.WorkflowId ?? 0;
+
+        CloseLogsModal();
+
+        if (row == null || workflowId <= 0) return;
+
+        var latch = GetOrCreateLatch(row, workflowId);
+        latch.RerunPending = true;
+        ApplyActionLatches(row);
+        StateHasChanged();
+        _ = TryRefreshAfterJobRerunAsync(row, workflowId);
+    }
+
+    private async Task TryRefreshAfterJobRerunAsync(WorkspaceActionRow row, long workflowId)
+    {
+        try
+        {
+            await TryRefreshUntilWorkflowLineRunningAsync(row, workflowId, "GHA Re-run (job)", CancellationToken.None);
+        }
+        finally
+        {
+            EndRerunLatch(row, workflowId);
+            ApplyActionLatches(row);
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
     internal void ToggleShowErrors()
     {
         _showErrors = !_showErrors;

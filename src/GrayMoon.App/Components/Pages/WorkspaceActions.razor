@@ -376,4 +376,5 @@
               RepositoryName="@(_logsRepo ?? "")"
               RunId="@_logsRunId"
               WorkflowDisplayName="@_logsWorkflowName"
-              OnClose="CloseLogsModal" />
+              OnClose="CloseLogsModal"
+              OnRerunTriggered="OnLogsRerunTriggered" />

@@ -36,13 +36,6 @@ window.ghaLogs = {
         };
     },
 
-    scrollToFirstError: function (el) {
-        if (!el) return;
-        const first = el.querySelector('.gha-log-group--error, .gha-log-line--error');
-        if (!first) return;
-        first.scrollIntoView({ block: 'start', behavior: 'instant' });
-    },
-
     downloadText: function (filename, content) {
         const blob = new Blob([content], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);

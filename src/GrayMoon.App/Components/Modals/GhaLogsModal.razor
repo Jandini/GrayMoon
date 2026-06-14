@@ -142,6 +142,7 @@
     [Parameter] public long RunId { get; set; }
     [Parameter] public string? WorkflowDisplayName { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnRerunTriggered { get; set; }
 
     private record JobLogEntry(GitHubWorkflowJobDto Meta, List<GhaLogEntry> Entries, string? RawLog);
 
@@ -154,7 +155,7 @@
     private bool _filterWarnings;
     private bool _loadTriggered;
     private bool _autoSelectInitialized;
-    private bool _scrollToFirstError;
+    private bool _scrollToTopAfterRender;
     private string? _errorMessage;
     private long? _selectedJobId;
     private List<JobLogEntry> _jobs = [];
@@ -222,10 +223,10 @@
             try { await JS.InvokeVoidAsync("ghaLogs.initAutoSelect", _contentRef); } catch { }
         }
 
-        if (_scrollToFirstError)
+        if (_scrollToTopAfterRender)
         {
-            _scrollToFirstError = false;
-            try { await JS.InvokeVoidAsync("ghaLogs.scrollToFirstError", _contentRef); } catch { }
+            _scrollToTopAfterRender = false;
+            try { await JS.InvokeVoidAsync("ghaLogs.scrollContent", _contentRef, "Home"); } catch { }
         }
     }
 
@@ -243,7 +244,10 @@
             }
 
             var jobsResponse = await GitHubService.GetWorkflowRunJobsAsync(connector, Owner, RepositoryName, RunId);
-            var jobs = jobsResponse?.Jobs ?? [];
+            var jobs = (jobsResponse?.Jobs ?? [])
+                .OrderBy(j => j.StartedAt ?? j.CreatedAt ?? DateTimeOffset.MaxValue)
+                .ThenBy(j => j.Id)
+                .ToList();
 
             for (int jobIdx = 0; jobIdx < jobs.Count; jobIdx++)
             {
@@ -303,7 +307,7 @@
         try
         {
             await GitHubService.RerunJobAsync(connector, Owner, RepositoryName, job.Meta.Id);
-            await CloseAsync();
+            await OnRerunTriggered.InvokeAsync();
         }
         catch (Exception ex)
         {
@@ -336,11 +340,11 @@
     private void SelectJob(long jobId)
     {
         _selectedJobId = jobId;
-        _filterErrors = false;
         _filterWarnings = false;
         var job = _jobs.FirstOrDefault(j => j.Meta.Id == jobId);
-        if (string.Equals(job?.Meta.Conclusion, "failure", StringComparison.OrdinalIgnoreCase))
-            _scrollToFirstError = true;
+        var isFailed = string.Equals(job?.Meta.Conclusion, "failure", StringComparison.OrdinalIgnoreCase);
+        _filterErrors = isFailed;
+        _scrollToTopAfterRender = true;
     }
 
     private string PillClass(GitHubWorkflowJobDto job, bool isSelected)
