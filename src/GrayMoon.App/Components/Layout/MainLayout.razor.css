@@ -29,7 +29,7 @@ article.content {
     align-items: center;
 }
 
-/* Main column only: workspace name + trailing controls; keep sidebar .top-row rules unchanged */
+/* Main column only: workspace name + trailing controls */
 .top-row.top-row-main {
     position: relative;
     justify-content: flex-end;
@@ -173,6 +173,7 @@ article.content {
         flex-direction: row;
     }
 
+    /* Sidebar is the flex parent for brand, nav body, and toggle */
     .sidebar {
         width: 180px;
         height: 100vh;
@@ -181,6 +182,8 @@ article.content {
         z-index: 100;
         overflow: hidden;
         transition: width 0.2s ease;
+        display: flex;
+        flex-direction: column;
     }
 
     /* Collapsed: width = topbar height; update --sidebar-width for loading overlay */
@@ -192,39 +195,44 @@ article.content {
         width: 3.5rem;
     }
 
-    /* Collapsed nav items: icon only, square and centered */
-    .page--navbar-collapsed ::deep .nav-item {
+    /* Collapsed brand: hide entirely */
+    .page--navbar-collapsed .sidebar ::deep .navbar-brand {
+        display: none;
+    }
+
+    /* Flip chevron when sidebar is collapsed - CSS-driven, no JS update needed */
+    .page--navbar-collapsed .sidebar ::deep .nav-collapse-btn i {
+        transform: scaleX(-1);
+    }
+
+    /* Collapsed nav items: icon only, centered - scoped to .sidebar to avoid Bootstrap tabs */
+    .page--navbar-collapsed .sidebar ::deep .nav-item {
         padding-left: 0 !important;
         padding-right: 0 !important;
         display: flex;
         justify-content: center;
     }
 
-    .page--navbar-collapsed ::deep .nav-link {
+    .page--navbar-collapsed .sidebar ::deep .nav-link {
         justify-content: center !important;
         padding: 0 !important;
         width: 3rem !important;
     }
 
-    .page--navbar-collapsed ::deep .nav-link > i:first-child {
+    .page--navbar-collapsed .sidebar ::deep .nav-link > i:first-child {
         margin-right: 0 !important;
     }
 
-    .page--navbar-collapsed ::deep .nav-link.active {
+    .page--navbar-collapsed .sidebar ::deep .nav-link.active {
         padding: 0 !important;
     }
 
-    .page--navbar-collapsed ::deep .nav-link:hover {
+    .page--navbar-collapsed .sidebar ::deep .nav-link:hover {
         padding: 0 !important;
     }
 
-    .page--navbar-collapsed ::deep .nav-link-text {
+    .page--navbar-collapsed .sidebar ::deep .nav-link-text {
         display: none;
-    }
-
-    .sidebar .top-row {
-        position: relative;
-        z-index: 101;
     }
 
     .top-row {

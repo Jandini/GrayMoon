@@ -1,5 +1,7 @@
 @implements IDisposable
 @inject NavigationManager NavigationManager
+@inject NavbarCollapseService NavbarCollapse
+@using GrayMoon.App.Services
 
 <div class="top-row navbar navbar-dark">
     <div class="container-fluid d-flex justify-content-center align-items-center">
@@ -19,50 +21,50 @@
         <nav class="flex-column">
             @if (isWorkspaceView && workspaceId != null)
             {
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="" Match="NavLinkMatch.All" title="Home">
+                <div class="nav-item px-3" data-nav-label="Home">
+                    <NavLink class="nav-link" href="" Match="NavLinkMatch.All" aria-label="Home">
                         <i class="bi bi-house-door-fill" aria-hidden="true"></i>
                         <span class="nav-link-text">Home</span>
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}")" Match="NavLinkMatch.All" title="Repositories">
+                <div class="nav-item px-3" data-nav-label="Repositories">
+                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}")" Match="NavLinkMatch.All" aria-label="Repositories">
                         <i class="bi bi-grid" aria-hidden="true"></i>
                         <span class="nav-link-text">Repositories</span>
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/projects")" Match="NavLinkMatch.All" title="Projects">
+                <div class="nav-item px-3" data-nav-label="Projects">
+                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/projects")" Match="NavLinkMatch.All" aria-label="Projects">
                         <i class="bi bi-journal-code" aria-hidden="true"></i>
                         <span class="nav-link-text">Projects</span>
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/packages")" Match="NavLinkMatch.All" title="Packages">
+                <div class="nav-item px-3" data-nav-label="Packages">
+                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/packages")" Match="NavLinkMatch.All" aria-label="Packages">
                         <i class="bi bi-box-seam" aria-hidden="true"></i>
                         <span class="nav-link-text">Packages</span>
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/files")" Match="NavLinkMatch.All" title="Files">
+                <div class="nav-item px-3" data-nav-label="Files">
+                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/files")" Match="NavLinkMatch.All" aria-label="Files">
                         <i class="bi bi-file-earmark" aria-hidden="true"></i>
                         <span class="nav-link-text">Files</span>
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/dependencies")" Match="NavLinkMatch.All" title="Dependencies">
+                <div class="nav-item px-3" data-nav-label="Dependencies">
+                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/dependencies")" Match="NavLinkMatch.All" aria-label="Dependencies">
                         <i class="bi bi-diagram-3" aria-hidden="true"></i>
                         <span class="nav-link-text">Deps</span>
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/actions")" Match="NavLinkMatch.All" title="Actions">
+                <div class="nav-item px-3" data-nav-label="Actions">
+                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/actions")" Match="NavLinkMatch.All" aria-label="Actions">
                         <i class="bi bi-play-circle" aria-hidden="true"></i>
                         <span class="nav-link-text">Actions</span>
                     </NavLink>
@@ -70,43 +72,43 @@
             }
             else
             {
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="" Match="NavLinkMatch.All" title="Home">
+                <div class="nav-item px-3" data-nav-label="Home">
+                    <NavLink class="nav-link" href="" Match="NavLinkMatch.All" aria-label="Home">
                         <i class="bi bi-house-door-fill" aria-hidden="true"></i>
                         <span class="nav-link-text">Home</span>
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="workspaces" title="Workspaces">
+                <div class="nav-item px-3" data-nav-label="Workspaces">
+                    <NavLink class="nav-link" href="workspaces" aria-label="Workspaces">
                         <i class="bi bi-grid" aria-hidden="true"></i>
                         <span class="nav-link-text">Workspaces</span>
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="repositories" title="Repositories">
+                <div class="nav-item px-3" data-nav-label="Repositories">
+                    <NavLink class="nav-link" href="repositories" aria-label="Repositories">
                         <i class="bi bi-github" aria-hidden="true"></i>
                         <span class="nav-link-text">Repositories</span>
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="connectors" title="Connectors">
+                <div class="nav-item px-3" data-nav-label="Connectors">
+                    <NavLink class="nav-link" href="connectors" aria-label="Connectors">
                         <i class="bi bi-plug" aria-hidden="true"></i>
                         <span class="nav-link-text">Connectors</span>
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="agent" title="Agent">
+                <div class="nav-item px-3" data-nav-label="Agent">
+                    <NavLink class="nav-link" href="agent" aria-label="Agent">
                         <i class="bi bi-cpu" aria-hidden="true"></i>
                         <span class="nav-link-text">Agent</span>
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="settings" title="Settings">
+                <div class="nav-item px-3" data-nav-label="Settings">
+                    <NavLink class="nav-link" href="settings" aria-label="Settings">
                         <i class="bi bi-gear" aria-hidden="true"></i>
                         <span class="nav-link-text">Settings</span>
                     </NavLink>
@@ -114,9 +116,16 @@
             }
         </nav>
     </div>
-    <div class="nav-collapse-toggle">
-        <NavCollapseToggle />
-    </div>
+</div>
+
+<div class="nav-collapse-toggle">
+    <button type="button"
+            class="nav-collapse-btn"
+            onclick="graymoonToggleSidebar()"
+            title="Toggle sidebar"
+            aria-label="Toggle sidebar">
+        <i class="bi bi-chevron-left" aria-hidden="true"></i>
+    </button>
 </div>
 
 @code {

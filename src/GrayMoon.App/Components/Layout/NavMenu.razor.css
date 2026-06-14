@@ -21,6 +21,7 @@
     display: flex;
     align-items: center;
     border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
 }
 
 .top-row .container-fluid {
@@ -161,6 +162,7 @@
     color: white;
 }
 
+/* Mobile: nav body and toggle hidden until hamburger opens */
 .nav-body {
     display: none;
 }
@@ -169,20 +171,27 @@
     display: block;
 }
 
+/* Toggle is desktop-only - hidden on mobile */
+.nav-collapse-toggle {
+    display: none;
+}
+
 @media (min-width: 641px) {
     .navbar-toggler {
         display: none;
     }
 
+    /* nav-body grows to fill the sidebar flex column (sidebar provides the height) */
     .nav-body {
         display: flex;
         flex-direction: column;
-        height: calc(100vh - 3.5rem);
+        flex: 1 1 auto;
+        min-height: 0;
     }
 
     .nav-scrollable {
         flex: 1 1 auto;
-        height: auto;
+        min-height: 0;
         overflow-y: auto;
         scrollbar-width: auto;
         scrollbar-color: #5a5a5a var(--bg-card, #252526);
@@ -205,11 +214,41 @@
         background: #6a6a6a;
     }
 
+    /* Collapse toggle anchored at the sidebar flex bottom */
     .nav-collapse-toggle {
+        display: flex;
         flex-shrink: 0;
+        align-items: stretch;
         border-top: 1px solid var(--border-color);
         min-height: 2.75rem;
-        display: flex;
-        align-items: stretch;
     }
+}
+
+.nav-collapse-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 2.75rem;
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.nav-collapse-btn:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.nav-collapse-btn:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--focus-ring-outer);
+}
+
+.nav-collapse-btn i {
+    font-size: 1rem;
+    transition: transform 0.2s ease;
 }
