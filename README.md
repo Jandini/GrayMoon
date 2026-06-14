@@ -106,6 +106,18 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 ## What's new
 
+### Global workspace action notifications
+
+A floating notification panel now appears anywhere in the app when a tracked workspace has pending actions - dependency updates, commits ready to push, or incoming commits to pull.
+
+- **Works from any page:** the panel appears in the bottom corner of the UI even when you are on the Projects, Actions, or Connectors pages - you do not need to navigate back to the workspace repositories view to act on it.
+- **Suppressed on the workspace page itself:** when you are already on the workspace repositories page, notifications for that workspace are hidden to avoid duplicating what is already visible in the grid.
+- **Up to two notifications at once:** if multiple workspaces need attention, the most recent two are shown. Older ones drop off as new ones arrive.
+- **Three conditions trigger a card:** unmatched dependency versions (orange dependency badge), outgoing commits with no upstream or commits ahead of remote (push recommended), or incoming commits on the default branch.
+- **One-click actions without navigating away:** each card shows the relevant action buttons - **Update** or **Update & Push** for dependency mismatches, **Push** for outgoing commits, **Pull** for incoming commits on the default branch. All run as background jobs using the same pipeline as the workspace repositories page.
+- **Dismiss per workspace:** use the x button on a card to dismiss it. The card reappears if the workspace syncs again with pending actions.
+- **Notifications update automatically:** the panel subscribes to the workspace sync hub and recomputes state each time any repository sync event arrives, so cards appear and disappear without a page reload.
+
 ### Background jobs on the workspace repositories page
 
 Long-running workspace operations now run as **background jobs** instead of blocking the page with an inline loading overlay. Sync, push, dependency update, restore packages, branch checkout/switch, commit sync, sync-to-default, and pull-request creation all use the same job pipeline.
