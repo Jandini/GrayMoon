@@ -29,7 +29,7 @@ article.content {
     align-items: center;
 }
 
-/* Main column only: workspace name + trailing controls; keep sidebar .top-row rules unchanged */
+/* Main column only: workspace name + trailing controls */
 .top-row.top-row-main {
     position: relative;
     justify-content: flex-end;
@@ -173,6 +173,7 @@ article.content {
         flex-direction: row;
     }
 
+    /* Sidebar is the flex parent for brand, nav body, and toggle */
     .sidebar {
         width: 180px;
         height: 100vh;
@@ -180,11 +181,55 @@ article.content {
         top: 0;
         z-index: 100;
         overflow: hidden;
+        transition: width 0.2s ease;
+        display: flex;
+        flex-direction: column;
     }
 
-    .sidebar .top-row {
-        position: relative;
-        z-index: 101;
+    /* Collapsed: width = topbar height; update --sidebar-width for loading overlay */
+    .page--navbar-collapsed {
+        --sidebar-width: 3.5rem;
+    }
+
+    .page--navbar-collapsed .sidebar {
+        width: 3.5rem;
+    }
+
+    /* Collapsed brand: fade out; pointer-events prevents clicks on the invisible element */
+    .page--navbar-collapsed .sidebar ::deep .navbar-brand {
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    /* Flip chevron when sidebar is collapsed - CSS-driven, no JS update needed */
+    .page--navbar-collapsed .sidebar ::deep .nav-collapse-btn i {
+        transform: scaleX(-1);
+    }
+
+    /* Collapsed nav items: icon only, centered - scoped to .sidebar to avoid Bootstrap tabs */
+    /* Remove px-3 padding so active/hover highlight spans the full sidebar width */
+    .page--navbar-collapsed .sidebar ::deep .nav-item {
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+    }
+
+    /* Center the 1.25rem icon in the 3.5rem sidebar via symmetric nav-link padding:
+       (3.5rem - 1.25rem) / 2 = 1.125rem. Transitions from 0 as icon barely moves. */
+    .page--navbar-collapsed .sidebar ::deep .nav-link {
+        padding-left: 1.125rem !important;
+        padding-right: 1.125rem !important;
+    }
+
+    .page--navbar-collapsed .sidebar ::deep .nav-link > i:first-child {
+        margin-right: 0 !important;
+    }
+
+    /* Text fades and collapses - max-width/opacity are transitionable; display:none is not */
+    .page--navbar-collapsed .sidebar ::deep .nav-link-text {
+        opacity: 0;
+        max-width: 0 !important;
+        overflow: hidden;
+        pointer-events: none;
     }
 
     .top-row {
@@ -215,6 +260,12 @@ article.content {
         max-width: min(38rem, calc(100vw - 360px - 1.5rem), calc(100vw - 24rem));
         font-size: calc((1.325rem + 0.9vw) * 0.72);
         pointer-events: auto;
+    }
+
+    /* Widen workspace title when sidebar collapses (sidebar shrinks to 3.5rem = ~56px) */
+    .page--navbar-collapsed main .top-row-workspace-title__text,
+    .page--navbar-collapsed main .top-row-workspace-title ::deep a.top-row-workspace-title__link {
+        max-width: min(48rem, calc(100vw - 112px - 1.5rem), calc(100vw - 7rem));
     }
 
     main .top-row-main-trailing {

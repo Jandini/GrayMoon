@@ -21,6 +21,7 @@
     display: flex;
     align-items: center;
     border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
 }
 
 .top-row .container-fluid {
@@ -35,6 +36,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    transition: opacity 0.2s ease;
 }
 
 .navbar-brand:hover {
@@ -95,6 +97,7 @@
 .nav-item {
     font-size: 0.9rem;
     padding-bottom: 0.5rem;
+    transition: padding-left 0.2s ease, padding-right 0.2s ease;
 }
 
     .nav-item:first-of-type {
@@ -115,7 +118,7 @@
         align-items: center;
         line-height: 3rem;
         width: 100%;
-        transition: background-color 0.15s ease, color 0.15s ease;
+        transition: background-color 0.15s ease, color 0.15s ease, padding-left 0.2s ease, padding-right 0.2s ease;
         text-decoration: none;
         white-space: nowrap;
         overflow: hidden;
@@ -125,6 +128,7 @@
         flex-shrink: 0;
         margin-right: 0.75rem;
         color: white;
+        transition: margin-right 0.2s ease;
     }
 
     .nav-item ::deep .nav-link .nav-link-text {
@@ -133,6 +137,8 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         flex: 1 1 auto;
+        max-width: 10rem;
+        transition: max-width 0.2s ease, opacity 0.2s ease;
     }
 
 .nav-item ::deep .nav-link.active {
@@ -161,12 +167,18 @@
     color: white;
 }
 
-.nav-scrollable {
+/* Mobile: nav body and toggle hidden until hamburger opens */
+.nav-body {
     display: none;
 }
 
-.navbar-toggler:checked ~ .nav-scrollable {
+.navbar-toggler:checked ~ .nav-body {
     display: block;
+}
+
+/* Toggle is desktop-only - hidden on mobile */
+.nav-collapse-toggle {
+    display: none;
 }
 
 @media (min-width: 641px) {
@@ -174,12 +186,17 @@
         display: none;
     }
 
-    .nav-scrollable {
-        /* Never collapse the sidebar for wide screens */
-        display: block;
+    /* nav-body grows to fill the sidebar flex column (sidebar provides the height) */
+    .nav-body {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+    }
 
-        /* Allow sidebar to scroll for tall menus */
-        height: calc(100vh - 3.5rem);
+    .nav-scrollable {
+        flex: 1 1 auto;
+        min-height: 0;
         overflow-y: auto;
         scrollbar-width: auto;
         scrollbar-color: #5a5a5a var(--bg-card, #252526);
@@ -201,4 +218,42 @@
     .nav-scrollable::-webkit-scrollbar-thumb:hover {
         background: #6a6a6a;
     }
+
+    /* Collapse toggle anchored at the sidebar flex bottom */
+    .nav-collapse-toggle {
+        display: flex;
+        flex-shrink: 0;
+        align-items: stretch;
+        border-top: 1px solid var(--border-color);
+        min-height: 2.75rem;
+    }
+}
+
+.nav-collapse-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 2.75rem;
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.nav-collapse-btn:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.nav-collapse-btn:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--focus-ring-outer);
+}
+
+.nav-collapse-btn i {
+    font-size: 1rem;
+    transition: transform 0.2s ease;
 }

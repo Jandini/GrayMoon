@@ -13,6 +13,7 @@ public static class ApiEndpointRegistration
         routes.MapConnectorEndpoints();
         routes.MapBranchEndpoints();
         routes.MapWorkspaceEndpoints();
+        routes.MapSettingsEndpoints();
         return routes;
     }
 }

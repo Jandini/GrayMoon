@@ -269,6 +269,67 @@
 
         window.graymoonStorageGet = (key) => localStorage.getItem(key);
         window.graymoonStorageSet = (key, value) => { localStorage.setItem(key, value); };
+        window.graymoonToggleClass = (selector, cls, add) => {
+            const el = document.querySelector(selector);
+            if (el) el.classList.toggle(cls, !!add);
+        };
+        window.graymoonToggleSidebar = function () {
+            var page = document.querySelector('.page');
+            if (!page) return;
+            var collapsed = page.classList.toggle('page--navbar-collapsed');
+            fetch('/api/settings/sidebar-collapsed', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: collapsed })
+            }).catch(function () { });
+        };
+        // Custom tooltip for collapsed sidebar icons - appears to the right of the sidebar
+        // so it does not overlap the chevron button at the bottom.
+        (function () {
+            var tip = null;
+            function ensureTip() {
+                if (!tip) {
+                    tip = document.createElement('div');
+                    tip.style.cssText = 'position:fixed;z-index:9999;pointer-events:none;display:none;'
+                        + 'background:#252526;color:#cccccc;border:1px solid #3e3e42;border-radius:4px;'
+                        + 'padding:3px 10px;font-size:0.82rem;white-space:nowrap;'
+                        + 'box-shadow:0 2px 8px rgba(0,0,0,0.45);';
+                    document.body.appendChild(tip);
+                }
+                return tip;
+            }
+            function positionTip(link) {
+                var sidebar = document.querySelector('.sidebar');
+                if (!sidebar || !tip) return;
+                var sr = sidebar.getBoundingClientRect();
+                var lr = link.getBoundingClientRect();
+                tip.style.left = (sr.right + 8) + 'px';
+                var tipH = tip.offsetHeight || 24;
+                tip.style.top = Math.round(lr.top + (lr.height - tipH) / 2) + 'px';
+            }
+            document.addEventListener('mouseover', function (e) {
+                var link = e.target.closest('.sidebar .nav-link');
+                if (!link) return;
+                var page = document.querySelector('.page');
+                if (!page || !page.classList.contains('page--navbar-collapsed')) return;
+                var item = link.closest('[data-nav-label]');
+                var label = item ? item.getAttribute('data-nav-label') : '';
+                if (!label) return;
+                var t = ensureTip();
+                t.textContent = label;
+                t.style.display = 'block';
+                positionTip(link);
+            });
+            document.addEventListener('mousemove', function (e) {
+                if (!tip || tip.style.display === 'none') return;
+                var link = e.target.closest('.sidebar .nav-link');
+                if (link) positionTip(link);
+            });
+            document.addEventListener('mouseout', function (e) {
+                if (!e.target.closest('.sidebar .nav-link')) return;
+                if (tip) tip.style.display = 'none';
+            });
+        })();
         document.body.addEventListener('click', (e) => {
             const el = e.target.closest('.dependency-level-count-link') || e.target.closest('.dependency-level-pr-link');
             if (!el) return;
