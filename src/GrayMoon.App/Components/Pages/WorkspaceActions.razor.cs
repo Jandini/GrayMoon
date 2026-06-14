@@ -222,6 +222,18 @@ public sealed partial class WorkspaceActions : IDisposable
         StateHasChanged();
     }
 
+    internal async Task HandleRerunAllClick()
+    {
+        CloseRerunMenu();
+        await RerunAllFailedAsync();
+    }
+
+    internal async Task HandleRerunFailedJobsOnlyClick()
+    {
+        CloseRerunMenu();
+        await RerunAllFailedJobsOnlyAsync();
+    }
+
     internal void ToggleShowErrors()
     {
         _showErrors = !_showErrors;

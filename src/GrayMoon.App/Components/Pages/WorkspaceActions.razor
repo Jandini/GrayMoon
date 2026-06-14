@@ -138,7 +138,7 @@
                                 <li>
                                     <button class="dropdown-item" type="button"
                                             role="menuitem"
-                                            @onclick="async () => { CloseRerunMenu(); await RerunAllFailedAsync(); }"
+                                            @onclick="HandleRerunAllClick"
                                             disabled="@(isRerunningAll || isRefreshing || isLoading)">
                                         Re-run
                                     </button>
@@ -147,7 +147,7 @@
                                 <li>
                                     <button class="dropdown-item" type="button"
                                             role="menuitem"
-                                            @onclick="async () => { CloseRerunMenu(); await RerunAllFailedJobsOnlyAsync(); }"
+                                            @onclick="HandleRerunFailedJobsOnlyClick"
                                             disabled="@(isRerunningAll || isRefreshing || isLoading)">
                                         Re-run Failed Jobs Only
                                     </button>
