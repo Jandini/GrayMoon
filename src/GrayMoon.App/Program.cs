@@ -53,6 +53,7 @@ try
     builder.Services.AddScoped<WorkspaceFileVersionConfigRepository>();
     builder.Services.AddScoped<WorkspaceRepository>();
     builder.Services.AddScoped<AppSettingRepository>();
+    builder.Services.AddScoped<NavbarCollapseService>();
     builder.Services.AddSingleton<AgentConnectionTracker>();
     builder.Services.AddSingleton<AgentQueueStateService>();
     builder.Services.AddSingleton<OverlayCommandTerminalService>();

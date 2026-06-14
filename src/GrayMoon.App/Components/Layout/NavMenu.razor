@@ -14,104 +14,109 @@
 
 <input type="checkbox" title="Navigation menu" class="navbar-toggler" />
 
-<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
-    <nav class="flex-column">
-        @if (isWorkspaceView && workspaceId != null)
-        {
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                    <i class="bi bi-house-door-fill" aria-hidden="true"></i>
-                    <span class="nav-link-text">Home</span>
-                </NavLink>
-            </div>
+<div class="nav-body">
+    <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+        <nav class="flex-column">
+            @if (isWorkspaceView && workspaceId != null)
+            {
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="" Match="NavLinkMatch.All" title="Home">
+                        <i class="bi bi-house-door-fill" aria-hidden="true"></i>
+                        <span class="nav-link-text">Home</span>
+                    </NavLink>
+                </div>
 
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="@($"workspaces/{workspaceId}")" Match="NavLinkMatch.All" title="Repositories">
-                    <i class="bi bi-grid" aria-hidden="true"></i>
-                    <span class="nav-link-text">Repositories</span>
-                </NavLink>
-            </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}")" Match="NavLinkMatch.All" title="Repositories">
+                        <i class="bi bi-grid" aria-hidden="true"></i>
+                        <span class="nav-link-text">Repositories</span>
+                    </NavLink>
+                </div>
 
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/projects")" Match="NavLinkMatch.All">
-                    <i class="bi bi-journal-code" aria-hidden="true"></i>
-                    <span class="nav-link-text">Projects</span>
-                </NavLink>
-            </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/projects")" Match="NavLinkMatch.All" title="Projects">
+                        <i class="bi bi-journal-code" aria-hidden="true"></i>
+                        <span class="nav-link-text">Projects</span>
+                    </NavLink>
+                </div>
 
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/packages")" Match="NavLinkMatch.All">
-                    <i class="bi bi-box-seam" aria-hidden="true"></i>
-                    <span class="nav-link-text">Packages</span>
-                </NavLink>
-            </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/packages")" Match="NavLinkMatch.All" title="Packages">
+                        <i class="bi bi-box-seam" aria-hidden="true"></i>
+                        <span class="nav-link-text">Packages</span>
+                    </NavLink>
+                </div>
 
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/files")" Match="NavLinkMatch.All">
-                    <i class="bi bi-file-earmark" aria-hidden="true"></i>
-                    <span class="nav-link-text">Files</span>
-                </NavLink>
-            </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/files")" Match="NavLinkMatch.All" title="Files">
+                        <i class="bi bi-file-earmark" aria-hidden="true"></i>
+                        <span class="nav-link-text">Files</span>
+                    </NavLink>
+                </div>
 
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/dependencies")" Match="NavLinkMatch.All" title="Dependencies">
-                    <i class="bi bi-diagram-3" aria-hidden="true"></i>
-                    <span class="nav-link-text">Deps</span>
-                </NavLink>
-            </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/dependencies")" Match="NavLinkMatch.All" title="Dependencies">
+                        <i class="bi bi-diagram-3" aria-hidden="true"></i>
+                        <span class="nav-link-text">Deps</span>
+                    </NavLink>
+                </div>
 
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/actions")" Match="NavLinkMatch.All">
-                    <i class="bi bi-play-circle" aria-hidden="true"></i>
-                    <span class="nav-link-text">Actions</span>
-                </NavLink>
-            </div>
-        }
-        else
-        {
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                    <i class="bi bi-house-door-fill" aria-hidden="true"></i>
-                    <span class="nav-link-text">Home</span>
-                </NavLink>
-            </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="@($"workspaces/{workspaceId}/actions")" Match="NavLinkMatch.All" title="Actions">
+                        <i class="bi bi-play-circle" aria-hidden="true"></i>
+                        <span class="nav-link-text">Actions</span>
+                    </NavLink>
+                </div>
+            }
+            else
+            {
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="" Match="NavLinkMatch.All" title="Home">
+                        <i class="bi bi-house-door-fill" aria-hidden="true"></i>
+                        <span class="nav-link-text">Home</span>
+                    </NavLink>
+                </div>
 
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="workspaces">
-                    <i class="bi bi-grid" aria-hidden="true"></i>
-                    <span class="nav-link-text">Workspaces</span>
-                </NavLink>
-            </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="workspaces" title="Workspaces">
+                        <i class="bi bi-grid" aria-hidden="true"></i>
+                        <span class="nav-link-text">Workspaces</span>
+                    </NavLink>
+                </div>
 
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="repositories">
-                    <i class="bi bi-github" aria-hidden="true"></i>
-                    <span class="nav-link-text">Repositories</span>
-                </NavLink>
-            </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="repositories" title="Repositories">
+                        <i class="bi bi-github" aria-hidden="true"></i>
+                        <span class="nav-link-text">Repositories</span>
+                    </NavLink>
+                </div>
 
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="connectors">
-                    <i class="bi bi-plug" aria-hidden="true"></i>
-                    <span class="nav-link-text">Connectors</span>
-                </NavLink>
-            </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="connectors" title="Connectors">
+                        <i class="bi bi-plug" aria-hidden="true"></i>
+                        <span class="nav-link-text">Connectors</span>
+                    </NavLink>
+                </div>
 
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="agent">
-                    <i class="bi bi-cpu" aria-hidden="true"></i>
-                    <span class="nav-link-text">Agent</span>
-                </NavLink>
-            </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="agent" title="Agent">
+                        <i class="bi bi-cpu" aria-hidden="true"></i>
+                        <span class="nav-link-text">Agent</span>
+                    </NavLink>
+                </div>
 
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="settings">
-                    <i class="bi bi-gear" aria-hidden="true"></i>
-                    <span class="nav-link-text">Settings</span>
-                </NavLink>
-            </div>
-        }
-    </nav>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="settings" title="Settings">
+                        <i class="bi bi-gear" aria-hidden="true"></i>
+                        <span class="nav-link-text">Settings</span>
+                    </NavLink>
+                </div>
+            }
+        </nav>
+    </div>
+    <div class="nav-collapse-toggle">
+        <NavCollapseToggle />
+    </div>
 </div>
 
 @code {

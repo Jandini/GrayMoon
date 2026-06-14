@@ -269,6 +269,10 @@
 
         window.graymoonStorageGet = (key) => localStorage.getItem(key);
         window.graymoonStorageSet = (key, value) => { localStorage.setItem(key, value); };
+        window.graymoonToggleClass = (selector, cls, add) => {
+            const el = document.querySelector(selector);
+            if (el) el.classList.toggle(cls, !!add);
+        };
         document.body.addEventListener('click', (e) => {
             const el = e.target.closest('.dependency-level-count-link') || e.target.closest('.dependency-level-pr-link');
             if (!el) return;

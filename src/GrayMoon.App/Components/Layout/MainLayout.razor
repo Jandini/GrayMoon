@@ -10,11 +10,12 @@
 @inject LoadingOverlayUiSettingsService LoadingOverlayUiSettings
 @inject IWorkspaceTopBarService WorkspaceTopBarService
 @inject NavigationManager NavigationManager
+@inject NavbarCollapseService NavbarCollapse
 
 <Toast />
 <WorkspaceActionNotificationPanel />
 
-<div class="page">
+<div class="page @(NavbarCollapse.IsCollapsed ? "page--navbar-collapsed" : "")">
     <div class="sidebar" id="sidebar">
         <NavMenu />
     </div>
@@ -82,6 +83,9 @@
         var transparent = await AppSettingRepository.GetBoolAsync(AppSettingRepository.TerminalTransparentBackdropKey, defaultValue: true);
         var scheme = await AppSettingRepository.GetTerminalColorSchemeAsync();
         LoadingOverlayUiSettings.LoadSilently(transparent, scheme);
+
+        var sidebarCollapsed = await AppSettingRepository.GetBoolAsync(AppSettingRepository.SidebarCollapsedKey, defaultValue: false);
+        NavbarCollapse.LoadSilently(sidebarCollapsed);
 
         await WorkspaceTopBarService.EnsureSynchronizedAsync();
     }

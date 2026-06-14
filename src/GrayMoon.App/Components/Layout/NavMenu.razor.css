@@ -161,11 +161,11 @@
     color: white;
 }
 
-.nav-scrollable {
+.nav-body {
     display: none;
 }
 
-.navbar-toggler:checked ~ .nav-scrollable {
+.navbar-toggler:checked ~ .nav-body {
     display: block;
 }
 
@@ -174,12 +174,15 @@
         display: none;
     }
 
-    .nav-scrollable {
-        /* Never collapse the sidebar for wide screens */
-        display: block;
-
-        /* Allow sidebar to scroll for tall menus */
+    .nav-body {
+        display: flex;
+        flex-direction: column;
         height: calc(100vh - 3.5rem);
+    }
+
+    .nav-scrollable {
+        flex: 1 1 auto;
+        height: auto;
         overflow-y: auto;
         scrollbar-width: auto;
         scrollbar-color: #5a5a5a var(--bg-card, #252526);
@@ -200,5 +203,10 @@
 
     .nav-scrollable::-webkit-scrollbar-thumb:hover {
         background: #6a6a6a;
+    }
+
+    .nav-collapse-toggle {
+        flex-shrink: 0;
+        border-top: 1px solid var(--border-color);
     }
 }

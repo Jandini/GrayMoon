@@ -1,0 +1,36 @@
+@using GrayMoon.App.Repositories
+@using GrayMoon.App.Services
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@implements IDisposable
+@inject NavbarCollapseService NavbarCollapse
+@inject AppSettingRepository AppSettingRepository
+@inject IJSRuntime JS
+
+<button type="button"
+        class="nav-collapse-btn"
+        title="@(NavbarCollapse.IsCollapsed ? "Expand sidebar" : "Collapse sidebar")"
+        aria-label="@(NavbarCollapse.IsCollapsed ? "Expand sidebar" : "Collapse sidebar")"
+        @onclick="HandleToggle">
+    <i class="bi @(NavbarCollapse.IsCollapsed ? "bi-chevron-right" : "bi-chevron-left")" aria-hidden="true"></i>
+</button>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        NavbarCollapse.Changed += OnChanged;
+        var collapsed = await AppSettingRepository.GetBoolAsync(
+            AppSettingRepository.SidebarCollapsedKey, defaultValue: false);
+        NavbarCollapse.LoadSilently(collapsed);
+    }
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private async Task HandleToggle()
+    {
+        NavbarCollapse.Toggle();
+        await JS.InvokeVoidAsync("graymoonToggleClass",
+            ".page", "page--navbar-collapsed", NavbarCollapse.IsCollapsed);
+    }
+
+    public void Dispose() => NavbarCollapse.Changed -= OnChanged;
+}
