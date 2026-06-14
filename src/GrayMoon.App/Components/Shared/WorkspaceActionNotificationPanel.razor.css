@@ -19,6 +19,7 @@
     padding: 0.75rem 0.875rem;
     pointer-events: all;
     animation: notif-slide-in 0.28s ease-out both;
+    position: relative;
 }
 
 .workspace-action-card__header {
@@ -57,6 +58,86 @@
     gap: 0.4rem;
     flex-wrap: wrap;
     align-items: center;
+}
+
+.notif-repo-list {
+    max-height: 8rem;
+    overflow-y: auto;
+    margin: 0 0 0.5rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color, #3e3e42) transparent;
+}
+
+.notif-repo-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.125rem 0;
+}
+
+.notif-repo-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary, #cccccc);
+    font-size: 0.78rem;
+}
+
+.notif-badge--update {
+    background-color: var(--bs-danger, #dc3545);
+    color: #fff;
+    font-size: 0.68rem;
+    cursor: default;
+    flex-shrink: 0;
+}
+
+.notif-badge--commits {
+    background-color: var(--bs-warning, #ffc107);
+    color: #1a1a1a;
+    font-size: 0.68rem;
+    cursor: default;
+    flex-shrink: 0;
+}
+
+.notif-dep-tooltip {
+    position: absolute;
+    right: calc(100% + 0.5rem);
+    bottom: 0;
+    width: 260px;
+    background: #2a2a2a;
+    border: 1px solid #555;
+    border-radius: 0.25rem;
+    padding: 0.5rem 0.6rem;
+    font-size: 0.76rem;
+    font-family: var(--bs-font-monospace);
+    color: #f0f0f0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    z-index: 9991;
+    pointer-events: none;
+    overflow-y: auto;
+    max-height: 12rem;
+}
+
+.notif-dep-tooltip-title {
+    display: block;
+    font-size: 0.72rem;
+    color: #999;
+    margin-bottom: 0.3rem;
+    font-family: var(--bs-font-sans-serif);
+}
+
+.notif-dep-tooltip-line {
+    padding: 0.1rem 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.notif-dep-tooltip-versions {
+    font-size: 0.7rem;
+    color: #888;
+    margin-left: 0.4rem;
 }
 
 @keyframes notif-slide-in {

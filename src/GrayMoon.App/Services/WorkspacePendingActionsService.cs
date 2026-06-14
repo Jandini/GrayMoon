@@ -2,12 +2,21 @@ using GrayMoon.App.Models;
 
 namespace GrayMoon.App.Services;
 
+public sealed record NotificationRepo(
+    int RepositoryId,
+    string RepositoryName,
+    int UnmatchedDeps,
+    int OutgoingCommits,
+    bool NewBranchNoPush,
+    IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> MismatchedDeps);
+
 public sealed record WorkspaceNotification(
     int WorkspaceId,
     string WorkspaceName,
     bool HasUnmatchedDependencies,
     bool IsPushRecommended,
-    bool HasIncomingCommits);
+    bool HasIncomingCommits,
+    IReadOnlyList<NotificationRepo> Repos);
 
 public sealed class WorkspacePendingActionsService
 {
@@ -38,7 +47,8 @@ public sealed class WorkspacePendingActionsService
     public static WorkspaceNotification? ComputeNotification(
         int workspaceId,
         string workspaceName,
-        IReadOnlyList<WorkspaceRepositoryLink> links)
+        IReadOnlyList<WorkspaceRepositoryLink> links,
+        IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>>? mismatchedDeps = null)
     {
         bool hasUnmatched = links.Any(wr => !wr.IsOnTag && (wr.UnmatchedDeps ?? 0) > 0);
         bool isPushRecommended = links.Any(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false));
@@ -50,6 +60,29 @@ public sealed class WorkspacePendingActionsService
             && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal));
         if (!hasUnmatched && !isPushRecommended && !hasIncoming)
             return null;
-        return new WorkspaceNotification(workspaceId, workspaceName, hasUnmatched, isPushRecommended, hasIncoming);
+
+        var repos = links
+            .Where(wr => !wr.IsOnTag && (
+                (wr.UnmatchedDeps ?? 0) > 0 ||
+                (wr.OutgoingCommits ?? 0) > 0 ||
+                wr.BranchHasUpstream == false))
+            .OrderBy(wr => wr.DependencyLevel ?? 0)
+            .ThenBy(wr => wr.Repository?.RepositoryName ?? string.Empty)
+            .Select(wr =>
+            {
+                var depLines = mismatchedDeps != null && mismatchedDeps.TryGetValue(wr.RepositoryId, out var lines)
+                    ? lines
+                    : (IReadOnlyList<(string, string, string)>)Array.Empty<(string, string, string)>();
+                return new NotificationRepo(
+                    wr.RepositoryId,
+                    wr.Repository?.RepositoryName ?? $"Repo {wr.RepositoryId}",
+                    wr.UnmatchedDeps ?? 0,
+                    wr.OutgoingCommits ?? 0,
+                    wr.BranchHasUpstream == false,
+                    depLines);
+            })
+            .ToList();
+
+        return new WorkspaceNotification(workspaceId, workspaceName, hasUnmatched, isPushRecommended, hasIncoming, repos);
     }
 }

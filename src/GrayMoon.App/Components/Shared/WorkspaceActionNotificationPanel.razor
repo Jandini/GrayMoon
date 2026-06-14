@@ -1,5 +1,6 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @implements IDisposable
+@using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
 @using Microsoft.AspNetCore.SignalR.Client
 @inject WorkspacePendingActionsService PendingActionsService
@@ -33,6 +34,45 @@
                     </button>
                 </div>
                 <p class="workspace-action-card__desc">@GetDescription(n)</p>
+                @if (n.Repos.Count > 0)
+                {
+                    <div class="notif-repo-list">
+                        @foreach (var repo in n.Repos)
+                        {
+                            <div class="notif-repo-row">
+                                <span class="notif-repo-name">@repo.RepositoryName</span>
+                                @if (repo.UnmatchedDeps > 0)
+                                {
+                                    <span class="badge notif-badge--update"
+                                          @onmouseenter="() => _hoveredDepBadge = (n.WorkspaceId, repo.RepositoryId)"
+                                          @onmouseleave="() => _hoveredDepBadge = null">
+                                        @repo.UnmatchedDeps update@(repo.UnmatchedDeps == 1 ? "" : "s")
+                                    </span>
+                                }
+                                @if (repo.OutgoingCommits > 0 || repo.NewBranchNoPush)
+                                {
+                                    <span class="badge notif-badge--commits">
+                                        @(repo.OutgoingCommits > 0
+                                            ? $"{repo.OutgoingCommits} commit{(repo.OutgoingCommits == 1 ? "" : "s")}"
+                                            : "new branch")
+                                    </span>
+                                }
+                            </div>
+                        }
+                    </div>
+                    @if (GetHoveredRepo(n) is { MismatchedDeps.Count: > 0 } hoveredRepo)
+                    {
+                        <div class="notif-dep-tooltip">
+                            <span class="notif-dep-tooltip-title">Dependencies requiring update:</span>
+                            @foreach (var dep in hoveredRepo.MismatchedDeps)
+                            {
+                                <div class="notif-dep-tooltip-line">
+                                    <code>@dep.PackageId</code><span class="notif-dep-tooltip-versions">@dep.CurrentVersion - @dep.NewVersion</span>
+                                </div>
+                            }
+                        </div>
+                    }
+                }
                 <div class="workspace-action-card__actions">
                     @if (n.HasUnmatchedDependencies)
                     {
@@ -100,8 +140,15 @@
     private HubConnection? _hubConnection;
     private bool _disposed;
     private readonly HashSet<int> _openUpdateMenus = new();
+    private (int WorkspaceId, int RepoId)? _hoveredDepBadge;
 
     private static string WorkspaceJobKey(int workspaceId) => $"/workspaces/{workspaceId}";
+
+    private NotificationRepo? GetHoveredRepo(WorkspaceNotification n)
+    {
+        if (_hoveredDepBadge is not { } h || h.WorkspaceId != n.WorkspaceId) return null;
+        return n.Repos.FirstOrDefault(r => r.RepositoryId == h.RepoId);
+    }
     private bool IsWorkspaceJobRunning(int workspaceId) => JobService.IsRunning(WorkspaceJobKey(workspaceId));
 
     private static int GetSuppressedWorkspaceId(string lowerPath)
@@ -160,7 +207,18 @@
                     return;
                 }
                 var links = workspace.Repositories.ToList();
-                var notification = WorkspacePendingActionsService.ComputeNotification(workspaceId, workspace.Name, links);
+
+                var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
+                var mismatchPayloads = await projectRepo.GetSyncDependenciesPayloadAsync(workspaceId);
+                var mismatchedDeps = mismatchPayloads.ToDictionary(
+                    p => p.RepoId,
+                    p => (IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>)p.ProjectUpdates
+                        .SelectMany(u => u.PackageUpdates)
+                        .GroupBy(x => x.PackageId)
+                        .Select(g => g.First())
+                        .ToList());
+
+                var notification = WorkspacePendingActionsService.ComputeNotification(workspaceId, workspace.Name, links, mismatchedDeps);
                 PendingActionsService.OnWorkspaceSynced(notification, workspaceId);
             }
             catch (Exception ex)
@@ -183,6 +241,7 @@
     {
         if (_disposed) return;
         _openUpdateMenus.Clear();
+        _hoveredDepBadge = null;
         _ = InvokeAsync(StateHasChanged);
     }
 
