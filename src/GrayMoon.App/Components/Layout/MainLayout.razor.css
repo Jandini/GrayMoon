@@ -195,9 +195,10 @@ article.content {
         width: 3.5rem;
     }
 
-    /* Collapsed brand: hide entirely */
+    /* Collapsed brand: fade out; pointer-events prevents clicks on the invisible element */
     .page--navbar-collapsed .sidebar ::deep .navbar-brand {
-        display: none;
+        opacity: 0;
+        pointer-events: none;
     }
 
     /* Flip chevron when sidebar is collapsed - CSS-driven, no JS update needed */
