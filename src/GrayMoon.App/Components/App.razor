@@ -287,6 +287,7 @@
         // so it does not overlap the chevron button at the bottom.
         (function () {
             var tip = null;
+            var hideTimer = null;
             function ensureTip() {
                 if (!tip) {
                     tip = document.createElement('div');
@@ -307,6 +308,9 @@
                 var tipH = tip.offsetHeight || 24;
                 tip.style.top = Math.round(lr.top + (lr.height - tipH) / 2) + 'px';
             }
+            function clearHideTimer() {
+                if (hideTimer !== null) { clearTimeout(hideTimer); hideTimer = null; }
+            }
             document.addEventListener('mouseover', function (e) {
                 var link = e.target.closest('.sidebar .nav-link');
                 if (!link) return;
@@ -319,6 +323,8 @@
                 t.textContent = label;
                 t.style.display = 'block';
                 positionTip(link);
+                clearHideTimer();
+                hideTimer = setTimeout(function () { if (tip) tip.style.display = 'none'; hideTimer = null; }, 2000);
             });
             document.addEventListener('mousemove', function (e) {
                 if (!tip || tip.style.display === 'none') return;
@@ -327,6 +333,7 @@
             });
             document.addEventListener('mouseout', function (e) {
                 if (!e.target.closest('.sidebar .nav-link')) return;
+                clearHideTimer();
                 if (tip) tip.style.display = 'none';
             });
         })();

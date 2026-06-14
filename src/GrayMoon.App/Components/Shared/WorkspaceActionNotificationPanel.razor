@@ -9,6 +9,7 @@
 @inject IBackgroundJobService JobService
 @inject IToastService ToastService
 @inject ILogger<WorkspaceActionNotificationPanel> Logger
+@inject WorkspaceFileVersionService FileVersionService
 
 @{
     var currentPath = new Uri(NavigationManager.Uri).AbsolutePath.ToLowerInvariant();
@@ -80,61 +81,112 @@
                     </div>
                 }
                 <div class="workspace-action-card__actions">
-                    @if (n.HasUnmatchedDependencies)
+                    @if (n.HasUnmatchedDependencies && n.IsPushRecommended && !n.HasIncomingCommits)
                     {
                         <div class="btn-group dropup position-relative">
-                            <button class="btn btn-danger btn-sm"
+                            <button class="btn btn-warning btn-sm"
                                     disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                    @onclick="() => _ = RunUpdateAsync(n.WorkspaceId)">
-                                Update
+                                    @onclick="() => _ = RunUpdateAndPushAsync(n.WorkspaceId)">
+                                Push Updated
                             </button>
                             <button type="button"
                                     class="btn btn-danger btn-sm dropdown-toggle dropdown-toggle-split"
-                                    aria-label="Toggle Update menu"
-                                    aria-expanded="@(_openUpdateMenus.Contains(n.WorkspaceId) ? "true" : "false")"
+                                    aria-label="Toggle Push Updated menu"
+                                    aria-expanded="@(_openPushUpdatedMenus.Contains(n.WorkspaceId) ? "true" : "false")"
                                     disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                    @onclick="() => ToggleUpdateMenu(n.WorkspaceId)"
+                                    @onclick="() => TogglePushUpdatedMenu(n.WorkspaceId)"
                                     @onclick:stopPropagation>
                                 <span class="visually-hidden">Toggle Dropdown</span>
                             </button>
-                            @if (_openUpdateMenus.Contains(n.WorkspaceId))
+                            @if (_openPushUpdatedMenus.Contains(n.WorkspaceId))
                             {
-                                <div class="branch-menu-backdrop" @onclick="() => CloseUpdateMenu(n.WorkspaceId)"></div>
+                                <div class="branch-menu-backdrop" @onclick="() => ClosePushUpdatedMenu(n.WorkspaceId)"></div>
                                 <ul class="dropdown-menu show shadow branch-menu-list bottom-100 mb-1" role="menu">
                                     <li>
                                         <button class="dropdown-item" type="button" role="menuitem"
                                                 disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                                @onclick="() => { CloseUpdateMenu(n.WorkspaceId); _ = RunUpdateAsync(n.WorkspaceId); }">
-                                            Update
+                                                @onclick="() => { ClosePushUpdatedMenu(n.WorkspaceId); _ = RunUpdateAsync(n.WorkspaceId); }">
+                                            Update Only
                                         </button>
                                     </li>
                                     <li><hr class="dropdown-divider branch-menu-divider" /></li>
                                     <li>
                                         <button class="dropdown-item" type="button" role="menuitem"
                                                 disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                                @onclick="() => { CloseUpdateMenu(n.WorkspaceId); _ = RunUpdateAndPushAsync(n.WorkspaceId); }">
-                                            Update &amp; Push
+                                                @onclick="() => { ClosePushUpdatedMenu(n.WorkspaceId); _ = RunUpdateFilesAsync(n.WorkspaceId); }">
+                                            Update Files
+                                        </button>
+                                    </li>
+                                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                                    <li>
+                                        <button class="dropdown-item" type="button" role="menuitem"
+                                                disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                                @onclick="() => { ClosePushUpdatedMenu(n.WorkspaceId); _ = RunPushAsync(n.WorkspaceId); }">
+                                            Push Only
                                         </button>
                                     </li>
                                 </ul>
                             }
                         </div>
                     }
-                    @if (n.HasIncomingCommits)
+                    else
                     {
-                        <button class="btn btn-danger btn-sm"
-                                disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                @onclick="() => _ = RunPullAsync(n.WorkspaceId)">
-                            Pull
-                        </button>
-                    }
-                    else if (n.IsPushRecommended)
-                    {
-                        <button class="btn btn-warning btn-sm"
-                                disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                @onclick="() => _ = RunPushAsync(n.WorkspaceId)">
-                            Push
-                        </button>
+                        @if (n.HasUnmatchedDependencies)
+                        {
+                            <div class="btn-group dropup position-relative">
+                                <button class="btn btn-danger btn-sm"
+                                        disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                        @onclick="() => _ = RunUpdateAsync(n.WorkspaceId)">
+                                    Update
+                                </button>
+                                <button type="button"
+                                        class="btn btn-danger btn-sm dropdown-toggle dropdown-toggle-split"
+                                        aria-label="Toggle Update menu"
+                                        aria-expanded="@(_openUpdateMenus.Contains(n.WorkspaceId) ? "true" : "false")"
+                                        disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                        @onclick="() => ToggleUpdateMenu(n.WorkspaceId)"
+                                        @onclick:stopPropagation>
+                                    <span class="visually-hidden">Toggle Dropdown</span>
+                                </button>
+                                @if (_openUpdateMenus.Contains(n.WorkspaceId))
+                                {
+                                    <div class="branch-menu-backdrop" @onclick="() => CloseUpdateMenu(n.WorkspaceId)"></div>
+                                    <ul class="dropdown-menu show shadow branch-menu-list bottom-100 mb-1" role="menu">
+                                        <li>
+                                            <button class="dropdown-item" type="button" role="menuitem"
+                                                    disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                                    @onclick="() => { CloseUpdateMenu(n.WorkspaceId); _ = RunUpdateAsync(n.WorkspaceId); }">
+                                                Update
+                                            </button>
+                                        </li>
+                                        <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                                        <li>
+                                            <button class="dropdown-item" type="button" role="menuitem"
+                                                    disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                                    @onclick="() => { CloseUpdateMenu(n.WorkspaceId); _ = RunUpdateAndPushAsync(n.WorkspaceId); }">
+                                                Update &amp; Push
+                                            </button>
+                                        </li>
+                                    </ul>
+                                }
+                            </div>
+                        }
+                        @if (n.HasIncomingCommits)
+                        {
+                            <button class="btn btn-danger btn-sm"
+                                    disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                    @onclick="() => _ = RunPullAsync(n.WorkspaceId)">
+                                Pull
+                            </button>
+                        }
+                        else if (n.IsPushRecommended)
+                        {
+                            <button class="btn btn-warning btn-sm"
+                                    disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                    @onclick="() => _ = RunPushAsync(n.WorkspaceId)">
+                                Push
+                            </button>
+                        }
                     }
                 </div>
             </div>
@@ -146,6 +198,7 @@
     private HubConnection? _hubConnection;
     private bool _disposed;
     private readonly HashSet<int> _openUpdateMenus = new();
+    private readonly HashSet<int> _openPushUpdatedMenus = new();
     private (int WorkspaceId, int RepoId)? _hoveredDepBadge;
     private CancellationTokenSource? _tooltipHideCts;
 
@@ -197,6 +250,14 @@
     }
 
     private void CloseUpdateMenu(int workspaceId) => _openUpdateMenus.Remove(workspaceId);
+
+    private void TogglePushUpdatedMenu(int workspaceId)
+    {
+        if (!_openPushUpdatedMenus.Remove(workspaceId))
+            _openPushUpdatedMenus.Add(workspaceId);
+    }
+
+    private void ClosePushUpdatedMenu(int workspaceId) => _openPushUpdatedMenus.Remove(workspaceId);
 
     private static string GetDescription(WorkspaceNotification n)
     {
@@ -270,6 +331,7 @@
     {
         if (_disposed) return;
         _openUpdateMenus.Clear();
+        _openPushUpdatedMenus.Clear();
         _tooltipHideCts?.Cancel();
         _tooltipHideCts = null;
         _hoveredDepBadge = null;
@@ -362,6 +424,38 @@
             {
                 Logger.LogError(ex, "Notification panel Update & Push (push phase) failed for workspace {WorkspaceId}", workspaceId);
                 if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Push failed after update."));
+                throw;
+            }
+        });
+        return Task.CompletedTask;
+    }
+
+    private Task RunUpdateFilesAsync(int workspaceId)
+    {
+        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        PendingActionsService.Dismiss(workspaceId);
+        JobService.StartJob(WorkspaceJobKey(workspaceId), "Updating file versions...", async (job, ct) =>
+        {
+            try
+            {
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
+                var (updated, failed, error, _) = await fileVersionService.UpdateAllVersionsAsync(
+                    workspaceId, selectedRepositoryIds: null, cancellationToken: ct);
+
+                if (!_disposed)
+                    await InvokeAsync(() =>
+                    {
+                        if (error != null) ToastService.ShowError(error);
+                        else if (failed > 0) ToastService.Show($"Updated {updated} line(s). {failed} file(s) could not be updated - check logs.");
+                        else ToastService.Show("Versions updated in configured files.");
+                    });
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Notification panel Update Files failed for workspace {WorkspaceId}", workspaceId);
+                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Update Files failed."));
                 throw;
             }
         });

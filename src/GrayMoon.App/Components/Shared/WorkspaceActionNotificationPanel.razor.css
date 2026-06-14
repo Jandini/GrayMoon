@@ -142,6 +142,17 @@
 }
 
 
+.btn-group > .btn-warning + .btn-danger.dropdown-toggle-split {
+    border-left-color: rgba(255, 255, 255, 0.4);
+}
+
+.branch-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    background: transparent;
+    z-index: 1050;
+}
+
 @keyframes notif-slide-in {
     from {
         opacity: 0;
