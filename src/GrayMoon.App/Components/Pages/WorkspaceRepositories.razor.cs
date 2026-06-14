@@ -820,12 +820,24 @@ public sealed partial class WorkspaceRepositories : IDisposable
         await CheckBranchesAndConfirmSyncToDefaultLevel(nonDefaultRepoIds);
     }
 
-    private Task CheckBranchesAndConfirmSyncToDefaultLevel(List<int> repositoryIds)
+    private async Task CheckBranchesAndConfirmSyncToDefaultLevel(List<int> repositoryIds)
     {
         if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || IsJobRunning)
-            return Task.CompletedTask;
+            return;
 
         _syncToDefaultCheckResults = null;
+
+        try
+        {
+            await WorkspacePageService.WorkspacePullRequestService.RefreshPullRequestsAsync(WorkspaceId, repositoryIds, force: true);
+            await ReloadWorkspaceDataFromFreshScopeAsync();
+            ApplySyncStateFromWorkspace();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "PR refresh before sync-to-default check failed for workspace {WorkspaceId}", WorkspaceId);
+        }
 
         // Synchronous pre-check using persisted state (no agent call needed)
         var checkResults = repositoryIds
@@ -853,7 +865,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             if (blocked.Count == 0)
                 ToastService.Show("No repositories to sync.");
-            return Task.CompletedTask;
+            return;
         }
 
         _syncToDefaultCheckResults = checkResults.Where(r => safeRepoIds.Contains(r.RepoId)).ToList();
@@ -924,8 +936,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     throw;
                 }
             });
-
-        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -2734,6 +2744,21 @@ public sealed partial class WorkspaceRepositories : IDisposable
             var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repositoryId);
             var defaultAhead = wr?.DefaultBranchAheadCommits ?? 0;
             var hasUpstream = wr?.BranchHasUpstream == true;
+
+            if (defaultAhead > 0)
+            {
+                try
+                {
+                    await WorkspacePageService.WorkspacePullRequestService.RefreshPullRequestsAsync(WorkspaceId, new[] { repositoryId }, force: true);
+                    await ReloadWorkspaceDataFromFreshScopeAsync();
+                    ApplySyncStateFromWorkspace();
+                    await InvokeAsync(StateHasChanged);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "PR refresh before sync-to-default check failed for RepositoryId={RepositoryId}", repositoryId);
+                }
+            }
 
             if (defaultAhead > 0 && !IsPrMergedForRepo(repositoryId))
             {
