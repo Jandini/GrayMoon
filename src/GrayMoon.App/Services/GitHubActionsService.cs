@@ -325,6 +325,24 @@ public class GitHubActionsService(
         await gitHubService.RerunWorkflowRunAsync(connector, action.Owner, action.RepositoryName, action.RunId);
     }
 
+    public async Task RerunFailedJobsOnlyAsync(GitHubActionEntry action)
+    {
+        if (action.RunId <= 0)
+            throw new InvalidOperationException("Workflow run id is not available.");
+
+        if (string.IsNullOrWhiteSpace(action.Owner) || string.IsNullOrWhiteSpace(action.RepositoryName))
+            throw new InvalidOperationException("Workflow owner and repository are required.");
+
+        var connector = await connectorRepository.GetByNameAsync(action.ConnectorName);
+        if (connector == null)
+        {
+            logger.LogWarning("Connector {ConnectorName} not found for rerun failed jobs.", action.ConnectorName);
+            throw new InvalidOperationException("Connector not found for this action.");
+        }
+
+        await gitHubService.RerunFailedJobsAsync(connector, action.Owner, action.RepositoryName, action.RunId);
+    }
+
     public async Task RunWorkflowAsync(GitHubActionEntry action)
     {
         if (action.WorkflowId <= 0)

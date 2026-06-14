@@ -114,11 +114,47 @@
                 </div>
                 @if (HasFailedRows)
                 {
-                    <button class="btn btn-danger"
-                            @onclick="RerunAllFailedAsync"
-                            disabled="@(isRerunningAll || isRefreshing || isLoading)">
-                        Re-run
-                    </button>
+                    <div class="btn-group position-relative">
+                        <button class="btn btn-danger"
+                                @onclick="RerunAllFailedAsync"
+                                @onclick:stopPropagation
+                                disabled="@(isRerunningAll || isRefreshing || isLoading)">
+                            Re-run
+                        </button>
+                        <button type="button"
+                                class="btn btn-danger dropdown-toggle dropdown-toggle-split"
+                                aria-label="Toggle Re-run menu"
+                                aria-expanded="@(_rerunMenuOpen ? "true" : "false")"
+                                @onclick="ToggleRerunMenu"
+                                @onclick:stopPropagation
+                                disabled="@(isRerunningAll || isRefreshing || isLoading)">
+                            <span class="visually-hidden">Toggle Dropdown</span>
+                        </button>
+                        @if (_rerunMenuOpen)
+                        {
+                            <div class="branch-menu-backdrop" @onclick="CloseRerunMenu"></div>
+                            <ul class="dropdown-menu show shadow branch-menu-list"
+                                role="menu">
+                                <li>
+                                    <button class="dropdown-item" type="button"
+                                            role="menuitem"
+                                            @onclick="async () => { CloseRerunMenu(); await RerunAllFailedAsync(); }"
+                                            disabled="@(isRerunningAll || isRefreshing || isLoading)">
+                                        Re-run
+                                    </button>
+                                </li>
+                                <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                                <li>
+                                    <button class="dropdown-item" type="button"
+                                            role="menuitem"
+                                            @onclick="async () => { CloseRerunMenu(); await RerunAllFailedJobsOnlyAsync(); }"
+                                            disabled="@(isRerunningAll || isRefreshing || isLoading)">
+                                        Re-run Failed Jobs Only
+                                    </button>
+                                </li>
+                            </ul>
+                        }
+                    </div>
                 }
                 <button class="btn btn-outline-secondary"
                         @onclick="RefreshAllAsync"

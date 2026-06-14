@@ -345,6 +345,20 @@ public class GitHubService : IConnectorService
         await PostAsync(connector, $"repos/{owner}/{repo}/actions/jobs/{jobId}/rerun", payload: null, cancellationToken: cancellationToken);
     }
 
+    public async Task RerunFailedJobsAsync(Connector connector, string owner, string repo, long runId, CancellationToken cancellationToken = default)
+    {
+        EnsureConnectorConfigured(connector);
+
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+        if (runId <= 0)
+            throw new ArgumentException("Workflow run id is required.", nameof(runId));
+
+        await PostAsync(connector, $"repos/{owner}/{repo}/actions/runs/{runId}/rerun-failed-jobs", payload: null, cancellationToken: cancellationToken);
+    }
+
     /// <summary>POST /repos/{owner}/{repo}/actions/runs/{run_id}/cancel - cancels an in-progress workflow run.</summary>
     /// <remarks>409 when the run already finished is treated as success (UI/API lag vs GitHub).</remarks>
     public async Task CancelWorkflowRunAsync(Connector connector, string owner, string repo, long runId, CancellationToken cancellationToken = default)

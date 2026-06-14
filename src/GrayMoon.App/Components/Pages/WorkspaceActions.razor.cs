@@ -91,6 +91,8 @@ public sealed partial class WorkspaceActions : IDisposable
     private long _logsRunId;
     private string? _logsWorkflowName;
 
+    private bool _rerunMenuOpen;
+
     private enum ActionLineFilterBucket
     {
         Failed,
@@ -206,6 +208,18 @@ public sealed partial class WorkspaceActions : IDisposable
             ApplyActionLatches(row);
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    internal void ToggleRerunMenu()
+    {
+        _rerunMenuOpen = !_rerunMenuOpen;
+        StateHasChanged();
+    }
+
+    internal void CloseRerunMenu()
+    {
+        _rerunMenuOpen = false;
+        StateHasChanged();
     }
 
     internal void ToggleShowErrors()
@@ -1145,6 +1159,83 @@ public sealed partial class WorkspaceActions : IDisposable
             await Task.WhenAll(tasks);
             Logger.LogInformation(
                 "GHA Re-run all finished (API phase): WorkspaceId={WorkspaceId} attempted={Count}",
+                WorkspaceId,
+                failedPairs.Count);
+        }
+        finally
+        {
+            isRerunningAll = false;
+            await InvokeAsync(StateHasChanged);
+            _ = RefreshAllAsync();
+        }
+    }
+
+    internal async Task RerunAllFailedJobsOnlyAsync()
+    {
+        var failedPairs = new List<(WorkspaceActionRow Row, WorkflowActionLine Line)>();
+        foreach (var row in rows)
+        {
+            foreach (var line in row.WorkflowLines)
+            {
+                if (IsLineFailedForBranch(row, line) && (line.Action?.RunId ?? 0) > 0)
+                    failedPairs.Add((row, line));
+            }
+        }
+
+        if (failedPairs.Count == 0) return;
+
+        Logger.LogInformation(
+            "GHA Re-run failed jobs only requested: WorkspaceId={WorkspaceId} count={Count}",
+            WorkspaceId,
+            failedPairs.Count);
+
+        _rerunTotal = failedPairs.Count;
+        _rerunCompleted = 0;
+        isRerunningAll = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
+            var tasks = failedPairs.Select(async pair =>
+            {
+                await semaphore.WaitAsync(_cts.Token);
+                try
+                {
+                    var actionEntry = BuildActionEntry(pair.Row, pair.Line);
+                    Logger.LogInformation(
+                        "GHA Re-run failed jobs only: invoking {Owner}/{Repo} workflow={WorkflowName} RunId={RunId}",
+                        actionEntry.Owner,
+                        actionEntry.RepositoryName,
+                        actionEntry.WorkflowName,
+                        actionEntry.RunId);
+                    await GitHubActionsService.RerunFailedJobsOnlyAsync(actionEntry);
+                    Logger.LogInformation(
+                        "GHA Re-run failed jobs only: API ok {Owner}/{Repo} workflow={WorkflowName} RunId={RunId}",
+                        actionEntry.Owner,
+                        actionEntry.RepositoryName,
+                        actionEntry.WorkflowName,
+                        actionEntry.RunId);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex,
+                        "GHA Re-run failed jobs only item failed: WorkspaceId={WorkspaceId} {Owner}/{Repo} RunId={RunId}",
+                        WorkspaceId,
+                        pair.Row.Repo.OrgName,
+                        pair.Row.Repo.RepositoryName,
+                        pair.Line.Action?.RunId);
+                }
+                finally
+                {
+                    semaphore.Release();
+                    Interlocked.Increment(ref _rerunCompleted);
+                    await InvokeAsync(StateHasChanged);
+                }
+            });
+            await Task.WhenAll(tasks);
+            Logger.LogInformation(
+                "GHA Re-run failed jobs only finished (API phase): WorkspaceId={WorkspaceId} attempted={Count}",
                 WorkspaceId,
                 failedPairs.Count);
         }
