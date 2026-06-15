@@ -279,12 +279,12 @@ article.content {
     }
 
     .top-row, article {
-        padding-left: 1.1rem !important;
-        padding-right: 1.1rem !important;
+        padding-left: 0.55rem !important;
+        padding-right: 0.55rem !important;
     }
 
     article.content {
-        padding-top: 2rem !important;
+        padding-top: 1rem !important;
     }
 
 }
