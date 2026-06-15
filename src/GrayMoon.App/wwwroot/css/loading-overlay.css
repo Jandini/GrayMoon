@@ -95,8 +95,9 @@
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  /* Top padding clears the brand bar (--loading-overlay-top-bar-height, default 3.5rem) so text is not clipped */
-  padding: var(--loading-overlay-top-bar-height, 3.5rem) 0.65rem 0.65rem;
+  /* Start at the top of the page; GrayMoon brand overlays with its own backdrop */
+  /* Bottom padding lifts the last line so all visible lines have clearance from the top edge when scrolled to end */
+  padding: 0px;
   scroll-padding-top: 0.35rem;
   border: none;
   border-radius: 0;
