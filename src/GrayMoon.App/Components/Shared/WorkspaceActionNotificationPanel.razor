@@ -805,7 +805,6 @@
                     await commitSyncHandler.CommitSyncAsync(
                         workspaceId,
                         repoIds[0],
-                        apiBaseUrl,
                         ct,
                         msg => { job.ReportProgress(msg); return Task.CompletedTask; },
                         (_, _) => { },
@@ -816,7 +815,6 @@
                     await commitSyncHandler.CommitSyncLevelAsync(
                         workspaceId,
                         repoIds,
-                        apiBaseUrl,
                         ct,
                         (done, total) => { job.ReportProgress($"Pulled {done} of {total}"); return Task.CompletedTask; },
                         (_, _) => { },

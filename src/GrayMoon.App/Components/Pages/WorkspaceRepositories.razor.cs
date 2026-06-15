@@ -2117,7 +2117,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 await commitSyncHandler.CommitSyncAsync(
                     WorkspaceId,
                     repositoryId,
-                    ApiBaseUrl,
                     ct,
                     async message =>
                     {
@@ -2172,7 +2171,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 await commitSyncHandler.CommitSyncLevelAsync(
                     WorkspaceId,
                     repositoryIds,
-                    ApiBaseUrl,
                     ct,
                     async (completed, total) =>
                     {
