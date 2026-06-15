@@ -81,6 +81,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid ValidatePath args"),
             "DotnetRestore" => JsonSerializer.Deserialize<DotnetRestoreRequest>(json, options)
                 ?? throw new ArgumentException("Invalid DotnetRestore args"),
+            "UndoPush" => JsonSerializer.Deserialize<UndoPushRequest>(json, options)
+                ?? throw new ArgumentException("Invalid UndoPush args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }
