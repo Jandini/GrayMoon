@@ -10,7 +10,9 @@ public sealed record NotificationRepo(
     int OutgoingCommits,
     int IncomingCommits,
     bool NewBranchNoPush,
-    IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> MismatchedDeps);
+    IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> MismatchedDeps,
+    string? BranchName,
+    string? DefaultBranchName);
 
 public sealed record WorkspaceNotification(
     int WorkspaceId,
@@ -83,7 +85,9 @@ public sealed class WorkspacePendingActionsService
                     wr.OutgoingCommits ?? 0,
                     wr.IncomingCommits ?? 0,
                     wr.BranchHasUpstream == false,
-                    depLines);
+                    depLines,
+                    wr.BranchName,
+                    wr.DefaultBranchName);
             })
             .ToList();
 

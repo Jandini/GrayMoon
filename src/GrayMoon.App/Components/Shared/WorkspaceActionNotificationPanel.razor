@@ -106,7 +106,7 @@
                                     <li>
                                         <button class="dropdown-item" type="button" role="menuitem"
                                                 disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                                @onclick="() => { ClosePushUpdatedMenu(n.WorkspaceId); _ = RunUpdateAsync(n.WorkspaceId); }">
+                                                @onclick="() => { ClosePushUpdatedMenu(n.WorkspaceId); _ = RunUpdateAsync(n); }">
                                             Update Only
                                         </button>
                                     </li>
@@ -122,7 +122,7 @@
                                     <li>
                                         <button class="dropdown-item" type="button" role="menuitem"
                                                 disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                                @onclick="() => { ClosePushUpdatedMenu(n.WorkspaceId); _ = RunPushAsync(n.WorkspaceId); }">
+                                                @onclick="() => { ClosePushUpdatedMenu(n.WorkspaceId); _ = RunPushAsync(n); }">
                                             Push Only
                                         </button>
                                     </li>
@@ -137,7 +137,7 @@
                             <div class="btn-group dropup position-relative">
                                 <button class="btn btn-danger btn-sm"
                                         disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                        @onclick="() => _ = RunUpdateAsync(n.WorkspaceId)">
+                                        @onclick="() => _ = RunUpdateAsync(n)">
                                     Update
                                 </button>
                                 <button type="button"
@@ -156,7 +156,7 @@
                                         <li>
                                             <button class="dropdown-item" type="button" role="menuitem"
                                                     disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                                    @onclick="() => { CloseUpdateMenu(n.WorkspaceId); _ = RunUpdateAsync(n.WorkspaceId); }">
+                                                    @onclick="() => { CloseUpdateMenu(n.WorkspaceId); _ = RunUpdateAsync(n); }">
                                                 Update
                                             </button>
                                         </li>
@@ -184,7 +184,7 @@
                         {
                             <button class="btn btn-warning btn-sm"
                                     disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                    @onclick="() => _ = RunPushAsync(n.WorkspaceId)">
+                                    @onclick="() => _ = RunPushAsync(n)">
                                 Push
                             </button>
                         }
@@ -195,13 +195,29 @@
     </div>
 }
 
+<DefaultBranchWarningModal
+    IsVisible="_defaultBranchWarning.IsVisible"
+    Message="_defaultBranchWarning.Message"
+    RepoItems="_defaultBranchWarning.RepoItems"
+    OnProceed="OnDefaultBranchWarningProceedAsync"
+    OnCancel="CloseDefaultBranchWarningModal" />
+
 @code {
+    private sealed record DefaultBranchWarningModalState
+    {
+        public bool IsVisible { get; init; }
+        public string Message { get; init; } = "";
+        public IReadOnlyList<(string RepoName, string DefaultBranchName)> RepoItems { get; init; } = Array.Empty<(string, string)>();
+        public Func<Task>? PendingAction { get; init; }
+    }
+
     private HubConnection? _hubConnection;
     private bool _disposed;
     private readonly HashSet<int> _openUpdateMenus = new();
     private readonly HashSet<int> _openPushUpdatedMenus = new();
     private (int WorkspaceId, int RepoId)? _hoveredDepBadge;
     private CancellationTokenSource? _tooltipHideCts;
+    private DefaultBranchWarningModalState _defaultBranchWarning = new();
 
     private static string WorkspaceJobKey(int workspaceId) => $"/workspaces/{workspaceId}";
 
@@ -259,6 +275,32 @@
     }
 
     private void ClosePushUpdatedMenu(int workspaceId) => _openPushUpdatedMenus.Remove(workspaceId);
+
+    private void ShowDefaultBranchWarning(string message, IReadOnlyList<(string RepoName, string DefaultBranchName)> repoItems, Func<Task> onProceed)
+    {
+        _defaultBranchWarning = _defaultBranchWarning with
+        {
+            IsVisible = true,
+            Message = message,
+            RepoItems = repoItems,
+            PendingAction = onProceed,
+        };
+        StateHasChanged();
+    }
+
+    private void CloseDefaultBranchWarningModal()
+    {
+        _defaultBranchWarning = _defaultBranchWarning with { IsVisible = false, PendingAction = null };
+        StateHasChanged();
+    }
+
+    private async Task OnDefaultBranchWarningProceedAsync()
+    {
+        var action = _defaultBranchWarning.PendingAction;
+        CloseDefaultBranchWarningModal();
+        if (action != null)
+            await action();
+    }
 
     private static string GetDescription(WorkspaceNotification n)
     {
@@ -350,9 +392,29 @@
         _ = _hubConnection?.DisposeAsync().AsTask();
     }
 
-    private Task RunUpdateAsync(int workspaceId)
+    private Task RunUpdateAsync(WorkspaceNotification n)
     {
+        var workspaceId = n.WorkspaceId;
         if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        var defaultBranchRepos = n.Repos
+            .Where(r => r.UnmatchedDeps > 0
+                && !string.IsNullOrWhiteSpace(r.DefaultBranchName)
+                && string.Equals(r.BranchName, r.DefaultBranchName, StringComparison.Ordinal))
+            .Select(r => (r.RepositoryName, r.DefaultBranchName!))
+            .ToList();
+        if (defaultBranchRepos.Count > 0)
+        {
+            ShowDefaultBranchWarning(
+                $"Update on workspace '{n.WorkspaceName}' will commit dependency changes directly to the default (protected) branch.",
+                defaultBranchRepos,
+                () => StartUpdateJobAsync(workspaceId));
+            return Task.CompletedTask;
+        }
+        return StartUpdateJobAsync(workspaceId);
+    }
+
+    private Task StartUpdateJobAsync(int workspaceId)
+    {
         PendingActionsService.Dismiss(workspaceId);
         JobService.StartJob(WorkspaceJobKey(workspaceId), "Updating dependencies...", async (job, ct) =>
         {
@@ -384,11 +446,31 @@
     private Task RunUpdateAndPushAsync(WorkspaceNotification notification)
     {
         var workspaceId = notification.WorkspaceId;
+        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        var defaultBranchRepos = notification.Repos
+            .Where(r => r.UnmatchedDeps > 0
+                && !string.IsNullOrWhiteSpace(r.DefaultBranchName)
+                && string.Equals(r.BranchName, r.DefaultBranchName, StringComparison.Ordinal))
+            .Select(r => (r.RepositoryName, r.DefaultBranchName!))
+            .ToList();
+        if (defaultBranchRepos.Count > 0)
+        {
+            ShowDefaultBranchWarning(
+                $"Update on workspace '{notification.WorkspaceName}' will commit dependency changes directly to the default (protected) branch.",
+                defaultBranchRepos,
+                () => StartUpdateAndPushJobAsync(notification));
+            return Task.CompletedTask;
+        }
+        return StartUpdateAndPushJobAsync(notification);
+    }
+
+    private Task StartUpdateAndPushJobAsync(WorkspaceNotification notification)
+    {
+        var workspaceId = notification.WorkspaceId;
         var updatedRepoIds = notification.Repos
             .Where(r => r.UnmatchedDeps > 0)
             .Select(r => r.RepositoryId)
             .ToHashSet();
-        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
         PendingActionsService.Dismiss(workspaceId);
         JobService.StartJob(WorkspaceJobKey(workspaceId), "Updating dependencies...", async (job, ct) =>
         {
@@ -468,9 +550,29 @@
         return Task.CompletedTask;
     }
 
-    private Task RunPushAsync(int workspaceId)
+    private Task RunPushAsync(WorkspaceNotification n)
     {
+        var workspaceId = n.WorkspaceId;
         if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        var defaultBranchRepos = n.Repos
+            .Where(r => r.OutgoingCommits > 0
+                && !string.IsNullOrWhiteSpace(r.DefaultBranchName)
+                && string.Equals(r.BranchName, r.DefaultBranchName, StringComparison.Ordinal))
+            .Select(r => (r.RepositoryName, r.DefaultBranchName!))
+            .ToList();
+        if (defaultBranchRepos.Count > 0)
+        {
+            ShowDefaultBranchWarning(
+                $"Pushing workspace '{n.WorkspaceName}' will commit directly to the default (protected) branch.",
+                defaultBranchRepos,
+                () => StartPushJobAsync(workspaceId));
+            return Task.CompletedTask;
+        }
+        return StartPushJobAsync(workspaceId);
+    }
+
+    private Task StartPushJobAsync(int workspaceId)
+    {
         PendingActionsService.Dismiss(workspaceId);
         JobService.StartJob(WorkspaceJobKey(workspaceId), "Preparing push...", async (job, ct) =>
         {
