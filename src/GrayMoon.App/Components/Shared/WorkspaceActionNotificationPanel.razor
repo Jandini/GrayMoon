@@ -37,6 +37,7 @@
                 <p class="workspace-action-card__desc">@GetDescription(n)</p>
                 @if (n.Repos.Count > 0)
                 {
+                    var showCommitBadges = n.Repos.Any(r => r.OutgoingCommits > 0 || r.IncomingCommits > 0 || r.NewBranchNoPush);
                     <div class="notif-repo-list">
                         @foreach (var repo in n.Repos)
                         {
@@ -51,12 +52,15 @@
                                         @repo.UnmatchedDeps of @repo.TotalDeps
                                     </span>
                                 }
-                                <CommitsBadge @key="@($"cmt-{repo.RepositoryId}")"
-                                              RepositoryId="repo.RepositoryId"
-                                              Outgoing="repo.OutgoingCommits"
-                                              Incoming="repo.IncomingCommits"
-                                              BranchHasUpstream="@(repo.NewBranchNoPush ? false : null)"
-                                              Disabled="true" />
+                                @if (showCommitBadges)
+                                {
+                                    <CommitsBadge @key="@($"cmt-{repo.RepositoryId}")"
+                                                  RepositoryId="repo.RepositoryId"
+                                                  Outgoing="repo.OutgoingCommits"
+                                                  Incoming="repo.IncomingCommits"
+                                                  BranchHasUpstream="@(repo.NewBranchNoPush ? false : null)"
+                                                  Disabled="true" />
+                                }
                             </div>
                         }
                     </div>
@@ -78,7 +82,7 @@
                     </div>
                 }
                 <div class="workspace-action-card__actions">
-                    @if (n.HasUnmatchedDependencies && n.IsPushRecommended && !n.HasIncomingCommits)
+                    @if (n.HasUnmatchedDependencies && !n.HasIncomingCommits)
                     {
                         <div class="btn-group dropup position-relative">
                             <button class="btn btn-warning btn-sm"
