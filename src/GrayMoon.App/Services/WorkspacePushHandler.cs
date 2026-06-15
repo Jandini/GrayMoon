@@ -14,13 +14,16 @@ public sealed class WorkspacePushHandler(
     public async Task<(IReadOnlyList<PushRepoPayload> Payload, bool HasUnpushed)> GetPushPlanAsync(
         int workspaceId,
         IReadOnlyList<WorkspaceRepositoryLink> workspaceRepositories,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlySet<int>? forceIncludeRepoIds = null)
     {
         var (payload, _) = await workspacePushService.GetPushPlanAsync(workspaceId, cancellationToken);
         var repoIdsWithUnpushed = workspaceRepositories
             .Where(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false))
             .Select(wr => wr.RepositoryId)
             .ToHashSet();
+        if (forceIncludeRepoIds != null)
+            repoIdsWithUnpushed.UnionWith(forceIncludeRepoIds);
         var toPush = payload.Where(p => repoIdsWithUnpushed.Contains(p.RepoId)).ToList();
         return (toPush, toPush.Count > 0);
     }
