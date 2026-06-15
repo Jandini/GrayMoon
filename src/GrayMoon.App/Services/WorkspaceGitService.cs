@@ -754,6 +754,87 @@ public class WorkspaceGitService(
         return (true, null);
     }
 
+    /// <summary>Syncs a single repository to its default branch by calling the agent directly, so CommandOutput flows to TerminalSinkContext when called inside a background job.</summary>
+    public async Task<(bool Success, string? ErrorMessage)> SyncToDefaultDirectAsync(
+        int workspaceId,
+        int repositoryId,
+        string currentBranchName,
+        bool deleteRemoteBranch,
+        bool allowForceDeleteLocalBranch,
+        CancellationToken cancellationToken)
+    {
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            return (false, "Workspace not found.");
+
+        var repo = await _repositoryRepository.GetByIdAsync(repositoryId, cancellationToken);
+        if (repo == null)
+            return (false, "Repository not found.");
+
+        var wr = await _dbContext.WorkspaceRepositories
+            .FirstOrDefaultAsync(x => x.WorkspaceId == workspaceId && x.RepositoryId == repositoryId, cancellationToken);
+        if (wr == null)
+            return (false, "Repository is not in the given workspace.");
+
+        if (_connectorHealthService != null)
+            await _connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
+
+        await _workspacePullRequestService.RefreshPullRequestsAsync(workspaceId, [repositoryId], force: true, cancellationToken);
+
+        var wrWithPr = await _dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(x => x.PullRequest)
+            .FirstOrDefaultAsync(x => x.WorkspaceId == workspaceId && x.RepositoryId == repositoryId, cancellationToken);
+        var prInfo = wrWithPr?.PullRequest?.PullRequestNumber.HasValue == true
+            ? wrWithPr.PullRequest.ToPullRequestInfo()
+            : null;
+        var forceDeleteLocalBranch = allowForceDeleteLocalBranch && (prInfo?.IsMerged == true || prInfo?.IsClosed == true);
+
+        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var args = new
+        {
+            workspaceName = workspace.Name,
+            repositoryName = repo.RepositoryName,
+            currentBranchName,
+            bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
+            workspaceRoot,
+            forceDeleteLocalBranch,
+            deleteRemoteBranch
+        };
+
+        var response = await _agentBridge.SendCommandAsync("SyncToDefaultBranch", args, cancellationToken);
+        var syncResponse = AgentResponseJson.DeserializeAgentResponse<SyncToDefaultBranchResponse>(response.Data);
+        var commandSuccess = syncResponse?.Success ?? response.Success;
+        var errorMessage = syncResponse?.ErrorMessage ?? response.Error ?? "Failed to sync to default branch";
+
+        if (!commandSuccess)
+            return (false, errorMessage);
+
+        if (syncResponse?.LocalBranches != null)
+        {
+            var localBranches = syncResponse.LocalBranches.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
+            var remoteBranches = syncResponse.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
+            var tags = syncResponse.Tags?.Where(t => !string.IsNullOrWhiteSpace(t)).ToList() ?? new List<string>();
+            await PersistBranchesAsync(wr.WorkspaceRepositoryId, localBranches, remoteBranches, syncResponse.DefaultBranch, tags, syncResponse.CurrentTag, cancellationToken);
+        }
+        else
+        {
+            var toRemove = await _dbContext.RepositoryBranches
+                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && !rb.IsRemote && rb.BranchName == currentBranchName)
+                .ToListAsync(cancellationToken);
+            if (toRemove.Count > 0)
+            {
+                _dbContext.RepositoryBranches.RemoveRange(toRemove);
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+        }
+
+        if (_hubContext != null)
+            await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
+
+        return (true, null);
+    }
+
     /// <summary>Refreshes branches for a single repository by calling the agent directly. Routes CommandOutput to TerminalSinkContext when called within a background job.</summary>
     public async Task<bool> RefreshBranchesForRepositoryAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
     {

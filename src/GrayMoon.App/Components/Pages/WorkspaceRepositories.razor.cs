@@ -2800,14 +2800,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
             try
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
-                var branchHandler = scope.ServiceProvider.GetRequiredService<WorkspaceBranchHandler>();
-                var (success, errMsg) = await branchHandler.SyncToDefaultSingleAsync(
+                var gitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                var (success, errMsg) = await gitService.SyncToDefaultDirectAsync(
                     WorkspaceId,
                     repositoryId,
                     currentBranchName,
                     deleteRemoteBranch,
                     allowForceDeleteLocalBranch,
-                    ApiBaseUrl,
                     ct);
 
                 if (success)
@@ -2879,14 +2878,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     {
                         var repoHasRemote = !resultByRepo.TryGetValue(repositoryId, out var repoCheck) || repoCheck.HasUpstream == true;
                         await using var taskScope = ServiceScopeFactory.CreateAsyncScope();
-                        var taskBranchHandler = taskScope.ServiceProvider.GetRequiredService<WorkspaceBranchHandler>();
-                        var (success, errMsg) = await taskBranchHandler.SyncToDefaultSingleAsync(
+                        var taskGitService = taskScope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                        var (success, errMsg) = await taskGitService.SyncToDefaultDirectAsync(
                             WorkspaceId,
                             repositoryId,
                             currentBranchName,
                             deleteRemoteBranch && repoHasRemote,
                             allowForceDeleteLocalBranch,
-                            ApiBaseUrl,
                             ct);
 
                         return (repositoryId, success, errMsg);

@@ -37,6 +37,7 @@
                 <p class="workspace-action-card__desc">@GetDescription(n)</p>
                 @if (n.Repos.Count > 0)
                 {
+                    var showCommitBadges = n.Repos.Any(r => r.OutgoingCommits > 0 || r.IncomingCommits > 0 || r.NewBranchNoPush);
                     <div class="notif-repo-list">
                         @foreach (var repo in n.Repos)
                         {
@@ -51,7 +52,7 @@
                                         @repo.UnmatchedDeps of @repo.TotalDeps
                                     </span>
                                 }
-                                @if (repo.OutgoingCommits > 0 || repo.NewBranchNoPush)
+                                @if (showCommitBadges)
                                 {
                                     <CommitsBadge @key="@($"cmt-{repo.RepositoryId}")"
                                                   RepositoryId="repo.RepositoryId"
@@ -81,12 +82,12 @@
                     </div>
                 }
                 <div class="workspace-action-card__actions">
-                    @if (n.HasUnmatchedDependencies && n.IsPushRecommended && !n.HasIncomingCommits)
+                    @if (n.HasUnmatchedDependencies && !n.HasIncomingCommits)
                     {
                         <div class="btn-group dropup position-relative">
                             <button class="btn btn-warning btn-sm"
                                     disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                    @onclick="() => _ = RunUpdateAndPushAsync(n.WorkspaceId)">
+                                    @onclick="() => _ = RunUpdateAndPushAsync(n)">
                                 Push Updated
                             </button>
                             <button type="button"
@@ -163,7 +164,7 @@
                                         <li>
                                             <button class="dropdown-item" type="button" role="menuitem"
                                                     disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                                    @onclick="() => { CloseUpdateMenu(n.WorkspaceId); _ = RunUpdateAndPushAsync(n.WorkspaceId); }">
+                                                    @onclick="() => { CloseUpdateMenu(n.WorkspaceId); _ = RunUpdateAndPushAsync(n); }">
                                                 Update &amp; Push
                                             </button>
                                         </li>
@@ -380,8 +381,13 @@
         return Task.CompletedTask;
     }
 
-    private Task RunUpdateAndPushAsync(int workspaceId)
+    private Task RunUpdateAndPushAsync(WorkspaceNotification notification)
     {
+        var workspaceId = notification.WorkspaceId;
+        var updatedRepoIds = notification.Repos
+            .Where(r => r.UnmatchedDeps > 0)
+            .Select(r => r.RepositoryId)
+            .ToHashSet();
         if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
         PendingActionsService.Dismiss(workspaceId);
         JobService.StartJob(WorkspaceJobKey(workspaceId), "Updating dependencies...", async (job, ct) =>
@@ -417,7 +423,7 @@
             job.ReportProgress("Preparing push...");
             try
             {
-                await ExecutePushAsync(workspaceId, freshLinks, job, ct);
+                await ExecutePushAsync(workspaceId, freshLinks, job, ct, updatedRepoIds);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -492,13 +498,14 @@
         int workspaceId,
         List<WorkspaceRepositoryLink> links,
         BackgroundJobHandle job,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlySet<int>? forceIncludeRepoIds = null)
     {
         await using var scope = ServiceScopeFactory.CreateAsyncScope();
         var pushHandler = scope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
         var depService = scope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
 
-        var (payload, hasUnpushed) = await pushHandler.GetPushPlanAsync(workspaceId, links, ct);
+        var (payload, hasUnpushed) = await pushHandler.GetPushPlanAsync(workspaceId, links, ct, forceIncludeRepoIds);
         if (!hasUnpushed)
         {
             if (!_disposed) _ = InvokeAsync(() => ToastService.Show("Nothing to push."));
@@ -517,6 +524,8 @@
             .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
             .Select(wr => wr.RepositoryId)
             .ToHashSet();
+        if (forceIncludeRepoIds != null)
+            repoIdsThatNeedPush.UnionWith(forceIncludeRepoIds);
         var depInfo = await depService.GetPushDependencyInfoForRepoSetAsync(workspaceId, pushRepoIds, ct);
         bool synchronizedPush = WorkspaceDependencyService.ShouldShowSynchronizedPushModal(depInfo, repoIdsThatNeedPush);
 

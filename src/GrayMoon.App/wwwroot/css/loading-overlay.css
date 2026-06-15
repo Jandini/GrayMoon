@@ -96,7 +96,8 @@
   overflow-x: hidden;
   overflow-y: auto;
   /* Start at the top of the page; GrayMoon brand overlays with its own backdrop */
-  padding: 0.75rem 0.65rem 0.65rem;
+  /* Bottom padding lifts the last line so all visible lines have clearance from the top edge when scrolled to end */
+  padding: 0px;
   scroll-padding-top: 0.35rem;
   border: none;
   border-radius: 0;
