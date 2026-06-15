@@ -159,7 +159,7 @@
                                         role="menuitem"
                                         disabled="@UpdateDisabled"
                                         @onclick="() => { ClosePushUpdatedMenu(); _ = OnUndoPush.InvokeAsync(); }">
-                                    Undo Push
+                                    Undo Push Commits
                                 </button>
                             </li>
                         }
@@ -253,7 +253,7 @@
                                 <button class="dropdown-item" type="button" role="menuitem"
                                         disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)"
                                         @onclick="() => { ClosePushMenu(); _ = OnUndoPush.InvokeAsync(); }">
-                                    Undo Push
+                                    Undo Push Commits
                                 </button>
                             </li>
                         </ul>

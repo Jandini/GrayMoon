@@ -134,7 +134,7 @@
                                             <button class="dropdown-item" type="button" role="menuitem"
                                                     disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
                                                     @onclick="() => { ClosePushUpdatedMenu(n.WorkspaceId); _ = RunUndoPushAsync(n); }">
-                                                Undo Push
+                                                Undo Push Commits
                                             </button>
                                         </li>
                                     }
@@ -217,7 +217,7 @@
                                             <button class="dropdown-item" type="button" role="menuitem"
                                                     disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
                                                     @onclick="() => { ClosePushMenu(n.WorkspaceId); _ = RunUndoPushAsync(n); }">
-                                                Undo Push
+                                                Undo Push Commits
                                             </button>
                                         </li>
                                     </ul>
@@ -419,7 +419,7 @@
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Notification panel Undo Push failed for workspace {WorkspaceId}", workspaceId);
-                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Undo Push failed."));
+                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Undo Push Commits failed."));
                 throw;
             }
         });
