@@ -75,6 +75,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private ConfirmModalState _confirmModal = new();
     private DefaultBranchWarningModalState _defaultBranchWarningModal = new();
     private SyncToDefaultOptionsModalState _syncToDefaultOptionsModal = new();
+    private UndoPushModalState _undoPushModal = new();
     private string searchTerm = string.Empty;
 
     private bool _disposed;
@@ -3229,6 +3230,92 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public bool IsVisible { get; init; }
         public string Title { get; init; } = "Operation Failed";
         public string Message { get; init; } = "";
+    }
+
+    private sealed record UndoPushModalState
+    {
+        public bool IsVisible { get; init; }
+        public IReadOnlyList<(string RepoName, int OutgoingCommits)> Repos { get; init; } = Array.Empty<(string, int)>();
+    }
+
+    private Task OnUndoPushClickAsync()
+    {
+        if (workspace == null || IsJobRunning)
+            return Task.CompletedTask;
+
+        var repos = workspaceRepositories
+            .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
+            .Select(wr => (RepoName: wr.Repository?.RepositoryName ?? wr.RepositoryId.ToString(), OutgoingCommits: wr.OutgoingCommits ?? 0))
+            .ToList();
+
+        if (repos.Count == 0)
+        {
+            ToastService.Show("No repositories with outgoing commits.");
+            return Task.CompletedTask;
+        }
+
+        _undoPushModal = _undoPushModal with { IsVisible = true, Repos = repos };
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task OnUndoPushProceedAsync(bool keepChanges)
+    {
+        CloseUndoPushModal();
+
+        if (workspace == null || IsJobRunning)
+            return Task.CompletedTask;
+
+        var reposSnapshot = workspaceRepositories.ToList();
+        errorMessage = null;
+
+        JobService.StartJob(PageJobKey, "Resetting outgoing commits...", async (job, ct) =>
+        {
+            try
+            {
+                var results = await UndoPushHandler.RunUndoPushAsync(WorkspaceId, reposSnapshot, keepChanges, job.ReportProgress, ct);
+
+                SafeInvoke(() =>
+                {
+                    foreach (var (repoId, success, errMsg) in results)
+                    {
+                        if (success)
+                            repositoryErrors.Remove(repoId);
+                        else if (errMsg != null)
+                        {
+                            repositoryErrors[repoId] = errMsg;
+                            var repoName = reposSnapshot.FirstOrDefault(w => w.RepositoryId == repoId)?.Repository?.RepositoryName ?? repoId.ToString();
+                            ToastService.Show($"{repoName}: {errMsg}");
+                        }
+                    }
+                });
+
+                await InvokeAsync(async () =>
+                {
+                    if (_disposed) return;
+                    await RefreshFromSync();
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                await ReloadWorkspaceDataAfterCancelAsync();
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error resetting outgoing commits for workspace {WorkspaceId}", WorkspaceId);
+                SafeInvoke(() => errorMessage = "An error occurred while resetting commits. The GrayMoon Agent may be offline.");
+                throw;
+            }
+        });
+
+        return Task.CompletedTask;
+    }
+
+    private void CloseUndoPushModal()
+    {
+        _undoPushModal = _undoPushModal with { IsVisible = false };
+        StateHasChanged();
     }
 
     private Task RestorePackagesAsync()

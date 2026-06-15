@@ -10,6 +10,7 @@
 @inject IToastService ToastService
 @inject ILogger<WorkspaceActionNotificationPanel> Logger
 @inject WorkspaceFileVersionService FileVersionService
+@inject WorkspaceUndoPushHandler UndoPushHandler
 
 @{
     var currentPath = new Uri(NavigationManager.Uri).AbsolutePath.ToLowerInvariant();
@@ -126,6 +127,17 @@
                                             Push Only
                                         </button>
                                     </li>
+                                    @if (n.Repos.Any(r => r.OutgoingCommits > 0))
+                                    {
+                                        <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                                        <li>
+                                            <button class="dropdown-item" type="button" role="menuitem"
+                                                    disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                                    @onclick="() => { ClosePushUpdatedMenu(n.WorkspaceId); _ = RunUndoPushAsync(n); }">
+                                                Undo Push
+                                            </button>
+                                        </li>
+                                    }
                                 </ul>
                             }
                         </div>
@@ -182,11 +194,35 @@
                         }
                         else if (n.IsPushRecommended)
                         {
-                            <button class="btn btn-warning btn-sm"
-                                    disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
-                                    @onclick="() => _ = RunPushAsync(n)">
-                                Push
-                            </button>
+                            <div class="btn-group dropup position-relative">
+                                <button class="btn btn-warning btn-sm"
+                                        disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                        @onclick="() => _ = RunPushAsync(n)">
+                                    Push
+                                </button>
+                                <button type="button"
+                                        class="btn btn-warning btn-sm dropdown-toggle dropdown-toggle-split"
+                                        aria-label="Toggle Push menu"
+                                        aria-expanded="@(_openPushMenus.Contains(n.WorkspaceId) ? "true" : "false")"
+                                        disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                        @onclick="() => TogglePushMenu(n.WorkspaceId)"
+                                        @onclick:stopPropagation>
+                                    <span class="visually-hidden">Toggle Dropdown</span>
+                                </button>
+                                @if (_openPushMenus.Contains(n.WorkspaceId))
+                                {
+                                    <div class="branch-menu-backdrop" @onclick="() => ClosePushMenu(n.WorkspaceId)"></div>
+                                    <ul class="dropdown-menu show shadow branch-menu-list bottom-100 mb-1" role="menu">
+                                        <li>
+                                            <button class="dropdown-item" type="button" role="menuitem"
+                                                    disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                                    @onclick="() => { ClosePushMenu(n.WorkspaceId); _ = RunUndoPushAsync(n); }">
+                                                Undo Push
+                                            </button>
+                                        </li>
+                                    </ul>
+                                }
+                            </div>
                         }
                     }
                 </div>
@@ -202,6 +238,11 @@
     OnProceed="OnDefaultBranchWarningProceedAsync"
     OnCancel="CloseDefaultBranchWarningModal" />
 
+<UndoPushModal IsVisible="_undoPushModal.IsVisible"
+               Repos="_undoPushModal.Repos"
+               OnProceed="OnUndoPushProceedAsync"
+               OnCancel="CloseUndoPushModal" />
+
 @code {
     private sealed record DefaultBranchWarningModalState
     {
@@ -215,9 +256,19 @@
     private bool _disposed;
     private readonly HashSet<int> _openUpdateMenus = new();
     private readonly HashSet<int> _openPushUpdatedMenus = new();
+    private readonly HashSet<int> _openPushMenus = new();
     private (int WorkspaceId, int RepoId)? _hoveredDepBadge;
     private CancellationTokenSource? _tooltipHideCts;
     private DefaultBranchWarningModalState _defaultBranchWarning = new();
+
+    private sealed record UndoPushModalState
+    {
+        public bool IsVisible { get; init; }
+        public IReadOnlyList<(string RepoName, int OutgoingCommits)> Repos { get; init; } = Array.Empty<(string, int)>();
+        public Func<bool, Task>? PendingAction { get; init; }
+    }
+
+    private UndoPushModalState _undoPushModal = new();
 
     private static string WorkspaceJobKey(int workspaceId) => $"/workspaces/{workspaceId}";
 
@@ -276,6 +327,14 @@
 
     private void ClosePushUpdatedMenu(int workspaceId) => _openPushUpdatedMenus.Remove(workspaceId);
 
+    private void TogglePushMenu(int workspaceId)
+    {
+        if (!_openPushMenus.Remove(workspaceId))
+            _openPushMenus.Add(workspaceId);
+    }
+
+    private void ClosePushMenu(int workspaceId) => _openPushMenus.Remove(workspaceId);
+
     private void ShowDefaultBranchWarning(string message, IReadOnlyList<(string RepoName, string DefaultBranchName)> repoItems, Func<Task> onProceed)
     {
         _defaultBranchWarning = _defaultBranchWarning with
@@ -300,6 +359,71 @@
         CloseDefaultBranchWarningModal();
         if (action != null)
             await action();
+    }
+
+    private Task RunUndoPushAsync(WorkspaceNotification n)
+    {
+        var workspaceId = n.WorkspaceId;
+        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+
+        var repos = n.Repos
+            .Where(r => r.OutgoingCommits > 0)
+            .Select(r => (r.RepositoryName, r.OutgoingCommits))
+            .ToList();
+
+        if (repos.Count == 0) return Task.CompletedTask;
+
+        _undoPushModal = _undoPushModal with
+        {
+            IsVisible = true,
+            Repos = repos,
+            PendingAction = keepChanges => StartUndoPushJobAsync(n, keepChanges),
+        };
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task OnUndoPushProceedAsync(bool keepChanges)
+    {
+        var action = _undoPushModal.PendingAction;
+        CloseUndoPushModal();
+        if (action != null)
+            await action(keepChanges);
+    }
+
+    private void CloseUndoPushModal()
+    {
+        _undoPushModal = _undoPushModal with { IsVisible = false, PendingAction = null };
+        StateHasChanged();
+    }
+
+    private Task StartUndoPushJobAsync(WorkspaceNotification notification, bool keepChanges)
+    {
+        var workspaceId = notification.WorkspaceId;
+        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        PendingActionsService.Dismiss(workspaceId);
+        JobService.StartJob(WorkspaceJobKey(workspaceId), "Resetting outgoing commits...", async (job, ct) =>
+        {
+            try
+            {
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+                var ws = await workspaceRepo.GetByIdAsync(workspaceId);
+                if (ws == null) return;
+
+                var links = ws.Repositories.ToList();
+                var undoPushHandler = scope.ServiceProvider.GetRequiredService<WorkspaceUndoPushHandler>();
+                await undoPushHandler.RunUndoPushAsync(workspaceId, links, keepChanges, job.ReportProgress, ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Notification panel Undo Push failed for workspace {WorkspaceId}", workspaceId);
+                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Undo Push failed."));
+                throw;
+            }
+        });
+        return Task.CompletedTask;
     }
 
     private static string GetDescription(WorkspaceNotification n)
@@ -375,6 +499,7 @@
         if (_disposed) return;
         _openUpdateMenus.Clear();
         _openPushUpdatedMenus.Clear();
+        _openPushMenus.Clear();
         _tooltipHideCts?.Cancel();
         _tooltipHideCts = null;
         _hoveredDepBadge = null;

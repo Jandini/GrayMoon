@@ -1179,6 +1179,34 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, null);
     }
 
+    public async Task<(bool Success, string? ErrorMessage)> ResetToRemoteAsync(string repoPath, string branchName, bool keepChanges, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
+            return (false, "Invalid repository path or branch name");
+
+        var mode = keepChanges ? "--mixed" : "--hard";
+        var target = $"origin/{branchName}";
+        var args = $"reset {mode} {target}";
+
+        var sw = Stopwatch.StartNew();
+        var (exitCode, stdout, stderr) = await RunProcessAsync("git", args, repoPath, ct);
+        sw.Stop();
+        if (exitCode != 0)
+        {
+            var output = (stdout ?? "").Trim();
+            var errOutput = (stderr ?? "").Trim();
+            var combined = string.IsNullOrWhiteSpace(output) ? errOutput :
+                           string.IsNullOrWhiteSpace(errOutput) ? output :
+                           $"{output}\n{errOutput}";
+            logger.LogError("Git reset failed in {ElapsedMs}ms for {RepoPath}. Args={Args}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}",
+                sw.ElapsedMilliseconds, repoPath, args, exitCode, stdout, stderr);
+            return (false, combined);
+        }
+
+        logger.LogInformation("Git reset {Mode} {Target} completed in {ElapsedMs}ms for {RepoPath}", mode, target, sw.ElapsedMilliseconds, repoPath);
+        return (true, null);
+    }
+
     public void CreateDirectory(string path)
     {
         if (Directory.Exists(path))
