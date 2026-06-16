@@ -644,7 +644,7 @@ h1:focus {
 }
 
 .bg-danger {
-    background-color: var(--error) !important;
+    background-color: #dc3545 !important;
     color: var(--bg-primary) !important;
 }
 
