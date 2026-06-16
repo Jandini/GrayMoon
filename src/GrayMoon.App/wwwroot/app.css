@@ -53,7 +53,7 @@
     --focus-ring-outer: rgba(255, 255, 255, 0.52);
     
     --success: #89d185;
-    --warning: #dcdcaa;
+    --warning: #ffc107;
     --error: #f48771;
     --info: #4fc1ff;
 
@@ -650,7 +650,7 @@ h1:focus {
 
 .bg-warning {
     background-color: var(--warning) !important;
-    color: var(--bg-primary) !important;
+    color: #000 !important;
 }
 
 .bg-secondary {
@@ -675,7 +675,7 @@ h1:focus {
 }
 
 .alert-warning {
-    background-color: rgba(220, 220, 170, 0.15);
+    background-color: rgba(255, 193, 7, 0.15);
     border-color: var(--warning);
     color: var(--warning);
 }
@@ -715,6 +715,19 @@ h1:focus {
 
 .modal-title {
     color: var(--text-primary);
+}
+
+.modal-header.bg-warning .modal-title {
+    color: #000;
+}
+
+.modal-header.bg-warning .btn-close {
+    filter: none;
+    opacity: 0.55;
+}
+
+.modal-header.bg-warning .btn-close:hover {
+    opacity: 0.85;
 }
 
 .btn-close {

@@ -40,5 +40,5 @@
 }
 
 .default-branch-warning-scroll code {
-    color: #ffc107;
+    color: var(--warning);
 }
