@@ -309,6 +309,6 @@
 }
 @if (ShowRepositoriesFetchOverlay)
 {
-    <LoadingOverlay IsVisible="true" PageScoped="true" Message="@RepositoriesFetchOverlayMessage" ShowCommandTerminal="false"
+    <LoadingOverlay IsVisible="true" Message="@RepositoriesFetchOverlayMessage" ShowCommandTerminal="false"
                    OnAbort="@EventCallback.Factory.Create(this, (Action)AbortFetchRepositories)" />
 }
