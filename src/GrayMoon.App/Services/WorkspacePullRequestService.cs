@@ -42,7 +42,7 @@ public sealed class WorkspacePullRequestService(
         if (toRefresh.Count == 0) return;
 
         using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
-        var tasks = toRefresh.Select(async wr =>
+        var fetchTasks = toRefresh.Select(async wr =>
         {
             await semaphore.WaitAsync(cancellationToken);
             try
@@ -52,23 +52,28 @@ public sealed class WorkspacePullRequestService(
                 if (!force && _cache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow - cached.FetchedAt < CacheTtl)
                 {
                     logger.LogTrace("PR cache hit for repo {RepositoryId}, branch {Branch}", wr.RepositoryId, branch);
-                    return;
+                    return (Wr: wr, Pr: (PullRequestInfo?)null, Skip: true);
                 }
 
                 var pr = await gitHubPullRequestService.GetPullRequestForBranchAsync(wr.Repository!, wr.Repository!.Connector, branch, cancellationToken);
                 _cache[cacheKey] = (pr, DateTime.UtcNow);
-                await pullRequestRepository.UpsertAsync(wr.WorkspaceRepositoryId, pr, cancellationToken);
+                return (Wr: wr, Pr: pr, Skip: false);
             }
             catch (Exception ex)
             {
                 logger.LogDebug(ex, "RefreshPullRequest failed. WorkspaceId={WorkspaceId}, RepositoryId={RepositoryId}", workspaceId, wr.RepositoryId);
+                return (Wr: wr, Pr: (PullRequestInfo?)null, Skip: true);
             }
             finally
             {
                 semaphore.Release();
             }
         });
-        await Task.WhenAll(tasks);
+        var fetched = await Task.WhenAll(fetchTasks);
+
+        foreach (var result in fetched.Where(r => !r.Skip))
+            await pullRequestRepository.UpsertAsync(result.Wr.WorkspaceRepositoryId, result.Pr, cancellationToken);
+
         logger.LogTrace("Refreshed PR for {Count} repo(s) in workspace {WorkspaceId}", toRefresh.Count, workspaceId);
     }
 

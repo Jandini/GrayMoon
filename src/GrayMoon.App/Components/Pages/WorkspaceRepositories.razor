@@ -21,6 +21,7 @@
 @inject WorkspaceUpdateHandler WorkspaceUpdateHandler
 @inject WorkspaceFileVersionService FileVersionService
 @inject WorkspacePushHandler WorkspacePushHandler
+@inject WorkspaceUndoPushHandler UndoPushHandler
 @inject WorkspaceDependencyService WorkspaceDependencyService
 @inject WorkspaceBranchHandler WorkspaceBranchHandler
 @inject NewFeatureOrchestrator NewFeatureOrchestrator
@@ -59,6 +60,7 @@
                                     OnUpdateAndPush="OnUpdateAndPushClickAsync"
                                     OnPull="OnPullClickAsync"
                                     OnPush="OnPushClickAsync"
+                                    OnUndoPush="OnUndoPushClickAsync"
                                     OnSync="SyncAsync"
                                     OnRestorePackages="@RestorePackagesAsync"
                                     OnSearchChanged="OnSearchChanged"
@@ -296,12 +298,17 @@
                      Message="@_operationErrorModal.Message"
                      OnClose="CloseOperationErrorModal" />
 
+<UndoPushModal IsVisible="@_undoPushModal.IsVisible"
+               Repos="@_undoPushModal.Repos"
+               OnProceed="@OnUndoPushProceedAsync"
+               OnCancel="@CloseUndoPushModal" />
+
 @if (isLoading)
 {
     <LoadingOverlay IsVisible="true" PageScoped="true" Message="Loading workspace..." ShowCommandTerminal="false" />
 }
 @if (ShowRepositoriesFetchOverlay)
 {
-    <LoadingOverlay IsVisible="true" PageScoped="true" Message="@RepositoriesFetchOverlayMessage" ShowCommandTerminal="false"
+    <LoadingOverlay IsVisible="true" Message="@RepositoriesFetchOverlayMessage" ShowCommandTerminal="false"
                    OnAbort="@EventCallback.Factory.Create(this, (Action)AbortFetchRepositories)" />
 }

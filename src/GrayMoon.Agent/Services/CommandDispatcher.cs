@@ -30,7 +30,8 @@ public sealed class CommandDispatcher(
     ICommandHandler<UpdateFileVersionsRequest, UpdateFileVersionsResponse> updateFileVersionsCommand,
     ICommandHandler<GetFileContentsRequest, GetFileContentsResponse> getFileContentsCommand,
     ICommandHandler<ValidatePathRequest, ValidatePathResponse> validatePathCommand,
-    ICommandHandler<DotnetRestoreRequest, DotnetRestoreResponse> dotnetRestoreCommand) : ICommandDispatcher
+    ICommandHandler<DotnetRestoreRequest, DotnetRestoreResponse> dotnetRestoreCommand,
+    ICommandHandler<UndoPushRequest, UndoPushResponse> undoPushCommand) : ICommandDispatcher
 {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
@@ -60,6 +61,7 @@ public sealed class CommandDispatcher(
         ["GetFileContents"] = async (req, ct) => await getFileContentsCommand.ExecuteAsync((GetFileContentsRequest)req, ct),
         ["ValidatePath"] = async (req, ct) => await validatePathCommand.ExecuteAsync((ValidatePathRequest)req, ct),
         ["DotnetRestore"] = async (req, ct) => await dotnetRestoreCommand.ExecuteAsync((DotnetRestoreRequest)req, ct),
+        ["UndoPush"] = async (req, ct) => await undoPushCommand.ExecuteAsync((UndoPushRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

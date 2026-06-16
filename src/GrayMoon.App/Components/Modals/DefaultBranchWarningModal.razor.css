@@ -38,3 +38,7 @@
 .default-branch-warning-scroll::-webkit-scrollbar-thumb:hover {
     background: #5a6268;
 }
+
+.default-branch-warning-scroll code {
+    color: var(--warning);
+}

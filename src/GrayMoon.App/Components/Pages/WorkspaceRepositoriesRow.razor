@@ -139,7 +139,7 @@
                               @onclick:preventDefault
                               @onkeydown="OnDependencyBadgeKeydown"
                               @onmouseleave="OnDependencyBadgeMouseLeave">
-                            <span class="badge build-dep-badge build-dep-badge-mismatch">@unmatchedDeps of @depCount</span>
+                            <span class="badge build-dep-badge @(depBadgeOnTag ? "build-dep-badge-none" : "build-dep-badge-mismatch")">@unmatchedDeps of @depCount</span>
                             @if (MismatchedDependencyLines.Count > 0)
                             {
                                 <div class="dependency-badge-tooltip">

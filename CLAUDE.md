@@ -7,6 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Line endings:** Always use **Windows (CRLF)** in generated or edited code. Do not use LF-only.
 - **Hyphens only:** Never use em dash (U+2014) or en dash (U+2013) anywhere - user-visible strings, UI markup, comments, XML docs, logs, CSS, or Markdown. ASCII hyphen-minus (`-`) only.
 - **Primary constructors:** Prefer C# 12 primary constructors (`public sealed class MyService(ILogger<MyService> logger)`) for classes that only capture constructor parameters. Keep an explicit constructor only when the body has non-trivial side effects.
+- **`sealed` by default:** All service, handler, command, and repository classes are `sealed`. Apply `sealed` to every new concrete class unless inheritance is explicitly required.
+- **Modal state as sealed records:** UI modal state objects in page code-behind files (e.g. `WorkspaceRepositories.razor.cs`) use `private sealed record ModalState` with `init`-only properties and record-level defaults. Use a `sealed class` with mutable properties only when the modal needs to mutate state mid-display (e.g. a progress counter while fetching).
+- **Agent DTOs as sealed classes:** Request and response types under `src/GrayMoon.Agent/Jobs/Requests/` and `src/GrayMoon.Agent/Jobs/Response/` are `sealed class` (not records) with `[JsonPropertyName("camelCase")]` on every property. Nullable fields default to `null`; required string fields use `string?` with a null-guard in the handler.
 
 ## Task completion
 
@@ -18,7 +21,7 @@ When you complete a task, write a single sentence summarizing what was done. Kee
 # Build the solution
 dotnet build GrayMoon.sln
 
-# Run tests
+# Run tests (xUnit)
 dotnet test src/GrayMoon.Common.Tests/GrayMoon.Common.Tests.csproj
 
 # Run a single test class

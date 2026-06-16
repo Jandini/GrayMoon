@@ -151,6 +151,18 @@
                                 Push Only
                             </button>
                         </li>
+                        @if (IsPushRecommended)
+                        {
+                            <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                            <li>
+                                <button class="dropdown-item" type="button"
+                                        role="menuitem"
+                                        disabled="@UpdateDisabled"
+                                        @onclick="() => { ClosePushUpdatedMenu(); _ = OnUndoPush.InvokeAsync(); }">
+                                    Undo Push Commits
+                                </button>
+                            </li>
+                        }
                     </ul>
                 }
             </div>
@@ -215,9 +227,42 @@
                     Pull
                 </button>
             }
+            else if (IsPushRecommended)
+            {
+                <div class="btn-group position-relative">
+                    <button class="btn btn-warning"
+                            @onclick="@(() => OnPush.InvokeAsync())"
+                            @onclick:stopPropagation
+                            disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)">
+                        Push
+                    </button>
+                    <button type="button"
+                            class="btn btn-warning dropdown-toggle dropdown-toggle-split"
+                            aria-label="Toggle Push menu"
+                            aria-expanded="@(_pushMenuOpen ? "true" : "false")"
+                            @onclick="TogglePushMenu"
+                            @onclick:stopPropagation
+                            disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)">
+                        <span class="visually-hidden">Toggle Dropdown</span>
+                    </button>
+                    @if (_pushMenuOpen)
+                    {
+                        <div class="branch-menu-backdrop" @onclick="ClosePushMenu"></div>
+                        <ul class="dropdown-menu show shadow branch-menu-list" role="menu">
+                            <li>
+                                <button class="dropdown-item" type="button" role="menuitem"
+                                        disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)"
+                                        @onclick="() => { ClosePushMenu(); _ = OnUndoPush.InvokeAsync(); }">
+                                    Undo Push Commits
+                                </button>
+                            </li>
+                        </ul>
+                    }
+                </div>
+            }
             else
             {
-                <button class="btn @(IsPushRecommended ? "btn-warning" : "btn-outline-secondary")"
+                <button class="btn btn-outline-secondary"
                         @onclick="@(() => OnPush.InvokeAsync())"
                         disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)">
                     Push
@@ -287,6 +332,7 @@
     [Parameter] public EventCallback OnUpdateAndPush { get; set; }
     [Parameter] public EventCallback OnPull { get; set; }
     [Parameter] public EventCallback OnPush { get; set; }
+    [Parameter] public EventCallback OnUndoPush { get; set; }
     [Parameter] public EventCallback OnSync { get; set; }
     [Parameter] public EventCallback OnRestorePackages { get; set; }
     [Parameter] public EventCallback<ChangeEventArgs> OnSearchChanged { get; set; }
@@ -297,6 +343,7 @@
     private bool _updateMenuOpen;
     private bool _syncMenuOpen;
     private bool _pushUpdatedMenuOpen;
+    private bool _pushMenuOpen;
 
     private bool UpdateDisabled =>
         WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
@@ -324,6 +371,10 @@
     private void TogglePushUpdatedMenu() => _pushUpdatedMenuOpen = !_pushUpdatedMenuOpen;
 
     private void ClosePushUpdatedMenu() => _pushUpdatedMenuOpen = false;
+
+    private void TogglePushMenu() => _pushMenuOpen = !_pushMenuOpen;
+
+    private void ClosePushMenu() => _pushMenuOpen = false;
 
     private void ToggleSyncMenu() => _syncMenuOpen = !_syncMenuOpen;
 

@@ -1,0 +1,93 @@
+@using Microsoft.AspNetCore.Components.Web
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDown"
+         @ref="_modalElement">
+        <div class="modal-dialog modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title">Undo Push Commits</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2 small">
+                        All outgoing commits will be reset back to <code>origin</code> for the following
+                        @(Repos.Count == 1 ? "repository" : "repositories"):
+                    </p>
+                    <div class="default-branch-warning-scroll small mb-3">
+                        <ul class="list-unstyled mb-0 ps-0">
+                            @foreach (var repo in Repos)
+                            {
+                                <li class="mb-1">
+                                    <code>@repo.RepoName</code>
+                                    <span class="text-muted">(@repo.OutgoingCommits @(repo.OutgoingCommits == 1 ? "commit" : "commits"))</span>
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="keepChangesCheck"
+                               checked="@_keepChanges"
+                               @onchange="OnKeepChangesChanged" />
+                        <label class="form-check-label small" for="keepChangesCheck">
+                            Keep changes (changes will remain in your working tree)
+                        </label>
+                    </div>
+                    @if (!_keepChanges)
+                    {
+                        <p class="small text-danger mb-0">
+                            Warning: changes will be permanently lost.
+                        </p>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-warning" @onclick="ProceedAsync">
+                        Proceed
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public IReadOnlyList<(string RepoName, int OutgoingCommits)> Repos { get; set; } = Array.Empty<(string, int)>();
+    [Parameter] public EventCallback<bool> OnProceed { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private bool _keepChanges = true;
+    private ElementReference _modalElement;
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible)
+            _keepChanges = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible)
+            await _modalElement.FocusAsync();
+    }
+
+    private void OnKeepChangesChanged(ChangeEventArgs e)
+    {
+        _keepChanges = e.Value is bool b ? b : true;
+    }
+
+    private async Task ProceedAsync() => await OnProceed.InvokeAsync(_keepChanges);
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            await OnCancel.InvokeAsync();
+        else if (e.Key == "Enter")
+            await ProceedAsync();
+    }
+}
