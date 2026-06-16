@@ -106,6 +106,21 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 ## What's new
 
+### Undo Push Commits
+
+When a branch has outgoing commits that have not yet been merged, GrayMoon can now reset them back to `origin` without leaving the app.
+
+- **Two entry points:** the **Push** split button in the workspace header gains an **Undo Push Commits** item when any repository has outgoing commits; the same option also appears in the **Branch** split menu's push section.
+- **Confirmation dialog:** lists every repository that will be reset along with its outgoing commit count so you can review the scope before proceeding.
+- **Keep or discard changes:** a checkbox lets you choose between a mixed reset (changes stay in the working tree, default) or a hard reset (changes are permanently discarded). A warning is shown when the hard reset option is selected.
+- **Runs in parallel:** all targeted repositories are reset concurrently (up to the workspace's configured parallelism limit). Progress is reported in the loading overlay as each reset completes.
+- **Instant UI update:** after each reset, the agent sends a sync notification so the Commits badge and version column update without a manual sync.
+- **Only eligible repositories are targeted:** pinned tags and repositories with no outgoing commits are automatically skipped.
+
+### Terminal output for commit sync
+
+The commit sync (pull-with-rebase) operation now streams agent command output into the loading overlay terminal, consistent with push, restore, and other long-running operations.
+
 ### Global workspace action notifications
 
 A floating notification panel now appears anywhere in the app when a tracked workspace has pending actions - dependency updates, commits ready to push, or incoming commits to pull.
