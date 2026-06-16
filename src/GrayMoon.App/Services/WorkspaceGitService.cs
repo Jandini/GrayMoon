@@ -76,6 +76,13 @@ public class WorkspaceGitService(
 
         _logger.LogInformation("Sync triggered by user (workspace UI). Workspace={WorkspaceName}, RepoCount={RepoCount}", workspace.Name, repos.Count);
 
+        // EF Core DbContext is not thread-safe; run health checks sequentially before the parallel block.
+        if (_connectorHealthService != null)
+        {
+            foreach (var repo in repos)
+                await _connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
+        }
+
         var completedCount = 0;
         var totalCount = repos.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
@@ -85,9 +92,6 @@ public class WorkspaceGitService(
             await semaphore.WaitAsync(cancellationToken);
             try
             {
-                if (_connectorHealthService != null)
-                    await _connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
-
                 var args = new
                 {
                     workspaceName = workspace.Name,
