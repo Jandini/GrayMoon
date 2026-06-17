@@ -86,6 +86,11 @@ a:hover, .btn-link:hover {
     text-decoration: underline;
 }
 
+/* Override Bootstrap code color (#d63384) */
+code {
+    color: goldenrod;
+}
+
 /* Workspaces breadcrumb (same gray as repositories count) */
 a.workspaces-breadcrumb-link,
 a.workspaces-breadcrumb-link:hover,
