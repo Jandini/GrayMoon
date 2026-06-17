@@ -187,6 +187,7 @@
                                     <th class="col-repo">Repository</th>
                                     <th class="col-branch">Branch</th>
                                     <th class="col-workflow">Workflow</th>
+                                    <th class="col-last-run">Last Run</th>
                                     <th class="col-action-status">Status</th>
                                     <th class="col-actions">Actions</th>
                                 </tr>
@@ -195,7 +196,7 @@
                                 @if (isLoading)
                                 {
                                     <tr>
-                                        <td colspan="5" class="text-center text-muted py-4">
+                                        <td colspan="6" class="text-center text-muted py-4">
                                             Loading workspace...
                                         </td>
                                     </tr>
@@ -203,7 +204,7 @@
                                 else if (rows.Count == 0)
                                 {
                                     <tr>
-                                        <td colspan="5" class="text-center text-muted py-4">
+                                        <td colspan="6" class="text-center text-muted py-4">
                                             No repositories in this workspace. Add repositories to see actions.
                                         </td>
                                     </tr>
@@ -211,7 +212,7 @@
                                 else if (NoVisibleWorkflowRows)
                                 {
                                     <tr>
-                                        <td colspan="5" class="text-center text-muted py-4">
+                                        <td colspan="6" class="text-center text-muted py-4">
                                             @(HasSearchFilter ? "No workflows match your search." : "No workflows match the current filters.")
                                         </td>
                                     </tr>
@@ -294,6 +295,17 @@
                                                     else
                                                     {
                                                         <span class="text-muted">-</span>
+                                                    }
+                                                </td>
+                                                <td class="col-last-run text-muted">
+                                                    @if (line.Action?.UpdatedAt != null)
+                                                    {
+                                                        var lastRunTooltip = line.Action.UpdatedAt.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+                                                        <span title="@lastRunTooltip">@FormatLastRun(line.Action.UpdatedAt)</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span>&middot;</span>
                                                     }
                                                 </td>
                                                 <td class="col-action-status text-center">
@@ -380,7 +392,7 @@
                                             @if (showGhaTerminal)
                                             {
                                                 <tr class="@($"{stripeClass} actions-gha-feed-row actions-data-row actions-row-running actions-row-running-terminal{(repoEndOnGhaRow ? " actions-row-repo-end" : "")}")">
-                                                    <td colspan="5" class="p-0 border-0">
+                                                    <td colspan="6" class="p-0 border-0">
                                                         <GhaWorkflowLiveTerminal @key="@($"{row.Repo.RepositoryId}-{(line.Action?.WorkflowId ?? 0)}-{(line.Action?.RunId ?? 0)}")"
                                                                                  ConnectorName="@row.Repo.ConnectorName"
                                                                                  Owner="@(row.Repo.OrgName ?? "")"
