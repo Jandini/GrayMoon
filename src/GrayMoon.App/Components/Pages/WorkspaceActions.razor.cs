@@ -1458,6 +1458,17 @@ public sealed partial class WorkspaceActions : IDisposable
     internal static string GroupStripeClass(int groupIndex) =>
         (groupIndex % 2 == 0) ? "actions-group-even" : "actions-group-odd";
 
+    internal static string FormatLastRun(DateTimeOffset? updatedAt)
+    {
+        if (updatedAt == null) return string.Empty;
+        var elapsed = DateTimeOffset.UtcNow - updatedAt.Value;
+        if (elapsed.TotalSeconds < 60) return "just now";
+        if (elapsed.TotalMinutes < 60) return $"{(int)elapsed.TotalMinutes} min ago";
+        if (elapsed.TotalHours < 24) return $"{(int)elapsed.TotalHours} hr ago";
+        if (elapsed.TotalDays < 7) return $"{(int)elapsed.TotalDays} days ago";
+        return updatedAt.Value.LocalDateTime.ToString("MMM d, h:mm tt");
+    }
+
     public void Dispose()
     {
         _cts.Cancel();

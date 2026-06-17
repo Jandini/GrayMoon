@@ -240,28 +240,32 @@
 }
 
 .col-repo {
-    width: 26%;
+    width: 22%;
 }
 
 .col-branch {
-    width: 16%;
+    width: 14%;
 }
 
 .col-workflow {
-    width: 22%;
+    width: 20%;
 }
 
 .col-event {
     width: 18%;
 }
 
+.col-last-run {
+    width: 14%;
+}
+
 .col-action-status {
-    width: 18%;
+    width: 14%;
 }
 
 /* Last column: actions (match Workspaces.razor) */
 .col-actions {
-    width: 18%;
+    width: 16%;
 }
 
 .actions-table tbody tr.actions-group-even {
