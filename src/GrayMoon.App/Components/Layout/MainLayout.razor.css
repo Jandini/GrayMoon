@@ -232,6 +232,15 @@ article.content {
         pointer-events: none;
     }
 
+    .page--navbar-collapsed .sidebar ::deep .nav-scrollable {
+        scrollbar-width: thin;
+        scrollbar-color: #5a5a5a var(--bg-card, #252526);
+    }
+
+    .page--navbar-collapsed .sidebar ::deep .nav-scrollable::-webkit-scrollbar {
+        width: 3px;
+    }
+
     .top-row {
         position: sticky;
         top: 0;
