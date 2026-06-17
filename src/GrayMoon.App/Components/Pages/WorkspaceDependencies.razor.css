@@ -1,6 +1,7 @@
 /* Match other grid pages; fit viewport so no vertical scroll */
+/* Height = 100vh - top-row (3.5rem) - article padding-top (2rem) */
 .dependencies-page.page-container.grid-page {
-    height: calc(100vh - 8rem);
+    height: calc(100vh - 5.5rem);
     min-height: 240px;
     overflow: hidden;
 }
@@ -11,6 +12,7 @@
     max-height: none;
     position: relative;
     overflow: hidden;
+    border-radius: 0.375rem;
 }
 
 .dependencies-page .cytoscape-graph {
