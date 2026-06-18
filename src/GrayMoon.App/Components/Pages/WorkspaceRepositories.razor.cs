@@ -79,6 +79,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private string searchTerm = string.Empty;
 
     private bool _disposed;
+    private bool _wasJobRunning;
     private string PageJobKey => new Uri(NavigationManager.Uri).AbsolutePath.ToLowerInvariant();
     private bool IsJobRunning => JobService.IsRunning(PageJobKey);
 
@@ -98,6 +99,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         JobService.Changed += OnJobServiceChanged;
+        _wasJobRunning = IsJobRunning;
         await LoadWorkspaceAsync();
         ApplySyncStateFromWorkspace();
     }
@@ -179,7 +181,19 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _fetchRepositoriesCts?.Dispose();
     }
 
-    private void OnJobServiceChanged() => SafeInvoke(() => { });
+    private void OnJobServiceChanged()
+    {
+        if (_disposed) return;
+        _ = InvokeAsync(() =>
+        {
+            if (_disposed) return;
+            var isRunning = IsJobRunning;
+            if (_wasJobRunning && !isRunning)
+                _ = InvokeAsync(RefreshFromSync);
+            _wasJobRunning = isRunning;
+            StateHasChanged();
+        });
+    }
 
     private void SafeInvoke(Action callback)
     {
