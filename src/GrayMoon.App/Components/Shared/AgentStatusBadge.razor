@@ -1,29 +1,65 @@
 @using GrayMoon.App.Services
 @inject AgentConnectionTracker AgentConnectionTracker
 @inject AgentQueueStateService AgentQueueStateService
+@inject IAgentBridge AgentBridge
+@inject NavigationManager NavigationManager
+@inject IToastService ToastService
 @rendermode @(new InteractiveServerRenderMode(prerender: true))
 
-<a href="/agent" class="@BadgeClassFull" 
-   title="@TitleText" 
-   style="cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; @BadgeStyle">
-    @StateLabel
-</a>
+@if (State == AgentConnectionState.VersionMismatch && !_isUpdating)
+{
+    <a class="@BadgeClassFull"
+       title="@TitleText"
+       style="cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; @BadgeStyle"
+       @onclick="StartUpdateAsync">
+        update
+    </a>
+}
+else
+{
+    <a href="/agent" class="@BadgeClassFull"
+       title="@TitleText"
+       style="cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; @BadgeStyle">
+        @StateLabel
+    </a>
+}
 
 @implements IDisposable
 
 @code {
     private AgentConnectionState State => AgentConnectionTracker.State;
     private string? AgentSemVer => AgentConnectionTracker.AgentSemVer;
+    private bool _isUpdating;
 
     protected override void OnInitialized()
     {
-        AgentConnectionTracker.OnStateChanged((state) => { _ = InvokeAsync(StateHasChanged); });
+        AgentConnectionTracker.OnStateChanged(state =>
+        {
+            if (state == AgentConnectionState.Online)
+                _isUpdating = false;
+            _ = InvokeAsync(StateHasChanged);
+        });
         AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
     }
 
     private void OnQueueStateChanged(object? sender, EventArgs e) => _ = InvokeAsync(StateHasChanged);
 
-    private string BadgeClass => State switch
+    private async Task StartUpdateAsync()
+    {
+        _isUpdating = true;
+        StateHasChanged();
+        var installUrl = NavigationManager.BaseUri.TrimEnd('/') + "/api/agent/install";
+        var response = await AgentBridge.SendCommandAsync("SelfUpdate", new { installUrl }, CancellationToken.None);
+        if (!response.Success)
+        {
+            _isUpdating = false;
+            StateHasChanged();
+            ToastService.ShowError("Agent update failed.");
+            NavigationManager.NavigateTo("/agent");
+        }
+    }
+
+    private string BadgeClass => _isUpdating ? "bg-primary" : State switch
     {
         AgentConnectionState.Online => "bg-success",
         AgentConnectionState.Offline => "bg-danger",
@@ -32,17 +68,19 @@
         _ => "bg-secondary"
     };
 
-    private string BadgeStyle => State switch
-    {
-        AgentConnectionState.Online => "background-color: #198754 !important;",
-        AgentConnectionState.Offline => "background-color: #dc3545 !important; color: #fff !important;",
-        AgentConnectionState.VersionMismatch => "background-color: #dc3545 !important; color: #fff !important;",
-        _ => ""
-    };
+    private string BadgeStyle => _isUpdating
+        ? "background-color: #0d6efd !important; color: #fff !important;"
+        : State switch
+        {
+            AgentConnectionState.Online => "background-color: #198754 !important;",
+            AgentConnectionState.Offline => "background-color: #dc3545 !important; color: #fff !important;",
+            AgentConnectionState.VersionMismatch => "background-color: #dc3545 !important; color: #fff !important;",
+            _ => ""
+        };
 
     private string BadgeClassFull => $"badge {BadgeClass} text-decoration-none ms-2";
 
-    private string StateLabel => State switch
+    private string StateLabel => _isUpdating ? "updating" : State switch
     {
         AgentConnectionState.Online => AgentQueueStateService.GetTotalPendingCount() > 0 ? "running" : "online",
         AgentConnectionState.Offline => "offline",
@@ -51,7 +89,7 @@
         _ => "offline"
     };
 
-    private string TitleText => State switch
+    private string TitleText => _isUpdating ? "Updating agent..." : State switch
     {
         AgentConnectionState.VersionMismatch => $"Agent version mismatch. Agent version: {AgentSemVer ?? "unknown"}. Click to update.",
         AgentConnectionState.Online => AgentQueueStateService.GetTotalPendingCount() > 0 ? "Agent is running tasks" : "Agent connection status: online",

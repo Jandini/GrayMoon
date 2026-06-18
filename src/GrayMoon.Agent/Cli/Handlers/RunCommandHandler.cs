@@ -126,6 +126,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<ValidatePathRequest, ValidatePathResponse>, ValidatePathCommand>();
         builder.Services.AddSingleton<ICommandHandler<DotnetRestoreRequest, DotnetRestoreResponse>, DotnetRestoreCommand>();
         builder.Services.AddSingleton<ICommandHandler<UndoPushRequest, UndoPushResponse>, UndoPushCommand>();
+        builder.Services.AddSingleton<ICommandHandler<SelfUpdateRequest, SelfUpdateResponse>, SelfUpdateCommand>();
         builder.Services.AddSingleton<CheckoutHookSyncCommand>();
         builder.Services.AddSingleton<CommitHookSyncCommand>();
         builder.Services.AddSingleton<MergeHookSyncCommand>();
