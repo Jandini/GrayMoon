@@ -22,6 +22,8 @@ public sealed class CommandJobFactory
         {
             if (command == "GetHostInfo")
                 return new GetHostInfoRequest();
+            if (command == "SelfUpdate")
+                return new SelfUpdateRequest();
             throw new ArgumentException($"Args required for {command}");
         }
 
@@ -83,6 +85,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid DotnetRestore args"),
             "UndoPush" => JsonSerializer.Deserialize<UndoPushRequest>(json, options)
                 ?? throw new ArgumentException("Invalid UndoPush args"),
+            "SelfUpdate" => JsonSerializer.Deserialize<SelfUpdateRequest>(json, options)
+                ?? throw new ArgumentException("Invalid SelfUpdate args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

@@ -31,7 +31,8 @@ public sealed class CommandDispatcher(
     ICommandHandler<GetFileContentsRequest, GetFileContentsResponse> getFileContentsCommand,
     ICommandHandler<ValidatePathRequest, ValidatePathResponse> validatePathCommand,
     ICommandHandler<DotnetRestoreRequest, DotnetRestoreResponse> dotnetRestoreCommand,
-    ICommandHandler<UndoPushRequest, UndoPushResponse> undoPushCommand) : ICommandDispatcher
+    ICommandHandler<UndoPushRequest, UndoPushResponse> undoPushCommand,
+    ICommandHandler<SelfUpdateRequest, SelfUpdateResponse> selfUpdateCommand) : ICommandDispatcher
 {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
@@ -62,6 +63,7 @@ public sealed class CommandDispatcher(
         ["ValidatePath"] = async (req, ct) => await validatePathCommand.ExecuteAsync((ValidatePathRequest)req, ct),
         ["DotnetRestore"] = async (req, ct) => await dotnetRestoreCommand.ExecuteAsync((DotnetRestoreRequest)req, ct),
         ["UndoPush"] = async (req, ct) => await undoPushCommand.ExecuteAsync((UndoPushRequest)req, ct),
+        ["SelfUpdate"] = async (req, ct) => await selfUpdateCommand.ExecuteAsync((SelfUpdateRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)
