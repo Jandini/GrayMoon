@@ -1169,6 +1169,7 @@ table.resizable-columns th:hover .resize-handle::after {
     padding: 0.32rem 0.8rem;
     cursor: pointer;
     color: #d0d0d0;
+    text-decoration: none;
     transition: background 0.08s, color 0.08s;
 }
 .gm-gh-dropdown-item:hover {
