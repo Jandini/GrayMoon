@@ -300,7 +300,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         // Resolve the upstream ref (e.g. origin/main) and use that as the fetch target for the
         // current branch rather than the branch name itself. This avoids fetching non-upstreamed
         // local branches and ensures we are always fetching the configured remote tracking ref.
-        var upstreamRef = skipUpstreamCheck ? null : await GetUpstreamRefAsync(repoPath, ct);
+        var upstreamRef = skipUpstreamCheck ? null : await GetUpstreamRefAsync(repoPath, branchName, ct);
         logger.LogDebug("Git minimal fetch upstream ref for {RepoPath}: {UpstreamRef}", repoPath, upstreamRef ?? "<none>");
 
         if (!string.IsNullOrWhiteSpace(upstreamRef))
@@ -383,7 +383,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         // Resolve upstream ref (e.g. origin/main) once for this branch. When there is no upstream
         // configured we fall back to comparing against the default branch only.
-        var upstreamRef = skipUpstreamCheck ? null : await GetUpstreamRefAsync(repoPath, ct);
+        var upstreamRef = skipUpstreamCheck ? null : await GetUpstreamRefAsync(repoPath, branchName, ct);
         if (string.IsNullOrWhiteSpace(upstreamRef))
         {
             var defaultBranch = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
@@ -1112,14 +1112,15 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
     }
 
     /// <summary>
-    /// Returns the configured upstream ref for the current HEAD (e.g. "origin/main") by using
-    /// `git rev-parse --abbrev-ref --symbolic-full-name @{u}`. Returns null when no upstream is configured.
+    /// Returns the configured upstream tracking ref for <paramref name="branchName"/> (e.g. "origin/main").
+    /// Uses <c>git for-each-ref --format=%(upstream:short)</c>, which exits 0 with empty output when no
+    /// upstream is set -- no fatal stderr, unlike the <c>@{u}</c> syntax.
     /// </summary>
-    private async Task<string?> GetUpstreamRefAsync(string repoPath, CancellationToken ct)
+    private async Task<string?> GetUpstreamRefAsync(string repoPath, string branchName, CancellationToken ct)
     {
         var (exitCode, stdout, _) = await RunProcessAsync(
             "git",
-            "rev-parse --abbrev-ref --symbolic-full-name @{u}",
+            $"for-each-ref --format=%(upstream:short) refs/heads/{branchName}",
             repoPath,
             ct);
 

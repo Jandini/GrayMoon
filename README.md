@@ -106,6 +106,10 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 ## What's new
 
+### No more red "fatal" noise in the terminal during New Feature runs
+
+The upstream tracking probe used by commit-count and fetch operations now uses `git for-each-ref --format=%(upstream:short)` instead of `git rev-parse @{u}`. The old command wrote `fatal: no upstream configured for branch '<name>'` to stderr every time GrayMoon checked a branch that had not yet been pushed - which always happens during a New Feature orchestrator run (branches are created locally before the first push). Because GrayMoon streams stderr to the terminal overlay in real time, that `fatal:` line appeared as red terminal output even though nothing was wrong. The new command exits 0 with empty output when no upstream is set, so no message is produced and the terminal stays clean.
+
 ### Undo Push Commits
 
 When a branch has outgoing commits that have not yet been merged, GrayMoon can now reset them back to `origin` without leaving the app.
