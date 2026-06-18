@@ -283,11 +283,23 @@
                 body: JSON.stringify({ value: collapsed })
             }).catch(function () { });
         };
-        // Custom tooltip for collapsed sidebar icons - appears to the right of the sidebar
-        // so it does not overlap the chevron button at the bottom.
+        // Collapsed sidebar nav hints: simple tooltip for all icons, workspace dropdown for Repositories.
         (function () {
             var tip = null;
+            var menu = null;
             var hideTimer = null;
+            var visited = []; // [{id, name, url}]; visited[0] = current workspace
+
+            function clearTimer() {
+                if (hideTimer !== null) { clearTimeout(hideTimer); hideTimer = null; }
+            }
+            function hideTip() { if (tip) tip.style.display = 'none'; }
+            function hideMenu() { if (menu) menu.classList.remove('gm-gh-dropdown--visible'); }
+            function scheduleHide() {
+                clearTimer();
+                hideTimer = setTimeout(function () { hideTip(); hideMenu(); }, 150);
+            }
+
             function ensureTip() {
                 if (!tip) {
                     tip = document.createElement('div');
@@ -308,9 +320,62 @@
                 var tipH = tip.offsetHeight || 24;
                 tip.style.top = Math.round(lr.top + (lr.height - tipH) / 2) + 'px';
             }
-            function clearHideTimer() {
-                if (hideTimer !== null) { clearTimeout(hideTimer); hideTimer = null; }
+            function showTip(link, label) {
+                hideMenu();
+                var t = ensureTip();
+                t.textContent = label;
+                t.style.display = 'block';
+                positionTip(link);
+                clearTimer();
+                hideTimer = setTimeout(function () { hideTip(); hideTimer = null; }, 1000);
             }
+
+            function escapeHtml(s) {
+                return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            }
+            function ensureMenu() {
+                if (!menu) {
+                    menu = document.createElement('div');
+                    menu.className = 'gm-gh-dropdown';
+                    menu.addEventListener('mouseenter', clearTimer);
+                    menu.addEventListener('mouseleave', scheduleHide);
+                    menu.addEventListener('click', function () {
+                        clearTimer();
+                        hideMenu();
+                    });
+                    document.body.appendChild(menu);
+                }
+                return menu;
+            }
+            function buildMenu() {
+                var m = ensureMenu();
+                m.innerHTML = '';
+                for (var i = 0; i < visited.length; i++) {
+                    var w = visited[i];
+                    var row = document.createElement('a');
+                    row.className = 'gm-gh-dropdown-item';
+                    row.href = '/' + w.url;
+                    var icon = i === 0 ? 'bi-grid' : 'bi-clock-history';
+                    row.innerHTML = '<i class="bi ' + icon + '" aria-hidden="true"></i><span>' + escapeHtml(w.name) + '</span>';
+                    m.appendChild(row);
+                }
+            }
+            function positionMenu(link) {
+                var sidebar = document.querySelector('.sidebar');
+                if (!sidebar || !menu) return;
+                var sr = sidebar.getBoundingClientRect();
+                var lr = link.getBoundingClientRect();
+                menu.style.left = (sr.right + 8) + 'px';
+                menu.style.top = lr.top + 'px';
+            }
+            function showMenu(link) {
+                hideTip();
+                buildMenu();
+                positionMenu(link);
+                ensureMenu().classList.add('gm-gh-dropdown--visible');
+                clearTimer();
+            }
+
             document.addEventListener('mouseover', function (e) {
                 var link = e.target.closest('.sidebar .nav-link');
                 if (!link) return;
@@ -319,12 +384,27 @@
                 var item = link.closest('[data-nav-label]');
                 var label = item ? item.getAttribute('data-nav-label') : '';
                 if (!label) return;
-                var t = ensureTip();
-                t.textContent = label;
-                t.style.display = 'block';
-                positionTip(link);
-                clearHideTimer();
-                hideTimer = setTimeout(function () { if (tip) tip.style.display = 'none'; hideTimer = null; }, 2000);
+                if (label === 'Repositories') {
+                    // Detect current workspace from the nav-link href and header title element
+                    var href = link.getAttribute('href') || '';
+                    var m = href.match(/workspaces\/(\d+)/i);
+                    if (m) {
+                        var wsId = parseInt(m[1], 10);
+                        var nameEl = document.querySelector('.top-row-workspace-title__link')
+                                  || document.querySelector('.top-row-workspace-title__text');
+                        var wsName = nameEl ? (nameEl.textContent || '').trim() : '';
+                        if (wsName && (!visited.length || visited[0].id !== wsId)) {
+                            visited = visited.filter(function (w) { return w.id !== wsId; });
+                            visited.unshift({ id: wsId, name: wsName, url: href });
+                            if (visited.length > 6) visited.length = 6;
+                        }
+                    }
+                    if (visited.length > 1) { showMenu(link); return; }
+                    if (visited.length === 1) { showTip(link, visited[0].name); return; }
+                    showTip(link, label);
+                    return;
+                }
+                showTip(link, label);
             });
             document.addEventListener('mousemove', function (e) {
                 if (!tip || tip.style.display === 'none') return;
@@ -333,8 +413,12 @@
             });
             document.addEventListener('mouseout', function (e) {
                 if (!e.target.closest('.sidebar .nav-link')) return;
-                clearHideTimer();
-                if (tip) tip.style.display = 'none';
+                if (menu && menu.classList.contains('gm-gh-dropdown--visible')) {
+                    scheduleHide();
+                    return;
+                }
+                clearTimer();
+                hideTip();
             });
         })();
         document.body.addEventListener('click', (e) => {
