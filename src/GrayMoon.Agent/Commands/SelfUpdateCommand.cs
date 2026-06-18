@@ -15,8 +15,8 @@ public sealed class SelfUpdateCommand(ILogger<SelfUpdateCommand> logger) : IComm
 
         var psi = new ProcessStartInfo
         {
-            FileName = "powershell.exe",
-            Arguments = $"-NoProfile -NonInteractive -Command \"irm '{request.InstallUrl}' | iex\"",
+            FileName = "cmd.exe",
+            Arguments = $"/c start \"\" /b powershell.exe -NoProfile -NonInteractive -Command \"irm '{request.InstallUrl}' | iex\"",
             UseShellExecute = false,
             CreateNoWindow = true,
         };

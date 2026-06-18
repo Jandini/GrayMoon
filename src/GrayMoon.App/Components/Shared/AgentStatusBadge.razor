@@ -3,6 +3,7 @@
 @inject AgentQueueStateService AgentQueueStateService
 @inject IAgentBridge AgentBridge
 @inject NavigationManager NavigationManager
+@inject IToastService ToastService
 @rendermode @(new InteractiveServerRenderMode(prerender: true))
 
 @if (State == AgentConnectionState.VersionMismatch && !_isUpdating)
@@ -53,6 +54,7 @@ else
         {
             _isUpdating = false;
             StateHasChanged();
+            ToastService.ShowError("Agent update failed.");
             NavigationManager.NavigateTo("/agent");
         }
     }

@@ -70,8 +70,27 @@ public sealed class SignalRConnectionHostedService(
         {
             logger.LogDebug("RequestCommand {RequestId} received: {Command}", requestId, command);
             logger.LogTrace("RequestCommand {RequestId} request content: {Args}", requestId, args.HasValue ? args.Value.GetRawText() : "null");
-            var envelope = commandJobFactory.CreateCommandJob(requestId, command, args);
-            await jobQueue.EnqueueAsync(envelope, cancellationToken);
+            try
+            {
+                var envelope = commandJobFactory.CreateCommandJob(requestId, command, args);
+                await jobQueue.EnqueueAsync(envelope, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to enqueue command {Command} (RequestId={RequestId})", command, requestId);
+                if (_connection?.State == HubConnectionState.Connected)
+                {
+                    try
+                    {
+                        var errorResponse = new AgentCommandResponse(false, null, ex.Message);
+                        await _connection.InvokeAsync(AgentHubMethods.ResponseCommand, requestId, errorResponse, cancellationToken);
+                    }
+                    catch (Exception sendEx)
+                    {
+                        logger.LogWarning(sendEx, "Failed to send error response for {RequestId}", requestId);
+                    }
+                }
+            }
         });
 
         _connection.Reconnecting += error =>
