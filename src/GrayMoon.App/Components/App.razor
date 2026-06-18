@@ -324,7 +324,7 @@
                 t.style.display = 'block';
                 positionTip(link);
                 clearHideTimer();
-                hideTimer = setTimeout(function () { if (tip) tip.style.display = 'none'; hideTimer = null; }, 2000);
+                hideTimer = setTimeout(function () { if (tip) tip.style.display = 'none'; hideTimer = null; }, 1000);
             });
             document.addEventListener('mousemove', function (e) {
                 if (!tip || tip.style.display === 'none') return;
