@@ -1,4 +1,5 @@
 using System.Text.Json;
+using GrayMoon.Abstractions.Agent;
 using GrayMoon.Agent.Jobs;
 using GrayMoon.Agent.Jobs.Requests;
 
@@ -22,7 +23,7 @@ public sealed class CommandJobFactory
         {
             if (command == "GetHostInfo")
                 return new GetHostInfoRequest();
-            if (command == "SelfUpdate")
+            if (command == AgentHubMethods.SelfUpdate)
                 return new SelfUpdateRequest();
             throw new ArgumentException($"Args required for {command}");
         }
@@ -85,7 +86,7 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid DotnetRestore args"),
             "UndoPush" => JsonSerializer.Deserialize<UndoPushRequest>(json, options)
                 ?? throw new ArgumentException("Invalid UndoPush args"),
-            "SelfUpdate" => JsonSerializer.Deserialize<SelfUpdateRequest>(json, options)
+            AgentHubMethods.SelfUpdate => JsonSerializer.Deserialize<SelfUpdateRequest>(json, options)
                 ?? throw new ArgumentException("Invalid SelfUpdate args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };

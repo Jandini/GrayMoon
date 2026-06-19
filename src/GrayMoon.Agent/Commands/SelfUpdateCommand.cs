@@ -13,6 +13,9 @@ public sealed class SelfUpdateCommand(ILogger<SelfUpdateCommand> logger) : IComm
         if (string.IsNullOrWhiteSpace(request.InstallUrl))
             throw new ArgumentException("InstallUrl is required.");
 
+        if (!OperatingSystem.IsWindows())
+            throw new NotSupportedException("Self-update via the badge is only supported on Windows. Run the install script manually on this platform.");
+
         var psi = new ProcessStartInfo
         {
             FileName = "cmd.exe",

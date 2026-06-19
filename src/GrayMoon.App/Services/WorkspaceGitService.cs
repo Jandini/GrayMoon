@@ -889,6 +889,13 @@ public class WorkspaceGitService(
         return true;
     }
 
+    public async Task RefreshBranchesAndBroadcastAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
+    {
+        await RefreshBranchesForRepositoryAsync(repositoryId, workspaceId, cancellationToken);
+        if (_hubContext != null)
+            await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken: cancellationToken);
+    }
+
     public async Task<IReadOnlyDictionary<int, RepoSyncStatus>> GetRepoSyncStatusAsync(
         int workspaceId,
         Action<int, RepoSyncStatus>? onProgress = null,
