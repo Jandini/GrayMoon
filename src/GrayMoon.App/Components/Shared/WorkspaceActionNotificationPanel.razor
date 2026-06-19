@@ -60,7 +60,10 @@
                                                   Outgoing="repo.OutgoingCommits"
                                                   Incoming="repo.IncomingCommits"
                                                   BranchHasUpstream="@(repo.NewBranchNoPush ? false : null)"
-                                                  Disabled="true" />
+                                                  BranchName="repo.BranchName"
+                                                  Disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                                  OnPushClick="() => OnPushBadgeClickAsync(n, repo)"
+                                                  OnPullClick="() => OnPullBadgeClickAsync(n, repo)" />
                                 }
                             </div>
                         }
@@ -243,6 +246,12 @@
                OnProceed="OnUndoPushProceedAsync"
                OnCancel="CloseUndoPushModal" />
 
+<PushWithDependenciesModal IsVisible="_pushWithDependenciesModal.IsVisible"
+                           Info="_pushWithDependenciesModal.Info"
+                           RepoName="_pushWithDependenciesModal.RepoName"
+                           OnProceed="OnPushWithDependenciesProceedAsync"
+                           OnCancel="ClosePushWithDependenciesModal" />
+
 @code {
     private sealed record DefaultBranchWarningModalState
     {
@@ -269,6 +278,18 @@
     }
 
     private UndoPushModalState _undoPushModal = new();
+
+    private sealed record PushWithDependenciesModalState
+    {
+        public bool IsVisible { get; init; }
+        public PushDependencyInfoForRepo? Info { get; init; }
+        public int WorkspaceId { get; init; }
+        public int RepoId { get; init; }
+        public string? BranchName { get; init; }
+        public string? RepoName { get; init; }
+    }
+
+    private PushWithDependenciesModalState _pushWithDependenciesModal = new();
 
     private static string WorkspaceJobKey(int workspaceId) => $"/workspaces/{workspaceId}";
 
@@ -771,6 +792,181 @@
             ToastService.Show,
             onAppSideComplete: () => { },
             ct);
+    }
+
+    private Task OnPullBadgeClickAsync(WorkspaceNotification n, NotificationRepo repo)
+    {
+        var workspaceId = n.WorkspaceId;
+        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        return RunPullSingleRepoAsync(workspaceId, repo.RepositoryId);
+    }
+
+    private Task OnPushBadgeClickAsync(WorkspaceNotification n, NotificationRepo repo)
+    {
+        var workspaceId = n.WorkspaceId;
+        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+
+        if (!string.IsNullOrWhiteSpace(repo.DefaultBranchName)
+            && string.Equals(repo.BranchName, repo.DefaultBranchName, StringComparison.Ordinal))
+        {
+            ShowDefaultBranchWarning(
+                $"Pushing repository '{repo.RepositoryName}' will commit directly to the default (protected) branch.",
+                new[] { (repo.RepositoryName, repo.DefaultBranchName!) },
+                () => PushBadgeClickCoreAsync(n, repo));
+            return Task.CompletedTask;
+        }
+
+        return PushBadgeClickCoreAsync(n, repo);
+    }
+
+    private async Task PushBadgeClickCoreAsync(WorkspaceNotification n, NotificationRepo repo)
+    {
+        var workspaceId = n.WorkspaceId;
+        if (IsWorkspaceJobRunning(workspaceId)) return;
+
+        try
+        {
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var depService = scope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
+            var repoIdsThatNeedPush = n.Repos
+                .Where(r => r.OutgoingCommits > 0 || r.NewBranchNoPush)
+                .Select(r => r.RepositoryId)
+                .ToHashSet();
+            var depInfo = await depService.GetPushDependencyInfoForRepoAsync(
+                workspaceId,
+                repo.RepositoryId,
+                CancellationToken.None);
+
+            if (depInfo == null || !WorkspaceDependencyService.ShouldShowSynchronizedPushModal(depInfo, repoIdsThatNeedPush))
+            {
+                await StartPushSingleRepoJobAsync(workspaceId, repo.RepositoryId, repo.BranchName);
+                return;
+            }
+
+            _pushWithDependenciesModal = _pushWithDependenciesModal with
+            {
+                IsVisible = true,
+                Info = depInfo,
+                WorkspaceId = workspaceId,
+                RepoId = repo.RepositoryId,
+                BranchName = repo.BranchName,
+                RepoName = repo.RepositoryName,
+            };
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Notification panel push badge click failed for repository {RepositoryId}", repo.RepositoryId);
+            ToastService.ShowError("Could not load dependency info. Try again.");
+        }
+    }
+
+    private void ClosePushWithDependenciesModal()
+    {
+        _pushWithDependenciesModal = _pushWithDependenciesModal with { IsVisible = false, Info = null };
+        StateHasChanged();
+    }
+
+    private Task OnPushWithDependenciesProceedAsync(bool synchronizedPush)
+    {
+        if (_pushWithDependenciesModal.Info == null) return Task.CompletedTask;
+
+        var workspaceId = _pushWithDependenciesModal.WorkspaceId;
+        var repoId = _pushWithDependenciesModal.RepoId;
+        var repoIds = _pushWithDependenciesModal.Info.DependencyRepoIds.Concat(new[] { repoId }).ToHashSet();
+        var requiredPackageIds = _pushWithDependenciesModal.Info.PayloadForRepo.RequiredPackages
+            .Select(r => r.PackageId?.Trim())
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Cast<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        ClosePushWithDependenciesModal();
+
+        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        PendingActionsService.Dismiss(workspaceId);
+        JobService.StartJob(WorkspaceJobKey(workspaceId), "Preparing push...", async (job, ct) =>
+        {
+            try
+            {
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var pushHandler = scope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
+                await pushHandler.RunPushWithDependenciesAsync(
+                    workspaceId,
+                    repoIds,
+                    synchronizedPush,
+                    requiredPackageIds,
+                    job.ReportProgress,
+                    ToastService.Show,
+                    onAppSideComplete: () => { },
+                    ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Notification panel push with dependencies failed for workspace {WorkspaceId}", workspaceId);
+                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Push failed."));
+                throw;
+            }
+        });
+        return Task.CompletedTask;
+    }
+
+    private Task StartPushSingleRepoJobAsync(int workspaceId, int repositoryId, string? branchName)
+    {
+        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        PendingActionsService.Dismiss(workspaceId);
+        JobService.StartJob(WorkspaceJobKey(workspaceId), "Setting upstream...", async (job, ct) =>
+        {
+            try
+            {
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var pushHandler = scope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
+                var (success, pushError) = await pushHandler.PushSingleRepositoryWithUpstreamAsync(
+                    workspaceId,
+                    repositoryId,
+                    branchName,
+                    job.ReportProgress,
+                    ct);
+                if (!success && !_disposed)
+                    _ = InvokeAsync(() => ToastService.ShowError(pushError ?? "Push failed."));
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Notification panel single-repo push failed for repository {RepositoryId}", repositoryId);
+                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Push failed."));
+                throw;
+            }
+        });
+        return Task.CompletedTask;
+    }
+
+    private Task RunPullSingleRepoAsync(int workspaceId, int repositoryId)
+    {
+        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        PendingActionsService.Dismiss(workspaceId);
+        JobService.StartJob(WorkspaceJobKey(workspaceId), "Synchronizing commits...", async (job, ct) =>
+        {
+            try
+            {
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var commitSyncHandler = scope.ServiceProvider.GetRequiredService<WorkspaceCommitSyncHandler>();
+                await commitSyncHandler.CommitSyncAsync(
+                    workspaceId,
+                    repositoryId,
+                    ct,
+                    msg => { job.ReportProgress(msg); return Task.CompletedTask; },
+                    (_, _) => { },
+                    _ => { });
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Notification panel pull failed for repository {RepositoryId}", repositoryId);
+                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Pull failed."));
+                throw;
+            }
+        });
+        return Task.CompletedTask;
     }
 
     private Task RunPullAsync(int workspaceId)

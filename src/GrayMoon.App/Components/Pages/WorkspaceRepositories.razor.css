@@ -440,6 +440,10 @@
     margin-bottom: 0.15rem;
 }
 
+::deep .repositories-table .dependency-badge-tooltip-line code {
+    color: goldenrod;
+}
+
 ::deep .repositories-table .dependency-badge-tooltip-line:last-of-type {
     margin-bottom: 0;
 }
