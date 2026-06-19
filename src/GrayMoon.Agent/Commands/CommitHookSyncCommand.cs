@@ -7,10 +7,10 @@ using Microsoft.Extensions.Logging;
 namespace GrayMoon.Agent.Commands;
 
 /// <summary>
-/// Handles post-commit and post-update hooks: re-runs GitVersion and gets commit counts.
+/// Handles post-commit and post-update hooks: re-runs GitVersion, gets commit counts, and re-scans .csproj references.
 /// No git fetch - uses the existing remote tracking refs from the last checkout/sync.
 /// </summary>
-public sealed class CommitHookSyncCommand(IGitService git, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<CommitHookSyncCommand> logger)
+public sealed class CommitHookSyncCommand(IGitService git, ICsProjFileService csProjFileService, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<CommitHookSyncCommand> logger)
 {
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
@@ -23,6 +23,7 @@ public sealed class CommitHookSyncCommand(IGitService git, IAgentTokenProvider t
         var (versionResult, _) = await git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
         var version = versionResult?.InformationalVersion ?? "-";
         var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
+        var findProjectsTask = csProjFileService.FindAsync(payload.RepositoryPath, cancellationToken);
 
         var currentTag = await git.GetCheckedOutTagAsync(payload.RepositoryPath, cancellationToken);
         if (currentTag != null)
@@ -58,6 +59,27 @@ public sealed class CommitHookSyncCommand(IGitService git, IAgentTokenProvider t
             }
         }
 
+        var projects = await findProjectsTask;
+        var syncProjects = projects?
+            .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+            .Select(p => new RepositorySyncProjectNotification
+            {
+                Name = p.Name.Trim(),
+                ProjectType = (int)p.ProjectType,
+                ProjectPath = p.ProjectPath ?? "",
+                TargetFramework = p.TargetFramework ?? "",
+                PackageId = p.PackageId,
+                PackageReferences = p.PackageReferences
+                    .Where(pr => !string.IsNullOrWhiteSpace(pr.Name))
+                    .Select(pr => new RepositorySyncPackageReferenceNotification
+                    {
+                        Name = pr.Name.Trim(),
+                        Version = pr.Version ?? ""
+                    })
+                    .ToList()
+            })
+            .ToList();
+
         var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)
         {
@@ -73,6 +95,7 @@ public sealed class CommitHookSyncCommand(IGitService git, IAgentTokenProvider t
                 HasUpstream = hasUpstream,
                 DefaultBranchBehind = defaultBehind,
                 DefaultBranchAhead = defaultAhead,
+                Projects = syncProjects,
                 ErrorMessage = null
             };
             await connection.InvokeAsync(AgentHubMethods.SyncCommand, notification, cancellationToken);
