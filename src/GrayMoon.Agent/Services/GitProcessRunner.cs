@@ -40,8 +40,7 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, ILogger<Gi
         bool? streamStderrAsStdout = null,
         bool? mirrorFailureOutputAsStderr = null)
     {
-        if (string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase) &&
-            !string.IsNullOrWhiteSpace(workingDirectory))
+        if (RequiresRepoLock(fileName, arguments) && !string.IsNullOrWhiteSpace(workingDirectory))
         {
             var repoLock = GetRepoLock(workingDirectory);
             await repoLock.WaitAsync(ct);
@@ -80,8 +79,7 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, ILogger<Gi
         string stdinContent,
         CancellationToken ct)
     {
-        if (string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase) &&
-            !string.IsNullOrWhiteSpace(workingDirectory))
+        if (RequiresRepoLock(fileName, arguments) && !string.IsNullOrWhiteSpace(workingDirectory))
         {
             var repoLock = GetRepoLock(workingDirectory);
             await repoLock.WaitAsync(ct);
@@ -131,6 +129,14 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, ILogger<Gi
         var key = Path.GetFullPath(repoPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         return RepoLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
     }
+
+    // dotnet-gitversion reads git HEAD/index state, so it must be serialized per-repo
+    // the same way raw git commands are.
+    private static bool RequiresRepoLock(string fileName, string arguments)
+        => string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(fileName, "dotnet-gitversion", StringComparison.OrdinalIgnoreCase)
+        || (string.Equals(fileName, "dotnet", StringComparison.OrdinalIgnoreCase)
+            && arguments.Contains("gitversion", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsGitLikeProgressStreaming(string fileName, string arguments)
     {

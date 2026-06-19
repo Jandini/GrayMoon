@@ -1,3 +1,4 @@
+using GrayMoon.Abstractions.Agent;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
@@ -63,7 +64,7 @@ public sealed class CommandDispatcher(
         ["ValidatePath"] = async (req, ct) => await validatePathCommand.ExecuteAsync((ValidatePathRequest)req, ct),
         ["DotnetRestore"] = async (req, ct) => await dotnetRestoreCommand.ExecuteAsync((DotnetRestoreRequest)req, ct),
         ["UndoPush"] = async (req, ct) => await undoPushCommand.ExecuteAsync((UndoPushRequest)req, ct),
-        ["SelfUpdate"] = async (req, ct) => await selfUpdateCommand.ExecuteAsync((SelfUpdateRequest)req, ct),
+        [AgentHubMethods.SelfUpdate] = async (req, ct) => await selfUpdateCommand.ExecuteAsync((SelfUpdateRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

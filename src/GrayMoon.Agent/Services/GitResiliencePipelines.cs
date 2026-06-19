@@ -138,10 +138,11 @@ internal static class GitResiliencePipelines
             })
             .Build();
 
-    private static bool IsMergeConflict(string? stdout, string? stderr)
+    internal static bool IsMergeConflict(string? stdout, string? stderr)
     {
         var combined = string.Concat(stdout ?? string.Empty, stderr ?? string.Empty);
         return combined.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("merge conflict", StringComparison.OrdinalIgnoreCase)
             || combined.Contains("Automatic merge failed", StringComparison.OrdinalIgnoreCase);
     }
 }

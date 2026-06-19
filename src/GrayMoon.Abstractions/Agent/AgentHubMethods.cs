@@ -22,4 +22,7 @@ public static class AgentHubMethods
 
     /// <summary>Agent → App: report agent job queue status (total pending, per-workspace counts).</summary>
     public const string ReportQueueStatus = "ReportQueueStatus";
+
+    /// <summary>App → Agent: request agent self-update (InstallUrl in payload).</summary>
+    public const string SelfUpdate = "SelfUpdate";
 }

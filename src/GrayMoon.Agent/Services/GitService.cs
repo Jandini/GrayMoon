@@ -361,23 +361,17 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return (aheadCount, null, false);
         }
 
-        var (exitOut, stdoutOut, stderrOut) = await runner.RunAsync("git", $"rev-list --count {originBranch}..HEAD", repoPath, ct);
-        if (exitOut != 0)
+        // Single atomic call: left=incoming (in originBranch not HEAD), right=outgoing (in HEAD not originBranch).
+        var (exitLR, stdoutLR, stderrLR) = await runner.RunAsync("git", $"rev-list --left-right --count {originBranch}...HEAD", repoPath, ct);
+        if (exitLR != 0)
         {
-            logger.LogWarning("Git rev-list (outgoing) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitOut, stdoutOut, stderrOut);
+            logger.LogWarning("Git rev-list --left-right (commit counts) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitLR, stdoutLR, stderrLR);
             return (null, null, true);
         }
 
-        var outVal = int.TryParse((stdoutOut ?? "").Trim(), out var o) ? o : (int?)null;
-
-        var (exitIn, stdoutIn, stderrIn) = await runner.RunAsync("git", $"rev-list --count HEAD..{originBranch}", repoPath, ct);
-        if (exitIn != 0)
-        {
-            logger.LogWarning("Git rev-list (incoming) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitIn, stdoutIn, stderrIn);
-            return (outVal, null, true);
-        }
-
-        var inVal = int.TryParse((stdoutIn ?? "").Trim(), out var i) ? i : (int?)null;
+        var parts = (stdoutLR ?? "").Trim().Split('\t', StringSplitOptions.RemoveEmptyEntries);
+        var inVal = parts.Length >= 1 && int.TryParse(parts[0], out var ic) ? ic : (int?)null;
+        var outVal = parts.Length >= 2 && int.TryParse(parts[1], out var oc) ? oc : (int?)null;
         sw.Stop();
         logger.LogDebug("GetCommitCounts completed in {ElapsedMs}ms for {RepoPath} (up{Outgoing} dn{Incoming})", sw.ElapsedMilliseconds, repoPath, outVal, inVal);
         return (outVal, inVal, true);
@@ -441,11 +435,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (exitCode != 0)
         {
             var combinedOutput = CombineOutput(stdout, stderr) ?? "";
-            var isMergeConflict = combinedOutput.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase)
-                                  || combinedOutput.Contains("merge conflict", StringComparison.OrdinalIgnoreCase)
-                                  || combinedOutput.Contains("Automatic merge failed", StringComparison.OrdinalIgnoreCase);
-
-            if (isMergeConflict)
+            if (GitResiliencePipelines.IsMergeConflict(stdout, stderr))
             {
                 logger.LogWarning("Git pull merge conflict detected for {RepoPath}. Branch={Branch}", repoPath, branchName);
                 return (false, true, combinedOutput);
@@ -689,7 +679,9 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 name = name.Substring("origin/".Length);
             if (string.IsNullOrWhiteSpace(name))
                 return (false, "Invalid branch name");
-            var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"push origin --delete {name}", repoPath, ct);
+            var (exitCode, stdout, stderr) = await runner.PushPipeline.ExecuteAsync(
+                async cancellationToken => await runner.RunAsync("git", $"push origin --delete {name}", repoPath, cancellationToken),
+                ct);
             if (exitCode != 0)
             {
                 var combined = CombineOutput(stdout, stderr) ?? "";

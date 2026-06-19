@@ -1,10 +1,11 @@
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
+using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class SyncToDefaultBranchCommand(IGitService git) : ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse>
+public sealed class SyncToDefaultBranchCommand(IGitService git, ILogger<SyncToDefaultBranchCommand> logger) : ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse>
 {
     public async Task<SyncToDefaultBranchResponse> ExecuteAsync(SyncToDefaultBranchRequest request, CancellationToken cancellationToken = default)
     {
@@ -37,7 +38,11 @@ public sealed class SyncToDefaultBranchCommand(IGitService git) : ICommandHandle
 
         // If the user confirmed remote branch deletion, delete it before fetch so --prune removes the tracking ref
         if (request.DeleteRemoteBranch && !string.Equals(currentBranchName, defaultBranch, StringComparison.OrdinalIgnoreCase))
-            await git.DeleteBranchAsync(repoPath, currentBranchName, isRemote: true, force: false, cancellationToken);
+        {
+            var (remoteDeleteOk, remoteDeleteErr) = await git.DeleteBranchAsync(repoPath, currentBranchName, isRemote: true, force: false, cancellationToken);
+            if (!remoteDeleteOk)
+                logger.LogWarning("Remote branch delete failed for {Branch} in {RepoPath}: {Error}", currentBranchName, repoPath, remoteDeleteErr);
+        }
 
         // Fetch to update remote-tracking refs and prune deleted remote branches
         var (fetchSuccess, fetchError) = await git.FetchAsync(repoPath, includeTags: true, request.BearerToken, cancellationToken);
@@ -65,7 +70,9 @@ public sealed class SyncToDefaultBranchCommand(IGitService git) : ICommandHandle
         if (currentBranchName != defaultBranch)
         {
             // Force delete (-D) only when PR is merged (set by App from current PR status). Otherwise use -d so we only delete if merged locally.
-            await git.DeleteBranchAsync(repoPath, currentBranchName, isRemote: false, force: request.ForceDeleteLocalBranch, cancellationToken);
+            var (localDeleteOk, localDeleteErr) = await git.DeleteBranchAsync(repoPath, currentBranchName, isRemote: false, force: request.ForceDeleteLocalBranch, cancellationToken);
+            if (!localDeleteOk)
+                logger.LogWarning("Local branch delete failed for {Branch} in {RepoPath}: {Error}", currentBranchName, repoPath, localDeleteErr);
         }
 
         // Always pull after switching to default so local is up to date
