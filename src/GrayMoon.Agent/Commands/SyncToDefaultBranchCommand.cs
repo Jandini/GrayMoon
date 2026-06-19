@@ -65,7 +65,7 @@ public sealed class SyncToDefaultBranchCommand(IGitService git) : ICommandHandle
         if (currentBranchName != defaultBranch)
         {
             // Force delete (-D) only when PR is merged (set by App from current PR status). Otherwise use -d so we only delete if merged locally.
-            await git.DeleteLocalBranchAsync(repoPath, currentBranchName, force: request.ForceDeleteLocalBranch, cancellationToken);
+            await git.DeleteBranchAsync(repoPath, currentBranchName, isRemote: false, force: request.ForceDeleteLocalBranch, cancellationToken);
         }
 
         // Always pull after switching to default so local is up to date

@@ -91,6 +91,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<IJobQueue>(sp => sp.GetRequiredService<TrackedJobQueue>());
         builder.Services.AddSingleton<IAgentQueueTracker>(sp => sp.GetRequiredService<TrackedJobQueue>());
         builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
+        builder.Services.AddSingleton<GitProcessRunner>();
         builder.Services.AddSingleton<IGitService, GitService>();
         builder.Services.AddSingleton<IAgentTokenProvider, AgentTokenProvider>();
         builder.Services.AddSingleton<ICsProjFileParser, CsProjFileParser>();

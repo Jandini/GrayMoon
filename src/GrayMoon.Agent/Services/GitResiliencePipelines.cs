@@ -65,8 +65,9 @@ internal static class GitResiliencePipelines
         => new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
             .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
             {
-                // Retry any non-zero exit code from git pull (e.g., transient network failures).
-                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>().HandleResult(r => r.ExitCode != 0),
+                // Retry transient failures (non-zero exit) but not merge conflicts which are deterministic.
+                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
+                    .HandleResult(r => r.ExitCode != 0 && !IsMergeConflict(r.Stdout, r.Stderr)),
                 MaxRetryAttempts = 3,
                 Delay = TimeSpan.FromMilliseconds(200),
                 BackoffType = DelayBackoffType.Exponential,
@@ -136,5 +137,12 @@ internal static class GitResiliencePipelines
                 }
             })
             .Build();
+
+    private static bool IsMergeConflict(string? stdout, string? stderr)
+    {
+        var combined = string.Concat(stdout ?? string.Empty, stderr ?? string.Empty);
+        return combined.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("Automatic merge failed", StringComparison.OrdinalIgnoreCase);
+    }
 }
 
