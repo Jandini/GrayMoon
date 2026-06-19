@@ -1,4 +1,3 @@
-using System.Text.Json;
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.App.Components.Modals;
 using GrayMoon.App.Models;
@@ -20,10 +19,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private IReadOnlyDictionary<int, PullRequestInfo?> prByRepositoryId = new Dictionary<int, PullRequestInfo?>();
     private readonly Dictionary<int, DateTime> _lastPrRefreshByRepoId = new();
     private static readonly TimeSpan PrRefreshThrottle = TimeSpan.FromSeconds(10);
-    private IReadOnlyDictionary<int, RepoGitVersionInfo> repoGitInfos = new Dictionary<int, RepoGitVersionInfo>();
     private string? errorMessage;
     private bool isLoading = true;
-    private IReadOnlySet<int>? pushPlanRepoIds = null;
     private bool? isOutOfSync = null;
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => !wr.IsOnTag && (wr.UnmatchedDeps ?? 0) > 0);
     private bool isPushRecommended => workspaceRepositories.Any(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false));
@@ -40,7 +37,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
             .GroupBy(wr => wr.DependencyLevel)
             .OrderByDescending(g => g.Key ?? int.MinValue);
 
-    private List<WorkspaceRepositoryLink> FilteredWorkspaceRepositories => GetFilteredWorkspaceRepositories();
+    private List<WorkspaceRepositoryLink> _filteredWorkspaceRepositories = new();
+    private List<WorkspaceRepositoryLink> FilteredWorkspaceRepositories => _filteredWorkspaceRepositories;
+    private void UpdateFilteredRepositories() => _filteredWorkspaceRepositories = GetFilteredWorkspaceRepositories();
 
     private string ApiBaseUrl => NavigationManager.BaseUri.TrimEnd('/');
 
@@ -87,6 +86,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     private const int RefreshDebounceMs = 200;
     private CancellationTokenSource? _refreshDebounceCts;
+    private readonly object _refreshDebounceLock = new();
 
     /// <summary>Toast shown when the user attempts a write action against a repository that is pinned to a tag.</summary>
     private const string TagBlockedActionMessage = "Repository is on a tag; checkout a branch first.";
@@ -122,10 +122,14 @@ public sealed partial class WorkspaceRepositories : IDisposable
             {
                 if (workspaceId != WorkspaceId) return;
                 if (IsJobRunning) return;
-                _refreshDebounceCts?.Cancel();
-                _refreshDebounceCts?.Dispose();
-                _refreshDebounceCts = new CancellationTokenSource();
-                var cts = _refreshDebounceCts;
+                CancellationTokenSource cts;
+                lock (_refreshDebounceLock)
+                {
+                    _refreshDebounceCts?.Cancel();
+                    _refreshDebounceCts?.Dispose();
+                    _refreshDebounceCts = new CancellationTokenSource();
+                    cts = _refreshDebounceCts;
+                }
                 try
                 {
                     await Task.Delay(RefreshDebounceMs, cts.Token);
@@ -137,10 +141,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 }
                 finally
                 {
-                    if (cts == _refreshDebounceCts)
+                    lock (_refreshDebounceLock)
                     {
-                        _refreshDebounceCts?.Dispose();
-                        _refreshDebounceCts = null;
+                        if (cts == _refreshDebounceCts)
+                        {
+                            _refreshDebounceCts?.Dispose();
+                            _refreshDebounceCts = null;
+                        }
                     }
                 }
             });
@@ -172,9 +179,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _disposed = true;
         AgentQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
         JobService.Changed -= OnJobServiceChanged;
-        _refreshDebounceCts?.Cancel();
-        _refreshDebounceCts?.Dispose();
-        _refreshDebounceCts = null;
+        lock (_refreshDebounceLock)
+        {
+            _refreshDebounceCts?.Cancel();
+            _refreshDebounceCts?.Dispose();
+            _refreshDebounceCts = null;
+        }
         _ = _hubConnection?.StopAsync();
         _hubConnection?.DisposeAsync();
         _fetchRepositoriesCts?.Cancel();
@@ -188,7 +198,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             if (_disposed) return;
             var isRunning = IsJobRunning;
-            if (_wasJobRunning && !isRunning)
+            if (_wasJobRunning && !isRunning && !_disposed)
                 _ = InvokeAsync(RefreshFromSync);
             _wasJobRunning = isRunning;
             StateHasChanged();
@@ -237,6 +247,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             errorMessage = "Workspace not found.";
             workspaceRepositories = new List<WorkspaceRepositoryLink>();
+            UpdateFilteredRepositories();
             return;
         }
 
@@ -247,6 +258,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             .ToList();
         prByRepositoryId = BuildPrByRepositoryIdFromLinks(workspaceRepositories);
         await LoadMismatchedDependencyLinesAsync();
+        UpdateFilteredRepositories();
     }
 
     private static int GetRepositoryTypeSortOrder(ProjectType? type) => type switch
@@ -324,22 +336,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    /// <summary>Calls the same branch refresh API as Switch Branch Fetch (fetch + persist) for the given repo.</summary>
     private async Task RefreshBranchesForRepositoryAsync(int repositoryId)
     {
         try
         {
-            var httpClient = WorkspacePageService.HttpClientFactory.CreateClient();
-            var request = new { workspaceId = WorkspaceId, repositoryId };
-            var json = JsonSerializer.Serialize(request);
-            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
-            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/refresh", content);
-            if (!response.IsSuccessStatusCode)
-            {
-                var errorText = await response.Content.ReadAsStringAsync();
-                Logger.LogDebug("Branch refresh after PR merge failed for RepositoryId={RepositoryId}: {StatusCode}, {Error}", repositoryId, response.StatusCode, errorText);
-            }
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var gitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+            await gitService.RefreshBranchesAndBroadcastAsync(repositoryId, WorkspaceId, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -381,6 +384,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         {
             errorMessage = "Workspace not found.";
             workspaceRepositories = new List<WorkspaceRepositoryLink>();
+            UpdateFilteredRepositories();
             return;
         }
         workspace = w;
@@ -391,6 +395,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             .ToList();
         prByRepositoryId = BuildPrByRepositoryIdFromLinks(workspaceRepositories);
         await LoadMismatchedDependencyLinesAsync();
+        UpdateFilteredRepositories();
     }
 
     private async Task LoadMismatchedDependencyLinesAsync()
@@ -441,6 +446,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private void OnSearchChanged(ChangeEventArgs e)
     {
         searchTerm = e.Value?.ToString() ?? string.Empty;
+        UpdateFilteredRepositories();
         StateHasChanged();
     }
 
@@ -1048,7 +1054,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     ct,
                     job.ReportProgress,
                     (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
-                    onAppSideComplete: () => { },
                     repoIdsToUpdate: new HashSet<int> { repositoryId });
 
                 await InvokeAsync(async () =>
@@ -1201,6 +1206,34 @@ public sealed partial class WorkspaceRepositories : IDisposable
         return Task.CompletedTask;
     }
 
+    private async Task<(IReadOnlySet<int> PushRepoIds, IReadOnlySet<string> RequiredPackageIds)?> BuildPushPlanAsync(
+        string emptyMessage, CancellationToken ct)
+    {
+        await using var planScope = ServiceScopeFactory.CreateAsyncScope();
+        var planPushHandler = planScope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
+        var planDepService = planScope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
+        var (payload, hasUnpushed) = await planPushHandler.GetPushPlanAsync(WorkspaceId, workspaceRepositories, ct);
+        if (!hasUnpushed)
+        {
+            SafeInvoke(() => ToastService.Show(emptyMessage));
+            return null;
+        }
+        var taggedRepoIds = workspaceRepositories.Where(wr => wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet();
+        IReadOnlySet<int> pushRepoIds = payload.Select(p => p.RepoId).Where(id => !taggedRepoIds.Contains(id)).ToHashSet();
+        if (pushRepoIds.Count == 0)
+        {
+            SafeInvoke(() => ToastService.Show(emptyMessage));
+            return null;
+        }
+        var depInfo = await planDepService.GetPushDependencyInfoForRepoSetAsync(WorkspaceId, pushRepoIds, ct);
+        IReadOnlySet<string> requiredPackageIds = depInfo?.PayloadForRepo?.RequiredPackages
+            .Select(r => r.PackageId?.Trim())
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Cast<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return (pushRepoIds, requiredPackageIds);
+    }
+
     private async Task ExecutePushCoreAsync(
         BackgroundJobHandle job,
         CancellationToken ct,
@@ -1219,8 +1252,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 requiredPackageIds,
                 job.ReportProgress,
                 ToastService.Show,
-                onAppSideComplete: () => { },
-                ct);
+                cancellationToken: ct);
         }
         catch (OperationCanceledException)
         {
@@ -1311,8 +1343,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 ToastService.Show("No repositories to push.");
                 return;
             }
-            pushPlanRepoIds = repoIdsWithUnpushed;
-
             var repoIdsThatNeedPush = workspaceRepositories
                 .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
@@ -1465,7 +1495,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
                         ct,
                         job.ReportProgress,
                         (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
-                        onAppSideComplete: () => { },
                         repoIdsToUpdate: null,
                         commitMessage: commitMessage,
                         includeDepsInCommitMessage: includeDepsInCommitMessage);
@@ -1609,7 +1638,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
                         ct,
                         job.ReportProgress,
                         (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
-                        onAppSideComplete: () => { },
                         repoIdsToUpdate: null,
                         commitMessage: commitMessage,
                         includeDepsInCommitMessage: includeDepsInCommitMessage);
@@ -1637,30 +1665,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
             IReadOnlySet<string> requiredPackageIds;
             try
             {
-                await using var planScope = ServiceScopeFactory.CreateAsyncScope();
-                var planPushHandler = planScope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
-                var planDepService = planScope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
-                var (payload, hasUnpushed) = await planPushHandler.GetPushPlanAsync(
-                    WorkspaceId, workspaceRepositories, ct);
-                if (!hasUnpushed)
-                {
-                    SafeInvoke(() => ToastService.Show("Update complete. Nothing to push."));
-                    return;
-                }
-                var taggedRepoIds = workspaceRepositories.Where(wr => wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet();
-                pushRepoIds = payload.Select(p => p.RepoId).Where(id => !taggedRepoIds.Contains(id)).ToHashSet();
-                if (pushRepoIds.Count == 0)
-                {
-                    SafeInvoke(() => ToastService.Show("Update complete. Nothing to push."));
-                    return;
-                }
-                var depInfo = await planDepService.GetPushDependencyInfoForRepoSetAsync(
-                    WorkspaceId, pushRepoIds, ct);
-                requiredPackageIds = depInfo?.PayloadForRepo?.RequiredPackages
-                    .Select(r => r.PackageId?.Trim())
-                    .Where(id => !string.IsNullOrEmpty(id))
-                    .Cast<string>()
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var plan = await BuildPushPlanAsync("Update complete. Nothing to push.", ct);
+                if (plan == null) return;
+                (pushRepoIds, requiredPackageIds) = plan.Value;
             }
             catch (OperationCanceledException)
             {
@@ -1862,127 +1869,33 @@ public sealed partial class WorkspaceRepositories : IDisposable
         }
     }
 
-    /// <summary>Sync repos only (git, version, branch, commit counts). Does not read or write .csproj; dependency mismatches are resolved only by Update. Runs in a fresh scope so DbContext is not stale and PersistVersionsAsync â†’ dependency recompute sees current state.</summary>
-    private Task SyncAsync()
+    private Task RunSyncJobAsync(IReadOnlyList<int>? repositoryIds, string jobLabel, bool skipDependencyLevelPersistence)
     {
-        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
-            return Task.CompletedTask;
-
-        var isRetryAfterError = !string.IsNullOrEmpty(errorMessage);
-        errorMessage = null;
-
-        JobService.StartJob(PageJobKey, "Synchronizing...", async (job, ct) =>
+        JobService.StartJob(PageJobKey, jobLabel, async (job, ct) =>
         {
             try
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
                 var syncHandler = scope.ServiceProvider.GetRequiredService<WorkspaceSyncHandler>();
-                repoGitInfos = await syncHandler.RunSyncAsync(
-                    WorkspaceId,
-                    repositoryIds: null,
-                    skipDependencyLevelPersistence: isRetryAfterError,
-                    cancellationToken: ct,
-                    setProgress: job.ReportProgress,
-                    updateRepoGitInfo: (repoId, info) =>
-                    {
-                        SafeInvoke(() =>
-                        {
-                            var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
-                            if (wr != null)
-                            {
-                                wr.GitVersion = info.Version == "-" ? null : info.Version;
-                                wr.BranchName = info.Branch == "-" ? null : info.Branch;
-                                wr.Projects = info.Projects;
-                                wr.OutgoingCommits = info.OutgoingCommits;
-                                wr.IncomingCommits = info.IncomingCommits;
-                            }
-                        });
-                    },
-                    setRepoSyncStatus: (repoId, status) => repoSyncStatus[repoId] = status,
-                    onAppSideComplete: () => { });
-
-                await InvokeAsync(async () =>
-                {
-                    if (_disposed) return;
-                    await ReloadWorkspaceDataAsync();
-                    ApplySyncStateFromWorkspace();
-                    isOutOfSync = repoSyncStatus.Values.Any(v => v != RepoSyncStatus.InSync);
-                    foreach (var (repoId, info) in repoGitInfos)
-                    {
-                        if (!string.IsNullOrWhiteSpace(info.ErrorMessage))
-                            repositoryErrors[repoId] = info.ErrorMessage;
-                        else
-                            repositoryErrors.Remove(repoId);
-                    }
-                    StateHasChanged();
-                });
-            }
-            catch (OperationCanceledException)
-            {
-                await ReloadWorkspaceDataAfterCancelAsync();
-                throw;
-            }
-            catch (AgentNotConnectedException ex)
-            {
-                Logger.LogError(ex, "Error syncing workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => errorMessage = $"Sync failed. {ex.Message}");
-                throw;
-            }
-            catch (ConnectorHealthException ex)
-            {
-                Logger.LogError(ex, "Error syncing workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => errorMessage = $"Sync failed. {ex.Message}");
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Error syncing workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => errorMessage = "Sync failed. An unexpected error occurred. Check the logs for details.");
-                throw;
-            }
-        });
-
-        return Task.CompletedTask;
-    }
-
-    /// <summary>Sync (refresh version, branch, commits) for the given repositories in a level. Uses skipDependencyLevelPersistence so merge does not persist with partial edges; PersistVersionsAsync then recomputes levels from full DB. Same overlay and error handling as SyncAsync.</summary>
-    private Task SyncLevelAsync(List<int> repositoryIds)
-    {
-        if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || IsJobRunning)
-            return Task.CompletedTask;
-
-        var msg = $"Synchronizing {repositoryIds.Count} {(repositoryIds.Count == 1 ? "repository" : "repositories")}...";
-        errorMessage = null;
-
-        JobService.StartJob(PageJobKey, msg, async (job, ct) =>
-        {
-            try
-            {
-                await using var scope = ServiceScopeFactory.CreateAsyncScope();
-                var syncHandler = scope.ServiceProvider.GetRequiredService<WorkspaceSyncHandler>();
-                repoGitInfos = await syncHandler.RunSyncAsync(
+                var repoGitInfos = await syncHandler.RunSyncAsync(
                     WorkspaceId,
                     repositoryIds,
-                    skipDependencyLevelPersistence: true,
+                    skipDependencyLevelPersistence,
                     cancellationToken: ct,
                     setProgress: job.ReportProgress,
-                    updateRepoGitInfo: (repoId, info) =>
+                    updateRepoGitInfo: (repoId, info) => SafeInvoke(() =>
                     {
-                        SafeInvoke(() =>
+                        var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
+                        if (wr != null)
                         {
-                            var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
-                            if (wr != null)
-                            {
-                                wr.GitVersion = info.Version == "-" ? null : info.Version;
-                                wr.BranchName = info.Branch == "-" ? null : info.Branch;
-                                wr.Projects = info.Projects;
-                                wr.OutgoingCommits = info.OutgoingCommits;
-                                wr.IncomingCommits = info.IncomingCommits;
-                            }
-                        });
-                    },
-                    setRepoSyncStatus: (repoId, status) => repoSyncStatus[repoId] = status,
-                    onAppSideComplete: () => { });
+                            wr.GitVersion = info.Version == "-" ? null : info.Version;
+                            wr.BranchName = info.Branch == "-" ? null : info.Branch;
+                            wr.Projects = info.Projects;
+                            wr.OutgoingCommits = info.OutgoingCommits;
+                            wr.IncomingCommits = info.IncomingCommits;
+                        }
+                    }),
+                    setRepoSyncStatus: (repoId, status) => repoSyncStatus[repoId] = status);
 
                 await InvokeAsync(async () =>
                 {
@@ -2007,107 +1920,47 @@ public sealed partial class WorkspaceRepositories : IDisposable
             }
             catch (AgentNotConnectedException ex)
             {
-                Logger.LogError(ex, "Error syncing level for workspace {WorkspaceId}", WorkspaceId);
+                Logger.LogError(ex, "Sync failed for workspace {WorkspaceId}", WorkspaceId);
                 SafeInvoke(() => errorMessage = $"Sync failed. {ex.Message}");
                 throw;
             }
             catch (ConnectorHealthException ex)
             {
-                Logger.LogError(ex, "Error syncing level for workspace {WorkspaceId}", WorkspaceId);
+                Logger.LogError(ex, "Sync failed for workspace {WorkspaceId}", WorkspaceId);
                 SafeInvoke(() => errorMessage = $"Sync failed. {ex.Message}");
                 throw;
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "Error syncing level for workspace {WorkspaceId}", WorkspaceId);
+                Logger.LogError(ex, "Sync failed for workspace {WorkspaceId}", WorkspaceId);
                 SafeInvoke(() => errorMessage = "Sync failed. An unexpected error occurred. Check the logs for details.");
                 throw;
             }
         });
-
         return Task.CompletedTask;
     }
 
-    /// <summary>Sync a single repository (same as Sync button but for one repo). Levels are recomputed after persist via full DB graph (see PersistVersionsAsync when skipDependencyLevelPersistence).</summary>
+    private Task SyncAsync()
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning) return Task.CompletedTask;
+        var skipDependencyLevelPersistence = !string.IsNullOrEmpty(errorMessage);
+        errorMessage = null;
+        return RunSyncJobAsync(null, "Synchronizing...", skipDependencyLevelPersistence);
+    }
+
+    private Task SyncLevelAsync(List<int> repositoryIds)
+    {
+        if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || IsJobRunning) return Task.CompletedTask;
+        errorMessage = null;
+        var label = $"Synchronizing {repositoryIds.Count} {(repositoryIds.Count == 1 ? "repository" : "repositories")}...";
+        return RunSyncJobAsync(repositoryIds, label, skipDependencyLevelPersistence: true);
+    }
+
     private Task SyncSingleRepoAsync(int repositoryId)
     {
-        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
-            return Task.CompletedTask;
-
+        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning) return Task.CompletedTask;
         errorMessage = null;
-
-        JobService.StartJob(PageJobKey, "Synchronizing repository...", async (job, ct) =>
-        {
-            try
-            {
-                await using var scope = ServiceScopeFactory.CreateAsyncScope();
-                var syncHandler = scope.ServiceProvider.GetRequiredService<WorkspaceSyncHandler>();
-                repoGitInfos = await syncHandler.RunSyncAsync(
-                    WorkspaceId,
-                    new[] { repositoryId },
-                    skipDependencyLevelPersistence: true,
-                    cancellationToken: ct,
-                    setProgress: job.ReportProgress,
-                    updateRepoGitInfo: (repoId, info) =>
-                    {
-                        SafeInvoke(() =>
-                        {
-                            var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
-                            if (wr != null)
-                            {
-                                wr.GitVersion = info.Version == "-" ? null : info.Version;
-                                wr.BranchName = info.Branch == "-" ? null : info.Branch;
-                                wr.Projects = info.Projects;
-                                wr.OutgoingCommits = info.OutgoingCommits;
-                                wr.IncomingCommits = info.IncomingCommits;
-                            }
-                        });
-                    },
-                    setRepoSyncStatus: (repoId, status) => repoSyncStatus[repoId] = status,
-                    onAppSideComplete: () => { });
-
-                await InvokeAsync(async () =>
-                {
-                    if (_disposed) return;
-                    await ReloadWorkspaceDataAsync();
-                    ApplySyncStateFromWorkspace();
-                    isOutOfSync = repoSyncStatus.Values.Any(v => v != RepoSyncStatus.InSync);
-                    foreach (var (repoId, info) in repoGitInfos)
-                    {
-                        if (!string.IsNullOrWhiteSpace(info.ErrorMessage))
-                            repositoryErrors[repoId] = info.ErrorMessage;
-                        else
-                            repositoryErrors.Remove(repoId);
-                    }
-                    StateHasChanged();
-                });
-            }
-            catch (OperationCanceledException)
-            {
-                await ReloadWorkspaceDataAfterCancelAsync();
-                throw;
-            }
-            catch (AgentNotConnectedException ex)
-            {
-                Logger.LogError(ex, "Error syncing repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
-                SafeInvoke(() => errorMessage = $"Sync failed. {ex.Message}");
-                throw;
-            }
-            catch (ConnectorHealthException ex)
-            {
-                Logger.LogError(ex, "Error syncing repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
-                SafeInvoke(() => errorMessage = $"Sync failed. {ex.Message}");
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Error syncing repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
-                SafeInvoke(() => errorMessage = "Sync failed. An unexpected error occurred. Check the logs for details.");
-                throw;
-            }
-        });
-
-        return Task.CompletedTask;
+        return RunSyncJobAsync(new[] { repositoryId }, "Synchronizing repository...", skipDependencyLevelPersistence: true);
     }
 
     private Task CommitSyncAsync(int repositoryId)
@@ -2132,11 +1985,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     WorkspaceId,
                     repositoryId,
                     ct,
-                    async message =>
-                    {
-                        job.ReportProgress(message);
-                        await Task.CompletedTask;
-                    },
+                    msg => { job.ReportProgress(msg); return Task.CompletedTask; },
                     (id, err) => SafeInvoke(() =>
                     {
                         if (err is null)
@@ -2186,11 +2035,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     WorkspaceId,
                     repositoryIds,
                     ct,
-                    async (completed, total) =>
-                    {
-                        job.ReportProgress($"Synchronized commits {completed} of {total}");
-                        await Task.CompletedTask;
-                    },
+                    (completed, total) => { job.ReportProgress($"Synchronized commits {completed} of {total}"); return Task.CompletedTask; },
                     (id, err) => SafeInvoke(() =>
                     {
                         if (err is null)
@@ -2414,30 +2259,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
             IReadOnlySet<string> requiredPackageIds;
             try
             {
-                await using var planScope = ServiceScopeFactory.CreateAsyncScope();
-                var planPushHandler = planScope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
-                var planDepService = planScope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
-                var (payload, hasUnpushed) = await planPushHandler.GetPushPlanAsync(
-                    WorkspaceId, workspaceRepositories, ct);
-                if (!hasUnpushed)
-                {
-                    SafeInvoke(() => ToastService.Show("No repositories to push."));
-                    return;
-                }
-                var taggedRepoIds = workspaceRepositories.Where(wr => wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet();
-                pushRepoIds = payload.Select(p => p.RepoId).Where(id => !taggedRepoIds.Contains(id)).ToHashSet();
-                if (pushRepoIds.Count == 0)
-                {
-                    SafeInvoke(() => ToastService.Show("No repositories to push."));
-                    return;
-                }
-                var depInfo = await planDepService.GetPushDependencyInfoForRepoSetAsync(
-                    WorkspaceId, pushRepoIds, ct);
-                requiredPackageIds = depInfo?.PayloadForRepo?.RequiredPackages
-                    .Select(r => r.PackageId?.Trim())
-                    .Where(id => !string.IsNullOrEmpty(id))
-                    .Cast<string>()
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var plan = await BuildPushPlanAsync("No repositories to push.", ct);
+                if (plan == null) return;
+                (pushRepoIds, requiredPackageIds) = plan.Value;
             }
             catch (OperationCanceledException)
             {
@@ -3065,6 +2889,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         if (e.Key == "Escape")
         {
             searchTerm = string.Empty;
+            UpdateFilteredRepositories();
             StateHasChanged();
         }
     }
@@ -3072,6 +2897,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private void ClearSearchFilter()
     {
         searchTerm = string.Empty;
+        UpdateFilteredRepositories();
         StateHasChanged();
     }
 

@@ -70,7 +70,7 @@ The App is organized into:
 - `Components/Shared/` and `Components/Modals/` — reusable UI components
 - `Services/` — 60+ domain services (GitHub API, workspace operations, push orchestration, dependency update, etc.)
 - `Data/` — EF Core `DbContext`, entity models, and repository classes
-- `Api/Endpoints/` — REST API endpoints grouped by domain (Agent, Branch, Commit, Connector, Sync, Workspace)
+- `Api/Endpoints/` — REST API endpoints grouped by domain (About, Agent, Branch, Connector, Settings, Sync, Workspace)
 
 ### Orchestrators
 
@@ -78,6 +78,12 @@ Three orchestrators coordinate multi-step workflows across repositories:
 - `DependencyUpdateOrchestrator` — drives level-by-level package version updates: updates `.csproj` files, runs `dotnet restore --force --no-cache`, commits each level, then moves to the next.
 - `PushOrchestrator` — synchronized push: pushes level-by-level, waits for NuGet availability between levels so downstream consumers get the correct package version before their push starts.
 - `NewFeatureOrchestrator` — automates branch creation, optional dependency update, commit, and push across selected repositories in one workflow.
+
+### Handler services
+
+`Workspace*Handler` services (`WorkspaceBranchHandler`, `WorkspacePushHandler`, `WorkspaceUpdateHandler`, `WorkspaceUndoPushHandler`, `WorkspaceCommitSyncHandler`, `WorkspaceSyncHandler`) are the page-facing layer above orchestrators and core services. They are stateless and accept UI callbacks (`Action<string> setProgress`, `Action<string> showToast`, `CancellationToken`) so Blazor components can delegate complex operations without owning workflow logic. When adding a new user-initiated multi-step operation, add it to the appropriate existing handler or create a new one rather than putting the logic in the component or a new orchestrator.
+
+`WorkspacePendingActionsService` computes per-workspace notification state (unmatched dependencies, outgoing commits, incoming default-branch commits) by subscribing to workspace sync hub events. It powers `WorkspaceActionNotificationPanel`, the floating notification cards visible from any page.
 
 ### GHA live feed services
 
