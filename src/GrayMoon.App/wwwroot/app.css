@@ -420,6 +420,19 @@ h1:focus {
     color: var(--text-primary) !important;
 }
 
+/* Dependency badge tooltip: restore per-element colors.
+   Uses 4 class selectors to beat the (0,3,3) specificity of the rule above. */
+.table .dependency-badge-tooltip-wrap .dependency-badge-tooltip .dependency-badge-tooltip-line code {
+    color: goldenrod !important;
+}
+.table .dependency-badge-tooltip-wrap .dependency-badge-tooltip .dependency-badge-tooltip-versions .dependency-badge-tooltip-arrow {
+    color: rgba(255, 255, 255, 0.45) !important;
+    font-size: 0.95rem;
+}
+.table .dependency-badge-tooltip-wrap .dependency-badge-tooltip .dependency-badge-tooltip-versions .dependency-badge-tooltip-new-version {
+    color: goldenrod !important;
+}
+
 /* Last row of every grid: no bottom border */
 .table tbody tr:last-child td,
 .table tbody tr:last-child th {

@@ -158,7 +158,7 @@
                                     @foreach (var line in MismatchedDependencyLines)
                                     {
                                         <div class="dependency-badge-tooltip-line">
-                                            <code>@line.PackageId</code> <span class="dependency-badge-tooltip-versions">@line.CurrentVersion → @line.NewVersion</span>
+                                            <code>@line.PackageId</code> <span class="dependency-badge-tooltip-versions">@line.CurrentVersion <span class="dependency-badge-tooltip-arrow">→</span> <span class="dependency-badge-tooltip-new-version">@line.NewVersion</span></span>
                                         </div>
                                     }
                                     <div class="dependency-badge-tooltip-footer">@(depBadgeOnTag ? "Repository is on a tag; checkout a branch first." : "Click to update this repository only.")</div>

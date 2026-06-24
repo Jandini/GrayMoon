@@ -442,6 +442,7 @@
 
 ::deep .repositories-table .dependency-badge-tooltip-line code {
     color: goldenrod;
+    font-size: 0.85rem;
 }
 
 ::deep .repositories-table .dependency-badge-tooltip-line:last-of-type {
@@ -450,7 +451,16 @@
 
 ::deep .repositories-table .dependency-badge-tooltip-versions {
     color: #aaa;
-    font-size: 0.72rem;
+    font-size: 0.85rem;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-arrow {
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 0.95rem;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-new-version {
+    color: goldenrod;
 }
 
 ::deep .repositories-table .dependency-badge-tooltip-footer {
