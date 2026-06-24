@@ -21,7 +21,7 @@ When you complete a task, write a single sentence summarizing what was done. Kee
 # Build the solution
 dotnet build GrayMoon.sln
 
-# Run tests (xUnit)
+# Run tests (xUnit) - only GrayMoon.Common is covered; no integration tests exist
 dotnet test src/GrayMoon.Common.Tests/GrayMoon.Common.Tests.csproj
 
 # Run a single test class
@@ -107,7 +107,7 @@ Connector tokens are AES-256-GCM encrypted at rest via `AesGcmTokenProtector` (b
 
 Schema is owned by EF Core but applied via `EnsureCreated()`. Core tables: `Connectors`, `Repositories`, `Workspaces`, `WorkspaceRepositories` (join with live state), `WorkspaceRepositoryPullRequest` (1:1 with link), `WorkspaceProject`, `ProjectDependency`, `WorkspaceFile`, `WorkspaceFileVersionConfig`, `RepositoryBranch`, `Settings`.
 
-After `EnsureCreated()`, startup calls `Migrations.RunAllAsync(dbContext)` (`src/GrayMoon.App/Migrations.cs`). Each migration is an idempotent `ALTER TABLE` guarded by `pragma_table_info()`. Add new columns there - no EF Core migration assembly is used.
+After `EnsureCreated()`, startup calls `Migrations.RunAllAsync(dbContext)` (`src/GrayMoon.App/Migrations.cs`). Each migration is an idempotent `ALTER TABLE` guarded by `pragma_table_info()`. To add a new column: add a `public static async Task MigrateXxxAsync(AppDbContext dbContext)` method to `Migrations.cs` (check `pragma_table_info('TableName') WHERE name='ColumnName'` before executing the `ALTER TABLE`), then call it at the end of `RunAllAsync`. No EF Core migration assembly is used.
 
 ### Background job system
 
