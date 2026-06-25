@@ -13,7 +13,7 @@
         : null;
     var depCount = Link.Dependencies ?? 0;
     var unmatchedDeps = Link.UnmatchedDeps ?? 0;
-    var outOfDateFiles = FileLineStatuses.Count;
+    var outOfDateFiles = FileLineStatuses.Sum(s => s.OutOfDateLines);
     var totalWithFiles = depCount + TotalMatchedFileLines;
     var unmatchedWithFiles = unmatchedDeps + outOfDateFiles;
     var graphUrl = WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, repositoryId: repo.RepositoryId);
@@ -103,26 +103,48 @@
                             <a href="@graphUrl" class="dependency-badge-graph-link">
                                 <span class="badge build-dep-badge build-dep-badge-ok">@totalWithFiles</span>
                             </a>
-                            @if (AllDependencyLines.Count > 0)
+                            @if (AllDependencyLines.Count > 0 || FileLineStatuses.Count > 0)
                             {
                                 <div class="dependency-badge-tooltip">
-                                    <div class="dependency-badge-tooltip-header">
-                                        <span class="dependency-badge-tooltip-title">Dependencies:</span>
-                                        <button type="button"
-                                                class="dependency-badge-tooltip-copy"
-                                                title="Copy list to clipboard"
-                                                aria-label="Copy list to clipboard"
-                                                @onclick="HandleCopyAllDependencies"
-                                                @onclick:preventDefault
-                                                @onclick:stopPropagation>
-                                            <i class="bi bi-clipboard" aria-hidden="true"></i>
-                                        </button>
-                                    </div>
-                                    @foreach (var line in AllDependencyLines)
+                                    @if (AllDependencyLines.Count > 0)
                                     {
-                                        <div class="dependency-badge-tooltip-line">
-                                            <code>@line.PackageId</code> <span class="dependency-badge-tooltip-versions">@line.Version</span>
+                                        <div class="dependency-badge-tooltip-header">
+                                            <span class="dependency-badge-tooltip-title">Dependencies:</span>
+                                            <button type="button"
+                                                    class="dependency-badge-tooltip-copy"
+                                                    title="Copy list to clipboard"
+                                                    aria-label="Copy list to clipboard"
+                                                    @onclick="HandleCopyAllDependencies"
+                                                    @onclick:preventDefault
+                                                    @onclick:stopPropagation>
+                                                <i class="bi bi-clipboard" aria-hidden="true"></i>
+                                            </button>
                                         </div>
+                                        @foreach (var line in AllDependencyLines)
+                                        {
+                                            <div class="dependency-badge-tooltip-line">
+                                                <code>@line.PackageId</code> <span class="dependency-badge-tooltip-versions">@line.Version</span>
+                                            </div>
+                                        }
+                                    }
+                                    @if (FileLineStatuses.Count > 0)
+                                    {
+                                        @if (AllDependencyLines.Count > 0)
+                                        {
+                                            <div class="dependency-badge-tooltip-section-header">Files:</div>
+                                        }
+                                        else
+                                        {
+                                            <div class="dependency-badge-tooltip-header">
+                                                <span class="dependency-badge-tooltip-title">Files:</span>
+                                            </div>
+                                        }
+                                        @foreach (var s in FileLineStatuses)
+                                        {
+                                            <div class="dependency-badge-tooltip-line">
+                                                <code>@s.FileName</code> <span class="dependency-badge-tooltip-versions">@s.TotalMatchedLines of @s.TotalMatchedLines current</span>
+                                            </div>
+                                        }
                                     }
                                     <div class="dependency-badge-tooltip-footer">Click to view the dependency graph.</div>
                                 </div>
@@ -167,22 +189,30 @@
                                             </div>
                                         }
                                     }
-                                    @if (outOfDateFiles > 0)
+                                    @if (FileLineStatuses.Count > 0)
                                     {
                                         @if (MismatchedDependencyLines.Count > 0)
                                         {
-                                            <div class="dependency-badge-tooltip-section-header">Files requiring update:</div>
+                                            <div class="dependency-badge-tooltip-section-header">Files:</div>
                                         }
                                         else
                                         {
                                             <div class="dependency-badge-tooltip-header">
-                                                <span class="dependency-badge-tooltip-title">Files requiring update:</span>
+                                                <span class="dependency-badge-tooltip-title">Files:</span>
                                             </div>
                                         }
                                         @foreach (var s in FileLineStatuses)
                                         {
                                             <div class="dependency-badge-tooltip-line">
-                                                <code>@s.FileName</code> <span class="dependency-badge-tooltip-versions">@s.TokenName: @s.CurrentValue <span class="dependency-badge-tooltip-arrow">→</span> <span class="dependency-badge-tooltip-new-version">@s.ExpectedValue</span></span>
+                                                <code>@s.FileName</code>
+                                                @if (s.OutOfDateLines == 0)
+                                                {
+                                                    <span class="dependency-badge-tooltip-versions">@s.TotalMatchedLines of @s.TotalMatchedLines current</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="dependency-badge-tooltip-versions"><span class="dependency-badge-tooltip-new-version">@s.OutOfDateLines of @s.TotalMatchedLines</span> need update</span>
+                                                }
                                             </div>
                                         }
                                     }

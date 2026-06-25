@@ -268,39 +268,34 @@ public sealed class WorkspaceFileVersionService(
             var result = AgentResponseJson.DeserializeAgentResponse<CheckFileVersionsAgentResponse>(resp.Data);
             if (result?.Files == null) return;
 
-            // Accumulate per-repo stats and new status rows
+            // Accumulate per-repo stats and new per-file status rows
             var newStatuses = new List<WorkspaceFileLineStatus>();
             var repoOutOfDate = new Dictionary<int, int>();
             var repoTotalMatched = new Dictionary<int, int>();
 
             foreach (var fileResult in result.Files)
             {
+                if (fileResult.TotalMatchedLines == 0) continue;
+
                 // Find repository id for this file result
                 var repoLink = workspace.Repositories.FirstOrDefault(r =>
                     string.Equals(r.Repository?.RepositoryName, fileResult.RepositoryName, StringComparison.OrdinalIgnoreCase));
                 if (repoLink == null) continue;
                 var repoId = repoLink.RepositoryId;
 
-                repoTotalMatched.TryGetValue(repoId, out var existingTotal);
-                repoTotalMatched[repoId] = existingTotal + fileResult.TotalMatchedLines;
-
-                if (fileResult.OutOfDateLines == null) continue;
-                foreach (var stale in fileResult.OutOfDateLines)
+                var outOfDateCount = fileResult.OutOfDateLines?.Count ?? 0;
+                newStatuses.Add(new WorkspaceFileLineStatus
                 {
-                    if (string.IsNullOrEmpty(stale.TokenName)) continue;
-                    newStatuses.Add(new WorkspaceFileLineStatus
-                    {
-                        WorkspaceId = workspaceId,
-                        RepositoryId = repoId,
-                        FilePath = fileResult.FilePath ?? "",
-                        FileName = fileResult.FileName ?? "",
-                        TokenName = stale.TokenName,
-                        CurrentValue = stale.CurrentValue,
-                        ExpectedValue = stale.ExpectedValue
-                    });
-                    repoOutOfDate.TryGetValue(repoId, out var existingOut);
-                    repoOutOfDate[repoId] = existingOut + 1;
-                }
+                    WorkspaceId = workspaceId,
+                    RepositoryId = repoId,
+                    FilePath = fileResult.FilePath ?? "",
+                    FileName = fileResult.FileName ?? "",
+                    TotalMatchedLines = fileResult.TotalMatchedLines,
+                    OutOfDateLines = outOfDateCount
+                });
+
+                repoTotalMatched[repoId] = (repoTotalMatched.TryGetValue(repoId, out var tot) ? tot : 0) + fileResult.TotalMatchedLines;
+                repoOutOfDate[repoId] = (repoOutOfDate.TryGetValue(repoId, out var ood) ? ood : 0) + outOfDateCount;
             }
 
             if (newStatuses.Count > 0)

@@ -1061,9 +1061,8 @@ public static class Migrations
                         RepositoryId INTEGER NOT NULL,
                         FilePath TEXT NOT NULL,
                         FileName TEXT NOT NULL,
-                        TokenName TEXT NOT NULL,
-                        CurrentValue TEXT,
-                        ExpectedValue TEXT
+                        TotalMatchedLines INTEGER NOT NULL DEFAULT 0,
+                        OutOfDateLines INTEGER NOT NULL DEFAULT 0
                     )";
                     await cmd.ExecuteNonQueryAsync();
                 }
@@ -1071,7 +1070,7 @@ public static class Migrations
                 cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='IX_WorkspaceFileLineStatuses_Unique'";
                 if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
                 {
-                    cmd.CommandText = "CREATE UNIQUE INDEX IX_WorkspaceFileLineStatuses_Unique ON WorkspaceFileLineStatuses(WorkspaceId, RepositoryId, FilePath, TokenName)";
+                    cmd.CommandText = "CREATE UNIQUE INDEX IX_WorkspaceFileLineStatuses_Unique ON WorkspaceFileLineStatuses(WorkspaceId, RepositoryId, FilePath)";
                     await cmd.ExecuteNonQueryAsync();
                 }
             }

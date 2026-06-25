@@ -315,10 +315,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.ToTable("WorkspaceFileLineStatuses");
             entity.HasKey(s => s.StatusId);
             entity.Property(s => s.StatusId).ValueGeneratedOnAdd();
-            entity.HasIndex(s => new { s.WorkspaceId, s.RepositoryId, s.FilePath, s.TokenName }).IsUnique();
+            entity.HasIndex(s => new { s.WorkspaceId, s.RepositoryId, s.FilePath }).IsUnique();
             entity.Property(s => s.FilePath).IsRequired().HasMaxLength(2000);
             entity.Property(s => s.FileName).IsRequired().HasMaxLength(260);
-            entity.Property(s => s.TokenName).IsRequired().HasMaxLength(200);
         });
 
         modelBuilder.Entity<Setting>(entity =>
