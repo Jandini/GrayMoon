@@ -1,5 +1,8 @@
+using GrayMoon.App.Data;
+using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
+using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services;
 
@@ -8,6 +11,7 @@ public sealed class WorkspaceFileVersionService(
     WorkspaceService workspaceService,
     WorkspaceRepository workspaceRepository,
     WorkspaceFileVersionConfigRepository versionConfigRepository,
+    AppDbContext dbContext,
     ILogger<WorkspaceFileVersionService> logger)
 {
     /// <summary>
@@ -179,5 +183,183 @@ public sealed class WorkspaceFileVersionService(
             lines.Add(line);
         }
         return string.Join("\n", lines);
+    }
+
+    /// <summary>
+    /// Reads all configured version files via the agent, compares current values to expected repo GitVersions,
+    /// and persists the results to WorkspaceFileLineStatuses and WorkspaceRepositoryLink (OutOfDateFileLines, TotalFileLines).
+    /// Called at the same trigger points as csproj dependency stat recomputation.
+    /// </summary>
+    public async Task CheckAndPersistFileVersionStatusAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        if (!agentBridge.IsAgentConnected)
+            return;
+
+        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null) return;
+
+        var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+
+        // Build expected version map: repo name -> GitVersion
+        var repoVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var link in workspace.Repositories)
+        {
+            if (link.Repository == null || string.IsNullOrEmpty(link.GitVersion)) continue;
+            repoVersions[link.Repository.RepositoryName] = link.GitVersion;
+        }
+
+        // Build per-file check items (skip files whose tokens have no version in the workspace)
+        var items = new List<object>();
+        foreach (var cfg in configs)
+        {
+            if (cfg.File?.Repository == null) continue;
+            var tokens = ExtractTokens(cfg.VersionPattern);
+            var knownVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var token in tokens)
+            {
+                if (repoVersions.TryGetValue(token, out var ver))
+                    knownVersions[token] = ver;
+            }
+            if (knownVersions.Count == 0) continue;
+
+            items.Add(new
+            {
+                repositoryName = cfg.File.Repository.RepositoryName,
+                filePath = cfg.File.FilePath,
+                pattern = cfg.VersionPattern,
+                expectedVersions = knownVersions
+            });
+        }
+
+        // Delete existing statuses for this workspace regardless of whether we have items to check
+        await dbContext.WorkspaceFileLineStatuses
+            .Where(s => s.WorkspaceId == workspaceId)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        if (items.Count == 0)
+        {
+            // Reset counters on all repo links when there are no configured files
+            await dbContext.WorkspaceRepositories
+                .Where(wr => wr.WorkspaceId == workspaceId && (wr.OutOfDateFileLines != null || wr.TotalFileLines != null))
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(wr => wr.OutOfDateFileLines, (int?)null)
+                    .SetProperty(wr => wr.TotalFileLines, (int?)null),
+                    cancellationToken);
+            return;
+        }
+
+        var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+
+        try
+        {
+            var resp = await agentBridge.SendCommandAsync("CheckFileVersions", new
+            {
+                workspaceName = workspace.Name,
+                workspaceRoot,
+                files = items
+            }, cancellationToken);
+
+            if (!resp.Success || resp.Data == null)
+            {
+                logger.LogWarning("CheckFileVersions failed for workspace {WorkspaceId}: {Error}", workspaceId, resp.Error);
+                return;
+            }
+
+            var result = AgentResponseJson.DeserializeAgentResponse<CheckFileVersionsAgentResponse>(resp.Data);
+            if (result?.Files == null) return;
+
+            // Accumulate per-repo stats and new status rows
+            var newStatuses = new List<WorkspaceFileLineStatus>();
+            var repoOutOfDate = new Dictionary<int, int>();
+            var repoTotalMatched = new Dictionary<int, int>();
+
+            foreach (var fileResult in result.Files)
+            {
+                // Find repository id for this file result
+                var repoLink = workspace.Repositories.FirstOrDefault(r =>
+                    string.Equals(r.Repository?.RepositoryName, fileResult.RepositoryName, StringComparison.OrdinalIgnoreCase));
+                if (repoLink == null) continue;
+                var repoId = repoLink.RepositoryId;
+
+                repoTotalMatched.TryGetValue(repoId, out var existingTotal);
+                repoTotalMatched[repoId] = existingTotal + fileResult.TotalMatchedLines;
+
+                if (fileResult.OutOfDateLines == null) continue;
+                foreach (var stale in fileResult.OutOfDateLines)
+                {
+                    if (string.IsNullOrEmpty(stale.TokenName)) continue;
+                    newStatuses.Add(new WorkspaceFileLineStatus
+                    {
+                        WorkspaceId = workspaceId,
+                        RepositoryId = repoId,
+                        FilePath = fileResult.FilePath ?? "",
+                        FileName = fileResult.FileName ?? "",
+                        TokenName = stale.TokenName,
+                        CurrentValue = stale.CurrentValue,
+                        ExpectedValue = stale.ExpectedValue
+                    });
+                    repoOutOfDate.TryGetValue(repoId, out var existingOut);
+                    repoOutOfDate[repoId] = existingOut + 1;
+                }
+            }
+
+            if (newStatuses.Count > 0)
+            {
+                dbContext.WorkspaceFileLineStatuses.AddRange(newStatuses);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+
+            // Update WorkspaceRepositoryLink counters
+            var allLinks = await dbContext.WorkspaceRepositories
+                .Where(wr => wr.WorkspaceId == workspaceId)
+                .ToListAsync(cancellationToken);
+
+            foreach (var link in allLinks)
+            {
+                link.OutOfDateFileLines = repoOutOfDate.TryGetValue(link.RepositoryId, out var ood) ? ood : (int?)null;
+                link.TotalFileLines = repoTotalMatched.TryGetValue(link.RepositoryId, out var tot) ? tot : (int?)null;
+            }
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Unexpected error checking file version status for workspace {WorkspaceId}", workspaceId);
+        }
+    }
+
+    /// <summary>Returns out-of-date file line statuses for the workspace, grouped by RepositoryId.</summary>
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<WorkspaceFileLineStatus>>> GetFileLineStatusByWorkspaceAsync(
+        int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var rows = await dbContext.WorkspaceFileLineStatuses
+            .AsNoTracking()
+            .Where(s => s.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+        return rows
+            .GroupBy(s => s.RepositoryId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<WorkspaceFileLineStatus>)g.ToList());
+    }
+
+    private sealed class CheckFileVersionsAgentResponse
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("files")]
+        public List<CheckFileVersionsAgentFileResult>? Files { get; set; }
+    }
+
+    private sealed class CheckFileVersionsAgentFileResult
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("repositoryName")] public string? RepositoryName { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("filePath")] public string? FilePath { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("fileName")] public string? FileName { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("totalMatchedLines")] public int TotalMatchedLines { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("outOfDateLines")] public List<CheckFileVersionsAgentOutOfDateLine>? OutOfDateLines { get; set; }
+    }
+
+    private sealed class CheckFileVersionsAgentOutOfDateLine
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("tokenName")] public string? TokenName { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("currentValue")] public string? CurrentValue { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("expectedValue")] public string? ExpectedValue { get; set; }
     }
 }

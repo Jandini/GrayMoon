@@ -26,7 +26,8 @@ public class WorkspaceGitService(
     PackageRegistrySyncService? packageRegistrySyncService = null,
     NuGetService? nuGetService = null,
     ConnectorRepository? connectorRepository = null,
-    ConnectorHealthService? connectorHealthService = null)
+    ConnectorHealthService? connectorHealthService = null,
+    WorkspaceFileVersionService? fileVersionService = null)
 {
     private readonly IAgentBridge _agentBridge = agentBridge ?? throw new ArgumentNullException(nameof(agentBridge));
     private readonly WorkspaceService _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
@@ -43,6 +44,7 @@ public class WorkspaceGitService(
     private readonly NuGetService? _nuGetService = nuGetService;
     private readonly ConnectorRepository? _connectorRepository = connectorRepository;
     private readonly ConnectorHealthService? _connectorHealthService = connectorHealthService;
+    private readonly WorkspaceFileVersionService? _fileVersionService = fileVersionService;
 
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
@@ -228,6 +230,8 @@ public class WorkspaceGitService(
 
         var resultsForDeps = syncResults.Select(r => (r.RepositoryId, r.ProjectsDetail)).ToList();
         await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, resultsForDeps, persistDependencyLevel: true, cancellationToken);
+        if (_fileVersionService != null)
+            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
 
         _logger.LogDebug("RefreshWorkspaceProjects completed for workspace {WorkspaceName}", workspace.Name);
     }
@@ -276,6 +280,8 @@ public class WorkspaceGitService(
         }
 
         await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(workspaceId, [(repositoryId, projectsDetail)], persistDependencyLevel: true, cancellationToken);
+        if (_fileVersionService != null)
+            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
         _logger.LogDebug("RefreshSingleRepositoryProjects completed for workspace {WorkspaceName}, repo {RepositoryId}", workspace.Name, repositoryId);
         return true;
     }
@@ -414,6 +420,8 @@ public class WorkspaceGitService(
             await _workspaceProjectRepository.UpdateProjectDependencyVersionsAsync(workspaceId, updatesToPersist, cancellationToken);
 
         await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
+        if (_fileVersionService != null)
+            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
 
         _logger.LogDebug("Sync dependencies completed for workspace {WorkspaceName}. Updated {RepoCount} repos, persisted {UpdateCount} versions", workspace.Name, toSync.Count, updatesToPersist.Count);
         return toSync.Count;
@@ -493,6 +501,8 @@ public class WorkspaceGitService(
     public async Task RecomputeAndBroadcastWorkspaceSyncedAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
+        if (_fileVersionService != null)
+            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
@@ -752,6 +762,8 @@ public class WorkspaceGitService(
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
 
         await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
+        if (_fileVersionService != null)
+            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
 
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);

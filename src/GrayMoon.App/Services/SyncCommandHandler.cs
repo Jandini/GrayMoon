@@ -142,6 +142,9 @@ public sealed class SyncCommandHandler(
 
         await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(n.WorkspaceId);
 
+        var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
+        await fileVersionService.CheckAndPersistFileVersionStatusAsync(n.WorkspaceId);
+
         var workspacePullRequestService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
         await workspacePullRequestService.RefreshPullRequestsAsync(n.WorkspaceId, [n.RepositoryId]);
 

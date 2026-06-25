@@ -472,6 +472,15 @@
     font-family: var(--bs-body-font-family);
 }
 
+::deep .repositories-table .dependency-badge-tooltip-section-header {
+    color: #aaa;
+    font-family: var(--bs-body-font-family);
+    font-size: 0.78rem;
+    margin-top: 0.45rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid #444;
+}
+
 ::deep .repositories-table .dependency-badge-tooltip-copy {
     flex: 0 0 auto;
     background: transparent;

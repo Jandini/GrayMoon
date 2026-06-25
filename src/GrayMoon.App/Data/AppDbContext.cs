@@ -16,6 +16,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<RepositoryBranch> RepositoryBranches => Set<RepositoryBranch>();
     public DbSet<WorkspaceFile> WorkspaceFiles => Set<WorkspaceFile>();
     public DbSet<WorkspaceFileVersionConfig> WorkspaceFileVersionConfigs => Set<WorkspaceFileVersionConfig>();
+    public DbSet<WorkspaceFileLineStatus> WorkspaceFileLineStatuses => Set<WorkspaceFileLineStatus>();
     public DbSet<Setting> Settings => Set<Setting>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -307,6 +308,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany()
                 .HasForeignKey(c => c.FileId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WorkspaceFileLineStatus>(entity =>
+        {
+            entity.ToTable("WorkspaceFileLineStatuses");
+            entity.HasKey(s => s.StatusId);
+            entity.Property(s => s.StatusId).ValueGeneratedOnAdd();
+            entity.HasIndex(s => new { s.WorkspaceId, s.RepositoryId, s.FilePath, s.TokenName }).IsUnique();
+            entity.Property(s => s.FilePath).IsRequired().HasMaxLength(2000);
+            entity.Property(s => s.FileName).IsRequired().HasMaxLength(260);
+            entity.Property(s => s.TokenName).IsRequired().HasMaxLength(200);
         });
 
         modelBuilder.Entity<Setting>(entity =>

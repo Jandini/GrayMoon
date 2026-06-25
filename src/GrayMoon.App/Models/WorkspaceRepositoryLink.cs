@@ -72,6 +72,12 @@ public class WorkspaceRepositoryLink
     /// <summary>Number of those dependencies whose version does not match the referenced repo's GitVersion. Set when dependencies are merged. Used for badge (same logic as build).</summary>
     public int? UnmatchedDeps { get; set; }
 
+    /// <summary>Count of configured version-file lines whose current value does not match the expected repo GitVersion. Set when file version status is checked (same trigger as dep stats). Used to extend the badge X-of-Y count.</summary>
+    public int? OutOfDateFileLines { get; set; }
+
+    /// <summary>Total count of configured version-file lines that were matched in files (regardless of whether they are up to date). Set when file version status is checked. Used for badge Y denominator.</summary>
+    public int? TotalFileLines { get; set; }
+
     /// <summary>Dominant project type for this repository (Service &gt; Package &gt; Executable &gt; Library &gt; Test). Null when no projects are known. Set during sync and project refresh.</summary>
     public ProjectType? RepositoryType { get; set; }
 

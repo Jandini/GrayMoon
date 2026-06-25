@@ -25,4 +25,7 @@ public static class AgentHubMethods
 
     /// <summary>App → Agent: request agent self-update (InstallUrl in payload).</summary>
     public const string SelfUpdate = "SelfUpdate";
+
+    /// <summary>App → Agent: check configured version files and return per-line staleness (read-only, no file writes).</summary>
+    public const string CheckFileVersions = "CheckFileVersions";
 }

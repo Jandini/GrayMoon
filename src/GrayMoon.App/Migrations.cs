@@ -40,6 +40,9 @@ public static class Migrations
         await MigrateRepositoryBranchesIsTagAsync(dbContext);
         await MigrateRepositoryBranchesSortIndexAsync(dbContext);
         await MigrateWorkspaceRepositoriesHasNewerTagAsync(dbContext);
+        await MigrateWorkspaceFileLineStatusTableAsync(dbContext);
+        await MigrateOutOfDateFileLinesColumnAsync(dbContext);
+        await MigrateTotalFileLinesColumnAsync(dbContext);
     }
 
     public static async Task MigrateRepositoriesTopicsAsync(AppDbContext dbContext)
@@ -1028,6 +1031,97 @@ public static class Migrations
                 if (!hasColumn)
                 {
                     cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN HasNewerTag INTEGER";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Creates the WorkspaceFileLineStatuses table that persists per-line staleness for configured version files.</summary>
+    public static async Task MigrateWorkspaceFileLineStatusTableAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceFileLineStatuses'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = @"CREATE TABLE WorkspaceFileLineStatuses (
+                        StatusId INTEGER PRIMARY KEY AUTOINCREMENT,
+                        WorkspaceId INTEGER NOT NULL,
+                        RepositoryId INTEGER NOT NULL,
+                        FilePath TEXT NOT NULL,
+                        FileName TEXT NOT NULL,
+                        TokenName TEXT NOT NULL,
+                        CurrentValue TEXT,
+                        ExpectedValue TEXT
+                    )";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='IX_WorkspaceFileLineStatuses_Unique'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "CREATE UNIQUE INDEX IX_WorkspaceFileLineStatuses_Unique ON WorkspaceFileLineStatuses(WorkspaceId, RepositoryId, FilePath, TokenName)";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds OutOfDateFileLines column to WorkspaceRepositories for the file-version staleness badge X count.</summary>
+    public static async Task MigrateOutOfDateFileLinesColumnAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='OutOfDateFileLines'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN OutOfDateFileLines INTEGER";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds TotalFileLines column to WorkspaceRepositories for the file-version staleness badge Y denominator.</summary>
+    public static async Task MigrateTotalFileLinesColumnAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='TotalFileLines'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN TotalFileLines INTEGER";
                     await cmd.ExecuteNonQueryAsync();
                 }
             }

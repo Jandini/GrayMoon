@@ -4,6 +4,7 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
 using Microsoft.AspNetCore.Components;
+
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.JSInterop;
@@ -22,7 +23,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private string? errorMessage;
     private bool isLoading = true;
     private bool? isOutOfSync = null;
-    private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => !wr.IsOnTag && (wr.UnmatchedDeps ?? 0) > 0);
+    private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => !wr.IsOnTag &&
+        ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileLines ?? 0) > 0));
     private bool isPushRecommended => workspaceRepositories.Any(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false));
     private bool hasTaggedRepos => workspaceRepositories.Any(wr => wr.IsOnTag);
     /// <summary>When true, any repository on its default branch has incoming commits; header shows red Pull button and executes only Pull (commit sync) for those repos. Repos pinned to a tag are excluded.</summary>
@@ -55,6 +57,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         : $"Fetched {_repositoriesModal.FetchedRepositoryCount} {(_repositoriesModal.FetchedRepositoryCount == 1 ? "repository" : "repositories")}";
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>> _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+    private IReadOnlyDictionary<int, IReadOnlyList<WorkspaceFileLineStatus>> _fileLineStatusByRepo = new Dictionary<int, IReadOnlyList<WorkspaceFileLineStatus>>();
 
     /// <summary>All workspace-internal package dependencies of each repository (PackageId + version as written in the .csproj). Used to populate the dependency-badge tooltip for repositories whose dependencies are up to date.</summary>
     private IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string Version)>> _allDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string)>>();
@@ -441,7 +444,28 @@ public sealed partial class WorkspaceRepositories : IDisposable
             Logger.LogDebug(ex, "Could not load dependency listing for workspace {WorkspaceId}", WorkspaceId);
             _allDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string)>>();
         }
+
+        await LoadFileLineStatusAsync();
     }
+
+    private async Task LoadFileLineStatusAsync()
+    {
+        try
+        {
+            _fileLineStatusByRepo = await FileVersionService.GetFileLineStatusByWorkspaceAsync(WorkspaceId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Could not load file line status for workspace {WorkspaceId}", WorkspaceId);
+            _fileLineStatusByRepo = new Dictionary<int, IReadOnlyList<WorkspaceFileLineStatus>>();
+        }
+    }
+
+    private IReadOnlyList<WorkspaceFileLineStatus> GetFileLineStatus(int repositoryId) =>
+        _fileLineStatusByRepo.TryGetValue(repositoryId, out var lines) ? lines : Array.Empty<WorkspaceFileLineStatus>();
+
+    private int GetTotalMatchedFileLines(int repositoryId) =>
+        workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.TotalFileLines ?? 0;
 
     private void OnSearchChanged(ChangeEventArgs e)
     {

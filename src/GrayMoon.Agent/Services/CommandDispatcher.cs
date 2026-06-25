@@ -33,7 +33,8 @@ public sealed class CommandDispatcher(
     ICommandHandler<ValidatePathRequest, ValidatePathResponse> validatePathCommand,
     ICommandHandler<DotnetRestoreRequest, DotnetRestoreResponse> dotnetRestoreCommand,
     ICommandHandler<UndoPushRequest, UndoPushResponse> undoPushCommand,
-    ICommandHandler<SelfUpdateRequest, SelfUpdateResponse> selfUpdateCommand) : ICommandDispatcher
+    ICommandHandler<SelfUpdateRequest, SelfUpdateResponse> selfUpdateCommand,
+    ICommandHandler<CheckFileVersionsRequest, CheckFileVersionsResponse> checkFileVersionsCommand) : ICommandDispatcher
 {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
@@ -65,6 +66,7 @@ public sealed class CommandDispatcher(
         ["DotnetRestore"] = async (req, ct) => await dotnetRestoreCommand.ExecuteAsync((DotnetRestoreRequest)req, ct),
         ["UndoPush"] = async (req, ct) => await undoPushCommand.ExecuteAsync((UndoPushRequest)req, ct),
         [AgentHubMethods.SelfUpdate] = async (req, ct) => await selfUpdateCommand.ExecuteAsync((SelfUpdateRequest)req, ct),
+        [AgentHubMethods.CheckFileVersions] = async (req, ct) => await checkFileVersionsCommand.ExecuteAsync((CheckFileVersionsRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)
