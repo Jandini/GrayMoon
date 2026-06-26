@@ -84,8 +84,8 @@
 }
 
 .custom-deps-grid tbody {
-    scrollbar-width: thin;
-    scrollbar-color: #5a5a5a #252526;
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a var(--bg-card, #252526);
 }
 
 .custom-deps-grid th,
