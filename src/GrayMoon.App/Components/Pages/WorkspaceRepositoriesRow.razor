@@ -249,6 +249,10 @@
                                         {
                                             @("Repository is on a tag; checkout a branch first.")
                                         }
+                                        else if (unmatchedDeps > 0 && hasOutOfDateFiles)
+                                        {
+                                            @("Click to update dependencies and file versions in this repository only.")
+                                        }
                                         else if (unmatchedDeps > 0)
                                         {
                                             @("Click to update this repository only.")

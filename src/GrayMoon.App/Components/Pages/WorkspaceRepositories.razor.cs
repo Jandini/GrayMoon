@@ -1040,6 +1040,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
             var (payload, _) = await workspaceGitService.GetUpdatePlanAsync(WorkspaceId, new HashSet<int> { repositoryId });
             if (payload == null || payload.Count == 0)
             {
+                if (HasOutOfDateFiles(repositoryId))
+                {
+                    OnFileDependencyBadgeClick(repositoryId);
+                    return;
+                }
                 ToastService.Show("No dependency updates for this repository.");
                 return;
             }
@@ -1051,8 +1056,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 && !string.IsNullOrWhiteSpace(repo.DefaultBranchName)
                 && string.Equals(repo.BranchName, repo.DefaultBranchName, StringComparison.Ordinal))
             {
+                var hasFiles = HasOutOfDateFiles(repositoryId);
+                var warningMsg = hasFiles
+                    ? "The following repository is on its default branch. Updating dependencies and file versions will commit changes directly to the default (protected) branch."
+                    : "The following repository is on its default branch. Updating dependencies will commit changes directly to the default (protected) branch.";
                 ShowDefaultBranchWarning(
-                    "The following repository is on its default branch. Updating dependencies will commit changes directly to the default (protected) branch.",
+                    warningMsg,
                     new[] { (repoName ?? $"repo {repositoryId}", repo.DefaultBranchName!) },
                     () => OpenUpdateSingleRepoModalAsync(repoPayload, repositoryId, repoName));
                 return;
