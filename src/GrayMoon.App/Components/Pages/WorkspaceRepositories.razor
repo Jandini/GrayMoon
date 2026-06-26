@@ -251,6 +251,13 @@
                          OnProceed="@OnUpdateAndPushProceedAsync"
                          OnCancel="@CloseUpdateAndPushModal" />
 
+<UpdateDependenciesModal IsVisible="@_levelOnlyUpdateAndPushModal.IsVisible"
+                         IsBusy="@IsJobRunning"
+                         InitialCommitMessage="@_levelOnlyUpdateAndPushModal.LastCommitMessage"
+                         InitialIncludeDeps="@_levelOnlyUpdateAndPushModal.LastIncludeDeps"
+                         OnProceed="@OnLevelOnlyUpdateAndPushProceedAsync"
+                         OnCancel="@CloseLevelOnlyUpdateAndPushModal" />
+
 <UpdateSingleRepositoryDependenciesModal IsVisible="@_updateSingleRepoModal.IsVisible"
                           Payload="@_updateSingleRepoModal.Payload"
                           RepoName="@_updateSingleRepoModal.RepoName"

@@ -81,6 +81,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private IReadOnlyList<(int RepoId, int? DefaultAhead, bool? HasUpstream)>? _syncToDefaultCheckResults = null;
     private UpdateModalState _updateModal = new();
     private UpdateModalState _updateAndPushModal = new();
+    private LevelOnlyUpdateAndPushModalState _levelOnlyUpdateAndPushModal = new();
     private UpdateSingleRepoDependenciesModalState _updateSingleRepoModal = new();
     private CustomDependenciesModalState _customDependenciesModal = new();
     private PushWithDependenciesModalState _pushWithDependenciesModal = new();
@@ -1793,7 +1794,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             return;
         }
 
-        if (workspaceRepositories.Where(wr => !wr.IsOnTag && wr.DependencyLevel == level).All(wr => wr.IsOnTag))
+        if (workspaceRepositories.Where(wr => !wr.IsOnTag && (wr.DependencyLevel ?? 0) <= level).All(wr => wr.IsOnTag))
         {
             ToastService.Show("All repositories at this level are on tags; checkout a branch first.");
             return;
@@ -1820,14 +1821,38 @@ public sealed partial class WorkspaceRepositories : IDisposable
             ShowDefaultBranchWarning(
                 $"The following repositories (up to Level {level}) are on their default branch. Update will commit dependency changes directly to the default (protected) branch.",
                 repoItems,
-                () => RunLevelOnlyUpdateAndPushCoreAsync(level.Value));
+                () => OpenLevelOnlyUpdateAndPushModalAsync(level.Value));
             return;
         }
 
-        await RunLevelOnlyUpdateAndPushCoreAsync(level.Value);
+        await OpenLevelOnlyUpdateAndPushModalAsync(level.Value);
     }
 
-    private Task RunLevelOnlyUpdateAndPushCoreAsync(int level)
+    private async Task OpenLevelOnlyUpdateAndPushModalAsync(int level)
+    {
+        _levelOnlyUpdateAndPushModal = _levelOnlyUpdateAndPushModal with { IsVisible = true, Level = level };
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void CloseLevelOnlyUpdateAndPushModal()
+    {
+        _levelOnlyUpdateAndPushModal = _levelOnlyUpdateAndPushModal with { IsVisible = false };
+        StateHasChanged();
+    }
+
+    private async Task OnLevelOnlyUpdateAndPushProceedAsync((string? CommitMessage, bool IncludeDeps) args)
+    {
+        var level = _levelOnlyUpdateAndPushModal.Level;
+        _levelOnlyUpdateAndPushModal = _levelOnlyUpdateAndPushModal with
+        {
+            IsVisible = false,
+            LastCommitMessage = args.CommitMessage,
+            LastIncludeDeps = args.IncludeDeps
+        };
+        await RunLevelOnlyUpdateAndPushCoreAsync(level, args.CommitMessage, args.IncludeDeps);
+    }
+
+    private Task RunLevelOnlyUpdateAndPushCoreAsync(int level, string? commitMessage = null, bool includeDepsInCommitMessage = true)
     {
         if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
             return Task.CompletedTask;
@@ -1847,6 +1872,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
                         ct,
                         job.ReportProgress,
                         (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
+                        commitMessage: commitMessage,
+                        includeDepsInCommitMessage: includeDepsInCommitMessage,
                         maxLevel: level);
                 }
 
@@ -3495,6 +3522,14 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public bool IsVisible { get; init; }
         public string? LastCommitMessage { get; init; }
         public bool LastIncludeDeps { get; init; } = true;
+    }
+
+    private sealed record LevelOnlyUpdateAndPushModalState
+    {
+        public bool IsVisible { get; init; }
+        public string? LastCommitMessage { get; init; }
+        public bool LastIncludeDeps { get; init; } = true;
+        public int Level { get; init; }
     }
 
     private sealed record UpdateSingleRepoDependenciesModalState
