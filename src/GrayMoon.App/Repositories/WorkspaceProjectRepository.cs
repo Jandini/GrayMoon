@@ -886,6 +886,7 @@ public sealed class WorkspaceProjectRepository(
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         foreach (var cfg in configs)
         {
+            if (cfg.File?.IsMissingOnDisk == true) continue;
             var fileRepoId = cfg.File?.RepositoryId;
             if (!fileRepoId.HasValue || fileRepoId.Value == 0 || !repoIdsInWorkspace.Contains(fileRepoId.Value)) continue;
             var dependentRepoId = fileRepoId.Value;

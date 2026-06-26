@@ -35,7 +35,8 @@ public static class WorkspaceEndpoints
             RepositoryId = f.RepositoryId,
             RepositoryName = f.Repository?.RepositoryName,
             FileName = f.FileName,
-            FilePath = f.FilePath
+            FilePath = f.FilePath,
+            IsMissingOnDisk = f.IsMissingOnDisk == true
         }).ToList();
         return TypedResults.Ok(dtos);
     }
@@ -111,6 +112,7 @@ public sealed class WorkspaceFileDto
     public string? RepositoryName { get; set; }
     public string FileName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
+    public bool IsMissingOnDisk { get; set; }
 }
 
 public sealed class AddWorkspaceFileRequest

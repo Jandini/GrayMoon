@@ -143,29 +143,20 @@ public sealed class SyncCommandHandler(
         }
 
         var depsSw = Stopwatch.StartNew();
+        try
+        {
+            var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
+            await fileVersionService.CheckAndPersistFileVersionStatusAsync(n.WorkspaceId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "SyncCommand CheckAndPersist failed for workspace {WorkspaceId}", n.WorkspaceId);
+        }
+
         await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(n.WorkspaceId);
         logger.LogDebug(
             "SyncCommand dependency stats persisted in {ElapsedMs}ms for workspace={WorkspaceId}, repo={RepositoryId}",
             depsSw.ElapsedMilliseconds, n.WorkspaceId, n.RepositoryId);
-
-        var workspaceId = n.WorkspaceId;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var checkSw = Stopwatch.StartNew();
-                await using var bgScope = scopeFactory.CreateAsyncScope();
-                var fileVersionService = bgScope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
-                await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId);
-                logger.LogDebug(
-                    "SyncCommand deferred CheckAndPersist completed in {ElapsedMs}ms for workspace={WorkspaceId}",
-                    checkSw.ElapsedMilliseconds, workspaceId);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "SyncCommand deferred CheckAndPersist failed for workspace {WorkspaceId}", workspaceId);
-            }
-        });
 
         var prSw = Stopwatch.StartNew();
         var workspacePullRequestService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();

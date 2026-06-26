@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using GrayMoon.App.Data;
+using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services;
@@ -12,8 +14,10 @@ public sealed class WorkspaceFileVersionService(
     IAgentBridge agentBridge,
     WorkspaceService workspaceService,
     WorkspaceRepository workspaceRepository,
+    WorkspaceProjectRepository workspaceProjectRepository,
     WorkspaceFileVersionConfigRepository versionConfigRepository,
     AppDbContext dbContext,
+    IHubContext<WorkspaceSyncHub> hubContext,
     ILogger<WorkspaceFileVersionService> logger)
 {
     private static readonly ConcurrentDictionary<int, object> CheckLocks = new();
@@ -90,6 +94,9 @@ public sealed class WorkspaceFileVersionService(
             var file = cfg.File;
             if (file?.Repository == null) continue;
 
+            if (file.IsMissingOnDisk == true)
+                continue;
+
             if (selectedRepositoryIds != null && selectedRepositoryIds.Count > 0 && !selectedRepositoryIds.Contains(file.RepositoryId))
                 continue;
 
@@ -125,7 +132,12 @@ public sealed class WorkspaceFileVersionService(
                         updatedFiles.Add((file.RepositoryId, file.Repository.RepositoryName ?? "", file.FilePath));
                     }
                     if (result?.ErrorMessage != null)
-                        logger.LogWarning("UpdateFileVersions warning for {FilePath}: {Msg}", file.FilePath, result.ErrorMessage);
+                    {
+                        if (result.ErrorMessage.StartsWith("File not found:", StringComparison.OrdinalIgnoreCase))
+                            logger.LogDebug("UpdateFileVersions skipped missing file {FilePath}", file.FilePath);
+                        else
+                            logger.LogWarning("UpdateFileVersions warning for {FilePath}: {Msg}", file.FilePath, result.ErrorMessage);
+                    }
                 }
                 else
                 {
@@ -191,7 +203,7 @@ public sealed class WorkspaceFileVersionService(
 
     /// <summary>
     /// Reads all configured version files via the agent, compares current values to expected repo GitVersions,
-    /// and persists the results to WorkspaceFileLineStatuses and WorkspaceRepositoryLink (OutOfDateFileLines, OutOfDateFileRepos, TotalFileLines).
+    /// and persists the results to WorkspaceFileLineStatuses and WorkspaceRepositoryLink file-config counters.
     /// Called at the same trigger points as csproj dependency stat recomputation.
     /// Concurrent callers for the same workspace coalesce onto one in-flight check unless <paramref name="forceFresh"/> is true.
     /// </summary>
@@ -267,8 +279,21 @@ public sealed class WorkspaceFileVersionService(
         if (workspace == null) return;
 
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        var trackedFiles = await dbContext.WorkspaceFiles
+            .Where(f => f.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
 
-        // Build expected version map: repo name -> GitVersion
+        var nameToRepoId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var link in workspace.Repositories)
+        {
+            if (link.Repository != null && !string.IsNullOrEmpty(link.Repository.RepositoryName))
+            {
+                var name = link.Repository.RepositoryName.Trim();
+                if (!nameToRepoId.ContainsKey(name))
+                    nameToRepoId[name] = link.RepositoryId;
+            }
+        }
+
         var repoVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var link in workspace.Repositories)
         {
@@ -276,7 +301,6 @@ public sealed class WorkspaceFileVersionService(
             repoVersions[link.Repository.RepositoryName] = link.GitVersion;
         }
 
-        // Build per-file check items (skip files whose tokens have no version in the workspace)
         var items = new List<object>();
         foreach (var cfg in configs)
         {
@@ -299,21 +323,22 @@ public sealed class WorkspaceFileVersionService(
             });
         }
 
-        // Delete existing statuses for this workspace regardless of whether we have items to check
-        await dbContext.WorkspaceFileLineStatuses
-            .Where(s => s.WorkspaceId == workspaceId)
-            .ExecuteDeleteAsync(cancellationToken);
+        var missingFlagChanged = false;
 
         if (items.Count == 0)
         {
-            // Reset counters on all repo links when there are no configured files
-            await dbContext.WorkspaceRepositories
-                .Where(wr => wr.WorkspaceId == workspaceId && (wr.OutOfDateFileLines != null || wr.OutOfDateFileRepos != null || wr.TotalFileLines != null))
-                .ExecuteUpdateAsync(s => s
-                    .SetProperty(wr => wr.OutOfDateFileLines, (int?)null)
-                    .SetProperty(wr => wr.OutOfDateFileRepos, (int?)null)
-                    .SetProperty(wr => wr.TotalFileLines, (int?)null),
-                    cancellationToken);
+            await ApplyFileConfigLinkCountersAsync(
+                workspaceId,
+                configs,
+                nameToRepoId,
+                repoOutOfDateTokens: new Dictionary<int, HashSet<string>>(),
+                cancellationToken);
+
+            await dbContext.WorkspaceFileLineStatuses
+                .Where(s => s.WorkspaceId == workspaceId)
+                .ExecuteDeleteAsync(cancellationToken);
+
+            await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
             logger.LogDebug("CheckAndPersist completed for workspace {WorkspaceId} in {ElapsedMs}ms (no items)", workspaceId, sw.ElapsedMilliseconds);
             return;
         }
@@ -340,71 +365,86 @@ public sealed class WorkspaceFileVersionService(
             var result = AgentResponseJson.DeserializeAgentResponse<CheckFileVersionsAgentResponse>(resp.Data);
             if (result?.Files == null) return;
 
-            // Accumulate per-repo stats and new per-file status rows
-            var newStatuses = new List<WorkspaceFileLineStatus>();
-            var repoOutOfDate = new Dictionary<int, int>();
+            var fileByRepoAndPath = trackedFiles.ToDictionary(
+                f => (RepoId: f.RepositoryId, Path: f.FilePath),
+                f => f);
+
             var repoOutOfDateTokens = new Dictionary<int, HashSet<string>>();
-            var repoTotalMatched = new Dictionary<int, int>();
+            var newStatuses = new List<WorkspaceFileLineStatus>();
+            var seenStaleTokens = new Dictionary<int, HashSet<string>>();
 
             foreach (var fileResult in result.Files)
             {
-                var expectedCount = fileResult.ExpectedTokenCount;
-                if (fileResult.TotalMatchedLines == 0 && expectedCount == 0)
-                    continue;
-
-                // Find repository id for this file result
                 var repoLink = workspace.Repositories.FirstOrDefault(r =>
                     string.Equals(r.Repository?.RepositoryName, fileResult.RepositoryName, StringComparison.OrdinalIgnoreCase));
                 if (repoLink == null) continue;
                 var repoId = repoLink.RepositoryId;
 
-                var outOfDateCount = fileResult.OutOfDateLines?.Count ?? 0;
-                var totalForStats = fileResult.TotalMatchedLines > 0 ? fileResult.TotalMatchedLines : expectedCount;
-
-                newStatuses.Add(new WorkspaceFileLineStatus
+                if (fileByRepoAndPath.TryGetValue((repoId, fileResult.FilePath ?? ""), out var trackedFile))
                 {
-                    WorkspaceId = workspaceId,
-                    RepositoryId = repoId,
-                    FilePath = fileResult.FilePath ?? "",
-                    FileName = fileResult.FileName ?? "",
-                    TotalMatchedLines = totalForStats,
-                    OutOfDateLines = outOfDateCount
-                });
-
-                repoTotalMatched[repoId] = (repoTotalMatched.TryGetValue(repoId, out var tot) ? tot : 0) + totalForStats;
-                repoOutOfDate[repoId] = (repoOutOfDate.TryGetValue(repoId, out var ood) ? ood : 0) + outOfDateCount;
-                if (outOfDateCount > 0 && fileResult.OutOfDateLines != null)
-                {
-                    if (!repoOutOfDateTokens.TryGetValue(repoId, out var tokens))
-                        repoOutOfDateTokens[repoId] = tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var line in fileResult.OutOfDateLines)
+                    var wasMissing = trackedFile.IsMissingOnDisk == true;
+                    var isMissing = fileResult.FileMissing;
+                    if (wasMissing != isMissing)
                     {
-                        if (!string.IsNullOrWhiteSpace(line.TokenName))
-                            tokens.Add(line.TokenName);
+                        trackedFile.IsMissingOnDisk = isMissing ? true : null;
+                        missingFlagChanged = true;
                     }
                 }
+
+                if (fileResult.FileMissing)
+                    continue;
+
+                if (fileResult.OutOfDateLines is not { Count: > 0 })
+                    continue;
+
+                if (!seenStaleTokens.TryGetValue(repoId, out var seen))
+                    seenStaleTokens[repoId] = seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                if (!repoOutOfDateTokens.TryGetValue(repoId, out var staleTokens))
+                    repoOutOfDateTokens[repoId] = staleTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var line in fileResult.OutOfDateLines)
+                {
+                    if (string.IsNullOrWhiteSpace(line.TokenName)) continue;
+                    if (!seen.Add(line.TokenName)) continue;
+
+                    staleTokens.Add(line.TokenName);
+                    newStatuses.Add(new WorkspaceFileLineStatus
+                    {
+                        WorkspaceId = workspaceId,
+                        RepositoryId = repoId,
+                        FilePath = fileResult.FilePath ?? "",
+                        FileName = fileResult.FileName ?? "",
+                        TokenName = line.TokenName,
+                        CurrentValue = line.CurrentValue,
+                        ExpectedValue = line.ExpectedValue
+                    });
+                }
             }
+
+            foreach (var cfg in configs)
+            {
+                if (cfg.File == null) continue;
+                var tracked = trackedFiles.FirstOrDefault(f => f.FileId == cfg.File.FileId);
+                if (tracked != null)
+                    cfg.File.IsMissingOnDisk = tracked.IsMissingOnDisk;
+            }
+
+            await dbContext.WorkspaceFileLineStatuses
+                .Where(s => s.WorkspaceId == workspaceId)
+                .ExecuteDeleteAsync(cancellationToken);
 
             if (newStatuses.Count > 0)
             {
                 dbContext.WorkspaceFileLineStatuses.AddRange(newStatuses);
-                await dbContext.SaveChangesAsync(cancellationToken);
             }
 
-            // Update WorkspaceRepositoryLink counters
-            var allLinks = await dbContext.WorkspaceRepositories
-                .Where(wr => wr.WorkspaceId == workspaceId)
-                .ToListAsync(cancellationToken);
+            await ApplyFileConfigLinkCountersAsync(workspaceId, configs, nameToRepoId, repoOutOfDateTokens, cancellationToken);
 
-            foreach (var link in allLinks)
-            {
-                link.OutOfDateFileLines = repoOutOfDate.TryGetValue(link.RepositoryId, out var ood) ? ood : (int?)null;
-                link.OutOfDateFileRepos = repoOutOfDateTokens.TryGetValue(link.RepositoryId, out var tokens) && tokens.Count > 0
-                    ? tokens.Count
-                    : (int?)null;
-                link.TotalFileLines = repoTotalMatched.TryGetValue(link.RepositoryId, out var tot) ? tot : (int?)null;
-            }
-            await dbContext.SaveChangesAsync(cancellationToken);
+            if (missingFlagChanged)
+                await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
+
+            await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
             logger.LogDebug("CheckAndPersist completed for workspace {WorkspaceId} in {ElapsedMs}ms", workspaceId, sw.ElapsedMilliseconds);
         }
         catch (OperationCanceledException) { throw; }
@@ -412,6 +452,74 @@ public sealed class WorkspaceFileVersionService(
         {
             logger.LogError(ex, "Unexpected error checking file version status for workspace {WorkspaceId}", workspaceId);
         }
+    }
+
+    private async Task ApplyFileConfigLinkCountersAsync(
+        int workspaceId,
+        IReadOnlyList<WorkspaceFileVersionConfig> configs,
+        Dictionary<string, int> nameToRepoId,
+        Dictionary<int, HashSet<string>> repoOutOfDateTokens,
+        CancellationToken cancellationToken)
+    {
+        var totalConfigRepos = BuildTotalFileConfigReposByDependentRepo(configs, nameToRepoId);
+
+        var allLinks = await dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+
+        foreach (var link in allLinks)
+        {
+            link.OutOfDateFileRepos = repoOutOfDateTokens.TryGetValue(link.RepositoryId, out var tokens) && tokens.Count > 0
+                ? tokens.Count
+                : null;
+            link.OutOfDateFileLines = null;
+            link.TotalFileLines = null;
+            link.TotalFileConfigRepos = totalConfigRepos.TryGetValue(link.RepositoryId, out var total) && total.Count > 0
+                ? total.Count
+                : null;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static Dictionary<int, HashSet<string>> BuildTotalFileConfigReposByDependentRepo(
+        IEnumerable<WorkspaceFileVersionConfig> configs,
+        IReadOnlyDictionary<string, int> nameToRepoId)
+    {
+        var result = new Dictionary<int, HashSet<string>>();
+        foreach (var cfg in configs)
+        {
+            if (cfg.File?.IsMissingOnDisk == true) continue;
+            var dependentRepoId = cfg.File!.RepositoryId;
+            foreach (var token in ExtractTokens(cfg.VersionPattern))
+            {
+                if (string.IsNullOrWhiteSpace(token)) continue;
+                if (!nameToRepoId.TryGetValue(token.Trim(), out var referencedRepoId)) continue;
+                if (referencedRepoId == dependentRepoId) continue;
+                if (!result.TryGetValue(dependentRepoId, out var set))
+                    result[dependentRepoId] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                set.Add(token.Trim());
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Returns out-of-date file-config token rows for the workspace, grouped by dependent RepositoryId.</summary>
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<(string TokenName, string CurrentValue, string ExpectedValue)>>> GetMismatchedFileVersionLinesByRepoAsync(
+        int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var rows = await dbContext.WorkspaceFileLineStatuses
+            .AsNoTracking()
+            .Where(s => s.WorkspaceId == workspaceId && s.TokenName != "")
+            .ToListAsync(cancellationToken);
+        return rows
+            .GroupBy(s => s.RepositoryId)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<(string, string, string)>)g
+                    .Select(s => (s.TokenName, s.CurrentValue ?? "", s.ExpectedValue ?? ""))
+                    .ToList());
     }
 
     /// <summary>Returns out-of-date file line statuses for the workspace, grouped by RepositoryId.</summary>
@@ -442,7 +550,7 @@ public sealed class WorkspaceFileVersionService(
 
         foreach (var cfg in configs)
         {
-            if (cfg.File?.Repository == null) continue;
+            if (cfg.File?.Repository == null || cfg.File.IsMissingOnDisk == true) continue;
             var repoId = cfg.File.RepositoryId;
             var fileName = cfg.File.FileName;
             var tokens = ExtractTokens(cfg.VersionPattern);
@@ -474,6 +582,7 @@ public sealed class WorkspaceFileVersionService(
         [System.Text.Json.Serialization.JsonPropertyName("fileName")] public string? FileName { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("totalMatchedLines")] public int TotalMatchedLines { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("expectedTokenCount")] public int ExpectedTokenCount { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("fileMissing")] public bool FileMissing { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("outOfDateLines")] public List<CheckFileVersionsAgentOutOfDateLine>? OutOfDateLines { get; set; }
     }
 

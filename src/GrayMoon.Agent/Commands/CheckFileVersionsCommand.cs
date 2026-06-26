@@ -47,7 +47,8 @@ public sealed class CheckFileVersionsCommand(IGitService git) : ICommandHandler<
                     FileName = fileName,
                     TotalMatchedLines = 0,
                     ExpectedTokenCount = expectedTokenCount,
-                    OutOfDateLines = BuildMissingTokenLines(patternEntries, expectedVersions, matchedTokens: null)
+                    FileMissing = true,
+                    OutOfDateLines = []
                 });
                 continue;
             }

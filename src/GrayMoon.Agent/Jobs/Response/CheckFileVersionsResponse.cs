@@ -14,6 +14,7 @@ public sealed class CheckFileVersionsResult
     [JsonPropertyName("fileName")] public string? FileName { get; set; }
     [JsonPropertyName("totalMatchedLines")] public int TotalMatchedLines { get; set; }
     [JsonPropertyName("expectedTokenCount")] public int ExpectedTokenCount { get; set; }
+    [JsonPropertyName("fileMissing")] public bool FileMissing { get; set; }
     [JsonPropertyName("outOfDateLines")] public List<CheckFileVersionsOutOfDateLine>? OutOfDateLines { get; set; }
 }
 

@@ -13,17 +13,13 @@
         : null;
     var depCount = Link.Dependencies ?? 0;
     var unmatchedDeps = Link.UnmatchedDeps ?? 0;
-    var outOfDateFileRepoCount = Link.OutOfDateFileRepos ?? 0;
-    var fileLinesNeedUpdate = FileLineStatuses.Any(s => s.OutOfDateLines > 0);
-    var fileMismatchRepos = fileLinesNeedUpdate
-        ? (outOfDateFileRepoCount > 0 ? outOfDateFileRepoCount : 1)
-        : 0;
+    var fileMismatchRepos = Link.OutOfDateFileRepos ?? 0;
     var totalWithFiles = depCount;
     var unmatchedWithFiles = unmatchedDeps + fileMismatchRepos;
-    var hasOutOfDateFiles = fileLinesNeedUpdate || outOfDateFileRepoCount > 0 || (Link.OutOfDateFileLines ?? 0) > 0;
+    var hasOutOfDateFiles = fileMismatchRepos > 0;
     var hasDependencyTooltipContent = AllDependencyLines.Count > 0
         || AllFileVersionLines.Count > 0
-        || FileLineStatuses.Count > 0
+        || MismatchedFileVersionLines.Count > 0
         || CustomDependencyLines.Count > 0;
     var depOkBadgeInactive = ActionsDisabled || Link.IsOnTag;
 
@@ -171,28 +167,28 @@
                                             }
                                         }
                                     }
-                                    else if (FileLineStatuses.Count > 0)
+                                    else if (AllFileVersionLines.Count > 0)
                                     {
                                         @if (AllDependencyLines.Count > 0 || CustomDependencyLines.Count > 0)
                                         {
-                                            <div class="dependency-badge-tooltip-section-header">Files:</div>
+                                            <div class="dependency-badge-tooltip-section-header">File dependencies (up to date):</div>
                                         }
                                         else
                                         {
                                             <div class="dependency-badge-tooltip-header">
-                                                <span class="dependency-badge-tooltip-title">Files:</span>
+                                                <span class="dependency-badge-tooltip-title">File dependencies (up to date):</span>
                                             </div>
                                         }
-                                        @foreach (var s in FileLineStatuses)
+                                        @foreach (var line in AllFileVersionLines.GroupBy(l => l.TokenName).Select(g => g.First()))
                                         {
                                             <div class="dependency-badge-tooltip-line">
-                                                <code>@s.FileName</code> <span class="dependency-badge-tooltip-versions">@s.TotalMatchedLines of @s.TotalMatchedLines current</span>
+                                                <code>@line.TokenName</code> <span class="dependency-badge-tooltip-versions">@line.Version</span>
                                             </div>
                                         }
                                     }
                                     @if (CustomDependencyLines.Count > 0)
                                     {
-                                        @if (AllDependencyLines.Count > 0 || AllFileVersionLines.Count > 0 || FileLineStatuses.Count > 0)
+                                        @if (AllDependencyLines.Count > 0 || AllFileVersionLines.Count > 0)
                                         {
                                             <div class="dependency-badge-tooltip-section-header">Custom dependencies:</div>
                                         }
@@ -235,7 +231,7 @@
                               @onkeydown="OnDependencyBadgeKeydown"
                               @onmouseleave="OnDependencyBadgeMouseLeave">
                             <span class="badge build-dep-badge @(depBadgeOnTag ? "build-dep-badge-none" : "build-dep-badge-mismatch")">@unmatchedWithFiles of @totalWithFiles</span>
-                            @if (MismatchedDependencyLines.Count > 0 || FileLineStatuses.Any(s => s.OutOfDateLines > 0) || CustomDependencyLines.Count > 0)
+                            @if (MismatchedDependencyLines.Count > 0 || MismatchedFileVersionLines.Count > 0 || CustomDependencyLines.Count > 0)
                             {
                                 <div class="dependency-badge-tooltip">
                                     @if (MismatchedDependencyLines.Count > 0)
@@ -259,37 +255,31 @@
                                             </div>
                                         }
                                     }
-                                    @if (FileLineStatuses.Count > 0)
+                                    @if (MismatchedFileVersionLines.Count > 0)
                                     {
                                         @if (MismatchedDependencyLines.Count > 0)
                                         {
-                                            <div class="dependency-badge-tooltip-section-header">Files:</div>
+                                            <div class="dependency-badge-tooltip-section-header">File dependencies requiring update:</div>
                                         }
                                         else
                                         {
                                             <div class="dependency-badge-tooltip-header">
-                                                <span class="dependency-badge-tooltip-title">Files:</span>
+                                                <span class="dependency-badge-tooltip-title">File dependencies requiring update:</span>
                                             </div>
                                         }
-                                        @foreach (var s in FileLineStatuses)
+                                        @foreach (var line in MismatchedFileVersionLines)
                                         {
                                             <div class="dependency-badge-tooltip-line">
-                                                <code>@s.FileName</code><span class="dependency-badge-tooltip-versions dependency-badge-tooltip-versions--after-file">
-                                                @if (s.OutOfDateLines == 0)
-                                                {
-                                                    @:@s.TotalMatchedLines of @s.TotalMatchedLines current
-                                                }
-                                                else
-                                                {
-                                                    <span class="dependency-badge-tooltip-file-count">@s.OutOfDateLines of @s.TotalMatchedLines</span>@: need update
-                                                }
+                                                <code>@line.TokenName</code>
+                                                <span class="dependency-badge-tooltip-versions">
+                                                    @line.CurrentValue <span class="dependency-badge-tooltip-arrow">→</span> <span class="dependency-badge-tooltip-new-version">@line.ExpectedValue</span>
                                                 </span>
                                             </div>
                                         }
                                     }
                                     @if (CustomDependencyLines.Count > 0)
                                     {
-                                        @if (MismatchedDependencyLines.Count > 0 || FileLineStatuses.Any(s => s.OutOfDateLines > 0))
+                                        @if (MismatchedDependencyLines.Count > 0 || MismatchedFileVersionLines.Count > 0)
                                         {
                                             <div class="dependency-badge-tooltip-section-header">Custom dependencies:</div>
                                         }
@@ -386,7 +376,8 @@
     /// <summary>All workspace-internal package dependencies of this repository (PackageId + version) used to populate the dependency-badge tooltip when everything is up to date.</summary>
     [Parameter] public IReadOnlyList<(string PackageId, string Version)> AllDependencyLines { get; set; } = Array.Empty<(string, string)>();
     [Parameter] public IReadOnlyList<string> CustomDependencyLines { get; set; } = Array.Empty<string>();
-    /// <summary>Out-of-date version-file line statuses for this repository loaded from DB (read-only, persisted at sync time).</summary>
+    [Parameter] public IReadOnlyList<(string TokenName, string CurrentValue, string ExpectedValue)> MismatchedFileVersionLines { get; set; } = Array.Empty<(string, string, string)>();
+    /// <summary>Legacy per-file line statuses; no longer used for badge display.</summary>
     [Parameter] public IReadOnlyList<WorkspaceFileLineStatus> FileLineStatuses { get; set; } = Array.Empty<WorkspaceFileLineStatus>();
     /// <summary>Per-token (FileName, TokenName, Version) entries for the badge and tooltip. TokenName is the repository name being tracked.</summary>
     [Parameter] public IReadOnlyList<(string FileName, string TokenName, string Version)> AllFileVersionLines { get; set; } = Array.Empty<(string, string, string)>();
@@ -443,7 +434,7 @@
             return;
         if ((Link?.UnmatchedDeps ?? 0) > 0)
             await OnDependencyBadgeClick.InvokeAsync();
-        else if ((Link?.OutOfDateFileRepos ?? 0) > 0 || (Link?.OutOfDateFileLines ?? 0) > 0)
+        else if ((Link?.OutOfDateFileRepos ?? 0) > 0)
             await OnFileDependencyBadgeClick.InvokeAsync();
     }
 
@@ -471,7 +462,7 @@
 
     private async Task HandleCopyDependencies()
     {
-        if (MismatchedDependencyLines.Count == 0) return;
+        if (MismatchedDependencyLines.Count == 0 && MismatchedFileVersionLines.Count == 0) return;
         var sb = new System.Text.StringBuilder();
         var repoName = Link?.Repository?.RepositoryName;
         if (!string.IsNullOrWhiteSpace(repoName))
@@ -480,6 +471,8 @@
             sb.AppendLine("Dependencies requiring update:");
         foreach (var line in MismatchedDependencyLines)
             sb.AppendLine($"{line.PackageId}: {line.CurrentVersion} -> {line.NewVersion}");
+        foreach (var line in MismatchedFileVersionLines)
+            sb.AppendLine($"{line.TokenName}: {line.CurrentValue} -> {line.ExpectedValue}");
         await OnCopyDependencies.InvokeAsync(sb.ToString().TrimEnd());
     }
 

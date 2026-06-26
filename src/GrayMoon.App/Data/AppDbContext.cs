@@ -287,6 +287,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .IsRequired()
                 .HasMaxLength(2000);
 
+            entity.Property(f => f.IsMissingOnDisk);
+
             entity.HasOne(f => f.Workspace)
                 .WithMany()
                 .HasForeignKey(f => f.WorkspaceId)
@@ -316,9 +318,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.ToTable("WorkspaceFileLineStatuses");
             entity.HasKey(s => s.StatusId);
             entity.Property(s => s.StatusId).ValueGeneratedOnAdd();
-            entity.HasIndex(s => new { s.WorkspaceId, s.RepositoryId, s.FilePath }).IsUnique();
+            entity.HasIndex(s => new { s.WorkspaceId, s.RepositoryId, s.FilePath, s.TokenName }).IsUnique();
             entity.Property(s => s.FilePath).IsRequired().HasMaxLength(2000);
             entity.Property(s => s.FileName).IsRequired().HasMaxLength(260);
+            entity.Property(s => s.TokenName).IsRequired().HasMaxLength(260);
+            entity.Property(s => s.CurrentValue).HasMaxLength(100);
+            entity.Property(s => s.ExpectedValue).HasMaxLength(100);
         });
 
         modelBuilder.Entity<WorkspaceRepositoryCustomDependency>(entity =>

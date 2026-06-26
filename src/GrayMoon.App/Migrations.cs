@@ -46,6 +46,9 @@ public static class Migrations
         await MigrateTotalFileLinesColumnAsync(dbContext);
         await MigrateOutOfDateFileReposColumnAsync(dbContext);
         await MigrateWorkspaceRepositoryCustomDependenciesAsync(dbContext);
+        await MigrateWorkspaceFileIsMissingOnDiskAsync(dbContext);
+        await MigrateTotalFileConfigReposColumnAsync(dbContext);
+        await MigrateWorkspaceFileLineStatusTokenColumnsAsync(dbContext);
     }
 
     public static async Task MigrateRepositoriesTopicsAsync(AppDbContext dbContext)
@@ -1323,6 +1326,87 @@ public static class Migrations
                 if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
                 {
                     cmd.CommandText = "CREATE INDEX IX_Repositories_CloneUrl ON Repositories(CloneUrl)";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds IsMissingOnDisk column to WorkspaceFiles.</summary>
+    public static async Task MigrateWorkspaceFileIsMissingOnDiskAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceFiles') WHERE name='IsMissingOnDisk'";
+            if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE WorkspaceFiles ADD COLUMN IsMissingOnDisk INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds TotalFileConfigRepos column to WorkspaceRepositories for distinct file-config repo count.</summary>
+    public static async Task MigrateTotalFileConfigReposColumnAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='TotalFileConfigRepos'";
+            if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN TotalFileConfigRepos INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds per-token columns to WorkspaceFileLineStatuses for dependency badge tooltips.</summary>
+    public static async Task MigrateWorkspaceFileLineStatusTokenColumnsAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceFileLineStatuses'";
+            if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                return;
+
+            foreach (var (column, ddl) in new (string, string)[]
+            {
+                ("TokenName", "ALTER TABLE WorkspaceFileLineStatuses ADD COLUMN TokenName TEXT NOT NULL DEFAULT ''"),
+                ("CurrentValue", "ALTER TABLE WorkspaceFileLineStatuses ADD COLUMN CurrentValue TEXT"),
+                ("ExpectedValue", "ALTER TABLE WorkspaceFileLineStatuses ADD COLUMN ExpectedValue TEXT"),
+            })
+            {
+                cmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('WorkspaceFileLineStatuses') WHERE name='{column}'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = ddl;
                     await cmd.ExecuteNonQueryAsync();
                 }
             }
