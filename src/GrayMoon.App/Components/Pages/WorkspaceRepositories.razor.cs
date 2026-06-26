@@ -3134,6 +3134,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
             return;
         }
 
+        clickedDependencyBadges.Add(repositoryId);
+        StateHasChanged();
+
         try
         {
             await using var scope = ServiceScopeFactory.CreateAsyncScope();

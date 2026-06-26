@@ -576,6 +576,17 @@ h1:focus {
     -webkit-overflow-scrolling: touch;
 }
 
+/* Dependency badge tooltips extend below the row; avoid clipping at tbody bottom while open */
+.grid-page-body .repositories-table tbody:has(.dependency-badge-tooltip-wrap:hover),
+.grid-page-body .repositories-table tbody:has(.dependency-badge-tooltip-wrap:focus-within) {
+    overflow: visible !important;
+}
+
+.grid-page-body .table-responsive:has(.repositories-table .dependency-badge-tooltip-wrap:hover),
+.grid-page-body .table-responsive:has(.repositories-table .dependency-badge-tooltip-wrap:focus-within) {
+    overflow: visible !important;
+}
+
 /* Custom scrollbar styling - narrow and gray, only in table body */
 .grid-page-body .table tbody::-webkit-scrollbar {
     width: 8px;

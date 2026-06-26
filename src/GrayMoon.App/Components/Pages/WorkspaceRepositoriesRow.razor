@@ -102,7 +102,7 @@
                 <span class="metrics-block metrics-deps">
                     @if (totalWithFiles == 0)
                     {
-                        <span class="dependency-badge-tooltip-wrap dependency-badge-link @(depOkBadgeInactive ? "dependency-badge-link--disabled dependency-badge-link--readonly" : "")">
+                        <span class="dependency-badge-link @(depOkBadgeInactive ? "dependency-badge-link--disabled dependency-badge-link--readonly" : "")">
                             <span class="badge build-dep-badge build-dep-badge-none dependency-badge-graph-link"
                                   role="button"
                                   tabindex="@(depOkBadgeInactive ? -1 : 0)"
@@ -111,21 +111,12 @@
                                   @onclick="HandleCustomDependenciesClick"
                                   @onclick:preventDefault
                                   @onkeydown="HandleCustomDependenciesKeydown">0</span>
-                            <div class="dependency-badge-tooltip">
-                                <div class="dependency-badge-tooltip-footer">
-                                    <button type="button"
-                                            class="btn btn-link btn-sm p-0 dependency-badge-tooltip-show-deps"
-                                            disabled="@depOkBadgeInactive"
-                                            @onclick="HandleShowDependenciesClick"
-                                            @onclick:preventDefault
-                                            @onclick:stopPropagation>Show dependencies</button>
-                                </div>
-                            </div>
                         </span>
                     }
                     else if (unmatchedWithFiles == 0)
                     {
-                        <span class="dependency-badge-tooltip-wrap dependency-badge-link @(depOkBadgeInactive ? "dependency-badge-link--disabled dependency-badge-link--readonly" : "")">
+                        <span class="dependency-badge-tooltip-wrap dependency-badge-link @(depOkBadgeInactive ? "dependency-badge-link--disabled dependency-badge-link--readonly" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
+                              @onmouseleave="OnDependencyBadgeMouseLeave">
                             <span class="badge build-dep-badge build-dep-badge-ok dependency-badge-graph-link"
                                   role="button"
                                   tabindex="@(depOkBadgeInactive ? -1 : 0)"
@@ -218,7 +209,7 @@
                                             </div>
                                         }
                                     }
-                                    <div class="dependency-badge-tooltip-footer">
+                                    <div class="dependency-badge-tooltip-footer dependency-badge-tooltip-footer--end">
                                         <button type="button"
                                                 class="btn btn-link btn-sm p-0 dependency-badge-tooltip-show-deps"
                                                 disabled="@depOkBadgeInactive"
@@ -315,22 +306,22 @@
                                             </div>
                                         }
                                     }
-                                    <div class="dependency-badge-tooltip-footer">
+                                    <div class="dependency-badge-tooltip-footer dependency-badge-tooltip-footer--split">
                                         @if (depBadgeOnTag)
                                         {
-                                            @("Repository is on a tag; checkout a branch first.")
+                                            <span class="dependency-badge-tooltip-footer-hint">Repository is on a tag; checkout a branch first.</span>
                                         }
                                         else if (unmatchedDeps > 0 && hasOutOfDateFiles)
                                         {
-                                            @("Click to update dependencies and file versions in this repository only.")
+                                            <span class="dependency-badge-tooltip-footer-hint">Click to update dependencies and file versions in this repository only.</span>
                                         }
                                         else if (unmatchedDeps > 0)
                                         {
-                                            @("Click to update this repository only.")
+                                            <span class="dependency-badge-tooltip-footer-hint">Click to update this repository only.</span>
                                         }
                                         else if (hasOutOfDateFiles)
                                         {
-                                            @("Click to update file versions in this repository only.")
+                                            <span class="dependency-badge-tooltip-footer-hint">Click to update file versions in this repository only.</span>
                                         }
                                         <button type="button"
                                                 class="btn btn-link btn-sm p-0 dependency-badge-tooltip-show-deps"

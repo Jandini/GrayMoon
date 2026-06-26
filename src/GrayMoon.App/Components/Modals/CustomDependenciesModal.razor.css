@@ -27,31 +27,10 @@
     border: 1px solid #5a5a5a;
     border-radius: 6px;
     max-height: min(50vh, 420px);
-    overflow-y: auto;
-    overflow-x: hidden;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
     background-color: #252526;
-}
-
-.custom-deps-grid-container::-webkit-scrollbar {
-    width: 8px;
-}
-
-.custom-deps-grid-container::-webkit-scrollbar-track {
-    background: #252526;
-}
-
-.custom-deps-grid-container::-webkit-scrollbar-thumb {
-    background: #5a5a5a;
-    border-radius: 4px;
-}
-
-.custom-deps-grid-container::-webkit-scrollbar-thumb:hover {
-    background: #6a6a6a;
-}
-
-.custom-deps-grid-container {
-    scrollbar-width: thin;
-    scrollbar-color: #5a5a5a #252526;
 }
 
 .custom-deps-grid {
@@ -60,6 +39,53 @@
     border-collapse: collapse;
     table-layout: fixed;
     background-color: #252526;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+
+.custom-deps-grid thead {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+    flex-shrink: 0;
+}
+
+.custom-deps-grid tbody {
+    display: block;
+    overflow-y: auto;
+    overflow-x: hidden;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.custom-deps-grid tbody tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
+.custom-deps-grid tbody::-webkit-scrollbar {
+    width: 8px;
+}
+
+.custom-deps-grid tbody::-webkit-scrollbar-track {
+    background: #252526;
+}
+
+.custom-deps-grid tbody::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.custom-deps-grid tbody::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}
+
+.custom-deps-grid tbody {
+    scrollbar-width: thin;
+    scrollbar-color: #5a5a5a #252526;
 }
 
 .custom-deps-grid th,
@@ -70,9 +96,6 @@
 }
 
 .custom-deps-grid thead th {
-    position: sticky;
-    top: 0;
-    z-index: 1;
     background-color: #2d2d30;
     color: #f1f1f1;
 }

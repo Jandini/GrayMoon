@@ -383,6 +383,18 @@
     display: inline-block;
 }
 
+/* Elevate row and wrap while tooltip is open so popup is not covered by rows below */
+::deep .grid-page-body .repositories-table tbody tr:has(.dependency-badge-tooltip-wrap:hover),
+::deep .grid-page-body .repositories-table tbody tr:has(.dependency-badge-tooltip-wrap:focus-within) {
+    position: relative;
+    z-index: 200;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-wrap:hover,
+::deep .repositories-table .dependency-badge-tooltip-wrap:focus-within {
+    z-index: 201;
+}
+
 ::deep .repositories-table .dependency-badge-tooltip {
     display: block;
     position: absolute;
@@ -400,7 +412,7 @@
     font-family: var(--bs-font-monospace);
     color: #f0f0f0;
     box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-    z-index: 2100;
+    z-index: 202;
     pointer-events: none;
     max-height: 14rem;
     width: 30rem;
@@ -478,6 +490,24 @@
     padding-top: 0.25rem;
     border-top: 1px solid #444;
     font-family: var(--bs-body-font-family);
+}
+
+::deep .repositories-table .dependency-badge-tooltip-footer--end {
+    display: flex;
+    justify-content: flex-end;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-footer--split {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.35rem;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-footer-hint {
+    align-self: stretch;
+    text-align: left;
+    line-height: 1.35;
 }
 
 ::deep .repositories-table .dependency-badge-tooltip-show-deps {
