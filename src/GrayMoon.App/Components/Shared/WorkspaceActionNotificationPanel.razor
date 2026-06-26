@@ -107,6 +107,17 @@
                             {
                                 <div class="branch-menu-backdrop" @onclick="() => ClosePushUpdatedMenu(n.WorkspaceId)"></div>
                                 <ul class="dropdown-menu show shadow branch-menu-list bottom-100 mb-1" role="menu">
+                                    @if (n.LowestLevelNeedingWork.HasValue)
+                                    {
+                                        <li>
+                                            <button class="dropdown-item dropdown-item--level-only" type="button" role="menuitem"
+                                                    disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
+                                                    @onclick="() => { ClosePushUpdatedMenu(n.WorkspaceId); _ = RunLevelOnlyUpdateAndPushAsync(n); }">
+                                                Level @n.LowestLevelNeedingWork Only
+                                            </button>
+                                        </li>
+                                        <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                                    }
                                     <li>
                                         <button class="dropdown-item" type="button" role="menuitem"
                                                 disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
@@ -657,6 +668,88 @@
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Notification panel Update & Push (push phase) failed for workspace {WorkspaceId}", workspaceId);
+                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Push failed after update."));
+                throw;
+            }
+        });
+        return Task.CompletedTask;
+    }
+
+    private Task RunLevelOnlyUpdateAndPushAsync(WorkspaceNotification n)
+    {
+        var workspaceId = n.WorkspaceId;
+        if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
+        if (!n.LowestLevelNeedingWork.HasValue) return Task.CompletedTask;
+        var level = n.LowestLevelNeedingWork.Value;
+        var defaultBranchRepos = n.Repos
+            .Where(r => r.UnmatchedDeps > 0
+                && !string.IsNullOrWhiteSpace(r.DefaultBranchName)
+                && string.Equals(r.BranchName, r.DefaultBranchName, StringComparison.Ordinal))
+            .Select(r => (r.RepositoryName, r.DefaultBranchName!))
+            .ToList();
+        if (defaultBranchRepos.Count > 0)
+        {
+            ShowDefaultBranchWarning(
+                $"Update on workspace '{n.WorkspaceName}' Level {level} will commit dependency changes directly to the default (protected) branch.",
+                defaultBranchRepos,
+                () => StartLevelOnlyUpdateAndPushJobAsync(n, level));
+            return Task.CompletedTask;
+        }
+        return StartLevelOnlyUpdateAndPushJobAsync(n, level);
+    }
+
+    private Task StartLevelOnlyUpdateAndPushJobAsync(WorkspaceNotification notification, int level)
+    {
+        var workspaceId = notification.WorkspaceId;
+        var updatedRepoIds = notification.Repos
+            .Where(r => r.UnmatchedDeps > 0)
+            .Select(r => r.RepositoryId)
+            .ToHashSet();
+        PendingActionsService.Dismiss(workspaceId);
+        JobService.StartJob(WorkspaceJobKey(workspaceId), $"Updating Level {level}...", async (job, ct) =>
+        {
+            List<WorkspaceRepositoryLink> freshLinks;
+            try
+            {
+                await using var updateScope = ServiceScopeFactory.CreateAsyncScope();
+                var updateHandler = updateScope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
+                await updateHandler.RunUpdateAsync(
+                    workspaceId,
+                    ct,
+                    job.ReportProgress,
+                    (_, _) => { },
+                    onAppSideComplete: () => { },
+                    repoIdsToUpdate: null,
+                    commitMessage: null,
+                    includeDepsInCommitMessage: true,
+                    onlyLevel: level);
+
+                await using var reloadScope = ServiceScopeFactory.CreateAsyncScope();
+                var workspaceRepo = reloadScope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+                var ws = await workspaceRepo.GetByIdAsync(workspaceId);
+                freshLinks = ws?.Repositories.ToList() ?? new List<WorkspaceRepositoryLink>();
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Notification panel Level-Only Update & Push (update phase) failed for workspace {WorkspaceId}", workspaceId);
+                if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Update failed. Start the Agent and try again."));
+                throw;
+            }
+
+            job.ReportProgress("Preparing push...");
+            try
+            {
+                var levelLinks = freshLinks.Where(wr => wr.DependencyLevel == level).ToList();
+                var levelUpdatedRepoIds = updatedRepoIds
+                    .Where(id => freshLinks.Any(l => l.RepositoryId == id && l.DependencyLevel == level))
+                    .ToHashSet();
+                await ExecutePushAsync(workspaceId, levelLinks, job, ct, forceIncludeRepoIds: levelUpdatedRepoIds);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Notification panel Level-Only Update & Push (push phase) failed for workspace {WorkspaceId}", workspaceId);
                 if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError("Push failed after update."));
                 throw;
             }

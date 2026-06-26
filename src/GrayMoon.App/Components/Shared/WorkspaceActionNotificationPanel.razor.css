@@ -158,6 +158,22 @@
     min-width: 100%;
 }
 
+.dropdown-item--level-only,
+.dropdown-item--level-only:hover,
+.dropdown-item--level-only:focus {
+    color: #000;
+    font-weight: 500;
+}
+
+.dropdown-item--level-only {
+    background-color: #ffc107;
+}
+
+.dropdown-item--level-only:hover,
+.dropdown-item--level-only:focus {
+    background-color: #ffca2c;
+}
+
 @keyframes notif-slide-in {
     from {
         opacity: 0;

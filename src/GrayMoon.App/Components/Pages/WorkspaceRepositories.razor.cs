@@ -26,6 +26,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => !wr.IsOnTag &&
         ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0));
     private bool isPushRecommended => workspaceRepositories.Any(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false));
+    private int? lowestLevelNeedingWork =>
+        workspaceRepositories
+            .Where(wr => !wr.IsOnTag && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0))
+            .Min(wr => (int?)wr.DependencyLevel);
     private bool hasTaggedRepos => workspaceRepositories.Any(wr => wr.IsOnTag);
     /// <summary>When true, any repository on its default branch has incoming commits; header shows red Pull button and executes only Pull (commit sync) for those repos. Repos pinned to a tag are excluded.</summary>
     private bool hasIncomingCommits => workspaceRepositories.Any(wr =>
@@ -1775,6 +1779,166 @@ public sealed partial class WorkspaceRepositories : IDisposable
             LastIncludeDeps = args.IncludeDeps
         };
         await RunUpdateAndPushCoreAsync(args.CommitMessage, args.IncludeDeps);
+    }
+
+    private async Task OnLevelOnlyUpdateAndPushClickAsync()
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
+            return;
+
+        var level = lowestLevelNeedingWork;
+        if (!level.HasValue)
+        {
+            ToastService.Show("No repositories need work.");
+            return;
+        }
+
+        if (workspaceRepositories.Where(wr => !wr.IsOnTag && wr.DependencyLevel == level).All(wr => wr.IsOnTag))
+        {
+            ToastService.Show("All repositories at this level are on tags; checkout a branch first.");
+            return;
+        }
+
+        await using var scope = ServiceScopeFactory.CreateAsyncScope();
+        var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+        var (updatePlan, _) = await workspaceGitService.GetUpdatePlanAsync(WorkspaceId);
+        var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
+
+        var reposOnDefault = workspaceRepositories
+            .Where(wr => !wr.IsOnTag
+                && wr.DependencyLevel == level
+                && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
+                && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal)
+                && repoIdsWithUpdates.Contains(wr.RepositoryId))
+            .ToList();
+
+        if (reposOnDefault.Count > 0)
+        {
+            var repoItems = reposOnDefault
+                .Select(wr => (wr.Repository?.RepositoryName ?? $"repo {wr.RepositoryId}", wr.DefaultBranchName!))
+                .ToList();
+            ShowDefaultBranchWarning(
+                $"The following Level {level} repositories are on their default branch. Update will commit dependency changes directly to the default (protected) branch.",
+                repoItems,
+                () => RunLevelOnlyUpdateAndPushCoreAsync(level.Value));
+            return;
+        }
+
+        await RunLevelOnlyUpdateAndPushCoreAsync(level.Value);
+    }
+
+    private Task RunLevelOnlyUpdateAndPushCoreAsync(int level)
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
+            return Task.CompletedTask;
+
+        errorMessage = null;
+
+        JobService.StartJob(PageJobKey, $"Updating Level {level}...", async (job, ct) =>
+        {
+            // Phase 1: update only repos at the target level
+            try
+            {
+                await using (var updateScope = ServiceScopeFactory.CreateAsyncScope())
+                {
+                    var updateHandler = updateScope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
+                    await updateHandler.RunUpdateAsync(
+                        WorkspaceId,
+                        ct,
+                        job.ReportProgress,
+                        (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
+                        onlyLevel: level);
+                }
+
+                await ReloadWorkspaceDataFromFreshScopeAsync();
+                _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromWorkspace(); StateHasChanged(); } });
+            }
+            catch (OperationCanceledException)
+            {
+                await ReloadWorkspaceDataAfterCancelAsync();
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Level-Only Update & Push: update failed for workspace {WorkspaceId}", WorkspaceId);
+                SafeInvoke(() => errorMessage = "Update failed. The GrayMoon Agent may be offline. Start the Agent and try again.");
+                throw;
+            }
+
+            // Phase 2: determine push plan, filtered to repos at the target level only
+            job.ReportProgress("Preparing push...");
+            IReadOnlySet<int> pushRepoIds;
+            IReadOnlySet<string> requiredPackageIds;
+            try
+            {
+                var levelRepoIds = workspaceRepositories
+                    .Where(wr => !wr.IsOnTag && wr.DependencyLevel == level)
+                    .Select(wr => wr.RepositoryId)
+                    .ToHashSet();
+
+                await using var planScope = ServiceScopeFactory.CreateAsyncScope();
+                var planPushHandler = planScope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
+                var planDepService = planScope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
+                var (payload, hasUnpushed) = await planPushHandler.GetPushPlanAsync(
+                    WorkspaceId, workspaceRepositories, ct, forceIncludeRepoIds: levelRepoIds);
+
+                var taggedRepoIds = workspaceRepositories.Where(wr => wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet();
+                pushRepoIds = payload
+                    .Select(p => p.RepoId)
+                    .Where(id => !taggedRepoIds.Contains(id) && levelRepoIds.Contains(id))
+                    .ToHashSet();
+
+                if (!hasUnpushed || pushRepoIds.Count == 0)
+                {
+                    SafeInvoke(() => ToastService.Show($"Level {level} updated. Nothing to push."));
+                    return;
+                }
+
+                var depInfo = await planDepService.GetPushDependencyInfoForRepoSetAsync(WorkspaceId, pushRepoIds, ct);
+                requiredPackageIds = depInfo?.PayloadForRepo?.RequiredPackages
+                    .Select(r => r.PackageId?.Trim())
+                    .Where(id => !string.IsNullOrEmpty(id))
+                    .Cast<string>()
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Level-Only Update & Push: failed to get push plan for workspace {WorkspaceId}", WorkspaceId);
+                SafeInvoke(() => ShowOperationError("Push Failed", $"Level {level} updated but push plan could not be determined. The GrayMoon Agent may be offline."));
+                throw;
+            }
+
+            // Phase 3: execute push for level repos only
+            try
+            {
+                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds);
+            }
+            catch (SynchronizedPushNotPossibleException ex)
+            {
+                SafeInvoke(() => ShowConfirm(
+                    $"Synchronized push could not be completed because {ex.MissingPackagesCount} required package mappings are missing. Check NuGet connector configuration and token, then retry. Continue with normal push?",
+                    () =>
+                    {
+                        JobService.StartJob(PageJobKey, "Preparing push...", async (j, c) =>
+                        {
+                            await ExecutePushCoreAsync(j, c, pushRepoIds, synchronizedPush: false, requiredPackageIds);
+                            await RestorePackagesCoreAsync(j, c);
+                        });
+                        return Task.CompletedTask;
+                    },
+                    confirmButtonText: "Continue"));
+                return;
+            }
+
+            // Phase 4: restore packages after successful push
+            await RestorePackagesCoreAsync(job, ct);
+        });
+
+        return Task.CompletedTask;
     }
 
     private Task RunUpdateAndPushCoreAsync(string? commitMessage = null, bool includeDepsInCommitMessage = true)

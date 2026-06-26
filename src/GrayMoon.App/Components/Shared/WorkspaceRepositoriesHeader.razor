@@ -125,6 +125,18 @@
                     <div class="branch-menu-backdrop" @onclick="ClosePushUpdatedMenu"></div>
                     <ul class="dropdown-menu show shadow branch-menu-list"
                         role="menu">
+                        @if (LowestLevelNeedingWork.HasValue)
+                        {
+                            <li>
+                                        <button class="dropdown-item dropdown-item--level-only" type="button"
+                                                role="menuitem"
+                                                @onclick="HandleLevelOnlyClick"
+                                                disabled="@UpdateDisabled">
+                                            Level @LowestLevelNeedingWork Only
+                                        </button>
+                            </li>
+                            <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                        }
                         <li>
                             <button class="dropdown-item" type="button"
                                     role="menuitem"
@@ -330,6 +342,8 @@
     [Parameter] public EventCallback OnUpdate { get; set; }
     [Parameter] public EventCallback OnUpdateFiles { get; set; }
     [Parameter] public EventCallback OnUpdateAndPush { get; set; }
+    [Parameter] public EventCallback OnLevelOnlyUpdateAndPush { get; set; }
+    [Parameter] public int? LowestLevelNeedingWork { get; set; }
     [Parameter] public EventCallback OnPull { get; set; }
     [Parameter] public EventCallback OnPush { get; set; }
     [Parameter] public EventCallback OnUndoPush { get; set; }
@@ -408,6 +422,12 @@
     {
         ClosePushUpdatedMenu();
         await OnUpdateAndPush.InvokeAsync();
+    }
+
+    private async Task HandleLevelOnlyClick()
+    {
+        ClosePushUpdatedMenu();
+        await OnLevelOnlyUpdateAndPush.InvokeAsync();
     }
 
     private async Task HandleUpdateOnlyClick()
