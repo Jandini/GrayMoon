@@ -88,6 +88,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid UndoPush args"),
             AgentHubMethods.SelfUpdate => JsonSerializer.Deserialize<SelfUpdateRequest>(json, options)
                 ?? throw new ArgumentException("Invalid SelfUpdate args"),
+            AgentHubMethods.CheckFileVersions => JsonSerializer.Deserialize<CheckFileVersionsRequest>(json, options)
+                ?? throw new ArgumentException("Invalid CheckFileVersions args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }
