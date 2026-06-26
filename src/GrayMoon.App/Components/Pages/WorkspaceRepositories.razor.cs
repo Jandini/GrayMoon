@@ -61,6 +61,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     /// <summary>All workspace-internal package dependencies of each repository (PackageId + version as written in the .csproj). Used to populate the dependency-badge tooltip for repositories whose dependencies are up to date.</summary>
     private IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string Version)>> _allDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string)>>();
+    /// <summary>Per-repo (FileName, TokenName, Version) triples derived from version-file configs and current GitVersions. Drives the OK badge file-dependency tooltip.</summary>
+    private IReadOnlyDictionary<int, IReadOnlyList<(string FileName, string TokenName, string Version)>> _allFileVersionLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
     private Dictionary<int, string> repositoryErrors = new(); // repositoryId -> error message
     private HashSet<string> clickedVersions = new(); // Track clicked versions to hide hover until mouse leaves
     private HashSet<int> clickedDependencyBadges = new(); // Track clicked dependency badges to hide tooltip immediately
@@ -90,6 +92,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private const int RefreshDebounceMs = 200;
     private CancellationTokenSource? _refreshDebounceCts;
     private readonly object _refreshDebounceLock = new();
+    private readonly SemaphoreSlim _loadMismatchedDepsLock = new(1, 1);
 
     /// <summary>Toast shown when the user attempts a write action against a repository that is pinned to a tag.</summary>
     private const string TagBlockedActionMessage = "Repository is on a tag; checkout a branch first.";
@@ -192,6 +195,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _hubConnection?.DisposeAsync();
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
+        _loadMismatchedDepsLock.Dispose();
     }
 
     private void OnJobServiceChanged()
@@ -403,66 +407,88 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     private async Task LoadMismatchedDependencyLinesAsync()
     {
-        if (!workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0))
+        await _loadMismatchedDepsLock.WaitAsync();
+        try
         {
-            _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
-        }
-        else
-        {
+            // Fresh scope: circuit-scoped DbContext may be busy (e.g. CheckFileVersions during sync/update).
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
+            var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
+
+            if (!workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0))
+            {
+                _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+            }
+            else
+            {
+                try
+                {
+                    // Use raw sync payloads so tag-pinned repos still get mismatch lines for hover/copy in the badge tooltip.
+                    // GetUpdatePlanAsync excludes tag-pinned repos on purpose so Update does not target them.
+                    var payloads = await projectRepo.GetSyncDependenciesPayloadAsync(WorkspaceId);
+                    var dict = new Dictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>>();
+                    foreach (var p in payloads.Where(p => p.ProjectUpdates.Count > 0))
+                    {
+                        var lines = p.ProjectUpdates
+                            .SelectMany(pu => pu.PackageUpdates)
+                            .GroupBy(x => (x.PackageId.Trim(), x.CurrentVersion.Trim(), x.NewVersion.Trim()))
+                            .Select(g => (g.Key.Item1, g.Key.Item2, g.Key.Item3))
+                            .ToList();
+                        dict[p.RepoId] = lines;
+                    }
+                    _mismatchedDependencyLinesByRepo = dict;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Could not load mismatched dependency lines for workspace {WorkspaceId}", WorkspaceId);
+                    _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+                }
+            }
+
             try
             {
-                // Use raw sync payloads so tag-pinned repos still get mismatch lines for hover/copy in the badge tooltip.
-                // GetUpdatePlanAsync excludes tag-pinned repos on purpose so Update does not target them.
-                var payloads = await WorkspacePageService.WorkspaceProjectRepository
-                    .GetSyncDependenciesPayloadAsync(WorkspaceId);
-                var dict = new Dictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>>();
-                foreach (var p in payloads.Where(p => p.ProjectUpdates.Count > 0))
-                {
-                    var lines = p.ProjectUpdates
-                        .SelectMany(pu => pu.PackageUpdates)
-                        .GroupBy(x => (x.PackageId.Trim(), x.CurrentVersion.Trim(), x.NewVersion.Trim()))
-                        .Select(g => (g.Key.Item1, g.Key.Item2, g.Key.Item3))
-                        .ToList();
-                    dict[p.RepoId] = lines;
-                }
-                _mismatchedDependencyLinesByRepo = dict;
+                _allDependencyLinesByRepo = await projectRepo.GetPackageDependencyLinesByRepoAsync(WorkspaceId);
             }
             catch (Exception ex)
             {
-                Logger.LogDebug(ex, "Could not load mismatched dependency lines for workspace {WorkspaceId}", WorkspaceId);
-                _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+                Logger.LogDebug(ex, "Could not load dependency listing for workspace {WorkspaceId}", WorkspaceId);
+                _allDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string)>>();
+            }
+
+            try
+            {
+                _fileLineStatusByRepo = await fileVersionService.GetFileLineStatusByWorkspaceAsync(WorkspaceId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Could not load file line status for workspace {WorkspaceId}", WorkspaceId);
+                _fileLineStatusByRepo = new Dictionary<int, IReadOnlyList<WorkspaceFileLineStatus>>();
+            }
+
+            try
+            {
+                var repoVersionMap = workspaceRepositories
+                    .Where(r => r.Repository?.RepositoryName != null && !string.IsNullOrEmpty(r.GitVersion))
+                    .ToDictionary(r => r.Repository!.RepositoryName!, r => r.GitVersion!, StringComparer.OrdinalIgnoreCase);
+                _allFileVersionLinesByRepo = await fileVersionService.GetAllFileVersionLinesByRepoAsync(WorkspaceId, repoVersionMap);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Could not load file version lines for workspace {WorkspaceId}", WorkspaceId);
+                _allFileVersionLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
             }
         }
-
-        try
+        finally
         {
-            _allDependencyLinesByRepo = await WorkspacePageService.WorkspaceProjectRepository
-                .GetPackageDependencyLinesByRepoAsync(WorkspaceId);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogDebug(ex, "Could not load dependency listing for workspace {WorkspaceId}", WorkspaceId);
-            _allDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string)>>();
-        }
-
-        await LoadFileLineStatusAsync();
-    }
-
-    private async Task LoadFileLineStatusAsync()
-    {
-        try
-        {
-            _fileLineStatusByRepo = await FileVersionService.GetFileLineStatusByWorkspaceAsync(WorkspaceId);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogDebug(ex, "Could not load file line status for workspace {WorkspaceId}", WorkspaceId);
-            _fileLineStatusByRepo = new Dictionary<int, IReadOnlyList<WorkspaceFileLineStatus>>();
+            _loadMismatchedDepsLock.Release();
         }
     }
 
     private IReadOnlyList<WorkspaceFileLineStatus> GetFileLineStatus(int repositoryId) =>
         _fileLineStatusByRepo.TryGetValue(repositoryId, out var lines) ? lines : Array.Empty<WorkspaceFileLineStatus>();
+
+    private IReadOnlyList<(string FileName, string TokenName, string Version)> GetAllFileVersionLines(int repositoryId) =>
+        _allFileVersionLinesByRepo.TryGetValue(repositoryId, out var lines) ? lines : Array.Empty<(string, string, string)>();
 
     private int GetTotalMatchedFileLines(int repositoryId) =>
         workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.TotalFileLines ?? 0;

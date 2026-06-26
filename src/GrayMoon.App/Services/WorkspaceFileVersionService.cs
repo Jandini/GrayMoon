@@ -336,6 +336,40 @@ public sealed class WorkspaceFileVersionService(
             .ToDictionary(g => g.Key, g => (IReadOnlyList<WorkspaceFileLineStatus>)g.ToList());
     }
 
+    /// <summary>
+    /// Returns per-repo (FileName, TokenName, Version) triples for the OK badge tooltip.
+    /// Each entry represents a tracked token in a version file whose expected value equals the current workspace GitVersion.
+    /// Only repos present in <paramref name="repoVersionMap"/> contribute entries.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<(string FileName, string TokenName, string Version)>>> GetAllFileVersionLinesByRepoAsync(
+        int workspaceId,
+        IReadOnlyDictionary<string, string> repoVersionMap,
+        CancellationToken cancellationToken = default)
+    {
+        var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        var result = new Dictionary<int, List<(string FileName, string TokenName, string Version)>>();
+
+        foreach (var cfg in configs)
+        {
+            if (cfg.File?.Repository == null) continue;
+            var repoId = cfg.File.RepositoryId;
+            var fileName = cfg.File.FileName;
+            var tokens = ExtractTokens(cfg.VersionPattern);
+
+            foreach (var token in tokens)
+            {
+                if (!repoVersionMap.TryGetValue(token, out var ver) || string.IsNullOrEmpty(ver)) continue;
+                if (!result.TryGetValue(repoId, out var list))
+                    result[repoId] = list = [];
+                if (!list.Any(e => string.Equals(e.FileName, fileName, StringComparison.OrdinalIgnoreCase)
+                                   && string.Equals(e.TokenName, token, StringComparison.OrdinalIgnoreCase)))
+                    list.Add((fileName, token, ver));
+            }
+        }
+
+        return result.ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<(string, string, string)>)kvp.Value);
+    }
+
     private sealed class CheckFileVersionsAgentResponse
     {
         [System.Text.Json.Serialization.JsonPropertyName("files")]

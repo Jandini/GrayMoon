@@ -103,7 +103,7 @@
                             <a href="@graphUrl" class="dependency-badge-graph-link">
                                 <span class="badge build-dep-badge build-dep-badge-ok">@totalWithFiles</span>
                             </a>
-                            @if (AllDependencyLines.Count > 0 || FileLineStatuses.Count > 0)
+                            @if (AllDependencyLines.Count > 0 || AllFileVersionLines.Count > 0 || FileLineStatuses.Count > 0)
                             {
                                 <div class="dependency-badge-tooltip">
                                     @if (AllDependencyLines.Count > 0)
@@ -127,7 +127,29 @@
                                             </div>
                                         }
                                     }
-                                    @if (FileLineStatuses.Count > 0)
+                                    @if (AllFileVersionLines.Count > 0)
+                                    {
+                                        @foreach (var entry in AllFileVersionLines.GroupBy(l => l.FileName).Select((fg, i) => new { fg, i }))
+                                        {
+                                            @if (entry.i == 0 && AllDependencyLines.Count == 0)
+                                            {
+                                                <div class="dependency-badge-tooltip-header">
+                                                    <span class="dependency-badge-tooltip-title">@entry.fg.Key - dependencies (up to date):</span>
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <div class="dependency-badge-tooltip-section-header">@entry.fg.Key - dependencies (up to date):</div>
+                                            }
+                                            @foreach (var line in entry.fg)
+                                            {
+                                                <div class="dependency-badge-tooltip-line">
+                                                    <code>@line.TokenName</code> <span class="dependency-badge-tooltip-versions">@line.Version</span>
+                                                </div>
+                                            }
+                                        }
+                                    }
+                                    else if (FileLineStatuses.Count > 0)
                                     {
                                         @if (AllDependencyLines.Count > 0)
                                         {
@@ -287,6 +309,8 @@
     [Parameter] public IReadOnlyList<(string PackageId, string Version)> AllDependencyLines { get; set; } = Array.Empty<(string, string)>();
     /// <summary>Out-of-date version-file line statuses for this repository loaded from DB (read-only, persisted at sync time).</summary>
     [Parameter] public IReadOnlyList<WorkspaceFileLineStatus> FileLineStatuses { get; set; } = Array.Empty<WorkspaceFileLineStatus>();
+    /// <summary>Per-token (FileName, TokenName, Version) entries for the OK badge tooltip. Populated when all file-tracked deps are up to date.</summary>
+    [Parameter] public IReadOnlyList<(string FileName, string TokenName, string Version)> AllFileVersionLines { get; set; } = Array.Empty<(string, string, string)>();
     /// <summary>Total count of version-file lines that matched configured patterns in this repository's files (matched lines, regardless of staleness).</summary>
     [Parameter] public int TotalMatchedFileLines { get; set; }
     [Parameter] public bool IsVersionClicked { get; set; }

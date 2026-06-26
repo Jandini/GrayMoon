@@ -157,6 +157,7 @@
                                                                   MismatchedDependencyLines="@GetMismatchedDependencyLines(wr.RepositoryId)"
                                                                   AllDependencyLines="@GetAllDependencyLines(wr.RepositoryId)"
                                                                   FileLineStatuses="@GetFileLineStatus(wr.RepositoryId)"
+                                                                  AllFileVersionLines="@GetAllFileVersionLines(wr.RepositoryId)"
                                                                   TotalMatchedFileLines="@GetTotalMatchedFileLines(wr.RepositoryId)"
                                                                   IsVersionClicked="@(wr.GitVersion != null && clickedVersions.Contains(wr.GitVersion))"
                                                                   IsDependencyBadgeClicked="@clickedDependencyBadges.Contains(wr.RepositoryId)"
