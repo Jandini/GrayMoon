@@ -49,6 +49,7 @@ public static class Migrations
         await MigrateWorkspaceFileIsMissingOnDiskAsync(dbContext);
         await MigrateTotalFileConfigReposColumnAsync(dbContext);
         await MigrateWorkspaceFileLineStatusTokenColumnsAsync(dbContext);
+        await MigrateWorkspaceFileLineStatusUniqueIndexFixAsync(dbContext);
     }
 
     public static async Task MigrateRepositoriesTopicsAsync(AppDbContext dbContext)
@@ -1113,7 +1114,7 @@ public static class Migrations
                 cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='IX_WorkspaceFileLineStatuses_Unique'";
                 if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
                 {
-                    cmd.CommandText = "CREATE UNIQUE INDEX IX_WorkspaceFileLineStatuses_Unique ON WorkspaceFileLineStatuses(WorkspaceId, RepositoryId, FilePath)";
+                    cmd.CommandText = "CREATE UNIQUE INDEX IX_WorkspaceFileLineStatuses_Unique ON WorkspaceFileLineStatuses(WorkspaceId, RepositoryId, FilePath, TokenName)";
                     await cmd.ExecuteNonQueryAsync();
                 }
             }
@@ -1409,6 +1410,46 @@ public static class Migrations
                     cmd.CommandText = ddl;
                     await cmd.ExecuteNonQueryAsync();
                 }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>
+    /// Fixes the WorkspaceFileLineStatuses unique index to include TokenName.
+    /// The original index covered only (WorkspaceId, RepositoryId, FilePath), which violates when a
+    /// single file has multiple out-of-date tokens. The correct constraint is per-token per file.
+    /// </summary>
+    public static async Task MigrateWorkspaceFileLineStatusUniqueIndexFixAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceFileLineStatuses'";
+            if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                return;
+
+            // If the named index exists but does not yet cover TokenName, drop it so we can recreate correctly.
+            cmd.CommandText = "SELECT sql FROM sqlite_master WHERE type='index' AND name='IX_WorkspaceFileLineStatuses_Unique'";
+            var indexSql = await cmd.ExecuteScalarAsync() as string;
+            if (indexSql != null && !indexSql.Contains("TokenName", StringComparison.OrdinalIgnoreCase))
+            {
+                cmd.CommandText = "DROP INDEX IX_WorkspaceFileLineStatuses_Unique";
+                await cmd.ExecuteNonQueryAsync();
+                indexSql = null;
+            }
+
+            if (indexSql == null)
+            {
+                cmd.CommandText = "CREATE UNIQUE INDEX IX_WorkspaceFileLineStatuses_Unique ON WorkspaceFileLineStatuses(WorkspaceId, RepositoryId, FilePath, TokenName)";
+                await cmd.ExecuteNonQueryAsync();
             }
         }
         catch
