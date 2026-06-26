@@ -1806,7 +1806,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
         var reposOnDefault = workspaceRepositories
             .Where(wr => !wr.IsOnTag
-                && wr.DependencyLevel == level
+                && (wr.DependencyLevel ?? 0) <= level
                 && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
                 && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal)
                 && repoIdsWithUpdates.Contains(wr.RepositoryId))
@@ -1818,7 +1818,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 .Select(wr => (wr.Repository?.RepositoryName ?? $"repo {wr.RepositoryId}", wr.DefaultBranchName!))
                 .ToList();
             ShowDefaultBranchWarning(
-                $"The following Level {level} repositories are on their default branch. Update will commit dependency changes directly to the default (protected) branch.",
+                $"The following repositories (up to Level {level}) are on their default branch. Update will commit dependency changes directly to the default (protected) branch.",
                 repoItems,
                 () => RunLevelOnlyUpdateAndPushCoreAsync(level.Value));
             return;
@@ -1847,7 +1847,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                         ct,
                         job.ReportProgress,
                         (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
-                        onlyLevel: level);
+                        maxLevel: level);
                 }
 
                 await ReloadWorkspaceDataFromFreshScopeAsync();
@@ -1872,7 +1872,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             try
             {
                 var levelRepoIds = workspaceRepositories
-                    .Where(wr => !wr.IsOnTag && wr.DependencyLevel == level)
+                    .Where(wr => !wr.IsOnTag && (wr.DependencyLevel ?? 0) <= level)
                     .Select(wr => wr.RepositoryId)
                     .ToHashSet();
 
@@ -1890,7 +1890,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
                 if (!hasUnpushed || pushRepoIds.Count == 0)
                 {
-                    SafeInvoke(() => ToastService.Show($"Level {level} updated. Nothing to push."));
+                    SafeInvoke(() => ToastService.Show($"Up to Level {level} updated. Nothing to push."));
                     return;
                 }
 

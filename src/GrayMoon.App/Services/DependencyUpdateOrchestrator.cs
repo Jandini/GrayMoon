@@ -26,7 +26,7 @@ public sealed class DependencyUpdateOrchestrator(
     /// <param name="repoIdsToUpdate">Optional. When set, only these repositories are considered for the update plan and all steps.</param>
     /// <param name="commitMessage">Optional user-supplied commit subject line. When provided, replaces the default subject in all commits created during this update.</param>
     /// <param name="includeDepsInCommitMessage">When true, the list of updated packages is appended to the commit message body.</param>
-    /// <param name="onlyLevel">Optional. When set, only repositories at this exact dependency level are processed; all other levels are skipped.</param>
+    /// <param name="maxLevel">Optional. When set, only repositories at or below this dependency level are processed; higher levels are skipped.</param>
     public async Task RunAsync(
         int workspaceId,
         CancellationToken cancellationToken,
@@ -36,7 +36,7 @@ public sealed class DependencyUpdateOrchestrator(
         IReadOnlySet<int>? repoIdsToUpdate = null,
         string? commitMessage = null,
         bool includeDepsInCommitMessage = true,
-        int? onlyLevel = null)
+        int? maxLevel = null)
     {
         var hadError = false;
         void OnRepoError(int repoId, string msg)
@@ -58,8 +58,8 @@ public sealed class DependencyUpdateOrchestrator(
 
         // Step 2+: Process repositories by dependency level.
         var levelRepoIds = await GetRepositoryIdsByDependencyLevelAsync(workspaceId, repoIdsToUpdate, OnRepoError);
-        if (onlyLevel.HasValue)
-            levelRepoIds = levelRepoIds.Where(x => x.Level == onlyLevel.Value).ToList();
+        if (maxLevel.HasValue)
+            levelRepoIds = levelRepoIds.Where(x => x.Level <= maxLevel.Value).ToList();
         if (levelRepoIds.Count == 0)
             hadError = true;
 

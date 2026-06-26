@@ -690,7 +690,7 @@
         if (defaultBranchRepos.Count > 0)
         {
             ShowDefaultBranchWarning(
-                $"Update on workspace '{n.WorkspaceName}' Level {level} will commit dependency changes directly to the default (protected) branch.",
+                $"Update on workspace '{n.WorkspaceName}' (up to Level {level}) will commit dependency changes directly to the default (protected) branch.",
                 defaultBranchRepos,
                 () => StartLevelOnlyUpdateAndPushJobAsync(n, level));
             return Task.CompletedTask;
@@ -722,7 +722,7 @@
                     repoIdsToUpdate: null,
                     commitMessage: null,
                     includeDepsInCommitMessage: true,
-                    onlyLevel: level);
+                    maxLevel: level);
 
                 await using var reloadScope = ServiceScopeFactory.CreateAsyncScope();
                 var workspaceRepo = reloadScope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
@@ -740,9 +740,9 @@
             job.ReportProgress("Preparing push...");
             try
             {
-                var levelLinks = freshLinks.Where(wr => wr.DependencyLevel == level).ToList();
+                var levelLinks = freshLinks.Where(wr => (wr.DependencyLevel ?? 0) <= level).ToList();
                 var levelUpdatedRepoIds = updatedRepoIds
-                    .Where(id => freshLinks.Any(l => l.RepositoryId == id && l.DependencyLevel == level))
+                    .Where(id => freshLinks.Any(l => l.RepositoryId == id && (l.DependencyLevel ?? 0) <= level))
                     .ToHashSet();
                 await ExecutePushAsync(workspaceId, levelLinks, job, ct, forceIncludeRepoIds: levelUpdatedRepoIds);
             }
