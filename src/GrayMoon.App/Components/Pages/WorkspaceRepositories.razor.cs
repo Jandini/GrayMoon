@@ -3139,6 +3139,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
             await using var scope = ServiceScopeFactory.CreateAsyncScope();
             var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
             var customDepRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryCustomDependencyRepository>();
+            var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+
+            var workspaceData = await workspaceRepo.GetByIdAsync(WorkspaceId);
+            var allLinks = workspaceData?.Repositories ?? workspaceRepositories;
 
             var lockedIds = await projectRepo.GetImplicitReferencedRepoIdsAsync(WorkspaceId, repositoryId);
             var savedCustomIds = await customDepRepo.GetCustomReferencedRepositoryIdsAsync(WorkspaceId, repositoryId);
@@ -3151,11 +3155,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 DependentRepoName = link.Repository?.RepositoryName,
                 LockedReferencedRepoIds = lockedIds,
                 SelectedCustomRepoIds = new HashSet<int>(savedCustomIds),
-                Repositories = workspaceRepositories
-                    .Where(wr => wr.Repository?.RepositoryName != null)
+                Repositories = allLinks
+                    .Where(wr => wr.Repository != null && !string.IsNullOrWhiteSpace(wr.Repository.RepositoryName))
                     .Select(wr => new CustomDependenciesModal.CustomDependencyRepoEntry(
                         wr.RepositoryId,
                         wr.Repository!.RepositoryName!))
+                    .OrderBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase)
                     .ToList(),
                 ErrorMessage = null,
                 IsSaving = false

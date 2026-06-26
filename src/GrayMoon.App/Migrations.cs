@@ -41,6 +41,7 @@ public static class Migrations
         await MigrateRepositoryBranchesSortIndexAsync(dbContext);
         await MigrateWorkspaceRepositoriesHasNewerTagAsync(dbContext);
         await MigrateWorkspaceFileLineStatusTableAsync(dbContext);
+        await MigrateWorkspaceFileLineStatusColumnsAsync(dbContext);
         await MigrateOutOfDateFileLinesColumnAsync(dbContext);
         await MigrateTotalFileLinesColumnAsync(dbContext);
         await MigrateOutOfDateFileReposColumnAsync(dbContext);
@@ -1110,6 +1111,42 @@ public static class Migrations
                 if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
                 {
                     cmd.CommandText = "CREATE UNIQUE INDEX IX_WorkspaceFileLineStatuses_Unique ON WorkspaceFileLineStatuses(WorkspaceId, RepositoryId, FilePath)";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds TotalMatchedLines and OutOfDateLines to WorkspaceFileLineStatuses when the table predates those columns.</summary>
+    public static async Task MigrateWorkspaceFileLineStatusColumnsAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceFileLineStatuses'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                    return;
+
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceFileLineStatuses') WHERE name='TotalMatchedLines'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "ALTER TABLE WorkspaceFileLineStatuses ADD COLUMN TotalMatchedLines INTEGER NOT NULL DEFAULT 0";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceFileLineStatuses') WHERE name='OutOfDateLines'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "ALTER TABLE WorkspaceFileLineStatuses ADD COLUMN OutOfDateLines INTEGER NOT NULL DEFAULT 0";
                     await cmd.ExecuteNonQueryAsync();
                 }
             }

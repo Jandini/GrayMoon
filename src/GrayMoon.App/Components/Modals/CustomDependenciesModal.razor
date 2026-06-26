@@ -11,72 +11,76 @@
                     <h5 class="modal-title">Custom dependencies@(string.IsNullOrEmpty(DependentRepoName) ? "" : $" - {DependentRepoName}")</h5>
                     <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
                 </div>
-                <div class="modal-body">
-                    <div class="mb-3 custom-deps-modal-body-content">
-                        <div class="form-label mb-2">Repositories</div>
-                        <div class="d-flex align-items-center mb-3">
-                            <FilterSearchInput @bind-Value="repositorySearch"
-                                               @ref="filterSearchInput"
-                                               WrapperAdditionalClass="flex-grow-1 min-width-0"
-                                               Placeholder="Search repositories…"
-                                               OnKeyDown="HandleKeyDown" />
-                        </div>
-                        <div class="repository-list border rounded">
-                            <table class="table table-sm mb-0 repository-grid workspaces-table resizable-columns custom-deps-grid">
-                                <thead class="table-dark">
+                <div class="modal-body custom-deps-modal-body">
+                    <div class="form-label mb-2">Repositories <span class="text-muted ms-1">@GetSelectableCount() available</span></div>
+                    <div class="d-flex align-items-center custom-deps-search-row">
+                        <FilterSearchInput @bind-Value="repositorySearch"
+                                           @ref="filterSearchInput"
+                                           WrapperAdditionalClass="flex-grow-1 min-width-0"
+                                           Placeholder="Search repositories…"
+                                           OnKeyDown="HandleKeyDown" />
+                    </div>
+                    <div class="custom-deps-grid-container">
+                        <table class="table table-sm mb-0 custom-deps-grid">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th class="col-select">
+                                        <input class="form-check-input workspace-repo-checkbox"
+                                               type="checkbox"
+                                               checked="@AreAllToggleableFilteredSelected()"
+                                               @onchange="(ChangeEventArgs e) => _ = ToggleAllFiltered((bool)e.Value!)" />
+                                    </th>
+                                    <th>Repository</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{
+                                    var filtered = GetFilteredRepositories();
+                                }
+                                @if (Repositories.Count == 0)
+                                {
                                     <tr>
-                                        <th class="col-select no-resize" data-width="26">
-                                            <input class="form-check-input workspace-repo-checkbox"
-                                                   type="checkbox"
-                                                   checked="@AreAllToggleableFilteredSelected()"
-                                                   @onchange="(ChangeEventArgs e) => _ = ToggleAllFiltered((bool)e.Value!)" />
-                                        </th>
-                                        <th>Repository</th>
+                                        <td colspan="2" class="text-muted p-2">No repositories in this workspace.</td>
                                     </tr>
-                                </thead>
-                                <tbody>
-                                    @{
-                                        var filtered = GetFilteredRepositories();
-                                    }
-                                    @if (filtered.Count == 0)
+                                }
+                                else if (filtered.Count == 0)
+                                {
+                                    <tr>
+                                        <td colspan="2" class="text-muted p-2">No repositories match your search.</td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    @foreach (var repository in filtered)
                                     {
+                                        var isLocked = LockedReferencedRepoIds.Contains(repository.RepositoryId);
+                                        var isChecked = isLocked || SelectedCustomRepoIds.Contains(repository.RepositoryId);
                                         <tr>
-                                            <td colspan="2" class="text-muted p-2">No repositories match your search.</td>
+                                            <td class="col-select">
+                                                <input class="form-check-input workspace-repo-checkbox"
+                                                       type="checkbox"
+                                                       checked="@isChecked"
+                                                       disabled="@isLocked"
+                                                       @onchange="(ChangeEventArgs e) => _ = ToggleRepository(repository.RepositoryId, (bool)e.Value!, isLocked)" />
+                                            </td>
+                                            <td>
+                                                <span class="repo-name-cell" title="@repository.RepositoryName">
+                                                    @repository.RepositoryName
+                                                    @if (isLocked)
+                                                    {
+                                                        <span class="text-muted small ms-1">(from project or file)</span>
+                                                    }
+                                                </span>
+                                            </td>
                                         </tr>
                                     }
-                                    else
-                                    {
-                                        @foreach (var repository in filtered)
-                                        {
-                                            var isLocked = LockedReferencedRepoIds.Contains(repository.RepositoryId);
-                                            var isChecked = isLocked || SelectedCustomRepoIds.Contains(repository.RepositoryId);
-                                            <tr>
-                                                <td class="col-select">
-                                                    <input class="form-check-input workspace-repo-checkbox"
-                                                           type="checkbox"
-                                                           checked="@isChecked"
-                                                           disabled="@isLocked"
-                                                           @onchange="(ChangeEventArgs e) => _ = ToggleRepository(repository.RepositoryId, (bool)e.Value!, isLocked)" />
-                                                </td>
-                                                <td>
-                                                    <span class="repo-name-cell" title="@repository.RepositoryName">
-                                                        @repository.RepositoryName
-                                                        @if (isLocked)
-                                                        {
-                                                            <span class="text-muted small ms-1">(from project or file)</span>
-                                                        }
-                                                    </span>
-                                                </td>
-                                            </tr>
-                                        }
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
+                                }
+                            </tbody>
+                        </table>
                     </div>
                     @if (ErrorMessage != null)
                     {
-                        <div class="alert alert-danger mb-0">@ErrorMessage</div>
+                        <div class="alert alert-danger mt-3 mb-0">@ErrorMessage</div>
                     }
                 </div>
                 <div class="modal-footer">
@@ -143,6 +147,9 @@
         else if (e.Key == "Enter" && !IsSaving)
             await OnSave.InvokeAsync();
     }
+
+    private int GetSelectableCount()
+        => Repositories.Count(r => r.RepositoryId != DependentRepositoryId);
 
     private List<CustomDependencyRepoEntry> GetFilteredRepositories()
     {
