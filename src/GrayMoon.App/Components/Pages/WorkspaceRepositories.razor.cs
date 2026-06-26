@@ -3156,7 +3156,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
             var workspaceData = await workspaceRepo.GetByIdAsync(WorkspaceId);
             var allLinks = workspaceData?.Repositories ?? workspaceRepositories;
 
-            var lockedIds = await projectRepo.GetImplicitReferencedRepoIdsAsync(WorkspaceId, repositoryId);
+            var implicitBySource = await projectRepo.GetImplicitReferencedRepoIdsBySourceAsync(WorkspaceId, repositoryId);
+            var lockedIds = new HashSet<int>(implicitBySource.FromProject);
+            lockedIds.UnionWith(implicitBySource.FromFile);
+            var circularRepoIds = await projectRepo.GetCircularCustomDependencyRepoIdsAsync(WorkspaceId, repositoryId);
             var savedCustomIds = await customDepRepo.GetCustomReferencedRepositoryIdsAsync(WorkspaceId, repositoryId);
 
             _customDependenciesModal = new CustomDependenciesModalState
@@ -3166,9 +3169,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 DependentWorkspaceRepositoryId = link.WorkspaceRepositoryId,
                 DependentRepoName = link.Repository?.RepositoryName,
                 LockedReferencedRepoIds = lockedIds,
+                LockedFromProjectRepoIds = implicitBySource.FromProject,
+                LockedFromFileRepoIds = implicitBySource.FromFile,
+                CircularCustomDependencyRepoIds = circularRepoIds,
                 SelectedCustomRepoIds = new HashSet<int>(savedCustomIds),
                 Repositories = allLinks
                     .Where(wr => wr.Repository != null && !string.IsNullOrWhiteSpace(wr.Repository.RepositoryName))
+                    .Where(wr => !circularRepoIds.Contains(wr.RepositoryId))
                     .Select(wr => new CustomDependenciesModal.CustomDependencyRepoEntry(
                         wr.RepositoryId,
                         wr.Repository!.RepositoryName!))
@@ -3199,8 +3206,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
         var dependentRepoId = _customDependenciesModal.DependentRepositoryId;
         var locked = _customDependenciesModal.LockedReferencedRepoIds;
+        var circular = _customDependenciesModal.CircularCustomDependencyRepoIds;
         var selected = _customDependenciesModal.SelectedCustomRepoIds
-            .Where(id => !locked.Contains(id) && id != dependentRepoId)
+            .Where(id => !locked.Contains(id) && !circular.Contains(id) && id != dependentRepoId)
             .ToHashSet();
 
         _customDependenciesModal.IsSaving = true;
@@ -3287,6 +3295,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public int DependentWorkspaceRepositoryId { get; set; }
         public string? DependentRepoName { get; set; }
         public IReadOnlySet<int> LockedReferencedRepoIds { get; set; } = new HashSet<int>();
+        public IReadOnlySet<int> LockedFromProjectRepoIds { get; set; } = new HashSet<int>();
+        public IReadOnlySet<int> LockedFromFileRepoIds { get; set; } = new HashSet<int>();
+        public IReadOnlySet<int> CircularCustomDependencyRepoIds { get; set; } = new HashSet<int>();
         public HashSet<int> SelectedCustomRepoIds { get; set; } = new();
         public IReadOnlyList<CustomDependenciesModal.CustomDependencyRepoEntry> Repositories { get; set; } = Array.Empty<CustomDependenciesModal.CustomDependencyRepoEntry>();
         public bool IsSaving { get; set; }

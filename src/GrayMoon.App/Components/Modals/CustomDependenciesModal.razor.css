@@ -127,9 +127,30 @@
     border-color: var(--accent-blue) !important;
 }
 
+.custom-deps-grid .repo-name-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
 .custom-deps-grid .repo-name-cell {
     display: block;
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.custom-deps-grid .repo-source-badges {
+    display: flex;
+    flex-shrink: 0;
+    gap: 0.25rem;
+    margin-left: auto;
+}
+
+.custom-deps-grid .custom-deps-source-badge {
+    font-size: 0.65em;
 }

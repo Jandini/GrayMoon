@@ -65,13 +65,22 @@
                                                        @onchange="(ChangeEventArgs e) => _ = ToggleRepository(repository.RepositoryId, (bool)e.Value!, isLocked)" />
                                             </td>
                                             <td>
-                                                <span class="repo-name-cell" title="@repository.RepositoryName">
-                                                    @repository.RepositoryName
+                                                <div class="repo-name-row">
+                                                    <span class="repo-name-cell" title="@repository.RepositoryName">@repository.RepositoryName</span>
                                                     @if (isLocked)
                                                     {
-                                                        <span class="text-muted small ms-1">(from project or file)</span>
+                                                        <span class="repo-source-badges">
+                                                            @if (LockedFromProjectRepoIds.Contains(repository.RepositoryId))
+                                                            {
+                                                                <span class="badge custom-deps-source-badge bg-secondary" title="Referenced from .csproj">project</span>
+                                                            }
+                                                            @if (LockedFromFileRepoIds.Contains(repository.RepositoryId))
+                                                            {
+                                                                <span class="badge custom-deps-source-badge bg-secondary" title="Referenced from version file">file</span>
+                                                            }
+                                                        </span>
                                                     }
-                                                </span>
+                                                </div>
                                             </td>
                                         </tr>
                                     }
@@ -107,6 +116,8 @@
     [Parameter] public int DependentRepositoryId { get; set; }
     [Parameter] public IReadOnlyList<CustomDependencyRepoEntry> Repositories { get; set; } = Array.Empty<CustomDependencyRepoEntry>();
     [Parameter] public IReadOnlySet<int> LockedReferencedRepoIds { get; set; } = new HashSet<int>();
+    [Parameter] public IReadOnlySet<int> LockedFromProjectRepoIds { get; set; } = new HashSet<int>();
+    [Parameter] public IReadOnlySet<int> LockedFromFileRepoIds { get; set; } = new HashSet<int>();
     [Parameter] public HashSet<int> SelectedCustomRepoIds { get; set; } = new();
     [Parameter] public bool IsSaving { get; set; }
     [Parameter] public string? ErrorMessage { get; set; }
