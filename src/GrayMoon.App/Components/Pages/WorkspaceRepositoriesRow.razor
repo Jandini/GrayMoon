@@ -13,10 +13,13 @@
         : null;
     var depCount = Link.Dependencies ?? 0;
     var unmatchedDeps = Link.UnmatchedDeps ?? 0;
-    var totalFileRepos = AllFileVersionLines.Select(l => l.TokenName).Distinct().Count();
     var filesWithOutOfDate = FileLineStatuses.Where(s => s.OutOfDateLines > 0).Select(s => s.FileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
-    var outOfDateFileRepos = AllFileVersionLines.Where(l => filesWithOutOfDate.Contains(l.FileName)).Select(l => l.TokenName).Distinct().Count();
-    var totalWithFiles = depCount + totalFileRepos;
+    var outOfDateFileRepos = AllFileVersionLines
+        .Where(l => filesWithOutOfDate.Contains(l.FileName))
+        .Select(l => l.TokenName)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Count();
+    var totalWithFiles = depCount;
     var unmatchedWithFiles = unmatchedDeps + outOfDateFileRepos;
     var graphUrl = WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, repositoryId: repo.RepositoryId);
 
