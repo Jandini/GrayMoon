@@ -84,9 +84,15 @@ public sealed class AgentHub(
     }
 
     /// <summary>Invoked by the agent when a hook fires: agent ran GitVersion (and fetch/commit counts) and pushes result for app to persist.</summary>
-    public async Task SyncCommand(RepositorySyncNotification notification)
+    public Task SyncCommand(RepositorySyncNotification notification)
     {
-        await syncCommandHandler.HandleAsync(notification);
+        // Run HandleAsync on a background thread so this hub method returns immediately.
+        // ASP.NET Core SignalR serializes hub method invocations per connection, so awaiting
+        // HandleAsync here blocks the hub's message reader. HandleAsync sends CheckFileVersions
+        // to the agent and awaits the ResponseCommand - but ResponseCommand can never arrive
+        // because the hub reader is stuck in SyncCommand. Fire-and-forget breaks the deadlock.
+        _ = Task.Run(() => syncCommandHandler.HandleAsync(notification));
+        return Task.CompletedTask;
     }
 
     /// <summary>Invoked by the agent when it connects to report its SemVer version.</summary>
