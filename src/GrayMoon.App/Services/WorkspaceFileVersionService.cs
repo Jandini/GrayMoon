@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
@@ -14,6 +16,8 @@ public sealed class WorkspaceFileVersionService(
     AppDbContext dbContext,
     ILogger<WorkspaceFileVersionService> logger)
 {
+    private static readonly ConcurrentDictionary<int, object> CheckLocks = new();
+    private static readonly ConcurrentDictionary<int, Task?> InFlightChecks = new();
     /// <summary>
     /// For every file in the workspace that has a version pattern configured:
     ///   1. Resolves the current version for each repo from the workspace's repository links (DB state); no GitVersion is run.
@@ -189,9 +193,50 @@ public sealed class WorkspaceFileVersionService(
     /// Reads all configured version files via the agent, compares current values to expected repo GitVersions,
     /// and persists the results to WorkspaceFileLineStatuses and WorkspaceRepositoryLink (OutOfDateFileLines, TotalFileLines).
     /// Called at the same trigger points as csproj dependency stat recomputation.
+    /// Concurrent callers for the same workspace coalesce onto one in-flight check.
     /// </summary>
-    public async Task CheckAndPersistFileVersionStatusAsync(int workspaceId, CancellationToken cancellationToken = default)
+    public Task CheckAndPersistFileVersionStatusAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
+        var gate = CheckLocks.GetOrAdd(workspaceId, _ => new object());
+        Task checkTask;
+        lock (gate)
+        {
+            if (InFlightChecks.TryGetValue(workspaceId, out var existing) && existing is { IsCompleted: false })
+            {
+                logger.LogDebug("CheckAndPersist coalesced: joining in-flight check for workspace {WorkspaceId}", workspaceId);
+                checkTask = existing;
+            }
+            else
+            {
+                checkTask = CheckAndPersistFileVersionStatusCoreAsync(workspaceId, cancellationToken);
+                InFlightChecks[workspaceId] = checkTask;
+            }
+        }
+
+        return AwaitAndClearInFlightAsync(workspaceId, checkTask, gate);
+    }
+
+    private static async Task AwaitAndClearInFlightAsync(int workspaceId, Task checkTask, object gate)
+    {
+        try
+        {
+            await checkTask.ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (gate)
+            {
+                if (InFlightChecks.TryGetValue(workspaceId, out var current) && ReferenceEquals(current, checkTask))
+                    InFlightChecks.TryRemove(workspaceId, out _);
+            }
+        }
+    }
+
+    private async Task CheckAndPersistFileVersionStatusCoreAsync(int workspaceId, CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+        logger.LogDebug("CheckAndPersist starting for workspace {WorkspaceId}", workspaceId);
+
         if (!agentBridge.IsAgentConnected)
             return;
 
@@ -245,6 +290,7 @@ public sealed class WorkspaceFileVersionService(
                     .SetProperty(wr => wr.OutOfDateFileLines, (int?)null)
                     .SetProperty(wr => wr.TotalFileLines, (int?)null),
                     cancellationToken);
+            logger.LogDebug("CheckAndPersist completed for workspace {WorkspaceId} in {ElapsedMs}ms (no items)", workspaceId, sw.ElapsedMilliseconds);
             return;
         }
 
@@ -252,12 +298,14 @@ public sealed class WorkspaceFileVersionService(
 
         try
         {
+            var agentSw = Stopwatch.StartNew();
             var resp = await agentBridge.SendCommandAsync("CheckFileVersions", new
             {
                 workspaceName = workspace.Name,
                 workspaceRoot,
                 files = items
             }, cancellationToken);
+            logger.LogDebug("CheckAndPersist CheckFileVersions agent call completed for workspace {WorkspaceId} in {ElapsedMs}ms", workspaceId, agentSw.ElapsedMilliseconds);
 
             if (!resp.Success || resp.Data == null)
             {
@@ -275,7 +323,9 @@ public sealed class WorkspaceFileVersionService(
 
             foreach (var fileResult in result.Files)
             {
-                if (fileResult.TotalMatchedLines == 0) continue;
+                var expectedCount = fileResult.ExpectedTokenCount;
+                if (fileResult.TotalMatchedLines == 0 && expectedCount == 0)
+                    continue;
 
                 // Find repository id for this file result
                 var repoLink = workspace.Repositories.FirstOrDefault(r =>
@@ -284,17 +334,19 @@ public sealed class WorkspaceFileVersionService(
                 var repoId = repoLink.RepositoryId;
 
                 var outOfDateCount = fileResult.OutOfDateLines?.Count ?? 0;
+                var totalForStats = fileResult.TotalMatchedLines > 0 ? fileResult.TotalMatchedLines : expectedCount;
+
                 newStatuses.Add(new WorkspaceFileLineStatus
                 {
                     WorkspaceId = workspaceId,
                     RepositoryId = repoId,
                     FilePath = fileResult.FilePath ?? "",
                     FileName = fileResult.FileName ?? "",
-                    TotalMatchedLines = fileResult.TotalMatchedLines,
+                    TotalMatchedLines = totalForStats,
                     OutOfDateLines = outOfDateCount
                 });
 
-                repoTotalMatched[repoId] = (repoTotalMatched.TryGetValue(repoId, out var tot) ? tot : 0) + fileResult.TotalMatchedLines;
+                repoTotalMatched[repoId] = (repoTotalMatched.TryGetValue(repoId, out var tot) ? tot : 0) + totalForStats;
                 repoOutOfDate[repoId] = (repoOutOfDate.TryGetValue(repoId, out var ood) ? ood : 0) + outOfDateCount;
             }
 
@@ -315,6 +367,7 @@ public sealed class WorkspaceFileVersionService(
                 link.TotalFileLines = repoTotalMatched.TryGetValue(link.RepositoryId, out var tot) ? tot : (int?)null;
             }
             await dbContext.SaveChangesAsync(cancellationToken);
+            logger.LogDebug("CheckAndPersist completed for workspace {WorkspaceId} in {ElapsedMs}ms", workspaceId, sw.ElapsedMilliseconds);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -382,6 +435,7 @@ public sealed class WorkspaceFileVersionService(
         [System.Text.Json.Serialization.JsonPropertyName("filePath")] public string? FilePath { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("fileName")] public string? FileName { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("totalMatchedLines")] public int TotalMatchedLines { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("expectedTokenCount")] public int ExpectedTokenCount { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("outOfDateLines")] public List<CheckFileVersionsAgentOutOfDateLine>? OutOfDateLines { get; set; }
     }
 

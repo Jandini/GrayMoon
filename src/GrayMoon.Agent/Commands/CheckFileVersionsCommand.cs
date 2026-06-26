@@ -32,6 +32,12 @@ public sealed class CheckFileVersionsCommand(IGitService git) : ICommandHandler<
             var fullFilePath = Path.Combine(repoPath, filePath.Replace('/', Path.DirectorySeparatorChar));
             var fileName = Path.GetFileName(fullFilePath);
 
+            var patternEntries = ParsePatternLines(pattern);
+            if (patternEntries.Count == 0)
+                continue;
+
+            var expectedTokenCount = patternEntries.Count(e => expectedVersions.ContainsKey(e.RepoName));
+
             if (!File.Exists(fullFilePath))
             {
                 results.Add(new CheckFileVersionsResult
@@ -40,18 +46,16 @@ public sealed class CheckFileVersionsCommand(IGitService git) : ICommandHandler<
                     FilePath = filePath,
                     FileName = fileName,
                     TotalMatchedLines = 0,
-                    OutOfDateLines = []
+                    ExpectedTokenCount = expectedTokenCount,
+                    OutOfDateLines = BuildMissingTokenLines(patternEntries, expectedVersions, matchedTokens: null)
                 });
                 continue;
             }
 
-            var patternEntries = ParsePatternLines(pattern);
-            if (patternEntries.Count == 0)
-                continue;
-
             var fileLines = await File.ReadAllLinesAsync(fullFilePath, cancellationToken);
             var totalMatchedLines = 0;
             var outOfDateLines = new List<CheckFileVersionsOutOfDateLine>();
+            var matchedTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var line in fileLines)
             {
@@ -67,6 +71,7 @@ public sealed class CheckFileVersionsCommand(IGitService git) : ICommandHandler<
                     var valueEnd = suffix.Length > 0 ? trimmedLine.Length - suffix.Length : trimmedLine.Length;
                     var currentValue = trimmedLine[prefix.Length..valueEnd];
                     totalMatchedLines++;
+                    matchedTokens.Add(repoName);
 
                     if (expectedVersions.TryGetValue(repoName, out var expectedValue) && currentValue != expectedValue)
                     {
@@ -81,17 +86,48 @@ public sealed class CheckFileVersionsCommand(IGitService git) : ICommandHandler<
                 }
             }
 
+            foreach (var missing in BuildMissingTokenLines(patternEntries, expectedVersions, matchedTokens))
+            {
+                if (!outOfDateLines.Any(o => string.Equals(o.TokenName, missing.TokenName, StringComparison.OrdinalIgnoreCase)))
+                    outOfDateLines.Add(missing);
+            }
+
             results.Add(new CheckFileVersionsResult
             {
                 RepositoryName = repositoryName,
                 FilePath = filePath,
                 FileName = fileName,
                 TotalMatchedLines = totalMatchedLines,
+                ExpectedTokenCount = expectedTokenCount,
                 OutOfDateLines = outOfDateLines
             });
         }
 
         return new CheckFileVersionsResponse { Files = results };
+    }
+
+    private static List<CheckFileVersionsOutOfDateLine> BuildMissingTokenLines(
+        IReadOnlyList<(string Prefix, string RepoName, string Suffix)> patternEntries,
+        IReadOnlyDictionary<string, string> expectedVersions,
+        IReadOnlySet<string>? matchedTokens)
+    {
+        var missing = new List<CheckFileVersionsOutOfDateLine>();
+        foreach (var (_, repoName, _) in patternEntries)
+        {
+            if (!expectedVersions.TryGetValue(repoName, out var expectedValue))
+                continue;
+            if (matchedTokens != null && matchedTokens.Contains(repoName))
+                continue;
+
+            missing.Add(new CheckFileVersionsOutOfDateLine
+            {
+                TokenName = repoName,
+                CurrentValue = "",
+                ExpectedValue = expectedValue
+            });
+        }
+
+        return missing;
     }
 
     private static List<(string Prefix, string RepoName, string Suffix)> ParsePatternLines(string pattern)
