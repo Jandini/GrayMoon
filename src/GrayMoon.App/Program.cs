@@ -38,9 +38,13 @@ try
     // Default SignalR incoming message limit is 32KB. SyncRepository ResponseCommand carries branch lists
     // plus full .csproj/package graphs; larger repos exceed that and the server closes the connection,
     // which surfaces on the agent as HubException during InvokeAsync (not a git failure).
-    builder.Services.Configure<HubOptions>(options =>
+    // MaximumParallelInvocationsPerClient > 1 allows the hub to process ResponseCommand while SyncCommand is
+    // still running its async work (DB + CheckFileVersions round-trip). Without this, the hub reader
+    // serializes invocations and deadlocks: SyncCommand awaits a ResponseCommand that can never arrive.
+    builder.Services.AddSignalR(options =>
     {
         options.MaximumReceiveMessageSize = 10 * 1024 * 1024;
+        options.MaximumParallelInvocationsPerClient = 4;
     });
 
     // Database (SQLite) for persisted data - stored in db/ for easy container volume mounting
