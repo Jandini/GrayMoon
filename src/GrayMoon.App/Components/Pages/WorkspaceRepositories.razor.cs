@@ -1963,7 +1963,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                         ct,
                         job.ReportProgress,
                         (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
-                        repoIdsToUpdate: reposNeedingWork.Count > 0 ? reposNeedingWork : null,
+                        repoIdsToUpdate: reposNeedingWork,
                         commitMessage: commitMessage,
                         includeDepsInCommitMessage: includeDepsInCommitMessage);
                 }

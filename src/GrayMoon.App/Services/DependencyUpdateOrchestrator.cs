@@ -38,6 +38,10 @@ public sealed class DependencyUpdateOrchestrator(
         bool includeDepsInCommitMessage = true,
         int? maxLevel = null)
     {
+        // Non-null empty set means the caller determined no repos need work.
+        if (repoIdsToUpdate is { Count: 0 })
+            return;
+
         var hadError = false;
         void OnRepoError(int repoId, string msg)
         {
@@ -202,7 +206,7 @@ public sealed class DependencyUpdateOrchestrator(
         var levelRepoIds = workspace.Repositories
             .Where(link => link.Repository != null)
             .Where(link => !IsPinnedToTag(link))
-            .Where(link => selectedRepositoryIds == null || selectedRepositoryIds.Count == 0 || selectedRepositoryIds.Contains(link.RepositoryId))
+            .Where(link => selectedRepositoryIds == null || selectedRepositoryIds.Contains(link.RepositoryId))
             .GroupBy(link => link.DependencyLevel ?? 0)
             .OrderBy(g => g.Key)
             .Select(g => (Level: g.Key, RepoIds: (IReadOnlySet<int>)g.Select(x => x.RepositoryId).ToHashSet()))

@@ -595,7 +595,7 @@
                     job.ReportProgress,
                     (_, _) => { },
                     onAppSideComplete: () => { },
-                    repoIdsToUpdate: reposNeedingWork.Count > 0 ? reposNeedingWork : null,
+                    repoIdsToUpdate: reposNeedingWork,
                     commitMessage: null,
                     includeDepsInCommitMessage: true);
             }
@@ -658,7 +658,7 @@
                     job.ReportProgress,
                     (_, _) => { },
                     onAppSideComplete: () => { },
-                    repoIdsToUpdate: reposNeedingWork.Count > 0 ? reposNeedingWork : null,
+                    repoIdsToUpdate: reposNeedingWork,
                     commitMessage: null,
                     includeDepsInCommitMessage: true);
 
