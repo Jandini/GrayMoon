@@ -152,12 +152,25 @@
                                             @if (entry.i == 0 && AllDependencyLines.Count == 0 && CustomDependencyLines.Count == 0)
                                             {
                                                 <div class="dependency-badge-tooltip-header">
-                                                    <span class="dependency-badge-tooltip-title">@entry.fg.Key - dependencies (up to date):</span>
+                                                    <span class="dependency-badge-tooltip-title">
+                                                        <span class="dependency-badge-tooltip-filename">@entry.fg.Key</span><span class="dependency-badge-tooltip-section-suffix"> (up to date):</span>
+                                                    </span>
+                                                    <button type="button"
+                                                            class="dependency-badge-tooltip-copy"
+                                                            title="Copy list to clipboard"
+                                                            aria-label="Copy list to clipboard"
+                                                            @onclick="HandleCopyAllDependencies"
+                                                            @onclick:preventDefault
+                                                            @onclick:stopPropagation>
+                                                        <i class="bi bi-clipboard" aria-hidden="true"></i>
+                                                    </button>
                                                 </div>
                                             }
                                             else
                                             {
-                                                <div class="dependency-badge-tooltip-section-header">@entry.fg.Key - dependencies (up to date):</div>
+                                                <div class="dependency-badge-tooltip-section-header">
+                                                    <span class="dependency-badge-tooltip-filename">@entry.fg.Key</span><span class="dependency-badge-tooltip-section-suffix"> (up to date):</span>
+                                                </div>
                                             }
                                             @foreach (var line in entry.fg)
                                             {
@@ -165,25 +178,6 @@
                                                     <code>@line.TokenName</code> <span class="dependency-badge-tooltip-versions">@line.Version</span>
                                                 </div>
                                             }
-                                        }
-                                    }
-                                    else if (AllFileVersionLines.Count > 0)
-                                    {
-                                        @if (AllDependencyLines.Count > 0 || CustomDependencyLines.Count > 0)
-                                        {
-                                            <div class="dependency-badge-tooltip-section-header">File dependencies (up to date):</div>
-                                        }
-                                        else
-                                        {
-                                            <div class="dependency-badge-tooltip-header">
-                                                <span class="dependency-badge-tooltip-title">File dependencies (up to date):</span>
-                                            </div>
-                                        }
-                                        @foreach (var line in AllFileVersionLines.GroupBy(l => l.TokenName).Select(g => g.First()))
-                                        {
-                                            <div class="dependency-badge-tooltip-line">
-                                                <code>@line.TokenName</code> <span class="dependency-badge-tooltip-versions">@line.Version</span>
-                                            </div>
                                         }
                                     }
                                     @if (CustomDependencyLines.Count > 0)
@@ -196,6 +190,15 @@
                                         {
                                             <div class="dependency-badge-tooltip-header">
                                                 <span class="dependency-badge-tooltip-title">Custom dependencies:</span>
+                                                <button type="button"
+                                                        class="dependency-badge-tooltip-copy"
+                                                        title="Copy list to clipboard"
+                                                        aria-label="Copy list to clipboard"
+                                                        @onclick="HandleCopyAllDependencies"
+                                                        @onclick:preventDefault
+                                                        @onclick:stopPropagation>
+                                                    <i class="bi bi-clipboard" aria-hidden="true"></i>
+                                                </button>
                                             </div>
                                         }
                                         @foreach (var name in CustomDependencyLines)
@@ -265,6 +268,15 @@
                                         {
                                             <div class="dependency-badge-tooltip-header">
                                                 <span class="dependency-badge-tooltip-title">File dependencies requiring update:</span>
+                                                <button type="button"
+                                                        class="dependency-badge-tooltip-copy"
+                                                        title="Copy list to clipboard"
+                                                        aria-label="Copy list to clipboard"
+                                                        @onclick="HandleCopyDependencies"
+                                                        @onclick:preventDefault
+                                                        @onclick:stopPropagation>
+                                                    <i class="bi bi-clipboard" aria-hidden="true"></i>
+                                                </button>
                                             </div>
                                         }
                                         @foreach (var line in MismatchedFileVersionLines)
@@ -291,6 +303,15 @@
                                         {
                                             <div class="dependency-badge-tooltip-header">
                                                 <span class="dependency-badge-tooltip-title">Custom dependencies:</span>
+                                                <button type="button"
+                                                        class="dependency-badge-tooltip-copy"
+                                                        title="Copy list to clipboard"
+                                                        aria-label="Copy list to clipboard"
+                                                        @onclick="HandleCopyDependencies"
+                                                        @onclick:preventDefault
+                                                        @onclick:stopPropagation>
+                                                    <i class="bi bi-clipboard" aria-hidden="true"></i>
+                                                </button>
                                             </div>
                                         }
                                         @foreach (var name in CustomDependencyLines)
@@ -466,31 +487,72 @@
 
     private async Task HandleCopyDependencies()
     {
-        if (MismatchedDependencyLines.Count == 0 && MismatchedFileVersionLines.Count == 0) return;
+        if (MismatchedDependencyLines.Count == 0 && MismatchedFileVersionLines.Count == 0 && CustomDependencyLines.Count == 0) return;
         var sb = new System.Text.StringBuilder();
         var repoName = Link?.Repository?.RepositoryName;
-        if (!string.IsNullOrWhiteSpace(repoName))
-            sb.AppendLine($"{repoName} - dependencies requiring update:");
-        else
-            sb.AppendLine("Dependencies requiring update:");
-        foreach (var line in MismatchedDependencyLines)
-            sb.AppendLine($"{line.PackageId}: {line.CurrentVersion} -> {line.NewVersion}");
-        foreach (var line in MismatchedFileVersionLines)
-            sb.AppendLine($"{line.TokenName}: {line.CurrentValue} -> {line.ExpectedValue}");
+        if (MismatchedDependencyLines.Count > 0)
+        {
+            if (!string.IsNullOrWhiteSpace(repoName))
+                sb.AppendLine($"{repoName} - dependencies requiring update:");
+            else
+                sb.AppendLine("Dependencies requiring update:");
+            foreach (var line in MismatchedDependencyLines)
+                sb.AppendLine($"{line.PackageId}: {line.CurrentVersion} -> {line.NewVersion}");
+        }
+        if (MismatchedFileVersionLines.Count > 0)
+        {
+            if (sb.Length > 0)
+                sb.AppendLine();
+            sb.AppendLine("File dependencies requiring update:");
+            foreach (var line in MismatchedFileVersionLines)
+            {
+                if (!string.IsNullOrEmpty(line.FileName))
+                    sb.AppendLine($"{line.FileName} - {line.TokenName}: {line.CurrentValue} -> {line.ExpectedValue}");
+                else
+                    sb.AppendLine($"{line.TokenName}: {line.CurrentValue} -> {line.ExpectedValue}");
+            }
+        }
+        if (CustomDependencyLines.Count > 0)
+        {
+            if (sb.Length > 0)
+                sb.AppendLine();
+            sb.AppendLine("Custom dependencies:");
+            foreach (var name in CustomDependencyLines)
+                sb.AppendLine(name);
+        }
         await OnCopyDependencies.InvokeAsync(sb.ToString().TrimEnd());
     }
 
     private async Task HandleCopyAllDependencies()
     {
-        if (AllDependencyLines.Count == 0) return;
+        if (AllDependencyLines.Count == 0 && AllFileVersionLines.Count == 0 && CustomDependencyLines.Count == 0) return;
         var sb = new System.Text.StringBuilder();
         var repoName = Link?.Repository?.RepositoryName;
-        if (!string.IsNullOrWhiteSpace(repoName))
-            sb.AppendLine($"{repoName} - dependencies (up to date):");
-        else
-            sb.AppendLine("Dependencies (up to date):");
-        foreach (var line in AllDependencyLines)
-            sb.AppendLine($"{line.PackageId}: {line.Version}");
+        if (AllDependencyLines.Count > 0)
+        {
+            if (!string.IsNullOrWhiteSpace(repoName))
+                sb.AppendLine($"{repoName} - dependencies (up to date):");
+            else
+                sb.AppendLine("Dependencies (up to date):");
+            foreach (var line in AllDependencyLines)
+                sb.AppendLine($"{line.PackageId}: {line.Version}");
+        }
+        foreach (var fileGroup in AllFileVersionLines.GroupBy(l => l.FileName))
+        {
+            if (sb.Length > 0)
+                sb.AppendLine();
+            sb.AppendLine($"{fileGroup.Key} (up to date):");
+            foreach (var line in fileGroup)
+                sb.AppendLine($"{line.TokenName}: {line.Version}");
+        }
+        if (CustomDependencyLines.Count > 0)
+        {
+            if (sb.Length > 0)
+                sb.AppendLine();
+            sb.AppendLine("Custom dependencies:");
+            foreach (var name in CustomDependencyLines)
+                sb.AppendLine(name);
+        }
         await OnCopyDependencies.InvokeAsync(sb.ToString().TrimEnd());
     }
 }

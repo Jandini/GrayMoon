@@ -8,9 +8,15 @@
          @onkeydown="HandleKeyDown">
         <div class="modal-dialog modal-lg custom-deps-modal-dialog">
             <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Custom dependencies@(string.IsNullOrEmpty(DependentRepoName) ? "" : $" - {DependentRepoName}")</h5>
-                    <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
+                <div class="modal-header custom-deps-modal-header">
+                    <h5 class="modal-title custom-deps-modal-title">
+                        Custom dependencies
+                        @if (!string.IsNullOrEmpty(DependentRepoName))
+                        {
+                            <span class="custom-deps-modal-repo-name text-muted fw-normal fs-6" title="@DependentRepoName">@DependentRepoName</span>
+                        }
+                    </h5>
+                    <button type="button" class="btn-close flex-shrink-0" aria-label="Close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body custom-deps-modal-body">
                     <div class="form-label mb-2">Repositories <span class="text-muted ms-1">@GetSelectableCount() available</span></div>

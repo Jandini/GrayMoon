@@ -475,9 +475,17 @@
 
 ::deep .repositories-table .dependency-badge-tooltip-file {
     display: block;
-    color: #888;
+    color: #fff;
     font-size: 0.78rem;
     margin-bottom: 0.05rem;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-filename {
+    color: #fff;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-section-suffix {
+    color: #aaa;
 }
 
 ::deep .repositories-table .dependency-badge-tooltip-versions {
