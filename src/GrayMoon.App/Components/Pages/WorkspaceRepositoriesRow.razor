@@ -13,9 +13,11 @@
         : null;
     var depCount = Link.Dependencies ?? 0;
     var unmatchedDeps = Link.UnmatchedDeps ?? 0;
-    var outOfDateFiles = FileLineStatuses.Sum(s => s.OutOfDateLines);
-    var totalWithFiles = depCount + TotalMatchedFileLines;
-    var unmatchedWithFiles = unmatchedDeps + outOfDateFiles;
+    var totalFileRepos = AllFileVersionLines.Select(l => l.TokenName).Distinct().Count();
+    var filesWithOutOfDate = FileLineStatuses.Where(s => s.OutOfDateLines > 0).Select(s => s.FileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var outOfDateFileRepos = AllFileVersionLines.Where(l => filesWithOutOfDate.Contains(l.FileName)).Select(l => l.TokenName).Distinct().Count();
+    var totalWithFiles = depCount + totalFileRepos;
+    var unmatchedWithFiles = unmatchedDeps + outOfDateFileRepos;
     var graphUrl = WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, repositoryId: repo.RepositoryId);
 
     <tr>
@@ -187,7 +189,7 @@
                               @onkeydown="OnDependencyBadgeKeydown"
                               @onmouseleave="OnDependencyBadgeMouseLeave">
                             <span class="badge build-dep-badge @(depBadgeOnTag ? "build-dep-badge-none" : "build-dep-badge-mismatch")">@unmatchedWithFiles of @totalWithFiles</span>
-                            @if (MismatchedDependencyLines.Count > 0 || outOfDateFiles > 0)
+                            @if (MismatchedDependencyLines.Count > 0 || FileLineStatuses.Any(s => s.OutOfDateLines > 0))
                             {
                                 <div class="dependency-badge-tooltip">
                                     @if (MismatchedDependencyLines.Count > 0)
@@ -309,10 +311,8 @@
     [Parameter] public IReadOnlyList<(string PackageId, string Version)> AllDependencyLines { get; set; } = Array.Empty<(string, string)>();
     /// <summary>Out-of-date version-file line statuses for this repository loaded from DB (read-only, persisted at sync time).</summary>
     [Parameter] public IReadOnlyList<WorkspaceFileLineStatus> FileLineStatuses { get; set; } = Array.Empty<WorkspaceFileLineStatus>();
-    /// <summary>Per-token (FileName, TokenName, Version) entries for the OK badge tooltip. Populated when all file-tracked deps are up to date.</summary>
+    /// <summary>Per-token (FileName, TokenName, Version) entries for the badge and tooltip. TokenName is the repository name being tracked.</summary>
     [Parameter] public IReadOnlyList<(string FileName, string TokenName, string Version)> AllFileVersionLines { get; set; } = Array.Empty<(string, string, string)>();
-    /// <summary>Total count of version-file lines that matched configured patterns in this repository's files (matched lines, regardless of staleness).</summary>
-    [Parameter] public int TotalMatchedFileLines { get; set; }
     [Parameter] public bool IsVersionClicked { get; set; }
     [Parameter] public bool IsDependencyBadgeClicked { get; set; }
     [Parameter] public string? RepositoryError { get; set; }

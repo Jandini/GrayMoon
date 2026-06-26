@@ -490,9 +490,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private IReadOnlyList<(string FileName, string TokenName, string Version)> GetAllFileVersionLines(int repositoryId) =>
         _allFileVersionLinesByRepo.TryGetValue(repositoryId, out var lines) ? lines : Array.Empty<(string, string, string)>();
 
-    private int GetTotalMatchedFileLines(int repositoryId) =>
-        workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.TotalFileLines ?? 0;
-
     private void OnSearchChanged(ChangeEventArgs e)
     {
         searchTerm = e.Value?.ToString() ?? string.Empty;
