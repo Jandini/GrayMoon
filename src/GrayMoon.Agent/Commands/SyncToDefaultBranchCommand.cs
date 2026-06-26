@@ -88,6 +88,10 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, ILogger<SyncToDe
             };
         }
 
+        var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
+        var (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, defaultBranch, defaultRef, cancellationToken);
+        var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);
+
         var localBranches = await git.GetLocalBranchesAsync(repoPath, cancellationToken);
         var remoteBranches = await git.GetRemoteBranchesFromRefsAsync(repoPath, cancellationToken);
         var tags = await git.GetTagsAsync(repoPath, cancellationToken);
@@ -101,7 +105,12 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, ILogger<SyncToDe
             LocalBranches = localBranches,
             RemoteBranches = remoteBranches,
             Tags = tags,
-            CurrentTag = currentTag
+            CurrentTag = currentTag,
+            OutgoingCommits = outgoing,
+            IncomingCommits = incoming,
+            HasUpstream = hasUpstream,
+            DefaultBranchBehind = defaultBehind,
+            DefaultBranchAhead = defaultAhead
         };
     }
 }
