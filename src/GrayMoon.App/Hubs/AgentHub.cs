@@ -8,7 +8,7 @@ namespace GrayMoon.App.Hubs;
 public sealed class AgentHub(
     AgentConnectionTracker connectionTracker,
     AgentQueueStateService agentQueueStateService,
-    SyncCommandHandler syncCommandHandler,
+    AgentSyncNotificationQueue syncNotificationQueue,
     IServiceScopeFactory scopeFactory,
     ILogger<AgentHub> logger) : Hub
 {
@@ -84,9 +84,10 @@ public sealed class AgentHub(
     }
 
     /// <summary>Invoked by the agent when a hook fires: agent ran GitVersion (and fetch/commit counts) and pushes result for app to persist.</summary>
-    public async Task SyncCommand(RepositorySyncNotification notification)
+    public Task SyncCommand(RepositorySyncNotification notification)
     {
-        await syncCommandHandler.HandleAsync(notification);
+        syncNotificationQueue.Enqueue(notification);
+        return Task.CompletedTask;
     }
 
     /// <summary>Invoked by the agent when it connects to report its SemVer version.</summary>

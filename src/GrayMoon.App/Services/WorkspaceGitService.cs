@@ -26,7 +26,8 @@ public class WorkspaceGitService(
     PackageRegistrySyncService? packageRegistrySyncService = null,
     NuGetService? nuGetService = null,
     ConnectorRepository? connectorRepository = null,
-    ConnectorHealthService? connectorHealthService = null)
+    ConnectorHealthService? connectorHealthService = null,
+    WorkspaceFileVersionService? fileVersionService = null)
 {
     private readonly IAgentBridge _agentBridge = agentBridge ?? throw new ArgumentNullException(nameof(agentBridge));
     private readonly WorkspaceService _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
@@ -43,6 +44,7 @@ public class WorkspaceGitService(
     private readonly NuGetService? _nuGetService = nuGetService;
     private readonly ConnectorRepository? _connectorRepository = connectorRepository;
     private readonly ConnectorHealthService? _connectorHealthService = connectorHealthService;
+    private readonly WorkspaceFileVersionService? _fileVersionService = fileVersionService;
 
     public async Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
@@ -134,6 +136,9 @@ public class WorkspaceGitService(
             isInSync = results.All(r => r.info.Version != "-" && r.info.Branch != "-");
         }
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
+
+        if (_fileVersionService != null)
+            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
 
         _logger.LogDebug("Sync completed for workspace {WorkspaceName}", workspace.Name);
         return results.ToDictionary(r => r.RepositoryId, r => r.info);
@@ -413,6 +418,9 @@ public class WorkspaceGitService(
         if (updatesToPersist.Count > 0)
             await _workspaceProjectRepository.UpdateProjectDependencyVersionsAsync(workspaceId, updatesToPersist, cancellationToken);
 
+        if (_fileVersionService != null)
+            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
+
         await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
 
         _logger.LogDebug("Sync dependencies completed for workspace {WorkspaceName}. Updated {RepoCount} repos, persisted {UpdateCount} versions", workspace.Name, toSync.Count, updatesToPersist.Count);
@@ -492,6 +500,9 @@ public class WorkspaceGitService(
     /// <summary>Broadcasts WorkspaceSynced so the grid refreshes. Call after SyncDependenciesAsync (which already recomputes and persists UnmatchedDeps).</summary>
     public async Task RecomputeAndBroadcastWorkspaceSyncedAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
+        if (_fileVersionService != null)
+            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
+
         await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
@@ -750,6 +761,9 @@ public class WorkspaceGitService(
             .ToListAsync(cancellationToken);
         var isInSync = allLinks.Count > 0 && allLinks.All(s => s == RepoSyncStatus.InSync);
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
+
+        if (_fileVersionService != null)
+            await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
 
         await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
 

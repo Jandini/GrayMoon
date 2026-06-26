@@ -16,6 +16,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<RepositoryBranch> RepositoryBranches => Set<RepositoryBranch>();
     public DbSet<WorkspaceFile> WorkspaceFiles => Set<WorkspaceFile>();
     public DbSet<WorkspaceFileVersionConfig> WorkspaceFileVersionConfigs => Set<WorkspaceFileVersionConfig>();
+    public DbSet<WorkspaceFileLineStatus> WorkspaceFileLineStatuses => Set<WorkspaceFileLineStatus>();
+    public DbSet<WorkspaceRepositoryCustomDependency> WorkspaceRepositoryCustomDependencies => Set<WorkspaceRepositoryCustomDependency>();
     public DbSet<Setting> Settings => Set<Setting>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -285,6 +287,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .IsRequired()
                 .HasMaxLength(2000);
 
+            entity.Property(f => f.IsMissingOnDisk);
+
             entity.HasOne(f => f.Workspace)
                 .WithMany()
                 .HasForeignKey(f => f.WorkspaceId)
@@ -306,6 +310,38 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasOne(c => c.File)
                 .WithMany()
                 .HasForeignKey(c => c.FileId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WorkspaceFileLineStatus>(entity =>
+        {
+            entity.ToTable("WorkspaceFileLineStatuses");
+            entity.HasKey(s => s.StatusId);
+            entity.Property(s => s.StatusId).ValueGeneratedOnAdd();
+            entity.HasIndex(s => new { s.WorkspaceId, s.RepositoryId, s.FilePath, s.TokenName }).IsUnique();
+            entity.Property(s => s.FilePath).IsRequired().HasMaxLength(2000);
+            entity.Property(s => s.FileName).IsRequired().HasMaxLength(260);
+            entity.Property(s => s.TokenName).IsRequired().HasMaxLength(260);
+            entity.Property(s => s.CurrentValue).HasMaxLength(100);
+            entity.Property(s => s.ExpectedValue).HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<WorkspaceRepositoryCustomDependency>(entity =>
+        {
+            entity.ToTable("WorkspaceRepositoryCustomDependencies");
+            entity.HasKey(d => d.CustomDependencyId);
+            entity.Property(d => d.CustomDependencyId).ValueGeneratedOnAdd();
+            entity.HasIndex(d => new { d.DependentWorkspaceRepositoryId, d.ReferencedWorkspaceRepositoryId })
+                .IsUnique();
+
+            entity.HasOne(d => d.DependentWorkspaceRepository)
+                .WithMany()
+                .HasForeignKey(d => d.DependentWorkspaceRepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(d => d.ReferencedWorkspaceRepository)
+                .WithMany()
+                .HasForeignKey(d => d.ReferencedWorkspaceRepositoryId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

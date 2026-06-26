@@ -12,6 +12,7 @@
 @inject WorkspaceFileRepository WorkspaceFileRepository
 @inject WorkspaceFileVersionConfigRepository VersionConfigRepository
 @inject WorkspaceFileVersionService FileVersionService
+@inject IServiceScopeFactory ServiceScopeFactory
 @inject WorkspaceService WorkspaceService
 @inject IToastService ToastService
 @inject ILogger<WorkspaceFiles> Logger
@@ -111,7 +112,13 @@
                                     @foreach (var f in FilteredFiles)
                                     {
                                         <tr>
-                                            <td class="col-filename"><strong>@f.FileName</strong></td>
+                                            <td class="col-filename">
+                                                <strong>@f.FileName</strong>
+                                                @if (f.IsMissingOnDisk)
+                                                {
+                                                    <span class="badge bg-secondary ms-2" title="File not found on disk; excluded from dependency and badge counts until restored.">Missing on disk</span>
+                                                }
+                                            </td>
                                             <td class="col-filepath text-muted">@f.FilePath</td>
                                             <td class="col-repo">@(f.RepositoryName ?? "-")</td>
                                             <td class="col-actions">
@@ -150,6 +157,7 @@
                 OnCancel="CloseAddFilesModal" />
 
 <VersionConfigModal IsVisible="@showVersionConfigModal"
+                    WorkspaceId="WorkspaceId"
                     File="@configuringFile"
                     WorkspaceRepos="@workspaceRepos"
                     CurrentPattern="@currentConfigPattern"
@@ -254,7 +262,8 @@
                 RepositoryId = f.RepositoryId,
                 RepositoryName = f.Repository?.RepositoryName,
                 FileName = f.FileName,
-                FilePath = f.FilePath
+                FilePath = f.FilePath,
+                IsMissingOnDisk = f.IsMissingOnDisk == true
             }).ToList();
             var configs = await VersionConfigRepository.GetByWorkspaceIdAsync(WorkspaceId);
             fileVersionConfigs = configs.ToDictionary(c => c.FileId, c => c.VersionPattern);
@@ -333,12 +342,23 @@
                 fileVersionConfigs[configuringFile.FileId] = normalized;
             }
             CloseVersionConfigModal();
+            await RefreshFileDependencyStateAsync();
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error saving version config for FileId={FileId}", configuringFile.FileId);
             errorMessage = "Failed to save version configuration.";
         }
+    }
+
+    private async Task RefreshFileDependencyStateAsync()
+    {
+        await using var scope = ServiceScopeFactory.CreateAsyncScope();
+        var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
+        var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
+        await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, forceFresh: true);
+        await projectRepo.RecomputeAndPersistRepositoryDependencyStatsAsync(WorkspaceId);
+        await LoadAsync();
     }
 
     private async Task UpdateVersionsAsync()
@@ -353,6 +373,13 @@
         try
         {
             var (updated, failed, error, _) = await FileVersionService.UpdateAllVersionsAsync(WorkspaceId, selectedRepositoryIds: null, cancellationToken: _updateCts.Token);
+            if (error == null)
+            {
+                updateMessage = "Checking file versions...";
+                StateHasChanged();
+                await FileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, _updateCts.Token, forceFresh: true);
+                await LoadAsync();
+            }
             if (error != null)
                 errorMessage = error;
             else if (failed > 0)
@@ -382,6 +409,7 @@
             errorMessage = null;
             await WorkspaceFileRepository.RemoveAsync(f.FileId);
             files.Remove(f);
+            await RefreshFileDependencyStateAsync();
         }
         catch (Exception ex)
         {

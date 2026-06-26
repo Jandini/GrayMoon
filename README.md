@@ -106,6 +106,19 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 ## What's new
 
+### File version config validation
+
+The version configuration dialog now validates pattern lines against the actual file on disk and highlights any that cannot be matched.
+
+- **On dialog open:** as soon as the dialog appears, GrayMoon calls the agent to scan the file and checks which configured pattern lines exist. Results appear within a second.
+- **While editing:** after 2 seconds of inactivity in the textarea, the check reruns automatically so you get immediate feedback without any button click.
+- **Red badges for missing lines:** token names whose pattern line is not found in the file appear as red badges below the textarea under "Not found in file:". Tokens that ARE found (even with a wrong version) are not flagged here.
+- **"Checking file..." indicator:** a small muted label appears while the agent call is in flight so you know validation is running.
+
+### Missing file lines no longer counted as out of date
+
+When a configured version pattern line does not exist in the file (for example a `PackageReference` was removed from a `.csproj` or a variable was dropped from a `.env`), GrayMoon previously counted it as out of date and showed it in the dependency tooltip as `-> expected-version` with nothing on the left. Those absent lines are now silently ignored: they do not contribute to the "X of Y" out-of-date badge count and produce no row in the file dependency tooltip. Only lines that actually exist in the file but carry a different version from the expected one are reported as out of date.
+
 ### One-click agent update from the badge
 
 When the agent version does not match the app, the header badge shows a red **update** label. Clicking it now triggers a self-update directly - no need to visit the Agent page and copy a command.

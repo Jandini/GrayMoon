@@ -677,6 +677,12 @@
                 var (updated, failed, error, _) = await fileVersionService.UpdateAllVersionsAsync(
                     workspaceId, selectedRepositoryIds: null, cancellationToken: ct);
 
+                if (error == null)
+                {
+                    job.ReportProgress("Checking file versions...");
+                    await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, ct, forceFresh: true);
+                }
+
                 if (!_disposed)
                     await InvokeAsync(() =>
                     {

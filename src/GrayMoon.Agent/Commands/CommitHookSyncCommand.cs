@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using GrayMoon.Abstractions.Agent;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.Agent.Abstractions;
@@ -98,9 +99,14 @@ public sealed class CommitHookSyncCommand(IGitService git, ICsProjFileService cs
                 Projects = syncProjects,
                 ErrorMessage = null
             };
+            var syncSw = Stopwatch.StartNew();
+            logger.LogDebug(
+                "CommitHookSync invoking SyncCommand: workspace={WorkspaceId}, repo={RepoId}",
+                payload.WorkspaceId, payload.RepositoryId);
             await connection.InvokeAsync(AgentHubMethods.SyncCommand, notification, cancellationToken);
-            logger.LogInformation("CommitHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}, hasUpstream={HasUpstream}",
-                payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream);
+            logger.LogInformation(
+                "CommitHookSync SyncCommand returned in {ElapsedMs}ms: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}, hasUpstream={HasUpstream}",
+                syncSw.ElapsedMilliseconds, payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream);
         }
         else
         {

@@ -139,11 +139,12 @@ public sealed class DependencyUpdateOrchestrator(
             }
         }
 
-        // Finalize: broadcast so grid refreshes.
+        // Finalize: broadcast so grid refreshes, then run one file-version check for the whole update.
         if (!hadError)
         {
             onAppSideComplete?.Invoke();
             await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+            await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
         }
     }
 

@@ -4,6 +4,7 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
 using Microsoft.AspNetCore.Components;
+
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.JSInterop;
@@ -22,7 +23,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private string? errorMessage;
     private bool isLoading = true;
     private bool? isOutOfSync = null;
-    private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => !wr.IsOnTag && (wr.UnmatchedDeps ?? 0) > 0);
+    private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => !wr.IsOnTag &&
+        ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0));
     private bool isPushRecommended => workspaceRepositories.Any(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false));
     private bool hasTaggedRepos => workspaceRepositories.Any(wr => wr.IsOnTag);
     /// <summary>When true, any repository on its default branch has incoming commits; header shows red Pull button and executes only Pull (commit sync) for those repos. Repos pinned to a tag are excluded.</summary>
@@ -55,9 +57,15 @@ public sealed partial class WorkspaceRepositories : IDisposable
         : $"Fetched {_repositoriesModal.FetchedRepositoryCount} {(_repositoriesModal.FetchedRepositoryCount == 1 ? "repository" : "repositories")}";
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>> _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+    private IReadOnlyDictionary<int, IReadOnlyList<WorkspaceFileLineStatus>> _fileLineStatusByRepo = new Dictionary<int, IReadOnlyList<WorkspaceFileLineStatus>>();
+    private IReadOnlyDictionary<int, IReadOnlyList<(string FileName, string TokenName, string CurrentValue, string ExpectedValue)>> _mismatchedFileVersionLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string, string)>>();
 
     /// <summary>All workspace-internal package dependencies of each repository (PackageId + version as written in the .csproj). Used to populate the dependency-badge tooltip for repositories whose dependencies are up to date.</summary>
     private IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string Version)>> _allDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string)>>();
+    /// <summary>Per-repo (FileName, TokenName, Version) triples derived from version-file configs and current GitVersions. Drives the OK badge file-dependency tooltip.</summary>
+    private IReadOnlyDictionary<int, IReadOnlyList<(string FileName, string TokenName, string Version)>> _allFileVersionLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+    /// <summary>User-declared custom dependency repo names per dependent repository (ordering only).</summary>
+    private IReadOnlyDictionary<int, IReadOnlyList<string>> _customDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<string>>();
     private Dictionary<int, string> repositoryErrors = new(); // repositoryId -> error message
     private HashSet<string> clickedVersions = new(); // Track clicked versions to hide hover until mouse leaves
     private HashSet<int> clickedDependencyBadges = new(); // Track clicked dependency badges to hide tooltip immediately
@@ -70,6 +78,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private UpdateModalState _updateModal = new();
     private UpdateModalState _updateAndPushModal = new();
     private UpdateSingleRepoDependenciesModalState _updateSingleRepoModal = new();
+    private CustomDependenciesModalState _customDependenciesModal = new();
     private PushWithDependenciesModalState _pushWithDependenciesModal = new();
     private ConfirmModalState _confirmModal = new();
     private DefaultBranchWarningModalState _defaultBranchWarningModal = new();
@@ -87,6 +96,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private const int RefreshDebounceMs = 200;
     private CancellationTokenSource? _refreshDebounceCts;
     private readonly object _refreshDebounceLock = new();
+    private readonly SemaphoreSlim _loadMismatchedDepsLock = new(1, 1);
 
     /// <summary>Toast shown when the user attempts a write action against a repository that is pinned to a tag.</summary>
     private const string TagBlockedActionMessage = "Repository is on a tag; checkout a branch first.";
@@ -189,6 +199,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _hubConnection?.DisposeAsync();
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
+        _loadMismatchedDepsLock.Dispose();
     }
 
     private void OnJobServiceChanged()
@@ -400,48 +411,115 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     private async Task LoadMismatchedDependencyLinesAsync()
     {
-        if (!workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0))
+        await _loadMismatchedDepsLock.WaitAsync();
+        try
         {
-            _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
-        }
-        else
-        {
+            // Fresh scope: circuit-scoped DbContext may be busy (e.g. CheckFileVersions during sync/update).
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
+            var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
+
+            if (!workspaceRepositories.Any(wr => (wr.UnmatchedDeps ?? 0) > 0))
+            {
+                _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+            }
+            else
+            {
+                try
+                {
+                    // Use raw sync payloads so tag-pinned repos still get mismatch lines for hover/copy in the badge tooltip.
+                    // GetUpdatePlanAsync excludes tag-pinned repos on purpose so Update does not target them.
+                    var payloads = await projectRepo.GetSyncDependenciesPayloadAsync(WorkspaceId);
+                    var dict = new Dictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>>();
+                    foreach (var p in payloads.Where(p => p.ProjectUpdates.Count > 0))
+                    {
+                        var lines = p.ProjectUpdates
+                            .SelectMany(pu => pu.PackageUpdates)
+                            .GroupBy(x => (x.PackageId.Trim(), x.CurrentVersion.Trim(), x.NewVersion.Trim()))
+                            .Select(g => (g.Key.Item1, g.Key.Item2, g.Key.Item3))
+                            .ToList();
+                        dict[p.RepoId] = lines;
+                    }
+                    _mismatchedDependencyLinesByRepo = dict;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Could not load mismatched dependency lines for workspace {WorkspaceId}", WorkspaceId);
+                    _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+                }
+            }
+
             try
             {
-                // Use raw sync payloads so tag-pinned repos still get mismatch lines for hover/copy in the badge tooltip.
-                // GetUpdatePlanAsync excludes tag-pinned repos on purpose so Update does not target them.
-                var payloads = await WorkspacePageService.WorkspaceProjectRepository
-                    .GetSyncDependenciesPayloadAsync(WorkspaceId);
-                var dict = new Dictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>>();
-                foreach (var p in payloads.Where(p => p.ProjectUpdates.Count > 0))
-                {
-                    var lines = p.ProjectUpdates
-                        .SelectMany(pu => pu.PackageUpdates)
-                        .GroupBy(x => (x.PackageId.Trim(), x.CurrentVersion.Trim(), x.NewVersion.Trim()))
-                        .Select(g => (g.Key.Item1, g.Key.Item2, g.Key.Item3))
-                        .ToList();
-                    dict[p.RepoId] = lines;
-                }
-                _mismatchedDependencyLinesByRepo = dict;
+                _allDependencyLinesByRepo = await projectRepo.GetPackageDependencyLinesByRepoAsync(WorkspaceId);
             }
             catch (Exception ex)
             {
-                Logger.LogDebug(ex, "Could not load mismatched dependency lines for workspace {WorkspaceId}", WorkspaceId);
-                _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+                Logger.LogDebug(ex, "Could not load dependency listing for workspace {WorkspaceId}", WorkspaceId);
+                _allDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string)>>();
+            }
+
+            try
+            {
+                _mismatchedFileVersionLinesByRepo = await fileVersionService.GetMismatchedFileVersionLinesByRepoAsync(WorkspaceId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Could not load mismatched file version lines for workspace {WorkspaceId}", WorkspaceId);
+                _mismatchedFileVersionLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string, string)>>();
+            }
+
+            try
+            {
+                _fileLineStatusByRepo = await fileVersionService.GetFileLineStatusByWorkspaceAsync(WorkspaceId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Could not load file line status for workspace {WorkspaceId}", WorkspaceId);
+                _fileLineStatusByRepo = new Dictionary<int, IReadOnlyList<WorkspaceFileLineStatus>>();
+            }
+
+            try
+            {
+                var repoVersionMap = workspaceRepositories
+                    .Where(r => r.Repository?.RepositoryName != null && !string.IsNullOrEmpty(r.GitVersion))
+                    .ToDictionary(r => r.Repository!.RepositoryName!, r => r.GitVersion!, StringComparer.OrdinalIgnoreCase);
+                _allFileVersionLinesByRepo = await fileVersionService.GetAllFileVersionLinesByRepoAsync(WorkspaceId, repoVersionMap);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Could not load file version lines for workspace {WorkspaceId}", WorkspaceId);
+                _allFileVersionLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+            }
+
+            try
+            {
+                var customDepRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryCustomDependencyRepository>();
+                _customDependencyLinesByRepo = await customDepRepo.GetCustomDependencyNamesByRepoAsync(WorkspaceId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Could not load custom dependency lines for workspace {WorkspaceId}", WorkspaceId);
+                _customDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<string>>();
             }
         }
-
-        try
+        finally
         {
-            _allDependencyLinesByRepo = await WorkspacePageService.WorkspaceProjectRepository
-                .GetPackageDependencyLinesByRepoAsync(WorkspaceId);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogDebug(ex, "Could not load dependency listing for workspace {WorkspaceId}", WorkspaceId);
-            _allDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string)>>();
+            _loadMismatchedDepsLock.Release();
         }
     }
+
+    private bool HasOutOfDateFiles(int repositoryId) =>
+        (workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.OutOfDateFileRepos ?? 0) > 0;
+
+    private IReadOnlyList<(string FileName, string TokenName, string CurrentValue, string ExpectedValue)> GetMismatchedFileVersionLines(int repositoryId) =>
+        _mismatchedFileVersionLinesByRepo.TryGetValue(repositoryId, out var lines) ? lines : Array.Empty<(string, string, string, string)>();
+
+    private IReadOnlyList<WorkspaceFileLineStatus> GetFileLineStatus(int repositoryId) =>
+        _fileLineStatusByRepo.TryGetValue(repositoryId, out var lines) ? lines : Array.Empty<WorkspaceFileLineStatus>();
+
+    private IReadOnlyList<(string FileName, string TokenName, string Version)> GetAllFileVersionLines(int repositoryId) =>
+        _allFileVersionLinesByRepo.TryGetValue(repositoryId, out var lines) ? lines : Array.Empty<(string, string, string)>();
 
     private void OnSearchChanged(ChangeEventArgs e)
     {
@@ -990,6 +1068,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
             var (payload, _) = await workspaceGitService.GetUpdatePlanAsync(WorkspaceId, new HashSet<int> { repositoryId });
             if (payload == null || payload.Count == 0)
             {
+                if (HasOutOfDateFiles(repositoryId))
+                {
+                    OnFileDependencyBadgeClick(repositoryId);
+                    return;
+                }
                 ToastService.Show("No dependency updates for this repository.");
                 return;
             }
@@ -1001,8 +1084,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 && !string.IsNullOrWhiteSpace(repo.DefaultBranchName)
                 && string.Equals(repo.BranchName, repo.DefaultBranchName, StringComparison.Ordinal))
             {
+                var hasFiles = HasOutOfDateFiles(repositoryId);
+                var warningMsg = hasFiles
+                    ? "The following repository is on its default branch. Updating dependencies and file versions will commit changes directly to the default (protected) branch."
+                    : "The following repository is on its default branch. Updating dependencies will commit changes directly to the default (protected) branch.";
                 ShowDefaultBranchWarning(
-                    "The following repository is on its default branch. Updating dependencies will commit changes directly to the default (protected) branch.",
+                    warningMsg,
                     new[] { (repoName ?? $"repo {repositoryId}", repo.DefaultBranchName!) },
                     () => OpenUpdateSingleRepoModalAsync(repoPayload, repositoryId, repoName));
                 return;
@@ -1538,14 +1625,24 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 var (updated, failed, error, _) = await fileVersionService.UpdateAllVersionsAsync(
                     WorkspaceId, selectedRepositoryIds: null, cancellationToken: ct);
 
-                SafeInvoke(() =>
+                if (error == null)
                 {
+                    job.ReportProgress("Checking file versions...");
+                    await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, ct, forceFresh: true);
+                }
+
+                await InvokeAsync(async () =>
+                {
+                    if (_disposed) return;
+                    if (error == null)
+                        await RefreshFromSync();
+                    StateHasChanged();
                     if (error != null)
                         errorMessage = error;
                     else if (failed > 0)
                         errorMessage = $"Updated {updated} line(s). {failed} file(s) could not be updated - check logs.";
                     else
-                        ToastService.Show("Versions updated in configured files.");
+                        ToastService.Show(updated > 0 ? "Versions updated in configured files." : "File versions are already up to date.");
                 });
             }
             catch (OperationCanceledException)
@@ -1555,6 +1652,68 @@ public sealed partial class WorkspaceRepositories : IDisposable
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Error updating file versions for WorkspaceId={WorkspaceId}", WorkspaceId);
+                SafeInvoke(() => errorMessage = "Failed to update file versions. Please try again.");
+                throw;
+            }
+        });
+
+        return Task.CompletedTask;
+    }
+
+    private Task UpdateSingleRepositoryFileVersionsAsync(int repositoryId)
+    {
+        if (workspace == null || IsJobRunning)
+            return Task.CompletedTask;
+        if (IsRepoOnTag(repositoryId))
+        {
+            ToastService.Show(TagBlockedActionMessage);
+            return Task.CompletedTask;
+        }
+
+        errorMessage = null;
+
+        JobService.StartJob(PageJobKey, "Updating file versions...", async (job, ct) =>
+        {
+            try
+            {
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
+                var repoIds = new HashSet<int> { repositoryId };
+                var (updated, failed, error, _) = await fileVersionService.UpdateAllVersionsAsync(
+                    WorkspaceId,
+                    selectedRepositoryIds: repoIds,
+                    filterPatternTokensToSelectedRepositories: false,
+                    cancellationToken: ct);
+
+                if (error != null)
+                {
+                    SafeInvoke(() => errorMessage = error);
+                    return;
+                }
+
+                job.ReportProgress("Checking file versions...");
+                await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, ct, forceFresh: true);
+
+                await InvokeAsync(async () =>
+                {
+                    if (_disposed) return;
+                    await RefreshFromSync();
+                    StateHasChanged();
+                    if (failed > 0)
+                        errorMessage = $"Updated {updated} line(s). {failed} file(s) could not be updated - check logs.";
+                    else if (updated > 0)
+                        ToastService.Show($"Updated {updated} line(s) in configured files.");
+                    else
+                        ToastService.Show("File versions are already up to date.");
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error updating file versions for repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
                 SafeInvoke(() => errorMessage = "Failed to update file versions. Please try again.");
                 throw;
             }
@@ -1711,8 +1870,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     private async Task HandleDependencyBadgeKeydown(KeyboardEventArgs e, int repositoryId, int unmatchedDeps)
     {
-        if ((e.Key == "Enter" || e.Key == " ") && !IsJobRunning)
+        if ((e.Key != "Enter" && e.Key != " ") || IsJobRunning)
+            return;
+        if (unmatchedDeps > 0)
             await ShowConfirmUpdateDependenciesAsync(repositoryId, unmatchedDeps);
+        else if (HasOutOfDateFiles(repositoryId))
+            OnFileDependencyBadgeClick(repositoryId);
     }
 
     /// <summary>Update dependencies for a single repository only (refresh projects, sync deps, no commit). Same as Update but scoped to one repo.</summary>
@@ -2876,6 +3039,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
         StateHasChanged();
     }
 
+    private void OnFileDependencyBadgeClick(int repositoryId)
+    {
+        clickedDependencyBadges.Add(repositoryId);
+        _ = UpdateSingleRepositoryFileVersionsAsync(repositoryId);
+        StateHasChanged();
+    }
+
     private void OnDependencyBadgeMouseLeave(int repositoryId)
     {
         if (clickedDependencyBadges.Remove(repositoryId))
@@ -2957,6 +3127,116 @@ public sealed partial class WorkspaceRepositories : IDisposable
         return _allDependencyLinesByRepo.GetValueOrDefault(repositoryId) ?? Array.Empty<(string PackageId, string Version)>();
     }
 
+    private IReadOnlyList<string> GetCustomDependencyLines(int repositoryId)
+    {
+        return _customDependencyLinesByRepo.GetValueOrDefault(repositoryId) ?? Array.Empty<string>();
+    }
+
+    private async Task ShowCustomDependenciesModalAsync(int repositoryId)
+    {
+        if (workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId) is not { } link)
+            return;
+
+        if (link.IsOnTag)
+        {
+            ToastService.Show("Repository is on a tag; checkout a branch first.");
+            return;
+        }
+
+        clickedDependencyBadges.Add(repositoryId);
+        StateHasChanged();
+
+        try
+        {
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
+            var customDepRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryCustomDependencyRepository>();
+            var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+
+            var workspaceData = await workspaceRepo.GetByIdAsync(WorkspaceId);
+            var allLinks = workspaceData?.Repositories ?? workspaceRepositories;
+
+            var implicitBySource = await projectRepo.GetImplicitReferencedRepoIdsBySourceAsync(WorkspaceId, repositoryId);
+            var lockedIds = new HashSet<int>(implicitBySource.FromProject);
+            lockedIds.UnionWith(implicitBySource.FromFile);
+            var circularRepoIds = await projectRepo.GetCircularCustomDependencyRepoIdsAsync(WorkspaceId, repositoryId);
+            var savedCustomIds = await customDepRepo.GetCustomReferencedRepositoryIdsAsync(WorkspaceId, repositoryId);
+
+            _customDependenciesModal = new CustomDependenciesModalState
+            {
+                IsVisible = true,
+                DependentRepositoryId = repositoryId,
+                DependentWorkspaceRepositoryId = link.WorkspaceRepositoryId,
+                DependentRepoName = link.Repository?.RepositoryName,
+                LockedReferencedRepoIds = lockedIds,
+                LockedFromProjectRepoIds = implicitBySource.FromProject,
+                LockedFromFileRepoIds = implicitBySource.FromFile,
+                CircularCustomDependencyRepoIds = circularRepoIds,
+                SelectedCustomRepoIds = new HashSet<int>(savedCustomIds),
+                Repositories = allLinks
+                    .Where(wr => wr.Repository != null && !string.IsNullOrWhiteSpace(wr.Repository.RepositoryName))
+                    .Where(wr => !circularRepoIds.Contains(wr.RepositoryId))
+                    .Select(wr => new CustomDependenciesModal.CustomDependencyRepoEntry(
+                        wr.RepositoryId,
+                        wr.Repository!.RepositoryName!))
+                    .OrderBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
+                ErrorMessage = null,
+                IsSaving = false
+            };
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not open custom dependencies dialog for repo {RepositoryId}", repositoryId);
+            ToastService.ShowError("Could not open custom dependencies dialog.");
+        }
+    }
+
+    private void CloseCustomDependenciesModal()
+    {
+        _customDependenciesModal = new CustomDependenciesModalState();
+        StateHasChanged();
+    }
+
+    private async Task SaveCustomDependenciesAsync()
+    {
+        if (!_customDependenciesModal.IsVisible || _customDependenciesModal.IsSaving)
+            return;
+
+        var dependentRepoId = _customDependenciesModal.DependentRepositoryId;
+        var locked = _customDependenciesModal.LockedReferencedRepoIds;
+        var circular = _customDependenciesModal.CircularCustomDependencyRepoIds;
+        var selected = _customDependenciesModal.SelectedCustomRepoIds
+            .Where(id => !locked.Contains(id) && !circular.Contains(id) && id != dependentRepoId)
+            .ToHashSet();
+
+        _customDependenciesModal.IsSaving = true;
+        _customDependenciesModal.ErrorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var customDepRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryCustomDependencyRepository>();
+            var gitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+
+            await customDepRepo.ReplaceCustomDependenciesForDependentAsync(WorkspaceId, dependentRepoId, selected);
+            await gitService.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId);
+            await ReloadWorkspaceDataFromFreshScopeAsync();
+
+            CloseCustomDependenciesModal();
+            ToastService.Show("Custom dependencies saved.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to save custom dependencies for repo {RepositoryId}", dependentRepoId);
+            _customDependenciesModal.IsSaving = false;
+            _customDependenciesModal.ErrorMessage = "Failed to save custom dependencies. Please try again.";
+            StateHasChanged();
+        }
+    }
+
     private List<WorkspaceRepositoryLink> GetFilteredWorkspaceRepositories()
     {
         if (string.IsNullOrWhiteSpace(searchTerm))
@@ -3006,6 +3286,22 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public bool IsFetching { get; set; }
         public int? FetchedRepositoryCount { get; set; }
         public bool HasConnectors { get; set; }
+    }
+
+    private sealed class CustomDependenciesModalState
+    {
+        public bool IsVisible { get; set; }
+        public int DependentRepositoryId { get; set; }
+        public int DependentWorkspaceRepositoryId { get; set; }
+        public string? DependentRepoName { get; set; }
+        public IReadOnlySet<int> LockedReferencedRepoIds { get; set; } = new HashSet<int>();
+        public IReadOnlySet<int> LockedFromProjectRepoIds { get; set; } = new HashSet<int>();
+        public IReadOnlySet<int> LockedFromFileRepoIds { get; set; } = new HashSet<int>();
+        public IReadOnlySet<int> CircularCustomDependencyRepoIds { get; set; } = new HashSet<int>();
+        public HashSet<int> SelectedCustomRepoIds { get; set; } = new();
+        public IReadOnlyList<CustomDependenciesModal.CustomDependencyRepoEntry> Repositories { get; set; } = Array.Empty<CustomDependenciesModal.CustomDependencyRepoEntry>();
+        public bool IsSaving { get; set; }
+        public string? ErrorMessage { get; set; }
     }
 
     private sealed record BranchModalState

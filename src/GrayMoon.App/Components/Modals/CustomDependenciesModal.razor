@@ -1,0 +1,220 @@
+@using GrayMoon.App.Components.Shared
+@using GrayMoon.App.Services
+@using Microsoft.AspNetCore.Components.Web
+
+@if (IsVisible)
+{
+    <div class="modal show d-block custom-deps-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1075;"
+         @onkeydown="HandleKeyDown">
+        <div class="modal-dialog modal-lg custom-deps-modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header custom-deps-modal-header">
+                    <h5 class="modal-title custom-deps-modal-title">
+                        Custom dependencies
+                        @if (!string.IsNullOrEmpty(DependentRepoName))
+                        {
+                            <span class="custom-deps-modal-repo-name text-muted fw-normal fs-6" title="@DependentRepoName">@DependentRepoName</span>
+                        }
+                    </h5>
+                    <button type="button" class="btn-close flex-shrink-0" aria-label="Close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body custom-deps-modal-body">
+                    <div class="form-label mb-2">Repositories <span class="text-muted ms-1">@GetSelectableCount() available</span></div>
+                    <div class="d-flex align-items-center custom-deps-search-row">
+                        <FilterSearchInput @bind-Value="repositorySearch"
+                                           @ref="filterSearchInput"
+                                           WrapperAdditionalClass="flex-grow-1 min-width-0"
+                                           Placeholder="Search repositories…"
+                                           OnKeyDown="HandleKeyDown" />
+                    </div>
+                    <div class="custom-deps-grid-container">
+                        <table class="table table-sm mb-0 custom-deps-grid">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th class="col-select">
+                                        <input class="form-check-input workspace-repo-checkbox"
+                                               type="checkbox"
+                                               checked="@AreAllToggleableFilteredSelected()"
+                                               @onchange="(ChangeEventArgs e) => _ = ToggleAllFiltered((bool)e.Value!)" />
+                                    </th>
+                                    <th>Repository</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{
+                                    var filtered = GetFilteredRepositories();
+                                }
+                                @if (Repositories.Count == 0)
+                                {
+                                    <tr>
+                                        <td colspan="2" class="text-muted p-2">No repositories in this workspace.</td>
+                                    </tr>
+                                }
+                                else if (filtered.Count == 0)
+                                {
+                                    <tr>
+                                        <td colspan="2" class="text-muted p-2">No repositories match your search.</td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    @foreach (var repository in filtered)
+                                    {
+                                        var isLocked = LockedReferencedRepoIds.Contains(repository.RepositoryId);
+                                        var isChecked = isLocked || SelectedCustomRepoIds.Contains(repository.RepositoryId);
+                                        <tr>
+                                            <td class="col-select">
+                                                <input class="form-check-input workspace-repo-checkbox"
+                                                       type="checkbox"
+                                                       checked="@isChecked"
+                                                       disabled="@isLocked"
+                                                       @onchange="(ChangeEventArgs e) => _ = ToggleRepository(repository.RepositoryId, (bool)e.Value!, isLocked)" />
+                                            </td>
+                                            <td>
+                                                <div class="repo-name-row">
+                                                    <span class="repo-name-cell" title="@repository.RepositoryName">@repository.RepositoryName</span>
+                                                    @if (isLocked)
+                                                    {
+                                                        <span class="repo-source-badges">
+                                                            @if (LockedFromProjectRepoIds.Contains(repository.RepositoryId))
+                                                            {
+                                                                <span class="badge custom-deps-source-badge bg-secondary" title="Referenced from .csproj">project</span>
+                                                            }
+                                                            @if (LockedFromFileRepoIds.Contains(repository.RepositoryId))
+                                                            {
+                                                                <span class="badge custom-deps-source-badge bg-secondary" title="Referenced from version file">file</span>
+                                                            }
+                                                        </span>
+                                                    }
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    @if (ErrorMessage != null)
+                    {
+                        <div class="alert alert-danger mt-3 mb-0">@ErrorMessage</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="OnSave" disabled="@IsSaving">
+                        @if (IsSaving)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Save
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private FilterSearchInput? filterSearchInput;
+
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public string? DependentRepoName { get; set; }
+    [Parameter] public int DependentRepositoryId { get; set; }
+    [Parameter] public IReadOnlyList<CustomDependencyRepoEntry> Repositories { get; set; } = Array.Empty<CustomDependencyRepoEntry>();
+    [Parameter] public IReadOnlySet<int> LockedReferencedRepoIds { get; set; } = new HashSet<int>();
+    [Parameter] public IReadOnlySet<int> LockedFromProjectRepoIds { get; set; } = new HashSet<int>();
+    [Parameter] public IReadOnlySet<int> LockedFromFileRepoIds { get; set; } = new HashSet<int>();
+    [Parameter] public HashSet<int> SelectedCustomRepoIds { get; set; } = new();
+    [Parameter] public bool IsSaving { get; set; }
+    [Parameter] public string? ErrorMessage { get; set; }
+    [Parameter] public EventCallback OnSave { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private string repositorySearch = string.Empty;
+    private bool _wasVisible;
+    private bool _needsFocus;
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !_wasVisible)
+        {
+            _wasVisible = true;
+            _needsFocus = true;
+            repositorySearch = string.Empty;
+        }
+        else if (!IsVisible)
+        {
+            _wasVisible = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_needsFocus)
+        {
+            _needsFocus = false;
+            if (filterSearchInput != null)
+                await filterSearchInput.FocusAsync();
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            await OnCancel.InvokeAsync();
+        else if (e.Key == "Enter" && !IsSaving)
+            await OnSave.InvokeAsync();
+    }
+
+    private int GetSelectableCount()
+        => Repositories.Count(r => r.RepositoryId != DependentRepositoryId);
+
+    private List<CustomDependencyRepoEntry> GetFilteredRepositories()
+    {
+        var source = Repositories.Where(r => r.RepositoryId != DependentRepositoryId);
+        if (string.IsNullOrWhiteSpace(repositorySearch))
+            return source.OrderBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase).ToList();
+
+        return source
+            .Where(r => WorkspaceRepositoryNameSearchMatcher.Matches(r.RepositoryName, repositorySearch))
+            .OrderBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private IEnumerable<CustomDependencyRepoEntry> GetToggleableFiltered()
+        => GetFilteredRepositories().Where(r => !LockedReferencedRepoIds.Contains(r.RepositoryId));
+
+    private bool AreAllToggleableFilteredSelected()
+    {
+        var toggleable = GetToggleableFiltered().ToList();
+        return toggleable.Count > 0 && toggleable.All(r => SelectedCustomRepoIds.Contains(r.RepositoryId));
+    }
+
+    private async Task ToggleRepository(int repositoryId, bool isSelected, bool isLocked)
+    {
+        if (isLocked)
+            return;
+
+        if (isSelected)
+            SelectedCustomRepoIds.Add(repositoryId);
+        else
+            SelectedCustomRepoIds.Remove(repositoryId);
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ToggleAllFiltered(bool isSelected)
+    {
+        foreach (var repository in GetToggleableFiltered())
+        {
+            if (isSelected)
+                SelectedCustomRepoIds.Add(repository.RepositoryId);
+            else
+                SelectedCustomRepoIds.Remove(repository.RepositoryId);
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public sealed record CustomDependencyRepoEntry(int RepositoryId, string RepositoryName);
+}

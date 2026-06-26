@@ -40,6 +40,16 @@ public static class Migrations
         await MigrateRepositoryBranchesIsTagAsync(dbContext);
         await MigrateRepositoryBranchesSortIndexAsync(dbContext);
         await MigrateWorkspaceRepositoriesHasNewerTagAsync(dbContext);
+        await MigrateWorkspaceFileLineStatusTableAsync(dbContext);
+        await MigrateWorkspaceFileLineStatusColumnsAsync(dbContext);
+        await MigrateOutOfDateFileLinesColumnAsync(dbContext);
+        await MigrateTotalFileLinesColumnAsync(dbContext);
+        await MigrateOutOfDateFileReposColumnAsync(dbContext);
+        await MigrateWorkspaceRepositoryCustomDependenciesAsync(dbContext);
+        await MigrateWorkspaceFileIsMissingOnDiskAsync(dbContext);
+        await MigrateTotalFileConfigReposColumnAsync(dbContext);
+        await MigrateWorkspaceFileLineStatusTokenColumnsAsync(dbContext);
+        await MigrateWorkspaceFileLineStatusUniqueIndexFixAsync(dbContext);
     }
 
     public static async Task MigrateRepositoriesTopicsAsync(AppDbContext dbContext)
@@ -716,6 +726,43 @@ public static class Migrations
         }
     }
 
+    public static async Task MigrateWorkspaceRepositoryCustomDependenciesAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceRepositoryCustomDependencies'";
+                var tableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+
+                if (!tableExists)
+                {
+                    cmd.CommandText = @"
+                    CREATE TABLE WorkspaceRepositoryCustomDependencies (
+                        CustomDependencyId INTEGER PRIMARY KEY AUTOINCREMENT,
+                        DependentWorkspaceRepositoryId INTEGER NOT NULL,
+                        ReferencedWorkspaceRepositoryId INTEGER NOT NULL,
+                        FOREIGN KEY (DependentWorkspaceRepositoryId) REFERENCES WorkspaceRepositories(WorkspaceRepositoryId) ON DELETE CASCADE,
+                        FOREIGN KEY (ReferencedWorkspaceRepositoryId) REFERENCES WorkspaceRepositories(WorkspaceRepositoryId) ON DELETE CASCADE
+                    )";
+                    await cmd.ExecuteNonQueryAsync();
+
+                    cmd.CommandText = @"CREATE UNIQUE INDEX IX_WorkspaceRepositoryCustomDependencies_Dependent_Referenced
+                        ON WorkspaceRepositoryCustomDependencies(DependentWorkspaceRepositoryId, ReferencedWorkspaceRepositoryId)";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
     public static async Task MigrateSettingsAsync(AppDbContext dbContext)
     {
         try
@@ -1038,6 +1085,157 @@ public static class Migrations
         }
     }
 
+    /// <summary>Creates the WorkspaceFileLineStatuses table that persists per-line staleness for configured version files.</summary>
+    public static async Task MigrateWorkspaceFileLineStatusTableAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceFileLineStatuses'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = @"CREATE TABLE WorkspaceFileLineStatuses (
+                        StatusId INTEGER PRIMARY KEY AUTOINCREMENT,
+                        WorkspaceId INTEGER NOT NULL,
+                        RepositoryId INTEGER NOT NULL,
+                        FilePath TEXT NOT NULL,
+                        FileName TEXT NOT NULL,
+                        TotalMatchedLines INTEGER NOT NULL DEFAULT 0,
+                        OutOfDateLines INTEGER NOT NULL DEFAULT 0
+                    )";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='IX_WorkspaceFileLineStatuses_Unique'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "CREATE UNIQUE INDEX IX_WorkspaceFileLineStatuses_Unique ON WorkspaceFileLineStatuses(WorkspaceId, RepositoryId, FilePath, TokenName)";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds TotalMatchedLines and OutOfDateLines to WorkspaceFileLineStatuses when the table predates those columns.</summary>
+    public static async Task MigrateWorkspaceFileLineStatusColumnsAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceFileLineStatuses'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                    return;
+
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceFileLineStatuses') WHERE name='TotalMatchedLines'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "ALTER TABLE WorkspaceFileLineStatuses ADD COLUMN TotalMatchedLines INTEGER NOT NULL DEFAULT 0";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceFileLineStatuses') WHERE name='OutOfDateLines'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "ALTER TABLE WorkspaceFileLineStatuses ADD COLUMN OutOfDateLines INTEGER NOT NULL DEFAULT 0";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds OutOfDateFileLines column to WorkspaceRepositories for the file-version staleness badge X count.</summary>
+    public static async Task MigrateOutOfDateFileLinesColumnAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='OutOfDateFileLines'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN OutOfDateFileLines INTEGER";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds TotalFileLines column to WorkspaceRepositories for the file-version staleness badge Y denominator.</summary>
+    public static async Task MigrateTotalFileLinesColumnAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='TotalFileLines'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN TotalFileLines INTEGER";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds OutOfDateFileRepos column to WorkspaceRepositories for distinct out-of-date file-dependency repo count on the badge.</summary>
+    public static async Task MigrateOutOfDateFileReposColumnAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='OutOfDateFileRepos'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN OutOfDateFileRepos INTEGER";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
     /// <summary>Adds SortIndex column to RepositoryBranches so tags can be persisted in the agent-reported order (newest first).</summary>
     public static async Task MigrateRepositoryBranchesSortIndexAsync(AppDbContext dbContext)
     {
@@ -1131,6 +1329,127 @@ public static class Migrations
                     cmd.CommandText = "CREATE INDEX IX_Repositories_CloneUrl ON Repositories(CloneUrl)";
                     await cmd.ExecuteNonQueryAsync();
                 }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds IsMissingOnDisk column to WorkspaceFiles.</summary>
+    public static async Task MigrateWorkspaceFileIsMissingOnDiskAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceFiles') WHERE name='IsMissingOnDisk'";
+            if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE WorkspaceFiles ADD COLUMN IsMissingOnDisk INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds TotalFileConfigRepos column to WorkspaceRepositories for distinct file-config repo count.</summary>
+    public static async Task MigrateTotalFileConfigReposColumnAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='TotalFileConfigRepos'";
+            if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN TotalFileConfigRepos INTEGER";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds per-token columns to WorkspaceFileLineStatuses for dependency badge tooltips.</summary>
+    public static async Task MigrateWorkspaceFileLineStatusTokenColumnsAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceFileLineStatuses'";
+            if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                return;
+
+            foreach (var (column, ddl) in new (string, string)[]
+            {
+                ("TokenName", "ALTER TABLE WorkspaceFileLineStatuses ADD COLUMN TokenName TEXT NOT NULL DEFAULT ''"),
+                ("CurrentValue", "ALTER TABLE WorkspaceFileLineStatuses ADD COLUMN CurrentValue TEXT"),
+                ("ExpectedValue", "ALTER TABLE WorkspaceFileLineStatuses ADD COLUMN ExpectedValue TEXT"),
+            })
+            {
+                cmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('WorkspaceFileLineStatuses') WHERE name='{column}'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = ddl;
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>
+    /// Fixes the WorkspaceFileLineStatuses unique index to include TokenName.
+    /// The original index covered only (WorkspaceId, RepositoryId, FilePath), which violates when a
+    /// single file has multiple out-of-date tokens. The correct constraint is per-token per file.
+    /// </summary>
+    public static async Task MigrateWorkspaceFileLineStatusUniqueIndexFixAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceFileLineStatuses'";
+            if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                return;
+
+            // If the named index exists but does not yet cover TokenName, drop it so we can recreate correctly.
+            cmd.CommandText = "SELECT sql FROM sqlite_master WHERE type='index' AND name='IX_WorkspaceFileLineStatuses_Unique'";
+            var indexSql = await cmd.ExecuteScalarAsync() as string;
+            if (indexSql != null && !indexSql.Contains("TokenName", StringComparison.OrdinalIgnoreCase))
+            {
+                cmd.CommandText = "DROP INDEX IX_WorkspaceFileLineStatuses_Unique";
+                await cmd.ExecuteNonQueryAsync();
+                indexSql = null;
+            }
+
+            if (indexSql == null)
+            {
+                cmd.CommandText = "CREATE UNIQUE INDEX IX_WorkspaceFileLineStatuses_Unique ON WorkspaceFileLineStatuses(WorkspaceId, RepositoryId, FilePath, TokenName)";
+                await cmd.ExecuteNonQueryAsync();
             }
         }
         catch

@@ -72,6 +72,18 @@ public class WorkspaceRepositoryLink
     /// <summary>Number of those dependencies whose version does not match the referenced repo's GitVersion. Set when dependencies are merged. Used for badge (same logic as build).</summary>
     public int? UnmatchedDeps { get; set; }
 
+    /// <summary>Count of configured version-file lines whose current value does not match the expected repo GitVersion. Diagnostic only; badge uses <see cref="OutOfDateFileRepos"/>.</summary>
+    public int? OutOfDateFileLines { get; set; }
+
+    /// <summary>Count of distinct workspace repositories referenced by out-of-date version-file tokens. Badge X for file-config portion.</summary>
+    public int? OutOfDateFileRepos { get; set; }
+
+    /// <summary>Total count of distinct workspace repositories referenced by file-config tokens for this dependent repo. Badge diagnostics; main Y uses <see cref="Dependencies"/>.</summary>
+    public int? TotalFileConfigRepos { get; set; }
+
+    /// <summary>Legacy line-count field; no longer used for badge display.</summary>
+    public int? TotalFileLines { get; set; }
+
     /// <summary>Dominant project type for this repository (Service &gt; Package &gt; Executable &gt; Library &gt; Test). Null when no projects are known. Set during sync and project refresh.</summary>
     public ProjectType? RepositoryType { get; set; }
 

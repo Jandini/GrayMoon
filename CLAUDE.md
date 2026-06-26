@@ -97,15 +97,29 @@ Three orchestrators coordinate multi-step workflows across repositories:
 
 ### Dependency levels
 
-Workspace repositories are topologically sorted into dependency levels (Kahn's algorithm). Level 1 = no dependencies; higher levels depend on lower ones. This drives: grid grouping, push ordering (synchronized push waits for NuGet availability level-by-level), and the dependency update flow.
+Workspace repositories are topologically sorted into dependency levels (Kahn's algorithm). Level 1 = no dependencies; higher levels depend on lower ones. This drives: grid grouping, push ordering (synchronized push waits for NuGet availability level-by-level), and the dependency update flow. Dependency edges come from three sources, all merged before the sort runs: (1) csproj `<PackageReference>` entries, (2) file-config token names (`{repositoryname}` in `WorkspaceFileVersionConfig` patterns), and (3) user-declared `WorkspaceRepositoryCustomDependencies` edges.
 
 ### Token encryption
 
 Connector tokens are AES-256-GCM encrypted at rest via `AesGcmTokenProtector` (backed by ASP.NET Core Data Protection). Keys live in `/app/db/DataProtection-Keys/`. All git remote operations pass the token at runtime via `-c http.extraHeader="Authorization: Basic ..."` — tokens are never written to disk by the Agent.
 
+### File versioning
+
+`WorkspaceFiles` (`/workspaces/{id}/files`) lets users pin arbitrary files from workspace repos. Each file can have a `WorkspaceFileVersionConfig` with a multi-line version pattern (`KEY={repositoryname}` per line) that maps file content tokens to workspace repo names.
+
+- **`WorkspaceFileVersionService`** - two main operations: `UpdateAllVersionsAsync` (calls `UpdateFileVersions` agent command to do in-place token substitution) and `CheckAndPersistFileVersionStatusAsync` (calls `CheckFileVersions` agent command, persists results to `WorkspaceFileLineStatuses`, updates `OutOfDateFileRepos`/`TotalFileConfigRepos` counters on `WorkspaceRepositories`). Concurrent callers for the same workspace coalesce onto one in-flight check unless `forceFresh: true`.
+- **`WorkspaceFileLineStatuses`** - one row per out-of-date token per file. Stores `TokenName`, `CurrentValue`, `ExpectedValue`. Cleared and rebuilt on every check.
+- **`WorkspaceFile.IsMissingOnDisk`** - nullable bool set by `CheckFileVersions` when the file path no longer exists. Missing files are excluded from badge computation and version update.
+- Agent commands `CheckFileVersions` and `UpdateFileVersions` live in `src/GrayMoon.Agent/Commands/`.
+- File-config token names also contribute dependency edges to the topological sort (alongside csproj project deps). `ImplicitReferencedRepoIdsBySource` separates `FromProject` vs `FromFile` for badge tooltip clarity.
+
+### Custom dependencies
+
+`WorkspaceRepositoryCustomDependencies` lets users declare explicit ordering edges between workspace repos. These user-declared edges are merged with csproj-derived and file-config-derived edges before Kahn's algorithm runs. Managed via `WorkspaceRepositoryCustomDependencyRepository` and the `CustomDependenciesModal`.
+
 ### Database schema
 
-Schema is owned by EF Core but applied via `EnsureCreated()`. Core tables: `Connectors`, `Repositories`, `Workspaces`, `WorkspaceRepositories` (join with live state), `WorkspaceRepositoryPullRequest` (1:1 with link), `WorkspaceProject`, `ProjectDependency`, `WorkspaceFile`, `WorkspaceFileVersionConfig`, `RepositoryBranch`, `Settings`.
+Schema is owned by EF Core but applied via `EnsureCreated()`. Core tables: `Connectors`, `Repositories`, `Workspaces`, `WorkspaceRepositories` (join with live state), `WorkspaceRepositoryPullRequest` (1:1 with link), `WorkspaceRepositoryActions` (CI status per link), `WorkspaceProject`, `ProjectDependency`, `WorkspaceFile`, `WorkspaceFileVersionConfig`, `WorkspaceFileLineStatuses`, `WorkspaceRepositoryCustomDependencies`, `RepositoryBranch`, `Settings`.
 
 After `EnsureCreated()`, startup calls `Migrations.RunAllAsync(dbContext)` (`src/GrayMoon.App/Migrations.cs`). Each migration is an idempotent `ALTER TABLE` guarded by `pragma_table_info()`. To add a new column: add a `public static async Task MigrateXxxAsync(AppDbContext dbContext)` method to `Migrations.cs` (check `pragma_table_info('TableName') WHERE name='ColumnName'` before executing the `ALTER TABLE`), then call it at the end of `RunAllAsync`. No EF Core migration assembly is used.
 

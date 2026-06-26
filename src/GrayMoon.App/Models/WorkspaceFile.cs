@@ -29,4 +29,7 @@ public class WorkspaceFile
     [Required]
     [MaxLength(2000)]
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>True when the file path no longer exists on disk. Excluded from dependency and badge computation until restored.</summary>
+    public bool? IsMissingOnDisk { get; set; }
 }

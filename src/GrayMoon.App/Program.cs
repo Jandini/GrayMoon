@@ -38,7 +38,9 @@ try
     // Default SignalR incoming message limit is 32KB. SyncRepository ResponseCommand carries branch lists
     // plus full .csproj/package graphs; larger repos exceed that and the server closes the connection,
     // which surfaces on the agent as HubException during InvokeAsync (not a git failure).
-    builder.Services.Configure<HubOptions>(options =>
+    // SyncCommand no longer awaits agent responses inline - it enqueues to AgentSyncNotificationQueue and
+    // returns immediately - so the default MaximumParallelInvocationsPerClient = 1 is sufficient.
+    builder.Services.AddSignalR(options =>
     {
         options.MaximumReceiveMessageSize = 10 * 1024 * 1024;
     });
@@ -51,6 +53,7 @@ try
     builder.Services.AddScoped<WorkspaceProjectRepository>();
     builder.Services.AddScoped<WorkspaceFileRepository>();
     builder.Services.AddScoped<WorkspaceFileVersionConfigRepository>();
+    builder.Services.AddScoped<WorkspaceRepositoryCustomDependencyRepository>();
     builder.Services.AddScoped<WorkspaceRepository>();
     builder.Services.AddScoped<AppSettingRepository>();
     builder.Services.AddScoped<NavbarCollapseService>();
@@ -102,6 +105,8 @@ try
     // Background services
     builder.Services.AddSingleton<SyncBackgroundService>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<SyncBackgroundService>());
+    builder.Services.AddSingleton<AgentSyncNotificationQueue>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentSyncNotificationQueue>());
     builder.Services.AddHostedService<TokenHealthBackgroundService>();
 
     // Connector services

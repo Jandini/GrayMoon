@@ -385,10 +385,10 @@
 
 ::deep .repositories-table .dependency-badge-tooltip {
     display: block;
-    position: absolute;
-    right: 0;
-    left: auto;
-    top: 100%;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: auto;
     /* No margin-top here: a transparent gap between badge and popup would break the :hover chain when the cursor
        crosses it. Use padding-top inside the popup instead so the popup is contiguous with the badge. */
     background: #2a2a2a;
@@ -400,7 +400,8 @@
     font-family: var(--bs-font-monospace);
     color: #f0f0f0;
     box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-    z-index: 2100;
+    /* Above table rows/thead; below page-scoped loading overlay (z-index 100) */
+    z-index: 50;
     pointer-events: none;
     max-height: 14rem;
     width: 30rem;
@@ -411,6 +412,29 @@
     opacity: 0;
     /* Fade out slowly with a 0.4s delay so brief cursor jitters between the badge and the popup don't close it. */
     transition: opacity 0.15s ease 0.4s;
+}
+
+/* Narrow scrollbar (same 8px track as custom dependencies dialog) */
+::deep .repositories-table .dependency-badge-tooltip {
+    scrollbar-width: thin;
+    scrollbar-color: #5a5a5a #2a2a2a;
+}
+
+::deep .repositories-table .dependency-badge-tooltip::-webkit-scrollbar {
+    width: 8px;
+}
+
+::deep .repositories-table .dependency-badge-tooltip::-webkit-scrollbar-track {
+    background: #2a2a2a;
+}
+
+::deep .repositories-table .dependency-badge-tooltip::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+::deep .repositories-table .dependency-badge-tooltip::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
 }
 
 ::deep .repositories-table .dependency-badge-tooltip-wrap:hover .dependency-badge-tooltip,
@@ -449,6 +473,21 @@
     margin-bottom: 0;
 }
 
+::deep .repositories-table .dependency-badge-tooltip-file {
+    display: block;
+    color: #fff;
+    font-size: 0.78rem;
+    margin-bottom: 0.05rem;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-filename {
+    color: #fff;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-section-suffix {
+    color: #aaa;
+}
+
 ::deep .repositories-table .dependency-badge-tooltip-versions {
     color: #aaa;
     font-size: 0.85rem;
@@ -463,6 +502,14 @@
     color: goldenrod;
 }
 
+::deep .repositories-table .dependency-badge-tooltip-file-count {
+    color: #fff;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-versions--after-file {
+    margin-left: 0.35rem;
+}
+
 ::deep .repositories-table .dependency-badge-tooltip-footer {
     color: #888;
     font-size: 0.72rem;
@@ -470,6 +517,48 @@
     padding-top: 0.25rem;
     border-top: 1px solid #444;
     font-family: var(--bs-body-font-family);
+}
+
+::deep .repositories-table .dependency-badge-tooltip-footer--end {
+    display: flex;
+    justify-content: flex-end;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-footer--split {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.35rem;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-footer-hint {
+    align-self: stretch;
+    text-align: left;
+    line-height: 1.35;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-show-deps {
+    color: #8ab4f8;
+    font-size: 0.72rem;
+    text-decoration: none;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-show-deps:hover:not(:disabled) {
+    color: #aecbfa;
+    text-decoration: underline;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-show-deps:disabled {
+    color: #666;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-section-header {
+    color: #aaa;
+    font-family: var(--bs-body-font-family);
+    font-size: 0.78rem;
+    margin-top: 0.45rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid #444;
 }
 
 ::deep .repositories-table .dependency-badge-tooltip-copy {

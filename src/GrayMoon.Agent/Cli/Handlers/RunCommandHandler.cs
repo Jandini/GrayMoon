@@ -123,6 +123,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<PushRepositoryRequest, PushRepositoryResponse>, PushRepositoryCommand>();
         builder.Services.AddSingleton<ICommandHandler<SearchFilesRequest, SearchFilesResponse>, SearchFilesCommand>();
         builder.Services.AddSingleton<ICommandHandler<UpdateFileVersionsRequest, UpdateFileVersionsResponse>, UpdateFileVersionsCommand>();
+        builder.Services.AddSingleton<ICommandHandler<CheckFileVersionsRequest, CheckFileVersionsResponse>, CheckFileVersionsCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetFileContentsRequest, GetFileContentsResponse>, GetFileContentsCommand>();
         builder.Services.AddSingleton<ICommandHandler<ValidatePathRequest, ValidatePathResponse>, ValidatePathCommand>();
         builder.Services.AddSingleton<ICommandHandler<DotnetRestoreRequest, DotnetRestoreResponse>, DotnetRestoreCommand>();

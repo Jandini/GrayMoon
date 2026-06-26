@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
@@ -16,6 +17,7 @@ public sealed class SyncCommandHandler(
 {
     public async Task HandleAsync(RepositorySyncNotification n)
     {
+        var totalSw = Stopwatch.StartNew();
         await using var scope = scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var workspaceProjectRepository = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
@@ -140,16 +142,36 @@ public sealed class SyncCommandHandler(
             await dbContext.SaveChangesAsync();
         }
 
-        await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(n.WorkspaceId);
+        var depsSw = Stopwatch.StartNew();
+        try
+        {
+            var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
+            await fileVersionService.CheckAndPersistFileVersionStatusAsync(n.WorkspaceId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "SyncCommand CheckAndPersist failed for workspace {WorkspaceId}", n.WorkspaceId);
+        }
 
+        await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(n.WorkspaceId);
+        logger.LogDebug(
+            "SyncCommand dependency stats persisted in {ElapsedMs}ms for workspace={WorkspaceId}, repo={RepositoryId}",
+            depsSw.ElapsedMilliseconds, n.WorkspaceId, n.RepositoryId);
+
+        var prSw = Stopwatch.StartNew();
         var workspacePullRequestService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
         await workspacePullRequestService.RefreshPullRequestsAsync(n.WorkspaceId, [n.RepositoryId]);
+        logger.LogDebug(
+            "SyncCommand RefreshPullRequests completed in {ElapsedMs}ms for workspace={WorkspaceId}, repo={RepositoryId}",
+            prSw.ElapsedMilliseconds, n.WorkspaceId, n.RepositoryId);
 
         await hubContext.Clients.All.SendAsync("RepositorySynced", n.WorkspaceId, n.RepositoryId);
         await hubContext.Clients.All.SendAsync("WorkspaceSynced", n.WorkspaceId);
         if (!string.IsNullOrWhiteSpace(n.ErrorMessage))
             await hubContext.Clients.All.SendAsync("RepositoryError", n.WorkspaceId, n.RepositoryId, n.ErrorMessage);
-        logger.LogDebug("SyncCommand persisted: workspace={WorkspaceId}, repo={RepositoryId}, version={Version}, branch={Branch}",
-            n.WorkspaceId, n.RepositoryId, n.Version, n.Branch);
+
+        logger.LogDebug(
+            "SyncCommand persisted in {ElapsedMs}ms: workspace={WorkspaceId}, repo={RepositoryId}, version={Version}, branch={Branch}",
+            totalSw.ElapsedMilliseconds, n.WorkspaceId, n.RepositoryId, n.Version, n.Branch);
     }
 }
