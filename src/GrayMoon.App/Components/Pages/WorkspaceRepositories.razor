@@ -168,6 +168,7 @@
                                                                   OnVersionMouseLeave="() => OnVersionMouseLeave(wr.GitVersion)"
                                                                   OnBranchClick="() => ShowSwitchBranchModal(wr.RepositoryId, wr.BranchName, wr.Repository?.CloneUrl)"
                                                                   OnDependencyBadgeClick="() => OnDependencyBadgeClick(wr.RepositoryId, wr.UnmatchedDeps ?? 0)"
+                                                                  OnFileDependencyBadgeClick="() => OnFileDependencyBadgeClick(wr.RepositoryId)"
                                                                   OnDependencyBadgeKeydown="(e) => HandleDependencyBadgeKeydown(e, wr.RepositoryId, wr.UnmatchedDeps ?? 0)"
                                                                   OnDependencyBadgeMouseLeave="() => OnDependencyBadgeMouseLeave(wr.RepositoryId)"
                                                                   OnPushBadgeClick="() => OnPushBadgeClickAsync(wr.RepositoryId, wr.BranchName)"

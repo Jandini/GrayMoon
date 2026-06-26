@@ -21,6 +21,7 @@
         .Count();
     var totalWithFiles = depCount;
     var unmatchedWithFiles = unmatchedDeps + outOfDateFileRepos;
+    var hasOutOfDateFiles = FileLineStatuses.Any(s => s.OutOfDateLines > 0);
     var graphUrl = WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, repositoryId: repo.RepositoryId);
 
     <tr>
@@ -186,7 +187,7 @@
                         <span class="dependency-badge-tooltip-wrap dependency-badge-link @(depMismatchBadgeInactive ? "dependency-badge-link--disabled" : "") @(depBadgeOnTag ? "dependency-badge-link--readonly" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
                               role="button"
                               tabindex="0"
-                              style="cursor: @(depBadgeOnTag || unmatchedDeps == 0 ? "default" : "pointer");"
+                              style="cursor: @(depBadgeOnTag || (unmatchedDeps == 0 && !hasOutOfDateFiles) ? "default" : "pointer");"
                               @onclick="HandleDependencyBadgeClick"
                               @onclick:preventDefault
                               @onkeydown="OnDependencyBadgeKeydown"
@@ -234,11 +235,11 @@
                                                 <code>@s.FileName</code>
                                                 @if (s.OutOfDateLines == 0)
                                                 {
-                                                    <span class="dependency-badge-tooltip-versions">@s.TotalMatchedLines of @s.TotalMatchedLines current</span>
+                                                    <span class="dependency-badge-tooltip-versions"> @s.TotalMatchedLines of @s.TotalMatchedLines current</span>
                                                 }
                                                 else
                                                 {
-                                                    <span class="dependency-badge-tooltip-versions"><span class="dependency-badge-tooltip-new-version">@s.OutOfDateLines of @s.TotalMatchedLines</span> need update</span>
+                                                    <span class="dependency-badge-tooltip-versions"> <span class="dependency-badge-tooltip-file-count">@s.OutOfDateLines of @s.TotalMatchedLines</span> need update</span>
                                                 }
                                             </div>
                                         }
@@ -254,7 +255,7 @@
                                         }
                                         else
                                         {
-                                            @("Use Update to sync file versions.")
+                                            @("Click to update file versions in this repository only.")
                                         }
                                     </div>
                                 </div>
@@ -328,6 +329,7 @@
     [Parameter] public EventCallback OnVersionMouseLeave { get; set; }
     [Parameter] public EventCallback OnBranchClick { get; set; }
     [Parameter] public EventCallback OnDependencyBadgeClick { get; set; }
+    [Parameter] public EventCallback OnFileDependencyBadgeClick { get; set; }
     [Parameter] public EventCallback<KeyboardEventArgs> OnDependencyBadgeKeydown { get; set; }
     [Parameter] public EventCallback OnDependencyBadgeMouseLeave { get; set; }
     [Parameter] public EventCallback OnPushBadgeClick { get; set; }
@@ -363,8 +365,12 @@
 
     private async Task HandleDependencyBadgeClick()
     {
-        if (!ActionsDisabled && Link?.IsOnTag != true && (Link?.UnmatchedDeps ?? 0) > 0)
+        if (ActionsDisabled || Link?.IsOnTag == true)
+            return;
+        if ((Link?.UnmatchedDeps ?? 0) > 0)
             await OnDependencyBadgeClick.InvokeAsync();
+        else if (FileLineStatuses.Any(s => s.OutOfDateLines > 0))
+            await OnFileDependencyBadgeClick.InvokeAsync();
     }
 
     private async Task HandleCopyDependencies()

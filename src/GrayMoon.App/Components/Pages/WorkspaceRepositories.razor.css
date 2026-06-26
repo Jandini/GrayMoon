@@ -463,6 +463,10 @@
     color: goldenrod;
 }
 
+::deep .repositories-table .dependency-badge-tooltip-file-count {
+    color: #fff;
+}
+
 ::deep .repositories-table .dependency-badge-tooltip-footer {
     color: #888;
     font-size: 0.72rem;

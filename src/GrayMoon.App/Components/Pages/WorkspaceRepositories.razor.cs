@@ -487,6 +487,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private IReadOnlyList<WorkspaceFileLineStatus> GetFileLineStatus(int repositoryId) =>
         _fileLineStatusByRepo.TryGetValue(repositoryId, out var lines) ? lines : Array.Empty<WorkspaceFileLineStatus>();
 
+    private bool HasOutOfDateFiles(int repositoryId) =>
+        GetFileLineStatus(repositoryId).Any(s => s.OutOfDateLines > 0);
+
     private IReadOnlyList<(string FileName, string TokenName, string Version)> GetAllFileVersionLines(int repositoryId) =>
         _allFileVersionLinesByRepo.TryGetValue(repositoryId, out var lines) ? lines : Array.Empty<(string, string, string)>();
 
@@ -1610,6 +1613,64 @@ public sealed partial class WorkspaceRepositories : IDisposable
         return Task.CompletedTask;
     }
 
+    private Task UpdateSingleRepositoryFileVersionsAsync(int repositoryId)
+    {
+        if (workspace == null || IsJobRunning)
+            return Task.CompletedTask;
+        if (IsRepoOnTag(repositoryId))
+        {
+            ToastService.Show(TagBlockedActionMessage);
+            return Task.CompletedTask;
+        }
+
+        errorMessage = null;
+
+        JobService.StartJob(PageJobKey, "Updating file versions...", async (job, ct) =>
+        {
+            try
+            {
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
+                var repoIds = new HashSet<int> { repositoryId };
+                var (updated, failed, error, _) = await fileVersionService.UpdateAllVersionsAsync(
+                    WorkspaceId, selectedRepositoryIds: repoIds, cancellationToken: ct);
+
+                if (error != null)
+                {
+                    SafeInvoke(() => errorMessage = error);
+                    return;
+                }
+
+                job.ReportProgress("Checking file versions...");
+                await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, ct);
+
+                await InvokeAsync(async () =>
+                {
+                    if (_disposed) return;
+                    await RefreshFromSync();
+                    if (failed > 0)
+                        errorMessage = $"Updated {updated} line(s). {failed} file(s) could not be updated - check logs.";
+                    else if (updated > 0)
+                        ToastService.Show($"Updated {updated} line(s) in configured files.");
+                    else
+                        ToastService.Show("File versions are already up to date.");
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error updating file versions for repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
+                SafeInvoke(() => errorMessage = "Failed to update file versions. Please try again.");
+                throw;
+            }
+        });
+
+        return Task.CompletedTask;
+    }
+
     private async Task OnUpdateAndPushClickAsync()
     {
         if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
@@ -1758,8 +1819,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
     private async Task HandleDependencyBadgeKeydown(KeyboardEventArgs e, int repositoryId, int unmatchedDeps)
     {
-        if ((e.Key == "Enter" || e.Key == " ") && !IsJobRunning)
+        if ((e.Key != "Enter" && e.Key != " ") || IsJobRunning)
+            return;
+        if (unmatchedDeps > 0)
             await ShowConfirmUpdateDependenciesAsync(repositoryId, unmatchedDeps);
+        else if (HasOutOfDateFiles(repositoryId))
+            OnFileDependencyBadgeClick(repositoryId);
     }
 
     /// <summary>Update dependencies for a single repository only (refresh projects, sync deps, no commit). Same as Update but scoped to one repo.</summary>
@@ -2920,6 +2985,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         clickedDependencyBadges.Add(repositoryId);
         _ = ShowConfirmUpdateDependenciesAsync(repositoryId, unmatchedDeps);
+        StateHasChanged();
+    }
+
+    private void OnFileDependencyBadgeClick(int repositoryId)
+    {
+        clickedDependencyBadges.Add(repositoryId);
+        _ = UpdateSingleRepositoryFileVersionsAsync(repositoryId);
         StateHasChanged();
     }
 
