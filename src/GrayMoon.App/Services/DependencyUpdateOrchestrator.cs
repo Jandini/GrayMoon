@@ -49,26 +49,11 @@ public sealed class DependencyUpdateOrchestrator(
             onRepoError(repoId, msg);
         }
 
-        // Load workspace links once: authoritative DB state for tag-pinned status and version-file scope.
+        // Load workspace links once: used to scope version-file work to repos with out-of-date files.
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         var workspaceLinks = workspace?.Repositories ?? (ICollection<WorkspaceRepositoryLink>)[];
-
-        // Strip tag-pinned repos from the caller-provided set using fresh DB state.
-        // Entry points may use stale page state; the orchestrator enforces the rule that
-        // tag-pinned repos never receive commits or pushes.
-        var tagPinnedRepoIds = workspaceLinks
-            .Where(l => !string.IsNullOrWhiteSpace(l.CheckedOutTag))
-            .Select(l => l.RepositoryId)
-            .ToHashSet();
-        if (repoIdsToUpdate != null && tagPinnedRepoIds.Count > 0)
-        {
-            repoIdsToUpdate = repoIdsToUpdate.Except(tagPinnedRepoIds).ToHashSet();
-            if (repoIdsToUpdate.Count == 0)
-                return;
-        }
-
         var outOfDateFileRepoIds = workspaceLinks
-            .Where(l => (l.OutOfDateFileRepos ?? 0) > 0 && !tagPinnedRepoIds.Contains(l.RepositoryId))
+            .Where(l => (l.OutOfDateFileRepos ?? 0) > 0)
             .Select(l => l.RepositoryId)
             .ToHashSet();
 
