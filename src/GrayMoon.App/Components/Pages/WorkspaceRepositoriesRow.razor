@@ -21,7 +21,11 @@
     var totalWithFiles = depCount;
     var unmatchedWithFiles = unmatchedDeps + fileMismatchRepos;
     var hasOutOfDateFiles = fileLinesNeedUpdate || outOfDateFileRepoCount > 0 || (Link.OutOfDateFileLines ?? 0) > 0;
-    var graphUrl = WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, repositoryId: repo.RepositoryId);
+    var hasDependencyTooltipContent = AllDependencyLines.Count > 0
+        || AllFileVersionLines.Count > 0
+        || FileLineStatuses.Count > 0
+        || CustomDependencyLines.Count > 0;
+    var depOkBadgeInactive = ActionsDisabled || Link.IsOnTag;
 
     <tr>
         <td class="col-repo">
@@ -98,17 +102,39 @@
                 <span class="metrics-block metrics-deps">
                     @if (totalWithFiles == 0)
                     {
-                        <a href="@graphUrl" class="dependency-badge-link" title="View dependency graph for this repository">
-                            <span class="badge build-dep-badge build-dep-badge-none">0</span>
-                        </a>
+                        <span class="dependency-badge-tooltip-wrap dependency-badge-link @(depOkBadgeInactive ? "dependency-badge-link--disabled dependency-badge-link--readonly" : "")">
+                            <span class="badge build-dep-badge build-dep-badge-none dependency-badge-graph-link"
+                                  role="button"
+                                  tabindex="@(depOkBadgeInactive ? -1 : 0)"
+                                  style="cursor: @(depOkBadgeInactive ? "default" : "pointer");"
+                                  title="@(depOkBadgeInactive ? "Repository is on a tag; checkout a branch first." : "Manage custom dependencies")"
+                                  @onclick="HandleCustomDependenciesClick"
+                                  @onclick:preventDefault
+                                  @onkeydown="HandleCustomDependenciesKeydown">0</span>
+                            <div class="dependency-badge-tooltip">
+                                <div class="dependency-badge-tooltip-footer">
+                                    <button type="button"
+                                            class="btn btn-link btn-sm p-0 dependency-badge-tooltip-show-deps"
+                                            disabled="@depOkBadgeInactive"
+                                            @onclick="HandleShowDependenciesClick"
+                                            @onclick:preventDefault
+                                            @onclick:stopPropagation>Show dependencies</button>
+                                </div>
+                            </div>
+                        </span>
                     }
                     else if (unmatchedWithFiles == 0)
                     {
-                        <span class="dependency-badge-tooltip-wrap dependency-badge-link">
-                            <a href="@graphUrl" class="dependency-badge-graph-link">
-                                <span class="badge build-dep-badge build-dep-badge-ok">@totalWithFiles</span>
-                            </a>
-                            @if (AllDependencyLines.Count > 0 || AllFileVersionLines.Count > 0 || FileLineStatuses.Count > 0)
+                        <span class="dependency-badge-tooltip-wrap dependency-badge-link @(depOkBadgeInactive ? "dependency-badge-link--disabled dependency-badge-link--readonly" : "")">
+                            <span class="badge build-dep-badge build-dep-badge-ok dependency-badge-graph-link"
+                                  role="button"
+                                  tabindex="@(depOkBadgeInactive ? -1 : 0)"
+                                  style="cursor: @(depOkBadgeInactive ? "default" : "pointer");"
+                                  title="@(depOkBadgeInactive ? "Repository is on a tag; checkout a branch first." : "Manage dependencies")"
+                                  @onclick="HandleCustomDependenciesClick"
+                                  @onclick:preventDefault
+                                  @onkeydown="HandleCustomDependenciesKeydown">@totalWithFiles</span>
+                            @if (hasDependencyTooltipContent)
                             {
                                 <div class="dependency-badge-tooltip">
                                     @if (AllDependencyLines.Count > 0)
@@ -136,7 +162,7 @@
                                     {
                                         @foreach (var entry in AllFileVersionLines.GroupBy(l => l.FileName).Select((fg, i) => new { fg, i }))
                                         {
-                                            @if (entry.i == 0 && AllDependencyLines.Count == 0)
+                                            @if (entry.i == 0 && AllDependencyLines.Count == 0 && CustomDependencyLines.Count == 0)
                                             {
                                                 <div class="dependency-badge-tooltip-header">
                                                     <span class="dependency-badge-tooltip-title">@entry.fg.Key - dependencies (up to date):</span>
@@ -156,7 +182,7 @@
                                     }
                                     else if (FileLineStatuses.Count > 0)
                                     {
-                                        @if (AllDependencyLines.Count > 0)
+                                        @if (AllDependencyLines.Count > 0 || CustomDependencyLines.Count > 0)
                                         {
                                             <div class="dependency-badge-tooltip-section-header">Files:</div>
                                         }
@@ -173,7 +199,33 @@
                                             </div>
                                         }
                                     }
-                                    <div class="dependency-badge-tooltip-footer">Click to view the dependency graph.</div>
+                                    @if (CustomDependencyLines.Count > 0)
+                                    {
+                                        @if (AllDependencyLines.Count > 0 || AllFileVersionLines.Count > 0 || FileLineStatuses.Count > 0)
+                                        {
+                                            <div class="dependency-badge-tooltip-section-header">Custom dependencies:</div>
+                                        }
+                                        else
+                                        {
+                                            <div class="dependency-badge-tooltip-header">
+                                                <span class="dependency-badge-tooltip-title">Custom dependencies:</span>
+                                            </div>
+                                        }
+                                        @foreach (var name in CustomDependencyLines)
+                                        {
+                                            <div class="dependency-badge-tooltip-line">
+                                                <code>@name</code>
+                                            </div>
+                                        }
+                                    }
+                                    <div class="dependency-badge-tooltip-footer">
+                                        <button type="button"
+                                                class="btn btn-link btn-sm p-0 dependency-badge-tooltip-show-deps"
+                                                disabled="@depOkBadgeInactive"
+                                                @onclick="HandleShowDependenciesClick"
+                                                @onclick:preventDefault
+                                                @onclick:stopPropagation>Show dependencies</button>
+                                    </div>
                                 </div>
                             }
                         </span>
@@ -192,7 +244,7 @@
                               @onkeydown="OnDependencyBadgeKeydown"
                               @onmouseleave="OnDependencyBadgeMouseLeave">
                             <span class="badge build-dep-badge @(depBadgeOnTag ? "build-dep-badge-none" : "build-dep-badge-mismatch")">@unmatchedWithFiles of @totalWithFiles</span>
-                            @if (MismatchedDependencyLines.Count > 0 || FileLineStatuses.Any(s => s.OutOfDateLines > 0))
+                            @if (MismatchedDependencyLines.Count > 0 || FileLineStatuses.Any(s => s.OutOfDateLines > 0) || CustomDependencyLines.Count > 0)
                             {
                                 <div class="dependency-badge-tooltip">
                                     @if (MismatchedDependencyLines.Count > 0)
@@ -244,6 +296,25 @@
                                             </div>
                                         }
                                     }
+                                    @if (CustomDependencyLines.Count > 0)
+                                    {
+                                        @if (MismatchedDependencyLines.Count > 0 || FileLineStatuses.Any(s => s.OutOfDateLines > 0))
+                                        {
+                                            <div class="dependency-badge-tooltip-section-header">Custom dependencies:</div>
+                                        }
+                                        else
+                                        {
+                                            <div class="dependency-badge-tooltip-header">
+                                                <span class="dependency-badge-tooltip-title">Custom dependencies:</span>
+                                            </div>
+                                        }
+                                        @foreach (var name in CustomDependencyLines)
+                                        {
+                                            <div class="dependency-badge-tooltip-line">
+                                                <code>@name</code>
+                                            </div>
+                                        }
+                                    }
                                     <div class="dependency-badge-tooltip-footer">
                                         @if (depBadgeOnTag)
                                         {
@@ -257,10 +328,16 @@
                                         {
                                             @("Click to update this repository only.")
                                         }
-                                        else
+                                        else if (hasOutOfDateFiles)
                                         {
                                             @("Click to update file versions in this repository only.")
                                         }
+                                        <button type="button"
+                                                class="btn btn-link btn-sm p-0 dependency-badge-tooltip-show-deps"
+                                                disabled="@depBadgeOnTag"
+                                                @onclick="HandleShowDependenciesClick"
+                                                @onclick:preventDefault
+                                                @onclick:stopPropagation>Show dependencies</button>
                                     </div>
                                 </div>
                             }
@@ -317,6 +394,7 @@
     [Parameter] public IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> MismatchedDependencyLines { get; set; } = Array.Empty<(string, string, string)>();
     /// <summary>All workspace-internal package dependencies of this repository (PackageId + version) used to populate the dependency-badge tooltip when everything is up to date.</summary>
     [Parameter] public IReadOnlyList<(string PackageId, string Version)> AllDependencyLines { get; set; } = Array.Empty<(string, string)>();
+    [Parameter] public IReadOnlyList<string> CustomDependencyLines { get; set; } = Array.Empty<string>();
     /// <summary>Out-of-date version-file line statuses for this repository loaded from DB (read-only, persisted at sync time).</summary>
     [Parameter] public IReadOnlyList<WorkspaceFileLineStatus> FileLineStatuses { get; set; } = Array.Empty<WorkspaceFileLineStatus>();
     /// <summary>Per-token (FileName, TokenName, Version) entries for the badge and tooltip. TokenName is the repository name being tracked.</summary>
@@ -333,6 +411,7 @@
     [Parameter] public EventCallback OnVersionMouseLeave { get; set; }
     [Parameter] public EventCallback OnBranchClick { get; set; }
     [Parameter] public EventCallback OnDependencyBadgeClick { get; set; }
+    [Parameter] public EventCallback OnCustomDependenciesClick { get; set; }
     [Parameter] public EventCallback OnFileDependencyBadgeClick { get; set; }
     [Parameter] public EventCallback<KeyboardEventArgs> OnDependencyBadgeKeydown { get; set; }
     [Parameter] public EventCallback OnDependencyBadgeMouseLeave { get; set; }
@@ -373,8 +452,30 @@
             return;
         if ((Link?.UnmatchedDeps ?? 0) > 0)
             await OnDependencyBadgeClick.InvokeAsync();
-        else if ((Link.OutOfDateFileRepos ?? 0) > 0 || (Link.OutOfDateFileLines ?? 0) > 0)
+        else if ((Link?.OutOfDateFileRepos ?? 0) > 0 || (Link?.OutOfDateFileLines ?? 0) > 0)
             await OnFileDependencyBadgeClick.InvokeAsync();
+    }
+
+    private async Task HandleCustomDependenciesClick()
+    {
+        if (ActionsDisabled || Link?.IsOnTag == true)
+            return;
+        await OnCustomDependenciesClick.InvokeAsync();
+    }
+
+    private async Task HandleShowDependenciesClick()
+    {
+        if (ActionsDisabled || Link?.IsOnTag == true)
+            return;
+        await OnCustomDependenciesClick.InvokeAsync();
+    }
+
+    private async Task HandleCustomDependenciesKeydown(KeyboardEventArgs e)
+    {
+        if (e.Key is "Enter" or " ")
+        {
+            await HandleCustomDependenciesClick();
+        }
     }
 
     private async Task HandleCopyDependencies()

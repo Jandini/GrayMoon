@@ -63,6 +63,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string Version)>> _allDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string)>>();
     /// <summary>Per-repo (FileName, TokenName, Version) triples derived from version-file configs and current GitVersions. Drives the OK badge file-dependency tooltip.</summary>
     private IReadOnlyDictionary<int, IReadOnlyList<(string FileName, string TokenName, string Version)>> _allFileVersionLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+    /// <summary>User-declared custom dependency repo names per dependent repository (ordering only).</summary>
+    private IReadOnlyDictionary<int, IReadOnlyList<string>> _customDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<string>>();
     private Dictionary<int, string> repositoryErrors = new(); // repositoryId -> error message
     private HashSet<string> clickedVersions = new(); // Track clicked versions to hide hover until mouse leaves
     private HashSet<int> clickedDependencyBadges = new(); // Track clicked dependency badges to hide tooltip immediately
@@ -75,6 +77,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private UpdateModalState _updateModal = new();
     private UpdateModalState _updateAndPushModal = new();
     private UpdateSingleRepoDependenciesModalState _updateSingleRepoModal = new();
+    private CustomDependenciesModalState _customDependenciesModal = new();
     private PushWithDependenciesModalState _pushWithDependenciesModal = new();
     private ConfirmModalState _confirmModal = new();
     private DefaultBranchWarningModalState _defaultBranchWarningModal = new();
@@ -476,6 +479,17 @@ public sealed partial class WorkspaceRepositories : IDisposable
             {
                 Logger.LogDebug(ex, "Could not load file version lines for workspace {WorkspaceId}", WorkspaceId);
                 _allFileVersionLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+            }
+
+            try
+            {
+                var customDepRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryCustomDependencyRepository>();
+                _customDependencyLinesByRepo = await customDepRepo.GetCustomDependencyNamesByRepoAsync(WorkspaceId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Could not load custom dependency lines for workspace {WorkspaceId}", WorkspaceId);
+                _customDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<string>>();
             }
         }
         finally
@@ -3104,6 +3118,100 @@ public sealed partial class WorkspaceRepositories : IDisposable
         return _allDependencyLinesByRepo.GetValueOrDefault(repositoryId) ?? Array.Empty<(string PackageId, string Version)>();
     }
 
+    private IReadOnlyList<string> GetCustomDependencyLines(int repositoryId)
+    {
+        return _customDependencyLinesByRepo.GetValueOrDefault(repositoryId) ?? Array.Empty<string>();
+    }
+
+    private async Task ShowCustomDependenciesModalAsync(int repositoryId)
+    {
+        if (workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId) is not { } link)
+            return;
+
+        if (link.IsOnTag)
+        {
+            ToastService.Show("Repository is on a tag; checkout a branch first.");
+            return;
+        }
+
+        try
+        {
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
+            var customDepRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryCustomDependencyRepository>();
+
+            var lockedIds = await projectRepo.GetImplicitReferencedRepoIdsAsync(WorkspaceId, repositoryId);
+            var savedCustomIds = await customDepRepo.GetCustomReferencedRepositoryIdsAsync(WorkspaceId, repositoryId);
+
+            _customDependenciesModal = new CustomDependenciesModalState
+            {
+                IsVisible = true,
+                DependentRepositoryId = repositoryId,
+                DependentWorkspaceRepositoryId = link.WorkspaceRepositoryId,
+                DependentRepoName = link.Repository?.RepositoryName,
+                LockedReferencedRepoIds = lockedIds,
+                SelectedCustomRepoIds = new HashSet<int>(savedCustomIds),
+                Repositories = workspaceRepositories
+                    .Where(wr => wr.Repository?.RepositoryName != null)
+                    .Select(wr => new CustomDependenciesModal.CustomDependencyRepoEntry(
+                        wr.RepositoryId,
+                        wr.Repository!.RepositoryName!))
+                    .ToList(),
+                ErrorMessage = null,
+                IsSaving = false
+            };
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not open custom dependencies dialog for repo {RepositoryId}", repositoryId);
+            ToastService.ShowError("Could not open custom dependencies dialog.");
+        }
+    }
+
+    private void CloseCustomDependenciesModal()
+    {
+        _customDependenciesModal = new CustomDependenciesModalState();
+        StateHasChanged();
+    }
+
+    private async Task SaveCustomDependenciesAsync()
+    {
+        if (!_customDependenciesModal.IsVisible || _customDependenciesModal.IsSaving)
+            return;
+
+        var dependentRepoId = _customDependenciesModal.DependentRepositoryId;
+        var locked = _customDependenciesModal.LockedReferencedRepoIds;
+        var selected = _customDependenciesModal.SelectedCustomRepoIds
+            .Where(id => !locked.Contains(id) && id != dependentRepoId)
+            .ToHashSet();
+
+        _customDependenciesModal.IsSaving = true;
+        _customDependenciesModal.ErrorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var customDepRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryCustomDependencyRepository>();
+            var gitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+
+            await customDepRepo.ReplaceCustomDependenciesForDependentAsync(WorkspaceId, dependentRepoId, selected);
+            await gitService.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId);
+            await ReloadWorkspaceDataFromFreshScopeAsync();
+
+            CloseCustomDependenciesModal();
+            ToastService.Show("Custom dependencies saved.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to save custom dependencies for repo {RepositoryId}", dependentRepoId);
+            _customDependenciesModal.IsSaving = false;
+            _customDependenciesModal.ErrorMessage = "Failed to save custom dependencies. Please try again.";
+            StateHasChanged();
+        }
+    }
+
     private List<WorkspaceRepositoryLink> GetFilteredWorkspaceRepositories()
     {
         if (string.IsNullOrWhiteSpace(searchTerm))
@@ -3153,6 +3261,19 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public bool IsFetching { get; set; }
         public int? FetchedRepositoryCount { get; set; }
         public bool HasConnectors { get; set; }
+    }
+
+    private sealed class CustomDependenciesModalState
+    {
+        public bool IsVisible { get; set; }
+        public int DependentRepositoryId { get; set; }
+        public int DependentWorkspaceRepositoryId { get; set; }
+        public string? DependentRepoName { get; set; }
+        public IReadOnlySet<int> LockedReferencedRepoIds { get; set; } = new HashSet<int>();
+        public HashSet<int> SelectedCustomRepoIds { get; set; } = new();
+        public IReadOnlyList<CustomDependenciesModal.CustomDependencyRepoEntry> Repositories { get; set; } = Array.Empty<CustomDependenciesModal.CustomDependencyRepoEntry>();
+        public bool IsSaving { get; set; }
+        public string? ErrorMessage { get; set; }
     }
 
     private sealed record BranchModalState

@@ -9,6 +9,7 @@ namespace GrayMoon.App.Repositories;
 public sealed class WorkspaceProjectRepository(
     AppDbContext dbContext,
     WorkspaceFileVersionConfigRepository versionConfigRepository,
+    WorkspaceRepositoryCustomDependencyRepository customDependencyRepository,
     ILogger<WorkspaceProjectRepository> logger)
 {
     /// <summary>Gets projects that have a PackageId (NuGet packages) for repositories linked to the given workspace.</summary>
@@ -261,34 +262,15 @@ public sealed class WorkspaceProjectRepository(
             }
         }
 
-        var projectDerivedRepoEdges = new HashSet<(int DepRepoId, int RefRepoId)>();
         var byProject = workspaceProjects.Count > 0 ? workspaceProjects.ToDictionary(p => p.ProjectId) : new Dictionary<int, WorkspaceProject>();
-        foreach (var (depId, refId, _) in uniqueEdges)
-        {
-            if (!byProject.TryGetValue(depId, out var depProj) || !byProject.TryGetValue(refId, out var refProj)) continue;
-            if (depProj.RepositoryId == refProj.RepositoryId) continue;
-            if (!repoIdsInWorkspace.Contains(depProj.RepositoryId) || !repoIdsInWorkspace.Contains(refProj.RepositoryId)) continue;
-            projectDerivedRepoEdges.Add((depProj.RepositoryId, refProj.RepositoryId));
-        }
-
-        var fileConfigRepoEdges = new HashSet<(int DepRepoId, int RefRepoId)>();
-        var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
-        foreach (var cfg in configs)
-        {
-            var fileRepoId = cfg.File?.RepositoryId;
-            if (!fileRepoId.HasValue || fileRepoId.Value == 0 || !repoIdsInWorkspace.Contains(fileRepoId.Value)) continue;
-            var dependentRepoId = fileRepoId.Value;
-            var tokens = WorkspaceFileVersionService.ExtractTokens(cfg.VersionPattern);
-            foreach (var token in tokens)
-            {
-                if (string.IsNullOrWhiteSpace(token)) continue;
-                if (!nameToRepoId.TryGetValue(token.Trim(), out var referencedRepoId)) continue;
-                if (referencedRepoId == dependentRepoId) continue;
-                fileConfigRepoEdges.Add((dependentRepoId, referencedRepoId));
-            }
-        }
-
-        var allRepoEdges = projectDerivedRepoEdges.Union(fileConfigRepoEdges).Distinct().ToList();
+        var edgeSets = await BuildRepoDependencyEdgeSetsAsync(
+            workspaceId,
+            repoIdsInWorkspace,
+            nameToRepoId,
+            uniqueEdges,
+            byProject,
+            cancellationToken);
+        var allRepoEdges = edgeSets.All;
 
         var inDegree = repoIdsInWorkspace.ToDictionary(id => id, _ => 0);
         var revEdges = repoIdsInWorkspace.ToDictionary(id => id, _ => new List<int>());
@@ -775,7 +757,7 @@ public sealed class WorkspaceProjectRepository(
         return new ProjectDependencyGraph(nodes, edgeList);
     }
 
-    /// <summary>Returns repository-level dependency graph (nodes = repos, edges = repo depends on repo). Includes both project-derived and file-config-derived edges. For Cytoscape.</summary>
+    /// <summary>Returns repository-level dependency graph (nodes = repos, edges = repo depends on repo). Includes project-derived, file-config, and custom dependency edges. For Cytoscape.</summary>
     public async Task<RepositoryDependencyGraph> GetRepositoryDependencyGraphAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         var links = await dbContext.WorkspaceRepositories
@@ -797,18 +779,110 @@ public sealed class WorkspaceProjectRepository(
             }
         }
 
-        var projectDerivedRepoEdges = new HashSet<(int Dep, int Ref)>();
         var projects = await GetByWorkspaceIdAsync(workspaceId, cancellationToken);
-        var edges = await GetDependencyEdgesAsync(workspaceId, cancellationToken);
         var byProject = projects.ToDictionary(p => p.ProjectId);
-        foreach (var (depProjectId, refProjectId) in edges)
+        var projectEdges = await GetDependencyEdgesAsync(workspaceId, cancellationToken);
+        var uniqueEdges = projectEdges
+            .Where(e => byProject.ContainsKey(e.DependentProjectId) && byProject.ContainsKey(e.ReferencedProjectId))
+            .Select(e => (e.DependentProjectId, e.ReferencedProjectId, (string?)null))
+            .ToList();
+
+        var edgeSets = await BuildRepoDependencyEdgeSetsAsync(
+            workspaceId,
+            repoIdsInWorkspace,
+            nameToRepoId,
+            uniqueEdges,
+            byProject,
+            cancellationToken);
+
+        var repoNodes = links
+            .Where(wr => wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
+            .Select(wr => new RepositoryDependencyNode(wr.RepositoryId, wr.Repository!.RepositoryName!, wr.RepositoryType))
+            .ToList();
+
+        var edgeList = edgeSets.All.Select(e => new RepositoryDependencyEdge(e.DepRepoId, e.RefRepoId)).ToList();
+
+        return new RepositoryDependencyGraph(repoNodes, edgeList);
+    }
+
+    /// <summary>Returns referenced repository IDs derived from csproj and file-version config for the given dependent repository (implicit, non-custom edges).</summary>
+    public async Task<HashSet<int>> GetImplicitReferencedRepoIdsAsync(
+        int workspaceId,
+        int dependentRepositoryId,
+        CancellationToken cancellationToken = default)
+    {
+        var links = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .ToListAsync(cancellationToken);
+        if (links.Count == 0) return [];
+
+        var repoIdsInWorkspace = links.Select(l => l.RepositoryId).ToHashSet();
+        if (!repoIdsInWorkspace.Contains(dependentRepositoryId))
+            return [];
+
+        var nameToRepoId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var wr in links)
         {
-            if (!byProject.TryGetValue(depProjectId, out var depProj) || !byProject.TryGetValue(refProjectId, out var refProj)) continue;
+            if (wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
+            {
+                var name = wr.Repository.RepositoryName.Trim();
+                if (!nameToRepoId.ContainsKey(name))
+                    nameToRepoId[name] = wr.RepositoryId;
+            }
+        }
+
+        var projects = await GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        var byProject = projects.ToDictionary(p => p.ProjectId);
+        var projectEdges = await GetDependencyEdgesAsync(workspaceId, cancellationToken);
+        var uniqueEdges = projectEdges
+            .Where(e => byProject.ContainsKey(e.DependentProjectId) && byProject.ContainsKey(e.ReferencedProjectId))
+            .Select(e => (e.DependentProjectId, e.ReferencedProjectId, (string?)null))
+            .ToList();
+
+        var edgeSets = await BuildRepoDependencyEdgeSetsAsync(
+            workspaceId,
+            repoIdsInWorkspace,
+            nameToRepoId,
+            uniqueEdges,
+            byProject,
+            cancellationToken);
+
+        var implicitRefs = new HashSet<int>();
+        foreach (var (dep, @ref) in edgeSets.ProjectDerived.Union(edgeSets.FileConfig))
+        {
+            if (dep == dependentRepositoryId)
+                implicitRefs.Add(@ref);
+        }
+
+        return implicitRefs;
+    }
+
+    private sealed record RepoDependencyEdgeSets(
+        HashSet<(int DepRepoId, int RefRepoId)> ProjectDerived,
+        HashSet<(int DepRepoId, int RefRepoId)> FileConfig,
+        HashSet<(int DepRepoId, int RefRepoId)> Custom,
+        List<(int DepRepoId, int RefRepoId)> All);
+
+    private async Task<RepoDependencyEdgeSets> BuildRepoDependencyEdgeSetsAsync(
+        int workspaceId,
+        HashSet<int> repoIdsInWorkspace,
+        Dictionary<string, int> nameToRepoId,
+        List<(int DependentProjectId, int ReferencedProjectId, string? Version)> uniqueEdges,
+        Dictionary<int, WorkspaceProject> byProject,
+        CancellationToken cancellationToken)
+    {
+        var projectDerivedRepoEdges = new HashSet<(int DepRepoId, int RefRepoId)>();
+        foreach (var (depId, refId, _) in uniqueEdges)
+        {
+            if (!byProject.TryGetValue(depId, out var depProj) || !byProject.TryGetValue(refId, out var refProj)) continue;
             if (depProj.RepositoryId == refProj.RepositoryId) continue;
+            if (!repoIdsInWorkspace.Contains(depProj.RepositoryId) || !repoIdsInWorkspace.Contains(refProj.RepositoryId)) continue;
             projectDerivedRepoEdges.Add((depProj.RepositoryId, refProj.RepositoryId));
         }
 
-        var fileConfigRepoEdges = new HashSet<(int Dep, int Ref)>();
+        var fileConfigRepoEdges = new HashSet<(int DepRepoId, int RefRepoId)>();
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         foreach (var cfg in configs)
         {
@@ -825,15 +899,15 @@ public sealed class WorkspaceProjectRepository(
             }
         }
 
-        var repoNodes = links
-            .Where(wr => wr.Repository != null && !string.IsNullOrEmpty(wr.Repository.RepositoryName))
-            .Select(wr => new RepositoryDependencyNode(wr.RepositoryId, wr.Repository!.RepositoryName!, wr.RepositoryType))
+        var customRepoEdges = await customDependencyRepository.GetRepoEdgesByWorkspaceIdAsync(workspaceId, cancellationToken);
+
+        var allRepoEdges = projectDerivedRepoEdges
+            .Union(fileConfigRepoEdges)
+            .Union(customRepoEdges)
+            .Distinct()
             .ToList();
 
-        var allRepoEdges = projectDerivedRepoEdges.Union(fileConfigRepoEdges).Distinct();
-        var edgeList = allRepoEdges.Select(e => new RepositoryDependencyEdge(e.Dep, e.Ref)).ToList();
-
-        return new RepositoryDependencyGraph(repoNodes, edgeList);
+        return new RepoDependencyEdgeSets(projectDerivedRepoEdges, fileConfigRepoEdges, customRepoEdges, allRepoEdges);
     }
 
 }

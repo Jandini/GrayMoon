@@ -1,0 +1,91 @@
+.custom-deps-modal-container {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+}
+
+::deep .custom-deps-modal-dialog {
+    width: 50vw;
+    max-width: 640px;
+    max-height: 80vh;
+    margin: 0;
+}
+
+::deep .custom-deps-modal-dialog .modal-content {
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+}
+
+::deep .custom-deps-modal-dialog .modal-body {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.custom-deps-modal-body-content {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.custom-deps-modal-body-content .repository-list {
+    flex: 1 1 0;
+    min-height: 0;
+    min-height: 240px;
+    max-height: 50vh;
+    overflow: hidden;
+}
+
+.custom-deps-grid th:nth-child(2),
+.custom-deps-grid td:nth-child(2) {
+    width: auto;
+    flex: 1 1 auto;
+}
+
+.custom-deps-grid {
+    border: none;
+    border-collapse: collapse;
+    background-color: #252526;
+}
+
+.custom-deps-grid thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    flex-shrink: 0;
+}
+
+.custom-deps-grid tbody {
+    display: block;
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.custom-deps-grid thead tr,
+.custom-deps-grid tbody tr {
+    display: flex;
+    width: 100%;
+}
+
+.custom-deps-grid th,
+.custom-deps-grid td {
+    flex: 1 0 auto;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.custom-deps-grid .workspace-repo-checkbox {
+    background-color: var(--bg-input) !important;
+    border-color: var(--border-light) !important;
+}
+
+.custom-deps-grid .workspace-repo-checkbox:checked {
+    background-color: var(--accent-blue) !important;
+    border-color: var(--accent-blue) !important;
+}

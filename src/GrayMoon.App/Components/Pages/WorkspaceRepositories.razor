@@ -156,6 +156,7 @@
                                                                   RepoSyncStatus="@GetRepoSyncStatus(wr.RepositoryId)"
                                                                   MismatchedDependencyLines="@GetMismatchedDependencyLines(wr.RepositoryId)"
                                                                   AllDependencyLines="@GetAllDependencyLines(wr.RepositoryId)"
+                                                                  CustomDependencyLines="@GetCustomDependencyLines(wr.RepositoryId)"
                                                                   FileLineStatuses="@GetFileLineStatus(wr.RepositoryId)"
                                                                   AllFileVersionLines="@GetAllFileVersionLines(wr.RepositoryId)"
                                                                   IsVersionClicked="@(wr.GitVersion != null && clickedVersions.Contains(wr.GitVersion))"
@@ -168,6 +169,7 @@
                                                                   OnVersionMouseLeave="() => OnVersionMouseLeave(wr.GitVersion)"
                                                                   OnBranchClick="() => ShowSwitchBranchModal(wr.RepositoryId, wr.BranchName, wr.Repository?.CloneUrl)"
                                                                   OnDependencyBadgeClick="() => OnDependencyBadgeClick(wr.RepositoryId, wr.UnmatchedDeps ?? 0)"
+                                                                  OnCustomDependenciesClick="() => ShowCustomDependenciesModalAsync(wr.RepositoryId)"
                                                                   OnFileDependencyBadgeClick="() => OnFileDependencyBadgeClick(wr.RepositoryId)"
                                                                   OnDependencyBadgeKeydown="(e) => HandleDependencyBadgeKeydown(e, wr.RepositoryId, wr.UnmatchedDeps ?? 0)"
                                                                   OnDependencyBadgeMouseLeave="() => OnDependencyBadgeMouseLeave(wr.RepositoryId)"
@@ -251,6 +253,17 @@
                           RepoName="@_updateSingleRepoModal.RepoName"
                           OnProceed="@OnUpdateSingleRepositoryDependenciesProceedAsync"
                           OnCancel="@CloseUpdateSingleRepositoryDependenciesModal" />
+
+<CustomDependenciesModal IsVisible="@_customDependenciesModal.IsVisible"
+                         DependentRepoName="@_customDependenciesModal.DependentRepoName"
+                         DependentRepositoryId="@_customDependenciesModal.DependentRepositoryId"
+                         Repositories="@_customDependenciesModal.Repositories"
+                         LockedReferencedRepoIds="@_customDependenciesModal.LockedReferencedRepoIds"
+                         SelectedCustomRepoIds="@_customDependenciesModal.SelectedCustomRepoIds"
+                         IsSaving="@_customDependenciesModal.IsSaving"
+                         ErrorMessage="@_customDependenciesModal.ErrorMessage"
+                         OnSave="@SaveCustomDependenciesAsync"
+                         OnCancel="@CloseCustomDependenciesModal" />
 
 <PushWithDependenciesModal IsVisible="@_pushWithDependenciesModal.IsVisible"
           Info="@_pushWithDependenciesModal.Info"

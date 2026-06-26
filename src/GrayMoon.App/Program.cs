@@ -51,6 +51,7 @@ try
     builder.Services.AddScoped<WorkspaceProjectRepository>();
     builder.Services.AddScoped<WorkspaceFileRepository>();
     builder.Services.AddScoped<WorkspaceFileVersionConfigRepository>();
+    builder.Services.AddScoped<WorkspaceRepositoryCustomDependencyRepository>();
     builder.Services.AddScoped<WorkspaceRepository>();
     builder.Services.AddScoped<AppSettingRepository>();
     builder.Services.AddScoped<NavbarCollapseService>();

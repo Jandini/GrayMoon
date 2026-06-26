@@ -480,6 +480,21 @@
     font-family: var(--bs-body-font-family);
 }
 
+::deep .repositories-table .dependency-badge-tooltip-show-deps {
+    color: #8ab4f8;
+    font-size: 0.72rem;
+    text-decoration: none;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-show-deps:hover:not(:disabled) {
+    color: #aecbfa;
+    text-decoration: underline;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-show-deps:disabled {
+    color: #666;
+}
+
 ::deep .repositories-table .dependency-badge-tooltip-section-header {
     color: #aaa;
     font-family: var(--bs-body-font-family);

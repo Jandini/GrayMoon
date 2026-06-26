@@ -17,6 +17,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<WorkspaceFile> WorkspaceFiles => Set<WorkspaceFile>();
     public DbSet<WorkspaceFileVersionConfig> WorkspaceFileVersionConfigs => Set<WorkspaceFileVersionConfig>();
     public DbSet<WorkspaceFileLineStatus> WorkspaceFileLineStatuses => Set<WorkspaceFileLineStatus>();
+    public DbSet<WorkspaceRepositoryCustomDependency> WorkspaceRepositoryCustomDependencies => Set<WorkspaceRepositoryCustomDependency>();
     public DbSet<Setting> Settings => Set<Setting>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -318,6 +319,25 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasIndex(s => new { s.WorkspaceId, s.RepositoryId, s.FilePath }).IsUnique();
             entity.Property(s => s.FilePath).IsRequired().HasMaxLength(2000);
             entity.Property(s => s.FileName).IsRequired().HasMaxLength(260);
+        });
+
+        modelBuilder.Entity<WorkspaceRepositoryCustomDependency>(entity =>
+        {
+            entity.ToTable("WorkspaceRepositoryCustomDependencies");
+            entity.HasKey(d => d.CustomDependencyId);
+            entity.Property(d => d.CustomDependencyId).ValueGeneratedOnAdd();
+            entity.HasIndex(d => new { d.DependentWorkspaceRepositoryId, d.ReferencedWorkspaceRepositoryId })
+                .IsUnique();
+
+            entity.HasOne(d => d.DependentWorkspaceRepository)
+                .WithMany()
+                .HasForeignKey(d => d.DependentWorkspaceRepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(d => d.ReferencedWorkspaceRepository)
+                .WithMany()
+                .HasForeignKey(d => d.ReferencedWorkspaceRepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Setting>(entity =>

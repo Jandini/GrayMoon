@@ -44,6 +44,7 @@ public static class Migrations
         await MigrateOutOfDateFileLinesColumnAsync(dbContext);
         await MigrateTotalFileLinesColumnAsync(dbContext);
         await MigrateOutOfDateFileReposColumnAsync(dbContext);
+        await MigrateWorkspaceRepositoryCustomDependenciesAsync(dbContext);
     }
 
     public static async Task MigrateRepositoriesTopicsAsync(AppDbContext dbContext)
@@ -710,6 +711,43 @@ public static class Migrations
                     await cmd.ExecuteNonQueryAsync();
 
                     cmd.CommandText = "CREATE INDEX IX_WorkspaceFileVersionConfigs_FileId ON WorkspaceFileVersionConfigs(FileId)";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    public static async Task MigrateWorkspaceRepositoryCustomDependenciesAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceRepositoryCustomDependencies'";
+                var tableExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+
+                if (!tableExists)
+                {
+                    cmd.CommandText = @"
+                    CREATE TABLE WorkspaceRepositoryCustomDependencies (
+                        CustomDependencyId INTEGER PRIMARY KEY AUTOINCREMENT,
+                        DependentWorkspaceRepositoryId INTEGER NOT NULL,
+                        ReferencedWorkspaceRepositoryId INTEGER NOT NULL,
+                        FOREIGN KEY (DependentWorkspaceRepositoryId) REFERENCES WorkspaceRepositories(WorkspaceRepositoryId) ON DELETE CASCADE,
+                        FOREIGN KEY (ReferencedWorkspaceRepositoryId) REFERENCES WorkspaceRepositories(WorkspaceRepositoryId) ON DELETE CASCADE
+                    )";
+                    await cmd.ExecuteNonQueryAsync();
+
+                    cmd.CommandText = @"CREATE UNIQUE INDEX IX_WorkspaceRepositoryCustomDependencies_Dependent_Referenced
+                        ON WorkspaceRepositoryCustomDependencies(DependentWorkspaceRepositoryId, ReferencedWorkspaceRepositoryId)";
                     await cmd.ExecuteNonQueryAsync();
                 }
             }
