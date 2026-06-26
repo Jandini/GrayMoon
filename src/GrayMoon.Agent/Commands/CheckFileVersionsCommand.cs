@@ -1,10 +1,11 @@
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
+using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class CheckFileVersionsCommand(IGitService git) : ICommandHandler<CheckFileVersionsRequest, CheckFileVersionsResponse>
+public sealed class CheckFileVersionsCommand(IGitService git, ILogger<CheckFileVersionsCommand> logger) : ICommandHandler<CheckFileVersionsRequest, CheckFileVersionsResponse>
 {
     public async Task<CheckFileVersionsResponse> ExecuteAsync(CheckFileVersionsRequest request, CancellationToken cancellationToken = default)
     {
@@ -74,14 +75,21 @@ public sealed class CheckFileVersionsCommand(IGitService git) : ICommandHandler<
                     totalMatchedLines++;
                     matchedTokens.Add(repoName);
 
-                    if (expectedVersions.TryGetValue(repoName, out var expectedValue) && currentValue != expectedValue)
+                    if (expectedVersions.TryGetValue(repoName, out var expectedValue))
                     {
-                        outOfDateLines.Add(new CheckFileVersionsOutOfDateLine
+                        var match = currentValue == expectedValue;
+                        logger.LogInformation(
+                            "CheckFileVersions {FilePath} token {Token}: current={Current} expected={Expected} match={Match}",
+                            filePath, repoName, currentValue, expectedValue, match);
+                        if (!match)
                         {
-                            TokenName = repoName,
-                            CurrentValue = currentValue,
-                            ExpectedValue = expectedValue
-                        });
+                            outOfDateLines.Add(new CheckFileVersionsOutOfDateLine
+                            {
+                                TokenName = repoName,
+                                CurrentValue = currentValue,
+                                ExpectedValue = expectedValue
+                            });
+                        }
                     }
                     break;
                 }
@@ -90,7 +98,12 @@ public sealed class CheckFileVersionsCommand(IGitService git) : ICommandHandler<
             foreach (var missing in BuildMissingTokenLines(patternEntries, expectedVersions, matchedTokens))
             {
                 if (!outOfDateLines.Any(o => string.Equals(o.TokenName, missing.TokenName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    logger.LogInformation(
+                        "CheckFileVersions {FilePath} token {Token}: NOT FOUND in file (expected={Expected})",
+                        filePath, missing.TokenName, missing.ExpectedValue);
                     outOfDateLines.Add(missing);
+                }
             }
 
             results.Add(new CheckFileVersionsResult

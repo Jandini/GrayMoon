@@ -270,6 +270,10 @@
                                         @foreach (var line in MismatchedFileVersionLines)
                                         {
                                             <div class="dependency-badge-tooltip-line">
+                                                @if (!string.IsNullOrEmpty(line.FileName))
+                                                {
+                                                    <span class="dependency-badge-tooltip-file">@line.FileName</span>
+                                                }
                                                 <code>@line.TokenName</code>
                                                 <span class="dependency-badge-tooltip-versions">
                                                     @line.CurrentValue <span class="dependency-badge-tooltip-arrow">→</span> <span class="dependency-badge-tooltip-new-version">@line.ExpectedValue</span>
@@ -376,7 +380,7 @@
     /// <summary>All workspace-internal package dependencies of this repository (PackageId + version) used to populate the dependency-badge tooltip when everything is up to date.</summary>
     [Parameter] public IReadOnlyList<(string PackageId, string Version)> AllDependencyLines { get; set; } = Array.Empty<(string, string)>();
     [Parameter] public IReadOnlyList<string> CustomDependencyLines { get; set; } = Array.Empty<string>();
-    [Parameter] public IReadOnlyList<(string TokenName, string CurrentValue, string ExpectedValue)> MismatchedFileVersionLines { get; set; } = Array.Empty<(string, string, string)>();
+    [Parameter] public IReadOnlyList<(string FileName, string TokenName, string CurrentValue, string ExpectedValue)> MismatchedFileVersionLines { get; set; } = Array.Empty<(string, string, string, string)>();
     /// <summary>Legacy per-file line statuses; no longer used for badge display.</summary>
     [Parameter] public IReadOnlyList<WorkspaceFileLineStatus> FileLineStatuses { get; set; } = Array.Empty<WorkspaceFileLineStatus>();
     /// <summary>Per-token (FileName, TokenName, Version) entries for the badge and tooltip. TokenName is the repository name being tracked.</summary>

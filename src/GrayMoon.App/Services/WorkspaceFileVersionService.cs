@@ -506,7 +506,7 @@ public sealed class WorkspaceFileVersionService(
     }
 
     /// <summary>Returns out-of-date file-config token rows for the workspace, grouped by dependent RepositoryId.</summary>
-    public async Task<IReadOnlyDictionary<int, IReadOnlyList<(string TokenName, string CurrentValue, string ExpectedValue)>>> GetMismatchedFileVersionLinesByRepoAsync(
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<(string FileName, string TokenName, string CurrentValue, string ExpectedValue)>>> GetMismatchedFileVersionLinesByRepoAsync(
         int workspaceId, CancellationToken cancellationToken = default)
     {
         var rows = await dbContext.WorkspaceFileLineStatuses
@@ -517,8 +517,8 @@ public sealed class WorkspaceFileVersionService(
             .GroupBy(s => s.RepositoryId)
             .ToDictionary(
                 g => g.Key,
-                g => (IReadOnlyList<(string, string, string)>)g
-                    .Select(s => (s.TokenName, s.CurrentValue ?? "", s.ExpectedValue ?? ""))
+                g => (IReadOnlyList<(string, string, string, string)>)g
+                    .Select(s => (s.FileName, s.TokenName, s.CurrentValue ?? "", s.ExpectedValue ?? ""))
                     .ToList());
     }
 

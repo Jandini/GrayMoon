@@ -58,7 +58,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private Dictionary<int, RepoSyncStatus> repoSyncStatus = new();
     private IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>> _mismatchedDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
     private IReadOnlyDictionary<int, IReadOnlyList<WorkspaceFileLineStatus>> _fileLineStatusByRepo = new Dictionary<int, IReadOnlyList<WorkspaceFileLineStatus>>();
-    private IReadOnlyDictionary<int, IReadOnlyList<(string TokenName, string CurrentValue, string ExpectedValue)>> _mismatchedFileVersionLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+    private IReadOnlyDictionary<int, IReadOnlyList<(string FileName, string TokenName, string CurrentValue, string ExpectedValue)>> _mismatchedFileVersionLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string, string)>>();
 
     /// <summary>All workspace-internal package dependencies of each repository (PackageId + version as written in the .csproj). Used to populate the dependency-badge tooltip for repositories whose dependencies are up to date.</summary>
     private IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string Version)>> _allDependencyLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string)>>();
@@ -466,7 +466,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             catch (Exception ex)
             {
                 Logger.LogDebug(ex, "Could not load mismatched file version lines for workspace {WorkspaceId}", WorkspaceId);
-                _mismatchedFileVersionLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string)>>();
+                _mismatchedFileVersionLinesByRepo = new Dictionary<int, IReadOnlyList<(string, string, string, string)>>();
             }
 
             try
@@ -512,8 +512,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private bool HasOutOfDateFiles(int repositoryId) =>
         (workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.OutOfDateFileRepos ?? 0) > 0;
 
-    private IReadOnlyList<(string TokenName, string CurrentValue, string ExpectedValue)> GetMismatchedFileVersionLines(int repositoryId) =>
-        _mismatchedFileVersionLinesByRepo.TryGetValue(repositoryId, out var lines) ? lines : Array.Empty<(string, string, string)>();
+    private IReadOnlyList<(string FileName, string TokenName, string CurrentValue, string ExpectedValue)> GetMismatchedFileVersionLines(int repositoryId) =>
+        _mismatchedFileVersionLinesByRepo.TryGetValue(repositoryId, out var lines) ? lines : Array.Empty<(string, string, string, string)>();
 
     private IReadOnlyList<WorkspaceFileLineStatus> GetFileLineStatus(int repositoryId) =>
         _fileLineStatusByRepo.TryGetValue(repositoryId, out var lines) ? lines : Array.Empty<WorkspaceFileLineStatus>();
