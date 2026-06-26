@@ -19,6 +19,10 @@ public sealed class StageAndCommitCommand(IGitService git) : ICommandHandler<Sta
         if (!git.DirectoryExists(repoPath))
             return new StageAndCommitResponse { Success = false, ErrorMessage = "Repository not found." };
 
+        var checkedOutTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
+        if (checkedOutTag != null)
+            return new StageAndCommitResponse { Success = true, Committed = false };
+
         var (success, committed, errorMessage) = await git.StageAndCommitAsync(repoPath, pathsToStage.ToList(), commitMessage, cancellationToken);
         return new StageAndCommitResponse { Success = success, Committed = committed, ErrorMessage = errorMessage };
     }
