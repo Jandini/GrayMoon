@@ -847,6 +847,20 @@ public class WorkspaceGitService(
             }
         }
 
+        // Persist BranchName and commit counts from the agent response so the UI is up to date
+        // immediately without waiting for the async post-merge hook (which only fires when pull merges).
+        if (syncResponse != null)
+        {
+            wr.BranchName = syncResponse.CurrentBranch ?? syncResponse.DefaultBranch;
+            wr.CheckedOutTag = null;
+            if (syncResponse.OutgoingCommits.HasValue) wr.OutgoingCommits = syncResponse.OutgoingCommits;
+            if (syncResponse.IncomingCommits.HasValue) wr.IncomingCommits = syncResponse.IncomingCommits;
+            if (syncResponse.HasUpstream.HasValue) wr.BranchHasUpstream = syncResponse.HasUpstream.Value;
+            if (syncResponse.DefaultBranchBehind.HasValue) wr.DefaultBranchBehindCommits = syncResponse.DefaultBranchBehind;
+            if (syncResponse.DefaultBranchAhead.HasValue) wr.DefaultBranchAheadCommits = syncResponse.DefaultBranchAhead;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
         if (_hubContext != null)
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
