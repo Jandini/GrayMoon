@@ -1602,14 +1602,24 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 var (updated, failed, error, _) = await fileVersionService.UpdateAllVersionsAsync(
                     WorkspaceId, selectedRepositoryIds: null, cancellationToken: ct);
 
-                SafeInvoke(() =>
+                if (error == null)
                 {
+                    job.ReportProgress("Checking file versions...");
+                    await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, ct, forceFresh: true);
+                }
+
+                await InvokeAsync(async () =>
+                {
+                    if (_disposed) return;
+                    if (error == null)
+                        await RefreshFromSync();
+                    StateHasChanged();
                     if (error != null)
                         errorMessage = error;
                     else if (failed > 0)
                         errorMessage = $"Updated {updated} line(s). {failed} file(s) could not be updated - check logs.";
                     else
-                        ToastService.Show("Versions updated in configured files.");
+                        ToastService.Show(updated > 0 ? "Versions updated in configured files." : "File versions are already up to date.");
                 });
             }
             catch (OperationCanceledException)
@@ -1659,12 +1669,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 }
 
                 job.ReportProgress("Checking file versions...");
-                await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, ct);
+                await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, ct, forceFresh: true);
 
                 await InvokeAsync(async () =>
                 {
                     if (_disposed) return;
                     await RefreshFromSync();
+                    StateHasChanged();
                     if (failed > 0)
                         errorMessage = $"Updated {updated} line(s). {failed} file(s) could not be updated - check logs.";
                     else if (updated > 0)

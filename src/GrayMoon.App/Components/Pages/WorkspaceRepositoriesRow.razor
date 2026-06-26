@@ -14,9 +14,13 @@
     var depCount = Link.Dependencies ?? 0;
     var unmatchedDeps = Link.UnmatchedDeps ?? 0;
     var outOfDateFileRepoCount = Link.OutOfDateFileRepos ?? 0;
+    var fileLinesNeedUpdate = FileLineStatuses.Any(s => s.OutOfDateLines > 0);
+    var fileMismatchRepos = fileLinesNeedUpdate
+        ? (outOfDateFileRepoCount > 0 ? outOfDateFileRepoCount : 1)
+        : 0;
     var totalWithFiles = depCount;
-    var unmatchedWithFiles = unmatchedDeps + outOfDateFileRepoCount;
-    var hasOutOfDateFiles = outOfDateFileRepoCount > 0 || (Link.OutOfDateFileLines ?? 0) > 0;
+    var unmatchedWithFiles = unmatchedDeps + fileMismatchRepos;
+    var hasOutOfDateFiles = fileLinesNeedUpdate || outOfDateFileRepoCount > 0 || (Link.OutOfDateFileLines ?? 0) > 0;
     var graphUrl = WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, repositoryId: repo.RepositoryId);
 
     <tr>

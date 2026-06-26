@@ -193,15 +193,38 @@ public sealed class WorkspaceFileVersionService(
     /// Reads all configured version files via the agent, compares current values to expected repo GitVersions,
     /// and persists the results to WorkspaceFileLineStatuses and WorkspaceRepositoryLink (OutOfDateFileLines, OutOfDateFileRepos, TotalFileLines).
     /// Called at the same trigger points as csproj dependency stat recomputation.
-    /// Concurrent callers for the same workspace coalesce onto one in-flight check.
+    /// Concurrent callers for the same workspace coalesce onto one in-flight check unless <paramref name="forceFresh"/> is true.
     /// </summary>
-    public Task CheckAndPersistFileVersionStatusAsync(int workspaceId, CancellationToken cancellationToken = default)
+    public async Task CheckAndPersistFileVersionStatusAsync(int workspaceId, CancellationToken cancellationToken = default, bool forceFresh = false)
     {
         var gate = CheckLocks.GetOrAdd(workspaceId, _ => new object());
+
+        if (forceFresh)
+        {
+            Task? inFlight = null;
+            lock (gate)
+            {
+                if (InFlightChecks.TryGetValue(workspaceId, out var existing) && existing is { IsCompleted: false })
+                    inFlight = existing;
+            }
+            if (inFlight != null)
+            {
+                logger.LogDebug("CheckAndPersist forceFresh: awaiting prior in-flight check for workspace {WorkspaceId}", workspaceId);
+                try
+                {
+                    await inFlight.ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Prior check failed; still run a fresh check below.
+                }
+            }
+        }
+
         Task checkTask;
         lock (gate)
         {
-            if (InFlightChecks.TryGetValue(workspaceId, out var existing) && existing is { IsCompleted: false })
+            if (!forceFresh && InFlightChecks.TryGetValue(workspaceId, out var existing) && existing is { IsCompleted: false })
             {
                 logger.LogDebug("CheckAndPersist coalesced: joining in-flight check for workspace {WorkspaceId}", workspaceId);
                 checkTask = existing;
@@ -213,7 +236,7 @@ public sealed class WorkspaceFileVersionService(
             }
         }
 
-        return AwaitAndClearInFlightAsync(workspaceId, checkTask, gate);
+        await AwaitAndClearInFlightAsync(workspaceId, checkTask, gate).ConfigureAwait(false);
     }
 
     private static async Task AwaitAndClearInFlightAsync(int workspaceId, Task checkTask, object gate)
