@@ -569,6 +569,61 @@ public sealed class WorkspaceFileVersionService(
         return result.ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<(string, string, string)>)kvp.Value);
     }
 
+    /// <summary>
+    /// Checks which pattern lines from <paramref name="pattern"/> cannot be matched in the actual file on disk.
+    /// Used by the version config dialog to highlight pattern lines that no longer exist in the file.
+    /// Returns token names (repo names) whose pattern line was not found. Returns empty if the agent is
+    /// not connected, the file is missing, or the call fails.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> ValidatePatternAgainstFileAsync(
+        int workspaceId,
+        string? repositoryName,
+        string? filePath,
+        string? pattern,
+        CancellationToken cancellationToken = default)
+    {
+        if (!agentBridge.IsAgentConnected) return [];
+        if (string.IsNullOrWhiteSpace(pattern) || string.IsNullOrWhiteSpace(repositoryName) || string.IsNullOrWhiteSpace(filePath))
+            return [];
+
+        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null) return [];
+
+        try
+        {
+            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+            var resp = await agentBridge.SendCommandAsync("CheckFileVersions", new
+            {
+                workspaceName = workspace.Name,
+                workspaceRoot,
+                files = new[]
+                {
+                    new
+                    {
+                        repositoryName,
+                        filePath,
+                        pattern,
+                        expectedVersions = new Dictionary<string, string>()
+                    }
+                }
+            }, cancellationToken);
+
+            if (!resp.Success || resp.Data == null) return [];
+
+            var result = AgentResponseJson.DeserializeAgentResponse<CheckFileVersionsAgentResponse>(resp.Data);
+            var fileResult = result?.Files?.FirstOrDefault();
+            if (fileResult == null || fileResult.FileMissing) return [];
+
+            return (IReadOnlyList<string>)(fileResult.NotMatchedTokens ?? []);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "ValidatePatternAgainstFile failed for {FilePath}", filePath);
+            return [];
+        }
+    }
+
     private sealed class CheckFileVersionsAgentResponse
     {
         [System.Text.Json.Serialization.JsonPropertyName("files")]
@@ -584,6 +639,7 @@ public sealed class WorkspaceFileVersionService(
         [System.Text.Json.Serialization.JsonPropertyName("expectedTokenCount")] public int ExpectedTokenCount { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("fileMissing")] public bool FileMissing { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("outOfDateLines")] public List<CheckFileVersionsAgentOutOfDateLine>? OutOfDateLines { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("notMatchedTokens")] public List<string>? NotMatchedTokens { get; set; }
     }
 
     private sealed class CheckFileVersionsAgentOutOfDateLine

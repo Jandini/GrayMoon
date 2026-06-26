@@ -3,6 +3,7 @@
 @using GrayMoon.App.Services
 @using GrayMoon.App.Api.Endpoints
 @inject IJSRuntime JS
+@inject WorkspaceFileVersionService VersionService
 
 @if (IsVisible)
 {
@@ -68,6 +69,21 @@
                             </div>
                         }
 
+                        @if (_fileValidating)
+                        {
+                            <div class="small text-muted mt-1">Checking file...</div>
+                        }
+                        else if (_notFoundInFileTokens.Count > 0)
+                        {
+                            <div class="mt-2 small">
+                                <span class="text-danger">Not found in file:</span>
+                                @foreach (var t in _notFoundInFileTokens)
+                                {
+                                    <span class="badge bg-danger ms-1">@t</span>
+                                }
+                            </div>
+                        }
+
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -89,6 +105,7 @@
 
 @code {
     [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public int WorkspaceId { get; set; }
     [Parameter] public WorkspaceFileDto? File { get; set; }
     [Parameter] public List<WorkspaceRepoItem> WorkspaceRepos { get; set; } = new();
     [Parameter] public string? CurrentPattern { get; set; }
@@ -101,6 +118,10 @@
     private bool _wasVisible;
     private ElementReference textareaRef;
     private ElementReference _suggestionsRef;
+
+    private IReadOnlyList<string> _notFoundInFileTokens = [];
+    private bool _fileValidating;
+    private CancellationTokenSource? _validateCts;
 
     // Autocomplete state
     private bool showSuggestions;
@@ -120,6 +141,9 @@
             patternText = CurrentPattern ?? "";
             showSuggestions = false;
             _justOpened = true;
+            _notFoundInFileTokens = [];
+            _fileValidating = false;
+            CancelValidateCts();
             Validate();
         }
         _wasVisible = IsVisible;
@@ -133,6 +157,7 @@
             try { await JS.InvokeVoidAsync("versionPatternEditor.initAutocomplete", textareaRef); } catch { /* ignore */ }
             try { await textareaRef.FocusAsync(); } catch { /* ignore */ }
             try { await JS.InvokeVoidAsync("versionPatternEditor.autoResize", textareaRef); } catch { /* ignore */ }
+            _ = InvokeAsync(() => ValidateAgainstFileAsync(CancellationToken.None));
         }
         if (IsVisible)
         {
@@ -156,6 +181,7 @@
         Validate();
         await JS.InvokeVoidAsync("versionPatternEditor.autoResize", textareaRef);
         await UpdateSuggestionsAsync();
+        ScheduleFileValidation();
     }
 
     private async Task UpdateSuggestionsAsync()
@@ -243,6 +269,9 @@
         invalidTokens.Clear();
         validTokenCount = 0;
         showSuggestions = false;
+        CancelValidateCts();
+        _notFoundInFileTokens = [];
+        _fileValidating = false;
     }
 
     private async Task SaveAsync()
@@ -254,6 +283,45 @@
     {
         // Escape is handled per-context in OnTextareaKeyDown; this catches modal-level escape
         if (!showSuggestions && e.Key == "Escape") await OnCancel.InvokeAsync();
+    }
+
+    private void CancelValidateCts()
+    {
+        _validateCts?.Cancel();
+        _validateCts?.Dispose();
+        _validateCts = null;
+    }
+
+    private void ScheduleFileValidation()
+    {
+        CancelValidateCts();
+        var cts = new CancellationTokenSource();
+        _validateCts = cts;
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await Task.Delay(2000, cts.Token);
+                await ValidateAgainstFileAsync(cts.Token);
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+
+    private async Task ValidateAgainstFileAsync(CancellationToken cancellationToken)
+    {
+        if (File == null || string.IsNullOrWhiteSpace(patternText)) return;
+        _fileValidating = true;
+        StateHasChanged();
+        try
+        {
+            _notFoundInFileTokens = await VersionService.ValidatePatternAgainstFileAsync(
+                WorkspaceId, File.RepositoryName, File.FilePath, patternText, cancellationToken);
+        }
+        catch (OperationCanceledException) { return; }
+        catch { _notFoundInFileTokens = []; }
+        _fileValidating = false;
+        StateHasChanged();
     }
 
     private sealed class AtContext

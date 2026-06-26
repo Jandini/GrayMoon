@@ -95,15 +95,17 @@ public sealed class CheckFileVersionsCommand(IGitService git, ILogger<CheckFileV
                 }
             }
 
-            foreach (var missing in BuildMissingTokenLines(patternEntries, expectedVersions, matchedTokens))
+            var notMatchedTokens = patternEntries
+                .Select(e => e.RepoName)
+                .Where(r => !matchedTokens.Contains(r))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var token in notMatchedTokens)
             {
-                if (!outOfDateLines.Any(o => string.Equals(o.TokenName, missing.TokenName, StringComparison.OrdinalIgnoreCase)))
-                {
-                    logger.LogInformation(
-                        "CheckFileVersions {FilePath} token {Token}: NOT FOUND in file (expected={Expected})",
-                        filePath, missing.TokenName, missing.ExpectedValue);
-                    outOfDateLines.Add(missing);
-                }
+                logger.LogInformation(
+                    "CheckFileVersions {FilePath} token {Token}: NOT FOUND in file (not counted as out-of-date)",
+                    filePath, token);
             }
 
             results.Add(new CheckFileVersionsResult
@@ -113,35 +115,12 @@ public sealed class CheckFileVersionsCommand(IGitService git, ILogger<CheckFileV
                 FileName = fileName,
                 TotalMatchedLines = totalMatchedLines,
                 ExpectedTokenCount = expectedTokenCount,
-                OutOfDateLines = outOfDateLines
+                OutOfDateLines = outOfDateLines,
+                NotMatchedTokens = notMatchedTokens
             });
         }
 
         return new CheckFileVersionsResponse { Files = results };
-    }
-
-    private static List<CheckFileVersionsOutOfDateLine> BuildMissingTokenLines(
-        IReadOnlyList<(string Prefix, string RepoName, string Suffix)> patternEntries,
-        IReadOnlyDictionary<string, string> expectedVersions,
-        IReadOnlySet<string>? matchedTokens)
-    {
-        var missing = new List<CheckFileVersionsOutOfDateLine>();
-        foreach (var (_, repoName, _) in patternEntries)
-        {
-            if (!expectedVersions.TryGetValue(repoName, out var expectedValue))
-                continue;
-            if (matchedTokens != null && matchedTokens.Contains(repoName))
-                continue;
-
-            missing.Add(new CheckFileVersionsOutOfDateLine
-            {
-                TokenName = repoName,
-                CurrentValue = "",
-                ExpectedValue = expectedValue
-            });
-        }
-
-        return missing;
     }
 
     private static List<(string Prefix, string RepoName, string Suffix)> ParsePatternLines(string pattern)
