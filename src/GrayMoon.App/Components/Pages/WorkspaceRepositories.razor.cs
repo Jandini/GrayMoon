@@ -1299,20 +1299,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
     }
 
     private async Task<(IReadOnlySet<int> PushRepoIds, IReadOnlySet<string> RequiredPackageIds)?> BuildPushPlanAsync(
-        string emptyMessage, CancellationToken ct)
+        string emptyMessage, CancellationToken ct, int? maxLevel = null)
     {
         await using var planScope = ServiceScopeFactory.CreateAsyncScope();
         var planPushHandler = planScope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
         var planDepService = planScope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
-        var (payload, hasUnpushed) = await planPushHandler.GetPushPlanAsync(WorkspaceId, workspaceRepositories, ct);
-        if (!hasUnpushed)
-        {
-            SafeInvoke(() => ToastService.Show(emptyMessage));
-            return null;
-        }
-        var taggedRepoIds = workspaceRepositories.Where(wr => wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet();
-        IReadOnlySet<int> pushRepoIds = payload.Select(p => p.RepoId).Where(id => !taggedRepoIds.Contains(id)).ToHashSet();
-        if (pushRepoIds.Count == 0)
+        var (_, pushRepoIds, hasUnpushed) = await planPushHandler.GetPushPlanAsync(WorkspaceId, workspaceRepositories, ct, maxLevel);
+        if (!hasUnpushed || pushRepoIds.Count == 0)
         {
             SafeInvoke(() => ToastService.Show(emptyMessage));
             return null;
@@ -1417,24 +1410,17 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
         try
         {
-            var (payload, hasUnpushed) = await WorkspacePushHandler.GetPushPlanAsync(
+            var (_, pushRepoIds, hasUnpushed) = await WorkspacePushHandler.GetPushPlanAsync(
                 WorkspaceId,
                 workspaceRepositories,
                 CancellationToken.None);
-            if (!hasUnpushed)
+            if (!hasUnpushed || pushRepoIds.Count == 0)
             {
                 ToastService.Show("No repositories to push.");
                 return;
             }
 
-            // Exclude repositories pinned to a tag: they have no branch to push.
-            var taggedRepoIds = workspaceRepositories.Where(wr => wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet();
-            var repoIdsWithUnpushed = payload.Select(p => p.RepoId).Where(id => !taggedRepoIds.Contains(id)).ToHashSet();
-            if (repoIdsWithUnpushed.Count == 0)
-            {
-                ToastService.Show("No repositories to push.");
-                return;
-            }
+            var repoIdsWithUnpushed = pushRepoIds;
             var repoIdsThatNeedPush = workspaceRepositories
                 .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
@@ -1861,9 +1847,15 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
         JobService.StartJob(PageJobKey, $"Updating Level {level}...", async (job, ct) =>
         {
-            // Phase 1: update only repos at the target level
+            // Phase 1: update repos needing work up to the target level
             try
             {
+                var reposNeedingWork = workspaceRepositories
+                    .Where(wr => !wr.IsOnTag && (wr.DependencyLevel ?? 0) <= level)
+                    .Where(wr => (wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
+                    .Select(wr => wr.RepositoryId)
+                    .ToHashSet();
+
                 await using (var updateScope = ServiceScopeFactory.CreateAsyncScope())
                 {
                     var updateHandler = updateScope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
@@ -1874,6 +1866,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                         (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
                         commitMessage: commitMessage,
                         includeDepsInCommitMessage: includeDepsInCommitMessage,
+                        repoIdsToUpdate: reposNeedingWork,
                         maxLevel: level);
                 }
 
@@ -1892,41 +1885,17 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 throw;
             }
 
-            // Phase 2: determine push plan, filtered to repos at the target level only
+            // Phase 2: determine push plan for repos that need pushing up to the target level
             job.ReportProgress("Preparing push...");
             IReadOnlySet<int> pushRepoIds;
             IReadOnlySet<string> requiredPackageIds;
             try
             {
-                var levelRepoIds = workspaceRepositories
-                    .Where(wr => !wr.IsOnTag && (wr.DependencyLevel ?? 0) <= level)
-                    .Select(wr => wr.RepositoryId)
-                    .ToHashSet();
-
-                await using var planScope = ServiceScopeFactory.CreateAsyncScope();
-                var planPushHandler = planScope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
-                var planDepService = planScope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
-                var (payload, hasUnpushed) = await planPushHandler.GetPushPlanAsync(
-                    WorkspaceId, workspaceRepositories, ct, forceIncludeRepoIds: levelRepoIds);
-
-                var taggedRepoIds = workspaceRepositories.Where(wr => wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet();
-                pushRepoIds = payload
-                    .Select(p => p.RepoId)
-                    .Where(id => !taggedRepoIds.Contains(id) && levelRepoIds.Contains(id))
-                    .ToHashSet();
-
-                if (!hasUnpushed || pushRepoIds.Count == 0)
-                {
-                    SafeInvoke(() => ToastService.Show($"Up to Level {level} updated. Nothing to push."));
+                var plan = await BuildPushPlanAsync($"Up to Level {level} updated. Nothing to push.", ct, maxLevel: level);
+                if (plan == null)
                     return;
-                }
 
-                var depInfo = await planDepService.GetPushDependencyInfoForRepoSetAsync(WorkspaceId, pushRepoIds, ct);
-                requiredPackageIds = depInfo?.PayloadForRepo?.RequiredPackages
-                    .Select(r => r.PackageId?.Trim())
-                    .Where(id => !string.IsNullOrEmpty(id))
-                    .Cast<string>()
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                (pushRepoIds, requiredPackageIds) = plan.Value;
             }
             catch (OperationCanceledException)
             {

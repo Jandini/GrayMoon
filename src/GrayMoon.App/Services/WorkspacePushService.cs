@@ -718,11 +718,21 @@ public sealed class WorkspacePushService(
         (err.Contains("non-fast-forward", StringComparison.OrdinalIgnoreCase) ||
          (err.Contains("[rejected]", StringComparison.OrdinalIgnoreCase) && err.Contains("fetch first", StringComparison.OrdinalIgnoreCase)));
 
+    private static bool IsMergeConflictError(string? err) =>
+        err != null && err.Contains("merge conflict", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsPullFailureError(string? err) =>
+        err != null && err.Contains("pull failed", StringComparison.OrdinalIgnoreCase);
+
     private static string FormatPushError(string? rawError)
     {
         var err = rawError ?? "Push failed";
+        if (IsMergeConflictError(err))
+            return "Push skipped: merge conflict while pulling remote changes. Resolve conflicts and retry.";
+        if (IsPullFailureError(err))
+            return "Push skipped: could not pull remote changes. Check repository state and retry.";
         if (IsNonFastForwardRejection(err))
-            return "Push rejected: remote has new commits. Fetching latest state — pull and retry.";
+            return "Push rejected: remote has new commits. Fetching latest state - pull and retry.";
         return err;
     }
 

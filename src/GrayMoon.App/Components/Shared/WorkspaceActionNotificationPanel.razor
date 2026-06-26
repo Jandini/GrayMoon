@@ -624,10 +624,6 @@
     private Task StartUpdateAndPushJobAsync(WorkspaceNotification notification)
     {
         var workspaceId = notification.WorkspaceId;
-        var updatedRepoIds = notification.Repos
-            .Where(r => r.UnmatchedDeps > 0)
-            .Select(r => r.RepositoryId)
-            .ToHashSet();
         PendingActionsService.Dismiss(workspaceId);
         JobService.StartJob(WorkspaceJobKey(workspaceId), "Updating dependencies...", async (job, ct) =>
         {
@@ -662,7 +658,7 @@
             job.ReportProgress("Preparing push...");
             try
             {
-                await ExecutePushAsync(workspaceId, freshLinks, job, ct, updatedRepoIds);
+                await ExecutePushAsync(workspaceId, freshLinks, job, ct);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -701,16 +697,22 @@
     private Task StartLevelOnlyUpdateAndPushJobAsync(WorkspaceNotification notification, int level)
     {
         var workspaceId = notification.WorkspaceId;
-        var updatedRepoIds = notification.Repos
-            .Where(r => r.UnmatchedDeps > 0)
-            .Select(r => r.RepositoryId)
-            .ToHashSet();
         PendingActionsService.Dismiss(workspaceId);
         JobService.StartJob(WorkspaceJobKey(workspaceId), $"Updating Level {level}...", async (job, ct) =>
         {
             List<WorkspaceRepositoryLink> freshLinks;
             try
             {
+                await using var preloadScope = ServiceScopeFactory.CreateAsyncScope();
+                var preloadWorkspaceRepo = preloadScope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+                var preloadWs = await preloadWorkspaceRepo.GetByIdAsync(workspaceId);
+                var preloadLinks = preloadWs?.Repositories.ToList() ?? new List<WorkspaceRepositoryLink>();
+                var reposNeedingWork = preloadLinks
+                    .Where(wr => !wr.IsOnTag && (wr.DependencyLevel ?? 0) <= level)
+                    .Where(wr => (wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
+                    .Select(wr => wr.RepositoryId)
+                    .ToHashSet();
+
                 await using var updateScope = ServiceScopeFactory.CreateAsyncScope();
                 var updateHandler = updateScope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
                 await updateHandler.RunUpdateAsync(
@@ -719,7 +721,7 @@
                     job.ReportProgress,
                     (_, _) => { },
                     onAppSideComplete: () => { },
-                    repoIdsToUpdate: null,
+                    repoIdsToUpdate: reposNeedingWork,
                     commitMessage: null,
                     includeDepsInCommitMessage: true,
                     maxLevel: level);
@@ -740,11 +742,7 @@
             job.ReportProgress("Preparing push...");
             try
             {
-                var levelLinks = freshLinks.Where(wr => (wr.DependencyLevel ?? 0) <= level).ToList();
-                var levelUpdatedRepoIds = updatedRepoIds
-                    .Where(id => freshLinks.Any(l => l.RepositoryId == id && (l.DependencyLevel ?? 0) <= level))
-                    .ToHashSet();
-                await ExecutePushAsync(workspaceId, levelLinks, job, ct, forceIncludeRepoIds: levelUpdatedRepoIds);
+                await ExecutePushAsync(workspaceId, freshLinks, job, ct, maxLevel: level);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -846,22 +844,14 @@
         List<WorkspaceRepositoryLink> links,
         BackgroundJobHandle job,
         CancellationToken ct,
-        IReadOnlySet<int>? forceIncludeRepoIds = null)
+        int? maxLevel = null)
     {
         await using var scope = ServiceScopeFactory.CreateAsyncScope();
         var pushHandler = scope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
         var depService = scope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
 
-        var (payload, hasUnpushed) = await pushHandler.GetPushPlanAsync(workspaceId, links, ct, forceIncludeRepoIds);
-        if (!hasUnpushed)
-        {
-            if (!_disposed) _ = InvokeAsync(() => ToastService.Show("Nothing to push."));
-            return;
-        }
-
-        var taggedIds = links.Where(wr => wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet();
-        var pushRepoIds = payload.Select(p => p.RepoId).Where(id => !taggedIds.Contains(id)).ToHashSet();
-        if (pushRepoIds.Count == 0)
+        var (_, pushRepoIds, hasUnpushed) = await pushHandler.GetPushPlanAsync(workspaceId, links, ct, maxLevel);
+        if (!hasUnpushed || pushRepoIds.Count == 0)
         {
             if (!_disposed) _ = InvokeAsync(() => ToastService.Show("Nothing to push."));
             return;
@@ -869,10 +859,9 @@
 
         var repoIdsThatNeedPush = links
             .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
+            .Where(wr => !maxLevel.HasValue || (wr.DependencyLevel ?? 0) <= maxLevel.Value)
             .Select(wr => wr.RepositoryId)
             .ToHashSet();
-        if (forceIncludeRepoIds != null)
-            repoIdsThatNeedPush.UnionWith(forceIncludeRepoIds);
         var depInfo = await depService.GetPushDependencyInfoForRepoSetAsync(workspaceId, pushRepoIds, ct);
         bool synchronizedPush = WorkspaceDependencyService.ShouldShowSynchronizedPushModal(depInfo, repoIdsThatNeedPush);
 
