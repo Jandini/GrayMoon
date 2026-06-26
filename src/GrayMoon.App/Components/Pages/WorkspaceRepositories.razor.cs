@@ -1949,6 +1949,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
             // Phase 1: update - fresh scope so DbContext does not compete with circuit page loads
             try
             {
+                var reposNeedingWork = workspaceRepositories
+                    .Where(wr => !wr.IsOnTag)
+                    .Where(wr => (wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
+                    .Select(wr => wr.RepositoryId)
+                    .ToHashSet();
+
                 await using (var updateScope = ServiceScopeFactory.CreateAsyncScope())
                 {
                     var updateHandler = updateScope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
@@ -1957,7 +1963,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                         ct,
                         job.ReportProgress,
                         (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
-                        repoIdsToUpdate: null,
+                        repoIdsToUpdate: reposNeedingWork.Count > 0 ? reposNeedingWork : null,
                         commitMessage: commitMessage,
                         includeDepsInCommitMessage: includeDepsInCommitMessage);
                 }

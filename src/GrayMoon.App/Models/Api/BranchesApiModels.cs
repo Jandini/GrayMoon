@@ -189,8 +189,18 @@ public sealed class StageAndCommitResponse
     [JsonPropertyName("success")]
     public bool Success { get; set; }
 
+    [JsonPropertyName("committed")]
+    public bool Committed { get; set; }
+
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
+}
+
+/// <summary>Agent SyncRepositoryDependencies response (camelCase).</summary>
+public sealed class SyncRepositoryDependenciesResponse
+{
+    [JsonPropertyName("updatedCount")]
+    public int UpdatedCount { get; set; }
 }
 
 /// <summary>Agent PushRepository response (camelCase).</summary>

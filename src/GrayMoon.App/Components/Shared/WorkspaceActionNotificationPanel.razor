@@ -577,6 +577,16 @@
         {
             try
             {
+                await using var preloadScope = ServiceScopeFactory.CreateAsyncScope();
+                var preloadWorkspaceRepo = preloadScope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+                var preloadWs = await preloadWorkspaceRepo.GetByIdAsync(workspaceId);
+                var preloadLinks = preloadWs?.Repositories.ToList() ?? new List<WorkspaceRepositoryLink>();
+                var reposNeedingWork = preloadLinks
+                    .Where(wr => !wr.IsOnTag)
+                    .Where(wr => (wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
+                    .Select(wr => wr.RepositoryId)
+                    .ToHashSet();
+
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
                 var updateHandler = scope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
                 await updateHandler.RunUpdateAsync(
@@ -585,7 +595,7 @@
                     job.ReportProgress,
                     (_, _) => { },
                     onAppSideComplete: () => { },
-                    repoIdsToUpdate: null,
+                    repoIdsToUpdate: reposNeedingWork.Count > 0 ? reposNeedingWork : null,
                     commitMessage: null,
                     includeDepsInCommitMessage: true);
             }
@@ -630,6 +640,16 @@
             List<WorkspaceRepositoryLink> freshLinks;
             try
             {
+                await using var preloadScope = ServiceScopeFactory.CreateAsyncScope();
+                var preloadWorkspaceRepo = preloadScope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+                var preloadWs = await preloadWorkspaceRepo.GetByIdAsync(workspaceId);
+                var preloadLinks = preloadWs?.Repositories.ToList() ?? new List<WorkspaceRepositoryLink>();
+                var reposNeedingWork = preloadLinks
+                    .Where(wr => !wr.IsOnTag)
+                    .Where(wr => (wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
+                    .Select(wr => wr.RepositoryId)
+                    .ToHashSet();
+
                 await using var updateScope = ServiceScopeFactory.CreateAsyncScope();
                 var updateHandler = updateScope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
                 await updateHandler.RunUpdateAsync(
@@ -638,7 +658,7 @@
                     job.ReportProgress,
                     (_, _) => { },
                     onAppSideComplete: () => { },
-                    repoIdsToUpdate: null,
+                    repoIdsToUpdate: reposNeedingWork.Count > 0 ? reposNeedingWork : null,
                     commitMessage: null,
                     includeDepsInCommitMessage: true);
 

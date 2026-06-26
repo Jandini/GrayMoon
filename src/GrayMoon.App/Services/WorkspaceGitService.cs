@@ -310,9 +310,9 @@ public class WorkspaceGitService(
             return;
 
         onProgressMessage?.Invoke("Syncing dependencies...");
-        var count = await SyncDependenciesAsync(workspaceId, repoIdsToSync: new HashSet<int> { repositoryId }, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: onRepoError, cancellationToken: cancellationToken);
+        var syncedIds = await SyncDependenciesAsync(workspaceId, repoIdsToSync: new HashSet<int> { repositoryId }, onProgress: (c, t, _) => onProgressMessage?.Invoke($"Synced dependencies {c} of {t}"), onRepoError: onRepoError, cancellationToken: cancellationToken);
         await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
-        _logger.LogDebug("RunUpdateSingleRepository completed for workspace {WorkspaceName}, repo {RepositoryId}, synced={Count}", workspace.Name, repositoryId, count);
+        _logger.LogDebug("RunUpdateSingleRepository completed for workspace {WorkspaceName}, repo {RepositoryId}, synced={Count}", workspace.Name, repositoryId, syncedIds.Count);
     }
 
     /// <summary>Gets the list of repos that need dependency updates, with levels. Used to detect single vs multi-level and to drive update-with-commit flow. When <paramref name="repositoryIds"/> is set, only those repos are considered.</summary>
@@ -338,8 +338,8 @@ public class WorkspaceGitService(
         return (withUpdates, isMultiLevel);
     }
 
-    /// <summary>Syncs dependency versions in .csproj files to match the current version of each referenced package source. Only repos with at least one mismatched dependency are updated. When <paramref name="repoIdsToSync"/> is set, only those repos are synced.</summary>
-    public async Task<int> SyncDependenciesAsync(
+    /// <summary>Syncs dependency versions in .csproj files to match the current version of each referenced package source. Only repos with at least one mismatched dependency are updated. When <paramref name="repoIdsToSync"/> is set, only those repos are synced. Returns the set of repo IDs where the agent reported UpdatedCount &gt; 0.</summary>
+    public async Task<IReadOnlySet<int>> SyncDependenciesAsync(
         int workspaceId,
         Action<int, int, int>? onProgress = null,
         Action<int, string>? onRepoError = null,
@@ -368,7 +368,7 @@ public class WorkspaceGitService(
         if (toSync.Count == 0)
         {
             _logger.LogInformation("Sync dependencies: no mismatched dependencies for workspace {WorkspaceName} (filtered)", workspace.Name);
-            return 0;
+            return new HashSet<int>();
         }
 
         _logger.LogInformation("Sync dependencies: Workspace={WorkspaceName}, RepoCount={RepoCount}", workspace.Name, toSync.Count);
@@ -376,6 +376,7 @@ public class WorkspaceGitService(
         var completedCount = 0;
         var totalCount = toSync.Count;
         var failedRepoIds = new ConcurrentDictionary<int, bool>();
+        var syncedRepoIds = new ConcurrentDictionary<int, bool>();
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
 
         var repoTasks = toSync.Select(async repo =>
@@ -404,6 +405,14 @@ public class WorkspaceGitService(
                 failedRepoIds.TryAdd(repo.RepoId, true);
                 onRepoError?.Invoke(repo.RepoId, response.Error ?? "Sync dependencies failed");
             }
+            else
+            {
+                var syncResponse = response.Data != null
+                    ? AgentResponseJson.DeserializeAgentResponse<SyncRepositoryDependenciesResponse>(response.Data)
+                    : null;
+                if (syncResponse?.UpdatedCount > 0)
+                    syncedRepoIds.TryAdd(repo.RepoId, true);
+            }
 
             var c = Interlocked.Increment(ref completedCount);
             onProgress?.Invoke(c, totalCount, repo.RepoId);
@@ -423,8 +432,8 @@ public class WorkspaceGitService(
 
         await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
 
-        _logger.LogDebug("Sync dependencies completed for workspace {WorkspaceName}. Updated {RepoCount} repos, persisted {UpdateCount} versions", workspace.Name, toSync.Count, updatesToPersist.Count);
-        return toSync.Count;
+        _logger.LogDebug("Sync dependencies completed for workspace {WorkspaceName}. Synced {SyncedCount} repos (with changes), persisted {UpdateCount} versions", workspace.Name, syncedRepoIds.Count, updatesToPersist.Count);
+        return syncedRepoIds.Keys.ToHashSet();
     }
 
     /// <summary>
@@ -509,7 +518,7 @@ public class WorkspaceGitService(
     }
 
     /// <summary>Stages updated .csproj paths and commits with message "chore(deps): update package versions" plus the full list of packages (one line per package: "- {packageId} to {version}"). Runs up to 8 commits in parallel.</summary>
-    public async Task<IReadOnlyList<(int RepoId, string? ErrorMessage)>> CommitDependencyUpdatesAsync(
+    public async Task<IReadOnlyList<(int RepoId, bool Committed, string? ErrorMessage)>> CommitDependencyUpdatesAsync(
         int workspaceId,
         IReadOnlyList<SyncDependenciesRepoPayload> reposToCommit,
         Action<int, int, int>? onProgress = null,
@@ -518,7 +527,7 @@ public class WorkspaceGitService(
         bool includeDepsInCommitMessage = true)
     {
         if (!_agentBridge.IsAgentConnected || reposToCommit.Count == 0)
-            return Array.Empty<(int, string?)>();
+            return Array.Empty<(int, bool, string?)>();
 
         var tagPinnedIds = (await _dbContext.WorkspaceRepositories
             .AsNoTracking()
@@ -527,11 +536,11 @@ public class WorkspaceGitService(
             .ToListAsync(cancellationToken)).ToHashSet();
         reposToCommit = reposToCommit.Where(r => !tagPinnedIds.Contains(r.RepoId)).ToList();
         if (reposToCommit.Count == 0)
-            return Array.Empty<(int, string?)>();
+            return Array.Empty<(int, bool, string?)>();
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
-            return reposToCommit.Select(r => (r.RepoId, (string?)"Workspace not found.")).ToList();
+            return reposToCommit.Select(r => (r.RepoId, false, (string?)"Workspace not found.")).ToList();
 
         var total = reposToCommit.Count;
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
@@ -581,11 +590,15 @@ public class WorkspaceGitService(
                     workspaceRoot
                 };
                 var response = await _agentBridge.SendCommandAsync("StageAndCommit", args, cancellationToken);
-                var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data) is { Success: true };
-                var err = success ? null : (response.Error ?? AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data!)?.ErrorMessage ?? "Commit failed");
+                var parsed = response.Success && response.Data != null
+                    ? AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data)
+                    : null;
+                var agentSuccess = parsed is { Success: true };
+                var agentCommitted = parsed?.Committed ?? false;
+                var err = agentSuccess ? null : (response.Error ?? parsed?.ErrorMessage ?? "Commit failed");
                 var c = Interlocked.Increment(ref completed);
                 onProgress?.Invoke(c, total, repo.RepoId);
-                return (RepoId: repo.RepoId, ErrorMessage: err);
+                return (RepoId: repo.RepoId, Committed: agentCommitted, ErrorMessage: err);
             }
             finally
             {
@@ -594,12 +607,12 @@ public class WorkspaceGitService(
         });
 
         var completedResults = await Task.WhenAll(tasks);
-        var byRepo = completedResults.ToDictionary(x => x.RepoId, x => x.ErrorMessage);
-        return reposToCommit.Select(r => (r.RepoId, ErrorMessage: byRepo[r.RepoId])).ToList();
+        var byRepo = completedResults.ToDictionary(x => x.RepoId, x => (x.Committed, x.ErrorMessage));
+        return reposToCommit.Select(r => (r.RepoId, byRepo[r.RepoId].Committed, byRepo[r.RepoId].ErrorMessage)).ToList();
     }
 
     /// <summary>Stages the given file paths per repo and commits with message "chore(deps): update versions (N)" where N is the path count for that repo. Uses the same agent StageAndCommit command.</summary>
-    public async Task<IReadOnlyList<(int RepoId, string? ErrorMessage)>> CommitFilePathsAsync(
+    public async Task<IReadOnlyList<(int RepoId, bool Committed, string? ErrorMessage)>> CommitFilePathsAsync(
         int workspaceId,
         IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)> reposAndPaths,
         Action<int, int, int>? onProgress = null,
@@ -607,7 +620,7 @@ public class WorkspaceGitService(
         string? commitMessageOverride = null)
     {
         if (!_agentBridge.IsAgentConnected || reposAndPaths.Count == 0)
-            return Array.Empty<(int, string?)>();
+            return Array.Empty<(int, bool, string?)>();
 
         var tagPinnedIdsFp = (await _dbContext.WorkspaceRepositories
             .AsNoTracking()
@@ -616,11 +629,11 @@ public class WorkspaceGitService(
             .ToListAsync(cancellationToken)).ToHashSet();
         reposAndPaths = reposAndPaths.Where(r => !tagPinnedIdsFp.Contains(r.RepoId)).ToList();
         if (reposAndPaths.Count == 0)
-            return Array.Empty<(int, string?)>();
+            return Array.Empty<(int, bool, string?)>();
 
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
-            return reposAndPaths.Select(r => (r.RepoId, (string?)"Workspace not found.")).ToList();
+            return reposAndPaths.Select(r => (r.RepoId, false, (string?)"Workspace not found.")).ToList();
 
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         var total = reposAndPaths.Count;
@@ -638,7 +651,7 @@ public class WorkspaceGitService(
                     .Distinct()
                     .ToList();
                 if (pathsToStage.Count == 0)
-                    return (RepoId: repo.RepoId, ErrorMessage: (string?)"No paths to stage.");
+                    return (RepoId: repo.RepoId, Committed: false, ErrorMessage: (string?)"No paths to stage.");
                 var commitMessage = string.IsNullOrWhiteSpace(commitMessageOverride)
                     ? $"chore(deps): update versions ({pathsToStage.Count})"
                     : commitMessageOverride.Trim();
@@ -651,11 +664,15 @@ public class WorkspaceGitService(
                     workspaceRoot
                 };
                 var response = await _agentBridge.SendCommandAsync("StageAndCommit", args, cancellationToken);
-                var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data) is { Success: true };
-                var err = success ? null : (response.Error ?? AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data!)?.ErrorMessage ?? "Commit failed");
+                var parsed = response.Success && response.Data != null
+                    ? AgentResponseJson.DeserializeAgentResponse<StageAndCommitResponse>(response.Data)
+                    : null;
+                var agentSuccess = parsed is { Success: true };
+                var agentCommitted = parsed?.Committed ?? false;
+                var err = agentSuccess ? null : (response.Error ?? parsed?.ErrorMessage ?? "Commit failed");
                 var c = Interlocked.Increment(ref completed);
                 onProgress?.Invoke(c, total, repo.RepoId);
-                return (RepoId: repo.RepoId, ErrorMessage: err);
+                return (RepoId: repo.RepoId, Committed: agentCommitted, ErrorMessage: err);
             }
             finally
             {
@@ -664,8 +681,8 @@ public class WorkspaceGitService(
         });
 
         var completedResults = await Task.WhenAll(tasks);
-        var byRepo = completedResults.ToDictionary(x => x.RepoId, x => x.ErrorMessage);
-        return reposAndPaths.Select(r => (r.RepoId, ErrorMessage: byRepo[r.RepoId])).ToList();
+        var byRepo = completedResults.ToDictionary(x => x.RepoId, x => (x.Committed, x.ErrorMessage));
+        return reposAndPaths.Select(r => (r.RepoId, byRepo[r.RepoId].Committed, byRepo[r.RepoId].ErrorMessage)).ToList();
     }
 
     /// <summary>Runs GetCommitCounts (agent) for each repo and returns DefaultBranchAhead and HasUpstream per repo. Used to check if sync-to-default is safe (no commits ahead of default). Respects MaxParallelOperations.</summary>
