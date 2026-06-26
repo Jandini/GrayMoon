@@ -191,7 +191,7 @@ public sealed class WorkspaceFileVersionService(
 
     /// <summary>
     /// Reads all configured version files via the agent, compares current values to expected repo GitVersions,
-    /// and persists the results to WorkspaceFileLineStatuses and WorkspaceRepositoryLink (OutOfDateFileLines, TotalFileLines).
+    /// and persists the results to WorkspaceFileLineStatuses and WorkspaceRepositoryLink (OutOfDateFileLines, OutOfDateFileRepos, TotalFileLines).
     /// Called at the same trigger points as csproj dependency stat recomputation.
     /// Concurrent callers for the same workspace coalesce onto one in-flight check.
     /// </summary>
@@ -285,9 +285,10 @@ public sealed class WorkspaceFileVersionService(
         {
             // Reset counters on all repo links when there are no configured files
             await dbContext.WorkspaceRepositories
-                .Where(wr => wr.WorkspaceId == workspaceId && (wr.OutOfDateFileLines != null || wr.TotalFileLines != null))
+                .Where(wr => wr.WorkspaceId == workspaceId && (wr.OutOfDateFileLines != null || wr.OutOfDateFileRepos != null || wr.TotalFileLines != null))
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(wr => wr.OutOfDateFileLines, (int?)null)
+                    .SetProperty(wr => wr.OutOfDateFileRepos, (int?)null)
                     .SetProperty(wr => wr.TotalFileLines, (int?)null),
                     cancellationToken);
             logger.LogDebug("CheckAndPersist completed for workspace {WorkspaceId} in {ElapsedMs}ms (no items)", workspaceId, sw.ElapsedMilliseconds);
@@ -319,6 +320,7 @@ public sealed class WorkspaceFileVersionService(
             // Accumulate per-repo stats and new per-file status rows
             var newStatuses = new List<WorkspaceFileLineStatus>();
             var repoOutOfDate = new Dictionary<int, int>();
+            var repoOutOfDateTokens = new Dictionary<int, HashSet<string>>();
             var repoTotalMatched = new Dictionary<int, int>();
 
             foreach (var fileResult in result.Files)
@@ -348,6 +350,16 @@ public sealed class WorkspaceFileVersionService(
 
                 repoTotalMatched[repoId] = (repoTotalMatched.TryGetValue(repoId, out var tot) ? tot : 0) + totalForStats;
                 repoOutOfDate[repoId] = (repoOutOfDate.TryGetValue(repoId, out var ood) ? ood : 0) + outOfDateCount;
+                if (outOfDateCount > 0 && fileResult.OutOfDateLines != null)
+                {
+                    if (!repoOutOfDateTokens.TryGetValue(repoId, out var tokens))
+                        repoOutOfDateTokens[repoId] = tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var line in fileResult.OutOfDateLines)
+                    {
+                        if (!string.IsNullOrWhiteSpace(line.TokenName))
+                            tokens.Add(line.TokenName);
+                    }
+                }
             }
 
             if (newStatuses.Count > 0)
@@ -364,6 +376,9 @@ public sealed class WorkspaceFileVersionService(
             foreach (var link in allLinks)
             {
                 link.OutOfDateFileLines = repoOutOfDate.TryGetValue(link.RepositoryId, out var ood) ? ood : (int?)null;
+                link.OutOfDateFileRepos = repoOutOfDateTokens.TryGetValue(link.RepositoryId, out var tokens) && tokens.Count > 0
+                    ? tokens.Count
+                    : (int?)null;
                 link.TotalFileLines = repoTotalMatched.TryGetValue(link.RepositoryId, out var tot) ? tot : (int?)null;
             }
             await dbContext.SaveChangesAsync(cancellationToken);

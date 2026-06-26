@@ -75,6 +75,9 @@ public class WorkspaceRepositoryLink
     /// <summary>Count of configured version-file lines whose current value does not match the expected repo GitVersion. Set when file version status is checked (same trigger as dep stats). Used to extend the badge X-of-Y count.</summary>
     public int? OutOfDateFileLines { get; set; }
 
+    /// <summary>Count of distinct workspace repositories referenced by out-of-date version-file tokens. Set when file version status is checked.</summary>
+    public int? OutOfDateFileRepos { get; set; }
+
     /// <summary>Total count of configured version-file lines that were matched in files (regardless of whether they are up to date). Set when file version status is checked. Used for badge Y denominator.</summary>
     public int? TotalFileLines { get; set; }
 

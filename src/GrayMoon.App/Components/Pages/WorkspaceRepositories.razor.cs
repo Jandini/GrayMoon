@@ -24,7 +24,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private bool isLoading = true;
     private bool? isOutOfSync = null;
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => !wr.IsOnTag &&
-        ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileLines ?? 0) > 0));
+        ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileLines ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0));
     private bool isPushRecommended => workspaceRepositories.Any(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false));
     private bool hasTaggedRepos => workspaceRepositories.Any(wr => wr.IsOnTag);
     /// <summary>When true, any repository on its default branch has incoming commits; header shows red Pull button and executes only Pull (commit sync) for those repos. Repos pinned to a tag are excluded.</summary>
@@ -487,8 +487,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private IReadOnlyList<WorkspaceFileLineStatus> GetFileLineStatus(int repositoryId) =>
         _fileLineStatusByRepo.TryGetValue(repositoryId, out var lines) ? lines : Array.Empty<WorkspaceFileLineStatus>();
 
-    private bool HasOutOfDateFiles(int repositoryId) =>
-        GetFileLineStatus(repositoryId).Any(s => s.OutOfDateLines > 0);
+    private bool HasOutOfDateFiles(int repositoryId)
+    {
+        var link = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId);
+        if (link != null && ((link.OutOfDateFileRepos ?? 0) > 0 || (link.OutOfDateFileLines ?? 0) > 0))
+            return true;
+        return GetFileLineStatus(repositoryId).Any(s => s.OutOfDateLines > 0);
+    }
 
     private IReadOnlyList<(string FileName, string TokenName, string Version)> GetAllFileVersionLines(int repositoryId) =>
         _allFileVersionLinesByRepo.TryGetValue(repositoryId, out var lines) ? lines : Array.Empty<(string, string, string)>();
@@ -1642,7 +1647,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
                 var repoIds = new HashSet<int> { repositoryId };
                 var (updated, failed, error, _) = await fileVersionService.UpdateAllVersionsAsync(
-                    WorkspaceId, selectedRepositoryIds: repoIds, cancellationToken: ct);
+                    WorkspaceId,
+                    selectedRepositoryIds: repoIds,
+                    filterPatternTokensToSelectedRepositories: false,
+                    cancellationToken: ct);
 
                 if (error != null)
                 {

@@ -43,6 +43,7 @@ public static class Migrations
         await MigrateWorkspaceFileLineStatusTableAsync(dbContext);
         await MigrateOutOfDateFileLinesColumnAsync(dbContext);
         await MigrateTotalFileLinesColumnAsync(dbContext);
+        await MigrateOutOfDateFileReposColumnAsync(dbContext);
     }
 
     public static async Task MigrateRepositoriesTopicsAsync(AppDbContext dbContext)
@@ -1121,6 +1122,31 @@ public static class Migrations
                 if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
                 {
                     cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN TotalFileLines INTEGER";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>Adds OutOfDateFileRepos column to WorkspaceRepositories for distinct out-of-date file-dependency repo count on the badge.</summary>
+    public static async Task MigrateOutOfDateFileReposColumnAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name='OutOfDateFileRepos'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN OutOfDateFileRepos INTEGER";
                     await cmd.ExecuteNonQueryAsync();
                 }
             }

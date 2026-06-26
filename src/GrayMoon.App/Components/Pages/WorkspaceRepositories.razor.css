@@ -467,6 +467,10 @@
     color: #fff;
 }
 
+::deep .repositories-table .dependency-badge-tooltip-versions--after-file {
+    margin-left: 0.35rem;
+}
+
 ::deep .repositories-table .dependency-badge-tooltip-footer {
     color: #888;
     font-size: 0.72rem;

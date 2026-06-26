@@ -13,15 +13,10 @@
         : null;
     var depCount = Link.Dependencies ?? 0;
     var unmatchedDeps = Link.UnmatchedDeps ?? 0;
-    var filesWithOutOfDate = FileLineStatuses.Where(s => s.OutOfDateLines > 0).Select(s => s.FileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
-    var outOfDateFileRepos = AllFileVersionLines
-        .Where(l => filesWithOutOfDate.Contains(l.FileName))
-        .Select(l => l.TokenName)
-        .Distinct(StringComparer.OrdinalIgnoreCase)
-        .Count();
+    var outOfDateFileRepoCount = Link.OutOfDateFileRepos ?? 0;
     var totalWithFiles = depCount;
-    var unmatchedWithFiles = unmatchedDeps + outOfDateFileRepos;
-    var hasOutOfDateFiles = FileLineStatuses.Any(s => s.OutOfDateLines > 0);
+    var unmatchedWithFiles = unmatchedDeps + outOfDateFileRepoCount;
+    var hasOutOfDateFiles = outOfDateFileRepoCount > 0 || (Link.OutOfDateFileLines ?? 0) > 0;
     var graphUrl = WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, repositoryId: repo.RepositoryId);
 
     <tr>
@@ -232,15 +227,16 @@
                                         @foreach (var s in FileLineStatuses)
                                         {
                                             <div class="dependency-badge-tooltip-line">
-                                                <code>@s.FileName</code>
+                                                <code>@s.FileName</code><span class="dependency-badge-tooltip-versions dependency-badge-tooltip-versions--after-file">
                                                 @if (s.OutOfDateLines == 0)
                                                 {
-                                                    <span class="dependency-badge-tooltip-versions"> @s.TotalMatchedLines of @s.TotalMatchedLines current</span>
+                                                    @:@s.TotalMatchedLines of @s.TotalMatchedLines current
                                                 }
                                                 else
                                                 {
-                                                    <span class="dependency-badge-tooltip-versions"> <span class="dependency-badge-tooltip-file-count">@s.OutOfDateLines of @s.TotalMatchedLines</span> need update</span>
+                                                    <span class="dependency-badge-tooltip-file-count">@s.OutOfDateLines of @s.TotalMatchedLines</span>@: need update
                                                 }
+                                                </span>
                                             </div>
                                         }
                                     }
@@ -373,7 +369,7 @@
             return;
         if ((Link?.UnmatchedDeps ?? 0) > 0)
             await OnDependencyBadgeClick.InvokeAsync();
-        else if (FileLineStatuses.Any(s => s.OutOfDateLines > 0))
+        else if ((Link.OutOfDateFileRepos ?? 0) > 0 || (Link.OutOfDateFileLines ?? 0) > 0)
             await OnFileDependencyBadgeClick.InvokeAsync();
     }
 
