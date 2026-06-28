@@ -3248,29 +3248,26 @@ public sealed partial class WorkspaceRepositories : IDisposable
             .Where(f => !string.IsNullOrEmpty(f))
             .Distinct()
             .ToList();
-        var message = string.IsNullOrWhiteSpace(repoName)
-            ? "Update file versions and commit the changes?"
-            : $"Update file versions in {repoName} and commit the changes?";
         _versionFilesCommitModal = _versionFilesCommitModal with
         {
             IsVisible = true,
-            Message = message,
+            RepoName = repoName,
             Files = distinctFiles,
             IsBusy = false,
-            PendingAction = () => CommitFileVersionUpdateAsync(repositoryId),
+            PendingAction = shouldCommit => CommitFileVersionUpdateAsync(repositoryId, shouldCommit),
         };
         StateHasChanged();
         return Task.CompletedTask;
     }
 
-    private async Task OnVersionFilesCommitProceedAsync()
+    private async Task OnVersionFilesCommitProceedAsync(bool shouldCommit)
     {
         var action = _versionFilesCommitModal.PendingAction;
         if (action == null)
             return;
         _versionFilesCommitModal = _versionFilesCommitModal with { IsBusy = true };
         StateHasChanged();
-        await action();
+        await action(shouldCommit);
     }
 
     private void CloseVersionFilesCommitModal()
@@ -3284,7 +3281,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         StateHasChanged();
     }
 
-    private Task CommitFileVersionUpdateAsync(int repositoryId)
+    private Task CommitFileVersionUpdateAsync(int repositoryId, bool shouldCommit)
     {
         if (workspace == null || IsJobRunning)
         {
@@ -3295,13 +3292,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
         errorMessage = null;
         CloseVersionFilesCommitModal();
 
-        JobService.StartJob(PageJobKey, "Updating file versions...", async (job, ct) =>
+        var jobLabel = shouldCommit ? "Updating and committing file versions..." : "Updating file versions...";
+        JobService.StartJob(PageJobKey, jobLabel, async (job, ct) =>
         {
             try
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
                 var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
-                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
                 var repoIds = new HashSet<int> { repositoryId };
 
                 var (updated, failed, error, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
@@ -3316,9 +3313,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     return;
                 }
 
-                if (updatedFiles is { Count: > 0 })
+                if (shouldCommit && updatedFiles is { Count: > 0 })
                 {
                     job.ReportProgress("Committing updated file versions...");
+                    var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
                     var byRepo = updatedFiles
                         .GroupBy(x => (x.RepositoryId, x.RepoName))
                         .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
@@ -3349,7 +3347,9 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     if (failed > 0)
                         errorMessage = $"Updated {updated} line(s). {failed} file(s) could not be updated - check logs.";
                     else if (updated > 0)
-                        ToastService.Show($"Updated and committed {updated} line(s) in configured files.");
+                        ToastService.Show(shouldCommit
+                            ? $"Updated and committed {updated} line(s) in configured files."
+                            : $"Updated {updated} line(s) in configured files.");
                     else
                         ToastService.Show("File versions are already up to date.");
                 });
@@ -3360,8 +3360,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "Error committing file versions for repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
-                SafeInvoke(() => errorMessage = "Failed to update and commit file versions. Please try again.");
+                Logger.LogError(ex, "Error updating file versions for repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
+                SafeInvoke(() => errorMessage = "Failed to update file versions. Please try again.");
                 throw;
             }
         });
@@ -3591,10 +3591,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private sealed record VersionFilesCommitModalState
     {
         public bool IsVisible { get; init; }
-        public string Message { get; init; } = "";
+        public string? RepoName { get; init; }
         public IReadOnlyList<string> Files { get; init; } = Array.Empty<string>();
         public bool IsBusy { get; init; }
-        public Func<Task>? PendingAction { get; init; }
+        public Func<bool, Task>? PendingAction { get; init; }
     }
 
     private sealed record SyncToDefaultOptionsModalState
