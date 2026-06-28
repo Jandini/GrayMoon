@@ -50,14 +50,6 @@ public sealed class DependencyUpdateOrchestrator(
             onRepoError(repoId, msg);
         }
 
-        // Load workspace links once: used to scope version-file work to repos with out-of-date files.
-        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
-        var workspaceLinks = workspace?.Repositories ?? (ICollection<WorkspaceRepositoryLink>)[];
-        var outOfDateFileRepoIds = workspaceLinks
-            .Where(l => (l.OutOfDateFileRepos ?? 0) > 0)
-            .Select(l => l.RepositoryId)
-            .ToHashSet();
-
         // Step 1: Refresh project data from .csproj files on disk.
         setProgress("Reading project files...");
         await workspaceGitService.RefreshWorkspaceProjectsAsync(
@@ -85,6 +77,15 @@ public sealed class DependencyUpdateOrchestrator(
 
             if (repoIds.Count == 0)
                 break;
+
+            // Re-fetch per level: RefreshRepositoryVersionsAsync updates OutOfDateFileRepos in the DB
+            // after each level commits, so re-reading here ensures newly out-of-date files at higher
+            // levels are not skipped.
+            var freshWorkspace = await workspaceRepository.GetByIdAsync(workspaceId);
+            var outOfDateFileRepoIds = (freshWorkspace?.Repositories ?? (ICollection<WorkspaceRepositoryLink>)[])
+                .Where(l => (l.OutOfDateFileRepos ?? 0) > 0)
+                .Select(l => l.RepositoryId)
+                .ToHashSet();
 
             Action<string> levelProgress = msg => setProgress($"{msg}\nLevel {level}");
 
