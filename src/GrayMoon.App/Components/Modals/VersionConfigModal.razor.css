@@ -51,6 +51,11 @@
     margin-left: auto;
 }
 
+.version-config-not-found-badge {
+    background-color: goldenrod;
+    color: #fff;
+}
+
 .version-config-textarea {
     font-size: 0.85rem;
     min-height: 12rem;

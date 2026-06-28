@@ -79,7 +79,7 @@
                                 <span class="text-danger">Not found in file:</span>
                                 @foreach (var t in _notFoundInFileTokens)
                                 {
-                                    <span class="badge bg-danger ms-1">@t</span>
+                                    <span class="badge version-config-not-found-badge ms-1">@t</span>
                                 }
                             </div>
                         }
@@ -157,7 +157,11 @@
             try { await JS.InvokeVoidAsync("versionPatternEditor.initAutocomplete", textareaRef); } catch { /* ignore */ }
             try { await textareaRef.FocusAsync(); } catch { /* ignore */ }
             try { await JS.InvokeVoidAsync("versionPatternEditor.autoResize", textareaRef); } catch { /* ignore */ }
-            _ = InvokeAsync(() => ValidateAgainstFileAsync(CancellationToken.None));
+            _ = InvokeAsync(async () =>
+            {
+                await Task.Delay(500);
+                await ValidateAgainstFileAsync(CancellationToken.None);
+            });
         }
         if (IsVisible)
         {
