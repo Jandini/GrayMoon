@@ -42,7 +42,7 @@ public sealed class UndoPushCommand(IGitService git, IHubConnectionProvider hubP
                 return new UndoPushResponse { Success = false, ErrorMessage = "Could not determine branch name" };
         }
 
-        var (success, errorMessage) = await git.ResetToRemoteAsync(repoPath, branch, request.KeepChanges, cancellationToken);
+        var (success, errorMessage) = await git.ResetToRemoteAsync(repoPath, branch, request.KeepChanges, request.BearerToken, cancellationToken);
 
         if (success)
             _ = SendPostResetSyncAsync(request.WorkspaceId, request.RepositoryId, repoPath, branch);

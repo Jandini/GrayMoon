@@ -21,4 +21,7 @@ public sealed class UndoPushRequest : WorkspaceCommandRequest
 
     [JsonPropertyName("keepChanges")]
     public bool KeepChanges { get; set; }
+
+    [JsonPropertyName("bearerToken")]
+    public string? BearerToken { get; set; }
 }

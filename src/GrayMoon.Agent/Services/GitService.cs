@@ -927,10 +927,19 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, true, null);
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> ResetToRemoteAsync(string repoPath, string branchName, bool keepChanges, CancellationToken ct)
+    public async Task<(bool Success, string? ErrorMessage)> ResetToRemoteAsync(string repoPath, string branchName, bool keepChanges, string? bearerToken, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (false, "Invalid repository path or branch name");
+
+        var (exitVerify, _, _) = await runner.RunAsync("git", $"rev-parse --verify origin/{branchName}", repoPath, ct);
+        if (exitVerify != 0)
+        {
+            logger.LogInformation("Remote ref origin/{BranchName} not found in {RepoPath} - pushing branch upstream first", branchName, repoPath);
+            var (pushOk, pushErr) = await PushAsync(repoPath, branchName, bearerToken, setTracking: true, ct: ct);
+            if (!pushOk)
+                return (false, pushErr ?? "Failed to push branch upstream before reset");
+        }
 
         var mode = keepChanges ? "--mixed" : "--hard";
         var target = $"origin/{branchName}";
