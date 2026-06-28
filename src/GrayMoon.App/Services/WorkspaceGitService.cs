@@ -506,6 +506,47 @@ public class WorkspaceGitService(
         return totalCount;
     }
 
+    public async Task<int> RestoreSyncedWorkspacePackagesAsync(
+        int workspaceId,
+        IReadOnlySet<int> syncedRepoIds,
+        Action<string> setProgress,
+        CancellationToken cancellationToken)
+    {
+        if (!_agentBridge.IsAgentConnected)
+            throw new AgentNotConnectedException();
+
+        if (syncedRepoIds.Count == 0)
+            return 0;
+
+        setProgress("Restoring packages...");
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            return 0;
+
+        var tagPinnedIds = workspace.Repositories
+            .Where(l => !string.IsNullOrWhiteSpace(l.CheckedOutTag))
+            .Select(l => l.RepositoryId)
+            .ToHashSet();
+
+        var projects = await _workspaceProjectRepository.GetByWorkspaceIdAsync(workspaceId);
+        var repoGroups = projects
+            .Where(p => p.Repository != null
+                        && !string.IsNullOrWhiteSpace(p.ProjectFilePath)
+                        && syncedRepoIds.Contains(p.RepositoryId)
+                        && !tagPinnedIds.Contains(p.RepositoryId))
+            .GroupBy(p => (p.RepositoryId, RepoName: p.Repository!.RepositoryName))
+            .Select(g => (g.Key.RepoName, ProjectPaths: (IReadOnlyList<string>)g.Select(p => p.ProjectFilePath!).ToList()))
+            .ToList();
+
+        var totalCount = repoGroups.Sum(r => r.ProjectPaths.Count);
+        if (totalCount == 0)
+            return 0;
+
+        await RestoreDependenciesAsync(workspaceId, repoGroups, cancellationToken);
+        return totalCount;
+    }
+
     /// <summary>Broadcasts WorkspaceSynced so the grid refreshes. Call after SyncDependenciesAsync (which already recomputes and persists UnmatchedDeps).</summary>
     public async Task RecomputeAndBroadcastWorkspaceSyncedAsync(int workspaceId, CancellationToken cancellationToken = default)
     {

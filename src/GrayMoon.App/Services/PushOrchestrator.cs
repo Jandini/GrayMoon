@@ -19,6 +19,7 @@ public sealed class PushOrchestrator(
         Action<string> setProgress,
         Action<string> showToast,
         Action? onAppSideComplete = null,
+        IReadOnlySet<int>? syncedRepoIds = null,
         CancellationToken cancellationToken = default)
     {
         if (synchronizedPush)
@@ -35,6 +36,7 @@ public sealed class PushOrchestrator(
                 (id, err) => showToast($"{id}: {err}"),
                 onAppSideComplete,
                 packageRegistriesAlreadySynced: requiredPackageIds.Count > 0,
+                syncedRepoIds: syncedRepoIds,
                 cancellationToken: cancellationToken);
         }
         else
