@@ -76,7 +76,7 @@
                         else if (_notFoundInFileTokens.Count > 0)
                         {
                             <div class="mt-2 small">
-                                <span class="text-danger">Not found in file:</span>
+                                <span class="text-white">Version pattern not found in file for</span>
                                 @foreach (var t in _notFoundInFileTokens)
                                 {
                                     <span class="badge version-config-not-found-badge ms-1">@t</span>
@@ -157,11 +157,7 @@
             try { await JS.InvokeVoidAsync("versionPatternEditor.initAutocomplete", textareaRef); } catch { /* ignore */ }
             try { await textareaRef.FocusAsync(); } catch { /* ignore */ }
             try { await JS.InvokeVoidAsync("versionPatternEditor.autoResize", textareaRef); } catch { /* ignore */ }
-            _ = InvokeAsync(async () =>
-            {
-                await Task.Delay(500);
-                await ValidateAgainstFileAsync(CancellationToken.None);
-            });
+            _ = InvokeAsync(() => ValidateAgainstFileAsync(CancellationToken.None, showSpinner: false));
         }
         if (IsVisible)
         {
@@ -312,11 +308,11 @@
         });
     }
 
-    private async Task ValidateAgainstFileAsync(CancellationToken cancellationToken)
+    private async Task ValidateAgainstFileAsync(CancellationToken cancellationToken, bool showSpinner = true)
     {
         if (File == null || string.IsNullOrWhiteSpace(patternText)) return;
         _fileValidating = true;
-        StateHasChanged();
+        if (showSpinner) StateHasChanged();
         try
         {
             _notFoundInFileTokens = await VersionService.ValidatePatternAgainstFileAsync(

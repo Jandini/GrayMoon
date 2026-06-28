@@ -295,6 +295,13 @@
                            OnProceed="@OnDefaultBranchWarningProceedAsync"
                            OnCancel="@CloseDefaultBranchWarningModal" />
 
+<VersionFilesCommitModal IsVisible="@_versionFilesCommitModal.IsVisible"
+                         Message="@_versionFilesCommitModal.Message"
+                         Files="@_versionFilesCommitModal.Files"
+                         IsBusy="@_versionFilesCommitModal.IsBusy"
+                         OnProceed="@OnVersionFilesCommitProceedAsync"
+                         OnCancel="@CloseVersionFilesCommitModal" />
+
 <SyncToDefaultOptionsModal IsVisible="@_syncToDefaultOptionsModal.IsVisible"
                            Message="@_syncToDefaultOptionsModal.Message"
                            RepoItems="@_syncToDefaultOptionsModal.RepoItems"

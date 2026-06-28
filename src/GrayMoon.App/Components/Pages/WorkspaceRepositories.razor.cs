@@ -87,6 +87,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private PushWithDependenciesModalState _pushWithDependenciesModal = new();
     private ConfirmModalState _confirmModal = new();
     private DefaultBranchWarningModalState _defaultBranchWarningModal = new();
+    private VersionFilesCommitModalState _versionFilesCommitModal = new();
     private SyncToDefaultOptionsModalState _syncToDefaultOptionsModal = new();
     private UndoPushModalState _undoPushModal = new();
     private string searchTerm = string.Empty;
@@ -2041,7 +2042,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         if (unmatchedDeps > 0)
             await ShowConfirmUpdateDependenciesAsync(repositoryId, unmatchedDeps);
         else if (HasOutOfDateFiles(repositoryId))
-            OnFileDependencyBadgeClick(repositoryId);
+            await ShowFileVersionsCommitFlowAsync(repositoryId);
     }
 
     /// <summary>Update dependencies for a single repository only (refresh projects, sync deps, no commit). Same as Update but scoped to one repo.</summary>
@@ -3208,8 +3209,164 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private void OnFileDependencyBadgeClick(int repositoryId)
     {
         clickedDependencyBadges.Add(repositoryId);
-        _ = UpdateSingleRepositoryFileVersionsAsync(repositoryId);
+        _ = ShowFileVersionsCommitFlowAsync(repositoryId);
         StateHasChanged();
+    }
+
+    private async Task ShowFileVersionsCommitFlowAsync(int repositoryId)
+    {
+        if (workspace == null || IsJobRunning)
+            return;
+        if (IsRepoOnTag(repositoryId))
+        {
+            ToastService.Show(TagBlockedActionMessage);
+            return;
+        }
+
+        var repo = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId);
+        var repoName = repo?.Repository?.RepositoryName;
+
+        if (repo != null
+            && !string.IsNullOrWhiteSpace(repo.DefaultBranchName)
+            && string.Equals(repo.BranchName, repo.DefaultBranchName, StringComparison.Ordinal))
+        {
+            ShowDefaultBranchWarning(
+                "The following repository is on its default branch. Updating file versions will commit changes directly to the default (protected) branch.",
+                new[] { (repoName ?? $"repo {repositoryId}", repo.DefaultBranchName!) },
+                () => ShowVersionFilesCommitModalAsync(repositoryId, repoName));
+            return;
+        }
+
+        await ShowVersionFilesCommitModalAsync(repositoryId, repoName);
+    }
+
+    private Task ShowVersionFilesCommitModalAsync(int repositoryId, string? repoName)
+    {
+        var lines = GetMismatchedFileVersionLines(repositoryId);
+        var distinctFiles = lines
+            .Select(l => l.FileName)
+            .Where(f => !string.IsNullOrEmpty(f))
+            .Distinct()
+            .ToList();
+        var message = string.IsNullOrWhiteSpace(repoName)
+            ? "Update file versions and commit the changes?"
+            : $"Update file versions in {repoName} and commit the changes?";
+        _versionFilesCommitModal = _versionFilesCommitModal with
+        {
+            IsVisible = true,
+            Message = message,
+            Files = distinctFiles,
+            IsBusy = false,
+            PendingAction = () => CommitFileVersionUpdateAsync(repositoryId),
+        };
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task OnVersionFilesCommitProceedAsync()
+    {
+        var action = _versionFilesCommitModal.PendingAction;
+        if (action == null)
+            return;
+        _versionFilesCommitModal = _versionFilesCommitModal with { IsBusy = true };
+        StateHasChanged();
+        await action();
+    }
+
+    private void CloseVersionFilesCommitModal()
+    {
+        _versionFilesCommitModal = _versionFilesCommitModal with
+        {
+            IsVisible = false,
+            IsBusy = false,
+            PendingAction = null,
+        };
+        StateHasChanged();
+    }
+
+    private Task CommitFileVersionUpdateAsync(int repositoryId)
+    {
+        if (workspace == null || IsJobRunning)
+        {
+            CloseVersionFilesCommitModal();
+            return Task.CompletedTask;
+        }
+
+        errorMessage = null;
+        CloseVersionFilesCommitModal();
+
+        JobService.StartJob(PageJobKey, "Updating file versions...", async (job, ct) =>
+        {
+            try
+            {
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
+                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                var repoIds = new HashSet<int> { repositoryId };
+
+                var (updated, failed, error, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
+                    WorkspaceId,
+                    selectedRepositoryIds: repoIds,
+                    filterPatternTokensToSelectedRepositories: false,
+                    cancellationToken: ct);
+
+                if (error != null)
+                {
+                    SafeInvoke(() => errorMessage = error);
+                    return;
+                }
+
+                if (updatedFiles is { Count: > 0 })
+                {
+                    job.ReportProgress("Committing updated file versions...");
+                    var byRepo = updatedFiles
+                        .GroupBy(x => (x.RepositoryId, x.RepoName))
+                        .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
+                        .ToList();
+                    var commitResults = await workspaceGitService.CommitFilePathsAsync(
+                        WorkspaceId,
+                        byRepo,
+                        onProgress: (c, t, _) => job.ReportProgress($"Committed version files {c} of {t}"),
+                        cancellationToken: ct);
+                    foreach (var (_, committed, errMsg) in commitResults)
+                    {
+                        if (!string.IsNullOrEmpty(errMsg))
+                        {
+                            SafeInvoke(() => errorMessage = errMsg);
+                            return;
+                        }
+                    }
+                }
+
+                job.ReportProgress("Checking file versions...");
+                await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, ct, forceFresh: true);
+
+                await InvokeAsync(async () =>
+                {
+                    if (_disposed) return;
+                    await RefreshFromSync();
+                    StateHasChanged();
+                    if (failed > 0)
+                        errorMessage = $"Updated {updated} line(s). {failed} file(s) could not be updated - check logs.";
+                    else if (updated > 0)
+                        ToastService.Show($"Updated and committed {updated} line(s) in configured files.");
+                    else
+                        ToastService.Show("File versions are already up to date.");
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error committing file versions for repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
+                SafeInvoke(() => errorMessage = "Failed to update and commit file versions. Please try again.");
+                throw;
+            }
+        });
+
+        return Task.CompletedTask;
     }
 
     private void OnDependencyBadgeMouseLeave(int repositoryId)
@@ -3428,6 +3585,15 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public bool IsVisible { get; init; }
         public string Message { get; init; } = "";
         public IReadOnlyList<(string RepoName, string DefaultBranchName)> RepoItems { get; init; } = Array.Empty<(string, string)>();
+        public Func<Task>? PendingAction { get; init; }
+    }
+
+    private sealed record VersionFilesCommitModalState
+    {
+        public bool IsVisible { get; init; }
+        public string Message { get; init; } = "";
+        public IReadOnlyList<string> Files { get; init; } = Array.Empty<string>();
+        public bool IsBusy { get; init; }
         public Func<Task>? PendingAction { get; init; }
     }
 

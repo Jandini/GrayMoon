@@ -52,7 +52,7 @@
 }
 
 .version-config-not-found-badge {
-    background-color: goldenrod;
+    background-color: var(--bs-danger);
     color: #fff;
 }
 
