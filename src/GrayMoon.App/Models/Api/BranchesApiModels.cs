@@ -161,6 +161,9 @@ public sealed class SyncToDefaultBranchResponse
 
     [JsonPropertyName("defaultBranchAhead")]
     public int? DefaultBranchAhead { get; set; }
+
+    [JsonPropertyName("gitVersion")]
+    public string? GitVersion { get; set; }
 }
 
 /// <summary>API response for POST /api/branches/delete (camelCase).</summary>

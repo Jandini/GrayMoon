@@ -905,8 +905,8 @@ public class WorkspaceGitService(
             }
         }
 
-        // Persist BranchName and commit counts from the agent response so the UI is up to date
-        // immediately without waiting for the async post-merge hook (which only fires when pull merges).
+        // Persist BranchName, commit counts, and GitVersion from the agent response so the UI is up
+        // to date immediately without waiting for the async post-merge hook.
         if (syncResponse != null)
         {
             wr.BranchName = syncResponse.CurrentBranch ?? syncResponse.DefaultBranch;
@@ -916,11 +916,12 @@ public class WorkspaceGitService(
             if (syncResponse.HasUpstream.HasValue) wr.BranchHasUpstream = syncResponse.HasUpstream.Value;
             if (syncResponse.DefaultBranchBehind.HasValue) wr.DefaultBranchBehindCommits = syncResponse.DefaultBranchBehind;
             if (syncResponse.DefaultBranchAhead.HasValue) wr.DefaultBranchAheadCommits = syncResponse.DefaultBranchAhead;
+            if (!string.IsNullOrWhiteSpace(syncResponse.GitVersion)) wr.GitVersion = syncResponse.GitVersion;
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        if (_hubContext != null)
-            await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
+        // Recompute dependency and file-version stats now that GitVersion is fresh, then broadcast.
+        await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
 
         return (true, null);
     }

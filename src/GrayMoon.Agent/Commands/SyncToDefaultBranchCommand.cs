@@ -97,6 +97,9 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, ILogger<SyncToDe
         var tags = await git.GetTagsAsync(repoPath, cancellationToken);
         var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
 
+        var (versionResult, _) = await git.GetVersionAsync(repoPath, cancellationToken);
+        var gitVersion = versionResult?.InformationalVersion;
+
         return new SyncToDefaultBranchResponse
         {
             Success = true,
@@ -110,7 +113,8 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, ILogger<SyncToDe
             IncomingCommits = incoming,
             HasUpstream = hasUpstream,
             DefaultBranchBehind = defaultBehind,
-            DefaultBranchAhead = defaultAhead
+            DefaultBranchAhead = defaultAhead,
+            GitVersion = gitVersion
         };
     }
 }
