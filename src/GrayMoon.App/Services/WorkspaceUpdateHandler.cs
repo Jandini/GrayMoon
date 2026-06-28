@@ -12,7 +12,7 @@ public sealed class WorkspaceUpdateHandler(
     /// Runs the full update flow (refresh, sync deps, commit per level, refresh version, version-file updates) via the orchestrator.
     /// </summary>
     /// <param name="maxLevel">Optional. When set, only repositories at or below this dependency level are processed.</param>
-    public async Task RunUpdateAsync(
+    public async Task<IReadOnlySet<int>> RunUpdateAsync(
         int workspaceId,
         CancellationToken cancellationToken,
         Action<string> setProgress,
@@ -25,7 +25,7 @@ public sealed class WorkspaceUpdateHandler(
     {
         try
         {
-            await dependencyUpdateOrchestrator.RunAsync(
+            return await dependencyUpdateOrchestrator.RunAsync(
                 workspaceId,
                 cancellationToken,
                 setProgress,

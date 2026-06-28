@@ -27,7 +27,7 @@ public sealed class DependencyUpdateOrchestrator(
     /// <param name="commitMessage">Optional user-supplied commit subject line. When provided, replaces the default subject in all commits created during this update.</param>
     /// <param name="includeDepsInCommitMessage">When true, the list of updated packages is appended to the commit message body.</param>
     /// <param name="maxLevel">Optional. When set, only repositories at or below this dependency level are processed; higher levels are skipped.</param>
-    public async Task RunAsync(
+    public async Task<IReadOnlySet<int>> RunAsync(
         int workspaceId,
         CancellationToken cancellationToken,
         Action<string> setProgress,
@@ -40,9 +40,10 @@ public sealed class DependencyUpdateOrchestrator(
     {
         // Non-null empty set means the caller determined no repos need work.
         if (repoIdsToUpdate is { Count: 0 })
-            return;
+            return new HashSet<int>();
 
         var hadError = false;
+        var allSyncedRepoIds = new HashSet<int>();
         void OnRepoError(int repoId, string msg)
         {
             hadError = true;
@@ -66,7 +67,7 @@ public sealed class DependencyUpdateOrchestrator(
             repositoryIds: repoIdsToUpdate,
             cancellationToken);
         if (hadError)
-            return;
+            return new HashSet<int>();
 
         // Step 2+: Process repositories by dependency level.
         var levelRepoIds = await GetRepositoryIdsByDependencyLevelAsync(workspaceId, repoIdsToUpdate, OnRepoError);
@@ -74,6 +75,8 @@ public sealed class DependencyUpdateOrchestrator(
             levelRepoIds = levelRepoIds.Where(x => x.Level <= maxLevel.Value).ToList();
         if (levelRepoIds.Count == 0)
             hadError = true;
+        if (hadError)
+            return new HashSet<int>();
 
         foreach (var (level, repoIds) in levelRepoIds)
         {
@@ -125,6 +128,7 @@ public sealed class DependencyUpdateOrchestrator(
                 onRepoError: OnRepoError,
                 repoIdsToSync: repoIds,
                 cancellationToken);
+            allSyncedRepoIds.UnionWith(syncedRepoIds);
             if (hadError)
                 break;
 
@@ -185,6 +189,8 @@ public sealed class DependencyUpdateOrchestrator(
             await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
             await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
         }
+
+        return hadError ? new HashSet<int>() : allSyncedRepoIds;
     }
 
     private async Task<IReadOnlyList<(int Level, IReadOnlySet<int> RepoIds)>> GetRepositoryIdsByDependencyLevelAsync(

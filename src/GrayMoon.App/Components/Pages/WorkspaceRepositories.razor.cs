@@ -1325,7 +1325,8 @@ public sealed partial class WorkspaceRepositories : IDisposable
         CancellationToken ct,
         IReadOnlySet<int> repoIds,
         bool synchronizedPush,
-        IReadOnlySet<string> requiredPackageIds)
+        IReadOnlySet<string> requiredPackageIds,
+        IReadOnlySet<int>? syncedRepoIds = null)
     {
         try
         {
@@ -1338,6 +1339,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 requiredPackageIds,
                 job.ReportProgress,
                 ToastService.Show,
+                syncedRepoIds: syncedRepoIds,
                 cancellationToken: ct);
         }
         catch (OperationCanceledException)
@@ -1849,6 +1851,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         JobService.StartJob(PageJobKey, $"Updating Level {level}...", async (job, ct) =>
         {
             // Phase 1: update repos needing work up to the target level
+            IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
             try
             {
                 var reposNeedingWork = workspaceRepositories
@@ -1860,7 +1863,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 await using (var updateScope = ServiceScopeFactory.CreateAsyncScope())
                 {
                     var updateHandler = updateScope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
-                    await updateHandler.RunUpdateAsync(
+                    syncedRepoIds = await updateHandler.RunUpdateAsync(
                         WorkspaceId,
                         ct,
                         job.ReportProgress,
@@ -1909,10 +1912,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 throw;
             }
 
-            // Phase 3: execute push for level repos only
+            // Phase 3: execute push (per-level restore of synced repos handled inside push service)
             try
             {
-                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds);
+                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds);
             }
             catch (SynchronizedPushNotPossibleException ex)
             {
@@ -1922,17 +1925,14 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     {
                         JobService.StartJob(PageJobKey, "Preparing push...", async (j, c) =>
                         {
-                            await ExecutePushCoreAsync(j, c, pushRepoIds, synchronizedPush: false, requiredPackageIds);
-                            await RestorePackagesCoreAsync(j, c);
+                            await ExecutePushCoreAsync(j, c, pushRepoIds, synchronizedPush: false, requiredPackageIds, syncedRepoIds);
+                            await RestoreSyncedPackagesCoreAsync(syncedRepoIds, j, c);
                         });
                         return Task.CompletedTask;
                     },
                     confirmButtonText: "Continue"));
                 return;
             }
-
-            // Phase 4: restore packages after successful push
-            await RestorePackagesCoreAsync(job, ct);
         });
 
         return Task.CompletedTask;
@@ -1948,6 +1948,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         JobService.StartJob(PageJobKey, "Updating dependencies...", async (job, ct) =>
         {
             // Phase 1: update - fresh scope so DbContext does not compete with circuit page loads
+            IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
             try
             {
                 var reposNeedingWork = workspaceRepositories
@@ -1959,7 +1960,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 await using (var updateScope = ServiceScopeFactory.CreateAsyncScope())
                 {
                     var updateHandler = updateScope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
-                    await updateHandler.RunUpdateAsync(
+                    syncedRepoIds = await updateHandler.RunUpdateAsync(
                         WorkspaceId,
                         ct,
                         job.ReportProgress,
@@ -2006,10 +2007,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 throw;
             }
 
-            // Phase 3: execute push
+            // Phase 3: execute push (per-level restore of synced repos handled inside push service)
             try
             {
-                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds);
+                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds);
             }
             catch (SynchronizedPushNotPossibleException ex)
             {
@@ -2019,17 +2020,14 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     {
                         JobService.StartJob(PageJobKey, "Preparing push...", async (j, c) =>
                         {
-                            await ExecutePushCoreAsync(j, c, pushRepoIds, synchronizedPush: false, requiredPackageIds);
-                            await RestorePackagesCoreAsync(j, c);
+                            await ExecutePushCoreAsync(j, c, pushRepoIds, synchronizedPush: false, requiredPackageIds, syncedRepoIds);
+                            await RestoreSyncedPackagesCoreAsync(syncedRepoIds, j, c);
                         });
                         return Task.CompletedTask;
                     },
                     confirmButtonText: "Continue"));
                 return;
             }
-
-            // Phase 4: restore packages after successful push
-            await RestorePackagesCoreAsync(job, ct);
         });
 
         return Task.CompletedTask;
@@ -2542,13 +2540,14 @@ public sealed partial class WorkspaceRepositories : IDisposable
         // runs, so DependencyUpdateOrchestrator never skips previously tag-pinned repos.
         JobService.StartJob(PageJobKey, "Creating branches...", async (job, ct) =>
         {
+            IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
             try
             {
                 // Fresh scope so DbContext does not compete with circuit page loads
                 await using (var orchestratorScope = ServiceScopeFactory.CreateAsyncScope())
                 {
                     var orchestrator = orchestratorScope.ServiceProvider.GetRequiredService<NewFeatureOrchestrator>();
-                    await orchestrator.RunAsync(
+                    syncedRepoIds = await orchestrator.RunAsync(
                         WorkspaceId,
                         request.NewBranchName,
                         request.BaseBranch,
@@ -2583,7 +2582,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             if (!request.PushChanges)
                 return;
 
-            // Phase 3: determine push plan and execute push
+            // Phase 3: determine push plan and execute push (per-level restore handled inside push service)
             job.ReportProgress("Preparing push...");
             IReadOnlySet<int> pushRepoIds;
             IReadOnlySet<string> requiredPackageIds;
@@ -2606,7 +2605,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
             try
             {
-                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds);
+                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds);
             }
             catch (SynchronizedPushNotPossibleException ex)
             {
@@ -2614,9 +2613,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     $"Synchronized push could not complete: {ex.MissingPackagesCount} required package mapping(s) are missing. Check NuGet connector configuration and token, then retry."));
                 return;
             }
-
-            // Phase 4: restore packages after successful push
-            await RestorePackagesCoreAsync(job, ct);
         });
 
         return Task.CompletedTask;
@@ -3814,6 +3810,45 @@ public sealed partial class WorkspaceRepositories : IDisposable
                 var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
                 count = await workspaceGitService.RestoreAllWorkspacePackagesAsync(
                     WorkspaceId,
+                    job.ReportProgress,
+                    ct);
+            }
+
+            if (count > 0)
+                SafeInvoke(() => ToastService.Show($"Restored packages in {count} {(count == 1 ? "project" : "projects")}"));
+        }
+        catch (OperationCanceledException)
+        {
+            SafeInvoke(() => ToastService.Show("Restore cancelled."));
+            throw;
+        }
+        catch (AgentNotConnectedException ex)
+        {
+            Logger.LogError(ex, "Restore packages failed (agent not connected) for workspace {WorkspaceId}", WorkspaceId);
+            SafeInvoke(() => ToastService.ShowError($"Restore failed. {ex.Message}"));
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Restore packages failed for workspace {WorkspaceId}", WorkspaceId);
+            SafeInvoke(() => ToastService.ShowError($"Restore failed: {ex.Message}"));
+            throw;
+        }
+    }
+
+    private async Task RestoreSyncedPackagesCoreAsync(IReadOnlySet<int> syncedRepoIds, BackgroundJobHandle job, CancellationToken ct)
+    {
+        if (syncedRepoIds.Count == 0) return;
+        job.ReportProgress("Restoring packages...");
+        try
+        {
+            int count;
+            await using (var scope = ServiceScopeFactory.CreateAsyncScope())
+            {
+                var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                count = await workspaceGitService.RestoreSyncedWorkspacePackagesAsync(
+                    WorkspaceId,
+                    syncedRepoIds,
                     job.ReportProgress,
                     ct);
             }

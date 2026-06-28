@@ -10,7 +10,7 @@ public sealed class NewFeatureOrchestrator(
     DependencyUpdateOrchestrator dependencyUpdateOrchestrator,
     ILogger<NewFeatureOrchestrator> logger)
 {
-    public async Task RunAsync(
+    public async Task<IReadOnlySet<int>> RunAsync(
         int workspaceId,
         string newBranchName,
         string baseBranch,
@@ -34,10 +34,11 @@ public sealed class NewFeatureOrchestrator(
             syncState: true,
             cancellationToken);
 
+        IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
         if (updateDependencies)
         {
             setProgress("Updating dependencies...");
-            await dependencyUpdateOrchestrator.RunAsync(
+            syncedRepoIds = await dependencyUpdateOrchestrator.RunAsync(
                 workspaceId,
                 cancellationToken,
                 setProgress,
@@ -49,5 +50,6 @@ public sealed class NewFeatureOrchestrator(
         }
 
         logger.LogInformation("NewFeatureOrchestrator completed for workspace {WorkspaceId}", workspaceId);
+        return syncedRepoIds;
     }
 }
