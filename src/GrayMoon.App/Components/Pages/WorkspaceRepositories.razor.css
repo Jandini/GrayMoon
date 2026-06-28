@@ -480,6 +480,18 @@
     margin-bottom: 0.05rem;
 }
 
+::deep .repositories-table .dependency-badge-tooltip-file-header {
+    color: #ccc;
+    font-size: 0.78rem;
+    font-style: italic;
+    margin-top: 0.2rem;
+    margin-bottom: 0.1rem;
+}
+
+::deep .repositories-table .dependency-badge-tooltip-line--indented {
+    padding-left: 0.75rem;
+}
+
 ::deep .repositories-table .dependency-badge-tooltip-filename {
     color: #fff;
 }

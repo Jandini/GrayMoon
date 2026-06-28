@@ -279,18 +279,21 @@
                                                 </button>
                                             </div>
                                         }
-                                        @foreach (var line in MismatchedFileVersionLines)
+                                        @foreach (var fileGroup in MismatchedFileVersionLines.GroupBy(l => l.FileName))
                                         {
-                                            <div class="dependency-badge-tooltip-line">
-                                                @if (!string.IsNullOrEmpty(line.FileName))
-                                                {
-                                                    <span class="dependency-badge-tooltip-file">@line.FileName</span>
-                                                }
-                                                <code>@line.TokenName</code>
-                                                <span class="dependency-badge-tooltip-versions">
-                                                    @line.CurrentValue <span class="dependency-badge-tooltip-arrow">→</span> <span class="dependency-badge-tooltip-new-version">@line.ExpectedValue</span>
-                                                </span>
-                                            </div>
+                                            @if (!string.IsNullOrEmpty(fileGroup.Key))
+                                            {
+                                                <div class="dependency-badge-tooltip-file-header">@fileGroup.Key</div>
+                                            }
+                                            @foreach (var line in fileGroup)
+                                            {
+                                                <div class="dependency-badge-tooltip-line dependency-badge-tooltip-line--indented">
+                                                    <code>@line.TokenName</code>
+                                                    <span class="dependency-badge-tooltip-versions">
+                                                        @line.CurrentValue <span class="dependency-badge-tooltip-arrow">→</span> <span class="dependency-badge-tooltip-new-version">@line.ExpectedValue</span>
+                                                    </span>
+                                                </div>
+                                            }
                                         }
                                     }
                                     @if (CustomDependencyLines.Count > 0)
@@ -504,12 +507,12 @@
             if (sb.Length > 0)
                 sb.AppendLine();
             sb.AppendLine("File dependencies requiring update:");
-            foreach (var line in MismatchedFileVersionLines)
+            foreach (var fileGroup in MismatchedFileVersionLines.GroupBy(l => l.FileName))
             {
-                if (!string.IsNullOrEmpty(line.FileName))
-                    sb.AppendLine($"{line.FileName} - {line.TokenName}: {line.CurrentValue} -> {line.ExpectedValue}");
-                else
-                    sb.AppendLine($"{line.TokenName}: {line.CurrentValue} -> {line.ExpectedValue}");
+                if (!string.IsNullOrEmpty(fileGroup.Key))
+                    sb.AppendLine(fileGroup.Key);
+                foreach (var line in fileGroup)
+                    sb.AppendLine($"  {line.TokenName}: {line.CurrentValue} -> {line.ExpectedValue}");
             }
         }
         if (CustomDependencyLines.Count > 0)
