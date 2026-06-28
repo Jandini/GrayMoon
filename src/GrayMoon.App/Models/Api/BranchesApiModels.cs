@@ -164,6 +164,9 @@ public sealed class SyncToDefaultBranchResponse
 
     [JsonPropertyName("gitVersion")]
     public string? GitVersion { get; set; }
+
+    [JsonPropertyName("projects")]
+    public List<AgentProjectDto>? Projects { get; set; }
 }
 
 /// <summary>API response for POST /api/branches/delete (camelCase).</summary>

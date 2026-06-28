@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using GrayMoon.Agent.Models;
 
 namespace GrayMoon.Agent.Jobs.Response;
 
@@ -45,4 +46,7 @@ public sealed class SyncToDefaultBranchResponse
 
     [JsonPropertyName("gitVersion")]
     public string? GitVersion { get; set; }
+
+    [JsonPropertyName("projects")]
+    public IReadOnlyList<CsProjFileInfo>? Projects { get; set; }
 }

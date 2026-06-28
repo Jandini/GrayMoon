@@ -920,7 +920,14 @@ public class WorkspaceGitService(
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        // Recompute dependency and file-version stats now that GitVersion is fresh, then broadcast.
+        // Persist fresh csproj data from the default branch so dependency stats reflect the new branch content.
+        var projectsDetail = GetProjectsDetail(syncResponse?.Projects);
+        if (projectsDetail is { Count: > 0 })
+            await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repositoryId, projectsDetail, cancellationToken);
+        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(
+            workspaceId, [(repositoryId, projectsDetail)], persistDependencyLevel: false, cancellationToken);
+
+        // Recompute dependency and file-version stats now that GitVersion and ProjectDependencies are fresh, then broadcast.
         await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
 
         return (true, null);
@@ -1150,7 +1157,11 @@ public class WorkspaceGitService(
     private static IReadOnlyList<SyncProjectInfo>? GetProjectsDetail(object data)
     {
         var r = AgentResponseJson.DeserializeAgentResponse<AgentSyncProjectsResponse>(data);
-        var projects = r?.Projects;
+        return GetProjectsDetail(r?.Projects);
+    }
+
+    private static IReadOnlyList<SyncProjectInfo>? GetProjectsDetail(List<AgentProjectDto>? projects)
+    {
         if (projects == null || projects.Count == 0) return null;
         var list = new List<SyncProjectInfo>();
         foreach (var p in projects)

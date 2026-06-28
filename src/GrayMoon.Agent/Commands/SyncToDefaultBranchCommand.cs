@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class SyncToDefaultBranchCommand(IGitService git, ILogger<SyncToDefaultBranchCommand> logger) : ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse>
+public sealed class SyncToDefaultBranchCommand(IGitService git, ICsProjFileService csProjFileService, ILogger<SyncToDefaultBranchCommand> logger) : ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse>
 {
     public async Task<SyncToDefaultBranchResponse> ExecuteAsync(SyncToDefaultBranchRequest request, CancellationToken cancellationToken = default)
     {
@@ -100,6 +100,8 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, ILogger<SyncToDe
         var (versionResult, _) = await git.GetVersionAsync(repoPath, cancellationToken);
         var gitVersion = versionResult?.InformationalVersion;
 
+        var projects = await csProjFileService.FindAsync(repoPath, cancellationToken);
+
         return new SyncToDefaultBranchResponse
         {
             Success = true,
@@ -114,7 +116,8 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, ILogger<SyncToDe
             HasUpstream = hasUpstream,
             DefaultBranchBehind = defaultBehind,
             DefaultBranchAhead = defaultAhead,
-            GitVersion = gitVersion
+            GitVersion = gitVersion,
+            Projects = projects
         };
     }
 }
