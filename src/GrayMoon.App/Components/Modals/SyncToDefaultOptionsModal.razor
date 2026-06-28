@@ -13,6 +13,13 @@
                 </div>
                 <div class="modal-body">
                     <p class="mb-2 small">@Message</p>
+                    @if (RepoItems.Any(r => r.CommitsAhead > 0))
+                    {
+                        <div class="alert alert-danger py-2 px-3 mb-3 small" role="alert">
+                            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                            One or more repositories have local commits that are not on the default branch. These commits will be permanently lost when the branch is deleted. This cannot be undone.
+                        </div>
+                    }
                     @if (RepoItems.Count > 0)
                     {
                         <div class="default-branch-warning-scroll small mb-3">
@@ -25,6 +32,14 @@
                                         @if (item.HasRemote)
                                         {
                                             <span class="badge bg-secondary ms-1" style="font-size:0.65em;">remote</span>
+                                        }
+                                        @if (item.HasOpenPr)
+                                        {
+                                            <span class="badge bg-warning text-dark ms-1" style="font-size:0.65em;">PR open - will be closed</span>
+                                        }
+                                        @if (item.CommitsAhead > 0)
+                                        {
+                                            <span class="text-danger ms-2" style="font-size:0.85em;">@item.CommitsAhead commit@(item.CommitsAhead == 1 ? "" : "s") will be lost</span>
                                         }
                                     </li>
                                 }
@@ -63,7 +78,7 @@
 @code {
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public string Message { get; set; } = "";
-    [Parameter] public IReadOnlyList<(string RepoName, string BranchName, bool HasRemote)> RepoItems { get; set; } = Array.Empty<(string, string, bool)>();
+    [Parameter] public IReadOnlyList<(string RepoName, string BranchName, bool HasRemote, bool HasOpenPr, int CommitsAhead)> RepoItems { get; set; } = Array.Empty<(string, string, bool, bool, int)>();
     [Parameter] public bool DeleteRemoteBranches { get; set; } = true;
     [Parameter] public EventCallback<bool> DeleteRemoteBranchesChanged { get; set; }
     [Parameter] public bool AllowForceDeleteLocalBranch { get; set; } = true;

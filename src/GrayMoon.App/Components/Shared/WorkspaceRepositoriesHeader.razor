@@ -99,6 +99,15 @@
                             Create PRs...
                         </button>
                     </li>
+                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                    <li>
+                        <button class="dropdown-item" type="button"
+                                role="menuitem"
+                                @onclick="HandleSyncAllToDefaultClick"
+                                disabled="@BranchActionsDisabled">
+                            Sync To Default
+                        </button>
+                    </li>
                 </ul>
             }
         </div>
@@ -339,6 +348,7 @@
     [Parameter] public EventCallback OnShowBranch { get; set; }
     [Parameter] public EventCallback OnShowSwitchBranch { get; set; }
     [Parameter] public EventCallback OnNewPullRequest { get; set; }
+    [Parameter] public EventCallback OnSyncAllToDefault { get; set; }
     [Parameter] public EventCallback OnUpdate { get; set; }
     [Parameter] public EventCallback OnUpdateFiles { get; set; }
     [Parameter] public EventCallback OnUpdateAndPush { get; set; }
@@ -476,6 +486,12 @@
     {
         CloseBranchMenu();
         await OnNewPullRequest.InvokeAsync();
+    }
+
+    private async Task HandleSyncAllToDefaultClick()
+    {
+        CloseBranchMenu();
+        await OnSyncAllToDefault.InvokeAsync();
     }
 
     private async Task OnSearchValueChangedAsync(string value)

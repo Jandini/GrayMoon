@@ -77,6 +77,23 @@ public sealed class WorkspacePullRequestService(
         logger.LogTrace("Refreshed PR for {Count} repo(s) in workspace {WorkspaceId}", toRefresh.Count, workspaceId);
     }
 
+    /// <summary>Closes an open pull request for the given repository. Looks up the connector from the workspace link and calls GitHub API. Logs and returns silently on error.</summary>
+    public async Task ClosePullRequestAsync(int workspaceId, int repositoryId, int prNumber, CancellationToken cancellationToken = default)
+    {
+        if (prNumber <= 0) return;
+
+        var link = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .ThenInclude(r => r!.Connector)
+            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
+
+        if (link?.Repository == null)
+            return;
+
+        await gitHubPullRequestService.ClosePullRequestAsync(link.Repository, link.Repository.Connector, prNumber, cancellationToken);
+    }
+
     /// <summary>Refreshes PR for all repositories in the workspace.</summary>
     public async Task RefreshPullRequestsForWorkspaceAsync(int workspaceId, CancellationToken cancellationToken = default)
     {

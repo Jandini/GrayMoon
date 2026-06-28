@@ -61,6 +61,26 @@ public sealed class GitHubPullRequestService(
         }
     }
 
+    /// <summary>Closes an open pull request for the given repository. Logs and returns silently on error - callers should not abort on close failure.</summary>
+    public async Task ClosePullRequestAsync(Repository repository, Connector? connector, int prNumber, CancellationToken cancellationToken = default)
+    {
+        if (repository == null || prNumber <= 0)
+            return;
+        if (connector == null || connector.ConnectorType != ConnectorType.GitHub || string.IsNullOrWhiteSpace(connector.UserToken))
+            return;
+        if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(repository.CloneUrl, out var owner, out var repo) || owner == null || repo == null)
+            return;
+
+        try
+        {
+            await gitHubService.ClosePullRequestAsync(connector, owner, repo, prNumber, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "ClosePullRequest failed. Repo={Repo}, PrNumber={PrNumber}", repository.RepositoryName, prNumber);
+        }
+    }
+
     /// <summary>Fetches PR info for all workspace repo links in parallel (bounded concurrency). Returns a dictionary keyed by RepositoryId.</summary>
     public async Task<IReadOnlyDictionary<int, PullRequestInfo?>> GetPullRequestsForWorkspaceAsync(
         IEnumerable<WorkspaceRepositoryLink> links,

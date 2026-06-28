@@ -529,6 +529,28 @@ public class GitHubService : IConnectorService
         }
     }
 
+    /// <summary>Closes an open pull request via PATCH /repos/{owner}/{repo}/pulls/{pull_number}. Throws on non-success.</summary>
+    public async Task ClosePullRequestAsync(
+        Connector connector,
+        string owner,
+        string repo,
+        int pullNumber,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+        if (pullNumber <= 0)
+            throw new ArgumentOutOfRangeException(nameof(pullNumber));
+
+        EnsureConnectorConfigured(connector);
+
+        var requestUri = $"repos/{owner}/{repo}/pulls/{pullNumber}";
+        var payload = "{\"state\":\"closed\"}";
+        await PatchAsync(connector, requestUri, payload, cancellationToken);
+    }
+
     /// <summary>Creates a pull request via POST /repos/{owner}/{repo}/pulls. Throws on non-success.</summary>
     public async Task<GitHubPullRequestDto> CreatePullRequestAsync(
         Connector connector,
@@ -766,6 +788,41 @@ public class GitHubService : IConnectorService
             throw new InvalidOperationException("Connector token is not configured.");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return request;
+    }
+
+    private async Task PatchAsync(Connector connector, string requestUri, string? payload = null, CancellationToken cancellationToken = default)
+    {
+        var baseUrl = string.IsNullOrWhiteSpace(connector.ApiBaseUrl)
+            ? "https://api.github.com/"
+            : connector.ApiBaseUrl.TrimEnd('/') + "/";
+
+        using var response = await GitHubMutationRetryPipeline.ExecuteAsync(async ct =>
+        {
+            var request = new HttpRequestMessage(HttpMethod.Patch, new Uri(new Uri(baseUrl), requestUri));
+            if (payload != null)
+                request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+            else
+                request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+            request.Headers.UserAgent.ParseAdd("GrayMoon");
+            request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
+            var token = ConnectorHelpers.UnprotectToken(connector.UserToken);
+            if (string.IsNullOrWhiteSpace(token))
+                throw new InvalidOperationException("Connector token is not configured.");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        }, cancellationToken);
+
+        if (response.IsSuccessStatusCode)
+            return;
+
+        var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+        _logger.LogError("GitHub API PATCH failed. Status: {StatusCode}, URL: {Url}, Response: {Response}",
+            response.StatusCode,
+            new Uri(new Uri(baseUrl), requestUri),
+            errorContent);
+
+        throw GitHubApiErrorHelper.CreateHttpRequestException(response.StatusCode, errorContent, response);
     }
 
     private async Task PostAsync(Connector connector, string requestUri, string? payload = null, CancellationToken cancellationToken = default)
