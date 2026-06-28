@@ -5,7 +5,7 @@
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
          @onkeydown="HandleKeyDown"
          @ref="_modalElement">
-        <div class="modal-dialog modal-dialog-scrollable modal-lg default-branch-warning-modal">
+        <div class="modal-dialog modal-lg sync-to-default-options-modal">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Sync to Default</h5>
@@ -22,7 +22,7 @@
                     }
                     @if (RepoItems.Count > 0)
                     {
-                        <div class="default-branch-warning-scroll small mb-3">
+                        <div class="sync-to-default-options-scroll small mb-3">
                             <ul class="list-unstyled mb-0 ps-0">
                                 @foreach (var item in RepoItems)
                                 {
