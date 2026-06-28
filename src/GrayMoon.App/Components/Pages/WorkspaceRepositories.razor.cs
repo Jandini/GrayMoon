@@ -26,6 +26,10 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private bool hasUnmatchedDependencies => workspaceRepositories.Any(wr => !wr.IsOnTag &&
         ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0));
     private bool isPushRecommended => workspaceRepositories.Any(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false));
+    private int? lowestLevelNeedingWork =>
+        workspaceRepositories
+            .Where(wr => !wr.IsOnTag && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0))
+            .Min(wr => (int?)wr.DependencyLevel);
     private bool hasTaggedRepos => workspaceRepositories.Any(wr => wr.IsOnTag);
     /// <summary>When true, any repository on its default branch has incoming commits; header shows red Pull button and executes only Pull (commit sync) for those repos. Repos pinned to a tag are excluded.</summary>
     private bool hasIncomingCommits => workspaceRepositories.Any(wr =>
@@ -77,11 +81,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private IReadOnlyList<(int RepoId, int? DefaultAhead, bool? HasUpstream)>? _syncToDefaultCheckResults = null;
     private UpdateModalState _updateModal = new();
     private UpdateModalState _updateAndPushModal = new();
+    private LevelOnlyUpdateAndPushModalState _levelOnlyUpdateAndPushModal = new();
     private UpdateSingleRepoDependenciesModalState _updateSingleRepoModal = new();
     private CustomDependenciesModalState _customDependenciesModal = new();
     private PushWithDependenciesModalState _pushWithDependenciesModal = new();
     private ConfirmModalState _confirmModal = new();
     private DefaultBranchWarningModalState _defaultBranchWarningModal = new();
+    private VersionFilesCommitModalState _versionFilesCommitModal = new();
     private SyncToDefaultOptionsModalState _syncToDefaultOptionsModal = new();
     private UndoPushModalState _undoPushModal = new();
     private string searchTerm = string.Empty;
@@ -1294,20 +1300,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
     }
 
     private async Task<(IReadOnlySet<int> PushRepoIds, IReadOnlySet<string> RequiredPackageIds)?> BuildPushPlanAsync(
-        string emptyMessage, CancellationToken ct)
+        string emptyMessage, CancellationToken ct, int? maxLevel = null)
     {
         await using var planScope = ServiceScopeFactory.CreateAsyncScope();
         var planPushHandler = planScope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
         var planDepService = planScope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
-        var (payload, hasUnpushed) = await planPushHandler.GetPushPlanAsync(WorkspaceId, workspaceRepositories, ct);
-        if (!hasUnpushed)
-        {
-            SafeInvoke(() => ToastService.Show(emptyMessage));
-            return null;
-        }
-        var taggedRepoIds = workspaceRepositories.Where(wr => wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet();
-        IReadOnlySet<int> pushRepoIds = payload.Select(p => p.RepoId).Where(id => !taggedRepoIds.Contains(id)).ToHashSet();
-        if (pushRepoIds.Count == 0)
+        var (_, pushRepoIds, hasUnpushed) = await planPushHandler.GetPushPlanAsync(WorkspaceId, workspaceRepositories, ct, maxLevel);
+        if (!hasUnpushed || pushRepoIds.Count == 0)
         {
             SafeInvoke(() => ToastService.Show(emptyMessage));
             return null;
@@ -1412,24 +1411,17 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
         try
         {
-            var (payload, hasUnpushed) = await WorkspacePushHandler.GetPushPlanAsync(
+            var (_, pushRepoIds, hasUnpushed) = await WorkspacePushHandler.GetPushPlanAsync(
                 WorkspaceId,
                 workspaceRepositories,
                 CancellationToken.None);
-            if (!hasUnpushed)
+            if (!hasUnpushed || pushRepoIds.Count == 0)
             {
                 ToastService.Show("No repositories to push.");
                 return;
             }
 
-            // Exclude repositories pinned to a tag: they have no branch to push.
-            var taggedRepoIds = workspaceRepositories.Where(wr => wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet();
-            var repoIdsWithUnpushed = payload.Select(p => p.RepoId).Where(id => !taggedRepoIds.Contains(id)).ToHashSet();
-            if (repoIdsWithUnpushed.Count == 0)
-            {
-                ToastService.Show("No repositories to push.");
-                return;
-            }
+            var repoIdsWithUnpushed = pushRepoIds;
             var repoIdsThatNeedPush = workspaceRepositories
                 .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
@@ -1777,6 +1769,175 @@ public sealed partial class WorkspaceRepositories : IDisposable
         await RunUpdateAndPushCoreAsync(args.CommitMessage, args.IncludeDeps);
     }
 
+    private async Task OnLevelOnlyUpdateAndPushClickAsync()
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
+            return;
+
+        var level = lowestLevelNeedingWork;
+        if (!level.HasValue)
+        {
+            ToastService.Show("No repositories need work.");
+            return;
+        }
+
+        if (workspaceRepositories.Where(wr => !wr.IsOnTag && (wr.DependencyLevel ?? 0) <= level).All(wr => wr.IsOnTag))
+        {
+            ToastService.Show("All repositories at this level are on tags; checkout a branch first.");
+            return;
+        }
+
+        await using var scope = ServiceScopeFactory.CreateAsyncScope();
+        var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+        var (updatePlan, _) = await workspaceGitService.GetUpdatePlanAsync(WorkspaceId);
+        var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
+
+        var reposOnDefault = workspaceRepositories
+            .Where(wr => !wr.IsOnTag
+                && (wr.DependencyLevel ?? 0) <= level
+                && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
+                && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal)
+                && repoIdsWithUpdates.Contains(wr.RepositoryId))
+            .ToList();
+
+        if (reposOnDefault.Count > 0)
+        {
+            var repoItems = reposOnDefault
+                .Select(wr => (wr.Repository?.RepositoryName ?? $"repo {wr.RepositoryId}", wr.DefaultBranchName!))
+                .ToList();
+            ShowDefaultBranchWarning(
+                $"The following repositories (up to Level {level}) are on their default branch. Update will commit dependency changes directly to the default (protected) branch.",
+                repoItems,
+                () => OpenLevelOnlyUpdateAndPushModalAsync(level.Value));
+            return;
+        }
+
+        await OpenLevelOnlyUpdateAndPushModalAsync(level.Value);
+    }
+
+    private async Task OpenLevelOnlyUpdateAndPushModalAsync(int level)
+    {
+        _levelOnlyUpdateAndPushModal = _levelOnlyUpdateAndPushModal with { IsVisible = true, Level = level };
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void CloseLevelOnlyUpdateAndPushModal()
+    {
+        _levelOnlyUpdateAndPushModal = _levelOnlyUpdateAndPushModal with { IsVisible = false };
+        StateHasChanged();
+    }
+
+    private async Task OnLevelOnlyUpdateAndPushProceedAsync((string? CommitMessage, bool IncludeDeps) args)
+    {
+        var level = _levelOnlyUpdateAndPushModal.Level;
+        _levelOnlyUpdateAndPushModal = _levelOnlyUpdateAndPushModal with
+        {
+            IsVisible = false,
+            LastCommitMessage = args.CommitMessage,
+            LastIncludeDeps = args.IncludeDeps
+        };
+        await RunLevelOnlyUpdateAndPushCoreAsync(level, args.CommitMessage, args.IncludeDeps);
+    }
+
+    private Task RunLevelOnlyUpdateAndPushCoreAsync(int level, string? commitMessage = null, bool includeDepsInCommitMessage = true)
+    {
+        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
+            return Task.CompletedTask;
+
+        errorMessage = null;
+
+        JobService.StartJob(PageJobKey, $"Updating Level {level}...", async (job, ct) =>
+        {
+            // Phase 1: update repos needing work up to the target level
+            try
+            {
+                var reposNeedingWork = workspaceRepositories
+                    .Where(wr => !wr.IsOnTag && (wr.DependencyLevel ?? 0) <= level)
+                    .Where(wr => (wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
+                    .Select(wr => wr.RepositoryId)
+                    .ToHashSet();
+
+                await using (var updateScope = ServiceScopeFactory.CreateAsyncScope())
+                {
+                    var updateHandler = updateScope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
+                    await updateHandler.RunUpdateAsync(
+                        WorkspaceId,
+                        ct,
+                        job.ReportProgress,
+                        (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
+                        commitMessage: commitMessage,
+                        includeDepsInCommitMessage: includeDepsInCommitMessage,
+                        repoIdsToUpdate: reposNeedingWork,
+                        maxLevel: level);
+                }
+
+                await ReloadWorkspaceDataFromFreshScopeAsync();
+                _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromWorkspace(); StateHasChanged(); } });
+            }
+            catch (OperationCanceledException)
+            {
+                await ReloadWorkspaceDataAfterCancelAsync();
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Level-Only Update & Push: update failed for workspace {WorkspaceId}", WorkspaceId);
+                SafeInvoke(() => errorMessage = "Update failed. The GrayMoon Agent may be offline. Start the Agent and try again.");
+                throw;
+            }
+
+            // Phase 2: determine push plan for repos that need pushing up to the target level
+            job.ReportProgress("Preparing push...");
+            IReadOnlySet<int> pushRepoIds;
+            IReadOnlySet<string> requiredPackageIds;
+            try
+            {
+                var plan = await BuildPushPlanAsync($"Up to Level {level} updated. Nothing to push.", ct, maxLevel: level);
+                if (plan == null)
+                    return;
+
+                (pushRepoIds, requiredPackageIds) = plan.Value;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Level-Only Update & Push: failed to get push plan for workspace {WorkspaceId}", WorkspaceId);
+                SafeInvoke(() => ShowOperationError("Push Failed", $"Level {level} updated but push plan could not be determined. The GrayMoon Agent may be offline."));
+                throw;
+            }
+
+            // Phase 3: execute push for level repos only
+            try
+            {
+                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds);
+            }
+            catch (SynchronizedPushNotPossibleException ex)
+            {
+                SafeInvoke(() => ShowConfirm(
+                    $"Synchronized push could not be completed because {ex.MissingPackagesCount} required package mappings are missing. Check NuGet connector configuration and token, then retry. Continue with normal push?",
+                    () =>
+                    {
+                        JobService.StartJob(PageJobKey, "Preparing push...", async (j, c) =>
+                        {
+                            await ExecutePushCoreAsync(j, c, pushRepoIds, synchronizedPush: false, requiredPackageIds);
+                            await RestorePackagesCoreAsync(j, c);
+                        });
+                        return Task.CompletedTask;
+                    },
+                    confirmButtonText: "Continue"));
+                return;
+            }
+
+            // Phase 4: restore packages after successful push
+            await RestorePackagesCoreAsync(job, ct);
+        });
+
+        return Task.CompletedTask;
+    }
+
     private Task RunUpdateAndPushCoreAsync(string? commitMessage = null, bool includeDepsInCommitMessage = true)
     {
         if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
@@ -1789,6 +1950,12 @@ public sealed partial class WorkspaceRepositories : IDisposable
             // Phase 1: update - fresh scope so DbContext does not compete with circuit page loads
             try
             {
+                var reposNeedingWork = workspaceRepositories
+                    .Where(wr => !wr.IsOnTag)
+                    .Where(wr => (wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
+                    .Select(wr => wr.RepositoryId)
+                    .ToHashSet();
+
                 await using (var updateScope = ServiceScopeFactory.CreateAsyncScope())
                 {
                     var updateHandler = updateScope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
@@ -1797,7 +1964,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                         ct,
                         job.ReportProgress,
                         (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
-                        repoIdsToUpdate: null,
+                        repoIdsToUpdate: reposNeedingWork,
                         commitMessage: commitMessage,
                         includeDepsInCommitMessage: includeDepsInCommitMessage);
                 }
@@ -1875,7 +2042,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         if (unmatchedDeps > 0)
             await ShowConfirmUpdateDependenciesAsync(repositoryId, unmatchedDeps);
         else if (HasOutOfDateFiles(repositoryId))
-            OnFileDependencyBadgeClick(repositoryId);
+            await ShowFileVersionsCommitFlowAsync(repositoryId);
     }
 
     /// <summary>Update dependencies for a single repository only (refresh projects, sync deps, no commit). Same as Update but scoped to one repo.</summary>
@@ -3042,8 +3209,164 @@ public sealed partial class WorkspaceRepositories : IDisposable
     private void OnFileDependencyBadgeClick(int repositoryId)
     {
         clickedDependencyBadges.Add(repositoryId);
-        _ = UpdateSingleRepositoryFileVersionsAsync(repositoryId);
+        _ = ShowFileVersionsCommitFlowAsync(repositoryId);
         StateHasChanged();
+    }
+
+    private async Task ShowFileVersionsCommitFlowAsync(int repositoryId)
+    {
+        if (workspace == null || IsJobRunning)
+            return;
+        if (IsRepoOnTag(repositoryId))
+        {
+            ToastService.Show(TagBlockedActionMessage);
+            return;
+        }
+
+        var repo = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId);
+        var repoName = repo?.Repository?.RepositoryName;
+
+        if (repo != null
+            && !string.IsNullOrWhiteSpace(repo.DefaultBranchName)
+            && string.Equals(repo.BranchName, repo.DefaultBranchName, StringComparison.Ordinal))
+        {
+            ShowDefaultBranchWarning(
+                "The following repository is on its default branch. Updating file versions will commit changes directly to the default (protected) branch.",
+                new[] { (repoName ?? $"repo {repositoryId}", repo.DefaultBranchName!) },
+                () => ShowVersionFilesCommitModalAsync(repositoryId, repoName));
+            return;
+        }
+
+        await ShowVersionFilesCommitModalAsync(repositoryId, repoName);
+    }
+
+    private Task ShowVersionFilesCommitModalAsync(int repositoryId, string? repoName)
+    {
+        var lines = GetMismatchedFileVersionLines(repositoryId);
+        var distinctFiles = lines
+            .Select(l => l.FileName)
+            .Where(f => !string.IsNullOrEmpty(f))
+            .Distinct()
+            .ToList();
+        _versionFilesCommitModal = _versionFilesCommitModal with
+        {
+            IsVisible = true,
+            RepoName = repoName,
+            Files = distinctFiles,
+            IsBusy = false,
+            PendingAction = shouldCommit => CommitFileVersionUpdateAsync(repositoryId, shouldCommit),
+        };
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task OnVersionFilesCommitProceedAsync(bool shouldCommit)
+    {
+        var action = _versionFilesCommitModal.PendingAction;
+        if (action == null)
+            return;
+        _versionFilesCommitModal = _versionFilesCommitModal with { IsBusy = true };
+        StateHasChanged();
+        await action(shouldCommit);
+    }
+
+    private void CloseVersionFilesCommitModal()
+    {
+        _versionFilesCommitModal = _versionFilesCommitModal with
+        {
+            IsVisible = false,
+            IsBusy = false,
+            PendingAction = null,
+        };
+        StateHasChanged();
+    }
+
+    private Task CommitFileVersionUpdateAsync(int repositoryId, bool shouldCommit)
+    {
+        if (workspace == null || IsJobRunning)
+        {
+            CloseVersionFilesCommitModal();
+            return Task.CompletedTask;
+        }
+
+        errorMessage = null;
+        CloseVersionFilesCommitModal();
+
+        var jobLabel = shouldCommit ? "Updating and committing file versions..." : "Updating file versions...";
+        JobService.StartJob(PageJobKey, jobLabel, async (job, ct) =>
+        {
+            try
+            {
+                await using var scope = ServiceScopeFactory.CreateAsyncScope();
+                var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
+                var repoIds = new HashSet<int> { repositoryId };
+
+                var (updated, failed, error, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
+                    WorkspaceId,
+                    selectedRepositoryIds: repoIds,
+                    filterPatternTokensToSelectedRepositories: false,
+                    cancellationToken: ct);
+
+                if (error != null)
+                {
+                    SafeInvoke(() => errorMessage = error);
+                    return;
+                }
+
+                if (shouldCommit && updatedFiles is { Count: > 0 })
+                {
+                    job.ReportProgress("Committing updated file versions...");
+                    var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+                    var byRepo = updatedFiles
+                        .GroupBy(x => (x.RepositoryId, x.RepoName))
+                        .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
+                        .ToList();
+                    var commitResults = await workspaceGitService.CommitFilePathsAsync(
+                        WorkspaceId,
+                        byRepo,
+                        onProgress: (c, t, _) => job.ReportProgress($"Committed version files {c} of {t}"),
+                        cancellationToken: ct);
+                    foreach (var (_, committed, errMsg) in commitResults)
+                    {
+                        if (!string.IsNullOrEmpty(errMsg))
+                        {
+                            SafeInvoke(() => errorMessage = errMsg);
+                            return;
+                        }
+                    }
+                }
+
+                job.ReportProgress("Checking file versions...");
+                await fileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, ct, forceFresh: true);
+
+                await InvokeAsync(async () =>
+                {
+                    if (_disposed) return;
+                    await RefreshFromSync();
+                    StateHasChanged();
+                    if (failed > 0)
+                        errorMessage = $"Updated {updated} line(s). {failed} file(s) could not be updated - check logs.";
+                    else if (updated > 0)
+                        ToastService.Show(shouldCommit
+                            ? $"Updated and committed {updated} line(s) in configured files."
+                            : $"Updated {updated} line(s) in configured files.");
+                    else
+                        ToastService.Show("File versions are already up to date.");
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error updating file versions for repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
+                SafeInvoke(() => errorMessage = "Failed to update file versions. Please try again.");
+                throw;
+            }
+        });
+
+        return Task.CompletedTask;
     }
 
     private void OnDependencyBadgeMouseLeave(int repositoryId)
@@ -3265,6 +3588,15 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public Func<Task>? PendingAction { get; init; }
     }
 
+    private sealed record VersionFilesCommitModalState
+    {
+        public bool IsVisible { get; init; }
+        public string? RepoName { get; init; }
+        public IReadOnlyList<string> Files { get; init; } = Array.Empty<string>();
+        public bool IsBusy { get; init; }
+        public Func<bool, Task>? PendingAction { get; init; }
+    }
+
     private sealed record SyncToDefaultOptionsModalState
     {
         public bool IsVisible { get; init; }
@@ -3331,6 +3663,14 @@ public sealed partial class WorkspaceRepositories : IDisposable
         public bool IsVisible { get; init; }
         public string? LastCommitMessage { get; init; }
         public bool LastIncludeDeps { get; init; } = true;
+    }
+
+    private sealed record LevelOnlyUpdateAndPushModalState
+    {
+        public bool IsVisible { get; init; }
+        public string? LastCommitMessage { get; init; }
+        public bool LastIncludeDeps { get; init; } = true;
+        public int Level { get; init; }
     }
 
     private sealed record UpdateSingleRepoDependenciesModalState

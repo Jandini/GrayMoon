@@ -58,6 +58,8 @@
                                     OnUpdate="OnUpdateClickAsync"
                                     OnUpdateFiles="OnUpdateFilesClickAsync"
                                     OnUpdateAndPush="OnUpdateAndPushClickAsync"
+                                    LowestLevelNeedingWork="@lowestLevelNeedingWork"
+                                    OnLevelOnlyUpdateAndPush="OnLevelOnlyUpdateAndPushClickAsync"
                                     OnPull="OnPullClickAsync"
                                     OnPush="OnPushClickAsync"
                                     OnUndoPush="OnUndoPushClickAsync"
@@ -249,6 +251,13 @@
                          OnProceed="@OnUpdateAndPushProceedAsync"
                          OnCancel="@CloseUpdateAndPushModal" />
 
+<UpdateDependenciesModal IsVisible="@_levelOnlyUpdateAndPushModal.IsVisible"
+                         IsBusy="@IsJobRunning"
+                         InitialCommitMessage="@_levelOnlyUpdateAndPushModal.LastCommitMessage"
+                         InitialIncludeDeps="@_levelOnlyUpdateAndPushModal.LastIncludeDeps"
+                         OnProceed="@OnLevelOnlyUpdateAndPushProceedAsync"
+                         OnCancel="@CloseLevelOnlyUpdateAndPushModal" />
+
 <UpdateSingleRepositoryDependenciesModal IsVisible="@_updateSingleRepoModal.IsVisible"
                           Payload="@_updateSingleRepoModal.Payload"
                           RepoName="@_updateSingleRepoModal.RepoName"
@@ -285,6 +294,13 @@
                            RepoItems="@_defaultBranchWarningModal.RepoItems"
                            OnProceed="@OnDefaultBranchWarningProceedAsync"
                            OnCancel="@CloseDefaultBranchWarningModal" />
+
+<VersionFilesCommitModal IsVisible="@_versionFilesCommitModal.IsVisible"
+                         RepoName="@_versionFilesCommitModal.RepoName"
+                         Files="@_versionFilesCommitModal.Files"
+                         IsBusy="@_versionFilesCommitModal.IsBusy"
+                         OnProceed="@OnVersionFilesCommitProceedAsync"
+                         OnCancel="@CloseVersionFilesCommitModal" />
 
 <SyncToDefaultOptionsModal IsVisible="@_syncToDefaultOptionsModal.IsVisible"
                            Message="@_syncToDefaultOptionsModal.Message"

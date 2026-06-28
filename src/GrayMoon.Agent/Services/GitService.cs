@@ -879,18 +879,18 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return string.IsNullOrWhiteSpace(name) ? null : name;
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct)
+    public async Task<(bool Success, bool Committed, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
-            return (false, "Invalid repository path");
+            return (false, false, "Invalid repository path");
         if (pathsToStage == null || pathsToStage.Count == 0)
-            return (false, "No paths to stage");
+            return (false, false, "No paths to stage");
         if (string.IsNullOrWhiteSpace(commitMessage))
-            return (false, "Commit message is required");
+            return (false, false, "Commit message is required");
 
         var paths = pathsToStage.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p!.Trim()).Distinct().ToList();
         if (paths.Count == 0)
-            return (false, "No paths to stage");
+            return (false, false, "No paths to stage");
 
         var addArgs = "add -- " + string.Join(" ", paths.Select(p => p.Contains(' ') ? "\"" + p.Replace("\"", "\\\"") + "\"" : p));
         var (addExit, addOut, addErr) = await runner.RunAsync("git", addArgs, repoPath, ct);
@@ -898,20 +898,20 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         {
             var err = (addErr ?? addOut ?? "").Trim();
             logger.LogError("Git add failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, addExit, err);
-            return (false, err);
+            return (false, false, err);
         }
 
         var (stagedExit, _, stagedErr) = await runner.RunAsync("git", "diff --cached --quiet", repoPath, ct);
         if (stagedExit == 0)
         {
             logger.LogInformation("Git stage and commit skipped for {RepoPath}: nothing staged to commit", repoPath);
-            return (true, null);
+            return (true, false, null);
         }
         if (stagedExit != 1)
         {
             var err = (stagedErr ?? "").Trim();
             logger.LogError("Git staged diff check failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, stagedExit, err);
-            return (false, string.IsNullOrWhiteSpace(err) ? "Failed to verify staged changes before commit." : err);
+            return (false, false, string.IsNullOrWhiteSpace(err) ? "Failed to verify staged changes before commit." : err);
         }
 
         var messageNormalized = commitMessage.Replace("\r\n", "\n").Replace("\r", "\n").TrimEnd();
@@ -920,11 +920,11 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         {
             var err = (commitErr ?? commitOut ?? "").Trim();
             logger.LogError("Git commit failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", repoPath, commitExit, err);
-            return (false, err);
+            return (false, false, err);
         }
 
         logger.LogInformation("Git stage and commit completed for {RepoPath}", repoPath);
-        return (true, null);
+        return (true, true, null);
     }
 
     public async Task<(bool Success, string? ErrorMessage)> ResetToRemoteAsync(string repoPath, string branchName, bool keepChanges, CancellationToken ct)

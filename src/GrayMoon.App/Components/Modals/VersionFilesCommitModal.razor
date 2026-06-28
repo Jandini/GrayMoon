@@ -7,27 +7,39 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Commit version files</h5>
+                    <h5 class="modal-title">Update version files</h5>
                     <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body">
-                    @if (!string.IsNullOrWhiteSpace(Message))
+                    @if (!string.IsNullOrWhiteSpace(RepoName))
                     {
-                        <p class="mb-2">@Message</p>
+                        <p class="mb-2">The following file(s) in <strong>@RepoName</strong> will have their version tokens updated:</p>
+                    }
+                    else
+                    {
+                        <p class="mb-2">The following file(s) will have their version tokens updated:</p>
                     }
                     @if (Files != null && Files.Count > 0)
                     {
-                        <div class="version-files-commit-label mb-1">Files</div>
-                        <div class="version-files-commit-box">
+                        <div class="version-files-commit-box mb-3">
                             <pre class="version-files-commit-pre mb-0 font-monospace p-2">
 @string.Join("\n", Files)
                             </pre>
                         </div>
                     }
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="vfcm-commit-check"
+                               checked="@_commitChanges"
+                               @onchange="e => _commitChanges = (bool)(e.Value ?? true)"
+                               disabled="@IsBusy" />
+                        <label class="form-check-label" for="vfcm-commit-check">
+                            Commit the changes
+                        </label>
+                    </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-primary" @onclick="OnProceed" disabled="@IsBusy">
-                        Commit
+                    <button type="button" class="btn btn-primary" @onclick="HandleProceed" disabled="@IsBusy">
+                        Update
                     </button>
                     <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel" disabled="@IsBusy">
                         Cancel
@@ -40,18 +52,28 @@
 
 @code {
     [Parameter] public bool IsVisible { get; set; }
-    [Parameter] public string? Message { get; set; }
+    [Parameter] public string? RepoName { get; set; }
     [Parameter] public IReadOnlyList<string>? Files { get; set; }
     [Parameter] public bool IsBusy { get; set; }
-    [Parameter] public EventCallback OnProceed { get; set; }
+    [Parameter] public EventCallback<bool> OnProceed { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
+
+    private bool _commitChanges = true;
+
+    protected override void OnParametersSet()
+    {
+        if (!IsVisible)
+            _commitChanges = true;
+    }
+
+    private async Task HandleProceed() => await OnProceed.InvokeAsync(_commitChanges);
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Escape")
             await OnCancel.InvokeAsync();
         else if (e.Key == "Enter")
-            await OnProceed.InvokeAsync();
+            await HandleProceed();
     }
 }
 

@@ -20,7 +20,8 @@ public sealed record WorkspaceNotification(
     bool HasUnmatchedDependencies,
     bool IsPushRecommended,
     bool HasIncomingCommits,
-    IReadOnlyList<NotificationRepo> Repos);
+    IReadOnlyList<NotificationRepo> Repos,
+    int? LowestLevelNeedingWork);
 
 public sealed class WorkspacePendingActionsService
 {
@@ -91,6 +92,10 @@ public sealed class WorkspacePendingActionsService
             })
             .ToList();
 
-        return new WorkspaceNotification(workspaceId, workspaceName, hasUnmatched, isPushRecommended, hasIncoming, repos);
+        var lowestLevel = links
+            .Where(wr => !wr.IsOnTag && (wr.UnmatchedDeps ?? 0) > 0)
+            .Min(wr => (int?)wr.DependencyLevel);
+
+        return new WorkspaceNotification(workspaceId, workspaceName, hasUnmatched, isPushRecommended, hasIncoming, repos, lowestLevel);
     }
 }

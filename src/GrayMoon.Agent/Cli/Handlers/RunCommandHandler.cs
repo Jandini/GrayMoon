@@ -93,6 +93,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
         builder.Services.AddSingleton<GitProcessRunner>();
         builder.Services.AddSingleton<IGitService, GitService>();
+        builder.Services.AddSingleton<GitRemoteIntegrateService>();
         builder.Services.AddSingleton<IAgentTokenProvider, AgentTokenProvider>();
         builder.Services.AddSingleton<ICsProjFileParser, CsProjFileParser>();
         builder.Services.AddSingleton<ICsProjFileService, CsProjFileService>();

@@ -11,6 +11,7 @@ public sealed class WorkspaceUpdateHandler(
     /// <summary>
     /// Runs the full update flow (refresh, sync deps, commit per level, refresh version, version-file updates) via the orchestrator.
     /// </summary>
+    /// <param name="maxLevel">Optional. When set, only repositories at or below this dependency level are processed.</param>
     public async Task RunUpdateAsync(
         int workspaceId,
         CancellationToken cancellationToken,
@@ -19,7 +20,8 @@ public sealed class WorkspaceUpdateHandler(
         Action? onAppSideComplete = null,
         IReadOnlySet<int>? repoIdsToUpdate = null,
         string? commitMessage = null,
-        bool includeDepsInCommitMessage = true)
+        bool includeDepsInCommitMessage = true,
+        int? maxLevel = null)
     {
         try
         {
@@ -31,7 +33,8 @@ public sealed class WorkspaceUpdateHandler(
                 onAppSideComplete,
                 repoIdsToUpdate,
                 commitMessage,
-                includeDepsInCommitMessage);
+                includeDepsInCommitMessage,
+                maxLevel);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
