@@ -1,5 +1,9 @@
 @using Microsoft.AspNetCore.Components.Web
 
+@{
+    var anyCommitsWillBeLost = RepoItems.Any(r => r.CommitsAhead > 0 && r.PrState is not "merged" and not "closed");
+}
+
 @if (IsVisible)
 {
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
@@ -13,7 +17,7 @@
                 </div>
                 <div class="modal-body">
                     <p class="mb-2 small">@Message</p>
-                    @if (RepoItems.Any(r => r.CommitsAhead > 0))
+                    @if (anyCommitsWillBeLost)
                     {
                         <div class="alert alert-danger py-2 px-3 mb-3 small" role="alert">
                             <i class="bi bi-exclamation-triangle-fill me-1"></i>
@@ -31,13 +35,21 @@
                                         <span class="text-muted ms-2">@item.BranchName</span>
                                         @if (item.HasRemote)
                                         {
-                                            <span class="badge bg-secondary ms-1" style="font-size:0.65em;">remote</span>
+                                            <span class="badge bg-secondary ms-1 sync-default-pr-badge">remote</span>
                                         }
-                                        @if (item.HasOpenPr)
+                                        @if (item.PrState == "open")
                                         {
-                                            <span class="badge bg-warning text-dark ms-1" style="font-size:0.65em;">PR open - will be closed</span>
+                                            <span class="badge bg-warning text-dark ms-1 sync-default-pr-badge">PR open</span>
                                         }
-                                        @if (item.CommitsAhead > 0)
+                                        else if (item.PrState == "merged")
+                                        {
+                                            <span class="badge ms-1 sync-default-pr-badge" style="background-color:#8957e5;color:#fff;">merged</span>
+                                        }
+                                        else if (item.PrState == "closed")
+                                        {
+                                            <span class="badge bg-secondary ms-1 sync-default-pr-badge">PR closed</span>
+                                        }
+                                        @if (item.CommitsAhead > 0 && item.PrState is not "merged" and not "closed")
                                         {
                                             <span class="text-danger ms-2" style="font-size:0.85em;">@item.CommitsAhead commit@(item.CommitsAhead == 1 ? "" : "s") will be lost</span>
                                         }
@@ -67,7 +79,7 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-danger" @onclick="OnProceed">Proceed</button>
+                    <button type="button" class="btn @(anyCommitsWillBeLost ? "btn-danger" : "btn-primary")" @onclick="OnProceed">Proceed</button>
                     <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">Cancel</button>
                 </div>
             </div>
@@ -78,7 +90,7 @@
 @code {
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public string Message { get; set; } = "";
-    [Parameter] public IReadOnlyList<(string RepoName, string BranchName, bool HasRemote, bool HasOpenPr, int CommitsAhead)> RepoItems { get; set; } = Array.Empty<(string, string, bool, bool, int)>();
+    [Parameter] public IReadOnlyList<(string RepoName, string BranchName, bool HasRemote, string? PrState, int CommitsAhead)> RepoItems { get; set; } = Array.Empty<(string, string, bool, string?, int)>();
     [Parameter] public bool DeleteRemoteBranches { get; set; } = true;
     [Parameter] public EventCallback<bool> DeleteRemoteBranchesChanged { get; set; }
     [Parameter] public bool AllowForceDeleteLocalBranch { get; set; } = true;

@@ -607,7 +607,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             await action();
     }
 
-    private void ShowSyncToDefaultOptions(string message, IReadOnlyList<(string RepoName, string BranchName, bool HasRemote, bool HasOpenPr, int CommitsAhead)> repoItems, Func<bool, bool, Task> onProceed, bool defaultDeleteRemote = true)
+    private void ShowSyncToDefaultOptions(string message, IReadOnlyList<(string RepoName, string BranchName, bool HasRemote, string? PrState, int CommitsAhead)> repoItems, Func<bool, bool, Task> onProceed, bool defaultDeleteRemote = true)
     {
         _syncToDefaultOptionsModal = _syncToDefaultOptionsModal with
         {
@@ -1022,7 +1022,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                             .Select(r =>
                             {
                                 var wr2 = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == r.RepoId);
-                                return (RepoName: wr2?.Repository?.RepositoryName ?? r.RepoId.ToString(), BranchName: wr2?.BranchName ?? "", HasRemote: r.HasUpstream == true, HasOpenPr: false, CommitsAhead: 0);
+                                return (RepoName: wr2?.Repository?.RepositoryName ?? r.RepoId.ToString(), BranchName: wr2?.BranchName ?? "", HasRemote: r.HasUpstream == true, PrState: (string?)null, CommitsAhead: 0);
                             })
                             .ToList() ?? new();
                         ShowSyncToDefaultOptions(dialogMessage, repoItems, (deleteRemote, allowForce) => SyncToDefaultLevelAsync(safeRepoIds, deleteRemote, allowForce));
@@ -2932,9 +2932,11 @@ public sealed partial class WorkspaceRepositories : IDisposable
             if (hasUpstream)
             {
                 var branchName = wr?.BranchName ?? currentBranchName;
+                prByRepositoryId.TryGetValue(repositoryId, out var singlePr);
+                var singlePrState = singlePr == null ? null : singlePr.IsMerged ? "merged" : singlePr.IsClosed ? "closed" : "open";
                 ShowSyncToDefaultOptions(
                     "This will checkout the default branch, remove the current branch locally, and pull the latest.",
-                    [(repositoryName!, branchName, true, false, 0)],
+                    [(repositoryName!, branchName, true, singlePrState, defaultAhead)],
                     (deleteRemote, allowForce) => SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemote, defaultBranch, allowForce));
             }
             else
@@ -3117,18 +3119,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
 
         var eligibleIds = eligibleRepos.Select(wr => wr.RepositoryId).ToList();
 
-        try
-        {
-            await WorkspacePageService.WorkspacePullRequestService.RefreshPullRequestsAsync(WorkspaceId, eligibleIds, force: true);
-            await ReloadWorkspaceDataFromFreshScopeAsync();
-            ApplySyncStateFromWorkspace();
-            await InvokeAsync(StateHasChanged);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogDebug(ex, "PR refresh before sync-all-to-default failed for workspace {WorkspaceId}", WorkspaceId);
-        }
-
         var totalCount = eligibleIds.Count;
         var dialogMessage = totalCount == 1
             ? "This will checkout the default branch, remove the current branch locally, and pull the latest. Uncommitted local changes can block checkout."
@@ -3140,6 +3130,17 @@ public sealed partial class WorkspaceRepositories : IDisposable
             {
                 try
                 {
+                    try
+                    {
+                        await using var prScope = ServiceScopeFactory.CreateAsyncScope();
+                        var prService = prScope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
+                        await prService.RefreshPullRequestsAsync(WorkspaceId, eligibleIds, force: true, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogDebug(ex, "PR refresh before sync-all-to-default failed for workspace {WorkspaceId}", WorkspaceId);
+                    }
+
                     var fetchDone = 0;
                     using var fetchSemaphore = new SemaphoreSlim(8);
                     await Task.WhenAll(eligibleIds.Select(async repoId =>
@@ -3169,13 +3170,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
                             {
                                 var wr2 = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
                                 prByRepositoryId.TryGetValue(repoId, out var pr);
-                                var hasOpenPr = pr != null && string.Equals(pr.State, "open", StringComparison.OrdinalIgnoreCase);
+                                var prState = pr == null ? null : pr.IsMerged ? "merged" : pr.IsClosed ? "closed" : "open";
                                 var commitsAhead = wr2?.DefaultBranchAheadCommits ?? 0;
                                 return (
                                     RepoName: wr2?.Repository?.RepositoryName ?? repoId.ToString(),
                                     BranchName: wr2?.BranchName ?? "",
                                     HasRemote: wr2?.BranchHasUpstream == true,
-                                    HasOpenPr: hasOpenPr,
+                                    PrState: prState,
                                     CommitsAhead: commitsAhead
                                 );
                             })
@@ -3200,7 +3201,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     }
 
     private Task ExecuteSyncAllToDefaultAsync(
-        IReadOnlyList<(string RepoName, string BranchName, bool HasRemote, bool HasOpenPr, int CommitsAhead)> repoItems,
+        IReadOnlyList<(string RepoName, string BranchName, bool HasRemote, string? PrState, int CommitsAhead)> repoItems,
         bool deleteRemoteBranch)
     {
         if (workspace == null || repoItems.Count == 0 || IsJobRunning)
@@ -3210,7 +3211,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
             wr => wr.Repository?.RepositoryName ?? string.Empty,
             wr => wr.RepositoryId);
         var prNumberByRepoName = new Dictionary<string, int>();
-        foreach (var item in repoItems.Where(r => r.HasOpenPr))
+        foreach (var item in repoItems.Where(r => r.PrState == "open"))
         {
             if (!repoIdByName.TryGetValue(item.RepoName, out var repoId)) continue;
             if (prByRepositoryId.TryGetValue(repoId, out var pr) && pr != null && pr.Number > 0)
@@ -3248,7 +3249,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
                     await semaphore.WaitAsync(ct);
                     try
                     {
-                        if (item.HasOpenPr && prNumberByRepoName.TryGetValue(item.RepoName, out var prNumber))
+                        if (item.PrState == "open" && prNumberByRepoName.TryGetValue(item.RepoName, out var prNumber))
                         {
                             try
                             {
@@ -3832,7 +3833,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     {
         public bool IsVisible { get; init; }
         public string Message { get; init; } = "";
-        public IReadOnlyList<(string RepoName, string BranchName, bool HasRemote, bool HasOpenPr, int CommitsAhead)> RepoItems { get; init; } = Array.Empty<(string, string, bool, bool, int)>();
+        public IReadOnlyList<(string RepoName, string BranchName, bool HasRemote, string? PrState, int CommitsAhead)> RepoItems { get; init; } = Array.Empty<(string, string, bool, string?, int)>();
         public bool DeleteRemoteBranches { get; init; } = true;
         public bool AllowForceDeleteLocalBranch { get; init; } = true;
         public Func<bool, bool, Task>? PendingAction { get; init; }
