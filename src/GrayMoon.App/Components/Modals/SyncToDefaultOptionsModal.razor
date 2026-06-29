@@ -1,9 +1,5 @@
 @using Microsoft.AspNetCore.Components.Web
 
-@{
-    var anyCommitsWillBeLost = RepoItems.Any(r => r.CommitsAhead > 0 && r.PrState is not "merged" and not "closed");
-}
-
 @if (IsVisible)
 {
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
@@ -13,11 +9,11 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Sync to Default</h5>
-                    <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="HandleCancelClick"></button>
                 </div>
                 <div class="modal-body">
                     <p class="mb-2 small">@Message</p>
-                    @if (anyCommitsWillBeLost)
+                    @if (AnyCommitsWillBeLost)
                     {
                         <div class="alert alert-danger py-2 px-3 mb-3 small" role="alert">
                             <i class="bi bi-exclamation-triangle-fill me-1"></i>
@@ -79,8 +75,22 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn @(anyCommitsWillBeLost ? "btn-danger" : "btn-primary")" @onclick="OnProceed">Proceed</button>
-                    <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">Cancel</button>
+                    <button type="button"
+                            class="btn @(AnyCommitsWillBeLost ? "btn-danger" : "btn-primary")"
+                            disabled="@_isCountingDown"
+                            @onclick="HandleProceedClick">
+                        @if (_isCountingDown)
+                        {
+                            @($"Syncing in {_countdownSecondsLeft}...")
+                        }
+                        else
+                        {
+                            @("Proceed")
+                        }
+                    </button>
+                    <button type="button"
+                            class="btn @(_isCountingDown ? "btn-warning text-dark" : "btn-outline-secondary")"
+                            @onclick="HandleCancelClick">Cancel</button>
                 </div>
             </div>
         </div>
@@ -99,11 +109,71 @@
     [Parameter] public EventCallback OnCancel { get; set; }
 
     private ElementReference _modalElement;
+    private int _countdownSecondsLeft;
+    private CancellationTokenSource? _countdownCts;
+    private bool _isCountingDown => _countdownSecondsLeft > 0;
+
+    private bool AnyCommitsWillBeLost =>
+        RepoItems.Any(r => r.CommitsAhead > 0 && r.PrState is not "merged" and not "closed");
+
+    protected override void OnParametersSet()
+    {
+        if (!IsVisible)
+            CancelCountdown();
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (IsVisible)
+        if (IsVisible && !_isCountingDown)
             await _modalElement.FocusAsync();
+    }
+
+    private async Task HandleProceedClick()
+    {
+        if (!AnyCommitsWillBeLost)
+        {
+            await OnProceed.InvokeAsync();
+            return;
+        }
+
+        if (_isCountingDown)
+            return;
+
+        _countdownCts?.Dispose();
+        _countdownCts = new CancellationTokenSource();
+        var ct = _countdownCts.Token;
+        _countdownSecondsLeft = 5;
+        StateHasChanged();
+
+        try
+        {
+            while (_countdownSecondsLeft > 0)
+            {
+                await Task.Delay(1000, ct);
+                _countdownSecondsLeft--;
+                StateHasChanged();
+            }
+            await OnProceed.InvokeAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            _countdownSecondsLeft = 0;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleCancelClick()
+    {
+        CancelCountdown();
+        await OnCancel.InvokeAsync();
+    }
+
+    private void CancelCountdown()
+    {
+        _countdownCts?.Cancel();
+        _countdownCts?.Dispose();
+        _countdownCts = null;
+        _countdownSecondsLeft = 0;
     }
 
     private async Task OnDeleteRemoteChanged(ChangeEventArgs e)
@@ -121,8 +191,8 @@
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Escape")
-            await OnCancel.InvokeAsync();
-        else if (e.Key == "Enter")
-            await OnProceed.InvokeAsync();
+            await HandleCancelClick();
+        else if (e.Key == "Enter" && !_isCountingDown)
+            await HandleProceedClick();
     }
 }
