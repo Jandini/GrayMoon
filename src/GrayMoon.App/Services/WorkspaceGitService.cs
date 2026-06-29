@@ -905,8 +905,8 @@ public class WorkspaceGitService(
             }
         }
 
-        // Persist BranchName and commit counts from the agent response so the UI is up to date
-        // immediately without waiting for the async post-merge hook (which only fires when pull merges).
+        // Persist BranchName, commit counts, and GitVersion from the agent response so the UI is up
+        // to date immediately without waiting for the async post-merge hook.
         if (syncResponse != null)
         {
             wr.BranchName = syncResponse.CurrentBranch ?? syncResponse.DefaultBranch;
@@ -916,11 +916,19 @@ public class WorkspaceGitService(
             if (syncResponse.HasUpstream.HasValue) wr.BranchHasUpstream = syncResponse.HasUpstream.Value;
             if (syncResponse.DefaultBranchBehind.HasValue) wr.DefaultBranchBehindCommits = syncResponse.DefaultBranchBehind;
             if (syncResponse.DefaultBranchAhead.HasValue) wr.DefaultBranchAheadCommits = syncResponse.DefaultBranchAhead;
+            if (!string.IsNullOrWhiteSpace(syncResponse.GitVersion)) wr.GitVersion = syncResponse.GitVersion;
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        if (_hubContext != null)
-            await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
+        // Persist fresh csproj data from the default branch so dependency stats reflect the new branch content.
+        var projectsDetail = GetProjectsDetail(syncResponse?.Projects);
+        if (projectsDetail is { Count: > 0 })
+            await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repositoryId, projectsDetail, cancellationToken);
+        await _workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(
+            workspaceId, [(repositoryId, projectsDetail)], persistDependencyLevel: false, cancellationToken);
+
+        // Recompute dependency and file-version stats now that GitVersion and ProjectDependencies are fresh, then broadcast.
+        await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
 
         return (true, null);
     }
@@ -1149,7 +1157,11 @@ public class WorkspaceGitService(
     private static IReadOnlyList<SyncProjectInfo>? GetProjectsDetail(object data)
     {
         var r = AgentResponseJson.DeserializeAgentResponse<AgentSyncProjectsResponse>(data);
-        var projects = r?.Projects;
+        return GetProjectsDetail(r?.Projects);
+    }
+
+    private static IReadOnlyList<SyncProjectInfo>? GetProjectsDetail(List<AgentProjectDto>? projects)
+    {
         if (projects == null || projects.Count == 0) return null;
         var list = new List<SyncProjectInfo>();
         foreach (var p in projects)

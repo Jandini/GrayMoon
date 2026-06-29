@@ -1,0 +1,39 @@
+/* Keep the dialog within the viewport */
+.sync-to-default-options-modal {
+    max-height: calc(100vh - 2rem);
+    margin: 1rem auto;
+}
+
+.sync-to-default-options-modal .modal-body {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+}
+
+/* Only the repo list scrolls */
+.sync-to-default-options-scroll {
+    flex: 0 1 auto;
+    max-height: 12rem;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: #6c757d transparent;
+}
+
+.sync-to-default-options-scroll::-webkit-scrollbar {
+    width: 0.35rem;
+}
+
+.sync-to-default-options-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sync-to-default-options-scroll::-webkit-scrollbar-thumb {
+    background: #6c757d;
+    border-radius: 0.2rem;
+}
+
+.sync-to-default-options-scroll::-webkit-scrollbar-thumb:hover {
+    background: #5a6268;
+}

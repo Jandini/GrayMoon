@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class SyncToDefaultBranchCommand(IGitService git, ILogger<SyncToDefaultBranchCommand> logger) : ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse>
+public sealed class SyncToDefaultBranchCommand(IGitService git, ICsProjFileService csProjFileService, ILogger<SyncToDefaultBranchCommand> logger) : ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse>
 {
     public async Task<SyncToDefaultBranchResponse> ExecuteAsync(SyncToDefaultBranchRequest request, CancellationToken cancellationToken = default)
     {
@@ -97,6 +97,11 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, ILogger<SyncToDe
         var tags = await git.GetTagsAsync(repoPath, cancellationToken);
         var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
 
+        var (versionResult, _) = await git.GetVersionAsync(repoPath, cancellationToken);
+        var gitVersion = versionResult?.InformationalVersion;
+
+        var projects = await csProjFileService.FindAsync(repoPath, cancellationToken);
+
         return new SyncToDefaultBranchResponse
         {
             Success = true,
@@ -110,7 +115,9 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, ILogger<SyncToDe
             IncomingCommits = incoming,
             HasUpstream = hasUpstream,
             DefaultBranchBehind = defaultBehind,
-            DefaultBranchAhead = defaultAhead
+            DefaultBranchAhead = defaultAhead,
+            GitVersion = gitVersion,
+            Projects = projects
         };
     }
 }
