@@ -37,3 +37,8 @@
 .sync-to-default-options-scroll::-webkit-scrollbar-thumb:hover {
     background: #5a6268;
 }
+
+.sync-default-pr-badge {
+    font-size: 0.65em;
+    vertical-align: middle;
+}

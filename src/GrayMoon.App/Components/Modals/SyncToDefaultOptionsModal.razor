@@ -9,11 +9,11 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Sync to Default</h5>
-                    <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="HandleCancelClick"></button>
                 </div>
                 <div class="modal-body">
                     <p class="mb-2 small">@Message</p>
-                    @if (RepoItems.Any(r => r.CommitsAhead > 0))
+                    @if (AnyCommitsWillBeLost)
                     {
                         <div class="alert alert-danger py-2 px-3 mb-3 small" role="alert">
                             <i class="bi bi-exclamation-triangle-fill me-1"></i>
@@ -31,13 +31,21 @@
                                         <span class="text-muted ms-2">@item.BranchName</span>
                                         @if (item.HasRemote)
                                         {
-                                            <span class="badge bg-secondary ms-1" style="font-size:0.65em;">remote</span>
+                                            <span class="badge bg-secondary ms-1 sync-default-pr-badge">remote</span>
                                         }
-                                        @if (item.HasOpenPr)
+                                        @if (item.PrState == "open")
                                         {
-                                            <span class="badge bg-warning text-dark ms-1" style="font-size:0.65em;">PR open - will be closed</span>
+                                            <span class="badge bg-warning text-dark ms-1 sync-default-pr-badge">PR open</span>
                                         }
-                                        @if (item.CommitsAhead > 0)
+                                        else if (item.PrState == "merged")
+                                        {
+                                            <span class="badge ms-1 sync-default-pr-badge" style="background-color:#8957e5;color:#fff;">merged</span>
+                                        }
+                                        else if (item.PrState == "closed")
+                                        {
+                                            <span class="badge bg-secondary ms-1 sync-default-pr-badge">PR closed</span>
+                                        }
+                                        @if (item.CommitsAhead > 0 && item.PrState is not "merged" and not "closed")
                                         {
                                             <span class="text-danger ms-2" style="font-size:0.85em;">@item.CommitsAhead commit@(item.CommitsAhead == 1 ? "" : "s") will be lost</span>
                                         }
@@ -67,8 +75,22 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-danger" @onclick="OnProceed">Proceed</button>
-                    <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">Cancel</button>
+                    <button type="button"
+                            class="btn @(AnyCommitsWillBeLost ? "btn-danger" : "btn-primary")"
+                            disabled="@_isCountingDown"
+                            @onclick="HandleProceedClick">
+                        @if (_isCountingDown)
+                        {
+                            @($"Syncing in {_countdownSecondsLeft}...")
+                        }
+                        else
+                        {
+                            @("Proceed")
+                        }
+                    </button>
+                    <button type="button"
+                            class="btn @(_isCountingDown ? "btn-warning text-dark" : "btn-outline-secondary")"
+                            @onclick="HandleCancelClick">Cancel</button>
                 </div>
             </div>
         </div>
@@ -78,7 +100,7 @@
 @code {
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public string Message { get; set; } = "";
-    [Parameter] public IReadOnlyList<(string RepoName, string BranchName, bool HasRemote, bool HasOpenPr, int CommitsAhead)> RepoItems { get; set; } = Array.Empty<(string, string, bool, bool, int)>();
+    [Parameter] public IReadOnlyList<(string RepoName, string BranchName, bool HasRemote, string? PrState, int CommitsAhead)> RepoItems { get; set; } = Array.Empty<(string, string, bool, string?, int)>();
     [Parameter] public bool DeleteRemoteBranches { get; set; } = true;
     [Parameter] public EventCallback<bool> DeleteRemoteBranchesChanged { get; set; }
     [Parameter] public bool AllowForceDeleteLocalBranch { get; set; } = true;
@@ -87,11 +109,71 @@
     [Parameter] public EventCallback OnCancel { get; set; }
 
     private ElementReference _modalElement;
+    private int _countdownSecondsLeft;
+    private CancellationTokenSource? _countdownCts;
+    private bool _isCountingDown => _countdownSecondsLeft > 0;
+
+    private bool AnyCommitsWillBeLost =>
+        RepoItems.Any(r => r.CommitsAhead > 0 && r.PrState is not "merged" and not "closed");
+
+    protected override void OnParametersSet()
+    {
+        if (!IsVisible)
+            CancelCountdown();
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (IsVisible)
+        if (IsVisible && !_isCountingDown)
             await _modalElement.FocusAsync();
+    }
+
+    private async Task HandleProceedClick()
+    {
+        if (!AnyCommitsWillBeLost)
+        {
+            await OnProceed.InvokeAsync();
+            return;
+        }
+
+        if (_isCountingDown)
+            return;
+
+        _countdownCts?.Dispose();
+        _countdownCts = new CancellationTokenSource();
+        var ct = _countdownCts.Token;
+        _countdownSecondsLeft = 5;
+        StateHasChanged();
+
+        try
+        {
+            while (_countdownSecondsLeft > 0)
+            {
+                await Task.Delay(1000, ct);
+                _countdownSecondsLeft--;
+                StateHasChanged();
+            }
+            await OnProceed.InvokeAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            _countdownSecondsLeft = 0;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleCancelClick()
+    {
+        CancelCountdown();
+        await OnCancel.InvokeAsync();
+    }
+
+    private void CancelCountdown()
+    {
+        _countdownCts?.Cancel();
+        _countdownCts?.Dispose();
+        _countdownCts = null;
+        _countdownSecondsLeft = 0;
     }
 
     private async Task OnDeleteRemoteChanged(ChangeEventArgs e)
@@ -109,8 +191,8 @@
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Escape")
-            await OnCancel.InvokeAsync();
-        else if (e.Key == "Enter")
-            await OnProceed.InvokeAsync();
+            await HandleCancelClick();
+        else if (e.Key == "Enter" && !_isCountingDown)
+            await HandleProceedClick();
     }
 }
