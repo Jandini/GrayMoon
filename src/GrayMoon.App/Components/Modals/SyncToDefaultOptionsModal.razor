@@ -100,7 +100,7 @@
 @code {
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public string Message { get; set; } = "";
-    [Parameter] public IReadOnlyList<(string RepoName, string BranchName, bool HasRemote, string? PrState, int CommitsAhead)> RepoItems { get; set; } = Array.Empty<(string, string, bool, string?, int)>();
+    [Parameter] public IReadOnlyList<SyncToDefaultRepoItem> RepoItems { get; set; } = Array.Empty<SyncToDefaultRepoItem>();
     [Parameter] public bool DeleteRemoteBranches { get; set; } = true;
     [Parameter] public EventCallback<bool> DeleteRemoteBranchesChanged { get; set; }
     [Parameter] public bool AllowForceDeleteLocalBranch { get; set; } = true;
