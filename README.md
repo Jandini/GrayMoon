@@ -106,14 +106,6 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 ## What's new
 
-### Unified on .NET 10 across App and Agent
-
-`GrayMoon.App`, `GrayMoon.Common`, `GrayMoon.Common.Tests`, and `GrayMoon.Abstractions` now target `net10.0` (previously `net8.0`), matching the Agent, which was already on .NET 10. The whole solution builds against one target framework.
-
-- **Docker image:** the build and runtime base images moved from `mcr.microsoft.com/dotnet/sdk:8.0` / `aspnet:8.0` to `mcr.microsoft.com/dotnet/sdk:10.0` / `aspnet:10.0`.
-- **Package bumps:** `Microsoft.EntityFrameworkCore`, `Microsoft.EntityFrameworkCore.Sqlite`, `Microsoft.AspNetCore.SignalR.Client`, and `Microsoft.Extensions.Logging.Abstractions` moved to their `10.0.*` releases to match.
-- **Action needed for host-side agents:** if you run the Agent as a framework-dependent build (the default download), make sure the host has the **.NET 10 runtime** installed.
-
 ### Enterprise GitHub link support, dependency-count fixes, and workspace repositories code cleanup
 
 - **Works with GitHub Enterprise Server (GHES):** repository web links, owner/repo parsing, and pull-request URLs are no longer hardcoded to `github.com`. `RepositoryUrlHelper` now derives the host from any `git@host:...` SSH URL or `https://host/...` HTTPS URL, so clone links, PR pages, and "Open in GitHub" actions work correctly against GHES instances as well as github.com.
