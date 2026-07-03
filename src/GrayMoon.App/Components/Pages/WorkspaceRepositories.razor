@@ -9,25 +9,6 @@
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.AspNetCore.SignalR.Client
 @using System.Text.Json
-@inject IWorkspacePageService WorkspacePageService
-@inject IServiceScopeFactory ServiceScopeFactory
-@inject NavigationManager NavigationManager
-@inject ILogger<WorkspaceRepositories> Logger
-@inject IJSRuntime JSRuntime
-@inject IToastService ToastService
-@inject Microsoft.Extensions.Options.IOptions<GrayMoon.App.Models.WorkspaceOptions> WorkspaceOptions
-@inject WorkspaceCommitSyncHandler WorkspaceCommitSyncHandler
-@inject WorkspaceSyncHandler WorkspaceSyncHandler
-@inject WorkspaceUpdateHandler WorkspaceUpdateHandler
-@inject WorkspaceFileVersionService FileVersionService
-@inject WorkspacePushHandler WorkspacePushHandler
-@inject WorkspaceUndoPushHandler UndoPushHandler
-@inject WorkspaceDependencyService WorkspaceDependencyService
-@inject WorkspaceBranchHandler WorkspaceBranchHandler
-@inject NewFeatureOrchestrator NewFeatureOrchestrator
-@inject AgentQueueStateService AgentQueueStateService
-@inject IPullRequestService PullRequestService
-@inject IBackgroundJobService JobService
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
 <PageTitle>Repositories - GrayMoon</PageTitle>

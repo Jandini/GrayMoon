@@ -400,15 +400,15 @@
     [Parameter] public PullRequestInfo? PrInfo { get; set; }
     [Parameter] public bool IsPrVerified { get; set; }
     [Parameter] public RepoSyncStatus? RepoSyncStatus { get; set; }
-    [Parameter] public IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> MismatchedDependencyLines { get; set; } = Array.Empty<(string, string, string)>();
+    [Parameter] public IReadOnlyList<DependencyMismatchLine> MismatchedDependencyLines { get; set; } = Array.Empty<DependencyMismatchLine>();
     /// <summary>All workspace-internal package dependencies of this repository (PackageId + version) used to populate the dependency-badge tooltip when everything is up to date.</summary>
-    [Parameter] public IReadOnlyList<(string PackageId, string Version)> AllDependencyLines { get; set; } = Array.Empty<(string, string)>();
+    [Parameter] public IReadOnlyList<DependencyLine> AllDependencyLines { get; set; } = Array.Empty<DependencyLine>();
     [Parameter] public IReadOnlyList<string> CustomDependencyLines { get; set; } = Array.Empty<string>();
-    [Parameter] public IReadOnlyList<(string FileName, string TokenName, string CurrentValue, string ExpectedValue)> MismatchedFileVersionLines { get; set; } = Array.Empty<(string, string, string, string)>();
+    [Parameter] public IReadOnlyList<FileVersionMismatchLine> MismatchedFileVersionLines { get; set; } = Array.Empty<FileVersionMismatchLine>();
     /// <summary>Legacy per-file line statuses; no longer used for badge display.</summary>
     [Parameter] public IReadOnlyList<WorkspaceFileLineStatus> FileLineStatuses { get; set; } = Array.Empty<WorkspaceFileLineStatus>();
     /// <summary>Per-token (FileName, TokenName, Version) entries for the badge and tooltip. TokenName is the repository name being tracked.</summary>
-    [Parameter] public IReadOnlyList<(string FileName, string TokenName, string Version)> AllFileVersionLines { get; set; } = Array.Empty<(string, string, string)>();
+    [Parameter] public IReadOnlyList<FileVersionDisplayLine> AllFileVersionLines { get; set; } = Array.Empty<FileVersionDisplayLine>();
     [Parameter] public bool IsVersionClicked { get; set; }
     [Parameter] public bool IsDependencyBadgeClicked { get; set; }
     [Parameter] public string? RepositoryError { get; set; }

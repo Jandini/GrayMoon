@@ -268,7 +268,7 @@
     {
         public bool IsVisible { get; init; }
         public string Message { get; init; } = "";
-        public IReadOnlyList<(string RepoName, string DefaultBranchName)> RepoItems { get; init; } = Array.Empty<(string, string)>();
+        public IReadOnlyList<DefaultBranchWarningItem> RepoItems { get; init; } = Array.Empty<DefaultBranchWarningItem>();
         public Func<Task>? PendingAction { get; init; }
     }
 
@@ -367,7 +367,7 @@
 
     private void ClosePushMenu(int workspaceId) => _openPushMenus.Remove(workspaceId);
 
-    private void ShowDefaultBranchWarning(string message, IReadOnlyList<(string RepoName, string DefaultBranchName)> repoItems, Func<Task> onProceed)
+    private void ShowDefaultBranchWarning(string message, IReadOnlyList<DefaultBranchWarningItem> repoItems, Func<Task> onProceed)
     {
         _defaultBranchWarning = _defaultBranchWarning with
         {
@@ -557,7 +557,7 @@
             .Where(r => r.UnmatchedDeps > 0
                 && !string.IsNullOrWhiteSpace(r.DefaultBranchName)
                 && string.Equals(r.BranchName, r.DefaultBranchName, StringComparison.Ordinal))
-            .Select(r => (r.RepositoryName, r.DefaultBranchName!))
+            .Select(r => new DefaultBranchWarningItem(r.RepositoryName, r.DefaultBranchName!))
             .ToList();
         if (defaultBranchRepos.Count > 0)
         {
@@ -618,7 +618,7 @@
             .Where(r => r.UnmatchedDeps > 0
                 && !string.IsNullOrWhiteSpace(r.DefaultBranchName)
                 && string.Equals(r.BranchName, r.DefaultBranchName, StringComparison.Ordinal))
-            .Select(r => (r.RepositoryName, r.DefaultBranchName!))
+            .Select(r => new DefaultBranchWarningItem(r.RepositoryName, r.DefaultBranchName!))
             .ToList();
         if (defaultBranchRepos.Count > 0)
         {
@@ -701,7 +701,7 @@
             .Where(r => r.UnmatchedDeps > 0
                 && !string.IsNullOrWhiteSpace(r.DefaultBranchName)
                 && string.Equals(r.BranchName, r.DefaultBranchName, StringComparison.Ordinal))
-            .Select(r => (r.RepositoryName, r.DefaultBranchName!))
+            .Select(r => new DefaultBranchWarningItem(r.RepositoryName, r.DefaultBranchName!))
             .ToList();
         if (defaultBranchRepos.Count > 0)
         {
@@ -821,7 +821,7 @@
             .Where(r => r.OutgoingCommits > 0
                 && !string.IsNullOrWhiteSpace(r.DefaultBranchName)
                 && string.Equals(r.BranchName, r.DefaultBranchName, StringComparison.Ordinal))
-            .Select(r => (r.RepositoryName, r.DefaultBranchName!))
+            .Select(r => new DefaultBranchWarningItem(r.RepositoryName, r.DefaultBranchName!))
             .ToList();
         if (defaultBranchRepos.Count > 0)
         {
@@ -919,7 +919,7 @@
         {
             ShowDefaultBranchWarning(
                 $"Pushing repository '{repo.RepositoryName}' will commit directly to the default (protected) branch.",
-                new[] { (repo.RepositoryName, repo.DefaultBranchName!) },
+                new[] { new DefaultBranchWarningItem(repo.RepositoryName, repo.DefaultBranchName!) },
                 () => PushBadgeClickCoreAsync(n, repo));
             return Task.CompletedTask;
         }

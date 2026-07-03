@@ -43,7 +43,7 @@
 @code {
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public string Message { get; set; } = "";
-    [Parameter] public IReadOnlyList<(string RepoName, string DefaultBranchName)> RepoItems { get; set; } = Array.Empty<(string, string)>();
+    [Parameter] public IReadOnlyList<DefaultBranchWarningItem> RepoItems { get; set; } = Array.Empty<DefaultBranchWarningItem>();
     [Parameter] public EventCallback OnProceed { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
 

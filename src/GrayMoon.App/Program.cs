@@ -97,6 +97,7 @@ try
     builder.Services.AddScoped<IWorkspaceTopBarService, WorkspaceTopBarService>();
 
     builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
+    builder.Services.AddSingleton<IScopedServiceExecutor, ScopedServiceExecutor>();
 
     // Token protection
     builder.Services.AddSingleton<ITokenEncryptionKeyProvider, TokenEncryptionKeyProvider>();

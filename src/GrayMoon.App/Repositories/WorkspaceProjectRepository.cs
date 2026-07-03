@@ -312,6 +312,8 @@ public sealed class WorkspaceProjectRepository(
         foreach (var (depId, refId, version) in uniqueEdges)
         {
             if (!byProject.TryGetValue(depId, out var depProj) || !byProject.TryGetValue(refId, out var refProj)) continue;
+            if (depProj.RepositoryId == refProj.RepositoryId) continue;
+            if (!repoIdsInWorkspace.Contains(depProj.RepositoryId) || !repoIdsInWorkspace.Contains(refProj.RepositoryId)) continue;
             var refRepoVersion = versionByRepo.GetValueOrDefault(refProj.RepositoryId);
             var depVersion = version?.Trim() ?? "";
             var refVersion = refRepoVersion?.Trim() ?? "";
