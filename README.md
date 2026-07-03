@@ -84,7 +84,7 @@ docker pull jandini/graymoon:latest && docker stop graymoon || true && docker rm
 
 The app runs in a container and does not run git or access your workspace filesystem. A **host-side agent** does that: it runs on the machine where your repos live, connects to the app via SignalR, and runs git, GitVersion, and workspace I/O.
 
-1. **Download** - On the home page, use **Download Agent**. Your browser gets a **zip** of the framework-dependent build (Windows or Linux): extract it and run `graymoon-agent` / `graymoon-agent.exe`. The host needs the **.NET 8 runtime** installed for that RID.
+1. **Download** - On the home page, use **Download Agent**. Your browser gets a **zip** of the framework-dependent build (Windows or Linux): extract it and run `graymoon-agent` / `graymoon-agent.exe`. The host needs the **.NET 10 runtime** installed for that RID.
 2. **Run on the host** - Run the agent on the same machine (or network) as your repositories, e.g. as a console app or Windows/Linux service.
 
 When the agent is connected, the app shows an **online** badge; sync and repository operations use the agent.
@@ -105,6 +105,20 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 6. Continue working in your IDE while GrayMoon tracks changes in the background; GrayMoon UI does not need to stay open as long as the Docker app and agent services are running.
 
 ## What's new
+
+### Unified on .NET 10 across App and Agent
+
+`GrayMoon.App`, `GrayMoon.Common`, `GrayMoon.Common.Tests`, and `GrayMoon.Abstractions` now target `net10.0` (previously `net8.0`), matching the Agent, which was already on .NET 10. The whole solution builds against one target framework.
+
+- **Docker image:** the build and runtime base images moved from `mcr.microsoft.com/dotnet/sdk:8.0` / `aspnet:8.0` to `mcr.microsoft.com/dotnet/sdk:10.0` / `aspnet:10.0`.
+- **Package bumps:** `Microsoft.EntityFrameworkCore`, `Microsoft.EntityFrameworkCore.Sqlite`, `Microsoft.AspNetCore.SignalR.Client`, and `Microsoft.Extensions.Logging.Abstractions` moved to their `10.0.*` releases to match.
+- **Action needed for host-side agents:** if you run the Agent as a framework-dependent build (the default download), make sure the host has the **.NET 10 runtime** installed.
+
+### Enterprise GitHub link support, dependency-count fixes, and workspace repositories code cleanup
+
+- **Works with GitHub Enterprise Server (GHES):** repository web links, owner/repo parsing, and pull-request URLs are no longer hardcoded to `github.com`. `RepositoryUrlHelper` now derives the host from any `git@host:...` SSH URL or `https://host/...` HTTPS URL, so clone links, PR pages, and "Open in GitHub" actions work correctly against GHES instances as well as github.com.
+- **Fixed "1 of 0 dependencies require update":** the dependency graph builder could count a project referencing another project inside the *same* repository, or a project outside the current workspace, as an unmatched dependency. Both are now excluded, so the notification badge count matches the dependencies actually listed in the popup.
+- **`WorkspaceRepositories.razor.cs` split into partials:** the ~4,100-line code-behind file was split into focused partial classes (`.Branches`, `.CommitSync`, `.Dependencies`, `.FileVersions`, `.NewFeature`, `.Push`, `.PullRequests`, `.Realtime`, `.Search`, `.State`, `.Sync`, `.SyncToDefault`, `.UndoPush`, `.Update`, and more) for maintainability - no behavior change for users.
 
 ### File version config validation
 
