@@ -147,29 +147,45 @@ public static class RepositoryUrlHelper
         return baseTrim;
     }
 
-    /// <summary>Converts a repository's CloneUrl to a GitHub web URL, or null if not a GitHub repo.</summary>
+    /// <summary>Converts a repository's CloneUrl to a web URL, or null if the URL is not parseable.</summary>
     public static string? GetRepositoryUrl(string? cloneUrl)
     {
         if (string.IsNullOrEmpty(cloneUrl))
             return null;
 
         var url = cloneUrl.Trim();
+        string root;
+        string path;
 
-        if (url.StartsWith("git@github.com:", StringComparison.OrdinalIgnoreCase))
-            url = url.Replace("git@github.com:", "https://github.com/", StringComparison.OrdinalIgnoreCase);
-        else if (url.StartsWith("https://github.com/", StringComparison.OrdinalIgnoreCase) ||
-                 url.StartsWith("http://github.com/", StringComparison.OrdinalIgnoreCase))
-        { }
+        if (url.StartsWith("git@", StringComparison.OrdinalIgnoreCase))
+        {
+            var colon = url.IndexOf(':');
+            if (colon <= "git@".Length)
+                return null;
+            var host = url["git@".Length..colon];
+            if (string.IsNullOrWhiteSpace(host))
+                return null;
+            root = $"https://{host}";
+            path = url[(colon + 1)..].Trim('/');
+        }
+        else if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
+        {
+            root = $"{uri.Scheme}://{uri.Authority}";
+            path = uri.AbsolutePath.Trim('/');
+        }
         else
             return null;
 
-        if (url.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-            url = url[..^4];
+        if (path.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
+            path = path[..^4];
 
-        return url;
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        return $"{root}/{path}";
     }
 
-    /// <summary>Parses owner and repo from a GitHub clone URL. Returns true if the URL is a recognized GitHub URL.</summary>
+    /// <summary>Parses owner and repo from a git clone URL. Returns true if the URL is parseable.</summary>
     public static bool TryParseGitHubOwnerRepo(string? cloneUrl, out string? owner, out string? repo)
     {
         owner = null;
@@ -179,12 +195,18 @@ public static class RepositoryUrlHelper
 
         var url = cloneUrl.Trim();
         string path;
-        if (url.StartsWith("git@github.com:", StringComparison.OrdinalIgnoreCase))
-            path = url["git@github.com:".Length..];
-        else if (url.StartsWith("https://github.com/", StringComparison.OrdinalIgnoreCase))
-            path = url["https://github.com/".Length..];
-        else if (url.StartsWith("http://github.com/", StringComparison.OrdinalIgnoreCase))
-            path = url["http://github.com/".Length..];
+
+        if (url.StartsWith("git@", StringComparison.OrdinalIgnoreCase))
+        {
+            var colon = url.IndexOf(':');
+            if (colon <= "git@".Length)
+                return false;
+            path = url[(colon + 1)..];
+        }
+        else if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
+        {
+            path = uri.AbsolutePath.TrimStart('/');
+        }
         else
             return false;
 
