@@ -180,13 +180,13 @@
 
 <WorkspaceRepositoriesModal IsVisible="@_repositoriesModal.IsVisible"
                             Title="@RepositoriesModalTitle"
-                            Repositories="@_repositoriesModal.Repositories"
                             SelectedRepositoryIds="@_repositoriesModal.SelectedRepositoryIds"
                             HasConnectors="@_repositoriesModal.HasConnectors"
                             IsSaving="@_repositoriesModal.IsSaving"
                             IsFetching="@_repositoriesModal.IsFetching"
                             ErrorMessage="@_repositoriesModal.ErrorMessage"
                             RenameWarnings="@_repositoriesModal.RenameWarnings"
+                            RefreshGeneration="@_repositoriesModal.RefreshGeneration"
                             OnSave="@SaveRepositoriesAsync"
                             OnCancel="@CloseRepositoriesModal"
                             OnFetchRepositories="@FetchRepositoriesAsync" />

@@ -7,6 +7,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Queries;
 using GrayMoon.App.Services.Security;
 using GrayMoon.Common;
 using Microsoft.AspNetCore.DataProtection;
@@ -70,6 +71,8 @@ try
     builder.Services.AddScoped<WorkspaceGitService>();
     builder.Services.AddScoped<ConnectorHealthService>();
     builder.Services.AddScoped<GitHubRepositoryService>();
+    builder.Services.AddScoped<IRepositoryListQueryService, RepositoryListQueryService>();
+    builder.Services.AddScoped<IWorkspaceProjectListQueryService, WorkspaceProjectListQueryService>();
     builder.Services.AddScoped<GitHubActionsService>();
     builder.Services.AddScoped<GhaWorkflowLiveFeedService>();
     builder.Services.AddScoped<GitHubPullRequestService>();

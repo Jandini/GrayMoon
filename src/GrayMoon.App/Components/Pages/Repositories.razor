@@ -1,10 +1,11 @@
 @page "/repositories"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
-@implements IDisposable
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services
+@using GrayMoon.App.Services.Queries
 @using GrayMoon.App.Components.Shared
 @inject GitHubRepositoryService RepositoryService
+@inject IRepositoryListQueryService RepositoryListQueryService
 @inject ILogger<Repositories> Logger
 @using Microsoft.AspNetCore.Components.Web
 
@@ -16,13 +17,17 @@
             <div class="workspace-repos-title-row">
                 <h2 class="workspace-repos-title">Repositories</h2>
                 <p class="text-muted mb-0 workspace-repos-subtitle repositories-page__subtitle">
-                    @if (repositories != null && repositories.Count > 0)
+                    @if (hasLoadedOnce && !isInitialLoading)
                     {
                         var repoSuffix = HasSearchFilter ? " found" : "";
-                        var repoCount = HasSearchFilter ? (GetFilteredRepositories()?.Count ?? 0) : repositories.Count;
+                        var repoCount = HasSearchFilter ? (totalCount ?? _items.Count) : (totalCount ?? _items.Count);
                         <span>@($"{repoCount} {(repoCount == 1 ? "repository" : "repositories")}{repoSuffix}")</span>
                     }
-                    else if (repositories != null)
+                    else if (hasLoadedOnce && catalogHasAny)
+                    {
+                        <span>&nbsp;</span>
+                    }
+                    else if (hasLoadedOnce)
                     {
                         <span>0 repositories</span>
                     }
@@ -35,11 +40,12 @@
             </div>
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
                 <div class="workspace-grid-search-wrapper">
-                    <FilterSearchInput @bind-Value="searchTerm"
+                    <FilterSearchInput Value="@searchTerm"
+                                       ValueChanged="OnSearchTermChangedAsync"
                                        InputId="repositories-search"
                                        InputAdditionalClass="workspace-grid-search"
                                        Placeholder="Search repositories…"
-                                       Disabled="@(repositories == null || repositories.Count == 0)"
+                                       Disabled="@(isInitialLoading && !hasLoadedOnce)"
                                        OnKeyDown="OnSearchKeyDown"
                                        OnClear="ClearSearchFilter" />
                 </div>
@@ -103,7 +109,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @if (repositories == null)
+                            @if (isInitialLoading && _items.Count == 0)
                             {
                                 <tr>
                                     <td colspan="5" class="text-center text-muted py-4">
@@ -111,7 +117,7 @@
                                     </td>
                                 </tr>
                             }
-                            else if (repositories.Count == 0)
+                            else if (!catalogHasAny && _items.Count == 0)
                             {
                                 <tr>
                                     <td colspan="5" class="text-center text-muted py-4">
@@ -119,7 +125,7 @@
                                     </td>
                                 </tr>
                             }
-                            else if (GetFilteredRepositories()?.Count == 0)
+                            else if (_items.Count == 0)
                             {
                                 <tr>
                                     <td colspan="5" class="text-center text-muted py-4">
@@ -129,7 +135,7 @@
                             }
                             else
                             {
-                                @foreach (var repository in GetFilteredRepositories() ?? new List<GitHubRepositoryEntry>())
+                                @foreach (var repository in _items)
                                 {
                                     <tr>
                                         <td class="col-repo"><strong>@repository.RepositoryName</strong></td>
@@ -158,6 +164,22 @@
                                         </td>
                                     </tr>
                                 }
+                                @if (isLoadingMore)
+                                {
+                                    <tr>
+                                        <td colspan="5" class="text-center text-muted py-3">
+                                            Loading more...
+                                        </td>
+                                    </tr>
+                                }
+                                @if (hasMore && !isLoadingMore)
+                                {
+                                    <tr>
+                                        <td colspan="5" class="p-0">
+                                            <InfiniteScrollLoadTrigger IsEnabled="true" OnLoadMore="LoadNextChunkAsync" />
+                                        </td>
+                                    </tr>
+                                }
                             }
                         </tbody>
                     </table>
@@ -169,133 +191,3 @@
 </div>
 
 <LoadingOverlay IsVisible="@isPersisting" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}")" OnAbort="AbortFetchRepositories" />
-
-@code {
-    private List<GitHubRepositoryEntry>? repositories;
-    private IReadOnlyList<ConnectorFetchError>? connectorErrors;
-    private IReadOnlyList<RenamedRepositoryInfo>? renamedRepositories;
-    private string? errorMessage;
-    private string searchTerm = string.Empty;
-    private bool isPersisting;
-
-    private bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
-
-    private void ClearSearchFilter()
-    {
-        searchTerm = string.Empty;
-        StateHasChanged();
-    }
-
-    private void OnSearchKeyDown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Escape")
-        {
-            searchTerm = string.Empty;
-            StateHasChanged();
-        }
-    }
-
-    private int? fetchedRepositoryCount;
-    private CancellationTokenSource? _fetchRepositoriesCts;
-
-    private void DismissConnectorErrors()
-    {
-        connectorErrors = null;
-    }
-
-    public void Dispose()
-    {
-        _fetchRepositoriesCts?.Cancel();
-        _fetchRepositoriesCts?.Dispose();
-    }
-
-    protected override async Task OnInitializedAsync()
-    {
-        await LoadRepositoriesAsync();
-    }
-
-    private async Task LoadRepositoriesAsync()
-    {
-        try
-        {
-            repositories = null;
-            connectorErrors = null;
-            errorMessage = null;
-            var persisted = await RepositoryService.GetPersistedRepositoriesAsync();
-            if (persisted.Count > 0)
-            {
-                repositories = persisted;
-                return;
-            }
-
-            await ReloadRepositoriesAsync();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Error loading repositories");
-            errorMessage = "Failed to load repositories. Please try again later.";
-            repositories = new List<GitHubRepositoryEntry>();
-        }
-    }
-
-    private void AbortFetchRepositories()
-    {
-        _fetchRepositoriesCts?.Cancel();
-    }
-
-    private async Task ReloadRepositoriesAsync()
-    {
-        _fetchRepositoriesCts?.Cancel();
-        _fetchRepositoriesCts = new CancellationTokenSource();
-
-        try
-        {
-            isPersisting = true;
-            fetchedRepositoryCount = null;
-            await InvokeAsync(StateHasChanged);
-            errorMessage = null;
-            connectorErrors = null;
-
-            var progress = new Progress<int>(count =>
-            {
-                fetchedRepositoryCount = count;
-                _ = InvokeAsync(StateHasChanged);
-            });
-            var result = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
-            repositories = result.Repositories.ToList();
-            connectorErrors = result.ConnectorErrors.Count > 0 ? result.ConnectorErrors : null;
-            renamedRepositories = result.RenamedRepositories.Count > 0 ? result.RenamedRepositories : null;
-        }
-        catch (OperationCanceledException)
-        {
-            repositories = (await RepositoryService.GetPersistedRepositoriesAsync()).ToList();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Error refreshing repositories");
-            errorMessage = "Failed to refresh repositories. Please try again later.";
-            repositories = new List<GitHubRepositoryEntry>();
-        }
-        finally
-        {
-            isPersisting = false;
-        }
-    }
-
-    private List<GitHubRepositoryEntry>? GetFilteredRepositories()
-    {
-        if (repositories == null)
-        {
-            return null;
-        }
-
-        if (string.IsNullOrWhiteSpace(searchTerm))
-        {
-            return repositories;
-        }
-
-        return repositories
-            .Where(r => GitHubRepositorySearchMatcher.Matches(r, searchTerm))
-            .ToList();
-    }
-}

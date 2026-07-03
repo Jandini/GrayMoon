@@ -1,0 +1,53 @@
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+
+<div @ref="_sentinel" class="infinite-scroll-sentinel" aria-hidden="true"></div>
+
+@code {
+    private ElementReference _sentinel;
+    private DotNetObjectReference<InfiniteScrollLoadTrigger>? _dotNetRef;
+    private bool _observing;
+
+    [Parameter] public EventCallback OnLoadMore { get; set; }
+    [Parameter] public bool IsEnabled { get; set; } = true;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsEnabled && !_observing)
+        {
+            _dotNetRef ??= DotNetObjectReference.Create(this);
+            await Js.InvokeVoidAsync("grayMoonInfiniteScroll.observe", _sentinel, _dotNetRef);
+            _observing = true;
+        }
+        else if (!IsEnabled && _observing)
+        {
+            await Js.InvokeVoidAsync("grayMoonInfiniteScroll.disconnect", _sentinel);
+            _observing = false;
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnIntersect()
+    {
+        if (IsEnabled && OnLoadMore.HasDelegate)
+        {
+            await OnLoadMore.InvokeAsync();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("grayMoonInfiniteScroll.disconnect", _sentinel);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        _dotNetRef?.Dispose();
+    }
+}

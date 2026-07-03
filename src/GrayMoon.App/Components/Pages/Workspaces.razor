@@ -4,14 +4,15 @@
 @using GrayMoon.App.Models
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 @using GrayMoon.App.Repositories
-@using GrayMoon.App.Services
+@using GrayMoon.App.Services.Queries
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Components.Modals
 @using Microsoft.AspNetCore.Components.Web
+@using GrayMoon.App.Services
 @inject WorkspaceRepository WorkspaceRepository
 @inject ConnectorRepository ConnectorRepository
+@inject IRepositoryListQueryService RepositoryListQueryService
 @inject GitHubRepositoryService RepositoryService
-@inject GitHubRepositoryRepository GitHubRepositoryRepository
 @inject WorkspaceService WorkspaceService
 @inject IAgentBridge AgentBridge
 @inject AgentConnectionTracker AgentConnectionTracker
@@ -186,13 +187,13 @@
 
 <WorkspaceRepositoriesModal IsVisible="@showRepositoriesModal"
                             Title="@($"Select repositories for {repositoriesModalWorkspaceName}")"
-                            Repositories="@repositories"
                             SelectedRepositoryIds="@selectedRepositoryIds"
                             HasConnectors="@hasConnectors"
                             IsSaving="@isSavingRepositories"
                             IsFetching="@isPersisting"
                             ErrorMessage="@repositoriesModalErrorMessage"
                             RenameWarnings="@repositoriesModalRenameWarnings"
+                            RefreshGeneration="@repositoriesModalRefreshGeneration"
                             OnSave="@SaveRepositoriesAsync"
                             OnCancel="@CloseRepositoriesModal"
                             OnFetchRepositories="@FetchRepositoriesAsync" />
@@ -230,7 +231,7 @@
 @code {
     private List<WorkspaceModel>? workspaces;
     private string searchTerm = string.Empty;
-    private List<GitHubRepositoryEntry>? repositories;
+    private int repositoriesModalRefreshGeneration;
     private string? errorMessage;
 
     private bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
@@ -358,23 +359,6 @@
         }
     }
 
-    private async Task EnsureRepositoriesAsync()
-    {
-        if (repositories != null)
-        {
-            return;
-        }
-
-        var connectors = await ConnectorRepository.GetAllAsync();
-        hasConnectors = connectors.Count > 0;
-        repositories = await RepositoryService.GetPersistedRepositoriesAsync();
-
-        if (hasConnectors && repositories.Count == 0)
-        {
-            await FetchRepositoriesAsync();
-        }
-    }
-
     private async Task ShowCreateModalAsync()
     {
         editingWorkspaceId = null;
@@ -434,8 +418,19 @@
         selectedRepositoryIds = workspace.Repositories
             .Select(link => link.RepositoryId)
             .ToHashSet();
-        await EnsureRepositoriesAsync();
-        PruneInvalidSelectedRepositoryIds();
+
+        try
+        {
+            var connectors = await ConnectorRepository.GetAllAsync();
+            hasConnectors = connectors.Count > 0;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load connectors for repositories modal.");
+            repositoriesModalErrorMessage = "Failed to load repositories. Please try again.";
+        }
+
+        repositoriesModalRefreshGeneration++;
         showRepositoriesModal = true;
     }
 
@@ -538,7 +533,7 @@
         if (editingWorkspaceId == null) return;
         if (isSavingRepositories) return;
 
-        var removedInvalidSelections = PruneInvalidSelectedRepositoryIds();
+        var removedInvalidSelections = await PruneInvalidSelectedRepositoryIdsAsync();
         if (removedInvalidSelections > 0)
         {
             Logger.LogWarning("Removed {Count} stale repository selections before saving workspace {WorkspaceId}",
@@ -653,23 +648,21 @@
                 _ = InvokeAsync(StateHasChanged);
             });
             var result = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
-            repositories = result.Repositories.ToList();
             repositoriesModalRenameWarnings = result.RenamedRepositories.Count > 0 ? result.RenamedRepositories : null;
-            // Translate any stale selectedRepositoryIds (caused by rename-merge) to canonical IDs.
             if (result.MergedRepositoryIdMap.Count > 0)
                 TranslateStaleRepositoryIds(result.MergedRepositoryIdMap);
-            PruneInvalidSelectedRepositoryIds();
+            await PruneInvalidSelectedRepositoryIdsAsync();
+            repositoriesModalRefreshGeneration++;
         }
         catch (OperationCanceledException)
         {
-            repositories = await RepositoryService.GetPersistedRepositoriesAsync();
-            PruneInvalidSelectedRepositoryIds();
+            await PruneInvalidSelectedRepositoryIdsAsync();
+            repositoriesModalRefreshGeneration++;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error fetching repositories");
             repositoriesModalErrorMessage = "Failed to fetch repositories. Please try again later.";
-            repositories = new List<GitHubRepositoryEntry>();
         }
         finally
         {
@@ -677,19 +670,17 @@
         }
     }
 
-    private int PruneInvalidSelectedRepositoryIds()
+    private async Task<int> PruneInvalidSelectedRepositoryIdsAsync()
     {
-        if (repositories == null || selectedRepositoryIds.Count == 0)
+        if (selectedRepositoryIds.Count == 0)
         {
             return 0;
         }
 
-        var validRepositoryIds = repositories
-            .Select(repository => repository.RepositoryId)
-            .ToHashSet();
-
+        var valid = await RepositoryListQueryService.FilterExistingIdsAsync(selectedRepositoryIds);
+        var validSet = valid.ToHashSet();
         var before = selectedRepositoryIds.Count;
-        selectedRepositoryIds.RemoveWhere(repositoryId => !validRepositoryIds.Contains(repositoryId));
+        selectedRepositoryIds.RemoveWhere(repositoryId => !validSet.Contains(repositoryId));
         return before - selectedRepositoryIds.Count;
     }
 
@@ -812,10 +803,7 @@
             if (urls.Count == 0)
                 return;
 
-            var allRepos = await GitHubRepositoryRepository.GetAllEntriesAsync();
-            var byUrl = allRepos
-                .Where(r => !string.IsNullOrWhiteSpace(r.CloneUrl))
-                .ToDictionary(r => r.CloneUrl.Trim(), r => r.RepositoryId, StringComparer.OrdinalIgnoreCase);
+            var byUrl = await RepositoryListQueryService.GetIdsByCloneUrlsAsync(urls);
 
             var matchedIds = new HashSet<int>();
             foreach (var url in urls)

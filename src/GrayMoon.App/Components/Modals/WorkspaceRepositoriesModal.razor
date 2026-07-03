@@ -1,5 +1,7 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services
+@using GrayMoon.App.Services.Queries
+@using GrayMoon.App.Components.Shared
 
 @if (IsVisible)
 {
@@ -26,7 +28,8 @@
                             </div>
                         </div>
                         <div class="d-flex align-items-center mb-3">
-                            <FilterSearchInput @bind-Value="repositorySearch"
+                            <FilterSearchInput Value="@repositorySearch"
+                                               ValueChanged="OnRepositorySearchChangedAsync"
                                                @ref="filterSearchInput"
                                                WrapperAdditionalClass="flex-grow-1 min-width-0"
                                                Placeholder="Search repositories…"
@@ -39,29 +42,32 @@
                             </button>
                         </div>
                         <div class="repository-list border rounded">
-                            @if (Repositories == null)
-                            {
-                                <div class="text-muted p-2">Loading repositories...</div>
-                            }
-                            else if (!HasConnectors)
+                            @if (!HasConnectors)
                             {
                                 <div class="text-muted p-2">No GitHub connectors configured.</div>
                             }
-                            else if (Repositories.Count == 0)
+                            else if (isInitialLoading && _items.Count == 0)
+                            {
+                                <div class="text-muted p-2">Loading repositories...</div>
+                            }
+                            else if (hasLoadedOnce && !HasConnectors)
+                            {
+                                <div class="text-muted p-2">No GitHub connectors configured.</div>
+                            }
+                            else if (hasLoadedOnce && totalCount == 0 && !isInitialLoading)
                             {
                                 <div class="text-muted p-2">No repositories available. Fetch repositories first.</div>
                             }
                             else
                             {
-                                var filtered = GetFilteredRepositories();
                                 <table class="table table-sm mb-0 repository-grid workspaces-table resizable-columns">
                                     <thead class="table-dark">
                                         <tr>
                                             <th class="col-select no-resize" data-width="26">
                                                 <input class="form-check-input workspace-repo-checkbox"
                                                        type="checkbox"
-                                                       checked="@AreAllFilteredSelected(filtered)"
-                                                       @onchange="(ChangeEventArgs e) => _ = ToggleAllFiltered(filtered, (bool)e.Value!)" />
+                                                       checked="@AreAllFilteredSelected()"
+                                                       @onchange="(ChangeEventArgs e) => _ = ToggleAllFiltered((bool)e.Value!)" />
                                             </th>
                                             <th>Repository</th>
                                             <th>Owner</th>
@@ -70,7 +76,7 @@
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        @if (filtered.Count == 0)
+                                        @if (_items.Count == 0 && !isInitialLoading)
                                         {
                                             <tr>
                                                 <td colspan="5" class="text-muted p-2">No repositories match your search.</td>
@@ -78,13 +84,13 @@
                                         }
                                         else
                                         {
-                                            @foreach (var repository in filtered)
+                                            @foreach (var repository in _items)
                                             {
                                                 <tr>
                                                     <td class="col-select">
                                                         <input class="form-check-input workspace-repo-checkbox"
                                                                type="checkbox"
-                                                               checked="@SelectedRepositoryIds.Contains(repository.RepositoryId)"
+                                                               checked="@IsRowSelected(repository.RepositoryId)"
                                                                @onchange="(ChangeEventArgs e) => _ = ToggleRepository(repository.RepositoryId, (bool)e.Value!)" />
                                                     </td>
                                                     <td>
@@ -110,6 +116,20 @@
                                                         <span class="repo-name-cell" title="@repository.ConnectorName">
                                                             @repository.ConnectorName
                                                         </span>
+                                                    </td>
+                                                </tr>
+                                            }
+                                            @if (isLoadingMore)
+                                            {
+                                                <tr>
+                                                    <td colspan="5" class="text-muted p-2 text-center">Loading more...</td>
+                                                </tr>
+                                            }
+                                            @if (hasMore && !isLoadingMore)
+                                            {
+                                                <tr>
+                                                    <td colspan="5" class="p-0">
+                                                        <InfiniteScrollLoadTrigger IsEnabled="true" OnLoadMore="LoadNextChunkAsync" />
                                                     </td>
                                                 </tr>
                                             }
@@ -159,133 +179,4 @@
     </div>
 }
 
-@code {
-    private FilterSearchInput? filterSearchInput;
-
-    [Parameter] public bool IsVisible { get; set; }
-    [Parameter] public string Title { get; set; } = "Select repositories";
-    [Parameter] public List<GitHubRepositoryEntry>? Repositories { get; set; }
-    [Parameter] public HashSet<int> SelectedRepositoryIds { get; set; } = new();
-    [Parameter] public bool HasConnectors { get; set; }
-    [Parameter] public bool IsSaving { get; set; }
-    [Parameter] public bool IsFetching { get; set; }
-    [Parameter] public string? ErrorMessage { get; set; }
-    [Parameter] public IReadOnlyList<RenamedRepositoryInfo>? RenameWarnings { get; set; }
-    [Parameter] public EventCallback OnSave { get; set; }
-    [Parameter] public EventCallback OnCancel { get; set; }
-    [Parameter] public EventCallback OnFetchRepositories { get; set; }
-    [Parameter] public bool DefaultSelectedOnly { get; set; }
-
-    private string repositorySearch = string.Empty;
-    private bool _wasVisible;
-    private bool _needsFocus;
-    private bool _showOnlySelected;
-    private HashSet<int> _selectedOnlySnapshot = new();
-
-    protected override void OnParametersSet()
-    {
-        if (IsVisible && !_wasVisible)
-        {
-            _wasVisible = true;
-            _needsFocus = true;
-            _showOnlySelected = DefaultSelectedOnly;
-            _selectedOnlySnapshot = new HashSet<int>(SelectedRepositoryIds);
-        }
-        else if (!IsVisible)
-        {
-            _wasVisible = false;
-        }
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (_needsFocus)
-        {
-            _needsFocus = false;
-            if (filterSearchInput != null)
-            {
-                await filterSearchInput.FocusAsync();
-            }
-        }
-    }
-
-    private void ToggleSelectedOnly(bool value)
-    {
-        _showOnlySelected = value;
-        if (value)
-        {
-            _selectedOnlySnapshot = new HashSet<int>(SelectedRepositoryIds);
-        }
-    }
-
-    private async Task HandleKeyDown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Escape")
-        {
-            await OnCancel.InvokeAsync();
-        }
-        else if (e.Key == "Enter")
-        {
-            await OnSave.InvokeAsync();
-        }
-    }
-
-    private List<GitHubRepositoryEntry> GetFilteredRepositories()
-    {
-        if (Repositories == null)
-        {
-            return new List<GitHubRepositoryEntry>();
-        }
-
-        IEnumerable<GitHubRepositoryEntry> source = Repositories;
-
-        if (_showOnlySelected)
-        {
-            source = source.Where(r => _selectedOnlySnapshot.Contains(r.RepositoryId));
-        }
-
-        if (string.IsNullOrWhiteSpace(repositorySearch))
-        {
-            return source.ToList();
-        }
-
-        return source.Where(r => GitHubRepositorySearchMatcher.Matches(r, repositorySearch)).ToList();
-    }
-
-    private async Task ToggleRepository(int repositoryId, bool isSelected)
-    {
-        if (isSelected)
-        {
-            SelectedRepositoryIds.Add(repositoryId);
-        }
-        else
-        {
-            SelectedRepositoryIds.Remove(repositoryId);
-        }
-        await InvokeAsync(StateHasChanged);
-    }
-
-    private bool AreAllFilteredSelected(IReadOnlyCollection<GitHubRepositoryEntry> filtered)
-    {
-        return filtered.Count > 0 && filtered.All(item => SelectedRepositoryIds.Contains(item.RepositoryId));
-    }
-
-    private async Task ToggleAllFiltered(IReadOnlyCollection<GitHubRepositoryEntry> filtered, bool isSelected)
-    {
-        if (isSelected)
-        {
-            foreach (var repository in filtered)
-            {
-                SelectedRepositoryIds.Add(repository.RepositoryId);
-            }
-        }
-        else
-        {
-            foreach (var repository in filtered)
-            {
-                SelectedRepositoryIds.Remove(repository.RepositoryId);
-            }
-        }
-        await InvokeAsync(StateHasChanged);
-    }
-}
+@inject IRepositoryListQueryService RepositoryListQueryService

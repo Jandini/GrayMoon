@@ -17,8 +17,8 @@ public class GitHubRepositoryService(
             return persisted;
         }
 
-        var result = await RefreshRepositoriesAsync();
-        return result.Repositories.ToList();
+        await RefreshRepositoriesAsync();
+        return await repositoryRepository.GetAllEntriesAsync();
     }
 
     public async Task<List<GitHubRepositoryEntry>> GetPersistedRepositoriesAsync()
@@ -98,10 +98,8 @@ public class GitHubRepositoryService(
             mergedIdMap = mergeResult.MergedRepositoryIdMap;
         }
 
-        var repositoriesList = await repositoryRepository.GetAllEntriesAsync();
         return new RefreshRepositoriesResult
         {
-            Repositories = repositoriesList,
             ConnectorErrors = connectorErrors,
             RenamedRepositories = renamedRepositories,
             MergedRepositoryIdMap = mergedIdMap
