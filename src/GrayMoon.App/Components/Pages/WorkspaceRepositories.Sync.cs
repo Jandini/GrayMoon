@@ -8,7 +8,7 @@ public sealed partial class WorkspaceRepositories
 {
     private Task SyncAsync()
     {
-        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning) return Task.CompletedTask;
+        if (workspace == null || !HasRepositories || IsJobRunning) return Task.CompletedTask;
         var skipDependencyLevelPersistence = !string.IsNullOrEmpty(errorMessage);
         errorMessage = null;
         return RunSyncJobAsync(null, "Synchronizing...", skipDependencyLevelPersistence);
@@ -24,7 +24,7 @@ public sealed partial class WorkspaceRepositories
 
     private Task SyncSingleRepoAsync(int repositoryId)
     {
-        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning) return Task.CompletedTask;
+        if (workspace == null || !HasRepositories || IsJobRunning) return Task.CompletedTask;
         errorMessage = null;
         return RunSyncJobAsync(new[] { repositoryId }, "Synchronizing repository...", skipDependencyLevelPersistence: true);
     }
@@ -59,8 +59,7 @@ public sealed partial class WorkspaceRepositories
                         setProgress: job.ReportProgress,
                         updateRepoGitInfo: (repoId, info) => SafeInvoke(() =>
                         {
-                            var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
-                            if (wr != null)
+                            if (_linkByRepoId.TryGetValue(repoId, out var wr))
                             {
                                 wr.GitVersion = info.Version == "-" ? null : info.Version;
                                 wr.BranchName = info.Branch == "-" ? null : info.Branch;
@@ -74,9 +73,8 @@ public sealed partial class WorkspaceRepositories
                 await InvokeAsync(async () =>
                 {
                     if (_disposed) return;
-                    await ReloadWorkspaceDataAsync();
-                    ApplySyncStateFromWorkspace();
-                    isOutOfSync = repoSyncStatus.Values.Any(v => v != RepoSyncStatus.InSync);
+                    await ReloadWorkspaceDataFromFreshScopeAsync();
+                    ApplySyncStateFromLoadedItems();
                     foreach (var (repoId, info) in repoGitInfos)
                     {
                         if (!string.IsNullOrWhiteSpace(info.ErrorMessage))

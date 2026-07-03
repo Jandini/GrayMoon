@@ -1,4 +1,5 @@
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Queries;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
@@ -29,6 +30,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
     [Inject] private IPullRequestService PullRequestService { get; set; } = default!;
     [Inject] private IBackgroundJobService JobService { get; set; } = default!;
     [Inject] private IScopedServiceExecutor ScopedExecutor { get; set; } = default!;
+    [Inject] private IWorkspaceRepositoryLinkListQueryService LinkListQueryService { get; set; } = default!;
 
     protected override async Task OnInitializedAsync()
     {
@@ -36,7 +38,7 @@ public sealed partial class WorkspaceRepositories : IDisposable
         JobService.Changed += OnJobServiceChanged;
         _wasJobRunning = IsJobRunning;
         await LoadWorkspaceAsync();
-        ApplySyncStateFromWorkspace();
+        ApplySyncStateFromLoadedItems();
     }
 
     public void Dispose()
@@ -55,5 +57,6 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
         _loadMismatchedDepsLock.Dispose();
+        _queryLoader.Dispose();
     }
 }

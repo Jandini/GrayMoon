@@ -10,7 +10,7 @@ public sealed partial class WorkspaceRepositories
 
     private async Task ShowNewFeatureModalAsync()
     {
-        if (workspace == null || workspaceRepositories.Count == 0)
+        if (workspace == null || !HasRepositories)
             return;
         try
         {
@@ -35,16 +35,17 @@ public sealed partial class WorkspaceRepositories
         _newFeatureModal = _newFeatureModal with { IsVisible = false };
     }
 
-    private Task HandleNewFeatureCreateAsync(NewFeatureRequest request)
+    private async Task HandleNewFeatureCreateAsync(NewFeatureRequest request)
     {
         if (workspace == null || IsJobRunning)
-            return Task.CompletedTask;
+            return;
 
         CloseNewFeatureModal();
         errorMessage = null;
 
+        var allLinks = await GetAllLinksForOperationAsync();
         var tagFilteredRepoIds = request.SkipReposOnTags
-            ? workspaceRepositories.Where(wr => !wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet()
+            ? allLinks.Where(wr => !wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet()
             : (IReadOnlySet<int>?)null;
 
         // Phases 1 + 2: branch creation (hooks suppressed, state persisted inline) then optional update.
@@ -73,7 +74,7 @@ public sealed partial class WorkspaceRepositories
 
                 // Unconditional reload so workspaceRepositories is current for Phase 3
                 await ReloadWorkspaceDataFromFreshScopeAsync();
-                _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromWorkspace(); StateHasChanged(); } });
+                _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
             }
             catch (OperationCanceledException)
             {
@@ -122,8 +123,6 @@ public sealed partial class WorkspaceRepositories
                 return;
             }
         }, new PageJobOptions { RefreshOnSuccess = false });
-
-        return Task.CompletedTask;
     }
 
     private sealed record NewFeatureModalState

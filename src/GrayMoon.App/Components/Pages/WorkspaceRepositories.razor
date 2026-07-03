@@ -3,7 +3,7 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Models.Api
 @using GrayMoon.App.Repositories
-@using GrayMoon.App.Services
+@using GrayMoon.App.Services.Queries
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Components.Modals
 @using Microsoft.AspNetCore.Components.Web
@@ -16,9 +16,9 @@
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
         <WorkspaceRepositoriesHeader WorkspaceName="@(workspace?.Name)"
-                                    RepositoriesCount="@(workspaceRepositories.Count)"
+                                    RepositoriesCount="@(_headerState?.TotalCount ?? 0)"
                                     HasFilter="@HasSearchFilter"
-                                    FilteredCount="@(FilteredWorkspaceRepositories.Count)"
+                                    FilteredCount="@(totalCount ?? _items.Count)"
                                     SearchTerm="@searchTerm"
                                     HasUnmatchedDependencies="@hasUnmatchedDependencies"
                                     IsPushRecommended="@isPushRecommended"
@@ -30,7 +30,7 @@
                                     IsCommitSyncing="@IsJobRunning"
                                     AgentTasksPendingCount="@AgentTasksPendingCount"
                                     IsRestoringPackages="@IsJobRunning"
-                                    IsOverlayVisible="@(isLoading || IsJobRunning || ShowRepositoriesFetchOverlay)"
+                                    IsOverlayVisible="@(isInitialLoading && !hasLoadedOnce || IsJobRunning || ShowRepositoriesFetchOverlay)"
                                     OnShowRepositories="ShowRepositoriesModalAsync"
                                     OnNewFeature="ShowNewFeatureModalAsync"
                                     OnShowBranch="() => ShowBranchModalAsync()"
@@ -91,7 +91,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @if (isLoading)
+                            @if (isInitialLoading && _items.Count == 0)
                             {
                                 <tr>
                                     <td colspan="@TableColSpan" class="text-center text-muted py-4">
@@ -99,7 +99,7 @@
                                     </td>
                                 </tr>
                             }
-                            else if (workspaceRepositories.Count == 0)
+                            else if (hasLoadedOnce && (_headerState?.TotalCount ?? 0) == 0 && !HasSearchFilter)
                             {
                                 <tr>
                                     <td colspan="@TableColSpan" class="text-center text-muted py-4">
@@ -107,7 +107,7 @@
                                     </td>
                                 </tr>
                             }
-                            else if (FilteredWorkspaceRepositories.Count == 0)
+                            else if (NoRepositoriesMatchSearch)
                             {
                                 <tr>
                                     <td colspan="@TableColSpan" class="text-center text-muted py-4">
@@ -117,17 +117,17 @@
                             }
                             else
                             {
-                                @foreach (var group in FilteredLevelGroups)
+                                @foreach (var group in LoadedLevelGroups)
                                 {
                                     <WorkspaceRepositoriesLevelHeader WorkspaceId="@WorkspaceId"
                                                                        LevelKey="@group.Key"
                                                                        ColSpan="@TableColSpan"
                                                                        Group="@group"
                                                                        ActionsDisabled="@group.All(wr => wr.IsOnTag)"
-                                                                       OnSyncToDefault="async () => await ShowConfirmSyncToDefaultLevel(group.Select(wr => wr.RepositoryId).ToList())"
-                                                                       OnSyncCommits="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
-                                                                       OnOpenPr="() => OpenPullRequestDialogForRepositoriesAsync(group.ToList())"
-                                                                       OnSyncLevel="() => ShowConfirmSyncLevel(group.Select(wr => wr.RepositoryId).ToList())"
+                                                                       OnSyncToDefault="async () => await SyncToDefaultForLevelAsync(group.Key)"
+                                                                       OnSyncCommits="async () => await SyncCommitsForLevelAsync(group.Key)"
+                                                                       OnOpenPr="async () => await OpenPullRequestDialogForLevelAsync(group.Key)"
+                                                                       OnSyncLevel="async () => await SyncLevelForLevelAsync(group.Key)"
                                                                        OpenPrUrls="@GetOpenPrUrlsForGroup(group)"
                                                                        OpenPrPullMap="@GetOpenPrPullMapForGroup(group)"
                                                                        />
@@ -167,6 +167,22 @@
                                                                   OnUpgradeClick="ShowSwitchBranchModalOnTagsTab"
                                                                   OnDismissError="() => DismissRepositoryError(wr.RepositoryId)" />
                                     }
+                                }
+                                @if (isLoadingMore)
+                                {
+                                    <tr>
+                                        <td colspan="@TableColSpan" class="text-center text-muted py-3">
+                                            Loading more...
+                                        </td>
+                                    </tr>
+                                }
+                                @if (hasMore && !isLoadingMore)
+                                {
+                                    <tr>
+                                        <td colspan="@TableColSpan" class="p-0">
+                                            <InfiniteScrollLoadTrigger IsEnabled="true" OnLoadMore="LoadNextChunkAsync" />
+                                        </td>
+                                    </tr>
                                 }
                             }
                         </tbody>
@@ -320,7 +336,7 @@
                OnProceed="@OnUndoPushProceedAsync"
                OnCancel="@CloseUndoPushModal" />
 
-@if (isLoading)
+@if (isInitialLoading && !hasLoadedOnce)
 {
     <LoadingOverlay IsVisible="true" PageScoped="true" Message="Loading workspace..." ShowCommandTerminal="false" />
 }

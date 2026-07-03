@@ -10,7 +10,7 @@ public sealed partial class WorkspaceRepositories
 
     private void ShowSwitchBranchModal(int repositoryId, string? currentBranch, string? cloneUrl)
     {
-        var wr = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId);
+        var wr = TryGetLink(repositoryId);
         var repo = wr?.Repository;
 
         if (repo == null)
@@ -42,7 +42,7 @@ public sealed partial class WorkspaceRepositories
 
     private void ShowSwitchBranchModalOnTagsTab(WorkspaceRepositoryLink link)
     {
-        var wr = workspaceRepositories.FirstOrDefault(r => r.RepositoryId == link.RepositoryId);
+        var wr = TryGetLink(link.RepositoryId);
         var repo = wr?.Repository;
         if (repo == null)
             return;
@@ -79,7 +79,7 @@ public sealed partial class WorkspaceRepositories
 
     private async Task ShowBranchModalAsync(string initialTab = "newbranch")
     {
-        if (workspace == null || workspaceRepositories.Count == 0)
+        if (workspace == null || !HasRepositories)
             return;
         try
         {
@@ -89,10 +89,11 @@ public sealed partial class WorkspaceRepositories
         {
             Logger.LogWarning(ex, "Could not load common branches for branch modal");
         }
+        var allLinks = await GetAllLinksForOperationAsync();
         _branchModal = _branchModal with
         {
             IsVisible = true,
-            WorkspaceUnifiedCurrentBranch = GetUnifiedWorkspaceCurrentBranch(workspaceRepositories),
+            WorkspaceUnifiedCurrentBranch = GetUnifiedWorkspaceCurrentBranch(allLinks),
             InitialTab = string.Equals(initialTab, "switchbranch", StringComparison.OrdinalIgnoreCase) ? "switchbranch" : "newbranch"
         };
         StateHasChanged();
@@ -115,27 +116,29 @@ public sealed partial class WorkspaceRepositories
 
         var commonLocal = data.CommonLocalBranchNames ?? data.CommonBranchNames ?? new List<string>();
         var commonRemote = data.CommonRemoteBranchNames ?? new List<string>();
+        var allLinks = await GetAllLinksForOperationAsync();
         _branchModal = _branchModal with
         {
             CommonBranchNames = commonLocal,
             CommonLocalBranchNames = commonLocal,
             CommonRemoteBranchNames = commonRemote,
             DefaultDisplayText = data.DefaultDisplayText ?? "multiple",
-            WorkspaceUnifiedCurrentBranch = GetUnifiedWorkspaceCurrentBranch(workspaceRepositories)
+            WorkspaceUnifiedCurrentBranch = GetUnifiedWorkspaceCurrentBranch(allLinks)
         };
     }
 
-    private Task FetchCommonBranchesAcrossWorkspaceAsync()
+    private async Task FetchCommonBranchesAcrossWorkspaceAsync()
     {
         if (workspace == null || IsJobRunning)
-            return Task.CompletedTask;
+            return;
 
-        var repoIds = workspaceRepositories
+        var allLinks = await GetAllLinksForOperationAsync();
+        var repoIds = allLinks
             .Select(wr => wr.RepositoryId)
             .Distinct()
             .ToList();
         if (repoIds.Count == 0)
-            return Task.CompletedTask;
+            return;
 
         StartPageJob("Fetching branches...", async (job, ct) =>
         {
@@ -182,22 +185,22 @@ public sealed partial class WorkspaceRepositories
             }
         });
 
-        return Task.CompletedTask;
     }
 
-    private Task CheckoutCommonBranchAcrossWorkspaceAsync((string BranchName, bool SkipReposOnTags) args)
+    private async Task CheckoutCommonBranchAcrossWorkspaceAsync((string BranchName, bool SkipReposOnTags) args)
     {
         var (branchName, skipReposOnTags) = args;
         if (workspace == null || string.IsNullOrWhiteSpace(branchName) || IsJobRunning)
-            return Task.CompletedTask;
+            return;
 
-        var repoIds = workspaceRepositories
+        var allLinks = await GetAllLinksForOperationAsync();
+        var repoIds = allLinks
             .Where(wr => !skipReposOnTags || !wr.IsOnTag)
             .Select(wr => wr.RepositoryId)
             .Distinct()
             .ToList();
         if (repoIds.Count == 0)
-            return Task.CompletedTask;
+            return;
 
         StartPageJob("Checking out...", async (job, ct) =>
         {
@@ -238,20 +241,20 @@ public sealed partial class WorkspaceRepositories
             }
         });
 
-        return Task.CompletedTask;
     }
 
-    private Task CreateBranchesAsync((string NewBranchName, string BaseBranch, bool SkipReposOnTags) args)
+    private async Task CreateBranchesAsync((string NewBranchName, string BaseBranch, bool SkipReposOnTags) args)
     {
         var (newBranchName, baseBranch, skipReposOnTags) = args;
         if (workspace == null || string.IsNullOrWhiteSpace(newBranchName) || IsJobRunning)
-            return Task.CompletedTask;
+            return;
 
         CloseBranchModal();
         errorMessage = null;
 
+        var allLinks = await GetAllLinksForOperationAsync();
         var tagFilteredRepoIds = skipReposOnTags
-            ? workspaceRepositories.Where(wr => !wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet()
+            ? allLinks.Where(wr => !wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet()
             : (IReadOnlySet<int>?)null;
 
         StartPageJob("Creating branches...", async (job, ct) =>
@@ -275,7 +278,6 @@ public sealed partial class WorkspaceRepositories
             }
         });
 
-        return Task.CompletedTask;
     }
 
     private async Task OnBranchChangedAsync()

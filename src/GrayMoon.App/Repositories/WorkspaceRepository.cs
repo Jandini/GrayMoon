@@ -32,6 +32,14 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
             .FirstOrDefaultAsync(workspace => workspace.WorkspaceId == workspaceId);
     }
 
+    /// <summary>Loads workspace metadata without repository links (for incremental list pages).</summary>
+    public async Task<Workspace?> GetHeaderAsync(int workspaceId)
+    {
+        return await _dbContext.Workspaces
+            .AsNoTracking()
+            .FirstOrDefaultAsync(workspace => workspace.WorkspaceId == workspaceId);
+    }
+
     public async Task<Workspace> AddAsync(string name, IReadOnlyCollection<int> repositoryIds)
     {
         var normalized = NormalizeName(name);

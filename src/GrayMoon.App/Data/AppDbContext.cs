@@ -136,6 +136,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasIndex(wr => new { wr.WorkspaceId, wr.RepositoryId })
                 .IsUnique();
 
+            entity.HasIndex(wr => new
+            {
+                wr.WorkspaceId,
+                wr.DependencyLevel,
+                wr.RepositoryType,
+                wr.Dependencies,
+                wr.WorkspaceRepositoryId,
+            });
+
             entity.Property(wr => wr.GitVersion)
                 .HasMaxLength(100);
 

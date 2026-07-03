@@ -17,6 +17,13 @@ public class FilterSearchEfQueryableTests
         Type: "Service",
         Framework: "net10.0");
 
+    private readonly TestWorkspaceLink _workspaceLink = new(
+        RepositoryName: "graymoon-api",
+        BranchName: "main",
+        GitVersion: "1.2.3",
+        DependencyLevel: 2,
+        SyncStatus: "in sync");
+
     [Fact]
     public void Repository_filter_parity_empty_query()
     {
@@ -67,6 +74,57 @@ public class FilterSearchEfQueryableTests
         AssertProjectParity("GrayMoon.App");
         AssertProjectParity("csproj");
         AssertProjectParity("missing");
+    }
+
+    [Fact]
+    public void Workspace_link_filter_parity_empty_query()
+    {
+        AssertWorkspaceLinkParity(null);
+        AssertWorkspaceLinkParity("   ");
+    }
+
+    [Fact]
+    public void Workspace_link_filter_parity_implicit_and()
+    {
+        AssertWorkspaceLinkParity("graymoon main");
+        AssertWorkspaceLinkParity("graymoon zz");
+    }
+
+    [Fact]
+    public void Workspace_link_filter_parity_or_and_parens()
+    {
+        AssertWorkspaceLinkParity("zz or main");
+        AssertWorkspaceLinkParity("(zz or main) and graymoon");
+    }
+
+    [Fact]
+    public void Workspace_link_filter_parity_topic_and_unknown_field()
+    {
+        AssertWorkspaceLinkParity("topic:blazor");
+        AssertWorkspaceLinkParity("status:open");
+    }
+
+    [Fact]
+    public void Workspace_link_filter_parity_sync_and_level_text()
+    {
+        AssertWorkspaceLinkParity("in sync");
+        AssertWorkspaceLinkParity("level 2");
+        AssertWorkspaceLinkParity("no dependencies");
+    }
+
+    [Fact]
+    public void Workspace_link_filter_parity_legacy_invalid_syntax()
+    {
+        AssertWorkspaceLinkParity("(main");
+        AssertWorkspaceLinkParity("  graymoon   main  ");
+    }
+
+    private void AssertWorkspaceLinkParity(string? query)
+    {
+        var expected = FilterSearchExpression.Matches(query, _workspaceLink.Matches);
+        var filter = FilterSearchEfQueryable.BuildFilter(query, BuildWorkspaceLinkTermPredicate);
+        var actual = filter is null || filter.Compile()(_workspaceLink);
+        Assert.Equal(expected, actual);
     }
 
     private void AssertRepositoryParity(string? query)
@@ -125,6 +183,25 @@ public class FilterSearchEfQueryableTests
                     || p.Framework.Contains(termValue, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static Expression<Func<TestWorkspaceLink, bool>> BuildWorkspaceLinkTermPredicate(FilterSearchTerm term)
+    {
+        if (!string.IsNullOrEmpty(term.Field))
+        {
+            return term.Field switch
+            {
+                "topic" => _ => false,
+                _ => _ => true,
+            };
+        }
+
+        var termValue = term.Value;
+        return link => link.RepositoryName.Contains(termValue, StringComparison.OrdinalIgnoreCase)
+                       || link.BranchName.Contains(termValue, StringComparison.OrdinalIgnoreCase)
+                       || link.GitVersion.Contains(termValue, StringComparison.OrdinalIgnoreCase)
+                       || link.LevelTitle.Contains(termValue, StringComparison.OrdinalIgnoreCase)
+                       || link.SyncStatus.Contains(termValue, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed record TestRepository(string Name, string Owner, string Topics, string Connector)
     {
         public bool Matches(FilterSearchTerm term)
@@ -161,6 +238,31 @@ public class FilterSearchEfQueryableTests
 
             var haystack = $"{Name} {File} {Type} {Framework}";
             return haystack.Contains(term.Value, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private sealed record TestWorkspaceLink(
+        string RepositoryName,
+        string BranchName,
+        string GitVersion,
+        int? DependencyLevel,
+        string SyncStatus)
+    {
+        public string LevelTitle => DependencyLevel == null ? "No dependencies" : $"Level {DependencyLevel}";
+
+        public bool Matches(FilterSearchTerm term)
+        {
+            if (!string.IsNullOrEmpty(term.Field))
+            {
+                return term.Field switch
+                {
+                    "topic" => false,
+                    _ => true,
+                };
+            }
+
+            var searchable = $"{RepositoryName} {BranchName} {GitVersion} {LevelTitle} {SyncStatus}";
+            return searchable.Contains(term.Value, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

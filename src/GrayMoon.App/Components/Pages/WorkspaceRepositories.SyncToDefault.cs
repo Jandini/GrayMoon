@@ -15,7 +15,7 @@ public sealed partial class WorkspaceRepositories
             return;
 
         var nonDefaultRepoIds = repositoryIds
-            .Select(id => workspaceRepositories.FirstOrDefault(w => w.RepositoryId == id))
+            .Select(id => TryGetLink(id))
             .Where(wr =>
             {
                 if (wr == null || wr.IsOnTag || string.IsNullOrWhiteSpace(wr.BranchName))
@@ -48,7 +48,7 @@ public sealed partial class WorkspaceRepositories
         {
             await WorkspacePageService.WorkspacePullRequestService.RefreshPullRequestsAsync(WorkspaceId, repositoryIds, force: true);
             await ReloadWorkspaceDataFromFreshScopeAsync();
-            ApplySyncStateFromWorkspace();
+            ApplySyncStateFromLoadedItems();
             await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex)
@@ -60,7 +60,7 @@ public sealed partial class WorkspaceRepositories
         var checkResults = repositoryIds
             .Select(repoId =>
             {
-                var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
+                var wr = TryGetLink(repoId);
                 return new SyncToDefaultCheckResult(repoId, wr?.DefaultBranchAheadCommits, wr?.BranchHasUpstream);
             })
             .ToList();
@@ -74,7 +74,7 @@ public sealed partial class WorkspaceRepositories
 
         foreach (var r in blocked)
         {
-            var name = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == r.RepoId)?.Repository?.RepositoryName ?? r.RepoId.ToString();
+            var name = TryGetLink(r.RepoId)?.Repository?.RepositoryName ?? r.RepoId.ToString();
             ToastService.Show($"{name}: skipped sync to default (commits ahead of default, PR not merged).");
         }
 
@@ -124,7 +124,7 @@ public sealed partial class WorkspaceRepositories
                         _syncToDefaultCheckResults = _syncToDefaultCheckResults?
                             .Select(r =>
                             {
-                                var wr2 = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == r.RepoId);
+                                var wr2 = TryGetLink(r.RepoId);
                                 return new SyncToDefaultCheckResult(r.RepoId, r.DefaultAhead, wr2?.BranchHasUpstream);
                             })
                             .ToList();
@@ -132,7 +132,7 @@ public sealed partial class WorkspaceRepositories
                         var repoItems = _syncToDefaultCheckResults?
                             .Select(r =>
                             {
-                                var wr2 = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == r.RepoId);
+                                var wr2 = TryGetLink(r.RepoId);
                                 return new SyncToDefaultRepoItem(wr2?.Repository?.RepositoryName ?? r.RepoId.ToString(), wr2?.BranchName ?? "", r.HasUpstream == true, PrState: null, CommitsAhead: 0);
                             })
                             .ToList() ?? new List<SyncToDefaultRepoItem>();
@@ -188,7 +188,7 @@ public sealed partial class WorkspaceRepositories
         try
         {
             // Use persisted workspace link state (updated by hooks); no agent GetCommitCounts call.
-            var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repositoryId);
+            var wr = await TryGetLinkAsync(repositoryId);
             var defaultAhead = wr?.DefaultBranchAheadCommits ?? 0;
             var hasUpstream = wr?.BranchHasUpstream == true;
 
@@ -198,7 +198,7 @@ public sealed partial class WorkspaceRepositories
                 {
                     await WorkspacePageService.WorkspacePullRequestService.RefreshPullRequestsAsync(WorkspaceId, new[] { repositoryId }, force: true);
                     await ReloadWorkspaceDataFromFreshScopeAsync();
-                    ApplySyncStateFromWorkspace();
+                    ApplySyncStateFromLoadedItems();
                     await InvokeAsync(StateHasChanged);
                 }
                 catch (Exception ex)
@@ -298,7 +298,7 @@ public sealed partial class WorkspaceRepositories
 
             var tasks = repositoryIds.Select(async repositoryId =>
             {
-                var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repositoryId);
+                var wr = await TryGetLinkAsync(repositoryId);
                 var currentBranchName = wr?.BranchName;
                 if (string.IsNullOrWhiteSpace(currentBranchName))
                 {
@@ -340,7 +340,7 @@ public sealed partial class WorkspaceRepositories
                     else if (errMsg != null)
                     {
                         repositoryErrors[repoId] = errMsg;
-                        var repoName = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId)?.Repository?.RepositoryName ?? repoId.ToString();
+                        var repoName = TryGetLink(repoId)?.Repository?.RepositoryName ?? repoId.ToString();
                         ToastService.Show($"{repoName}: {errMsg}");
                     }
                 }
@@ -362,7 +362,8 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || IsJobRunning)
             return;
 
-        var eligibleRepos = workspaceRepositories
+        var allLinks = await GetAllLinksForOperationAsync();
+        var eligibleRepos = allLinks
             .Where(wr =>
                 !wr.IsOnTag &&
                 !string.IsNullOrWhiteSpace(wr.BranchName) &&
@@ -425,7 +426,7 @@ public sealed partial class WorkspaceRepositories
                         var repoItems = eligibleIds
                             .Select(repoId =>
                             {
-                                var wr2 = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
+                                var wr2 = TryGetLink(repoId);
                                 prByRepositoryId.TryGetValue(repoId, out var pr);
                                 var prState = pr == null ? null : pr.IsMerged ? "merged" : pr.IsClosed ? "closed" : "open";
                                 var commitsAhead = wr2?.DefaultBranchAheadCommits ?? 0;
@@ -456,14 +457,15 @@ public sealed partial class WorkspaceRepositories
             });
     }
 
-    private Task ExecuteSyncAllToDefaultAsync(
+    private async Task ExecuteSyncAllToDefaultAsync(
         IReadOnlyList<SyncToDefaultRepoItem> repoItems,
         bool deleteRemoteBranch)
     {
         if (workspace == null || repoItems.Count == 0 || IsJobRunning)
-            return Task.CompletedTask;
+            return;
 
-        var repoIdByName = workspaceRepositories.ToDictionary(
+        var allLinks = await GetAllLinksForOperationAsync();
+        var repoIdByName = allLinks.ToDictionary(
             wr => wr.Repository?.RepositoryName ?? string.Empty,
             wr => wr.RepositoryId);
         var prNumberByRepoName = new Dictionary<string, int>();
@@ -492,7 +494,7 @@ public sealed partial class WorkspaceRepositories
                     return (RepoId: 0, Success: false, ErrorMsg: (string?)"Repository not found");
                 }
 
-                var wr = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId);
+                var wr = TryGetLink(repoId);
                 var currentBranch = wr?.BranchName ?? item.BranchName;
                 if (string.IsNullOrWhiteSpace(currentBranch))
                 {
@@ -549,7 +551,7 @@ public sealed partial class WorkspaceRepositories
                     else if (errMsg != null)
                     {
                         repositoryErrors[repoId] = errMsg;
-                        var repoName = workspaceRepositories.FirstOrDefault(w => w.RepositoryId == repoId)?.Repository?.RepositoryName ?? repoId.ToString();
+                        var repoName = TryGetLink(repoId)?.Repository?.RepositoryName ?? repoId.ToString();
                         ToastService.Show($"{repoName}: {errMsg}");
                     }
                 }
@@ -571,6 +573,5 @@ public sealed partial class WorkspaceRepositories
             }
         });
 
-        return Task.CompletedTask;
     }
 }

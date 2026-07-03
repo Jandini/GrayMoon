@@ -5,12 +5,13 @@ namespace GrayMoon.App.Components.Pages;
 public sealed partial class WorkspaceRepositories
 {
     /// <summary>Pull button click (when any repo has incoming commits): run commit sync (Pull) only for repos with incoming commits. Uses same overlay and merge/error handling as CommitSyncAsync/CommitSyncLevelAsync.</summary>
-    private void OnPullClickAsync()
+    private async Task OnPullClickAsync()
     {
-        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
+        if (workspace == null || !HasRepositories || IsJobRunning)
             return;
 
-        var repoIdsWithIncoming = workspaceRepositories
+        var allLinks = await GetAllLinksForOperationAsync();
+        var repoIdsWithIncoming = allLinks
             .Where(wr =>
                 !wr.IsOnTag
                 && (wr.IncomingCommits ?? 0) > 0
@@ -46,6 +47,24 @@ public sealed partial class WorkspaceRepositories
     private void ShowConfirmSyncCommits(int repositoryId)
     {
         ShowConfirm("Do you want to sync commits for this repository?", () => CommitSyncAsync(repositoryId));
+    }
+
+    private async Task SyncCommitsForLevelAsync(int? levelKey)
+    {
+        var ids = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToList();
+        ShowConfirmSyncCommitsLevel(ids);
+    }
+
+    private async Task SyncToDefaultForLevelAsync(int? levelKey)
+    {
+        var ids = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToList();
+        await ShowConfirmSyncToDefaultLevel(ids);
+    }
+
+    private async Task SyncLevelForLevelAsync(int? levelKey)
+    {
+        var ids = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToList();
+        ShowConfirmSyncLevel(ids);
     }
 
     private void ShowConfirmSyncCommitsLevel(List<int> repositoryIds)

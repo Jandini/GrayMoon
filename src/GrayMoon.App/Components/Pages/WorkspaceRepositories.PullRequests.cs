@@ -10,8 +10,18 @@ public sealed partial class WorkspaceRepositories
 {
     private NewPullRequestModalState _newPrModal = new();
 
-    private Task OpenPullRequestDialogForAllRepositoriesAsync()
-        => OpenPullRequestDialogCoreAsync(workspaceRepositories);
+    private async Task OpenPullRequestDialogForAllRepositoriesAsync()
+    {
+        var links = await GetAllLinksForOperationAsync();
+        await OpenPullRequestDialogCoreAsync(links);
+    }
+
+    private async Task OpenPullRequestDialogForLevelAsync(int? levelKey)
+    {
+        var ids = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToHashSet();
+        var links = (await GetAllLinksForOperationAsync()).Where(wr => ids.Contains(wr.RepositoryId)).ToList();
+        await OpenPullRequestDialogCoreAsync(links);
+    }
 
     private Task OpenPullRequestDialogForRepositoryAsync(WorkspaceRepositoryLink link)
         => OpenPullRequestDialogCoreAsync(new[] { link });

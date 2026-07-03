@@ -8,7 +8,8 @@ public sealed partial class WorkspaceRepositories
 
     private async Task ShowRepositoriesModalAsync()
     {
-        var ids = workspace?.Repositories.Select(r => r.RepositoryId).ToHashSet() ?? new HashSet<int>();
+        var snapshots = await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId);
+        var ids = snapshots.Select(r => r.RepositoryId).ToHashSet();
         _repositoriesModal = new RepositoriesModalState
         {
             IsVisible = true,
@@ -61,7 +62,7 @@ public sealed partial class WorkspaceRepositories
                 workspace?.Name ?? string.Empty,
                 ids,
                 workspace?.RootPath);
-            await ReloadWorkspaceDataAsync();
+            await ReloadWorkspaceDataFromFreshScopeAsync();
             CloseRepositoriesModal();
             ToastService.Show("Workspace repositories updated.");
         }

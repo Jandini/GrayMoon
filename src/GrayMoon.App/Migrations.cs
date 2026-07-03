@@ -1482,6 +1482,13 @@ public static class Migrations
                 cmd.CommandText = "CREATE INDEX IX_WorkspaceProjects_WorkspaceId_ProjectName_ProjectId ON WorkspaceProjects(WorkspaceId, ProjectName, ProjectId)";
                 await cmd.ExecuteNonQueryAsync();
             }
+
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='IX_WorkspaceRepositories_WorkspaceId_Level_Type_Deps_Id'";
+            if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+            {
+                cmd.CommandText = "CREATE INDEX IX_WorkspaceRepositories_WorkspaceId_Level_Type_Deps_Id ON WorkspaceRepositories(WorkspaceId, DependencyLevel, RepositoryType, Dependencies, WorkspaceRepositoryId)";
+                await cmd.ExecuteNonQueryAsync();
+            }
         }
         catch
         {

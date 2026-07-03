@@ -8,19 +8,20 @@ public sealed partial class WorkspaceRepositories
     private UndoPushModalState _undoPushModal = new();
 
     /// <summary>Opens the Undo Push modal showing all repositories that have outgoing commits.</summary>
-    private Task OnUndoPushClickAsync()
+    private async Task OnUndoPushClickAsync()
     {
         if (workspace == null || IsJobRunning)
-            return Task.CompletedTask;
+            return;
 
-        var reposWithOutgoing = workspaceRepositories
+        var allLinks = await GetAllLinksForOperationAsync();
+        var reposWithOutgoing = allLinks
             .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
             .ToList();
 
         if (reposWithOutgoing.Count == 0)
         {
             ToastService.Show("No outgoing commits to undo.");
-            return Task.CompletedTask;
+            return;
         }
 
         _undoPushModal = _undoPushModal with
@@ -32,7 +33,6 @@ public sealed partial class WorkspaceRepositories
                 .ToList()
         };
         StateHasChanged();
-        return Task.CompletedTask;
     }
 
     private Task OnUndoPushProceedAsync(bool keepChanges)

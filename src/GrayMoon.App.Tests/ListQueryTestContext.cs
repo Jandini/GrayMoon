@@ -13,6 +13,7 @@ public sealed class ListQueryTestContext : IAsyncDisposable
     public AppDbContext DbContext { get; }
     public RepositoryListQueryService RepositoryQuery { get; }
     public WorkspaceProjectListQueryService ProjectQuery { get; }
+    public WorkspaceRepositoryLinkListQueryService WorkspaceRepoLinkQuery { get; }
 
     private ListQueryTestContext(SqliteConnection connection, AppDbContext dbContext)
     {
@@ -20,6 +21,7 @@ public sealed class ListQueryTestContext : IAsyncDisposable
         DbContext = dbContext;
         RepositoryQuery = new RepositoryListQueryService(dbContext);
         ProjectQuery = new WorkspaceProjectListQueryService(dbContext);
+        WorkspaceRepoLinkQuery = new WorkspaceRepositoryLinkListQueryService(dbContext);
     }
 
     public static async Task<ListQueryTestContext> CreateAsync(int repositoryCount = 120)
@@ -79,7 +81,38 @@ public sealed class ListQueryTestContext : IAsyncDisposable
         }
 
         await dbContext.SaveChangesAsync();
+
+        var allRepos = await dbContext.Repositories.OrderBy(r => r.RepositoryId).ToListAsync();
+        for (var i = 0; i < allRepos.Count; i++)
+        {
+            var repo = allRepos[i];
+            dbContext.WorkspaceRepositories.Add(new WorkspaceRepositoryLink
+            {
+                WorkspaceId = workspace.WorkspaceId,
+                RepositoryId = repo.RepositoryId,
+                GitVersion = $"1.0.{i}",
+                BranchName = i % 4 == 0 ? "main" : $"feature-{i % 10}",
+                DefaultBranchName = "main",
+                DependencyLevel = i % 5,
+                Dependencies = i % 7,
+                UnmatchedDeps = i % 11 == 0 ? 1 : 0,
+                OutOfDateFileRepos = i % 13 == 0 ? 1 : 0,
+                OutgoingCommits = i % 3 == 0 ? 2 : 0,
+                IncomingCommits = i % 6 == 0 ? 1 : 0,
+                RepositoryType = i % 3 == 0 ? ProjectType.Service : ProjectType.Library,
+                SyncStatus = i % 8 == 0 ? RepoSyncStatus.NeedsSync : RepoSyncStatus.InSync,
+            });
+        }
+
+        await dbContext.SaveChangesAsync();
         return new ListQueryTestContext(connection, dbContext);
+    }
+
+    public static async Task<(ListQueryTestContext Context, int WorkspaceId)> CreateWithWorkspaceLinksAsync(int repositoryCount = 120)
+    {
+        var ctx = await CreateAsync(repositoryCount);
+        var workspaceId = ctx.DbContext.Workspaces.Select(w => w.WorkspaceId).First();
+        return (ctx, workspaceId);
     }
 
     public async ValueTask DisposeAsync()
