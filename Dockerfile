@@ -13,7 +13,7 @@ RUN dotnet publish "src/GrayMoon.Agent/GrayMoon.Agent.csproj" -c Release -r win-
 RUN cd /agent/publish-linux && zip -q -r /agent/graymoon-agent-linux.zip .
 RUN cd /agent/publish-win && zip -q -r /agent/graymoon-agent-windows.zip .
 
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build-app
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build-app
 WORKDIR /src
 
 ARG VERSION=1.0.0
@@ -23,7 +23,7 @@ RUN dotnet publish "src/GrayMoon.App/GrayMoon.App.csproj" -c Release -o /app/pub
   /p:UseAppHost=false \
   /p:Version=$VERSION /p:DisableGitVersionTask=true
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
 COPY --from=build-app /app/publish .
