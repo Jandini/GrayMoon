@@ -12,6 +12,17 @@ public interface IWorkspaceRepositoryLinkListQueryService
 
     Task<WorkspaceRepositoryHeaderStateDto> GetHeaderStateAsync(int workspaceId, CancellationToken cancellationToken = default);
 
+    /// <summary>Ordered lightweight index for virtual scroll (same sort as the grid).</summary>
+    Task<IReadOnlyList<WorkspaceRepositoryLinkIndexEntry>> GetIndexAsync(
+        WorkspaceRepositoryLinkListFilter filter,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Hydrates full list DTOs for the given workspace-repository link PKs.</summary>
+    Task<IReadOnlyList<WorkspaceRepositoryLinkListItemDto>> GetByIdsAsync(
+        int workspaceId,
+        IReadOnlyList<int> workspaceRepositoryIds,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<int>> GetRepositoryIdsAtLevelAsync(
         int workspaceId,
         int? levelKey,

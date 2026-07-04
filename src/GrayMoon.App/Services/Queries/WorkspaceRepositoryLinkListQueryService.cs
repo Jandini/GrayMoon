@@ -44,39 +44,46 @@ public sealed class WorkspaceRepositoryLinkListQueryService(AppDbContext dbConte
         int workspaceId,
         CancellationToken cancellationToken = default)
     {
-        var links = await _dbContext.WorkspaceRepositories.AsNoTracking()
-            .Where(wr => wr.WorkspaceId == workspaceId)
-            .Select(wr => new
-            {
-                wr.DependencyLevel,
-                IsOnTag = wr.CheckedOutTag != null && wr.CheckedOutTag != string.Empty,
-                wr.UnmatchedDeps,
-                wr.OutOfDateFileRepos,
-                wr.OutgoingCommits,
-                wr.BranchHasUpstream,
-                wr.IncomingCommits,
-                wr.BranchName,
-                wr.DefaultBranchName,
-                wr.SyncStatus,
-            })
-            .ToListAsync(cancellationToken);
+        var baseQuery = _dbContext.WorkspaceRepositories.AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId);
 
-        var totalCount = links.Count;
-        var hasUnmatchedDependencies = links.Any(wr => !wr.IsOnTag
-            && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0));
-        var isPushRecommended = links.Any(wr => !wr.IsOnTag
-            && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false));
-        var hasIncomingCommits = links.Any(wr => !wr.IsOnTag
-            && (wr.IncomingCommits ?? 0) > 0
-            && !string.IsNullOrWhiteSpace(wr.BranchName)
-            && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
-            && wr.BranchName == wr.DefaultBranchName);
-        var hasTaggedRepos = links.Any(wr => wr.IsOnTag);
-        var isOutOfSync = links.Any(wr => wr.SyncStatus != RepoSyncStatus.InSync);
-        var lowestLevelNeedingWork = links
-            .Where(wr => !wr.IsOnTag && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0))
-            .Select(wr => wr.DependencyLevel)
-            .Min();
+        var totalCount = await baseQuery.CountAsync(cancellationToken);
+
+        var hasUnmatchedDependencies = await baseQuery.AnyAsync(
+            wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
+                && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0),
+            cancellationToken);
+
+        var isPushRecommended = await baseQuery.AnyAsync(
+            wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
+                && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false),
+            cancellationToken);
+
+        var hasIncomingCommits = await baseQuery.AnyAsync(
+            wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
+                && (wr.IncomingCommits ?? 0) > 0
+                && wr.BranchName != null && wr.BranchName != string.Empty
+                && wr.DefaultBranchName != null && wr.DefaultBranchName != string.Empty
+                && wr.BranchName == wr.DefaultBranchName,
+            cancellationToken);
+
+        var hasTaggedRepos = await baseQuery.AnyAsync(
+            wr => wr.CheckedOutTag != null && wr.CheckedOutTag != string.Empty,
+            cancellationToken);
+
+        var isOutOfSync = await baseQuery.AnyAsync(
+            wr => wr.SyncStatus != RepoSyncStatus.InSync,
+            cancellationToken);
+
+        var lowestLevels = await baseQuery
+            .Where(wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
+                && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
+                && wr.DependencyLevel != null)
+            .Select(wr => wr.DependencyLevel!.Value)
+            .OrderBy(level => level)
+            .Take(1)
+            .ToListAsync(cancellationToken);
+        int? lowestLevelNeedingWork = lowestLevels.Count > 0 ? lowestLevels[0] : null;
 
         return new WorkspaceRepositoryHeaderStateDto(
             totalCount,
@@ -86,6 +93,43 @@ public sealed class WorkspaceRepositoryLinkListQueryService(AppDbContext dbConte
             hasTaggedRepos,
             isOutOfSync,
             lowestLevelNeedingWork);
+    }
+
+    public async Task<IReadOnlyList<WorkspaceRepositoryLinkIndexEntry>> GetIndexAsync(
+        WorkspaceRepositoryLinkListFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        var query = ApplyFilters(_dbContext.WorkspaceRepositories.AsNoTracking(), filter);
+        query = ApplySort(query);
+        return await query
+            .Select(wr => new WorkspaceRepositoryLinkIndexEntry(
+                wr.WorkspaceRepositoryId,
+                wr.RepositoryId,
+                wr.DependencyLevel))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<WorkspaceRepositoryLinkListItemDto>> GetByIdsAsync(
+        int workspaceId,
+        IReadOnlyList<int> workspaceRepositoryIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (workspaceRepositoryIds.Count == 0)
+        {
+            return Array.Empty<WorkspaceRepositoryLinkListItemDto>();
+        }
+
+        var idSet = workspaceRepositoryIds.ToHashSet();
+        var rows = await Project(_dbContext.WorkspaceRepositories.AsNoTracking()
+                .Where(wr => wr.WorkspaceId == workspaceId && idSet.Contains(wr.WorkspaceRepositoryId)))
+            .ToListAsync(cancellationToken);
+
+        var order = workspaceRepositoryIds
+            .Select((id, index) => (id, index))
+            .ToDictionary(x => x.id, x => x.index);
+        return rows
+            .OrderBy(r => order.GetValueOrDefault(r.WorkspaceRepositoryId, int.MaxValue))
+            .ToList();
     }
 
     public async Task<IReadOnlyList<int>> GetRepositoryIdsAtLevelAsync(

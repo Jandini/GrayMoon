@@ -3,13 +3,10 @@ using GrayMoon.App.Services.Queries;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
-
 namespace GrayMoon.App.Components.Pages;
-
-public sealed partial class WorkspaceRepositories : IDisposable
+public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposable
 {
     [Parameter] public int WorkspaceId { get; set; }
-
     [Inject] private IWorkspacePageService WorkspacePageService { get; set; } = default!;
     [Inject] private IServiceScopeFactory ServiceScopeFactory { get; set; } = default!;
     [Inject] private NavigationManager NavigationManager { get; set; } = default!;
@@ -31,19 +28,47 @@ public sealed partial class WorkspaceRepositories : IDisposable
     [Inject] private IBackgroundJobService JobService { get; set; } = default!;
     [Inject] private IScopedServiceExecutor ScopedExecutor { get; set; } = default!;
     [Inject] private IWorkspaceRepositoryLinkListQueryService LinkListQueryService { get; set; } = default!;
-
     protected override async Task OnInitializedAsync()
     {
         AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         JobService.Changed += OnJobServiceChanged;
         _wasJobRunning = IsJobRunning;
+        _loadedWorkspaceId = WorkspaceId;
         await LoadWorkspaceAsync();
         ApplySyncStateFromLoadedItems();
     }
-
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedWorkspaceId == WorkspaceId || _disposed)
+        {
+            return;
+        }
+        CancelBackgroundWork();
+        await DetachVirtualScrollAsync();
+        _loadedWorkspaceId = WorkspaceId;
+        errorMessage = null;
+        hasLoadedOnce = false;
+        ClearGridState();
+        await LoadWorkspaceAsync();
+        ApplySyncStateFromLoadedItems();
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await OnAfterRenderRealtimeAsync(firstRender);
+        if (!isInitialLoading && _slots.Count > 0 && !_virtualScrollAttached && !_disposed)
+        {
+            await AttachVirtualScrollAsync();
+        }
+    }
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         _disposed = true;
+        CancelBackgroundWork();
         AgentQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
         JobService.Changed -= OnJobServiceChanged;
         lock (_refreshDebounceLock)
@@ -56,7 +81,13 @@ public sealed partial class WorkspaceRepositories : IDisposable
         _ = _hubConnection?.DisposeAsync().AsTask();
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
-        _loadMismatchedDepsLock.Dispose();
         _queryLoader.Dispose();
+        _virtualScrollDotNetRef?.Dispose();
+        _virtualScrollDotNetRef = null;
+    }
+    public async ValueTask DisposeAsync()
+    {
+        await DetachVirtualScrollAsync();
+        Dispose();
     }
 }

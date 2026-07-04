@@ -741,6 +741,89 @@ public sealed class WorkspaceProjectRepository(
                 .ToList());
     }
 
+    /// <summary>Package dependency lines for a single repository (badge tooltip).</summary>
+    public async Task<IReadOnlyList<(string PackageId, string Version)>> GetPackageDependencyLinesForRepoAsync(
+        int workspaceId,
+        int repositoryId,
+        CancellationToken cancellationToken = default)
+    {
+        var depProjects = await dbContext.WorkspaceProjects
+            .AsNoTracking()
+            .Where(p => p.WorkspaceId == workspaceId && p.RepositoryId == repositoryId)
+            .Select(p => p.ProjectId)
+            .ToListAsync(cancellationToken);
+        if (depProjects.Count == 0)
+            return Array.Empty<(string, string)>();
+
+        var depProjectIds = depProjects.ToHashSet();
+        var edges = await (
+            from d in dbContext.ProjectDependencies.AsNoTracking()
+            join refProj in dbContext.WorkspaceProjects.AsNoTracking() on d.ReferencedProjectId equals refProj.ProjectId
+            where depProjectIds.Contains(d.DependentProjectId)
+                && refProj.WorkspaceId == workspaceId
+                && refProj.PackageId != null
+                && refProj.PackageId != string.Empty
+            select new { PackageId = refProj.PackageId!, Version = d.Version ?? string.Empty })
+            .ToListAsync(cancellationToken);
+
+        return edges
+            .Select(e => (e.PackageId, e.Version))
+            .Distinct()
+            .OrderBy(t => t.PackageId, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(t => t.Version, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>Mismatched package dependency lines for a single repository (badge tooltip).</summary>
+    public async Task<IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>> GetMismatchedDependencyLinesForRepoAsync(
+        int workspaceId,
+        int repositoryId,
+        CancellationToken cancellationToken = default)
+    {
+        var versionByRepo = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId)
+            .Select(wr => new { wr.RepositoryId, wr.GitVersion })
+            .ToDictionaryAsync(x => x.RepositoryId, x => x.GitVersion, cancellationToken);
+
+        var depProjects = await dbContext.WorkspaceProjects
+            .AsNoTracking()
+            .Where(p => p.WorkspaceId == workspaceId && p.RepositoryId == repositoryId)
+            .Select(p => p.ProjectId)
+            .ToListAsync(cancellationToken);
+        if (depProjects.Count == 0)
+            return Array.Empty<(string, string, string)>();
+
+        var depProjectIds = depProjects.ToHashSet();
+        var edges = await (
+            from d in dbContext.ProjectDependencies.AsNoTracking()
+            join refProj in dbContext.WorkspaceProjects.AsNoTracking() on d.ReferencedProjectId equals refProj.ProjectId
+            where depProjectIds.Contains(d.DependentProjectId) && refProj.WorkspaceId == workspaceId
+            select new
+            {
+                RefRepoId = refProj.RepositoryId,
+                PackageId = !string.IsNullOrWhiteSpace(refProj.PackageId) ? refProj.PackageId! : refProj.ProjectName,
+                Version = d.Version,
+            })
+            .ToListAsync(cancellationToken);
+
+        var lines = new HashSet<(string PackageId, string CurrentVersion, string NewVersion)>();
+        foreach (var e in edges)
+        {
+            if (string.IsNullOrWhiteSpace(e.PackageId))
+                continue;
+            var refVersion = versionByRepo.GetValueOrDefault(e.RefRepoId)?.Trim() ?? "";
+            var depVersion = e.Version?.Trim() ?? "";
+            if (string.IsNullOrEmpty(refVersion) || depVersion == refVersion)
+                continue;
+            lines.Add((e.PackageId.Trim(), depVersion, refVersion));
+        }
+
+        return lines
+            .OrderBy(t => t.PackageId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     /// <summary>Returns the dependency graph for the workspace: nodes (projects with labels) and edges. Suitable for Cytoscape (nodes + edges).</summary>
     public async Task<ProjectDependencyGraph> GetDependencyGraphAsync(int workspaceId, CancellationToken cancellationToken = default)
     {

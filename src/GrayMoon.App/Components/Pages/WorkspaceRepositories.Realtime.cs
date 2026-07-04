@@ -8,13 +8,13 @@ public sealed partial class WorkspaceRepositories
     private HubConnection? _hubConnection;
     private CancellationTokenSource? _fetchRepositoriesCts;
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    private async Task OnAfterRenderRealtimeAsync(bool firstRender)
     {
         if (firstRender)
         {
             try { await JSRuntime.InvokeVoidAsync("focusElement", "workspace-repos-search"); } catch { /* ignore */ }
         }
-        if (firstRender && workspace != null && errorMessage == null)
+        if (firstRender && workspace != null && errorMessage == null && _hubConnection == null)
         {
             _hubConnection = new HubConnectionBuilder()
                 .WithUrl(NavigationManager.ToAbsoluteUri("/hubs/workspace-sync"))

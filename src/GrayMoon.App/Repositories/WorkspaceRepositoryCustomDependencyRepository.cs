@@ -57,6 +57,28 @@ public sealed class WorkspaceRepositoryCustomDependencyRepository(
         return referencedRepoIds.ToHashSet();
     }
 
+    /// <summary>Custom dependency repo names for a single dependent repository (badge tooltip).</summary>
+    public async Task<IReadOnlyList<string>> GetCustomDependencyNamesForRepoAsync(
+        int workspaceId,
+        int repositoryId,
+        CancellationToken cancellationToken = default)
+    {
+        var names = await dbContext.WorkspaceRepositoryCustomDependencies
+            .AsNoTracking()
+            .Where(d => d.DependentWorkspaceRepository!.WorkspaceId == workspaceId
+                && d.DependentWorkspaceRepository.RepositoryId == repositoryId
+                && d.ReferencedWorkspaceRepository!.Repository != null)
+            .Select(d => d.ReferencedWorkspaceRepository!.Repository!.RepositoryName)
+            .Where(n => n != null && n != string.Empty)
+            .ToListAsync(cancellationToken);
+
+        return names
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList()!;
+    }
+
     /// <summary>Returns custom dependency repo names keyed by dependent repository ID (for badge tooltips).</summary>
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<string>>> GetCustomDependencyNamesByRepoAsync(
         int workspaceId,

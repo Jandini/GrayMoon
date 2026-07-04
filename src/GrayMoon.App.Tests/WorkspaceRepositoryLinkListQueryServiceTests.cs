@@ -118,4 +118,49 @@ public class WorkspaceRepositoryLinkListQueryServiceTests
             Assert.True(count > 0);
         }
     }
+
+    [Fact]
+    public async Task GetIndex_matches_count_and_order_of_pages()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(80);
+        await using (ctx)
+        {
+            var filter = new WorkspaceRepositoryLinkListFilter(workspaceId, null);
+            var index = await ctx.WorkspaceRepoLinkQuery.GetIndexAsync(filter);
+            Assert.Equal(80, index.Count);
+
+            var page = await ctx.WorkspaceRepoLinkQuery.GetPageAsync(
+                new WorkspaceRepositoryLinkListRequest(workspaceId, null, 50, null));
+            Assert.Equal(
+                page.Items.Select(i => i.WorkspaceRepositoryId),
+                index.Take(page.Items.Count).Select(i => i.WorkspaceRepositoryId));
+        }
+    }
+
+    [Fact]
+    public async Task GetByIds_returns_requested_rows_in_request_order()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(40);
+        await using (ctx)
+        {
+            var index = await ctx.WorkspaceRepoLinkQuery.GetIndexAsync(new WorkspaceRepositoryLinkListFilter(workspaceId, null));
+            var ids = index.Skip(5).Take(7).Select(i => i.WorkspaceRepositoryId).Reverse().ToList();
+            var rows = await ctx.WorkspaceRepoLinkQuery.GetByIdsAsync(workspaceId, ids);
+            Assert.Equal(ids, rows.Select(r => r.WorkspaceRepositoryId).ToList());
+            Assert.All(rows, r => Assert.False(string.IsNullOrWhiteSpace(r.RepositoryName)));
+        }
+    }
+
+    [Fact]
+    public async Task Header_state_aggregates_without_loading_all_columns()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(15);
+        await using (ctx)
+        {
+            var header = await ctx.WorkspaceRepoLinkQuery.GetHeaderStateAsync(workspaceId);
+            Assert.Equal(15, header.TotalCount);
+            Assert.True(header.HasUnmatchedDependencies);
+            Assert.True(header.IsPushRecommended);
+        }
+    }
 }

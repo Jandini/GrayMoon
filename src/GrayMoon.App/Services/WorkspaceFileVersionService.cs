@@ -522,6 +522,21 @@ public sealed class WorkspaceFileVersionService(
                     .ToList());
     }
 
+    /// <summary>Out-of-date file-config token rows for a single repository (badge tooltip).</summary>
+    public async Task<IReadOnlyList<(string FileName, string TokenName, string CurrentValue, string ExpectedValue)>> GetMismatchedFileVersionLinesForRepoAsync(
+        int workspaceId,
+        int repositoryId,
+        CancellationToken cancellationToken = default)
+    {
+        var rows = await dbContext.WorkspaceFileLineStatuses
+            .AsNoTracking()
+            .Where(s => s.WorkspaceId == workspaceId && s.RepositoryId == repositoryId && s.TokenName != "")
+            .ToListAsync(cancellationToken);
+        return rows
+            .Select(s => (s.FileName, s.TokenName, s.CurrentValue ?? "", s.ExpectedValue ?? ""))
+            .ToList();
+    }
+
     /// <summary>Returns out-of-date file line statuses for the workspace, grouped by RepositoryId.</summary>
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<WorkspaceFileLineStatus>>> GetFileLineStatusByWorkspaceAsync(
         int workspaceId, CancellationToken cancellationToken = default)
@@ -533,6 +548,18 @@ public sealed class WorkspaceFileVersionService(
         return rows
             .GroupBy(s => s.RepositoryId)
             .ToDictionary(g => g.Key, g => (IReadOnlyList<WorkspaceFileLineStatus>)g.ToList());
+    }
+
+    /// <summary>Out-of-date file line statuses for a single repository.</summary>
+    public async Task<IReadOnlyList<WorkspaceFileLineStatus>> GetFileLineStatusForRepoAsync(
+        int workspaceId,
+        int repositoryId,
+        CancellationToken cancellationToken = default)
+    {
+        return await dbContext.WorkspaceFileLineStatuses
+            .AsNoTracking()
+            .Where(s => s.WorkspaceId == workspaceId && s.RepositoryId == repositoryId)
+            .ToListAsync(cancellationToken);
     }
 
     /// <summary>
@@ -567,6 +594,35 @@ public sealed class WorkspaceFileVersionService(
         }
 
         return result.ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<(string, string, string)>)kvp.Value);
+    }
+
+    /// <summary>OK-badge file version lines for a single repository.</summary>
+    public async Task<IReadOnlyList<(string FileName, string TokenName, string Version)>> GetAllFileVersionLinesForRepoAsync(
+        int workspaceId,
+        int repositoryId,
+        IReadOnlyDictionary<string, string> repoVersionMap,
+        CancellationToken cancellationToken = default)
+    {
+        var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        var list = new List<(string FileName, string TokenName, string Version)>();
+
+        foreach (var cfg in configs)
+        {
+            if (cfg.File?.Repository == null || cfg.File.IsMissingOnDisk == true) continue;
+            if (cfg.File.RepositoryId != repositoryId) continue;
+            var fileName = cfg.File.FileName;
+            var tokens = ExtractTokens(cfg.VersionPattern);
+
+            foreach (var token in tokens)
+            {
+                if (!repoVersionMap.TryGetValue(token, out var ver) || string.IsNullOrEmpty(ver)) continue;
+                if (!list.Any(e => string.Equals(e.FileName, fileName, StringComparison.OrdinalIgnoreCase)
+                                   && string.Equals(e.TokenName, token, StringComparison.OrdinalIgnoreCase)))
+                    list.Add((fileName, token, ver));
+            }
+        }
+
+        return list;
     }
 
     /// <summary>

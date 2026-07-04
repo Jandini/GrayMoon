@@ -18,7 +18,7 @@
         <WorkspaceRepositoriesHeader WorkspaceName="@(workspace?.Name)"
                                     RepositoriesCount="@(_headerState?.TotalCount ?? 0)"
                                     HasFilter="@HasSearchFilter"
-                                    FilteredCount="@(totalCount ?? _items.Count)"
+                                    FilteredCount="@(totalCount ?? 0)"
                                     SearchTerm="@searchTerm"
                                     HasUnmatchedDependencies="@hasUnmatchedDependencies"
                                     IsPushRecommended="@isPushRecommended"
@@ -90,8 +90,8 @@
                                 </th>
                             </tr>
                         </thead>
-                        <tbody>
-                            @if (isInitialLoading && _items.Count == 0)
+                        <tbody @ref="_tbodyRef" class="repositories-virtual-tbody">
+                            @if (isInitialLoading && _slots.Count == 0)
                             {
                                 <tr>
                                     <td colspan="@TableColSpan" class="text-center text-muted py-4">
@@ -117,23 +117,36 @@
                             }
                             else
                             {
-                                @foreach (var group in LoadedLevelGroups)
+                                @if (_topSpacerPx > 0)
                                 {
-                                    <WorkspaceRepositoriesLevelHeader WorkspaceId="@WorkspaceId"
-                                                                       LevelKey="@group.Key"
-                                                                       ColSpan="@TableColSpan"
-                                                                       Group="@group"
-                                                                       ActionsDisabled="@group.All(wr => wr.IsOnTag)"
-                                                                       OnSyncToDefault="async () => await SyncToDefaultForLevelAsync(group.Key)"
-                                                                       OnSyncCommits="async () => await SyncCommitsForLevelAsync(group.Key)"
-                                                                       OnOpenPr="async () => await OpenPullRequestDialogForLevelAsync(group.Key)"
-                                                                       OnSyncLevel="async () => await SyncLevelForLevelAsync(group.Key)"
-                                                                       OpenPrUrls="@GetOpenPrUrlsForGroup(group)"
-                                                                       OpenPrPullMap="@GetOpenPrPullMapForGroup(group)"
-                                                                       />
-                                    @foreach (var wr in group)
+                                    <tr class="virtual-scroll-spacer" aria-hidden="true">
+                                        <td colspan="@TableColSpan" style="height:@(_topSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
+                                    </tr>
+                                }
+                                @foreach (var slot in VisibleSlots)
+                                {
+                                    if (slot.Kind == VirtualSlotKind.LevelHeader)
                                     {
-                                        <WorkspaceRepositoriesRow WorkspaceId="@WorkspaceId"
+                                        var levelGroup = GetHydratedLinksAtLevel(slot.LevelKey);
+                                        <WorkspaceRepositoriesLevelHeader @key="@($"lvl-{slot.LevelKey?.ToString() ?? "none"}")"
+                                                                           WorkspaceId="@WorkspaceId"
+                                                                           LevelKey="@slot.LevelKey"
+                                                                           ColSpan="@TableColSpan"
+                                                                           Group="@levelGroup"
+                                                                           RepositoryCount="@slot.LevelRepoCount"
+                                                                           ActionsDisabled="@IsLevelActionsDisabled(slot.LevelKey)"
+                                                                           OnSyncToDefault="async () => await SyncToDefaultForLevelAsync(slot.LevelKey)"
+                                                                           OnSyncCommits="async () => await SyncCommitsForLevelAsync(slot.LevelKey)"
+                                                                           OnOpenPr="async () => await OpenPullRequestDialogForLevelAsync(slot.LevelKey)"
+                                                                           OnSyncLevel="async () => await SyncLevelForLevelAsync(slot.LevelKey)"
+                                                                           OpenPrUrls="@GetOpenPrUrlsForGroup(levelGroup)"
+                                                                           OpenPrPullMap="@GetOpenPrPullMapForGroup(levelGroup)"
+                                                                           />
+                                    }
+                                    else if (_linkByWrlId.TryGetValue(slot.WorkspaceRepositoryId, out var wr))
+                                    {
+                                        <WorkspaceRepositoriesRow @key="@($"row-{slot.WorkspaceRepositoryId}")"
+                                                                  WorkspaceId="@WorkspaceId"
                                                                   Link="@wr"
                                                                   PrInfo="@GetPrInfoForRepository(wr.RepositoryId)"
                                                                   IsPrVerified="@prByRepositoryId.ContainsKey(wr.RepositoryId)"
@@ -151,12 +164,13 @@
                                                                   IsUpdating="@IsJobRunning"
                                                                   ColSpan="@TableColSpan"
                                                                   OnVersionClick="() => CopyVersionToClipboard(wr.GitVersion!)"
-                                                                  OnVersionMouseLeave="() => OnVersionMouseLeave(wr.GitVersion)"
+                                                                  OnVersionMouseLeave="() => OnVersionMouseLeave(wr.GitVersion!)"
                                                                   OnBranchClick="() => ShowSwitchBranchModal(wr.RepositoryId, wr.BranchName, wr.Repository?.CloneUrl)"
                                                                   OnDependencyBadgeClick="() => OnDependencyBadgeClick(wr.RepositoryId, wr.UnmatchedDeps ?? 0)"
                                                                   OnCustomDependenciesClick="() => ShowCustomDependenciesModalAsync(wr.RepositoryId)"
                                                                   OnFileDependencyBadgeClick="() => OnFileDependencyBadgeClick(wr.RepositoryId)"
                                                                   OnDependencyBadgeKeydown="(e) => HandleDependencyBadgeKeydown(e, wr.RepositoryId, wr.UnmatchedDeps ?? 0)"
+                                                                  OnDependencyBadgeMouseEnter="() => OnDependencyBadgeMouseEnter(wr.RepositoryId)"
                                                                   OnDependencyBadgeMouseLeave="() => OnDependencyBadgeMouseLeave(wr.RepositoryId)"
                                                                   OnPushBadgeClick="() => OnPushBadgeClickAsync(wr.RepositoryId, wr.BranchName)"
                                                                   OnPullBadgeClick="() => OnPullBadgeClickAsync(wr.RepositoryId)"
@@ -167,21 +181,17 @@
                                                                   OnUpgradeClick="ShowSwitchBranchModalOnTagsTab"
                                                                   OnDismissError="() => DismissRepositoryError(wr.RepositoryId)" />
                                     }
+                                    else
+                                    {
+                                        <tr @key="@($"ph-{slot.WorkspaceRepositoryId}")" class="virtual-scroll-placeholder">
+                                            <td colspan="@TableColSpan" class="text-muted py-2">&nbsp;</td>
+                                        </tr>
+                                    }
                                 }
-                                @if (isLoadingMore)
+                                @if (_bottomSpacerPx > 0)
                                 {
-                                    <tr>
-                                        <td colspan="@TableColSpan" class="text-center text-muted py-3">
-                                            Loading more...
-                                        </td>
-                                    </tr>
-                                }
-                                @if (hasMore && !isLoadingMore)
-                                {
-                                    <tr>
-                                        <td colspan="@TableColSpan" class="p-0">
-                                            <InfiniteScrollLoadTrigger IsEnabled="true" OnLoadMore="LoadNextChunkAsync" />
-                                        </td>
+                                    <tr class="virtual-scroll-spacer" aria-hidden="true">
+                                        <td colspan="@TableColSpan" style="height:@(_bottomSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
                                     </tr>
                                 }
                             }

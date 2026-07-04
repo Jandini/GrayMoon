@@ -84,6 +84,20 @@
     font-size: 0.75rem;
 }
 
+.notif-repo-row--more {
+    justify-content: flex-start;
+}
+
+.notif-repo-more-link {
+    color: var(--link-color, #6cb6ff);
+    font-size: 0.75rem;
+    text-decoration: none;
+}
+
+.notif-repo-more-link:hover {
+    text-decoration: underline;
+}
+
 .notif-dep-badge {
     background-color: #dc3545;
     color: #fff;

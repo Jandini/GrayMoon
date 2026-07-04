@@ -243,6 +243,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasIndex(d => new { d.DependentProjectId, d.ReferencedProjectId })
                 .IsUnique();
 
+            entity.HasIndex(d => d.DependentProjectId)
+                .HasDatabaseName("IX_ProjectDependencies_DependentProjectId");
+
             entity.Property(d => d.Version)
                 .HasMaxLength(100);
 

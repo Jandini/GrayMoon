@@ -67,6 +67,12 @@
                                 }
                             </div>
                         }
+                        @if (n.TotalActionRepoCount > n.Repos.Count)
+                        {
+                            <div class="notif-repo-row notif-repo-row--more">
+                                <a class="notif-repo-more-link" href="/workspaces/@n.WorkspaceId">... and more</a>
+                            </div>
+                        }
                     </div>
                 }
                 @if (GetHoveredRepo(n) is { MismatchedDeps.Count: > 0 } hoveredRepo)
@@ -936,10 +942,23 @@
         {
             await using var scope = ServiceScopeFactory.CreateAsyncScope();
             var depService = scope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
-            var repoIdsThatNeedPush = n.Repos
-                .Where(r => r.OutgoingCommits > 0 || r.NewBranchNoPush)
-                .Select(r => r.RepositoryId)
-                .ToHashSet();
+            HashSet<int> repoIdsThatNeedPush;
+            if (n.TotalActionRepoCount > n.Repos.Count)
+            {
+                var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+                var ws = await workspaceRepo.GetByIdAsync(workspaceId);
+                repoIdsThatNeedPush = (ws?.Repositories ?? [])
+                    .Where(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false))
+                    .Select(wr => wr.RepositoryId)
+                    .ToHashSet();
+            }
+            else
+            {
+                repoIdsThatNeedPush = n.Repos
+                    .Where(r => r.OutgoingCommits > 0 || r.NewBranchNoPush)
+                    .Select(r => r.RepositoryId)
+                    .ToHashSet();
+            }
             var depInfo = await depService.GetPushDependencyInfoForRepoAsync(
                 workspaceId,
                 repo.RepositoryId,

@@ -51,6 +51,7 @@ public static class Migrations
         await MigrateWorkspaceFileLineStatusTokenColumnsAsync(dbContext);
         await MigrateWorkspaceFileLineStatusUniqueIndexFixAsync(dbContext);
         await MigrateListQueryIndexesAsync(dbContext);
+        await MigrateProjectDependenciesDependentIndexAsync(dbContext);
     }
 
     public static async Task MigrateRepositoriesTopicsAsync(AppDbContext dbContext)
@@ -1487,6 +1488,28 @@ public static class Migrations
             if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
             {
                 cmd.CommandText = "CREATE INDEX IX_WorkspaceRepositories_WorkspaceId_Level_Type_Deps_Id ON WorkspaceRepositories(WorkspaceId, DependencyLevel, RepositoryType, Dependencies, WorkspaceRepositoryId)";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+        catch
+        {
+            // Migration may already be applied
+        }
+    }
+
+    public static async Task MigrateProjectDependenciesDependentIndexAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='IX_ProjectDependencies_DependentProjectId'";
+            if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+            {
+                cmd.CommandText = "CREATE INDEX IX_ProjectDependencies_DependentProjectId ON ProjectDependencies(DependentProjectId)";
                 await cmd.ExecuteNonQueryAsync();
             }
         }

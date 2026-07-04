@@ -1,7 +1,5 @@
 using GrayMoon.App.Models;
-
 namespace GrayMoon.App.Services;
-
 public sealed record NotificationRepo(
     int RepositoryId,
     string RepositoryName,
@@ -13,7 +11,6 @@ public sealed record NotificationRepo(
     IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> MismatchedDeps,
     string? BranchName,
     string? DefaultBranchName);
-
 public sealed record WorkspaceNotification(
     int WorkspaceId,
     string WorkspaceName,
@@ -21,16 +18,14 @@ public sealed record WorkspaceNotification(
     bool IsPushRecommended,
     bool HasIncomingCommits,
     IReadOnlyList<NotificationRepo> Repos,
-    int? LowestLevelNeedingWork);
-
+    int? LowestLevelNeedingWork,
+    int TotalActionRepoCount);
 public sealed class WorkspacePendingActionsService
 {
+    public const int MaxListedActionRepos = 100;
     private readonly List<WorkspaceNotification> _notifications = new();
-
     public IReadOnlyList<WorkspaceNotification> Notifications => _notifications;
-
     public event Action? Changed;
-
     public void OnWorkspaceSynced(WorkspaceNotification? notification, int workspaceId)
     {
         _notifications.RemoveAll(n => n.WorkspaceId == workspaceId);
@@ -42,13 +37,11 @@ public sealed class WorkspacePendingActionsService
         }
         Changed?.Invoke();
     }
-
     public void Dismiss(int workspaceId)
     {
         _notifications.RemoveAll(n => n.WorkspaceId == workspaceId);
         Changed?.Invoke();
     }
-
     public static WorkspaceNotification? ComputeNotification(
         int workspaceId,
         string workspaceName,
@@ -65,14 +58,17 @@ public sealed class WorkspacePendingActionsService
             && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal));
         if (!hasUnmatched && !isPushRecommended && !hasIncoming)
             return null;
-
-        var repos = links
+        var actionLinks = links
             .Where(wr => !wr.IsOnTag && (
                 (wr.UnmatchedDeps ?? 0) > 0 ||
                 (wr.OutgoingCommits ?? 0) > 0 ||
                 wr.BranchHasUpstream == false))
             .OrderBy(wr => wr.DependencyLevel ?? 0)
             .ThenBy(wr => wr.Repository?.RepositoryName ?? string.Empty)
+            .ToList();
+        var totalActionRepoCount = actionLinks.Count;
+        var repos = actionLinks
+            .Take(MaxListedActionRepos)
             .Select(wr =>
             {
                 var depLines = mismatchedDeps != null && mismatchedDeps.TryGetValue(wr.RepositoryId, out var lines)
@@ -91,11 +87,17 @@ public sealed class WorkspacePendingActionsService
                     wr.DefaultBranchName);
             })
             .ToList();
-
         var lowestLevel = links
             .Where(wr => !wr.IsOnTag && (wr.UnmatchedDeps ?? 0) > 0)
             .Min(wr => (int?)wr.DependencyLevel);
-
-        return new WorkspaceNotification(workspaceId, workspaceName, hasUnmatched, isPushRecommended, hasIncoming, repos, lowestLevel);
+        return new WorkspaceNotification(
+            workspaceId,
+            workspaceName,
+            hasUnmatched,
+            isPushRecommended,
+            hasIncoming,
+            repos,
+            lowestLevel,
+            totalActionRepoCount);
     }
 }

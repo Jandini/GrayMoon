@@ -59,3 +59,9 @@ public sealed record WorkspaceRepositoryHeaderStateDto(
     bool HasTaggedRepos,
     bool IsOutOfSync,
     int? LowestLevelNeedingWork);
+
+/// <summary>Lightweight row for virtual-scroll index (no PR/join payload).</summary>
+public sealed record WorkspaceRepositoryLinkIndexEntry(
+    int WorkspaceRepositoryId,
+    int RepositoryId,
+    int? DependencyLevel);

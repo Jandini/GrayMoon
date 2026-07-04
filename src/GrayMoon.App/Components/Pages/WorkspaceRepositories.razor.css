@@ -21,6 +21,11 @@
     text-overflow: ellipsis;
     min-width: 0;
 }
+.repositories-virtual-tbody tr.virtual-scroll-placeholder td {
+    height: 48px;
+    box-sizing: border-box;
+}
+
 .workspace-repos-title-spacer {
     flex: 1 1 auto;
     min-width: 0;
