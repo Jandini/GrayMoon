@@ -215,21 +215,22 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
         }
     }
 
-    private async Task EnsureVisibleHydratedAsync(CancellationToken cancellationToken)
+    private async Task<bool> EnsureVisibleHydratedAsync(CancellationToken cancellationToken)
     {
         var missing = _virtual.GetMissingIds(_virtual.VisibleStart, _virtual.VisibleEnd);
         if (missing.Count == 0)
         {
-            return;
+            return false;
         }
 
         var rows = await RepositoryListQueryService.GetByIdsAsync(missing, cancellationToken);
         if (cancellationToken.IsCancellationRequested || _disposed)
         {
-            return;
+            return false;
         }
 
         _virtual.CacheItems(rows.Select(r => (r.RepositoryId, r)));
+        return rows.Count > 0;
     }
 
     [JSInvokable]
@@ -240,17 +241,23 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
             return;
         }
 
-        var generation = _queryLoader.Generation;
+        var scrollGeneration = _virtual.BeginScrollUpdate();
+        var queryGeneration = _queryLoader.Generation;
         var token = _queryLoader.GetQueryToken();
         var (start, end) = _virtual.ComputeRange(scrollTop, clientHeight);
-        _virtual.UpdateVisibleRange(start, end);
-        await EnsureVisibleHydratedAsync(token);
-        if (generation != _queryLoader.Generation || _disposed)
+        var rangeChanged = _virtual.UpdateVisibleRange(start, end);
+        var itemsHydrated = await EnsureVisibleHydratedAsync(token);
+        if (!_virtual.IsCurrentScroll(scrollGeneration)
+            || queryGeneration != _queryLoader.Generation
+            || _disposed)
         {
             return;
         }
 
-        await InvokeAsync(StateHasChanged);
+        if (rangeChanged || itemsHydrated)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private RepositoryListFilter BuildFilter()

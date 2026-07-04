@@ -7,13 +7,15 @@ namespace GrayMoon.App.Components.Shared;
 public sealed class VirtualTableScrollState<TItem> : IAsyncDisposable
 {
     public const double DefaultRowHeightPx = 48;
-    public const int DefaultOverscanSlots = 8;
-    public const int DefaultInitialViewportSlots = 40;
+    public const int DefaultOverscanSlots = 24;
+    public const int DefaultInitialViewportSlots = 48;
 
     private readonly List<int> _ids = new();
     private readonly Dictionary<int, TItem> _itemsById = new();
     private IDisposable? _dotNetRef;
     private bool _attached;
+    private int _scrollGeneration;
+    private ElementReference _scrollElement;
 
     public double RowHeightPx { get; init; } = DefaultRowHeightPx;
     public int OverscanSlots { get; init; } = DefaultOverscanSlots;
@@ -24,10 +26,15 @@ public sealed class VirtualTableScrollState<TItem> : IAsyncDisposable
     public double TopSpacerPx { get; private set; }
     public double BottomSpacerPx { get; private set; }
     public bool IsAttached => _attached;
+    public int ScrollGeneration => _scrollGeneration;
 
     public int Count => _ids.Count;
     public double TotalHeightPx => _ids.Count * RowHeightPx;
     public IReadOnlyList<int> Ids => _ids;
+
+    public int BeginScrollUpdate() => Interlocked.Increment(ref _scrollGeneration);
+
+    public bool IsCurrentScroll(int generation) => generation == _scrollGeneration;
 
     public void SetIndex(IReadOnlyList<int> ids)
     {
@@ -82,23 +89,31 @@ public sealed class VirtualTableScrollState<TItem> : IAsyncDisposable
         return missing;
     }
 
-    public void UpdateVisibleRange(int start, int end)
+    /// <summary>Returns true when the visible window actually changed.</summary>
+    public bool UpdateVisibleRange(int start, int end)
     {
         if (_ids.Count == 0)
         {
+            var wasEmpty = VisibleEnd < 0 && VisibleStart == 0 && TopSpacerPx == 0 && BottomSpacerPx == 0;
             VisibleStart = 0;
             VisibleEnd = -1;
             TopSpacerPx = 0;
             BottomSpacerPx = 0;
-            return;
+            return !wasEmpty;
         }
 
         start = Math.Clamp(start, 0, _ids.Count - 1);
         end = Math.Clamp(end, start, _ids.Count - 1);
+        if (start == VisibleStart && end == VisibleEnd)
+        {
+            return false;
+        }
+
         VisibleStart = start;
         VisibleEnd = end;
         TopSpacerPx = start * RowHeightPx;
         BottomSpacerPx = (_ids.Count - end - 1) * RowHeightPx;
+        return true;
     }
 
     public (int Start, int End) ComputeRange(double scrollTop, double clientHeight)
@@ -135,8 +150,6 @@ public sealed class VirtualTableScrollState<TItem> : IAsyncDisposable
             }
         }
     }
-
-    private ElementReference _scrollElement;
 
     public async Task AttachAsync<THost>(IJSRuntime js, THost host, ElementReference scrollElement)
         where THost : class

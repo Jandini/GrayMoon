@@ -97,11 +97,11 @@ public sealed partial class WorkspaceRepositories
             }
         }
     }
-    private async Task EnsureSlotsHydratedAsync(int start, int end, CancellationToken cancellationToken)
+    private async Task<bool> EnsureSlotsHydratedAsync(int start, int end, CancellationToken cancellationToken)
     {
         if (_slots.Count == 0 || end < start)
         {
-            return;
+            return false;
         }
         start = Math.Clamp(start, 0, _slots.Count - 1);
         end = Math.Clamp(end, start, _slots.Count - 1);
@@ -120,14 +120,15 @@ public sealed partial class WorkspaceRepositories
         }
         if (missingIds.Count == 0)
         {
-            return;
+            return false;
         }
         var dtos = await LinkListQueryService.GetByIdsAsync(WorkspaceId, missingIds, cancellationToken);
         if (cancellationToken.IsCancellationRequested || _disposed)
         {
-            return;
+            return false;
         }
         ApplyItemsFromDtos(dtos, replace: false);
+        return dtos.Count > 0;
     }
     [JSInvokable]
     public async Task OnVirtualScroll(double scrollTop, double clientHeight)
@@ -136,7 +137,9 @@ public sealed partial class WorkspaceRepositories
         {
             return;
         }
-        var generation = _queryLoader.Generation;
+
+        var scrollGeneration = Interlocked.Increment(ref _scrollGeneration);
+        var queryGeneration = _queryLoader.Generation;
         var token = _queryLoader.GetQueryToken();
         var rangeStart = scrollTop - (VirtualOverscanSlots * VirtualRowHeightPx);
         var rangeEnd = scrollTop + clientHeight + (VirtualOverscanSlots * VirtualRowHeightPx);
@@ -172,13 +175,20 @@ public sealed partial class WorkspaceRepositories
             start = 0;
             end = Math.Min(_slots.Count - 1, VirtualInitialViewportSlots - 1);
         }
-        UpdateVisibleRange(start, end);
-        await EnsureSlotsHydratedAsync(start, end, token);
-        if (generation != _queryLoader.Generation || _disposed)
+
+        var rangeChanged = UpdateVisibleRange(start, end);
+        var itemsHydrated = await EnsureSlotsHydratedAsync(start, end, token);
+        if (scrollGeneration != _scrollGeneration
+            || queryGeneration != _queryLoader.Generation
+            || _disposed)
         {
             return;
         }
-        await InvokeAsync(StateHasChanged);
+
+        if (rangeChanged || itemsHydrated)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
     }
     private async Task AttachVirtualScrollAsync()
     {

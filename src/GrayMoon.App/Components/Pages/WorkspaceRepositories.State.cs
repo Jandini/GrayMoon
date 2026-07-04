@@ -9,8 +9,9 @@ public sealed partial class WorkspaceRepositories
 {
     private const double VirtualRowHeightPx = 48;
     private const double VirtualHeaderHeightPx = 40;
-    private const int VirtualOverscanSlots = 8;
-    private const int VirtualInitialViewportSlots = 40;
+    private const int VirtualOverscanSlots = 24;
+    private const int VirtualInitialViewportSlots = 48;
+    private int _scrollGeneration;
     private readonly DebouncedQueryLoader _queryLoader = new();
     private readonly Dictionary<int, WorkspaceRepositoryLink> _linkByRepoId = new();
     private readonly Dictionary<int, WorkspaceRepositoryLink> _linkByWrlId = new();
@@ -229,18 +230,26 @@ public sealed partial class WorkspaceRepositories
         }
         return hydrated.All(wr => wr.IsOnTag);
     }
-    private void UpdateVisibleRange(int start, int end)
+    /// <summary>Returns true when the visible window actually changed.</summary>
+    private bool UpdateVisibleRange(int start, int end)
     {
-        start = Math.Clamp(start, 0, Math.Max(0, _slots.Count - 1));
-        end = Math.Clamp(end, start, Math.Max(-1, _slots.Count - 1));
         if (_slots.Count == 0)
         {
+            var wasEmpty = _visibleEnd < 0 && _visibleStart == 0 && _topSpacerPx == 0 && _bottomSpacerPx == 0;
             _visibleStart = 0;
             _visibleEnd = -1;
             _topSpacerPx = 0;
             _bottomSpacerPx = 0;
-            return;
+            return !wasEmpty;
         }
+
+        start = Math.Clamp(start, 0, _slots.Count - 1);
+        end = Math.Clamp(end, start, _slots.Count - 1);
+        if (start == _visibleStart && end == _visibleEnd)
+        {
+            return false;
+        }
+
         _visibleStart = start;
         _visibleEnd = end;
         double top = 0;
@@ -255,6 +264,7 @@ public sealed partial class WorkspaceRepositories
         }
         _topSpacerPx = top;
         _bottomSpacerPx = bottom;
+        return true;
     }
     private IReadOnlyList<VirtualSlot> VisibleSlots
     {

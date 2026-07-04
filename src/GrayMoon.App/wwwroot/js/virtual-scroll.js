@@ -1,5 +1,20 @@
 window.grayMoonVirtualScroll = (function () {
     const stateByEl = new WeakMap();
+
+    function invokeScroll(el, state, scrollTop, clientHeight) {
+        state.inflight = true;
+        state.dotNetRef.invokeMethodAsync('OnVirtualScroll', scrollTop, clientHeight)
+            .catch(function () { })
+            .finally(function () {
+                state.inflight = false;
+                if (state.pending) {
+                    var pending = state.pending;
+                    state.pending = null;
+                    invokeScroll(el, state, pending.scrollTop, pending.clientHeight);
+                }
+            });
+    }
+
     function onScroll(ev) {
         var el = ev.currentTarget;
         var state = stateByEl.get(el);
@@ -11,20 +26,33 @@ window.grayMoonVirtualScroll = (function () {
         }
         state.raf = requestAnimationFrame(function () {
             state.raf = 0;
-            state.dotNetRef.invokeMethodAsync('OnVirtualScroll', el.scrollTop, el.clientHeight).catch(function () { });
+            var scrollTop = el.scrollTop;
+            var clientHeight = el.clientHeight;
+            if (state.inflight) {
+                state.pending = { scrollTop: scrollTop, clientHeight: clientHeight };
+                return;
+            }
+            invokeScroll(el, state, scrollTop, clientHeight);
         });
     }
+
     return {
         attach: function (tbody, dotNetRef, totalHeight) {
             if (!tbody) {
                 return;
             }
             grayMoonVirtualScroll.detach(tbody);
-            var state = { dotNetRef: dotNetRef, raf: 0, totalHeight: totalHeight || 0 };
+            var state = {
+                dotNetRef: dotNetRef,
+                raf: 0,
+                totalHeight: totalHeight || 0,
+                inflight: false,
+                pending: null
+            };
             stateByEl.set(tbody, state);
             tbody.addEventListener('scroll', onScroll, { passive: true });
             tbody.scrollTop = 0;
-            dotNetRef.invokeMethodAsync('OnVirtualScroll', 0, tbody.clientHeight).catch(function () { });
+            invokeScroll(tbody, state, 0, tbody.clientHeight);
         },
         setTotalHeight: function (tbody, totalHeight) {
             var state = tbody ? stateByEl.get(tbody) : null;
@@ -44,6 +72,7 @@ window.grayMoonVirtualScroll = (function () {
             if (state.raf) {
                 cancelAnimationFrame(state.raf);
             }
+            state.pending = null;
             stateByEl.delete(tbody);
         }
     };
