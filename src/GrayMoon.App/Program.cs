@@ -7,6 +7,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Queries;
 using GrayMoon.App.Services.Security;
 using GrayMoon.Common;
 using Microsoft.AspNetCore.DataProtection;
@@ -45,8 +46,11 @@ try
         options.MaximumReceiveMessageSize = 10 * 1024 * 1024;
     });
 
-    // Database (SQLite) for persisted data - stored in db/ for easy container volume mounting
+    // Database (SQLite) for persisted data - stored in db/ for easy container volume mounting.
+    // WAL + busy_timeout so a large workspace's reads/writes do not block other circuits as hard.
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=db/graymoon.db";
+    if (!connectionString.Contains("Cache=", StringComparison.OrdinalIgnoreCase))
+        connectionString += connectionString.EndsWith(';') ? "Cache=Shared;" : ";Cache=Shared;";
     builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connectionString));
     builder.Services.AddScoped<ConnectorRepository>();
     builder.Services.AddScoped<GitHubRepositoryRepository>();
@@ -70,6 +74,9 @@ try
     builder.Services.AddScoped<WorkspaceGitService>();
     builder.Services.AddScoped<ConnectorHealthService>();
     builder.Services.AddScoped<GitHubRepositoryService>();
+    builder.Services.AddScoped<IRepositoryListQueryService, RepositoryListQueryService>();
+    builder.Services.AddScoped<IWorkspaceProjectListQueryService, WorkspaceProjectListQueryService>();
+    builder.Services.AddScoped<IWorkspaceRepositoryLinkListQueryService, WorkspaceRepositoryLinkListQueryService>();
     builder.Services.AddScoped<GitHubActionsService>();
     builder.Services.AddScoped<GhaWorkflowLiveFeedService>();
     builder.Services.AddScoped<GitHubPullRequestService>();
@@ -158,6 +165,10 @@ try
 
         dbContext.Database.EnsureCreated();
         await Migrations.RunAllAsync(dbContext);
+
+        await dbContext.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
+        await dbContext.Database.ExecuteSqlRawAsync("PRAGMA busy_timeout=5000;");
+        await dbContext.Database.ExecuteSqlRawAsync("PRAGMA synchronous=NORMAL;");
     }
 
     static string? GetDatabasePath(string connectionString)

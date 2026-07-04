@@ -1,10 +1,12 @@
 @page "/repositories"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
-@implements IDisposable
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services
+@using GrayMoon.App.Services.Queries
 @using GrayMoon.App.Components.Shared
+@using static GrayMoon.App.Components.Shared.VirtualScrollUi
 @inject GitHubRepositoryService RepositoryService
+@inject IRepositoryListQueryService RepositoryListQueryService
 @inject ILogger<Repositories> Logger
 @using Microsoft.AspNetCore.Components.Web
 
@@ -16,13 +18,17 @@
             <div class="workspace-repos-title-row">
                 <h2 class="workspace-repos-title">Repositories</h2>
                 <p class="text-muted mb-0 workspace-repos-subtitle repositories-page__subtitle">
-                    @if (repositories != null && repositories.Count > 0)
+                    @if (hasLoadedOnce && !isInitialLoading)
                     {
                         var repoSuffix = HasSearchFilter ? " found" : "";
-                        var repoCount = HasSearchFilter ? (GetFilteredRepositories()?.Count ?? 0) : repositories.Count;
+                        var repoCount = totalCount ?? 0;
                         <span>@($"{repoCount} {(repoCount == 1 ? "repository" : "repositories")}{repoSuffix}")</span>
                     }
-                    else if (repositories != null)
+                    else if (hasLoadedOnce && catalogHasAny)
+                    {
+                        <span>&nbsp;</span>
+                    }
+                    else if (hasLoadedOnce)
                     {
                         <span>0 repositories</span>
                     }
@@ -35,11 +41,12 @@
             </div>
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
                 <div class="workspace-grid-search-wrapper">
-                    <FilterSearchInput @bind-Value="searchTerm"
+                    <FilterSearchInput Value="@searchTerm"
+                                       ValueChanged="OnSearchTermChangedAsync"
                                        InputId="repositories-search"
                                        InputAdditionalClass="workspace-grid-search"
                                        Placeholder="Search repositories…"
-                                       Disabled="@(repositories == null || repositories.Count == 0)"
+                                       Disabled="@(isInitialLoading && !hasLoadedOnce)"
                                        OnKeyDown="OnSearchKeyDown"
                                        OnClear="ClearSearchFilter" />
                 </div>
@@ -92,7 +99,7 @@
                 }
                 <div class="card-body p-0">
                     <div class="table-responsive">
-                        <table class="table table-striped table-hover mb-0 repositories-table resizable-columns">
+                        <table class="table table-hover mb-0 repositories-table resizable-columns virtual-scroll-table">
                         <thead class="table-dark">
                             <tr>
                                 <th class="col-repo">Repository</th>
@@ -102,8 +109,8 @@
                                 <th class="col-visibility col-status-badge">Visibility</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            @if (repositories == null)
+                        <tbody @ref="_tbodyRef">
+                            @if (isInitialLoading && _virtual.Count == 0)
                             {
                                 <tr>
                                     <td colspan="5" class="text-center text-muted py-4">
@@ -111,7 +118,7 @@
                                     </td>
                                 </tr>
                             }
-                            else if (repositories.Count == 0)
+                            else if (!catalogHasAny && _virtual.Count == 0)
                             {
                                 <tr>
                                     <td colspan="5" class="text-center text-muted py-4">
@@ -119,7 +126,7 @@
                                     </td>
                                 </tr>
                             }
-                            else if (GetFilteredRepositories()?.Count == 0)
+                            else if (hasLoadedOnce && _virtual.Count == 0)
                             {
                                 <tr>
                                     <td colspan="5" class="text-center text-muted py-4">
@@ -129,33 +136,54 @@
                             }
                             else
                             {
-                                @foreach (var repository in GetFilteredRepositories() ?? new List<GitHubRepositoryEntry>())
+                                @if (_virtual.TopSpacerPx > 0)
                                 {
-                                    <tr>
-                                        <td class="col-repo"><strong>@repository.RepositoryName</strong></td>
-                                        <td class="col-owner">@(string.IsNullOrWhiteSpace(repository.OrgName) ? "-" : repository.OrgName)</td>
-                                        <td class="col-topics">
-                                            @if (!string.IsNullOrWhiteSpace(repository.Topics))
-                                            {
-                                                @foreach (var topic in repository.Topics.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                                    <tr class="virtual-scroll-spacer" aria-hidden="true">
+                                        <td colspan="5" style="height:@(_virtual.TopSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
+                                    </tr>
+                                }
+                                @foreach (var (index, id, repository) in _virtual.VisibleRows)
+                                {
+                                    if (repository is null)
+                                    {
+                                        <tr @key="@id" class="virtual-scroll-placeholder @StripeClass(index)">
+                                            <td colspan="5">&nbsp;</td>
+                                        </tr>
+                                    }
+                                    else
+                                    {
+                                        <tr @key="@id" class="@StripeClass(index)">
+                                            <td class="col-repo"><strong>@repository.RepositoryName</strong></td>
+                                            <td class="col-owner">@(string.IsNullOrWhiteSpace(repository.OrgName) ? "-" : repository.OrgName)</td>
+                                            <td class="col-topics">
+                                                @if (!string.IsNullOrWhiteSpace(repository.Topics))
                                                 {
-                                                    <span class="badge badge-topic">@topic</span>
+                                                    @foreach (var topic in repository.Topics.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                                                    {
+                                                        <span class="badge badge-topic">@topic</span>
+                                                    }
                                                 }
-                                            }
-                                        </td>
-                                        <td class="col-connector">@repository.ConnectorName</td>
-                                        <td class="col-visibility col-status-badge">
-                                            @if (repository.Archived)
-                                            {
-                                                <span class="badge badge-archived">archived</span>
-                                            }
-                                            else
-                                            {
-                                                <span class="badge @(repository.Visibility == "Private" ? "badge-private" : "badge-public")">
-                                                    @repository.Visibility.ToLowerInvariant()
-                                                </span>
-                                            }
-                                        </td>
+                                            </td>
+                                            <td class="col-connector">@repository.ConnectorName</td>
+                                            <td class="col-visibility col-status-badge">
+                                                @if (repository.Archived)
+                                                {
+                                                    <span class="badge badge-archived">archived</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge @(repository.Visibility == "Private" ? "badge-private" : "badge-public")">
+                                                        @repository.Visibility.ToLowerInvariant()
+                                                    </span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                                @if (_virtual.BottomSpacerPx > 0)
+                                {
+                                    <tr class="virtual-scroll-spacer" aria-hidden="true">
+                                        <td colspan="5" style="height:@(_virtual.BottomSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
                                     </tr>
                                 }
                             }
@@ -169,133 +197,3 @@
 </div>
 
 <LoadingOverlay IsVisible="@isPersisting" Message="@(fetchedRepositoryCount is null || fetchedRepositoryCount == 0 ? "Fetching repositories..." : $"Fetched {fetchedRepositoryCount} {(fetchedRepositoryCount == 1 ? "repository" : "repositories")}")" OnAbort="AbortFetchRepositories" />
-
-@code {
-    private List<GitHubRepositoryEntry>? repositories;
-    private IReadOnlyList<ConnectorFetchError>? connectorErrors;
-    private IReadOnlyList<RenamedRepositoryInfo>? renamedRepositories;
-    private string? errorMessage;
-    private string searchTerm = string.Empty;
-    private bool isPersisting;
-
-    private bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
-
-    private void ClearSearchFilter()
-    {
-        searchTerm = string.Empty;
-        StateHasChanged();
-    }
-
-    private void OnSearchKeyDown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Escape")
-        {
-            searchTerm = string.Empty;
-            StateHasChanged();
-        }
-    }
-
-    private int? fetchedRepositoryCount;
-    private CancellationTokenSource? _fetchRepositoriesCts;
-
-    private void DismissConnectorErrors()
-    {
-        connectorErrors = null;
-    }
-
-    public void Dispose()
-    {
-        _fetchRepositoriesCts?.Cancel();
-        _fetchRepositoriesCts?.Dispose();
-    }
-
-    protected override async Task OnInitializedAsync()
-    {
-        await LoadRepositoriesAsync();
-    }
-
-    private async Task LoadRepositoriesAsync()
-    {
-        try
-        {
-            repositories = null;
-            connectorErrors = null;
-            errorMessage = null;
-            var persisted = await RepositoryService.GetPersistedRepositoriesAsync();
-            if (persisted.Count > 0)
-            {
-                repositories = persisted;
-                return;
-            }
-
-            await ReloadRepositoriesAsync();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Error loading repositories");
-            errorMessage = "Failed to load repositories. Please try again later.";
-            repositories = new List<GitHubRepositoryEntry>();
-        }
-    }
-
-    private void AbortFetchRepositories()
-    {
-        _fetchRepositoriesCts?.Cancel();
-    }
-
-    private async Task ReloadRepositoriesAsync()
-    {
-        _fetchRepositoriesCts?.Cancel();
-        _fetchRepositoriesCts = new CancellationTokenSource();
-
-        try
-        {
-            isPersisting = true;
-            fetchedRepositoryCount = null;
-            await InvokeAsync(StateHasChanged);
-            errorMessage = null;
-            connectorErrors = null;
-
-            var progress = new Progress<int>(count =>
-            {
-                fetchedRepositoryCount = count;
-                _ = InvokeAsync(StateHasChanged);
-            });
-            var result = await RepositoryService.RefreshRepositoriesAsync(progress, _fetchRepositoriesCts.Token);
-            repositories = result.Repositories.ToList();
-            connectorErrors = result.ConnectorErrors.Count > 0 ? result.ConnectorErrors : null;
-            renamedRepositories = result.RenamedRepositories.Count > 0 ? result.RenamedRepositories : null;
-        }
-        catch (OperationCanceledException)
-        {
-            repositories = (await RepositoryService.GetPersistedRepositoriesAsync()).ToList();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Error refreshing repositories");
-            errorMessage = "Failed to refresh repositories. Please try again later.";
-            repositories = new List<GitHubRepositoryEntry>();
-        }
-        finally
-        {
-            isPersisting = false;
-        }
-    }
-
-    private List<GitHubRepositoryEntry>? GetFilteredRepositories()
-    {
-        if (repositories == null)
-        {
-            return null;
-        }
-
-        if (string.IsNullOrWhiteSpace(searchTerm))
-        {
-            return repositories;
-        }
-
-        return repositories
-            .Where(r => GitHubRepositorySearchMatcher.Matches(r, searchTerm))
-            .ToList();
-    }
-}

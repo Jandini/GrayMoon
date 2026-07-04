@@ -3,10 +3,12 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
+@using GrayMoon.App.Services.Queries
 @using GrayMoon.App.Components.Shared
+@using static GrayMoon.App.Components.Shared.VirtualScrollUi
 @using Microsoft.AspNetCore.Components.Web
 @inject WorkspaceRepository WorkspaceRepository
-@inject WorkspaceProjectRepository WorkspaceProjectRepository
+@inject IWorkspaceProjectListQueryService WorkspaceProjectListQueryService
 @inject ILogger<WorkspaceProjects> Logger
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
@@ -18,17 +20,17 @@
             <div class="workspace-repos-title-row">
                 <h2 class="workspace-repos-title">Projects</h2>
                 <p class="text-muted mb-0 workspace-repos-subtitle workspace-projects__subtitle">
-                    @if (!isLoading && projects.Count > 0)
+                    @if (hasLoadedOnce && !isInitialLoading)
                     {
                         var projSuffix = HasSearchFilter ? " found" : "";
-                        var projCount = HasSearchFilter ? FilteredProjectCount : projects.Count;
+                        var projCount = totalCount ?? 0;
                         <span>@($"{projCount} {(projCount == 1 ? "project" : "projects")}{projSuffix}")</span>
                     }
-                    else if (!isLoading && workspace != null)
+                    else if (hasLoadedOnce && workspace != null && totalCount == 0 && !HasSearchFilter)
                     {
                         <span>0 projects</span>
                     }
-                    else if (isLoading)
+                    else if (isInitialLoading)
                     {
                         <span>&nbsp;</span>
                     }
@@ -37,11 +39,12 @@
             </div>
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
                 <div class="workspace-grid-search-wrapper">
-                    <FilterSearchInput @bind-Value="searchTerm"
+                    <FilterSearchInput Value="@searchTerm"
+                                       ValueChanged="OnSearchTermChangedAsync"
                                        InputId="workspace-projects-search"
                                        InputAdditionalClass="workspace-grid-search"
                                        Placeholder="Search project name or file..."
-                                       Disabled="@(isLoading || projects.Count == 0)"
+                                       Disabled="@(isInitialLoading && !hasLoadedOnce)"
                                        OnKeyDown="OnSearchKeyDown"
                                        OnClear="ClearSearchFilter" />
                 </div>
@@ -60,7 +63,7 @@
             <div class="card page-card mb-4">
                 <div class="card-body p-0">
                     <div class="table-responsive">
-                        <table class="table table-striped table-hover mb-0 projects-table resizable-columns">
+                        <table class="table table-hover mb-0 projects-table resizable-columns virtual-scroll-table">
                             <thead class="table-dark">
                                 <tr>
                                     <th class="col-name">Name</th>
@@ -69,8 +72,8 @@
                                     <th class="col-file">File</th>
                                 </tr>
                             </thead>
-                            <tbody>
-                                @if (isLoading)
+                            <tbody @ref="_tbodyRef">
+                                @if (isInitialLoading && _virtual.Count == 0)
                                 {
                                     <tr>
                                         <td colspan="4" class="text-center text-muted py-4">
@@ -78,7 +81,7 @@
                                         </td>
                                     </tr>
                                 }
-                                else if (projects.Count == 0)
+                                else if (hasLoadedOnce && totalCount == 0 && !HasSearchFilter)
                                 {
                                     <tr>
                                         <td colspan="4" class="text-center text-muted py-4">
@@ -96,13 +99,34 @@
                                 }
                                 else
                                 {
-                                    @foreach (var p in FilteredProjects)
+                                    @if (_virtual.TopSpacerPx > 0)
                                     {
-                                        <tr>
-                                            <td class="col-name"><strong>@p.ProjectName</strong></td>
-                                            <td class="col-type text-muted">@p.ProjectType</td>
-                                            <td class="col-framework"><span class="badge bg-secondary">@(p.TargetFramework ?? "-")</span></td>
-                                            <td class="col-file text-muted" title="@p.ProjectFilePath">@GetFileName(p.ProjectFilePath)</td>
+                                        <tr class="virtual-scroll-spacer" aria-hidden="true">
+                                            <td colspan="4" style="height:@(_virtual.TopSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
+                                        </tr>
+                                    }
+                                    @foreach (var (index, id, p) in _virtual.VisibleRows)
+                                    {
+                                        if (p is null)
+                                        {
+                                            <tr @key="@id" class="virtual-scroll-placeholder @StripeClass(index)">
+                                                <td colspan="4">&nbsp;</td>
+                                            </tr>
+                                        }
+                                        else
+                                        {
+                                            <tr @key="@id" class="@StripeClass(index)">
+                                                <td class="col-name"><strong>@p.ProjectName</strong></td>
+                                                <td class="col-type text-muted">@p.ProjectType</td>
+                                                <td class="col-framework"><span class="badge bg-secondary">@(p.TargetFramework ?? "-")</span></td>
+                                                <td class="col-file text-muted" title="@p.ProjectFilePath">@GetFileName(p.ProjectFilePath)</td>
+                                            </tr>
+                                        }
+                                    }
+                                    @if (_virtual.BottomSpacerPx > 0)
+                                    {
+                                        <tr class="virtual-scroll-spacer" aria-hidden="true">
+                                            <td colspan="4" style="height:@(_virtual.BottomSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
                                         </tr>
                                     }
                                 }
@@ -115,88 +139,4 @@
     }
 </div>
 
-<LoadingOverlay IsVisible="@isLoading" Message="Loading projects..." />
-
-@code {
-    [Parameter] public int WorkspaceId { get; set; }
-
-    private WorkspaceModel? workspace;
-    private List<WorkspaceProject> projects = new();
-    private string? errorMessage;
-    private bool isLoading = true;
-    private string searchTerm = string.Empty;
-
-    private bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
-
-    private IReadOnlyList<WorkspaceProject> FilteredProjects => GetFilteredProjects();
-
-    private int FilteredProjectCount => FilteredProjects.Count;
-
-    private bool NoProjectsMatchSearch =>
-        !isLoading && projects.Count > 0 && FilteredProjects.Count == 0;
-
-    private IReadOnlyList<WorkspaceProject> GetFilteredProjects()
-    {
-        if (string.IsNullOrWhiteSpace(searchTerm))
-        {
-            return projects;
-        }
-
-        return projects.Where(p => WorkspaceProjectSearchMatcher.Matches(p, searchTerm)).ToList();
-    }
-
-    private void ClearSearchFilter()
-    {
-        searchTerm = string.Empty;
-        StateHasChanged();
-    }
-
-    private void OnSearchKeyDown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Escape")
-        {
-            searchTerm = string.Empty;
-            StateHasChanged();
-        }
-    }
-
-    protected override async Task OnInitializedAsync()
-    {
-        await LoadAsync();
-    }
-
-    private async Task LoadAsync()
-    {
-        try
-        {
-            isLoading = true;
-            errorMessage = null;
-            workspace = await WorkspaceRepository.GetByIdAsync(WorkspaceId);
-            if (workspace == null)
-            {
-                errorMessage = "Workspace not found.";
-                projects = new List<WorkspaceProject>();
-                return;
-            }
-            projects = await WorkspaceProjectRepository.GetByWorkspaceIdAsync(WorkspaceId);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Error loading projects for workspace {WorkspaceId}", WorkspaceId);
-            errorMessage = "Failed to load projects. Please try again later.";
-            projects = new List<WorkspaceProject>();
-        }
-        finally
-        {
-            isLoading = false;
-        }
-    }
-
-    private static string GetFileName(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return "-";
-        var name = path.Replace('\\', '/');
-        var last = name.LastIndexOf('/');
-        return last >= 0 ? name[(last + 1)..] : name;
-    }
-}
+<LoadingOverlay IsVisible="@(isInitialLoading && !hasLoadedOnce)" Message="Loading projects..." />

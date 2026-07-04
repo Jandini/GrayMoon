@@ -9,7 +9,7 @@ public sealed partial class WorkspaceRepositories
 
     private Task OnUpdateFilesClickAsync()
     {
-        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
+        if (workspace == null || !HasRepositories || IsJobRunning)
             return Task.CompletedTask;
 
         errorMessage = null;
@@ -129,7 +129,7 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
-        var repo = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId);
+        var repo = TryGetLink(repositoryId);
         var repoName = repo?.Repository?.RepositoryName;
 
         if (repo != null

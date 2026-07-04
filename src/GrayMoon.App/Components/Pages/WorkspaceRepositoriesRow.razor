@@ -23,7 +23,7 @@
         || CustomDependencyLines.Count > 0;
     var depOkBadgeInactive = ActionsDisabled || Link.IsOnTag;
 
-    <tr>
+    <tr class="@RowCssClass">
         <td class="col-repo">
             @if (!string.IsNullOrEmpty(repoUrl))
             {
@@ -112,6 +112,7 @@
                     else if (unmatchedWithFiles == 0)
                     {
                         <span class="dependency-badge-tooltip-wrap dependency-badge-link @(depOkBadgeInactive ? "dependency-badge-link--disabled dependency-badge-link--readonly" : "") @(IsDependencyBadgeClicked ? "dependency-badge-tooltip-wrap--clicked" : "")"
+                              @onmouseenter="OnDependencyBadgeMouseEnter"
                               @onmouseleave="OnDependencyBadgeMouseLeave">
                             <span class="badge build-dep-badge build-dep-badge-ok dependency-badge-graph-link"
                                   role="button"
@@ -232,6 +233,7 @@
                               @onclick="HandleDependencyBadgeClick"
                               @onclick:preventDefault
                               @onkeydown="OnDependencyBadgeKeydown"
+                              @onmouseenter="OnDependencyBadgeMouseEnter"
                               @onmouseleave="OnDependencyBadgeMouseLeave">
                             <span class="badge build-dep-badge @(depBadgeOnTag ? "build-dep-badge-none" : "build-dep-badge-mismatch")">@unmatchedWithFiles of @totalWithFiles</span>
                             @if (MismatchedDependencyLines.Count > 0 || MismatchedFileVersionLines.Count > 0 || CustomDependencyLines.Count > 0)
@@ -396,6 +398,8 @@
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
+    /// <summary>Absolute-index stripe class (virtual-row-odd / virtual-row-even) so striping stays stable while scrolling.</summary>
+    [Parameter] public string? RowCssClass { get; set; }
     [Parameter] public WorkspaceRepositoryLink? Link { get; set; }
     [Parameter] public PullRequestInfo? PrInfo { get; set; }
     [Parameter] public bool IsPrVerified { get; set; }
@@ -424,6 +428,7 @@
     [Parameter] public EventCallback OnCustomDependenciesClick { get; set; }
     [Parameter] public EventCallback OnFileDependencyBadgeClick { get; set; }
     [Parameter] public EventCallback<KeyboardEventArgs> OnDependencyBadgeKeydown { get; set; }
+    [Parameter] public EventCallback OnDependencyBadgeMouseEnter { get; set; }
     [Parameter] public EventCallback OnDependencyBadgeMouseLeave { get; set; }
     [Parameter] public EventCallback OnPushBadgeClick { get; set; }
     [Parameter] public EventCallback OnPullBadgeClick { get; set; }

@@ -73,7 +73,7 @@
                   data-pr-pull-map="@OpenPrPullMapJson"
                   tabindex="0"
                   aria-haspopup="true">
-                <span class="dependency-level-count-num">@RepositoryCount</span> @(RepositoryCount == 1 ? "repository" : "repositories")
+                <span class="dependency-level-count-num">@DisplayRepositoryCount</span> @(DisplayRepositoryCount == 1 ? "repository" : "repositories")
             </span>
         </div>
     </td>
@@ -84,6 +84,8 @@
     [Parameter] public int? LevelKey { get; set; }
     [Parameter] public int ColSpan { get; set; } = 8;
     [Parameter] public IEnumerable<WorkspaceRepositoryLink>? Group { get; set; }
+    /// <summary>Total repositories at this level (may exceed hydrated <see cref="Group"/> count under virtual scroll).</summary>
+    [Parameter] public int RepositoryCount { get; set; }
     [Parameter] public bool ActionsDisabled { get; set; }
     [Parameter] public EventCallback OnSyncToDefault { get; set; }
     [Parameter] public EventCallback OnSyncCommits { get; set; }
@@ -92,7 +94,7 @@
     [Parameter] public IReadOnlyList<string>? OpenPrUrls { get; set; }
     [Parameter] public IReadOnlyDictionary<string, string>? OpenPrPullMap { get; set; }
 
-    private int RepositoryCount => Group?.Count() ?? 0;
+    private int DisplayRepositoryCount => RepositoryCount > 0 ? RepositoryCount : (Group?.Count() ?? 0);
 
     private string OpenPrUrlsJson => System.Text.Json.JsonSerializer.Serialize(OpenPrUrls ?? (IReadOnlyList<string>)[]);
 

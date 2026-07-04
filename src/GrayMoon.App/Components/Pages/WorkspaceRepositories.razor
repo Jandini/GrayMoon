@@ -3,7 +3,7 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Models.Api
 @using GrayMoon.App.Repositories
-@using GrayMoon.App.Services
+@using GrayMoon.App.Services.Queries
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Components.Modals
 @using Microsoft.AspNetCore.Components.Web
@@ -16,9 +16,9 @@
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
         <WorkspaceRepositoriesHeader WorkspaceName="@(workspace?.Name)"
-                                    RepositoriesCount="@(workspaceRepositories.Count)"
+                                    RepositoriesCount="@(_headerState?.TotalCount ?? 0)"
                                     HasFilter="@HasSearchFilter"
-                                    FilteredCount="@(FilteredWorkspaceRepositories.Count)"
+                                    FilteredCount="@(totalCount ?? 0)"
                                     SearchTerm="@searchTerm"
                                     HasUnmatchedDependencies="@hasUnmatchedDependencies"
                                     IsPushRecommended="@isPushRecommended"
@@ -30,7 +30,7 @@
                                     IsCommitSyncing="@IsJobRunning"
                                     AgentTasksPendingCount="@AgentTasksPendingCount"
                                     IsRestoringPackages="@IsJobRunning"
-                                    IsOverlayVisible="@(isLoading || IsJobRunning || ShowRepositoriesFetchOverlay)"
+                                    IsOverlayVisible="@(isInitialLoading && !hasLoadedOnce || IsJobRunning || ShowRepositoriesFetchOverlay)"
                                     OnShowRepositories="ShowRepositoriesModalAsync"
                                     OnNewFeature="ShowNewFeatureModalAsync"
                                     OnShowBranch="() => ShowBranchModalAsync()"
@@ -63,7 +63,7 @@
             <div class="card page-card mb-4">
                     <div class="card-body p-0">
                         <div class="table-responsive">
-                            <table class="table table-striped table-hover mb-0 repositories-table resizable-columns">
+                            <table class="table table-hover mb-0 repositories-table resizable-columns virtual-scroll-table">
                         <thead class="table-dark">
                             <tr>
                                 <th class="col-repo">Repository</th>
@@ -90,8 +90,8 @@
                                 </th>
                             </tr>
                         </thead>
-                        <tbody>
-                            @if (isLoading)
+                        <tbody @ref="_tbodyRef" class="repositories-virtual-tbody">
+                            @if (isInitialLoading && _slots.Count == 0)
                             {
                                 <tr>
                                     <td colspan="@TableColSpan" class="text-center text-muted py-4">
@@ -99,7 +99,7 @@
                                     </td>
                                 </tr>
                             }
-                            else if (workspaceRepositories.Count == 0)
+                            else if (hasLoadedOnce && (_headerState?.TotalCount ?? 0) == 0 && !HasSearchFilter)
                             {
                                 <tr>
                                     <td colspan="@TableColSpan" class="text-center text-muted py-4">
@@ -107,7 +107,7 @@
                                     </td>
                                 </tr>
                             }
-                            else if (FilteredWorkspaceRepositories.Count == 0)
+                            else if (NoRepositoriesMatchSearch)
                             {
                                 <tr>
                                     <td colspan="@TableColSpan" class="text-center text-muted py-4">
@@ -117,23 +117,37 @@
                             }
                             else
                             {
-                                @foreach (var group in FilteredLevelGroups)
+                                @if (_topSpacerPx > 0)
                                 {
-                                    <WorkspaceRepositoriesLevelHeader WorkspaceId="@WorkspaceId"
-                                                                       LevelKey="@group.Key"
-                                                                       ColSpan="@TableColSpan"
-                                                                       Group="@group"
-                                                                       ActionsDisabled="@group.All(wr => wr.IsOnTag)"
-                                                                       OnSyncToDefault="async () => await ShowConfirmSyncToDefaultLevel(group.Select(wr => wr.RepositoryId).ToList())"
-                                                                       OnSyncCommits="() => ShowConfirmSyncCommitsLevel(group.Select(wr => wr.RepositoryId).ToList())"
-                                                                       OnOpenPr="() => OpenPullRequestDialogForRepositoriesAsync(group.ToList())"
-                                                                       OnSyncLevel="() => ShowConfirmSyncLevel(group.Select(wr => wr.RepositoryId).ToList())"
-                                                                       OpenPrUrls="@GetOpenPrUrlsForGroup(group)"
-                                                                       OpenPrPullMap="@GetOpenPrPullMapForGroup(group)"
-                                                                       />
-                                    @foreach (var wr in group)
+                                    <tr class="virtual-scroll-spacer" aria-hidden="true">
+                                        <td colspan="@TableColSpan" style="height:@(_topSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
+                                    </tr>
+                                }
+                                @foreach (var slot in VisibleSlots)
+                                {
+                                    if (slot.Kind == VirtualSlotKind.LevelHeader)
                                     {
-                                        <WorkspaceRepositoriesRow WorkspaceId="@WorkspaceId"
+                                        var levelGroup = GetHydratedLinksAtLevel(slot.LevelKey);
+                                        <WorkspaceRepositoriesLevelHeader @key="@($"lvl-{slot.LevelKey?.ToString() ?? "none"}")"
+                                                                           WorkspaceId="@WorkspaceId"
+                                                                           LevelKey="@slot.LevelKey"
+                                                                           ColSpan="@TableColSpan"
+                                                                           Group="@levelGroup"
+                                                                           RepositoryCount="@slot.LevelRepoCount"
+                                                                           ActionsDisabled="@IsLevelActionsDisabled(slot.LevelKey)"
+                                                                           OnSyncToDefault="async () => await SyncToDefaultForLevelAsync(slot.LevelKey)"
+                                                                           OnSyncCommits="async () => await SyncCommitsForLevelAsync(slot.LevelKey)"
+                                                                           OnOpenPr="async () => await OpenPullRequestDialogForLevelAsync(slot.LevelKey)"
+                                                                           OnSyncLevel="async () => await SyncLevelForLevelAsync(slot.LevelKey)"
+                                                                           OpenPrUrls="@GetOpenPrUrlsForGroup(levelGroup)"
+                                                                           OpenPrPullMap="@GetOpenPrPullMapForGroup(levelGroup)"
+                                                                           />
+                                    }
+                                    else if (_linkByWrlId.TryGetValue(slot.WorkspaceRepositoryId, out var wr))
+                                    {
+                                        <WorkspaceRepositoriesRow @key="@($"row-{slot.WorkspaceRepositoryId}")"
+                                                                  WorkspaceId="@WorkspaceId"
+                                                                  RowCssClass="@StripeClass(slot.StripeIndex)"
                                                                   Link="@wr"
                                                                   PrInfo="@GetPrInfoForRepository(wr.RepositoryId)"
                                                                   IsPrVerified="@prByRepositoryId.ContainsKey(wr.RepositoryId)"
@@ -151,12 +165,13 @@
                                                                   IsUpdating="@IsJobRunning"
                                                                   ColSpan="@TableColSpan"
                                                                   OnVersionClick="() => CopyVersionToClipboard(wr.GitVersion!)"
-                                                                  OnVersionMouseLeave="() => OnVersionMouseLeave(wr.GitVersion)"
+                                                                  OnVersionMouseLeave="() => OnVersionMouseLeave(wr.GitVersion!)"
                                                                   OnBranchClick="() => ShowSwitchBranchModal(wr.RepositoryId, wr.BranchName, wr.Repository?.CloneUrl)"
                                                                   OnDependencyBadgeClick="() => OnDependencyBadgeClick(wr.RepositoryId, wr.UnmatchedDeps ?? 0)"
                                                                   OnCustomDependenciesClick="() => ShowCustomDependenciesModalAsync(wr.RepositoryId)"
                                                                   OnFileDependencyBadgeClick="() => OnFileDependencyBadgeClick(wr.RepositoryId)"
                                                                   OnDependencyBadgeKeydown="(e) => HandleDependencyBadgeKeydown(e, wr.RepositoryId, wr.UnmatchedDeps ?? 0)"
+                                                                  OnDependencyBadgeMouseEnter="() => OnDependencyBadgeMouseEnter(wr.RepositoryId)"
                                                                   OnDependencyBadgeMouseLeave="() => OnDependencyBadgeMouseLeave(wr.RepositoryId)"
                                                                   OnPushBadgeClick="() => OnPushBadgeClickAsync(wr.RepositoryId, wr.BranchName)"
                                                                   OnPullBadgeClick="() => OnPullBadgeClickAsync(wr.RepositoryId)"
@@ -167,6 +182,18 @@
                                                                   OnUpgradeClick="ShowSwitchBranchModalOnTagsTab"
                                                                   OnDismissError="() => DismissRepositoryError(wr.RepositoryId)" />
                                     }
+                                    else
+                                    {
+                                        <tr @key="@($"row-{slot.WorkspaceRepositoryId}")" class="virtual-scroll-placeholder @StripeClass(slot.StripeIndex)">
+                                            <td colspan="@TableColSpan">&nbsp;</td>
+                                        </tr>
+                                    }
+                                }
+                                @if (_bottomSpacerPx > 0)
+                                {
+                                    <tr class="virtual-scroll-spacer" aria-hidden="true">
+                                        <td colspan="@TableColSpan" style="height:@(_bottomSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
+                                    </tr>
                                 }
                             }
                         </tbody>
@@ -180,13 +207,13 @@
 
 <WorkspaceRepositoriesModal IsVisible="@_repositoriesModal.IsVisible"
                             Title="@RepositoriesModalTitle"
-                            Repositories="@_repositoriesModal.Repositories"
                             SelectedRepositoryIds="@_repositoriesModal.SelectedRepositoryIds"
                             HasConnectors="@_repositoriesModal.HasConnectors"
                             IsSaving="@_repositoriesModal.IsSaving"
                             IsFetching="@_repositoriesModal.IsFetching"
                             ErrorMessage="@_repositoriesModal.ErrorMessage"
                             RenameWarnings="@_repositoriesModal.RenameWarnings"
+                            RefreshGeneration="@_repositoriesModal.RefreshGeneration"
                             OnSave="@SaveRepositoriesAsync"
                             OnCancel="@CloseRepositoriesModal"
                             OnFetchRepositories="@FetchRepositoriesAsync" />
@@ -320,7 +347,7 @@
                OnProceed="@OnUndoPushProceedAsync"
                OnCancel="@CloseUndoPushModal" />
 
-@if (isLoading)
+@if (isInitialLoading && !hasLoadedOnce)
 {
     <LoadingOverlay IsVisible="true" PageScoped="true" Message="Loading workspace..." ShowCommandTerminal="false" />
 }

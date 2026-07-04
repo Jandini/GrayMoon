@@ -3,7 +3,6 @@ namespace GrayMoon.App.Models;
 /// <summary>Result of refreshing repositories from GitHub; may include per-connector fetch errors and detected renames.</summary>
 public sealed class RefreshRepositoriesResult
 {
-    public IReadOnlyList<GitHubRepositoryEntry> Repositories { get; init; } = [];
     public IReadOnlyList<ConnectorFetchError> ConnectorErrors { get; init; } = [];
     public IReadOnlyList<RenamedRepositoryInfo> RenamedRepositories { get; init; } = [];
     /// <summary>Maps old (deleted) RepositoryId to the surviving canonical RepositoryId for any repository that was merged during rename reconciliation. Empty when no merges occurred.</summary>

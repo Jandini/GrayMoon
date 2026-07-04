@@ -78,6 +78,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasIndex(repository => repository.CloneUrl)
                 .HasDatabaseName("IX_Repositories_CloneUrl");
 
+            entity.HasIndex(repository => new { repository.RepositoryName, repository.RepositoryId })
+                .HasDatabaseName("IX_Repositories_RepositoryName_RepositoryId");
+
             entity.Property(repository => repository.RepositoryName)
                 .IsRequired()
                 .HasMaxLength(200);
@@ -132,6 +135,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             entity.HasIndex(wr => new { wr.WorkspaceId, wr.RepositoryId })
                 .IsUnique();
+
+            entity.HasIndex(wr => new
+            {
+                wr.WorkspaceId,
+                wr.DependencyLevel,
+                wr.RepositoryType,
+                wr.Dependencies,
+                wr.WorkspaceRepositoryId,
+            });
 
             entity.Property(wr => wr.GitVersion)
                 .HasMaxLength(100);
@@ -191,6 +203,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasIndex(p => new { p.WorkspaceId, p.RepositoryId, p.ProjectName })
                 .IsUnique();
 
+            entity.HasIndex(p => new { p.WorkspaceId, p.ProjectName, p.ProjectId })
+                .HasDatabaseName("IX_WorkspaceProjects_WorkspaceId_ProjectName_ProjectId");
+
             entity.Property(p => p.ProjectName)
                 .IsRequired()
                 .HasMaxLength(200);
@@ -227,6 +242,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasKey(d => d.ProjectDependencyId);
             entity.HasIndex(d => new { d.DependentProjectId, d.ReferencedProjectId })
                 .IsUnique();
+
+            entity.HasIndex(d => d.DependentProjectId)
+                .HasDatabaseName("IX_ProjectDependencies_DependentProjectId");
 
             entity.Property(d => d.Version)
                 .HasMaxLength(100);

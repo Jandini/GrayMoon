@@ -13,10 +13,11 @@ public sealed partial class WorkspaceRepositories
     /// <summary>Update button click: get update plan; if no updates, toast; else show modal (single vs multi-level).</summary>
     private async Task OnUpdateClickAsync()
     {
-        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
+        if (workspace == null || !HasRepositories || IsJobRunning)
             return;
 
-        if (workspaceRepositories.All(wr => wr.IsOnTag))
+        var allLinks = await GetAllLinksForOperationAsync();
+        if (allLinks.All(wr => wr.IsOnTag))
         {
             ToastService.Show("All repositories are on tags; checkout a branch first.");
             return;
@@ -26,7 +27,7 @@ public sealed partial class WorkspaceRepositories
             svc => svc.GetUpdatePlanAsync(WorkspaceId));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
-        var reposOnDefault = workspaceRepositories
+        var reposOnDefault = allLinks
             .Where(wr => !wr.IsOnTag
                 && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
                 && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal)
@@ -85,7 +86,7 @@ public sealed partial class WorkspaceRepositories
     /// <summary>Runs update (refresh, sync deps, commit per level, refresh version). Overlay shows progress.</summary>
     private Task RunUpdateCoreAsync(string? commitMessage = null, bool includeDepsInCommitMessage = true)
     {
-        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
+        if (workspace == null || !HasRepositories || IsJobRunning)
             return Task.CompletedTask;
 
         errorMessage = null;
@@ -116,10 +117,11 @@ public sealed partial class WorkspaceRepositories
 
     private async Task OnUpdateAndPushClickAsync()
     {
-        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
+        if (workspace == null || !HasRepositories || IsJobRunning)
             return;
 
-        if (workspaceRepositories.All(wr => wr.IsOnTag))
+        var allLinks = await GetAllLinksForOperationAsync();
+        if (allLinks.All(wr => wr.IsOnTag))
         {
             ToastService.Show("All repositories are on tags; checkout a branch first.");
             return;
@@ -129,7 +131,7 @@ public sealed partial class WorkspaceRepositories
             svc => svc.GetUpdatePlanAsync(WorkspaceId));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
-        var reposOnDefault = workspaceRepositories
+        var reposOnDefault = allLinks
             .Where(wr => !wr.IsOnTag
                 && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
                 && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal)
@@ -176,7 +178,7 @@ public sealed partial class WorkspaceRepositories
 
     private async Task OnLevelOnlyUpdateAndPushClickAsync()
     {
-        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
+        if (workspace == null || !HasRepositories || IsJobRunning)
             return;
 
         var level = lowestLevelNeedingWork;
@@ -186,7 +188,8 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
-        if (workspaceRepositories.Where(wr => !wr.IsOnTag && (wr.DependencyLevel ?? 0) <= level).All(wr => wr.IsOnTag))
+        var allLinks = await GetAllLinksForOperationAsync();
+        if (allLinks.Where(wr => !wr.IsOnTag && (wr.DependencyLevel ?? 0) <= level).All(wr => wr.IsOnTag))
         {
             ToastService.Show("All repositories at this level are on tags; checkout a branch first.");
             return;
@@ -196,7 +199,7 @@ public sealed partial class WorkspaceRepositories
             svc => svc.GetUpdatePlanAsync(WorkspaceId));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
-        var reposOnDefault = workspaceRepositories
+        var reposOnDefault = allLinks
             .Where(wr => !wr.IsOnTag
                 && (wr.DependencyLevel ?? 0) <= level
                 && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
@@ -245,7 +248,7 @@ public sealed partial class WorkspaceRepositories
 
     private Task RunLevelOnlyUpdateAndPushCoreAsync(int level, string? commitMessage = null, bool includeDepsInCommitMessage = true)
     {
-        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
+        if (workspace == null || !HasRepositories || IsJobRunning)
             return Task.CompletedTask;
 
         errorMessage = null;
@@ -256,7 +259,8 @@ public sealed partial class WorkspaceRepositories
             IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
             try
             {
-                var reposNeedingWork = workspaceRepositories
+                var allLinks = await GetAllLinksForOperationAsync();
+                var reposNeedingWork = allLinks
                     .Where(wr => !wr.IsOnTag && (wr.DependencyLevel ?? 0) <= level)
                     .Where(wr => (wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
                     .Select(wr => wr.RepositoryId)
@@ -274,7 +278,7 @@ public sealed partial class WorkspaceRepositories
                         maxLevel: level));
 
                 await ReloadWorkspaceDataFromFreshScopeAsync();
-                _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromWorkspace(); StateHasChanged(); } });
+                _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
             }
             catch (OperationCanceledException)
             {
@@ -339,7 +343,7 @@ public sealed partial class WorkspaceRepositories
 
     private Task RunUpdateAndPushCoreAsync(string? commitMessage = null, bool includeDepsInCommitMessage = true)
     {
-        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
+        if (workspace == null || !HasRepositories || IsJobRunning)
             return Task.CompletedTask;
 
         errorMessage = null;
@@ -350,7 +354,8 @@ public sealed partial class WorkspaceRepositories
             IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
             try
             {
-                var reposNeedingWork = workspaceRepositories
+                var allLinks = await GetAllLinksForOperationAsync();
+                var reposNeedingWork = allLinks
                     .Where(wr => !wr.IsOnTag)
                     .Where(wr => (wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
                     .Select(wr => wr.RepositoryId)
@@ -366,9 +371,8 @@ public sealed partial class WorkspaceRepositories
                         commitMessage: commitMessage,
                         includeDepsInCommitMessage: includeDepsInCommitMessage));
 
-                // Unconditional reload so workspaceRepositories is current for Phase 2
                 await ReloadWorkspaceDataFromFreshScopeAsync();
-                _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromWorkspace(); StateHasChanged(); } });
+                _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
             }
             catch (OperationCanceledException)
             {

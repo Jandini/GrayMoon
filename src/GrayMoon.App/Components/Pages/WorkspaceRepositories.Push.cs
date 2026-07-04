@@ -11,14 +11,15 @@ public sealed partial class WorkspaceRepositories
     /// <summary>Push button click: get push plan; filter to repos with unpushed commits or no upstream branch; show modal only if at least one dependency repo needs push; otherwise push immediately.</summary>
     private async Task OnPushClickAsync()
     {
-        if (workspace == null || workspaceRepositories.Count == 0 || IsJobRunning)
+        if (workspace == null || !HasRepositories || IsJobRunning)
             return;
 
         try
         {
+            var allLinks = await GetAllLinksForOperationAsync();
             var (_, pushRepoIds, hasUnpushed) = await WorkspacePushHandler.GetPushPlanAsync(
                 WorkspaceId,
-                workspaceRepositories,
+                allLinks,
                 CancellationToken.None);
             if (!hasUnpushed || pushRepoIds.Count == 0)
             {
@@ -27,7 +28,7 @@ public sealed partial class WorkspaceRepositories
             }
 
             var repoIdsWithUnpushed = pushRepoIds;
-            var repoIdsThatNeedPush = workspaceRepositories
+            var repoIdsThatNeedPush = allLinks
                 .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
@@ -37,7 +38,7 @@ public sealed partial class WorkspaceRepositories
                 CancellationToken.None);
             if (depInfo == null)
             {
-                ToastService.Show("Could not load push plan. Try again.");
+                ToastService.ShowError("Could not load push plan. Try again.");
                 return;
             }
             _pushWithDependenciesModal = _pushWithDependenciesModal with
@@ -77,7 +78,7 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
-        var repo = workspaceRepositories.FirstOrDefault(r => r.RepositoryId == repositoryId);
+        var repo = TryGetLink(repositoryId);
         if (repo != null
             && !string.IsNullOrWhiteSpace(repo.DefaultBranchName)
             && string.Equals(repo.BranchName, repo.DefaultBranchName, StringComparison.Ordinal))
@@ -97,7 +98,8 @@ public sealed partial class WorkspaceRepositories
     {
         try
         {
-            var repoIdsThatNeedPush = workspaceRepositories
+            var allLinks = await GetAllLinksForOperationAsync();
+            var repoIdsThatNeedPush = allLinks
                 .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
@@ -112,7 +114,7 @@ public sealed partial class WorkspaceRepositories
                 return;
             }
 
-            var repoName = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.Repository?.RepositoryName;
+            var repoName = TryGetLink(repositoryId)?.Repository?.RepositoryName;
             _pushWithDependenciesModal = _pushWithDependenciesModal with
             {
                 IsVisible = true,
@@ -127,7 +129,7 @@ public sealed partial class WorkspaceRepositories
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error getting push dependency info for repository {RepositoryId}", repositoryId);
-            ToastService.Show("Could not load dependency info. Try again.");
+            ToastService.ShowError("Could not load dependency info. Try again.");
         }
     }
 
@@ -182,7 +184,8 @@ public sealed partial class WorkspaceRepositories
         await using var planScope = ServiceScopeFactory.CreateAsyncScope();
         var planPushHandler = planScope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
         var planDepService = planScope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
-        var (_, pushRepoIds, hasUnpushed) = await planPushHandler.GetPushPlanAsync(WorkspaceId, workspaceRepositories, ct, maxLevel);
+        var allLinks = await GetAllLinksForOperationAsync();
+        var (_, pushRepoIds, hasUnpushed) = await planPushHandler.GetPushPlanAsync(WorkspaceId, allLinks, ct, maxLevel);
         if (!hasUnpushed || pushRepoIds.Count == 0)
         {
             SafeInvoke(() => ToastService.Show(emptyMessage));
@@ -214,7 +217,7 @@ public sealed partial class WorkspaceRepositories
                     synchronizedPush,
                     requiredPackageIds,
                     job.ReportProgress,
-                    ToastService.Show,
+                    ToastService.ShowError,
                     syncedRepoIds: syncedRepoIds,
                     cancellationToken: ct));
         }
@@ -247,7 +250,7 @@ public sealed partial class WorkspaceRepositories
             if (success)
                 await InvokeAsync(async () => { if (_disposed) return; await RefreshFromSync(); });
             else
-                SafeInvoke(() => ToastService.Show(pushError ?? "Push failed."));
+                SafeInvoke(() => ToastService.ShowError(pushError ?? "Push failed."));
         }, new PageJobOptions
         {
             RefreshOnSuccess = false,
@@ -255,7 +258,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Push with upstream failed for repository {RepositoryId}", repositoryId);
-                SafeInvoke(() => ToastService.Show(ex.Message));
+                SafeInvoke(() => ToastService.ShowError(ex.Message));
             }
         });
 

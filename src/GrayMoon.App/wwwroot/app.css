@@ -611,6 +611,35 @@ h1:focus {
     table-layout: fixed;
 }
 
+.grid-page-body .table tbody tr.virtual-scroll-placeholder td,
+.repository-grid tbody tr.virtual-scroll-placeholder td {
+    height: 48px;
+    max-height: 48px;
+    padding: 0;
+    border-bottom-color: transparent;
+    box-sizing: border-box;
+    line-height: 48px;
+    overflow: hidden;
+}
+
+/* Absolute-index striping for virtual scroll (table-striped nth-child flips when the window moves). */
+.virtual-scroll-table > tbody > tr.virtual-row-odd > td {
+    background-color: var(--bg-table-stripe);
+    color: var(--text-primary) !important;
+}
+
+.virtual-scroll-table > tbody > tr.virtual-row-even > td {
+    background-color: var(--bg-card);
+    color: var(--text-primary) !important;
+}
+
+.virtual-scroll-table > tbody > tr.virtual-scroll-spacer > td {
+    background-color: transparent !important;
+    padding: 0 !important;
+    border: 0 !important;
+    line-height: 0 !important;
+}
+
 /* First column in grid data rows: normal weight (not bold) like other columns */
 .grid-page-body .table tbody td:first-child,
 .grid-page-body .table tbody td:first-child strong {

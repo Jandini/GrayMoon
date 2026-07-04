@@ -12,7 +12,7 @@ public sealed partial class WorkspaceRepositories
     private CustomDependenciesModalState _customDependenciesModal = new();
 
     private bool HasOutOfDateFiles(int repositoryId) =>
-        (workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.OutOfDateFileRepos ?? 0) > 0;
+        (TryGetLink(repositoryId)?.OutOfDateFileRepos ?? 0) > 0;
 
     private IReadOnlyList<FileVersionMismatchLine> GetMismatchedFileVersionLines(int repositoryId) =>
         _mismatchedFileVersionLinesByRepo.TryGetValue(repositoryId, out var lines) ? lines : Array.Empty<FileVersionMismatchLine>();
@@ -88,9 +88,9 @@ public sealed partial class WorkspaceRepositories
                 return;
             }
             var repoPayload = payload[0];
-            var repoName = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId)?.Repository?.RepositoryName;
+            var repoName = TryGetLink(repositoryId)?.Repository?.RepositoryName;
 
-            var repo = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId);
+            var repo = TryGetLink(repositoryId);
             if (repo != null
                 && !string.IsNullOrWhiteSpace(repo.DefaultBranchName)
                 && string.Equals(repo.BranchName, repo.DefaultBranchName, StringComparison.Ordinal))
@@ -111,7 +111,7 @@ public sealed partial class WorkspaceRepositories
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error getting update plan for repository {RepositoryId}", repositoryId);
-            ToastService.Show("Could not load dependency updates.");
+            ToastService.ShowError("Could not load dependency updates.");
         }
     }
 
@@ -156,7 +156,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Update dependencies failed for repository {RepositoryId}", repositoryId);
-                SafeInvoke(() => ToastService.Show(ex.Message));
+                SafeInvoke(() => ToastService.ShowError(ex.Message));
             }
         });
 
@@ -200,7 +200,7 @@ public sealed partial class WorkspaceRepositories
 
     private async Task ShowCustomDependenciesModalAsync(int repositoryId)
     {
-        if (workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId) is not { } link)
+        if (TryGetLink(repositoryId) is not { } link)
             return;
 
         if (link.IsOnTag)
@@ -220,7 +220,8 @@ public sealed partial class WorkspaceRepositories
             var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
 
             var workspaceData = await workspaceRepo.GetByIdAsync(WorkspaceId);
-            var allLinks = workspaceData?.Repositories ?? workspaceRepositories;
+            var allLinks = workspaceData?.Repositories
+                ?? (await GetAllLinksForOperationAsync()).ToList();
 
             var implicitBySource = await projectRepo.GetImplicitReferencedRepoIdsBySourceAsync(WorkspaceId, repositoryId);
             var lockedIds = new HashSet<int>(implicitBySource.FromProject);

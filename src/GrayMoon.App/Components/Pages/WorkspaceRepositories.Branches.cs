@@ -10,7 +10,7 @@ public sealed partial class WorkspaceRepositories
 
     private void ShowSwitchBranchModal(int repositoryId, string? currentBranch, string? cloneUrl)
     {
-        var wr = workspaceRepositories.FirstOrDefault(wr => wr.RepositoryId == repositoryId);
+        var wr = TryGetLink(repositoryId);
         var repo = wr?.Repository;
 
         if (repo == null)
@@ -42,7 +42,7 @@ public sealed partial class WorkspaceRepositories
 
     private void ShowSwitchBranchModalOnTagsTab(WorkspaceRepositoryLink link)
     {
-        var wr = workspaceRepositories.FirstOrDefault(r => r.RepositoryId == link.RepositoryId);
+        var wr = TryGetLink(link.RepositoryId);
         var repo = wr?.Repository;
         if (repo == null)
             return;
@@ -79,7 +79,7 @@ public sealed partial class WorkspaceRepositories
 
     private async Task ShowBranchModalAsync(string initialTab = "newbranch")
     {
-        if (workspace == null || workspaceRepositories.Count == 0)
+        if (workspace == null || !HasRepositories)
             return;
         try
         {
@@ -89,10 +89,11 @@ public sealed partial class WorkspaceRepositories
         {
             Logger.LogWarning(ex, "Could not load common branches for branch modal");
         }
+        var allLinks = await GetAllLinksForOperationAsync();
         _branchModal = _branchModal with
         {
             IsVisible = true,
-            WorkspaceUnifiedCurrentBranch = GetUnifiedWorkspaceCurrentBranch(workspaceRepositories),
+            WorkspaceUnifiedCurrentBranch = GetUnifiedWorkspaceCurrentBranch(allLinks),
             InitialTab = string.Equals(initialTab, "switchbranch", StringComparison.OrdinalIgnoreCase) ? "switchbranch" : "newbranch"
         };
         StateHasChanged();
@@ -115,27 +116,29 @@ public sealed partial class WorkspaceRepositories
 
         var commonLocal = data.CommonLocalBranchNames ?? data.CommonBranchNames ?? new List<string>();
         var commonRemote = data.CommonRemoteBranchNames ?? new List<string>();
+        var allLinks = await GetAllLinksForOperationAsync();
         _branchModal = _branchModal with
         {
             CommonBranchNames = commonLocal,
             CommonLocalBranchNames = commonLocal,
             CommonRemoteBranchNames = commonRemote,
             DefaultDisplayText = data.DefaultDisplayText ?? "multiple",
-            WorkspaceUnifiedCurrentBranch = GetUnifiedWorkspaceCurrentBranch(workspaceRepositories)
+            WorkspaceUnifiedCurrentBranch = GetUnifiedWorkspaceCurrentBranch(allLinks)
         };
     }
 
-    private Task FetchCommonBranchesAcrossWorkspaceAsync()
+    private async Task FetchCommonBranchesAcrossWorkspaceAsync()
     {
         if (workspace == null || IsJobRunning)
-            return Task.CompletedTask;
+            return;
 
-        var repoIds = workspaceRepositories
+        var allLinks = await GetAllLinksForOperationAsync();
+        var repoIds = allLinks
             .Select(wr => wr.RepositoryId)
             .Distinct()
             .ToList();
         if (repoIds.Count == 0)
-            return Task.CompletedTask;
+            return;
 
         StartPageJob("Fetching branches...", async (job, ct) =>
         {
@@ -170,7 +173,7 @@ public sealed partial class WorkspaceRepositories
             });
 
             if (failureCount > 0)
-                SafeInvoke(() => ToastService.Show($"Fetched branches for {successCount} repositories. {failureCount} failed."));
+                SafeInvoke(() => ToastService.ShowError($"Fetched branches for {successCount} repositories. {failureCount} failed."));
         }, new PageJobOptions
         {
             RefreshOnSuccess = false,
@@ -178,26 +181,26 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error fetching branches across workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => ToastService.Show("Failed to fetch branches across workspace."));
+                SafeInvoke(() => ToastService.ShowError("Failed to fetch branches across workspace."));
             }
         });
 
-        return Task.CompletedTask;
     }
 
-    private Task CheckoutCommonBranchAcrossWorkspaceAsync((string BranchName, bool SkipReposOnTags) args)
+    private async Task CheckoutCommonBranchAcrossWorkspaceAsync((string BranchName, bool SkipReposOnTags) args)
     {
         var (branchName, skipReposOnTags) = args;
         if (workspace == null || string.IsNullOrWhiteSpace(branchName) || IsJobRunning)
-            return Task.CompletedTask;
+            return;
 
-        var repoIds = workspaceRepositories
+        var allLinks = await GetAllLinksForOperationAsync();
+        var repoIds = allLinks
             .Where(wr => !skipReposOnTags || !wr.IsOnTag)
             .Select(wr => wr.RepositoryId)
             .Distinct()
             .ToList();
         if (repoIds.Count == 0)
-            return Task.CompletedTask;
+            return;
 
         StartPageJob("Checking out...", async (job, ct) =>
         {
@@ -227,31 +230,37 @@ public sealed partial class WorkspaceRepositories
             });
 
             if (result.FailureCount > 0)
-                SafeInvoke(() => ToastService.Show($"Checked out branch in {result.SuccessCount} repositories. {result.FailureCount} failed."));
+            {
+                var firstError = result.ErrorsByRepositoryId.Values.FirstOrDefault();
+                SafeInvoke(() => ToastService.ShowError(
+                    !string.IsNullOrWhiteSpace(firstError)
+                        ? firstError
+                        : $"Checked out branch in {result.SuccessCount} repositories. {result.FailureCount} failed."));
+            }
         }, new PageJobOptions
         {
             CancelToast = "Checkout cancelled.",
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error checking out branch {BranchName} across workspace {WorkspaceId}", branchName, WorkspaceId);
-                SafeInvoke(() => ToastService.Show("Failed to check out branch across workspace."));
+                SafeInvoke(() => ToastService.ShowError("Failed to check out branch across workspace."));
             }
         });
 
-        return Task.CompletedTask;
     }
 
-    private Task CreateBranchesAsync((string NewBranchName, string BaseBranch, bool SkipReposOnTags) args)
+    private async Task CreateBranchesAsync((string NewBranchName, string BaseBranch, bool SkipReposOnTags) args)
     {
         var (newBranchName, baseBranch, skipReposOnTags) = args;
         if (workspace == null || string.IsNullOrWhiteSpace(newBranchName) || IsJobRunning)
-            return Task.CompletedTask;
+            return;
 
         CloseBranchModal();
         errorMessage = null;
 
+        var allLinks = await GetAllLinksForOperationAsync();
         var tagFilteredRepoIds = skipReposOnTags
-            ? workspaceRepositories.Where(wr => !wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet()
+            ? allLinks.Where(wr => !wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet()
             : (IReadOnlySet<int>?)null;
 
         StartPageJob("Creating branches...", async (job, ct) =>
@@ -275,7 +284,6 @@ public sealed partial class WorkspaceRepositories
             }
         });
 
-        return Task.CompletedTask;
     }
 
     private async Task OnBranchChangedAsync()
@@ -342,9 +350,15 @@ public sealed partial class WorkspaceRepositories
             SafeInvoke(() =>
             {
                 if (success)
+                {
                     repositoryErrors.Remove(repositoryId);
+                }
                 else
-                    repositoryErrors[repositoryId] = errMsg ?? (isTag ? "Failed to checkout tag." : "Failed to checkout branch.");
+                {
+                    var message = errMsg ?? (isTag ? "Failed to checkout tag." : "Failed to checkout branch.");
+                    repositoryErrors[repositoryId] = message;
+                    ToastService.ShowError(message);
+                }
             });
         }, new PageJobOptions
         {
@@ -352,9 +366,14 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error checking out {Kind} for repository {RepositoryId}", isTag ? "tag" : "branch", repositoryId);
-                SafeInvoke(() => { repositoryErrors[repositoryId] = isTag
+                var message = isTag
                     ? "Failed to checkout tag. The GrayMoon Agent may be offline. Start the Agent and try again."
-                    : "Failed to checkout branch. The GrayMoon Agent may be offline. Start the Agent and try again."; });
+                    : "Failed to checkout branch. The GrayMoon Agent may be offline. Start the Agent and try again.";
+                SafeInvoke(() =>
+                {
+                    repositoryErrors[repositoryId] = message;
+                    ToastService.ShowError(message);
+                });
             }
         });
 

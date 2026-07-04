@@ -8,35 +8,28 @@ public sealed partial class WorkspaceRepositories
 
     private async Task ShowRepositoriesModalAsync()
     {
-        var ids = workspace?.Repositories.Select(r => r.RepositoryId).ToHashSet() ?? new HashSet<int>();
+        var snapshots = await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId);
+        var ids = snapshots.Select(r => r.RepositoryId).ToHashSet();
         _repositoriesModal = new RepositoriesModalState
         {
             IsVisible = true,
             SelectedRepositoryIds = ids,
             ErrorMessage = null,
+            RefreshGeneration = _repositoriesModal.RefreshGeneration + 1,
         };
         StateHasChanged();
-        await EnsureRepositoriesForModalAsync();
-    }
-
-    private async Task EnsureRepositoriesForModalAsync()
-    {
-        if (_repositoriesModal.RepositoriesLoaded)
-            return;
 
         try
         {
             var connectors = await WorkspacePageService.ConnectorRepository.GetAllAsync();
             _repositoriesModal.HasConnectors = connectors.Count > 0;
-            _repositoriesModal.Repositories = await WorkspacePageService.RepositoryService.GetPersistedRepositoriesAsync();
-            _repositoriesModal.RepositoriesLoaded = true;
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to load repositories for Repositories modal.");
+            Logger.LogError(ex, "Failed to load connectors for Repositories modal.");
             _repositoriesModal.ErrorMessage = "Failed to load repositories. Please try again.";
+            await InvokeAsync(StateHasChanged);
         }
-        await InvokeAsync(StateHasChanged);
     }
 
     private void CloseRepositoriesModal()
@@ -69,7 +62,7 @@ public sealed partial class WorkspaceRepositories
                 workspace?.Name ?? string.Empty,
                 ids,
                 workspace?.RootPath);
-            await ReloadWorkspaceDataAsync();
+            await ReloadWorkspaceDataFromFreshScopeAsync();
             CloseRepositoriesModal();
             ToastService.Show("Workspace repositories updated.");
         }
@@ -112,12 +105,12 @@ public sealed partial class WorkspaceRepositories
             });
 
             var result = await WorkspacePageService.RepositoryService.RefreshRepositoriesAsync(progress, cts.Token);
-            _repositoriesModal.Repositories = result.Repositories.ToList();
             _repositoriesModal.RenameWarnings = result.RenamedRepositories.Count > 0 ? result.RenamedRepositories : null;
+            _repositoriesModal.RefreshGeneration++;
         }
         catch (OperationCanceledException)
         {
-            _repositoriesModal.Repositories = await WorkspacePageService.RepositoryService.GetPersistedRepositoriesAsync();
+            _repositoriesModal.RefreshGeneration++;
         }
         catch (Exception ex)
         {
@@ -136,14 +129,13 @@ public sealed partial class WorkspaceRepositories
     {
         public bool IsVisible { get; set; }
         public HashSet<int> SelectedRepositoryIds { get; set; } = new();
-        public List<GitHubRepositoryEntry>? Repositories { get; set; }
         public bool HasConnectors { get; set; }
-        public bool RepositoriesLoaded { get; set; }
         public bool IsSaving { get; set; }
         public string? ErrorMessage { get; set; }
         public bool IsFetching { get; set; }
         public int? FetchedRepositoryCount { get; set; }
         public string? FetchError { get; set; }
         public IReadOnlyList<RenamedRepositoryInfo>? RenameWarnings { get; set; }
+        public int RefreshGeneration { get; set; }
     }
 }
