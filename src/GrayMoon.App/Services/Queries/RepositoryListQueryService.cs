@@ -58,11 +58,41 @@ public sealed class RepositoryListQueryService(AppDbContext dbContext) : IReposi
 
     public async Task<IReadOnlyList<int>> GetMatchingIdsAsync(RepositoryListFilter filter, CancellationToken cancellationToken = default)
     {
-        return await ApplyFilters(_dbContext.Repositories.AsNoTracking(), filter)
-            .OrderBy(r => r.RepositoryName)
-            .ThenBy(r => r.RepositoryId)
+        var query = ApplyFilters(_dbContext.Repositories.AsNoTracking(), filter);
+        query = ApplySort(query, filter.SortField, filter.SortDescending);
+        return await query
             .Select(r => r.RepositoryId)
             .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<RepositoryListItemDto>> GetByIdsAsync(
+        IReadOnlyList<int> repositoryIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (repositoryIds.Count == 0)
+        {
+            return Array.Empty<RepositoryListItemDto>();
+        }
+
+        var idSet = repositoryIds.ToHashSet();
+        var rows = await _dbContext.Repositories.AsNoTracking()
+            .Where(r => idSet.Contains(r.RepositoryId))
+            .Select(r => new RepositoryListItemDto(
+                r.RepositoryId,
+                r.RepositoryName,
+                r.OrgName,
+                r.Connector != null ? r.Connector.ConnectorName : "Unknown",
+                r.Visibility,
+                r.Archived,
+                r.Topics))
+            .ToListAsync(cancellationToken);
+
+        var order = repositoryIds
+            .Select((id, index) => (id, index))
+            .ToDictionary(x => x.id, x => x.index);
+        return rows
+            .OrderBy(r => order.GetValueOrDefault(r.RepositoryId, int.MaxValue))
+            .ToList();
     }
 
     public async Task<IReadOnlyList<int>> FilterExistingIdsAsync(IReadOnlyCollection<int> repositoryIds, CancellationToken cancellationToken = default)

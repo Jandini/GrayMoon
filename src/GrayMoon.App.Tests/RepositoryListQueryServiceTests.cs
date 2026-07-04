@@ -92,6 +92,17 @@ public class RepositoryListQueryServiceTests
     }
 
     [Fact]
+    public async Task GetByIds_returns_rows_in_request_order()
+    {
+        await using var ctx = await ListQueryTestContext.CreateAsync();
+        var ids = await ctx.RepositoryQuery.GetMatchingIdsAsync(new RepositoryListFilter(null, null));
+        var subset = ids.Skip(2).Take(5).Reverse().ToList();
+        var rows = await ctx.RepositoryQuery.GetByIdsAsync(subset);
+        Assert.Equal(subset, rows.Select(r => r.RepositoryId).ToList());
+        Assert.All(rows, r => Assert.False(string.IsNullOrWhiteSpace(r.RepositoryName)));
+    }
+
+    [Fact]
     public async Task Query_uses_take_in_sql()
     {
         await using var ctx = await ListQueryTestContext.CreateAsync();

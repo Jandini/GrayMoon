@@ -46,7 +46,7 @@
                             {
                                 <div class="text-muted p-2">No GitHub connectors configured.</div>
                             }
-                            else if (isInitialLoading && _items.Count == 0)
+                            else if (isInitialLoading && _virtual.Count == 0)
                             {
                                 <div class="text-muted p-2">Loading repositories...</div>
                             }
@@ -75,8 +75,8 @@
                                             <th>Connector</th>
                                         </tr>
                                     </thead>
-                                    <tbody>
-                                        @if (_items.Count == 0 && !isInitialLoading)
+                                    <tbody @ref="_tbodyRef">
+                                        @if (_virtual.Count == 0 && !isInitialLoading)
                                         {
                                             <tr>
                                                 <td colspan="5" class="text-muted p-2">No repositories match your search.</td>
@@ -84,53 +84,60 @@
                                         }
                                         else
                                         {
-                                            @foreach (var repository in _items)
+                                            @if (_virtual.TopSpacerPx > 0)
                                             {
-                                                <tr>
-                                                    <td class="col-select">
-                                                        <input class="form-check-input workspace-repo-checkbox"
-                                                               type="checkbox"
-                                                               checked="@IsRowSelected(repository.RepositoryId)"
-                                                               @onchange="(ChangeEventArgs e) => _ = ToggleRepository(repository.RepositoryId, (bool)e.Value!)" />
-                                                    </td>
-                                                    <td>
-                                                        <span class="repo-name-cell" title="@repository.RepositoryName">
-                                                            @repository.RepositoryName
-                                                        </span>
-                                                    </td>
-                                                    <td>
-                                                        <span class="repo-name-cell" title="@(repository.OrgName ?? "-")">
-                                                            @(repository.OrgName ?? "-")
-                                                        </span>
-                                                    </td>
-                                                    <td class="col-topics">
-                                                        @if (!string.IsNullOrWhiteSpace(repository.Topics))
-                                                        {
-                                                            @foreach (var topic in repository.Topics.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                                                <tr class="virtual-scroll-spacer" aria-hidden="true">
+                                                    <td colspan="5" style="height:@(_virtual.TopSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
+                                                </tr>
+                                            }
+                                            @foreach (var (id, repository) in _virtual.VisibleRows)
+                                            {
+                                                if (repository is null)
+                                                {
+                                                    <tr @key="@($"ph-{id}")" class="virtual-scroll-placeholder">
+                                                        <td colspan="5">&nbsp;</td>
+                                                    </tr>
+                                                }
+                                                else
+                                                {
+                                                    <tr @key="@id">
+                                                        <td class="col-select">
+                                                            <input class="form-check-input workspace-repo-checkbox"
+                                                                   type="checkbox"
+                                                                   checked="@IsRowSelected(repository.RepositoryId)"
+                                                                   @onchange="(ChangeEventArgs e) => _ = ToggleRepository(repository.RepositoryId, (bool)e.Value!)" />
+                                                        </td>
+                                                        <td>
+                                                            <span class="repo-name-cell" title="@repository.RepositoryName">
+                                                                @repository.RepositoryName
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span class="repo-name-cell" title="@(repository.OrgName ?? "-")">
+                                                                @(repository.OrgName ?? "-")
+                                                            </span>
+                                                        </td>
+                                                        <td class="col-topics">
+                                                            @if (!string.IsNullOrWhiteSpace(repository.Topics))
                                                             {
-                                                                <span class="badge badge-topic">@topic</span>
+                                                                @foreach (var topic in repository.Topics.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                                                                {
+                                                                    <span class="badge badge-topic">@topic</span>
+                                                                }
                                                             }
-                                                        }
-                                                    </td>
-                                                    <td>
-                                                        <span class="repo-name-cell" title="@repository.ConnectorName">
-                                                            @repository.ConnectorName
-                                                        </span>
-                                                    </td>
-                                                </tr>
+                                                        </td>
+                                                        <td>
+                                                            <span class="repo-name-cell" title="@repository.ConnectorName">
+                                                                @repository.ConnectorName
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                }
                                             }
-                                            @if (isLoadingMore)
+                                            @if (_virtual.BottomSpacerPx > 0)
                                             {
-                                                <tr>
-                                                    <td colspan="5" class="text-muted p-2 text-center">Loading more...</td>
-                                                </tr>
-                                            }
-                                            @if (hasMore && !isLoadingMore)
-                                            {
-                                                <tr>
-                                                    <td colspan="5" class="p-0">
-                                                        <InfiniteScrollLoadTrigger IsEnabled="true" OnLoadMore="LoadNextChunkAsync" />
-                                                    </td>
+                                                <tr class="virtual-scroll-spacer" aria-hidden="true">
+                                                    <td colspan="5" style="height:@(_virtual.BottomSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
                                                 </tr>
                                             }
                                         }

@@ -20,7 +20,7 @@
                     @if (hasLoadedOnce && !isInitialLoading)
                     {
                         var repoSuffix = HasSearchFilter ? " found" : "";
-                        var repoCount = HasSearchFilter ? (totalCount ?? _items.Count) : (totalCount ?? _items.Count);
+                        var repoCount = totalCount ?? 0;
                         <span>@($"{repoCount} {(repoCount == 1 ? "repository" : "repositories")}{repoSuffix}")</span>
                     }
                     else if (hasLoadedOnce && catalogHasAny)
@@ -108,8 +108,8 @@
                                 <th class="col-visibility col-status-badge">Visibility</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            @if (isInitialLoading && _items.Count == 0)
+                        <tbody @ref="_tbodyRef">
+                            @if (isInitialLoading && _virtual.Count == 0)
                             {
                                 <tr>
                                     <td colspan="5" class="text-center text-muted py-4">
@@ -117,7 +117,7 @@
                                     </td>
                                 </tr>
                             }
-                            else if (!catalogHasAny && _items.Count == 0)
+                            else if (!catalogHasAny && _virtual.Count == 0)
                             {
                                 <tr>
                                     <td colspan="5" class="text-center text-muted py-4">
@@ -125,7 +125,7 @@
                                     </td>
                                 </tr>
                             }
-                            else if (_items.Count == 0)
+                            else if (hasLoadedOnce && _virtual.Count == 0)
                             {
                                 <tr>
                                     <td colspan="5" class="text-center text-muted py-4">
@@ -135,49 +135,54 @@
                             }
                             else
                             {
-                                @foreach (var repository in _items)
+                                @if (_virtual.TopSpacerPx > 0)
                                 {
-                                    <tr>
-                                        <td class="col-repo"><strong>@repository.RepositoryName</strong></td>
-                                        <td class="col-owner">@(string.IsNullOrWhiteSpace(repository.OrgName) ? "-" : repository.OrgName)</td>
-                                        <td class="col-topics">
-                                            @if (!string.IsNullOrWhiteSpace(repository.Topics))
-                                            {
-                                                @foreach (var topic in repository.Topics.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                                    <tr class="virtual-scroll-spacer" aria-hidden="true">
+                                        <td colspan="5" style="height:@(_virtual.TopSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
+                                    </tr>
+                                }
+                                @foreach (var (id, repository) in _virtual.VisibleRows)
+                                {
+                                    if (repository is null)
+                                    {
+                                        <tr @key="@($"ph-{id}")" class="virtual-scroll-placeholder">
+                                            <td colspan="5">&nbsp;</td>
+                                        </tr>
+                                    }
+                                    else
+                                    {
+                                        <tr @key="@id">
+                                            <td class="col-repo"><strong>@repository.RepositoryName</strong></td>
+                                            <td class="col-owner">@(string.IsNullOrWhiteSpace(repository.OrgName) ? "-" : repository.OrgName)</td>
+                                            <td class="col-topics">
+                                                @if (!string.IsNullOrWhiteSpace(repository.Topics))
                                                 {
-                                                    <span class="badge badge-topic">@topic</span>
+                                                    @foreach (var topic in repository.Topics.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                                                    {
+                                                        <span class="badge badge-topic">@topic</span>
+                                                    }
                                                 }
-                                            }
-                                        </td>
-                                        <td class="col-connector">@repository.ConnectorName</td>
-                                        <td class="col-visibility col-status-badge">
-                                            @if (repository.Archived)
-                                            {
-                                                <span class="badge badge-archived">archived</span>
-                                            }
-                                            else
-                                            {
-                                                <span class="badge @(repository.Visibility == "Private" ? "badge-private" : "badge-public")">
-                                                    @repository.Visibility.ToLowerInvariant()
-                                                </span>
-                                            }
-                                        </td>
-                                    </tr>
+                                            </td>
+                                            <td class="col-connector">@repository.ConnectorName</td>
+                                            <td class="col-visibility col-status-badge">
+                                                @if (repository.Archived)
+                                                {
+                                                    <span class="badge badge-archived">archived</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge @(repository.Visibility == "Private" ? "badge-private" : "badge-public")">
+                                                        @repository.Visibility.ToLowerInvariant()
+                                                    </span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
                                 }
-                                @if (isLoadingMore)
+                                @if (_virtual.BottomSpacerPx > 0)
                                 {
-                                    <tr>
-                                        <td colspan="5" class="text-center text-muted py-3">
-                                            Loading more...
-                                        </td>
-                                    </tr>
-                                }
-                                @if (hasMore && !isLoadingMore)
-                                {
-                                    <tr>
-                                        <td colspan="5" class="p-0">
-                                            <InfiniteScrollLoadTrigger IsEnabled="true" OnLoadMore="LoadNextChunkAsync" />
-                                        </td>
+                                    <tr class="virtual-scroll-spacer" aria-hidden="true">
+                                        <td colspan="5" style="height:@(_virtual.BottomSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
                                     </tr>
                                 }
                             }

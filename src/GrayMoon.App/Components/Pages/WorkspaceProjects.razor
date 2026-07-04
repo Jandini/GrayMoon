@@ -22,7 +22,7 @@
                     @if (hasLoadedOnce && !isInitialLoading)
                     {
                         var projSuffix = HasSearchFilter ? " found" : "";
-                        var projCount = totalCount ?? _items.Count;
+                        var projCount = totalCount ?? 0;
                         <span>@($"{projCount} {(projCount == 1 ? "project" : "projects")}{projSuffix}")</span>
                     }
                     else if (hasLoadedOnce && workspace != null && totalCount == 0 && !HasSearchFilter)
@@ -71,8 +71,8 @@
                                     <th class="col-file">File</th>
                                 </tr>
                             </thead>
-                            <tbody>
-                                @if (isInitialLoading && _items.Count == 0)
+                            <tbody @ref="_tbodyRef">
+                                @if (isInitialLoading && _virtual.Count == 0)
                                 {
                                     <tr>
                                         <td colspan="4" class="text-center text-muted py-4">
@@ -98,29 +98,34 @@
                                 }
                                 else
                                 {
-                                    @foreach (var p in _items)
+                                    @if (_virtual.TopSpacerPx > 0)
                                     {
-                                        <tr>
-                                            <td class="col-name"><strong>@p.ProjectName</strong></td>
-                                            <td class="col-type text-muted">@p.ProjectType</td>
-                                            <td class="col-framework"><span class="badge bg-secondary">@(p.TargetFramework ?? "-")</span></td>
-                                            <td class="col-file text-muted" title="@p.ProjectFilePath">@GetFileName(p.ProjectFilePath)</td>
+                                        <tr class="virtual-scroll-spacer" aria-hidden="true">
+                                            <td colspan="4" style="height:@(_virtual.TopSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
                                         </tr>
                                     }
-                                    @if (isLoadingMore)
+                                    @foreach (var (id, p) in _virtual.VisibleRows)
                                     {
-                                        <tr>
-                                            <td colspan="4" class="text-center text-muted py-3">
-                                                Loading more...
-                                            </td>
-                                        </tr>
+                                        if (p is null)
+                                        {
+                                            <tr @key="@($"ph-{id}")" class="virtual-scroll-placeholder">
+                                                <td colspan="4">&nbsp;</td>
+                                            </tr>
+                                        }
+                                        else
+                                        {
+                                            <tr @key="@id">
+                                                <td class="col-name"><strong>@p.ProjectName</strong></td>
+                                                <td class="col-type text-muted">@p.ProjectType</td>
+                                                <td class="col-framework"><span class="badge bg-secondary">@(p.TargetFramework ?? "-")</span></td>
+                                                <td class="col-file text-muted" title="@p.ProjectFilePath">@GetFileName(p.ProjectFilePath)</td>
+                                            </tr>
+                                        }
                                     }
-                                    @if (hasMore && !isLoadingMore)
+                                    @if (_virtual.BottomSpacerPx > 0)
                                     {
-                                        <tr>
-                                            <td colspan="4" class="p-0">
-                                                <InfiniteScrollLoadTrigger IsEnabled="true" OnLoadMore="LoadNextChunkAsync" />
-                                            </td>
+                                        <tr class="virtual-scroll-spacer" aria-hidden="true">
+                                            <td colspan="4" style="height:@(_virtual.BottomSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
                                         </tr>
                                     }
                                 }

@@ -3,13 +3,15 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Services.Queries;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.JSInterop;
 
 namespace GrayMoon.App.Components.Modals;
 
 public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
 {
     private readonly DebouncedQueryLoader _queryLoader = new();
-    private readonly List<RepositoryListItemDto> _items = new();
+    private readonly VirtualTableScrollState<RepositoryListItemDto> _virtual = new();
+    private ElementReference _tbodyRef;
 
     private FilterSearchInput? filterSearchInput;
 
@@ -20,16 +22,14 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
     private bool _showOnlySelected;
     private HashSet<int> _selectedOnlySnapshot = new();
     private bool isInitialLoading;
-    private bool isLoadingMore;
-    private bool hasMore;
     private bool hasLoadedOnce;
     private int? totalCount;
-    private RepositoryListCursor? _nextCursor;
-    private bool _loadingNextChunk;
     private bool _disposed;
     private int _lastRefreshGeneration = -1;
 
     private HashSet<int> _matchingFilterIds = new();
+
+    [Inject] private IJSRuntime JSRuntime { get; set; } = default!;
 
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public string Title { get; set; } = "Select repositories";
@@ -57,6 +57,12 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
         }
         else if (!IsVisible)
         {
+            if (_wasVisible)
+            {
+                _ = _virtual.DetachAsync(JSRuntime);
+                _virtual.Clear();
+            }
+
             _wasVisible = false;
         }
         else if (IsVisible && RefreshGeneration != _lastRefreshGeneration)
@@ -75,6 +81,11 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
             {
                 await filterSearchInput.FocusAsync();
             }
+        }
+
+        if (IsVisible && !isInitialLoading && _virtual.Count > 0 && !_virtual.IsAttached && !_disposed)
+        {
+            await _virtual.AttachAsync(JSRuntime, this, _tbodyRef);
         }
     }
 
@@ -164,13 +175,10 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
         }
 
         var token = _queryLoader.BeginQueryCycle(out var generation);
-        _items.Clear();
-        _nextCursor = null;
-        hasMore = false;
+        await _virtual.DetachAsync(JSRuntime);
+        _virtual.Clear();
         totalCount = null;
         isInitialLoading = true;
-        isLoadingMore = false;
-        _loadingNextChunk = false;
 
         try
         {
@@ -183,16 +191,9 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
             }
 
             _matchingFilterIds = matchingIds.ToHashSet();
-            var page = await RepositoryListQueryService.GetPageAsync(BuildRequest(null), token);
-            if (generation != _queryLoader.Generation || _disposed)
-            {
-                return;
-            }
-
-            _items.AddRange(page.Items);
-            _nextCursor = page.NextCursor;
-            hasMore = page.HasMore;
+            _virtual.SetIndex(matchingIds);
             hasLoadedOnce = true;
+            await EnsureVisibleHydratedAsync(token);
         }
         catch (OperationCanceledException)
         {
@@ -201,7 +202,7 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
         {
             if (generation == _queryLoader.Generation && !_disposed)
             {
-                _items.Clear();
+                _virtual.Clear();
             }
         }
         finally
@@ -214,38 +215,42 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
         }
     }
 
-    private async Task LoadNextChunkAsync()
+    private async Task EnsureVisibleHydratedAsync(CancellationToken cancellationToken)
     {
-        if (_loadingNextChunk || isInitialLoading || !hasMore || _nextCursor is null)
+        var missing = _virtual.GetMissingIds(_virtual.VisibleStart, _virtual.VisibleEnd);
+        if (missing.Count == 0)
         {
             return;
         }
 
-        _loadingNextChunk = true;
-        isLoadingMore = true;
+        var rows = await RepositoryListQueryService.GetByIdsAsync(missing, cancellationToken);
+        if (cancellationToken.IsCancellationRequested || _disposed)
+        {
+            return;
+        }
+
+        _virtual.CacheItems(rows.Select(r => (r.RepositoryId, r)));
+    }
+
+    [JSInvokable]
+    public async Task OnVirtualScroll(double scrollTop, double clientHeight)
+    {
+        if (_disposed || _virtual.Count == 0)
+        {
+            return;
+        }
+
         var generation = _queryLoader.Generation;
         var token = _queryLoader.GetQueryToken();
+        var (start, end) = _virtual.ComputeRange(scrollTop, clientHeight);
+        _virtual.UpdateVisibleRange(start, end);
+        await EnsureVisibleHydratedAsync(token);
+        if (generation != _queryLoader.Generation || _disposed)
+        {
+            return;
+        }
 
-        try
-        {
-            var page = await RepositoryListQueryService.GetPageAsync(BuildRequest(_nextCursor), token);
-            if (generation != _queryLoader.Generation || _disposed)
-            {
-                return;
-            }
-
-            _items.AddRange(page.Items);
-            _nextCursor = page.NextCursor;
-            hasMore = page.HasMore;
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        finally
-        {
-            _loadingNextChunk = false;
-            isLoadingMore = false;
-        }
+        await InvokeAsync(StateHasChanged);
     }
 
     private RepositoryListFilter BuildFilter()
@@ -256,19 +261,11 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
         return new RepositoryListFilter(_effectiveSearch, restrict);
     }
 
-    private RepositoryListRequest BuildRequest(RepositoryListCursor? cursor) =>
-        new(
-            _effectiveSearch,
-            _showOnlySelected ? _selectedOnlySnapshot.ToList() : null,
-            RepositorySortField.Name,
-            SortDescending: false,
-            IRepositoryListQueryService.DefaultChunkSize,
-            cursor);
-
     public async ValueTask DisposeAsync()
     {
         _disposed = true;
+        await _virtual.DetachAsync(JSRuntime);
+        await _virtual.DisposeAsync();
         _queryLoader.Dispose();
-        await Task.CompletedTask;
     }
 }

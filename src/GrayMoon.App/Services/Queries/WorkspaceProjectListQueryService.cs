@@ -51,6 +51,45 @@ public sealed class WorkspaceProjectListQueryService(AppDbContext dbContext) : I
         return new WorkspaceProjectListPageResult(rows, nextCursor, hasMore);
     }
 
+    public async Task<IReadOnlyList<int>> GetIndexAsync(
+        WorkspaceProjectListFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        var query = ApplyFilters(_dbContext.WorkspaceProjects.AsNoTracking(), filter);
+        query = ApplySort(query);
+        return await query
+            .Select(p => p.ProjectId)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<WorkspaceProjectListItemDto>> GetByIdsAsync(
+        IReadOnlyList<int> projectIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (projectIds.Count == 0)
+        {
+            return Array.Empty<WorkspaceProjectListItemDto>();
+        }
+
+        var idSet = projectIds.ToHashSet();
+        var rows = await _dbContext.WorkspaceProjects.AsNoTracking()
+            .Where(p => idSet.Contains(p.ProjectId))
+            .Select(p => new WorkspaceProjectListItemDto(
+                p.ProjectId,
+                p.ProjectName,
+                p.ProjectType,
+                p.TargetFramework,
+                p.ProjectFilePath))
+            .ToListAsync(cancellationToken);
+
+        var order = projectIds
+            .Select((id, index) => (id, index))
+            .ToDictionary(x => x.id, x => x.index);
+        return rows
+            .OrderBy(r => order.GetValueOrDefault(r.ProjectId, int.MaxValue))
+            .ToList();
+    }
+
     private static IQueryable<WorkspaceProject> ApplyFilters(IQueryable<WorkspaceProject> query, WorkspaceProjectListFilter filter)
     {
         query = query.Where(p => p.WorkspaceId == filter.WorkspaceId);

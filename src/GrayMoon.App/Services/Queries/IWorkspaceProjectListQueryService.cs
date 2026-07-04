@@ -7,4 +7,10 @@ public interface IWorkspaceProjectListQueryService
     Task<int> CountAsync(WorkspaceProjectListFilter filter, CancellationToken cancellationToken = default);
 
     Task<WorkspaceProjectListPageResult> GetPageAsync(WorkspaceProjectListRequest request, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<int>> GetIndexAsync(WorkspaceProjectListFilter filter, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<WorkspaceProjectListItemDto>> GetByIdsAsync(
+        IReadOnlyList<int> projectIds,
+        CancellationToken cancellationToken = default);
 }

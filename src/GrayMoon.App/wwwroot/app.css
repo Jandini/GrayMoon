@@ -611,6 +611,12 @@ h1:focus {
     table-layout: fixed;
 }
 
+.grid-page-body .table tbody tr.virtual-scroll-placeholder td,
+.repository-grid tbody tr.virtual-scroll-placeholder td {
+    height: 48px;
+    box-sizing: border-box;
+}
+
 /* First column in grid data rows: normal weight (not bold) like other columns */
 .grid-page-body .table tbody td:first-child,
 .grid-page-body .table tbody td:first-child strong {

@@ -12,6 +12,10 @@ public interface IRepositoryListQueryService
 
     Task<IReadOnlyList<int>> GetMatchingIdsAsync(RepositoryListFilter filter, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<RepositoryListItemDto>> GetByIdsAsync(
+        IReadOnlyList<int> repositoryIds,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<int>> FilterExistingIdsAsync(IReadOnlyCollection<int> repositoryIds, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyDictionary<string, int>> GetIdsByCloneUrlsAsync(IReadOnlyList<string> cloneUrls, CancellationToken cancellationToken = default);

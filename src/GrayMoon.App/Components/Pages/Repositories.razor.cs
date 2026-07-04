@@ -2,14 +2,19 @@ using GrayMoon.App.Components.Shared;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.Queries;
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.JSInterop;
 
 namespace GrayMoon.App.Components.Pages;
 
-public sealed partial class Repositories : IDisposable
+public sealed partial class Repositories : IAsyncDisposable, IDisposable
 {
     private readonly DebouncedQueryLoader _queryLoader = new();
-    private readonly List<RepositoryListItemDto> _items = new();
+    private readonly VirtualTableScrollState<RepositoryListItemDto> _virtual = new();
+    private ElementReference _tbodyRef;
+
+    [Inject] private IJSRuntime JSRuntime { get; set; } = default!;
 
     private IReadOnlyList<ConnectorFetchError>? connectorErrors;
     private IReadOnlyList<RenamedRepositoryInfo>? renamedRepositories;
@@ -18,15 +23,11 @@ public sealed partial class Repositories : IDisposable
     private string _effectiveSearch = string.Empty;
     private bool isPersisting;
     private bool isInitialLoading = true;
-    private bool isLoadingMore;
-    private bool hasMore;
     private bool catalogHasAny;
     private bool hasLoadedOnce;
     private int? totalCount;
-    private RepositoryListCursor? _nextCursor;
     private int? fetchedRepositoryCount;
     private CancellationTokenSource? _fetchRepositoriesCts;
-    private bool _loadingNextChunk;
     private bool _disposed;
 
     private bool HasSearchFilter => !string.IsNullOrWhiteSpace(_effectiveSearch);
@@ -67,10 +68,22 @@ public sealed partial class Repositories : IDisposable
 
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         _disposed = true;
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
         _queryLoader.Dispose();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _virtual.DetachAsync(JSRuntime);
+        await _virtual.DisposeAsync();
+        Dispose();
     }
 
     protected override async Task OnInitializedAsync()
@@ -94,32 +107,36 @@ public sealed partial class Repositories : IDisposable
         }
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!isInitialLoading && _virtual.Count > 0 && !_virtual.IsAttached && !_disposed)
+        {
+            await _virtual.AttachAsync(JSRuntime, this, _tbodyRef);
+        }
+    }
+
     private async Task ResetAndLoadFromTopAsync()
     {
         var token = _queryLoader.BeginQueryCycle(out var generation);
-        _items.Clear();
-        _nextCursor = null;
-        hasMore = false;
+        await _virtual.DetachAsync(JSRuntime);
+        _virtual.Clear();
         totalCount = null;
         isInitialLoading = true;
-        isLoadingMore = false;
-        _loadingNextChunk = false;
         errorMessage = null;
 
         try
         {
             var filter = BuildFilter();
             totalCount = await RepositoryListQueryService.CountAsync(filter, token);
-            var page = await RepositoryListQueryService.GetPageAsync(BuildRequest(null), token);
+            var ids = await RepositoryListQueryService.GetMatchingIdsAsync(filter, token);
             if (generation != _queryLoader.Generation || _disposed)
             {
                 return;
             }
 
-            _items.AddRange(page.Items);
-            _nextCursor = page.NextCursor;
-            hasMore = page.HasMore;
+            _virtual.SetIndex(ids);
             hasLoadedOnce = true;
+            await EnsureVisibleHydratedAsync(token);
         }
         catch (OperationCanceledException)
         {
@@ -130,7 +147,7 @@ public sealed partial class Repositories : IDisposable
             {
                 Logger.LogError(ex, "Error loading repository list");
                 errorMessage = "Failed to load repositories. Please try again later.";
-                _items.Clear();
+                _virtual.Clear();
             }
         }
         finally
@@ -142,59 +159,46 @@ public sealed partial class Repositories : IDisposable
         }
     }
 
-    private async Task LoadNextChunkAsync()
+    private async Task EnsureVisibleHydratedAsync(CancellationToken cancellationToken)
     {
-        if (_loadingNextChunk || isInitialLoading || !hasMore || _nextCursor is null)
+        var missing = _virtual.GetMissingIds(_virtual.VisibleStart, _virtual.VisibleEnd);
+        if (missing.Count == 0)
         {
             return;
         }
 
-        _loadingNextChunk = true;
-        isLoadingMore = true;
+        var rows = await RepositoryListQueryService.GetByIdsAsync(missing, cancellationToken);
+        if (cancellationToken.IsCancellationRequested || _disposed)
+        {
+            return;
+        }
+
+        _virtual.CacheItems(rows.Select(r => (r.RepositoryId, r)));
+    }
+
+    [JSInvokable]
+    public async Task OnVirtualScroll(double scrollTop, double clientHeight)
+    {
+        if (_disposed || _virtual.Count == 0)
+        {
+            return;
+        }
+
         var generation = _queryLoader.Generation;
         var token = _queryLoader.GetQueryToken();
+        var (start, end) = _virtual.ComputeRange(scrollTop, clientHeight);
+        _virtual.UpdateVisibleRange(start, end);
+        await EnsureVisibleHydratedAsync(token);
+        if (generation != _queryLoader.Generation || _disposed)
+        {
+            return;
+        }
 
-        try
-        {
-            var page = await RepositoryListQueryService.GetPageAsync(BuildRequest(_nextCursor), token);
-            if (generation != _queryLoader.Generation || _disposed)
-            {
-                return;
-            }
-
-            _items.AddRange(page.Items);
-            _nextCursor = page.NextCursor;
-            hasMore = page.HasMore;
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            if (generation == _queryLoader.Generation && !_disposed)
-            {
-                Logger.LogError(ex, "Error loading more repositories");
-                errorMessage = "Failed to load more repositories. Please try again later.";
-            }
-        }
-        finally
-        {
-            _loadingNextChunk = false;
-            isLoadingMore = false;
-        }
+        await InvokeAsync(StateHasChanged);
     }
 
     private RepositoryListFilter BuildFilter() =>
         new(_effectiveSearch, null);
-
-    private RepositoryListRequest BuildRequest(RepositoryListCursor? cursor) =>
-        new(
-            _effectiveSearch,
-            null,
-            RepositorySortField.Name,
-            SortDescending: false,
-            IRepositoryListQueryService.DefaultChunkSize,
-            cursor);
 
     private void AbortFetchRepositories()
     {
