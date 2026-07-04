@@ -111,7 +111,7 @@ public sealed partial class WorkspaceRepositories
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error getting update plan for repository {RepositoryId}", repositoryId);
-            ToastService.Show("Could not load dependency updates.");
+            ToastService.ShowError("Could not load dependency updates.");
         }
     }
 
@@ -156,7 +156,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Update dependencies failed for repository {RepositoryId}", repositoryId);
-                SafeInvoke(() => ToastService.Show(ex.Message));
+                SafeInvoke(() => ToastService.ShowError(ex.Message));
             }
         });
 

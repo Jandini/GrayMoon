@@ -173,7 +173,7 @@ public sealed partial class WorkspaceRepositories
             });
 
             if (failureCount > 0)
-                SafeInvoke(() => ToastService.Show($"Fetched branches for {successCount} repositories. {failureCount} failed."));
+                SafeInvoke(() => ToastService.ShowError($"Fetched branches for {successCount} repositories. {failureCount} failed."));
         }, new PageJobOptions
         {
             RefreshOnSuccess = false,
@@ -181,7 +181,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error fetching branches across workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => ToastService.Show("Failed to fetch branches across workspace."));
+                SafeInvoke(() => ToastService.ShowError("Failed to fetch branches across workspace."));
             }
         });
 
@@ -230,14 +230,20 @@ public sealed partial class WorkspaceRepositories
             });
 
             if (result.FailureCount > 0)
-                SafeInvoke(() => ToastService.Show($"Checked out branch in {result.SuccessCount} repositories. {result.FailureCount} failed."));
+            {
+                var firstError = result.ErrorsByRepositoryId.Values.FirstOrDefault();
+                SafeInvoke(() => ToastService.ShowError(
+                    !string.IsNullOrWhiteSpace(firstError)
+                        ? firstError
+                        : $"Checked out branch in {result.SuccessCount} repositories. {result.FailureCount} failed."));
+            }
         }, new PageJobOptions
         {
             CancelToast = "Checkout cancelled.",
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error checking out branch {BranchName} across workspace {WorkspaceId}", branchName, WorkspaceId);
-                SafeInvoke(() => ToastService.Show("Failed to check out branch across workspace."));
+                SafeInvoke(() => ToastService.ShowError("Failed to check out branch across workspace."));
             }
         });
 
@@ -344,9 +350,15 @@ public sealed partial class WorkspaceRepositories
             SafeInvoke(() =>
             {
                 if (success)
+                {
                     repositoryErrors.Remove(repositoryId);
+                }
                 else
-                    repositoryErrors[repositoryId] = errMsg ?? (isTag ? "Failed to checkout tag." : "Failed to checkout branch.");
+                {
+                    var message = errMsg ?? (isTag ? "Failed to checkout tag." : "Failed to checkout branch.");
+                    repositoryErrors[repositoryId] = message;
+                    ToastService.ShowError(message);
+                }
             });
         }, new PageJobOptions
         {
@@ -354,9 +366,14 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error checking out {Kind} for repository {RepositoryId}", isTag ? "tag" : "branch", repositoryId);
-                SafeInvoke(() => { repositoryErrors[repositoryId] = isTag
+                var message = isTag
                     ? "Failed to checkout tag. The GrayMoon Agent may be offline. Start the Agent and try again."
-                    : "Failed to checkout branch. The GrayMoon Agent may be offline. Start the Agent and try again."; });
+                    : "Failed to checkout branch. The GrayMoon Agent may be offline. Start the Agent and try again.";
+                SafeInvoke(() =>
+                {
+                    repositoryErrors[repositoryId] = message;
+                    ToastService.ShowError(message);
+                });
             }
         });
 

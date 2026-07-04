@@ -38,7 +38,7 @@ public sealed partial class WorkspaceRepositories
                 CancellationToken.None);
             if (depInfo == null)
             {
-                ToastService.Show("Could not load push plan. Try again.");
+                ToastService.ShowError("Could not load push plan. Try again.");
                 return;
             }
             _pushWithDependenciesModal = _pushWithDependenciesModal with
@@ -129,7 +129,7 @@ public sealed partial class WorkspaceRepositories
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error getting push dependency info for repository {RepositoryId}", repositoryId);
-            ToastService.Show("Could not load dependency info. Try again.");
+            ToastService.ShowError("Could not load dependency info. Try again.");
         }
     }
 
@@ -217,7 +217,7 @@ public sealed partial class WorkspaceRepositories
                     synchronizedPush,
                     requiredPackageIds,
                     job.ReportProgress,
-                    ToastService.Show,
+                    ToastService.ShowError,
                     syncedRepoIds: syncedRepoIds,
                     cancellationToken: ct));
         }
@@ -250,7 +250,7 @@ public sealed partial class WorkspaceRepositories
             if (success)
                 await InvokeAsync(async () => { if (_disposed) return; await RefreshFromSync(); });
             else
-                SafeInvoke(() => ToastService.Show(pushError ?? "Push failed."));
+                SafeInvoke(() => ToastService.ShowError(pushError ?? "Push failed."));
         }, new PageJobOptions
         {
             RefreshOnSuccess = false,
@@ -258,7 +258,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Push with upstream failed for repository {RepositoryId}", repositoryId);
-                SafeInvoke(() => ToastService.Show(ex.Message));
+                SafeInvoke(() => ToastService.ShowError(ex.Message));
             }
         });
 

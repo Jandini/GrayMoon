@@ -148,7 +148,7 @@ public sealed partial class WorkspaceRepositories
                 catch (Exception ex)
                 {
                     Logger.LogError(ex, "Error checking branches for sync to default");
-                    SafeInvoke(() => ToastService.Show("Failed to prepare sync to default."));
+                    SafeInvoke(() => ToastService.ShowError("Failed to prepare sync to default."));
                     throw;
                 }
             });
@@ -231,7 +231,7 @@ public sealed partial class WorkspaceRepositories
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error preparing sync to default (repository {RepositoryId})", repositoryId);
-            ToastService.Show("Failed to prepare sync to default.");
+            ToastService.ShowError("Failed to prepare sync to default.");
         }
     }
 
@@ -256,7 +256,11 @@ public sealed partial class WorkspaceRepositories
             }
             else if (errMsg != null)
             {
-                SafeInvoke(() => { repositoryErrors[repositoryId] = errMsg; });
+                SafeInvoke(() =>
+                {
+                    repositoryErrors[repositoryId] = errMsg;
+                    ToastService.ShowError(errMsg);
+                });
             }
         }, new PageJobOptions
         {
@@ -264,7 +268,12 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error syncing to default branch for repository {RepositoryId}", repositoryId);
-                SafeInvoke(() => { repositoryErrors[repositoryId] = "An error occurred while syncing to default branch. The GrayMoon Agent may be offline."; });
+                var message = "An error occurred while syncing to default branch. The GrayMoon Agent may be offline.";
+                SafeInvoke(() =>
+                {
+                    repositoryErrors[repositoryId] = message;
+                    ToastService.ShowError(message);
+                });
             }
         });
 
@@ -341,7 +350,7 @@ public sealed partial class WorkspaceRepositories
                     {
                         repositoryErrors[repoId] = errMsg;
                         var repoName = TryGetLink(repoId)?.Repository?.RepositoryName ?? repoId.ToString();
-                        ToastService.Show($"{repoName}: {errMsg}");
+                        ToastService.ShowError($"{repoName}: {errMsg}");
                     }
                 }
             });
@@ -451,7 +460,7 @@ public sealed partial class WorkspaceRepositories
                 catch (Exception ex)
                 {
                     Logger.LogError(ex, "Error fetching branch state before sync all to default");
-                    SafeInvoke(() => ToastService.Show("Failed to prepare sync to default."));
+                    SafeInvoke(() => ToastService.ShowError("Failed to prepare sync to default."));
                     throw;
                 }
             });
@@ -552,7 +561,7 @@ public sealed partial class WorkspaceRepositories
                     {
                         repositoryErrors[repoId] = errMsg;
                         var repoName = TryGetLink(repoId)?.Repository?.RepositoryName ?? repoId.ToString();
-                        ToastService.Show($"{repoName}: {errMsg}");
+                        ToastService.ShowError($"{repoName}: {errMsg}");
                     }
                 }
 
@@ -561,7 +570,7 @@ public sealed partial class WorkspaceRepositories
                     if (failureCount == 0)
                         ToastService.Show($"Synced {successCount} of {total} repositories to default branch.");
                     else
-                        ToastService.Show($"Synced {successCount} of {total} repositories to default branch ({failureCount} failed).");
+                        ToastService.ShowError($"Synced {successCount} of {total} repositories to default branch ({failureCount} failed).");
                 }
             });
         }, new PageJobOptions
