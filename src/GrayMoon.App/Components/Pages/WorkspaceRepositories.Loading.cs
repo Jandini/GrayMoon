@@ -177,6 +177,11 @@ public sealed partial class WorkspaceRepositories
         }
 
         var rangeChanged = UpdateVisibleRange(start, end);
+        if (rangeChanged && scrollGeneration == _scrollGeneration && !_disposed)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+
         var itemsHydrated = await EnsureSlotsHydratedAsync(start, end, token);
         if (scrollGeneration != _scrollGeneration
             || queryGeneration != _queryLoader.Generation
@@ -185,7 +190,7 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
-        if (rangeChanged || itemsHydrated)
+        if (itemsHydrated)
         {
             await InvokeAsync(StateHasChanged);
         }

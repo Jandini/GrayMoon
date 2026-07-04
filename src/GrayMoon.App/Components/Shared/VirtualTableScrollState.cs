@@ -133,7 +133,8 @@ public sealed class VirtualTableScrollState<TItem> : IAsyncDisposable
         return (start, end);
     }
 
-    public IEnumerable<(int Id, TItem? Item)> VisibleRows
+    /// <summary>Visible rows with absolute list index (for stable striping, independent of DOM position).</summary>
+    public IEnumerable<(int Index, int Id, TItem? Item)> VisibleRows
     {
         get
         {
@@ -146,10 +147,11 @@ public sealed class VirtualTableScrollState<TItem> : IAsyncDisposable
             {
                 var id = _ids[i];
                 _itemsById.TryGetValue(id, out var item);
-                yield return (id, item);
+                yield return (i, id, item);
             }
         }
     }
+
 
     public async Task AttachAsync<THost>(IJSRuntime js, THost host, ElementReference scrollElement)
         where THost : class

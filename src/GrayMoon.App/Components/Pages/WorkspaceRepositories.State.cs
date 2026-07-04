@@ -87,7 +87,8 @@ public sealed partial class WorkspaceRepositories
         int? LevelKey,
         int WorkspaceRepositoryId,
         int RepositoryId,
-        int LevelRepoCount);
+        int LevelRepoCount,
+        int StripeIndex);
     private bool IsRepoOnTag(int repositoryId) =>
         TryGetLink(repositoryId)?.IsOnTag == true;
     private WorkspaceRepositoryLink? TryGetLink(int repositoryId) =>
@@ -153,6 +154,7 @@ public sealed partial class WorkspaceRepositories
         }
         var previousLevel = int.MinValue;
         var hasPrevious = false;
+        var stripeIndex = 0;
         foreach (var entry in index)
         {
             var levelKey = entry.DependencyLevel ?? int.MinValue;
@@ -163,7 +165,8 @@ public sealed partial class WorkspaceRepositories
                     entry.DependencyLevel,
                     0,
                     0,
-                    levelCounts[levelKey]));
+                    levelCounts[levelKey],
+                    -1));
                 previousLevel = levelKey;
                 hasPrevious = true;
             }
@@ -172,9 +175,12 @@ public sealed partial class WorkspaceRepositories
                 entry.DependencyLevel,
                 entry.WorkspaceRepositoryId,
                 entry.RepositoryId,
-                0));
+                0,
+                stripeIndex++));
         }
     }
+
+    private static string StripeClass(int stripeIndex) => VirtualScrollUi.StripeClass(stripeIndex);
     private static double SlotHeight(VirtualSlot slot) =>
         slot.Kind == VirtualSlotKind.LevelHeader ? VirtualHeaderHeightPx : VirtualRowHeightPx;
     private double TotalScrollHeightPx()

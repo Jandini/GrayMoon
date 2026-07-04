@@ -2,6 +2,7 @@
 @using GrayMoon.App.Services
 @using GrayMoon.App.Services.Queries
 @using GrayMoon.App.Components.Shared
+@using static GrayMoon.App.Components.Shared.VirtualScrollUi
 
 @if (IsVisible)
 {
@@ -60,7 +61,7 @@
                             }
                             else
                             {
-                                <table class="table table-sm mb-0 repository-grid workspaces-table resizable-columns">
+                                <table class="table table-sm mb-0 repository-grid workspaces-table resizable-columns virtual-scroll-table">
                                     <thead class="table-dark">
                                         <tr>
                                             <th class="col-select no-resize" data-width="26">
@@ -90,17 +91,17 @@
                                                     <td colspan="5" style="height:@(_virtual.TopSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
                                                 </tr>
                                             }
-                                            @foreach (var (id, repository) in _virtual.VisibleRows)
+                                            @foreach (var (index, id, repository) in _virtual.VisibleRows)
                                             {
                                                 if (repository is null)
                                                 {
-                                                    <tr @key="@id" class="virtual-scroll-placeholder">
+                                                    <tr @key="@id" class="virtual-scroll-placeholder @StripeClass(index)">
                                                         <td colspan="5">&nbsp;</td>
                                                     </tr>
                                                 }
                                                 else
                                                 {
-                                                    <tr @key="@id">
+                                                    <tr @key="@id" class="@StripeClass(index)">
                                                         <td class="col-select">
                                                             <input class="form-check-input workspace-repo-checkbox"
                                                                    type="checkbox"

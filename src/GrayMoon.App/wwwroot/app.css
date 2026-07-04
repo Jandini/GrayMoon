@@ -622,6 +622,24 @@ h1:focus {
     overflow: hidden;
 }
 
+/* Absolute-index striping for virtual scroll (table-striped nth-child flips when the window moves). */
+.virtual-scroll-table > tbody > tr.virtual-row-odd > td {
+    background-color: var(--bg-table-stripe);
+    color: var(--text-primary) !important;
+}
+
+.virtual-scroll-table > tbody > tr.virtual-row-even > td {
+    background-color: var(--bg-card);
+    color: var(--text-primary) !important;
+}
+
+.virtual-scroll-table > tbody > tr.virtual-scroll-spacer > td {
+    background-color: transparent !important;
+    padding: 0 !important;
+    border: 0 !important;
+    line-height: 0 !important;
+}
+
 /* First column in grid data rows: normal weight (not bold) like other columns */
 .grid-page-body .table tbody td:first-child,
 .grid-page-body .table tbody td:first-child strong {

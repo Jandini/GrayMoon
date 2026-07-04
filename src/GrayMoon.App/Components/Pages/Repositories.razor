@@ -4,6 +4,7 @@
 @using GrayMoon.App.Services
 @using GrayMoon.App.Services.Queries
 @using GrayMoon.App.Components.Shared
+@using static GrayMoon.App.Components.Shared.VirtualScrollUi
 @inject GitHubRepositoryService RepositoryService
 @inject IRepositoryListQueryService RepositoryListQueryService
 @inject ILogger<Repositories> Logger
@@ -98,7 +99,7 @@
                 }
                 <div class="card-body p-0">
                     <div class="table-responsive">
-                        <table class="table table-striped table-hover mb-0 repositories-table resizable-columns">
+                        <table class="table table-hover mb-0 repositories-table resizable-columns virtual-scroll-table">
                         <thead class="table-dark">
                             <tr>
                                 <th class="col-repo">Repository</th>
@@ -141,17 +142,17 @@
                                         <td colspan="5" style="height:@(_virtual.TopSpacerPx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture))px;padding:0;border:0;line-height:0;"></td>
                                     </tr>
                                 }
-                                @foreach (var (id, repository) in _virtual.VisibleRows)
+                                @foreach (var (index, id, repository) in _virtual.VisibleRows)
                                 {
                                     if (repository is null)
                                     {
-                                        <tr @key="@id" class="virtual-scroll-placeholder">
+                                        <tr @key="@id" class="virtual-scroll-placeholder @StripeClass(index)">
                                             <td colspan="5">&nbsp;</td>
                                         </tr>
                                     }
                                     else
                                     {
-                                        <tr @key="@id">
+                                        <tr @key="@id" class="@StripeClass(index)">
                                             <td class="col-repo"><strong>@repository.RepositoryName</strong></td>
                                             <td class="col-owner">@(string.IsNullOrWhiteSpace(repository.OrgName) ? "-" : repository.OrgName)</td>
                                             <td class="col-topics">

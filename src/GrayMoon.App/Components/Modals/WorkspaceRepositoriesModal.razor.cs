@@ -246,6 +246,11 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
         var token = _queryLoader.GetQueryToken();
         var (start, end) = _virtual.ComputeRange(scrollTop, clientHeight);
         var rangeChanged = _virtual.UpdateVisibleRange(start, end);
+        if (rangeChanged && _virtual.IsCurrentScroll(scrollGeneration) && !_disposed)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+
         var itemsHydrated = await EnsureVisibleHydratedAsync(token);
         if (!_virtual.IsCurrentScroll(scrollGeneration)
             || queryGeneration != _queryLoader.Generation
@@ -254,7 +259,7 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
             return;
         }
 
-        if (rangeChanged || itemsHydrated)
+        if (itemsHydrated)
         {
             await InvokeAsync(StateHasChanged);
         }
