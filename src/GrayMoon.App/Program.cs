@@ -3,6 +3,7 @@ using GrayMoon.App;
 using GrayMoon.App.Api;
 using GrayMoon.App.Components;
 using GrayMoon.App.Data;
+using GrayMoon.App.Desktop;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
@@ -22,6 +23,17 @@ Log.Logger = new LoggerConfiguration()
 try
 {
     var builder = WebApplication.CreateBuilder(args);
+
+    // Desktop mode: launched with --desktop <pipe-name> by GrayMoon.Desktop.exe
+    var desktopPipeIndex = Array.IndexOf(args, "--desktop");
+    var isDesktopMode = desktopPipeIndex >= 0 && desktopPipeIndex + 1 < args.Length;
+    var desktopPipeName = isDesktopMode ? args[desktopPipeIndex + 1] : null;
+
+    if (isDesktopMode && desktopPipeName is not null)
+    {
+        builder.WebHost.UseDesktopMode(desktopPipeName);
+        builder.Services.AddHostedService<DesktopStartupService>();
+    }
 
     builder.Logging.ClearProviders();
     builder.Host.UseSerilog((context, services, configuration) => configuration
@@ -189,7 +201,8 @@ try
     }
 
     // Only redirect to HTTPS when URLs include HTTPS (skip in container when only HTTP is used)
-    if ((app.Configuration["ASPNETCORE_URLS"] ?? "").Contains("https", StringComparison.OrdinalIgnoreCase))
+    // Also skip in desktop mode — loopback HTTP only, no HTTPS needed.
+    if (!isDesktopMode && (app.Configuration["ASPNETCORE_URLS"] ?? "").Contains("https", StringComparison.OrdinalIgnoreCase))
     {
         app.UseHttpsRedirection();
     }
@@ -200,6 +213,14 @@ try
     app.MapApiEndpoints();
     app.MapHub<WorkspaceSyncHub>("/hubs/workspace-sync");
     app.MapHub<AgentHub>("/hub/agent");
+
+    // Desktop-mode-only endpoints
+    if (isDesktopMode)
+    {
+        app.MapHub<DesktopNotificationHub>("/hubs/desktop");
+    }
+
+    app.MapGet("/health", () => Results.Ok());
 
     app.MapRazorComponents<App>()
         .AddInteractiveServerRenderMode();

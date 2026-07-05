@@ -16,6 +16,12 @@
     <ProjectReference Include="..\GrayMoon.Common\GrayMoon.Common.csproj" />
     <None Include="..\..\.github\workflows\docker-build.yml" Link="docker-build.yml" />
     <None Include="..\..\README.md" Link="README.md" />
+    <None Update="appsettings.Development.json">
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </None>
+    <Content Update="appsettings.Development.json">
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>
