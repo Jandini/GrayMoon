@@ -22,6 +22,12 @@
 
         const anchor = wrap.getBoundingClientRect();
 
+        // Skip positioning when the element has not been laid out yet (e.g. during
+        // initial render or right after a Blazor re-render replaces the DOM node).
+        // Without this guard the tooltip would land at top:0 left:0 because
+        // getBoundingClientRect returns all-zeros for off-screen / unrendered nodes.
+        if (anchor.width === 0 && anchor.height === 0) return;
+
         const tipWidth = tip.offsetWidth || 480;
 
         const margin = 8;
@@ -63,6 +69,8 @@
 
 
     document.addEventListener('mouseover', onWrapActivated, true);
+
+    document.addEventListener('mouseenter', onWrapActivated, true);
 
     document.addEventListener('focusin', onWrapActivated, true);
 
