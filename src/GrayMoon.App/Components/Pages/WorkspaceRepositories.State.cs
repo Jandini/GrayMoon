@@ -223,7 +223,7 @@ public sealed partial class WorkspaceRepositories
         {
             return;
         }
-        StateHasChanged();
+        _ = InvokeAsync(StateHasChanged);
     }
     private IEnumerable<WorkspaceRepositoryLink> GetHydratedLinksAtLevel(int? levelKey) =>
         _linkByRepoId.Values.Where(wr => wr.DependencyLevel == levelKey);
