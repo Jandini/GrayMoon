@@ -75,7 +75,7 @@ public sealed partial class WorkspaceRepositories
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Quick Fetch failed for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => errorMessage = "Quick Fetch failed. Check the logs for details.");
+                SafeInvoke(() => errorMessage = "Fetch failed. Check the logs for details.");
                 throw;
             }
         });

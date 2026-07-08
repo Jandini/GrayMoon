@@ -295,7 +295,7 @@
                     @onclick="HandleSyncPrimaryClick"
                     @onclick:stopPropagation
                     disabled="@SyncDisabled">
-                @(QuickFetchIsPrimary ? "Quick Fetch" : "Sync")
+                @(QuickFetchIsPrimary ? "Fetch" : "Sync")
             </button>
             <button type="button"
                     class="btn @(IsOutOfSync == true ? "btn-danger" : "btn-primary") dropdown-toggle dropdown-toggle-split"
@@ -316,7 +316,7 @@
                                 role="menuitem"
                                 @onclick="HandleQuickFetchClick"
                                 disabled="@SyncDisabled">
-                            Quick Fetch
+                            Fetch
                         </button>
                     </li>
                     <li>
@@ -333,7 +333,7 @@
                                 role="menuitem"
                                 @onclick="HandleRestorePackagesClick"
                                 disabled="@SyncDisabled">
-                            Restore Packages
+                            Restore
                         </button>
                     </li>
                 </ul>
