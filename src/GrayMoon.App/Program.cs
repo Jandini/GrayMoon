@@ -51,6 +51,7 @@ try
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=db/graymoon.db";
     if (!connectionString.Contains("Cache=", StringComparison.OrdinalIgnoreCase))
         connectionString += connectionString.EndsWith(';') ? "Cache=Shared;" : ";Cache=Shared;";
+    builder.Services.AddDbContextFactory<AppDbContext>(options => options.UseSqlite(connectionString));
     builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connectionString));
     builder.Services.AddScoped<ConnectorRepository>();
     builder.Services.AddScoped<GitHubRepositoryRepository>();

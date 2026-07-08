@@ -497,7 +497,6 @@ public sealed partial class WorkspaceRepositories
             }
         }, new PageJobOptions
         {
-            RefreshOnSuccess = false,
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error updating branch from default for repository {RepositoryId}", repositoryId);

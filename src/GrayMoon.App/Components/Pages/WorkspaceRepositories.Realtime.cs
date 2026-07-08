@@ -68,15 +68,9 @@ public sealed partial class WorkspaceRepositories
     private void OnJobServiceChanged()
     {
         if (_disposed) return;
-        _ = InvokeAsync(() =>
-        {
-            if (_disposed) return;
-            var isRunning = IsJobRunning;
-            if (_wasJobRunning && !isRunning && !_disposed)
-                _ = InvokeAsync(RefreshFromSync);
-            _wasJobRunning = isRunning;
-            StateHasChanged();
-        });
+        // Overlay / IsJobRunning UI only. Grid refresh runs inside job bodies
+        // (RefreshOnSuccess / ReloadWorkspaceDataAfterCancelAsync), not here.
+        _ = InvokeAsync(StateHasChanged);
     }
 
     private void SafeInvoke(Action callback)

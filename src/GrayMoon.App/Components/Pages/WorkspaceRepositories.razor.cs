@@ -32,7 +32,6 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     {
         AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         JobService.Changed += OnJobServiceChanged;
-        _wasJobRunning = IsJobRunning;
         _loadedWorkspaceId = WorkspaceId;
         await LoadWorkspaceAsync();
         ApplySyncStateFromLoadedItems();
@@ -82,6 +81,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
         _queryLoader.Dispose();
+        _reloadGate.Dispose();
         _virtualScrollDotNetRef?.Dispose();
         _virtualScrollDotNetRef = null;
     }

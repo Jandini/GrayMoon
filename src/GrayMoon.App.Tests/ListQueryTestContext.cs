@@ -15,13 +15,13 @@ public sealed class ListQueryTestContext : IAsyncDisposable
     public WorkspaceProjectListQueryService ProjectQuery { get; }
     public WorkspaceRepositoryLinkListQueryService WorkspaceRepoLinkQuery { get; }
 
-    private ListQueryTestContext(SqliteConnection connection, AppDbContext dbContext)
+    private ListQueryTestContext(SqliteConnection connection, AppDbContext dbContext, DbContextOptions<AppDbContext> options)
     {
         _connection = connection;
         DbContext = dbContext;
         RepositoryQuery = new RepositoryListQueryService(dbContext);
         ProjectQuery = new WorkspaceProjectListQueryService(dbContext);
-        WorkspaceRepoLinkQuery = new WorkspaceRepositoryLinkListQueryService(dbContext);
+        WorkspaceRepoLinkQuery = new WorkspaceRepositoryLinkListQueryService(new TestDbContextFactory(options));
     }
 
     public static async Task<ListQueryTestContext> CreateAsync(int repositoryCount = 120)
@@ -105,7 +105,7 @@ public sealed class ListQueryTestContext : IAsyncDisposable
         }
 
         await dbContext.SaveChangesAsync();
-        return new ListQueryTestContext(connection, dbContext);
+        return new ListQueryTestContext(connection, dbContext, options);
     }
 
     public static async Task<(ListQueryTestContext Context, int WorkspaceId)> CreateWithWorkspaceLinksAsync(int repositoryCount = 120)
@@ -119,5 +119,10 @@ public sealed class ListQueryTestContext : IAsyncDisposable
     {
         await DbContext.DisposeAsync();
         await _connection.DisposeAsync();
+    }
+
+    private sealed class TestDbContextFactory(DbContextOptions<AppDbContext> options) : IDbContextFactory<AppDbContext>
+    {
+        public AppDbContext CreateDbContext() => new(options);
     }
 }
