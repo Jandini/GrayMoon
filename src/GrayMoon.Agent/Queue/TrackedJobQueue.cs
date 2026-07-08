@@ -30,8 +30,8 @@ public sealed class TrackedJobQueue(
     public async ValueTask EnqueueAsync(JobEnvelope job, CancellationToken cancellationToken = default)
     {
         var workspaceId = job.TryGetWorkspaceId();
-        Increment(workspaceId);
         await _channel.Writer.WriteAsync(job, cancellationToken);
+        Increment(workspaceId);
         _ = NotifyAppAsync();
     }
 

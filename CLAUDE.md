@@ -19,7 +19,7 @@ When you complete a task, write a single sentence summarizing what was done. Kee
 
 ```powershell
 # Build the solution
-dotnet build GrayMoon.sln
+dotnet build GrayMoon.slnx
 
 # Run tests (xUnit) - only GrayMoon.Common is covered; no integration tests exist
 dotnet test src/GrayMoon.Common.Tests/GrayMoon.Common.Tests.csproj
