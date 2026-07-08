@@ -73,6 +73,11 @@ html, body {
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
     background-color: var(--bg-primary);
     color: var(--text-primary);
+    /* Prevent a page-level vertical scrollbar. This is a full-page app: all
+       scrolling is handled internally by grid-page-body tbody and other
+       explicit scroll containers. DPI scaling on VDI machines can cause
+       subpixel rounding that pushes layout a few pixels over 100vh. */
+    overflow: hidden;
 }
 
 /* Links */
