@@ -1100,7 +1100,13 @@ table.resizable-columns th:hover .resize-handle::after {
 }
 
 /* Yellow actionable style for the behind count when update-branch is available */
-.repositories-table td.col-divergence .divergence-link-behind--actionable {
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable,
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable:link,
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable:visited,
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable:focus,
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable:focus-visible,
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable:hover,
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable:active {
     background-color: #ffc107;
     color: #000 !important;
     border-color: #ffc107;
@@ -1111,9 +1117,9 @@ table.resizable-columns th:hover .resize-handle::after {
     line-height: inherit;
 }
 
-.repositories-table td.col-divergence .divergence-link-behind--actionable:hover {
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable:hover,
+.repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable:focus-visible {
     background-color: #e0a800;
-    color: #000 !important;
     border-color: #d39e00;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
