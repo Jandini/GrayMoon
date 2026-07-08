@@ -51,8 +51,11 @@ try
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=db/graymoon.db";
     if (!connectionString.Contains("Cache=", StringComparison.OrdinalIgnoreCase))
         connectionString += connectionString.EndsWith(';') ? "Cache=Shared;" : ";Cache=Shared;";
+    // AddDbContext + AddDbContextFactory together fails on EF Core 10 (scoped
+    // IDbContextOptionsConfiguration resolved from the root provider). Register the
+    // factory only, then supply scoped AppDbContext instances from it.
     builder.Services.AddDbContextFactory<AppDbContext>(options => options.UseSqlite(connectionString));
-    builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connectionString));
+    builder.Services.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<AppDbContext>>().CreateDbContext());
     builder.Services.AddScoped<ConnectorRepository>();
     builder.Services.AddScoped<GitHubRepositoryRepository>();
     builder.Services.AddScoped<WorkspaceProjectRepository>();

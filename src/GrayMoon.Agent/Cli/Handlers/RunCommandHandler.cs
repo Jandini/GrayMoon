@@ -131,6 +131,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<UndoPushRequest, UndoPushResponse>, UndoPushCommand>();
         builder.Services.AddSingleton<ICommandHandler<SelfUpdateRequest, SelfUpdateResponse>, SelfUpdateCommand>();
         builder.Services.AddSingleton<ICommandHandler<UpdateBranchFromDefaultRequest, UpdateBranchFromDefaultResponse>, UpdateBranchFromDefaultCommand>();
+        builder.Services.AddSingleton<ICommandHandler<FetchCommitsRequest, FetchCommitsResponse>, FetchCommitsCommand>();
         builder.Services.AddSingleton<CheckoutHookSyncCommand>();
         builder.Services.AddSingleton<CommitHookSyncCommand>();
         builder.Services.AddSingleton<MergeHookSyncCommand>();

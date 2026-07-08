@@ -35,7 +35,8 @@ public sealed class CommandDispatcher(
     ICommandHandler<UndoPushRequest, UndoPushResponse> undoPushCommand,
     ICommandHandler<SelfUpdateRequest, SelfUpdateResponse> selfUpdateCommand,
     ICommandHandler<CheckFileVersionsRequest, CheckFileVersionsResponse> checkFileVersionsCommand,
-    ICommandHandler<UpdateBranchFromDefaultRequest, UpdateBranchFromDefaultResponse> updateBranchFromDefaultCommand) : ICommandDispatcher
+    ICommandHandler<UpdateBranchFromDefaultRequest, UpdateBranchFromDefaultResponse> updateBranchFromDefaultCommand,
+    ICommandHandler<FetchCommitsRequest, FetchCommitsResponse> fetchCommitsCommand) : ICommandDispatcher
 {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
@@ -69,6 +70,7 @@ public sealed class CommandDispatcher(
         [AgentHubMethods.SelfUpdate] = async (req, ct) => await selfUpdateCommand.ExecuteAsync((SelfUpdateRequest)req, ct),
         [AgentHubMethods.CheckFileVersions] = async (req, ct) => await checkFileVersionsCommand.ExecuteAsync((CheckFileVersionsRequest)req, ct),
         ["UpdateBranchFromDefault"] = async (req, ct) => await updateBranchFromDefaultCommand.ExecuteAsync((UpdateBranchFromDefaultRequest)req, ct),
+        ["FetchCommits"] = async (req, ct) => await fetchCommitsCommand.ExecuteAsync((FetchCommitsRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

@@ -44,6 +44,44 @@ public sealed partial class WorkspaceRepositories
             ShowConfirm($"Do you want to sync {filtered.Count} repositories in this level?", () => SyncLevelAsync(filtered));
     }
 
+    private Task QuickFetchAsync()
+    {
+        if (workspace == null || !HasRepositories || IsJobRunning) return Task.CompletedTask;
+        errorMessage = null;
+        JobService.StartJob(PageJobKey, "Fetching commits...", async (job, ct) =>
+        {
+            try
+            {
+                await ScopedExecutor.ExecuteAsync<WorkspaceGitService>(
+                    svc => svc.QuickFetchAsync(
+                        WorkspaceId,
+                        onProgress: (done, total) => job.ReportProgress($"Fetched {done} of {total}"),
+                        cancellationToken: ct),
+                    ct);
+
+                await InvokeAsync(async () =>
+                {
+                    if (_disposed) return;
+                    await ReloadWorkspaceDataFromFreshScopeAsync();
+                    ApplySyncStateFromLoadedItems();
+                    StateHasChanged();
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                await ReloadWorkspaceDataAfterCancelAsync();
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Quick Fetch failed for workspace {WorkspaceId}", WorkspaceId);
+                SafeInvoke(() => errorMessage = "Quick Fetch failed. Check the logs for details.");
+                throw;
+            }
+        });
+        return Task.CompletedTask;
+    }
+
     private Task RunSyncJobAsync(IReadOnlyList<int>? repositoryIds, string jobLabel, bool skipDependencyLevelPersistence)
     {
         JobService.StartJob(PageJobKey, jobLabel, async (job, ct) =>
