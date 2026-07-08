@@ -744,6 +744,39 @@ h1:focus {
     background-color: rgba(0, 0, 0, 0.6);
 }
 
+/* Gray scrollbar on the Bootstrap modal overlay (visible on Windows when the
+   dialog is taller than the viewport). */
+.modal {
+    scrollbar-color: #5a5a5a transparent;
+    scrollbar-width: thin;
+}
+
+.modal::-webkit-scrollbar {
+    width: 8px;
+}
+
+.modal::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.modal::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+/* Prevent modal dialogs from slightly exceeding the viewport height, which on
+   Windows causes a barely-scrollable scrollbar on the .modal overlay.
+   3.5rem = 2 x Bootstrap's default 1.75rem top/bottom margin.
+   Scoped modal CSS with higher specificity overrides these where needed. */
+.modal-dialog {
+    max-height: calc(100vh - 3.5rem);
+}
+
+.modal-dialog > .modal-content {
+    max-height: 100%;
+    overflow: hidden;
+}
+
 .modal-content {
     background-color: var(--bg-card);
     border-color: var(--border-color);
