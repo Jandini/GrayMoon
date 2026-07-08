@@ -51,50 +51,64 @@ public sealed partial class WorkspaceRepositories
             isInitialLoading = false;
             return;
         }
-        var token = _queryLoader.BeginQueryCycle(out var generation);
-        ClearGridState();
-        isInitialLoading = true;
-        _virtualScrollAttached = false;
+
+        await _reloadGate.WaitAsync();
+        var generation = 0;
         try
         {
-            var filter = new WorkspaceRepositoryLinkListFilter(WorkspaceId, _effectiveSearch);
-            await LoadHeaderStateAsync(token);
-            totalCount = await LinkListQueryService.CountAsync(filter, token);
-            var index = await LinkListQueryService.GetIndexAsync(filter, token);
-            if (generation != _queryLoader.Generation || _disposed)
+            if (_disposed)
             {
                 return;
             }
-            BuildSlots(index);
-            hasLoadedOnce = true;
-            _loadedWorkspaceId = WorkspaceId;
-            var initialEnd = Math.Min(_slots.Count - 1, VirtualInitialViewportSlots - 1);
-            UpdateVisibleRange(0, Math.Max(-1, initialEnd));
-            await EnsureSlotsHydratedAsync(0, initialEnd, token);
-            if (generation != _queryLoader.Generation || _disposed)
+            var token = _queryLoader.BeginQueryCycle(out generation);
+            ClearGridState();
+            isInitialLoading = true;
+            _virtualScrollAttached = false;
+            try
             {
-                return;
+                var filter = new WorkspaceRepositoryLinkListFilter(WorkspaceId, _effectiveSearch);
+                await LoadHeaderStateAsync(token);
+                totalCount = await LinkListQueryService.CountAsync(filter, token);
+                var index = await LinkListQueryService.GetIndexAsync(filter, token);
+                if (generation != _queryLoader.Generation || _disposed)
+                {
+                    return;
+                }
+                BuildSlots(index);
+                hasLoadedOnce = true;
+                _loadedWorkspaceId = WorkspaceId;
+                var initialEnd = Math.Min(_slots.Count - 1, VirtualInitialViewportSlots - 1);
+                UpdateVisibleRange(0, Math.Max(-1, initialEnd));
+                await EnsureSlotsHydratedAsync(0, initialEnd, token);
+                if (generation != _queryLoader.Generation || _disposed)
+                {
+                    return;
+                }
+                ApplySyncStateFromLoadedItems();
             }
-            ApplySyncStateFromLoadedItems();
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            if (generation == _queryLoader.Generation && !_disposed)
+            catch (OperationCanceledException)
             {
-                Logger.LogError(ex, "Error loading repositories for workspace {WorkspaceId}", WorkspaceId);
-                errorMessage = "Failed to load workspace. Please try again later.";
-                ClearGridState();
+            }
+            catch (Exception ex)
+            {
+                if (generation == _queryLoader.Generation && !_disposed)
+                {
+                    Logger.LogError(ex, "Error loading repositories for workspace {WorkspaceId}", WorkspaceId);
+                    errorMessage = "Failed to load workspace. Please try again later.";
+                    ClearGridState();
+                }
+            }
+            finally
+            {
+                if (generation == _queryLoader.Generation && !_disposed)
+                {
+                    isInitialLoading = false;
+                }
             }
         }
         finally
         {
-            if (generation == _queryLoader.Generation && !_disposed)
-            {
-                isInitialLoading = false;
-            }
+            _reloadGate.Release();
         }
     }
     private async Task<bool> EnsureSlotsHydratedAsync(int start, int end, CancellationToken cancellationToken)
@@ -303,13 +317,19 @@ public sealed partial class WorkspaceRepositories
             Logger.LogDebug(ex, "Branch refresh after PR merge failed for RepositoryId={RepositoryId}", repositoryId);
         }
     }
-    /// <summary>Reload workspace after abort/cancel using a fresh scope. Safe to call from background job bodies. Swallows disposal exceptions so abort does not cascade errors when the circuit or context is already disposed.</summary>
+    /// <summary>Reload workspace after abort/cancel using a fresh scope. Safe to call from background job bodies. Marshals the reload onto the Blazor dispatcher so it does not race circuit-scoped DbContext use. Swallows disposal exceptions so abort does not cascade errors when the circuit or context is already disposed.</summary>
     private async Task ReloadWorkspaceDataAfterCancelAsync()
     {
         if (_disposed) return;
         try
         {
-            await ReloadWorkspaceDataFromFreshScopeAsync();
+            await InvokeAsync(async () =>
+            {
+                if (_disposed) return;
+                await ReloadWorkspaceDataFromFreshScopeAsync();
+                ApplySyncStateFromLoadedItems();
+                StateHasChanged();
+            });
         }
         catch (ObjectDisposedException ex)
         {
@@ -319,12 +339,6 @@ public sealed partial class WorkspaceRepositories
         {
             Logger.LogDebug(ex, "Reload after cancel skipped (invalid operation, e.g. circuit disposed) for workspace {WorkspaceId}", WorkspaceId);
         }
-        try
-        {
-            await InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
-        }
-        catch (ObjectDisposedException) { }
-        catch (InvalidOperationException) { }
     }
     /// <summary>Loads workspace using a new scope (fresh DbContext) so we get current DB values and avoid EF cache. Used by RefreshFromSync so the grid shows updated UnmatchedDeps after notify or Update.</summary>
     private async Task ReloadWorkspaceDataFromFreshScopeAsync()
@@ -344,60 +358,69 @@ public sealed partial class WorkspaceRepositories
     private async Task RefreshFromSync()
     {
         if (_disposed) return;
+        await _reloadGate.WaitAsync();
         try
         {
-            var token = _queryLoader.GetQueryToken();
-            var w = await ScopedExecutor.ExecuteAsync<WorkspaceRepository, Workspace?>(
-                repo => repo.GetHeaderAsync(WorkspaceId));
-            if (w == null)
-            {
-                errorMessage = "Workspace not found.";
-                ClearGridState();
-                await InvokeAsync(StateHasChanged);
-                return;
-            }
-            workspace = w;
-            // Rebuild index when levels/order may have changed; keep scroll position via virtual scroll.
-            var filter = new WorkspaceRepositoryLinkListFilter(WorkspaceId, _effectiveSearch);
-            var index = await LinkListQueryService.GetIndexAsync(filter, token);
             if (_disposed) return;
-            BuildSlots(index);
-            totalCount = index.Count;
-            await LoadHeaderStateAsync(token);
-            _linkByRepoId.Clear();
-            _linkByWrlId.Clear();
-            prByRepositoryId = new Dictionary<int, PullRequestInfo?>();
-            repoSyncStatus = new();
-            _tooltipLoadedRepoIds.Clear();
-            _tooltipLoadInFlight.Clear();
-            if (_visibleEnd < 0 || _visibleStart >= _slots.Count)
+            try
             {
-                var initialEnd = Math.Min(_slots.Count - 1, VirtualInitialViewportSlots - 1);
-                UpdateVisibleRange(0, Math.Max(-1, initialEnd));
-            }
-            else
-            {
-                UpdateVisibleRange(_visibleStart, Math.Min(_visibleEnd, _slots.Count - 1));
-            }
-            await EnsureSlotsHydratedAsync(_visibleStart, _visibleEnd, token);
-            if (_virtualScrollAttached)
-            {
-                try
+                var token = _queryLoader.GetQueryToken();
+                var w = await ScopedExecutor.ExecuteAsync<WorkspaceRepository, Workspace?>(
+                    repo => repo.GetHeaderAsync(WorkspaceId));
+                if (w == null)
                 {
-                    await JSRuntime.InvokeVoidAsync("grayMoonVirtualScroll.setTotalHeight", _tbodyRef, TotalScrollHeightPx());
+                    errorMessage = "Workspace not found.";
+                    ClearGridState();
+                    await InvokeAsync(StateHasChanged);
+                    return;
                 }
-                catch (JSDisconnectedException) { }
-                catch (InvalidOperationException) { }
+                workspace = w;
+                // Rebuild index when levels/order may have changed; keep scroll position via virtual scroll.
+                var filter = new WorkspaceRepositoryLinkListFilter(WorkspaceId, _effectiveSearch);
+                var index = await LinkListQueryService.GetIndexAsync(filter, token);
+                if (_disposed) return;
+                BuildSlots(index);
+                totalCount = index.Count;
+                await LoadHeaderStateAsync(token);
+                _linkByRepoId.Clear();
+                _linkByWrlId.Clear();
+                prByRepositoryId = new Dictionary<int, PullRequestInfo?>();
+                repoSyncStatus = new();
+                _tooltipLoadedRepoIds.Clear();
+                _tooltipLoadInFlight.Clear();
+                if (_visibleEnd < 0 || _visibleStart >= _slots.Count)
+                {
+                    var initialEnd = Math.Min(_slots.Count - 1, VirtualInitialViewportSlots - 1);
+                    UpdateVisibleRange(0, Math.Max(-1, initialEnd));
+                }
+                else
+                {
+                    UpdateVisibleRange(_visibleStart, Math.Min(_visibleEnd, _slots.Count - 1));
+                }
+                await EnsureSlotsHydratedAsync(_visibleStart, _visibleEnd, token);
+                if (_virtualScrollAttached)
+                {
+                    try
+                    {
+                        await JSRuntime.InvokeVoidAsync("grayMoonVirtualScroll.setTotalHeight", _tbodyRef, TotalScrollHeightPx());
+                    }
+                    catch (JSDisconnectedException) { }
+                    catch (InvalidOperationException) { }
+                }
+                ApplySyncStateFromLoadedItems();
+                await InvokeAsync(StateHasChanged);
             }
-            ApplySyncStateFromLoadedItems();
-            await InvokeAsync(StateHasChanged);
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "RefreshFromSync failed for workspace {WorkspaceId}", WorkspaceId);
+            }
         }
-        catch (OperationCanceledException) { }
-        catch (ObjectDisposedException) { }
-        catch (InvalidOperationException) { }
-        catch (Exception ex)
+        finally
         {
-            Logger.LogDebug(ex, "RefreshFromSync failed for workspace {WorkspaceId}", WorkspaceId);
+            _reloadGate.Release();
         }
     }
     private void CancelBackgroundWork()

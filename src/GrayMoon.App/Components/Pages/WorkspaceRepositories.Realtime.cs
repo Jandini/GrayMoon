@@ -1,3 +1,4 @@
+using GrayMoon.App.Services;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.JSInterop;
 
@@ -72,7 +73,11 @@ public sealed partial class WorkspaceRepositories
         {
             if (_disposed) return;
             var isRunning = IsJobRunning;
-            if (_wasJobRunning && !isRunning && !_disposed)
+            // Abort already reloads via ReloadWorkspaceDataAfterCancelAsync; skip duplicate RefreshFromSync
+            // so we do not race the circuit-scoped DbContext against the cancel-path reload.
+            var finishedJobWasAborted = !isRunning
+                && JobService.GetJob(PageJobKey)?.State == BackgroundJobState.Aborted;
+            if (_wasJobRunning && !isRunning && !_disposed && !finishedJobWasAborted)
                 _ = InvokeAsync(RefreshFromSync);
             _wasJobRunning = isRunning;
             StateHasChanged();

@@ -82,6 +82,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
         _queryLoader.Dispose();
+        _reloadGate.Dispose();
         _virtualScrollDotNetRef?.Dispose();
         _virtualScrollDotNetRef = null;
     }

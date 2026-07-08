@@ -68,6 +68,7 @@ public sealed partial class WorkspaceRepositories
     private string searchTerm = string.Empty;
     private bool _disposed;
     private bool _wasJobRunning;
+    private readonly SemaphoreSlim _reloadGate = new(1, 1);
     private string PageJobKey => new Uri(NavigationManager.Uri).AbsolutePath.ToLowerInvariant();
     private bool IsJobRunning => JobService.IsRunning(PageJobKey);
     private int AgentTasksPendingCount => AgentQueueStateService.GetPendingCountForWorkspace(WorkspaceId);
