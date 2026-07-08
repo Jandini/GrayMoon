@@ -452,7 +452,8 @@ public sealed partial class WorkspaceRepositories
             var allDeps = await projectRepo.GetPackageDependencyLinesForRepoAsync(WorkspaceId, repositoryId);
             var mismatchedFiles = await fileVersionService.GetMismatchedFileVersionLinesForRepoAsync(WorkspaceId, repositoryId);
             var fileStatuses = await fileVersionService.GetFileLineStatusForRepoAsync(WorkspaceId, repositoryId);
-            var repoVersionMap = await LinkListQueryService.GetGitVersionNameMapAsync(WorkspaceId);
+            var linkListQuery = scope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
+            var repoVersionMap = await linkListQuery.GetGitVersionNameMapAsync(WorkspaceId);
             var allFileLines = await fileVersionService.GetAllFileVersionLinesForRepoAsync(WorkspaceId, repositoryId, repoVersionMap);
             var custom = await customDepRepo.GetCustomDependencyNamesForRepoAsync(WorkspaceId, repositoryId);
             var mismatchDict = _mismatchedDependencyLinesByRepo as Dictionary<int, IReadOnlyList<DependencyMismatchLine>>
