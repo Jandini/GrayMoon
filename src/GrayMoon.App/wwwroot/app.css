@@ -1099,11 +1099,11 @@ table.resizable-columns th:hover .resize-handle::after {
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
-/* Red actionable style for the behind count when update-branch is available */
+/* Yellow actionable style for the behind count when update-branch is available */
 .repositories-table td.col-divergence .divergence-link-behind--actionable {
-    background-color: #dc3545;
-    color: #fff !important;
-    border-color: #dc3545;
+    background-color: #ffc107;
+    color: #000 !important;
+    border-color: #ffc107;
     font-weight: 500;
     /* Reset button defaults */
     font-size: inherit;
@@ -1112,9 +1112,9 @@ table.resizable-columns th:hover .resize-handle::after {
 }
 
 .repositories-table td.col-divergence .divergence-link-behind--actionable:hover {
-    background-color: #b02a37;
-    color: #fff !important;
-    border-color: #a52834;
+    background-color: #e0a800;
+    color: #000 !important;
+    border-color: #d39e00;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
