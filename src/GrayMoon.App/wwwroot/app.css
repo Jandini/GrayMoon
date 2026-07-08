@@ -1099,6 +1099,25 @@ table.resizable-columns th:hover .resize-handle::after {
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
+/* Red actionable style for the behind count when update-branch is available */
+.repositories-table td.col-divergence .divergence-link-behind--actionable {
+    background-color: #dc3545;
+    color: #fff !important;
+    border-color: #dc3545;
+    font-weight: 500;
+    /* Reset button defaults */
+    font-size: inherit;
+    font-family: inherit;
+    line-height: inherit;
+}
+
+.repositories-table td.col-divergence .divergence-link-behind--actionable:hover {
+    background-color: #b02a37;
+    color: #fff !important;
+    border-color: #a52834;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
 /* PR column badges - white text except create (black on yellow) */
 .repositories-table td.col-pr .pr-badge {
     font-weight: 400;

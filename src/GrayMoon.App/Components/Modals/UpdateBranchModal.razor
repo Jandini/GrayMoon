@@ -1,0 +1,78 @@
+@using Microsoft.AspNetCore.Components.Web
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1075;"
+         @onkeydown="HandleKeyDown"
+         @ref="_modalElement">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Update Branch</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2">
+                        Update <strong>@CurrentBranch</strong> in <strong>@RepositoryName</strong> with the latest
+                        changes from <strong>@DefaultBranch</strong>
+                        (@CommitsBehind @(CommitsBehind == 1 ? "commit" : "commits") behind).
+                    </p>
+                    <p class="mb-2 text-muted small">The following will happen:</p>
+                    <ol class="mb-2 small">
+                        <li>Fetch the latest <strong>@DefaultBranch</strong> from origin.</li>
+                        <li>Merge <strong>origin/@DefaultBranch</strong> into <strong>@CurrentBranch</strong>.</li>
+                        <li>
+                            If the merge succeeds, your branch will have the latest changes and new outgoing commits ready to push.
+                        </li>
+                        <li>
+                            If there are merge conflicts, you will be notified and can resolve them in your IDE before committing.
+                        </li>
+                    </ol>
+                    <p class="mb-0 text-muted small">No automatic push - you stay in control.</p>
+                </div>
+                <div class="modal-footer">
+                    @if (!string.IsNullOrWhiteSpace(GitHubCompareUrl))
+                    {
+                        <a href="@GitHubCompareUrl" target="_blank" rel="noopener noreferrer"
+                           class="btn btn-outline-secondary me-auto">
+                            @CommitsBehind @(CommitsBehind == 1 ? "commit" : "commits")
+                        </a>
+                    }
+                    <button type="button" class="btn btn-primary" @onclick="OnConfirm">
+                        Update Branch
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public string? RepositoryName { get; set; }
+    [Parameter] public string? CurrentBranch { get; set; }
+    [Parameter] public string? DefaultBranch { get; set; }
+    [Parameter] public int CommitsBehind { get; set; }
+    [Parameter] public string? GitHubCompareUrl { get; set; }
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private ElementReference _modalElement;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible)
+            await _modalElement.FocusAsync();
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            await OnCancel.InvokeAsync();
+        else if (e.Key == "Enter")
+            await OnConfirm.InvokeAsync();
+    }
+}

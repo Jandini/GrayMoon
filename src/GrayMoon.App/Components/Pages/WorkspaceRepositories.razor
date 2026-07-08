@@ -167,6 +167,7 @@
                                                                   OnVersionClick="() => CopyVersionToClipboard(wr.GitVersion!)"
                                                                   OnVersionMouseLeave="() => OnVersionMouseLeave(wr.GitVersion!)"
                                                                   OnBranchClick="() => ShowSwitchBranchModal(wr.RepositoryId, wr.BranchName, wr.Repository?.CloneUrl)"
+                                                                  OnUpdateBranchClick="() => ShowUpdateBranchModal(wr.RepositoryId)"
                                                                   OnDependencyBadgeClick="() => OnDependencyBadgeClick(wr.RepositoryId, wr.UnmatchedDeps ?? 0)"
                                                                   OnCustomDependenciesClick="() => ShowCustomDependenciesModalAsync(wr.RepositoryId)"
                                                                   OnFileDependencyBadgeClick="() => OnFileDependencyBadgeClick(wr.RepositoryId)"
@@ -245,6 +246,15 @@
                    OnCheckoutBranch="@CheckoutBranchAsync"
                    OnSyncToDefault="@SyncToDefaultFromModalAsync"
                    OnCreateBranch="@CreateSingleBranchAsync" />
+
+<UpdateBranchModal IsVisible="@_updateBranchModal.IsVisible"
+                  RepositoryName="@_updateBranchModal.RepositoryName"
+                  CurrentBranch="@_updateBranchModal.CurrentBranch"
+                  DefaultBranch="@_updateBranchModal.DefaultBranch"
+                  CommitsBehind="@_updateBranchModal.CommitsBehind"
+                  GitHubCompareUrl="@_updateBranchModal.GitHubCompareUrl"
+                  OnConfirm="@OnUpdateBranchConfirmedAsync"
+                  OnCancel="@CloseUpdateBranchModal" />
 
 <UpdateDependenciesModal IsVisible="@_updateModal.IsVisible"
                          IsBusy="@IsJobRunning"

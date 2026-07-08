@@ -41,7 +41,11 @@
                     ? "This branch is 1 commit behind the default branch"
                     : $"This branch is {behind} commits behind the default branch");
 
-            if (!string.IsNullOrWhiteSpace(behindUrl))
+            @if (behind > 0 && OnUpdateBranchClick.HasDelegate)
+            {
+                <button type="button" class="divergence-link divergence-link-behind divergence-link-behind--actionable" title="@behindTitle" @onclick="OnUpdateBranchClick">@behind</button>
+            }
+            else if (!string.IsNullOrWhiteSpace(behindUrl))
             {
                 <a href="@behindUrl" target="_blank" rel="noopener noreferrer" class="divergence-link divergence-link-behind" title="@behindTitle">@behind</a>
             }
@@ -70,4 +74,6 @@
     [Parameter] public string? DefaultBranchName { get; set; }
     /// <summary>True when the repository is checked out at a tag (detached HEAD); divergence vs. default branch is not meaningful, render blank.</summary>
     [Parameter] public bool IsOnTag { get; set; }
+    /// <summary>When set, the behind count renders as an actionable red button that invokes this callback instead of opening GitHub.</summary>
+    [Parameter] public EventCallback OnUpdateBranchClick { get; set; }
 }
