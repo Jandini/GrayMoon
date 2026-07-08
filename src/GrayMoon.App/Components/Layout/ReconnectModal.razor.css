@@ -19,6 +19,11 @@
     display: block;
 }
 
+/* Blazor adds this when the circuit is restored; hide immediately even if close() is delayed. */
+#components-reconnect-modal.components-reconnect-hide {
+    display: none !important;
+}
+
 #components-reconnect-modal {
     background-color: #252526;
     color: #e8e8e8;
