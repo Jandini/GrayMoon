@@ -32,7 +32,6 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     {
         AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         JobService.Changed += OnJobServiceChanged;
-        _wasJobRunning = IsJobRunning;
         _loadedWorkspaceId = WorkspaceId;
         await LoadWorkspaceAsync();
         ApplySyncStateFromLoadedItems();

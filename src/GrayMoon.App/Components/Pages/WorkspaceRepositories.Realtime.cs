@@ -68,15 +68,9 @@ public sealed partial class WorkspaceRepositories
     private void OnJobServiceChanged()
     {
         if (_disposed) return;
-        _ = InvokeAsync(() =>
-        {
-            if (_disposed) return;
-            var isRunning = IsJobRunning;
-            // Success and abort paths refresh inside the job body (RefreshOnSuccess / ReloadWorkspaceDataAfterCancelAsync).
-            // Skipping here avoids a redundant second RefreshFromSync and abort/success races on completion.
-            _wasJobRunning = isRunning;
-            StateHasChanged();
-        });
+        // Overlay / IsJobRunning UI only. Grid refresh runs inside job bodies
+        // (RefreshOnSuccess / ReloadWorkspaceDataAfterCancelAsync), not here.
+        _ = InvokeAsync(StateHasChanged);
     }
 
     private void SafeInvoke(Action callback)
