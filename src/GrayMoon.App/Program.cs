@@ -88,6 +88,7 @@ try
     builder.Services.AddScoped<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
     builder.Services.AddScoped<WorkspaceFileVersionService>();
     builder.Services.AddScoped<WorkspaceCommitSyncHandler>();
+    builder.Services.AddScoped<WorkspaceBranchUpdateHandler>();
     builder.Services.AddScoped<WorkspaceSyncHandler>();
     builder.Services.AddScoped<DependencyUpdateOrchestrator>();
     builder.Services.AddScoped<WorkspaceUpdateHandler>();

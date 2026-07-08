@@ -473,8 +473,8 @@ public sealed partial class WorkspaceRepositories
 
         StartPageJob($"Updating branch in {repoName}...", async (job, ct) =>
         {
-            var result = await ScopedExecutor.ExecuteAsync<WorkspaceBranchHandler, UpdateBranchFromDefaultResult>(
-                svc => svc.UpdateBranchFromDefaultAsync(WorkspaceId, repositoryId, ApiBaseUrl, ct));
+            var result = await ScopedExecutor.ExecuteAsync<WorkspaceBranchUpdateHandler, UpdateBranchFromDefaultResult>(
+                svc => svc.UpdateBranchFromDefaultAsync(WorkspaceId, repositoryId, ct));
 
             if (result.HasConflicts)
             {
