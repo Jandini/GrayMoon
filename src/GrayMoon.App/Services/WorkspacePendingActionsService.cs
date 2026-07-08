@@ -52,17 +52,15 @@ public sealed class WorkspacePendingActionsService
         bool isPushRecommended = links.Any(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false));
         bool hasIncoming = links.Any(wr =>
             !wr.IsOnTag
-            && (wr.IncomingCommits ?? 0) > 0
-            && !string.IsNullOrWhiteSpace(wr.BranchName)
-            && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
-            && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal));
+            && (wr.IncomingCommits ?? 0) > 0);
         if (!hasUnmatched && !isPushRecommended && !hasIncoming)
             return null;
         var actionLinks = links
             .Where(wr => !wr.IsOnTag && (
                 (wr.UnmatchedDeps ?? 0) > 0 ||
                 (wr.OutgoingCommits ?? 0) > 0 ||
-                wr.BranchHasUpstream == false))
+                wr.BranchHasUpstream == false ||
+                (wr.IncomingCommits ?? 0) > 0))
             .OrderBy(wr => wr.DependencyLevel ?? 0)
             .ThenBy(wr => wr.Repository?.RepositoryName ?? string.Empty)
             .ToList();
