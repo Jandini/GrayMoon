@@ -67,6 +67,7 @@ try
     builder.Services.AddScoped<NavbarCollapseService>();
     builder.Services.AddSingleton<AgentConnectionTracker>();
     builder.Services.AddSingleton<AgentQueueStateService>();
+    builder.Services.AddSingleton<AgentCommandCancelSender>();
     builder.Services.AddSingleton<OverlayCommandTerminalService>();
     builder.Services.AddSingleton<IToastService, ToastService>();
     builder.Services.AddSingleton<MatrixOverlayPreferenceService>();
@@ -137,6 +138,7 @@ try
         .PersistKeysToFileSystem(new DirectoryInfo(keyRingDir));
 
     var app = builder.Build();
+    AgentResponseDelivery.SetCancelNotifier(app.Services.GetRequiredService<AgentCommandCancelSender>().NotifyCancel);
     //var version = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
     var version = typeof(Program).Assembly
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?

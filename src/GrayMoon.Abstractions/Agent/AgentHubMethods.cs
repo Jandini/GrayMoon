@@ -8,6 +8,9 @@ public static class AgentHubMethods
     /// <summary>App → Agent: send a command (requestId, command, args).</summary>
     public const string RequestCommand = "RequestCommand";
 
+    /// <summary>App → Agent: cancel a previously sent command (requestId). Used when the App aborts a background job.</summary>
+    public const string CancelCommand = "CancelCommand";
+
     /// <summary>Agent → App: command completed (requestId, payload).</summary>
     public const string ResponseCommand = "ResponseCommand";
 

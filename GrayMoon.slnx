@@ -1,0 +1,15 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/GrayMoon.Abstractions/GrayMoon.Abstractions.csproj" />
+    <Project Path="src/GrayMoon.Agent/GrayMoon.Agent.csproj" />
+    <Project Path="src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj" />
+    <Project Path="src/GrayMoon.App/GrayMoon.App.csproj" />
+    <Project Path="src/GrayMoon.Common.Tests/GrayMoon.Common.Tests.csproj" />
+    <Project Path="src/GrayMoon.Common/GrayMoon.Common.csproj" />
+  </Folder>
+</Solution>
