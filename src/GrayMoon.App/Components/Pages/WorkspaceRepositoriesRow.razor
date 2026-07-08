@@ -83,7 +83,8 @@
                                     BranchName="@Link.BranchName"
                                     RepositoryUrl="@RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl)"
                                     DefaultBranchName="@Link.DefaultBranchName"
-                                    IsOnTag="@Link.IsOnTag" />
+                                    IsOnTag="@Link.IsOnTag"
+                                    OnUpdateBranchClick="@OnUpdateBranchClick" />
                 </span>
                 <span class="metrics-block metrics-pr text-nowrap"
                       @onmouseenter="HandlePrBadgeMouseEnter">
@@ -432,6 +433,7 @@
     [Parameter] public EventCallback OnDependencyBadgeMouseLeave { get; set; }
     [Parameter] public EventCallback OnPushBadgeClick { get; set; }
     [Parameter] public EventCallback OnPullBadgeClick { get; set; }
+    [Parameter] public EventCallback OnUpdateBranchClick { get; set; }
     [Parameter] public EventCallback OnSyncClick { get; set; }
     [Parameter] public EventCallback OnDismissError { get; set; }
     [Parameter] public EventCallback OnPrBadgeMouseEnter { get; set; }

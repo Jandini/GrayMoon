@@ -496,6 +496,50 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             logger.LogInformation("Git merge aborted for {RepoPath}", repoPath);
     }
 
+    public async Task<(bool Success, bool HasConflicts, IReadOnlyList<string> ConflictFiles, string? ErrorMessage)> MergeFromRemoteAsync(string repoPath, string remoteBranch, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return (false, false, Array.Empty<string>(), "Invalid repository path");
+
+        var sw = Stopwatch.StartNew();
+        var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"merge --no-edit {remoteBranch}", repoPath, ct);
+        sw.Stop();
+
+        if (exitCode == 0)
+        {
+            logger.LogInformation("Git merge completed in {ElapsedMs}ms for {RepoPath}. Branch={Branch}", sw.ElapsedMilliseconds, repoPath, remoteBranch);
+            return (true, false, Array.Empty<string>(), null);
+        }
+
+        // Exit code 1 with conflict markers = merge conflict; repo is left in MERGE_HEAD state.
+        if (GitResiliencePipelines.IsMergeConflict(stdout, stderr))
+        {
+            logger.LogWarning("Git merge conflict detected in {ElapsedMs}ms for {RepoPath}. Branch={Branch}", sw.ElapsedMilliseconds, repoPath, remoteBranch);
+            var conflictFiles = await GetConflictFilesAsync(repoPath, ct);
+            return (false, true, conflictFiles, null);
+        }
+
+        var combined = CombineOutput(stdout, stderr) ?? "Merge failed";
+        logger.LogError("Git merge failed in {ElapsedMs}ms for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, repoPath, remoteBranch, exitCode, stdout, stderr);
+        return (false, false, Array.Empty<string>(), combined);
+    }
+
+    private async Task<IReadOnlyList<string>> GetConflictFilesAsync(string repoPath, CancellationToken ct)
+    {
+        var (exitCode, stdout, _) = await runner.RunAsync("git", "status --porcelain", repoPath, ct);
+        if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
+            return Array.Empty<string>();
+
+        return stdout
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(line => line.Length >= 2 && (line[0] == 'U' || line[1] == 'U'
+                || (line[0] == 'A' && line[1] == 'A')
+                || (line[0] == 'D' && line[1] == 'D')))
+            .Select(line => line.Substring(3).Trim())
+            .Where(f => !string.IsNullOrWhiteSpace(f))
+            .ToList();
+    }
+
     public async Task<IReadOnlyList<string>> GetLocalBranchesAsync(string repoPath, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))

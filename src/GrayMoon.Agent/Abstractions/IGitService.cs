@@ -34,6 +34,13 @@ public interface IGitService
     Task<(bool Success, string? ErrorMessage)> PushAsync(string repoPath, string branchName, string? bearerToken, bool setTracking = false, CancellationToken ct = default);
     /// <summary>Aborts a merge in progress.</summary>
     Task AbortMergeAsync(string repoPath, CancellationToken ct);
+    /// <summary>
+    /// Merges <paramref name="remoteBranch"/> (e.g. "origin/main") into the current branch using
+    /// <c>git merge --no-edit</c>. Returns (Success, HasConflicts, ConflictFiles, ErrorMessage).
+    /// When <see cref="HasConflicts"/> is true the repo is left in MERGE_HEAD state for the user to
+    /// resolve; the caller must NOT abort - the user resolves in their IDE then commits.
+    /// </summary>
+    Task<(bool Success, bool HasConflicts, IReadOnlyList<string> ConflictFiles, string? ErrorMessage)> MergeFromRemoteAsync(string repoPath, string remoteBranch, CancellationToken ct);
     /// <summary>Gets all local branch names (without 'origin/' prefix).</summary>
     Task<IReadOnlyList<string>> GetLocalBranchesAsync(string repoPath, CancellationToken ct);
     /// <summary>Gets all remote branch names from local refs (refs/remotes/origin). Use after fetch to avoid ls-remote network call.</summary>

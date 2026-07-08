@@ -90,6 +90,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid SelfUpdate args"),
             AgentHubMethods.CheckFileVersions => JsonSerializer.Deserialize<CheckFileVersionsRequest>(json, options)
                 ?? throw new ArgumentException("Invalid CheckFileVersions args"),
+            "UpdateBranchFromDefault" => JsonSerializer.Deserialize<UpdateBranchFromDefaultRequest>(json, options)
+                ?? throw new ArgumentException("Invalid UpdateBranchFromDefault args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

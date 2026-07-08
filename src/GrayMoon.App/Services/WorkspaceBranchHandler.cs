@@ -315,6 +315,36 @@ public sealed class WorkspaceBranchHandler(
         var failureCount = errors.Count;
         return new WorkspaceBranchBulkResult(total - failureCount, failureCount, new Dictionary<int, string>(errors));
     }
+
+    public async Task<UpdateBranchFromDefaultResult> UpdateBranchFromDefaultAsync(int workspaceId, int repositoryId, string apiBaseUrl, CancellationToken cancellationToken)
+    {
+        var httpClient = httpClientFactory.CreateClient();
+        var request = new { workspaceId, repositoryId };
+        var json = JsonSerializer.Serialize(request);
+        using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+        using var response = await httpClient.PostAsync($"{apiBaseUrl}/api/branches/update-from-default", content, cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorText = await response.Content.ReadAsStringAsync(cancellationToken);
+            var message = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText)
+                ?? $"Request failed: {response.StatusCode}";
+            logger.LogWarning("UpdateBranchFromDefault failed for repository {RepositoryId}: {Error}", repositoryId, message);
+            return new UpdateBranchFromDefaultResult(false, false, Array.Empty<string>(), message);
+        }
+
+        var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+        var result = JsonSerializer.Deserialize<UpdateBranchFromDefaultApiResult>(responseContent, AgentResponseJson.Options);
+        if (result == null)
+            return new UpdateBranchFromDefaultResult(false, false, Array.Empty<string>(), "Invalid response from server");
+
+        return new UpdateBranchFromDefaultResult(
+            result.Success,
+            result.HasConflicts,
+            result.ConflictFiles ?? Array.Empty<string>(),
+            null);
+    }
 }
 
 public sealed record WorkspaceBranchBulkResult(
@@ -323,5 +353,24 @@ public sealed record WorkspaceBranchBulkResult(
     IReadOnlyDictionary<int, string> ErrorsByRepositoryId)
 {
     public static WorkspaceBranchBulkResult Empty { get; } = new(0, 0, new Dictionary<int, string>());
+}
+
+public sealed record UpdateBranchFromDefaultResult(
+    bool Success,
+    bool HasConflicts,
+    IReadOnlyList<string> ConflictFiles,
+    string? ErrorMessage);
+
+/// <summary>Mirrors the JSON returned by POST /api/branches/update-from-default.</summary>
+internal sealed class UpdateBranchFromDefaultApiResult
+{
+    [System.Text.Json.Serialization.JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("hasConflicts")]
+    public bool HasConflicts { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("conflictFiles")]
+    public IReadOnlyList<string>? ConflictFiles { get; set; }
 }
 
