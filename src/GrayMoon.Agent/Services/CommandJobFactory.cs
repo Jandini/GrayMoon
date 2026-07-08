@@ -92,6 +92,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid CheckFileVersions args"),
             "UpdateBranchFromDefault" => JsonSerializer.Deserialize<UpdateBranchFromDefaultRequest>(json, options)
                 ?? throw new ArgumentException("Invalid UpdateBranchFromDefault args"),
+            "FetchCommits" => JsonSerializer.Deserialize<FetchCommitsRequest>(json, options)
+                ?? throw new ArgumentException("Invalid FetchCommits args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }
