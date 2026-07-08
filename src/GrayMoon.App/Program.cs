@@ -204,6 +204,8 @@ try
     app.UseStaticFiles();
     app.UseAntiforgery();
 
+    app.MapStaticAssets();
+
     app.MapApiEndpoints();
     app.MapHub<WorkspaceSyncHub>("/hubs/workspace-sync");
     app.MapHub<AgentHub>("/hub/agent");
