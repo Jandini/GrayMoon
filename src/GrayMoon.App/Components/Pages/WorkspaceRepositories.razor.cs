@@ -28,13 +28,25 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     [Inject] private IBackgroundJobService JobService { get; set; } = default!;
     [Inject] private IScopedServiceExecutor ScopedExecutor { get; set; } = default!;
     [Inject] private IWorkspaceRepositoryLinkListQueryService LinkListQueryService { get; set; } = default!;
+
+    private const string SyncModeStorageKey = "graymoon:sync-mode";
+    private bool _quickFetchIsPrimary;
+
     protected override async Task OnInitializedAsync()
     {
         AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         JobService.Changed += OnJobServiceChanged;
         _loadedWorkspaceId = WorkspaceId;
+        var storedMode = await JSRuntime.InvokeAsync<string?>("graymoonStorageGet", SyncModeStorageKey);
+        _quickFetchIsPrimary = storedMode == "quick-fetch";
         await LoadWorkspaceAsync();
         ApplySyncStateFromLoadedItems();
+    }
+
+    private async Task SetSyncModeAsync(bool quickFetch)
+    {
+        _quickFetchIsPrimary = quickFetch;
+        await JSRuntime.InvokeVoidAsync("graymoonStorageSet", SyncModeStorageKey, quickFetch ? "quick-fetch" : "sync");
     }
     protected override async Task OnParametersSetAsync()
     {

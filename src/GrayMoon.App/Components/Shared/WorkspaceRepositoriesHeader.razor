@@ -292,10 +292,10 @@
         }
         <div class="btn-group position-relative">
             <button class="btn @(IsOutOfSync == true ? "btn-danger" : "btn-primary")"
-                    @onclick="@(() => OnSync.InvokeAsync())"
+                    @onclick="HandleSyncPrimaryClick"
                     @onclick:stopPropagation
-                    disabled="@(IsSyncing || IsUpdating || IsPushing || IsRestoringPackages || RepositoriesCount == 0)">
-                Sync
+                    disabled="@SyncDisabled">
+                @(QuickFetchIsPrimary ? "Fetch" : "Sync")
             </button>
             <button type="button"
                     class="btn @(IsOutOfSync == true ? "btn-danger" : "btn-primary") dropdown-toggle dropdown-toggle-split"
@@ -303,7 +303,7 @@
                     aria-expanded="@(_syncMenuOpen ? "true" : "false")"
                     @onclick="ToggleSyncMenu"
                     @onclick:stopPropagation
-                    disabled="@(IsSyncing || IsUpdating || IsPushing || IsRestoringPackages || RepositoriesCount == 0)">
+                    disabled="@SyncDisabled">
                 <span class="visually-hidden">Toggle Dropdown</span>
             </button>
             @if (_syncMenuOpen)
@@ -314,9 +314,26 @@
                     <li>
                         <button class="dropdown-item" type="button"
                                 role="menuitem"
+                                @onclick="HandleQuickFetchClick"
+                                disabled="@SyncDisabled">
+                            Fetch
+                        </button>
+                    </li>
+                    <li>
+                        <button class="dropdown-item" type="button"
+                                role="menuitem"
+                                @onclick="HandleSyncClick"
+                                disabled="@SyncDisabled">
+                            Sync
+                        </button>
+                    </li>
+                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                    <li>
+                        <button class="dropdown-item" type="button"
+                                role="menuitem"
                                 @onclick="HandleRestorePackagesClick"
-                                disabled="@(IsSyncing || IsUpdating || IsPushing || IsRestoringPackages || RepositoriesCount == 0)">
-                            Restore Packages
+                                disabled="@SyncDisabled">
+                            Restore
                         </button>
                     </li>
                 </ul>
@@ -358,6 +375,9 @@
     [Parameter] public EventCallback OnPush { get; set; }
     [Parameter] public EventCallback OnUndoPush { get; set; }
     [Parameter] public EventCallback OnSync { get; set; }
+    [Parameter] public EventCallback OnQuickFetch { get; set; }
+    [Parameter] public bool QuickFetchIsPrimary { get; set; }
+    [Parameter] public EventCallback<bool> OnSyncModeChanged { get; set; }
     [Parameter] public EventCallback OnRestorePackages { get; set; }
     [Parameter] public EventCallback<ChangeEventArgs> OnSearchChanged { get; set; }
     [Parameter] public EventCallback OnClearSearch { get; set; }
@@ -368,6 +388,9 @@
     private bool _syncMenuOpen;
     private bool _pushUpdatedMenuOpen;
     private bool _pushMenuOpen;
+
+    private bool SyncDisabled =>
+        IsSyncing || IsUpdating || IsPushing || IsRestoringPackages || RepositoriesCount == 0;
 
     private bool UpdateDisabled =>
         WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0;
@@ -403,6 +426,28 @@
     private void ToggleSyncMenu() => _syncMenuOpen = !_syncMenuOpen;
 
     private void CloseSyncMenu() => _syncMenuOpen = false;
+
+    private async Task HandleSyncPrimaryClick()
+    {
+        if (QuickFetchIsPrimary)
+            await HandleQuickFetchClick();
+        else
+            await HandleSyncClick();
+    }
+
+    private async Task HandleQuickFetchClick()
+    {
+        CloseSyncMenu();
+        await OnSyncModeChanged.InvokeAsync(true);
+        await OnQuickFetch.InvokeAsync();
+    }
+
+    private async Task HandleSyncClick()
+    {
+        CloseSyncMenu();
+        await OnSyncModeChanged.InvokeAsync(false);
+        await OnSync.InvokeAsync();
+    }
 
     private async Task HandleRestorePackagesClick()
     {

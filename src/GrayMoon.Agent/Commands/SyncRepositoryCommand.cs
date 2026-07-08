@@ -68,12 +68,11 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
 
             // Detect tag/detached HEAD; if on a tag we don't have a real branch so wipe the GitVersion branch echo.
             var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
-            IReadOnlyList<string>? allTags = null;
+            // Always fetch the full tag list - fetch already ran with includeTags:true so local refs are current.
+            var allTags = await git.GetTagsAsync(repoPath, cancellationToken);
             if (currentTag != null)
             {
                 branch = "-";
-                // FetchAsync(includeTags: true) already ran above, so local refs are up to date.
-                allTags = await git.GetTagsAsync(repoPath, cancellationToken);
             }
 
             if (version != "-" && branch != "-")

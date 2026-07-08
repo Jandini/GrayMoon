@@ -14,10 +14,7 @@ public sealed partial class WorkspaceRepositories
         var repoIdsWithIncoming = allLinks
             .Where(wr =>
                 !wr.IsOnTag
-                && (wr.IncomingCommits ?? 0) > 0
-                && !string.IsNullOrWhiteSpace(wr.BranchName)
-                && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
-                && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal))
+                && (wr.IncomingCommits ?? 0) > 0)
             .Select(wr => wr.RepositoryId)
             .ToList();
         if (repoIdsWithIncoming.Count == 0)

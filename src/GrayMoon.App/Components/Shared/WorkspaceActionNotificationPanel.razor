@@ -1113,10 +1113,7 @@
                 var repoIds = links
                     .Where(wr =>
                         !wr.IsOnTag
-                        && (wr.IncomingCommits ?? 0) > 0
-                        && !string.IsNullOrWhiteSpace(wr.BranchName)
-                        && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
-                        && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal))
+                        && (wr.IncomingCommits ?? 0) > 0)
                     .Select(wr => wr.RepositoryId)
                     .ToList();
                 if (repoIds.Count == 0) return;

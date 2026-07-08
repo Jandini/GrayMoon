@@ -610,7 +610,7 @@ public void Dispose()
 ### Build
 
 ```
-dotnet build GrayMoon.sln
+dotnet build GrayMoon.slnx
 Build succeeded. 0 Error(s), 0 Warning(s)
 ```
 

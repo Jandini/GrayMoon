@@ -7,6 +7,7 @@ using GrayMoon.Abstractions.Agent;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs;
 using GrayMoon.Agent.Logging;
+using GrayMoon.Agent.Services;
 using GrayMoon.Common;
 using Microsoft.AspNetCore.SignalR.Client;
 using Polly;
@@ -23,6 +24,7 @@ public sealed class JobBackgroundService(
     ICommandDispatcher dispatcher,
     INotifySyncHandler notifySyncHandler,
     IHubConnectionProvider hubProvider,
+    CommandJobCancellationRegistry cancellationRegistry,
     IOptions<AgentOptions> options,
     ILogger<JobBackgroundService> logger) : BackgroundService
 {
@@ -52,6 +54,7 @@ public sealed class JobBackgroundService(
     {
         await foreach (var envelope in jobQueue.ReadAllAsync(stoppingToken))
         {
+            var requestId = envelope.CommandJob?.RequestId;
             try
             {
                 if (envelope.Kind == JobKind.Notify && envelope.NotifyJob != null)
@@ -62,7 +65,48 @@ public sealed class JobBackgroundService(
                         envelope.NotifyJob.RepositoryId, envelope.NotifyJob.WorkspaceId, nsw.ElapsedMilliseconds);
                 }
                 else if (envelope.Kind == JobKind.Command && envelope.CommandJob != null)
-                    await ProcessCommandAsync(envelope.CommandJob, stoppingToken);
+                {
+                    var job = envelope.CommandJob;
+                    var jobToken = cancellationRegistry.GetTokenOrNone(job.RequestId);
+                    using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, jobToken);
+
+                    if (linked.IsCancellationRequested || cancellationRegistry.IsCancelled(job.RequestId))
+                    {
+                        logger.LogDebug("Skipping cancelled command {Command} RequestId={RequestId}", job.Command, job.RequestId);
+                        try
+                        {
+                            await SendResponseAsync(job.RequestId, job.Command,
+                                new AgentCommandResponse(false, null, "Command cancelled."), CancellationToken.None);
+                        }
+                        catch (Exception sendEx)
+                        {
+                            logger.LogDebug(sendEx, "Failed sending cancelled ResponseCommand. RequestId={RequestId}", job.RequestId);
+                        }
+                    }
+                    else
+                    {
+                        await ProcessCommandAsync(job, linked.Token);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+            {
+                // Per-job cancel while running: report cancelled response if still connected.
+                if (envelope.CommandJob != null)
+                {
+                    logger.LogDebug("Command cancelled mid-execution. RequestId={RequestId}, Command={Command}",
+                        envelope.CommandJob.RequestId, envelope.CommandJob.Command);
+                    try
+                    {
+                        await SendResponseAsync(envelope.CommandJob.RequestId, envelope.CommandJob.Command,
+                            new AgentCommandResponse(false, null, "Command cancelled."), CancellationToken.None);
+                    }
+                    catch (Exception sendEx)
+                    {
+                        logger.LogDebug(sendEx, "Failed sending cancelled ResponseCommand. RequestId={RequestId}",
+                            envelope.CommandJob.RequestId);
+                    }
+                }
             }
             catch (OperationCanceledException)
             {
@@ -90,6 +134,8 @@ public sealed class JobBackgroundService(
             }
             finally
             {
+                if (requestId != null)
+                    cancellationRegistry.Unregister(requestId);
                 queueTracker.ReportJobCompleted(envelope);
             }
         }

@@ -15,6 +15,7 @@ public interface IAgentBridge
 public sealed class AgentBridge(
     IHubContext<AgentHub> hubContext,
     AgentConnectionTracker connectionTracker,
+    AgentCommandCancelSender cancelSender,
     ILogger<AgentBridge> logger) : IAgentBridge
 {
     public bool IsAgentConnected => connectionTracker.GetAgentConnectionId() != null;
@@ -40,6 +41,9 @@ public sealed class AgentBridge(
         }
         catch (OperationCanceledException)
         {
+            // WaitAsync cancel registration also notifies the agent; send here too in case
+            // RequestCommand was delivered before SendAsync observed cancellation.
+            cancelSender.NotifyCancel(requestId);
             throw;
         }
         catch (Exception ex)
