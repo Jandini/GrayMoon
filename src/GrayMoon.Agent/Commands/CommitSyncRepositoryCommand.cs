@@ -44,11 +44,12 @@ public sealed class CommitSyncRepositoryCommand(IGitService git, GitRemoteIntegr
         var integrate = await remoteIntegrate.IntegrateAsync(repoPath, bearerToken, cancellationToken);
         if (!integrate.Success)
         {
+            var failVersion = await ResolveVersionAsync(repoPath, cancellationToken);
             return new CommitSyncRepositoryResponse
             {
                 Success = false,
                 MergeConflict = integrate.MergeConflict,
-                Version = integrate.Version,
+                Version = failVersion,
                 Branch = integrate.Branch,
                 OutgoingCommits = integrate.Outgoing,
                 IncomingCommits = integrate.Incoming,
@@ -57,7 +58,7 @@ public sealed class CommitSyncRepositoryCommand(IGitService git, GitRemoteIntegr
         }
 
         var branch = integrate.Branch!;
-        var version = integrate.Version ?? "-";
+        var version = await ResolveVersionAsync(repoPath, cancellationToken);
         var outgoing = integrate.Outgoing;
         var incoming = integrate.Incoming;
 
@@ -98,4 +99,11 @@ public sealed class CommitSyncRepositoryCommand(IGitService git, GitRemoteIntegr
             IncomingCommits = incoming
         };
     }
+
+    private async Task<string> ResolveVersionAsync(string repoPath, CancellationToken cancellationToken)
+    {
+        var (versionResult, _) = await git.GetVersionAsync(repoPath, cancellationToken);
+        return versionResult?.InformationalVersion ?? "-";
+    }
 }
+

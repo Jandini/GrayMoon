@@ -19,7 +19,7 @@ public sealed class PushRepositoryRequest : WorkspaceCommandRequest
     [JsonPropertyName("workspaceId")]
     public int WorkspaceId { get; set; }
 
-    /// <summary>Optional. When set, the agent uses this branch instead of resolving via GitVersion.</summary>
+    /// <summary>Optional. When set, the agent uses this branch instead of resolving the current branch via git.</summary>
     [JsonPropertyName("branchName")]
     public string? BranchName { get; set; }
 }
