@@ -5,19 +5,22 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
-    <link rel="stylesheet" href="bootstrap/bootstrap.min.css" />
-    <link rel="stylesheet" href="bootstrap-icons/bootstrap-icons.css" />
-    <link rel="stylesheet" href="app.css" />
-    <link rel="stylesheet" href="css/workspace-grid-search.css" />
-    <link rel="stylesheet" href="css/loading-overlay.css" />
-    <link rel="stylesheet" href="GrayMoon.App.styles.css" />
+    <link rel="stylesheet" href="@Assets["bootstrap/bootstrap.min.css"]" />
+    <link rel="stylesheet" href="@Assets["bootstrap-icons/bootstrap-icons.css"]" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["css/workspace-grid-search.css"]" />
+    <link rel="stylesheet" href="@Assets["css/loading-overlay.css"]" />
+    <link rel="stylesheet" href="@Assets["GrayMoon.App.styles.css"]" />
+    <ImportMap />
     <link rel="icon" type="image/svg+xml" href="moon.svg" />
     <HeadOutlet />
 </head>
 
 <body>
+    <ReconnectModal />
     <Routes />
     <script src="_framework/blazor.web.js"></script>
+    <script src="js/reconnectModal.js" type="module"></script>
     <script src="js/cytoscape.min.js"></script>
     <script src="js/dagre.min.js"></script>
     <script src="js/cytoscape-dagre.js"></script>

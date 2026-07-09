@@ -15,6 +15,7 @@ public sealed record GitRemoteIntegrateResult(
 /// <summary>
 /// Fetches from origin and pulls incoming commits before push or commit-sync workflows.
 /// Single source of truth for remote integration (fetch + conditional pull).
+/// Resolves branch via git only; Version is always null - callers that need SemVer run GitVersion themselves.
 /// </summary>
 public sealed class GitRemoteIntegrateService(IGitService git)
 {
@@ -37,21 +38,7 @@ public sealed class GitRemoteIntegrateService(IGitService git)
                 ErrorMessage: fetchError ?? "Fetch failed");
         }
 
-        var (versionResult, versionError) = await git.GetVersionAsync(repoPath, cancellationToken);
-        if (versionResult == null)
-        {
-            return new GitRemoteIntegrateResult(
-                Success: false,
-                Branch: null,
-                Version: null,
-                Outgoing: null,
-                Incoming: null,
-                HasUpstream: false,
-                MergeConflict: false,
-                ErrorMessage: versionError ?? "Could not determine repository version");
-        }
-
-        var branch = versionResult.BranchName ?? versionResult.EscapedBranchName;
+        var branch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken);
         if (string.IsNullOrWhiteSpace(branch))
         {
             return new GitRemoteIntegrateResult(
@@ -65,7 +52,6 @@ public sealed class GitRemoteIntegrateService(IGitService git)
                 ErrorMessage: "Could not determine branch name");
         }
 
-        var version = versionResult.InformationalVersion ?? "-";
         var (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);
 
         if (!incoming.HasValue || incoming.Value <= 0)
@@ -73,7 +59,7 @@ public sealed class GitRemoteIntegrateService(IGitService git)
             return new GitRemoteIntegrateResult(
                 Success: true,
                 Branch: branch,
-                Version: version,
+                Version: null,
                 Outgoing: outgoing,
                 Incoming: incoming,
                 HasUpstream: hasUpstream,
@@ -92,7 +78,7 @@ public sealed class GitRemoteIntegrateService(IGitService git)
             return new GitRemoteIntegrateResult(
                 Success: false,
                 Branch: branch,
-                Version: version,
+                Version: null,
                 Outgoing: outgoing,
                 Incoming: incoming,
                 HasUpstream: hasUpstream,
@@ -105,7 +91,7 @@ public sealed class GitRemoteIntegrateService(IGitService git)
             return new GitRemoteIntegrateResult(
                 Success: false,
                 Branch: branch,
-                Version: version,
+                Version: null,
                 Outgoing: outgoing,
                 Incoming: incoming,
                 HasUpstream: hasUpstream,
@@ -118,7 +104,7 @@ public sealed class GitRemoteIntegrateService(IGitService git)
         return new GitRemoteIntegrateResult(
             Success: true,
             Branch: branch,
-            Version: version,
+            Version: null,
             Outgoing: outgoing,
             Incoming: incoming,
             HasUpstream: hasUpstream,
@@ -126,3 +112,4 @@ public sealed class GitRemoteIntegrateService(IGitService git)
             ErrorMessage: null);
     }
 }
+
