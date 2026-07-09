@@ -90,6 +90,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<TrackedJobQueue>();
         builder.Services.AddSingleton<IJobQueue>(sp => sp.GetRequiredService<TrackedJobQueue>());
         builder.Services.AddSingleton<IAgentQueueTracker>(sp => sp.GetRequiredService<TrackedJobQueue>());
+        builder.Services.AddSingleton<CommandJobCancellationRegistry>();
         builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
         builder.Services.AddSingleton<GitProcessRunner>();
         builder.Services.AddSingleton<IGitService, GitService>();
@@ -130,6 +131,8 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<DotnetRestoreRequest, DotnetRestoreResponse>, DotnetRestoreCommand>();
         builder.Services.AddSingleton<ICommandHandler<UndoPushRequest, UndoPushResponse>, UndoPushCommand>();
         builder.Services.AddSingleton<ICommandHandler<SelfUpdateRequest, SelfUpdateResponse>, SelfUpdateCommand>();
+        builder.Services.AddSingleton<ICommandHandler<UpdateBranchFromDefaultRequest, UpdateBranchFromDefaultResponse>, UpdateBranchFromDefaultCommand>();
+        builder.Services.AddSingleton<ICommandHandler<FetchCommitsRequest, FetchCommitsResponse>, FetchCommitsCommand>();
         builder.Services.AddSingleton<CheckoutHookSyncCommand>();
         builder.Services.AddSingleton<CommitHookSyncCommand>();
         builder.Services.AddSingleton<MergeHookSyncCommand>();

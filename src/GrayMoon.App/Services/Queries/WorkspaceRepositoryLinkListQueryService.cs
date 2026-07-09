@@ -5,19 +5,29 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.Queries;
 
-public sealed class WorkspaceRepositoryLinkListQueryService(AppDbContext dbContext) : IWorkspaceRepositoryLinkListQueryService
+/// <summary>
+/// Link-list queries use a factory so each call owns a short-lived DbContext.
+/// That avoids concurrent-use races when Blazor circuits share work across Job.Run, scroll, and tooltips.
+/// </summary>
+public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<AppDbContext> dbContextFactory)
+    : IWorkspaceRepositoryLinkListQueryService
 {
-    private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly IDbContextFactory<AppDbContext> _dbContextFactory =
+        dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
 
-    public Task<int> CountAsync(WorkspaceRepositoryLinkListFilter filter, CancellationToken cancellationToken = default) =>
-        ApplyFilters(_dbContext.WorkspaceRepositories.AsNoTracking(), filter).CountAsync(cancellationToken);
+    public async Task<int> CountAsync(WorkspaceRepositoryLinkListFilter filter, CancellationToken cancellationToken = default)
+    {
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        return await ApplyFilters(db.WorkspaceRepositories.AsNoTracking(), filter).CountAsync(cancellationToken);
+    }
 
     public async Task<WorkspaceRepositoryLinkListPageResult> GetPageAsync(
         WorkspaceRepositoryLinkListRequest request,
         CancellationToken cancellationToken = default)
     {
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         var filter = new WorkspaceRepositoryLinkListFilter(request.WorkspaceId, request.Search);
-        var query = ApplyFilters(_dbContext.WorkspaceRepositories.AsNoTracking(), filter);
+        var query = ApplyFilters(db.WorkspaceRepositories.AsNoTracking(), filter);
         query = ApplySort(query);
         query = ApplyKeyset(query, request.Cursor);
 
@@ -44,7 +54,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(AppDbContext dbConte
         int workspaceId,
         CancellationToken cancellationToken = default)
     {
-        var baseQuery = _dbContext.WorkspaceRepositories.AsNoTracking()
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var baseQuery = db.WorkspaceRepositories.AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId);
 
         var totalCount = await baseQuery.CountAsync(cancellationToken);
@@ -61,10 +72,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(AppDbContext dbConte
 
         var hasIncomingCommits = await baseQuery.AnyAsync(
             wr => (wr.CheckedOutTag == null || wr.CheckedOutTag == string.Empty)
-                && (wr.IncomingCommits ?? 0) > 0
-                && wr.BranchName != null && wr.BranchName != string.Empty
-                && wr.DefaultBranchName != null && wr.DefaultBranchName != string.Empty
-                && wr.BranchName == wr.DefaultBranchName,
+                && (wr.IncomingCommits ?? 0) > 0,
             cancellationToken);
 
         var hasTaggedRepos = await baseQuery.AnyAsync(
@@ -99,7 +107,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(AppDbContext dbConte
         WorkspaceRepositoryLinkListFilter filter,
         CancellationToken cancellationToken = default)
     {
-        var query = ApplyFilters(_dbContext.WorkspaceRepositories.AsNoTracking(), filter);
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var query = ApplyFilters(db.WorkspaceRepositories.AsNoTracking(), filter);
         query = ApplySort(query);
         return await query
             .Select(wr => new WorkspaceRepositoryLinkIndexEntry(
@@ -119,8 +128,9 @@ public sealed class WorkspaceRepositoryLinkListQueryService(AppDbContext dbConte
             return Array.Empty<WorkspaceRepositoryLinkListItemDto>();
         }
 
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         var idSet = workspaceRepositoryIds.ToHashSet();
-        var rows = await Project(_dbContext.WorkspaceRepositories.AsNoTracking()
+        var rows = await Project(db.WorkspaceRepositories.AsNoTracking()
                 .Where(wr => wr.WorkspaceId == workspaceId && idSet.Contains(wr.WorkspaceRepositoryId)))
             .ToListAsync(cancellationToken);
 
@@ -138,8 +148,9 @@ public sealed class WorkspaceRepositoryLinkListQueryService(AppDbContext dbConte
         string? search,
         CancellationToken cancellationToken = default)
     {
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         var filter = new WorkspaceRepositoryLinkListFilter(workspaceId, search);
-        var query = ApplyFilters(_dbContext.WorkspaceRepositories.AsNoTracking(), filter)
+        var query = ApplyFilters(db.WorkspaceRepositories.AsNoTracking(), filter)
             .Where(wr => wr.DependencyLevel == levelKey);
 
         return await query
@@ -152,7 +163,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(AppDbContext dbConte
         int workspaceId,
         CancellationToken cancellationToken = default)
     {
-        var query = _dbContext.WorkspaceRepositories.AsNoTracking()
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var query = db.WorkspaceRepositories.AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId);
         query = ApplySort(query);
         return await Project(query).ToListAsync(cancellationToken);
@@ -162,7 +174,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(AppDbContext dbConte
         int workspaceId,
         CancellationToken cancellationToken = default)
     {
-        var rows = await _dbContext.WorkspaceRepositories.AsNoTracking()
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await db.WorkspaceRepositories.AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId
                 && wr.Repository != null
                 && wr.GitVersion != null
@@ -180,7 +193,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(AppDbContext dbConte
         int repositoryId,
         CancellationToken cancellationToken = default)
     {
-        return await Project(_dbContext.WorkspaceRepositories.AsNoTracking()
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        return await Project(db.WorkspaceRepositories.AsNoTracking()
                 .Where(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId))
             .FirstOrDefaultAsync(cancellationToken);
     }
@@ -280,3 +294,4 @@ public sealed class WorkspaceRepositoryLinkListQueryService(AppDbContext dbConte
             dto.Dependencies ?? int.MinValue,
             dto.WorkspaceRepositoryId);
 }
+

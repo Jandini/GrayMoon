@@ -113,6 +113,37 @@ public sealed class AgentPackageRefDto
     public string? Version { get; set; }
 }
 
+/// <summary>Agent FetchCommits response - commit counts plus tags and current tag for HasNewerTag update.</summary>
+public sealed class AgentFetchCommitsResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("errorMessage")]
+    public string? ErrorMessage { get; set; }
+
+    [JsonPropertyName("outgoingCommits")]
+    public int? OutgoingCommits { get; set; }
+
+    [JsonPropertyName("incomingCommits")]
+    public int? IncomingCommits { get; set; }
+
+    [JsonPropertyName("hasUpstream")]
+    public bool? HasUpstream { get; set; }
+
+    [JsonPropertyName("defaultBranchBehind")]
+    public int? DefaultBranchBehind { get; set; }
+
+    [JsonPropertyName("defaultBranchAhead")]
+    public int? DefaultBranchAhead { get; set; }
+
+    [JsonPropertyName("tags")]
+    public List<string>? Tags { get; set; }
+
+    [JsonPropertyName("currentTag")]
+    public string? CurrentTag { get; set; }
+}
+
 /// <summary>Agent sync response with projects array.</summary>
 public sealed class AgentSyncProjectsResponse
 {

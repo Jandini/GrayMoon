@@ -7,6 +7,7 @@ public sealed partial class WorkspaceRepositories
 {
     private SwitchBranchModalState _switchBranchModal = new();
     private BranchModalState _branchModal = new();
+    private UpdateBranchModalState _updateBranchModal = new();
 
     private void ShowSwitchBranchModal(int repositoryId, string? currentBranch, string? cloneUrl)
     {
@@ -400,5 +401,109 @@ public sealed partial class WorkspaceRepositories
         public string? CurrentBranch { get; init; }
         public string? RepositoryUrl { get; init; }
         public string? InitialTab { get; init; }
+    }
+
+    private sealed record UpdateBranchModalState
+    {
+        public bool IsVisible { get; init; }
+        public int RepositoryId { get; init; }
+        public string? RepositoryName { get; init; }
+        public string? CurrentBranch { get; init; }
+        public string? DefaultBranch { get; init; }
+        public int CommitsBehind { get; init; }
+        public string? GitHubCompareUrl { get; init; }
+    }
+
+    private void ShowUpdateBranchModal(int repositoryId)
+    {
+        var wr = TryGetLink(repositoryId);
+        var repo = wr?.Repository;
+        if (wr == null || repo == null || string.IsNullOrWhiteSpace(wr.BranchName) || wr.IsOnTag)
+            return;
+
+        var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl);
+        var currentBranch = wr.BranchName;
+        var defaultBranch = wr.DefaultBranchName ?? "default";
+        string? compareUrl = null;
+        if (!string.IsNullOrWhiteSpace(repoUrl) && !string.IsNullOrWhiteSpace(currentBranch))
+        {
+            var encBranch = Uri.EscapeDataString(currentBranch);
+            var encDefault = Uri.EscapeDataString(defaultBranch);
+            compareUrl = $"{repoUrl}/compare/{encBranch}...{encDefault}";
+        }
+
+        _updateBranchModal = _updateBranchModal with
+        {
+            IsVisible = true,
+            RepositoryId = repositoryId,
+            RepositoryName = repo.RepositoryName,
+            CurrentBranch = currentBranch,
+            DefaultBranch = defaultBranch,
+            CommitsBehind = wr.DefaultBranchBehindCommits ?? 0,
+            GitHubCompareUrl = compareUrl
+        };
+        StateHasChanged();
+    }
+
+    private void CloseUpdateBranchModal()
+    {
+        _updateBranchModal = _updateBranchModal with
+        {
+            IsVisible = false,
+            RepositoryId = 0,
+            RepositoryName = null,
+            CurrentBranch = null,
+            DefaultBranch = null,
+            CommitsBehind = 0,
+            GitHubCompareUrl = null
+        };
+    }
+
+    private Task OnUpdateBranchConfirmedAsync()
+    {
+        var repositoryId = _updateBranchModal.RepositoryId;
+        var repoName = _updateBranchModal.RepositoryName;
+        if (workspace == null || repositoryId <= 0)
+        {
+            CloseUpdateBranchModal();
+            return Task.CompletedTask;
+        }
+
+        CloseUpdateBranchModal();
+
+        StartPageJob($"Updating branch in {repoName}...", async (job, ct) =>
+        {
+            var result = await ScopedExecutor.ExecuteAsync<WorkspaceBranchUpdateHandler, UpdateBranchFromDefaultResult>(
+                svc => svc.UpdateBranchFromDefaultAsync(WorkspaceId, repositoryId, ct));
+
+            if (result.HasConflicts)
+            {
+                var fileList = result.ConflictFiles.Count > 0
+                    ? string.Join(", ", result.ConflictFiles)
+                    : "unknown files";
+                var conflictCount = result.ConflictFiles.Count;
+                SafeInvoke(() => ToastService.ShowError(
+                    $"Merge conflict in {conflictCount} {(conflictCount == 1 ? "file" : "files")}: {fileList}. " +
+                    "Resolve the conflicts in your IDE, then commit."));
+            }
+            else if (!result.Success)
+            {
+                var message = result.ErrorMessage ?? "Failed to update branch. The GrayMoon Agent may be offline.";
+                SafeInvoke(() => ToastService.ShowError(message));
+            }
+            else
+            {
+                SafeInvoke(() => ToastService.Show($"Branch updated successfully."));
+            }
+        }, new PageJobOptions
+        {
+            OnError = ex =>
+            {
+                Logger.LogError(ex, "Error updating branch from default for repository {RepositoryId}", repositoryId);
+                SafeInvoke(() => ToastService.ShowError("An error occurred while updating branch."));
+            }
+        });
+
+        return Task.CompletedTask;
     }
 }

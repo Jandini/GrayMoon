@@ -396,8 +396,8 @@
 ::deep .repositories-table .dependency-badge-tooltip {
     display: block;
     position: fixed;
-    top: 0;
-    left: 0;
+    top: -9999px;
+    left: -9999px;
     right: auto;
     /* No margin-top here: a transparent gap between badge and popup would break the :hover chain when the cursor
        crosses it. Use padding-top inside the popup instead so the popup is contiguous with the badge. */

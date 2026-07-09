@@ -64,6 +64,8 @@
 
     document.addEventListener('mouseover', onWrapActivated, true);
 
+    document.addEventListener('mouseenter', onWrapActivated, true);
+
     document.addEventListener('focusin', onWrapActivated, true);
 
     document.addEventListener('scroll', repositionOpenTooltips, true);

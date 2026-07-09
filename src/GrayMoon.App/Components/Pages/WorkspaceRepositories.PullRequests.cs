@@ -234,6 +234,12 @@ public sealed partial class WorkspaceRepositories
                     Logger.LogDebug(ex, "Failed to refresh pull requests after creation");
                 }
             }
+
+            await InvokeAsync(async () =>
+            {
+                if (_disposed) return;
+                await RefreshFromSync();
+            });
         });
 
         return Task.CompletedTask;

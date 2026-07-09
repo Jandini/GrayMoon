@@ -29,11 +29,13 @@ public sealed class SignalRConnectionHostedService(
     IHubConnectionProvider hubProvider,
     IJobQueue jobQueue,
     CommandJobFactory commandJobFactory,
+    CommandJobCancellationRegistry cancellationRegistry,
     IOptions<AgentOptions> options,
     ILogger<SignalRConnectionHostedService> logger) : IHostedService, IAsyncDisposable
 {
     private readonly AgentOptions _options = options.Value;
     private HubConnection? _connection;
+    private CancellationTokenSource? _hostCts;
 
     private async Task ReportSemVerAsync(CancellationToken cancellationToken)
     {
@@ -56,6 +58,8 @@ public sealed class SignalRConnectionHostedService(
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        _hostCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
         _connection = new HubConnectionBuilder()
             .WithUrl(_options.AppHubUrl)
             .WithAutomaticReconnect(new FiveSecondRetryPolicy())
@@ -72,18 +76,50 @@ public sealed class SignalRConnectionHostedService(
             logger.LogTrace("RequestCommand {RequestId} request content: {Args}", requestId, args.HasValue ? args.Value.GetRawText() : "null");
             try
             {
+                var hostToken = _hostCts?.Token ?? CancellationToken.None;
+                var jobCts = cancellationRegistry.Register(requestId, hostToken);
+                if (jobCts.IsCancellationRequested)
+                {
+                    logger.LogDebug("RequestCommand {RequestId} already cancelled; skipping enqueue", requestId);
+                    if (_connection?.State == HubConnectionState.Connected)
+                    {
+                        var cancelled = new AgentCommandResponse(false, null, "Command cancelled.");
+                        await _connection.InvokeAsync(AgentHubMethods.ResponseCommand, requestId, cancelled, CancellationToken.None);
+                    }
+                    cancellationRegistry.Unregister(requestId);
+                    return;
+                }
+
                 var envelope = commandJobFactory.CreateCommandJob(requestId, command, args);
-                await jobQueue.EnqueueAsync(envelope, cancellationToken);
+                await jobQueue.EnqueueAsync(envelope, jobCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                logger.LogDebug("RequestCommand {RequestId} enqueue cancelled", requestId);
+                cancellationRegistry.Unregister(requestId);
+                if (_connection?.State == HubConnectionState.Connected)
+                {
+                    try
+                    {
+                        var cancelled = new AgentCommandResponse(false, null, "Command cancelled.");
+                        await _connection.InvokeAsync(AgentHubMethods.ResponseCommand, requestId, cancelled, CancellationToken.None);
+                    }
+                    catch (Exception sendEx)
+                    {
+                        logger.LogDebug(sendEx, "Failed to send cancelled response for {RequestId}", requestId);
+                    }
+                }
             }
             catch (Exception ex)
             {
+                cancellationRegistry.Unregister(requestId);
                 logger.LogError(ex, "Failed to enqueue command {Command} (RequestId={RequestId})", command, requestId);
                 if (_connection?.State == HubConnectionState.Connected)
                 {
                     try
                     {
                         var errorResponse = new AgentCommandResponse(false, null, ex.Message);
-                        await _connection.InvokeAsync(AgentHubMethods.ResponseCommand, requestId, errorResponse, cancellationToken);
+                        await _connection.InvokeAsync(AgentHubMethods.ResponseCommand, requestId, errorResponse, CancellationToken.None);
                     }
                     catch (Exception sendEx)
                     {
@@ -91,6 +127,13 @@ public sealed class SignalRConnectionHostedService(
                     }
                 }
             }
+        });
+
+        _connection.On<string>(AgentHubMethods.CancelCommand, requestId =>
+        {
+            logger.LogDebug("CancelCommand {RequestId} received", requestId);
+            cancellationRegistry.Cancel(requestId);
+            return Task.CompletedTask;
         });
 
         _connection.Reconnecting += error =>
@@ -211,6 +254,13 @@ public sealed class SignalRConnectionHostedService(
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
+        if (_hostCts != null)
+        {
+            await _hostCts.CancelAsync();
+            _hostCts.Dispose();
+            _hostCts = null;
+        }
+
         if (_connection != null)
         {
             await _connection.StopAsync(cancellationToken);
@@ -220,6 +270,12 @@ public sealed class SignalRConnectionHostedService(
 
     public async ValueTask DisposeAsync()
     {
+        if (_hostCts != null)
+        {
+            _hostCts.Dispose();
+            _hostCts = null;
+        }
+
         if (_connection != null)
         {
             await _connection.DisposeAsync();

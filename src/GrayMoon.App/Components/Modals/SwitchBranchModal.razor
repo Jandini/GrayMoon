@@ -127,13 +127,7 @@
                                 {
                                     @if (GetFilteredLocalBranches().Count() == 0)
                                     {
-                                        <div class="d-flex align-items-center justify-content-between px-3 py-3 text-muted">
-                                            <span>@(localBranches.Count == 0 ? "No local branches found." : "No branches match the filter.")</span>
-                                            @if (localBranches.Count > 0 && !string.IsNullOrWhiteSpace(branchFilter))
-                                            {
-                                                <button type="button" class="btn btn-secondary btn-sm" @onclick="CreateFromFilter" @onclick:stopPropagation="true">Create</button>
-                                            }
-                                        </div>
+                                        <div class="text-muted p-3">@(localBranches.Count == 0 ? "No local branches found." : "No branches match the filter.")</div>
                                     }
                                     else
                                     {
@@ -441,6 +435,15 @@
                                     Create
                                 </button>
                             }
+                        }
+                        else if (CanCreateFromFilter())
+                        {
+                            <button type="button"
+                                    class="btn btn-primary"
+                                    @onclick="CreateFromFilter"
+                                    disabled="@isRefreshing">
+                                Create
+                            </button>
                         }
                         else
                         {
@@ -773,6 +776,13 @@
             selectedBranch = null;
         StateHasChanged();
     }
+
+    /// <summary>True when Locals filter matched no branches so the footer can offer Create instead of Check out.</summary>
+    private bool CanCreateFromFilter() =>
+        activeTab == "local"
+        && localBranches.Count > 0
+        && !string.IsNullOrWhiteSpace(branchFilter)
+        && GetFilteredLocalBranches().Count() == 0;
 
     /// <summary>Copy filter text to New branch name and switch to New Branch tab (when Locals filter matched no branches).</summary>
     private void CreateFromFilter()
@@ -1143,7 +1153,7 @@
         if (activeTab == "newbranch" || isRefreshing)
             return;
         // Locals tab: when filter matched no branches, Enter opens New Branch with filter text as name
-        if (activeTab == "local" && localBranches.Count > 0 && GetFilteredLocalBranches().Count() == 0)
+        if (CanCreateFromFilter())
         {
             _suppressNextEnterForNewBranch = true;
             CreateFromFilter();

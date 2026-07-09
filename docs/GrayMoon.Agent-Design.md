@@ -105,7 +105,7 @@ graymoon-agent
 ## 6. Solution Layout
 
 ```
-GrayMoon.sln
+GrayMoon.slnx
 ├── src/
 │   ├── GrayMoon.App/
 │   └── GrayMoon.Agent/

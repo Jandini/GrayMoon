@@ -778,6 +778,105 @@ public class WorkspaceGitService(
         return results.ToList();
     }
 
+    /// <summary>
+    /// Runs git fetch + tag list + commit counts for every repo in the workspace (no GitVersion, no csproj scan,
+    /// no branch listing). Updates only commit-count fields and RepositoryBranch tag rows in the DB.
+    /// Significantly faster than a full Sync.
+    /// </summary>
+    public async Task QuickFetchAsync(
+        int workspaceId,
+        Action<int, int>? onProgress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_agentBridge.IsAgentConnected)
+            throw new AgentNotConnectedException();
+
+        var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            throw new InvalidOperationException($"Workspace {workspaceId} not found.");
+
+        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+
+        var links = workspace.Repositories
+            .Where(l => l.Repository != null)
+            .ToList();
+
+        if (links.Count == 0) return;
+
+        _logger.LogInformation("Quick Fetch triggered. Workspace={WorkspaceName}, RepoCount={Count}", workspace.Name, links.Count);
+
+        var completedCount = 0;
+        var totalCount = links.Count;
+        using var semaphore = new SemaphoreSlim(_maxConcurrent);
+
+        var fetchTasks = links.Select(async link =>
+        {
+            var repo = link.Repository!;
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                var args = new
+                {
+                    workspaceName = workspace.Name,
+                    repositoryId = repo.RepositoryId,
+                    repositoryName = repo.RepositoryName,
+                    bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
+                    workspaceId,
+                    workspaceRoot
+                };
+                var response = await _agentBridge.SendCommandAsync("FetchCommits", args, cancellationToken);
+                var data = response.Success && response.Data != null
+                    ? AgentResponseJson.DeserializeAgentResponse<AgentFetchCommitsResponse>(response.Data)
+                    : null;
+                var count = Interlocked.Increment(ref completedCount);
+                onProgress?.Invoke(count, totalCount);
+                return (link.WorkspaceRepositoryId, repo.RepositoryId, data);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        var results = await Task.WhenAll(fetchTasks);
+
+        // Update commit-count fields on WorkspaceRepositoryLink rows.
+        // EF Core not thread-safe; query sequentially after the parallel fetch.
+        var repoIds = results.Select(r => r.RepositoryId).ToList();
+        var wrLinks = await _dbContext.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.RepositoryId))
+            .ToListAsync(cancellationToken);
+
+        foreach (var (_, repoId, data) in results)
+        {
+            if (data == null) continue;
+            var wr = wrLinks.FirstOrDefault(w => w.RepositoryId == repoId);
+            if (wr == null) continue;
+
+            if (data.OutgoingCommits.HasValue) wr.OutgoingCommits = data.OutgoingCommits;
+            if (data.IncomingCommits.HasValue) wr.IncomingCommits = data.IncomingCommits;
+            if (data.HasUpstream.HasValue) wr.BranchHasUpstream = data.HasUpstream.Value;
+            if (data.DefaultBranchBehind.HasValue) wr.DefaultBranchBehindCommits = data.DefaultBranchBehind;
+            if (data.DefaultBranchAhead.HasValue) wr.DefaultBranchAheadCommits = data.DefaultBranchAhead;
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        // Update RepositoryBranch tag rows and HasNewerTag. Pass localBranches/remoteBranches as null so
+        // existing branch rows are not touched - only tag rows are refreshed.
+        foreach (var (wrId, _, data) in results)
+        {
+            if (data?.Tags == null && string.IsNullOrWhiteSpace(data?.CurrentTag)) continue;
+            await PersistBranchesAsync(wrId, localBranches: null, remoteBranches: null, defaultBranchName: null,
+                tags: data?.Tags, currentTag: data?.CurrentTag, cancellationToken);
+        }
+
+        if (_hubContext != null)
+            await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
+
+        _logger.LogDebug("Quick Fetch completed for workspace {WorkspaceName}", workspace.Name);
+    }
+
     /// <summary>Refreshes version for a single repo and persists. Returns (success, errorMessage) for caller to report and optionally stop workflow.</summary>
     public async Task<(bool Success, string? ErrorMessage)> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, CancellationToken cancellationToken = default)
     {

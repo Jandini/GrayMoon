@@ -23,6 +23,7 @@ public static class BranchEndpoints
         routes.MapPost("/api/branches/create", CreateBranch);
         routes.MapPost("/api/branches/set-upstream", SetUpstreamBranch);
         routes.MapPost("/api/branches/delete", DeleteBranch);
+        routes.MapPost("/api/branches/update-from-default", UpdateBranchFromDefault);
         return routes;
     }
 
@@ -749,6 +750,102 @@ public static class BranchEndpoints
             return Results.Problem("An error occurred while deleting branch", statusCode: 500);
         }
     }
+    private static async Task<IResult> UpdateBranchFromDefault(
+        UpdateBranchFromDefaultApiRequest? body,
+        IAgentBridge agentBridge,
+        WorkspaceService workspaceService,
+        WorkspaceRepository workspaceRepository,
+        GitHubRepositoryRepository repoRepository,
+        AppDbContext dbContext,
+        IHubContext<WorkspaceSyncHub> hubContext,
+        ConnectorHealthService connectorHealthService,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("GrayMoon.App.Api.Branches");
+        if (body == null)
+            return Results.BadRequest("Request body is required.");
+
+        var workspaceId = body.WorkspaceId;
+        var repositoryId = body.RepositoryId;
+
+        if (workspaceId <= 0 || repositoryId <= 0)
+            return Results.BadRequest("workspaceId and repositoryId are required.");
+
+        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            return Results.NotFound("Workspace not found.");
+
+        var repo = await repoRepository.GetByIdAsync(repositoryId);
+        if (repo == null)
+            return Results.NotFound("Repository not found.");
+
+        var wr = await dbContext.WorkspaceRepositories
+            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId);
+        if (wr == null)
+            return Results.NotFound("Repository is not in the given workspace.");
+
+        if (!agentBridge.IsAgentConnected)
+            return Results.Problem("Agent not connected.", statusCode: 503);
+
+        try
+        {
+            await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, CancellationToken.None);
+
+            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, CancellationToken.None);
+            var defaultBranchName = await dbContext.RepositoryBranches
+                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsDefault && !rb.IsTag)
+                .Select(rb => rb.BranchName)
+                .FirstOrDefaultAsync(CancellationToken.None) ?? "main";
+
+            var args = new
+            {
+                workspaceName = workspace.Name,
+                repositoryName = repo.RepositoryName,
+                currentBranchName = wr.BranchName,
+                defaultBranchName,
+                bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
+                workspaceRoot
+            };
+            var response = await agentBridge.SendCommandAsync("UpdateBranchFromDefault", args, CancellationToken.None);
+
+            var updateResponse = AgentResponseJson.DeserializeAgentResponse<UpdateBranchFromDefaultResponse>(response.Data);
+            var commandSuccess = updateResponse?.Success ?? response.Success;
+
+            if (!commandSuccess && updateResponse?.HasConflicts != true)
+            {
+                var errorMessage = updateResponse?.ErrorMessage ?? response.Error ?? "Failed to update branch";
+                return Results.Problem(errorMessage, statusCode: 500);
+            }
+
+            // On clean merge: persist updated commit counts returned by the agent.
+            if (commandSuccess && updateResponse != null)
+            {
+                if (updateResponse.OutgoingCommits.HasValue)
+                    wr.OutgoingCommits = updateResponse.OutgoingCommits.Value;
+                if (updateResponse.IncomingCommits.HasValue)
+                    wr.IncomingCommits = updateResponse.IncomingCommits.Value;
+                if (updateResponse.DefaultBranchBehind.HasValue)
+                    wr.DefaultBranchBehindCommits = updateResponse.DefaultBranchBehind.Value;
+                if (updateResponse.DefaultBranchAhead.HasValue)
+                    wr.DefaultBranchAheadCommits = updateResponse.DefaultBranchAhead.Value;
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+                await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
+            }
+
+            return Results.Ok(new
+            {
+                success = commandSuccess,
+                hasConflicts = updateResponse?.HasConflicts ?? false,
+                conflictFiles = updateResponse?.ConflictFiles ?? Array.Empty<string>()
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error updating branch from default for repository {RepositoryId}", repositoryId);
+            return Results.Problem("An error occurred while updating branch from default", statusCode: 500);
+        }
+    }
+
     private static async Task<IResult> GetCommonBranches(
         CommonBranchesApiRequest? body,
         WorkspaceRepository workspaceRepository,
@@ -937,5 +1034,39 @@ public sealed class DeleteBranchApiRequest
     public bool IsRemote { get; set; }
     /// <summary>When true, local delete uses git branch -D (after user confirmed not-fully-merged warning).</summary>
     public bool Force { get; set; }
+}
+
+public sealed class UpdateBranchFromDefaultApiRequest
+{
+    public int WorkspaceId { get; set; }
+    public int RepositoryId { get; set; }
+}
+
+/// <summary>Mirrors UpdateBranchFromDefaultResponse from the Agent for JSON deserialization on the App side.</summary>
+public sealed class UpdateBranchFromDefaultResponse
+{
+    [System.Text.Json.Serialization.JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("hasConflicts")]
+    public bool HasConflicts { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("conflictFiles")]
+    public IReadOnlyList<string>? ConflictFiles { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("errorMessage")]
+    public string? ErrorMessage { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("outgoingCommits")]
+    public int? OutgoingCommits { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("incomingCommits")]
+    public int? IncomingCommits { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("defaultBranchBehind")]
+    public int? DefaultBranchBehind { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("defaultBranchAhead")]
+    public int? DefaultBranchAhead { get; set; }
 }
 

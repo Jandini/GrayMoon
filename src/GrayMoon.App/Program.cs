@@ -63,7 +63,11 @@ try
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=db/graymoon.db";
     if (!connectionString.Contains("Cache=", StringComparison.OrdinalIgnoreCase))
         connectionString += connectionString.EndsWith(';') ? "Cache=Shared;" : ";Cache=Shared;";
-    builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connectionString));
+    // AddDbContext + AddDbContextFactory together fails on EF Core 10 (scoped
+    // IDbContextOptionsConfiguration resolved from the root provider). Register the
+    // factory only, then supply scoped AppDbContext instances from it.
+    builder.Services.AddDbContextFactory<AppDbContext>(options => options.UseSqlite(connectionString));
+    builder.Services.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<AppDbContext>>().CreateDbContext());
     builder.Services.AddScoped<ConnectorRepository>();
     builder.Services.AddScoped<GitHubRepositoryRepository>();
     builder.Services.AddScoped<WorkspaceProjectRepository>();
@@ -75,6 +79,7 @@ try
     builder.Services.AddScoped<NavbarCollapseService>();
     builder.Services.AddSingleton<AgentConnectionTracker>();
     builder.Services.AddSingleton<AgentQueueStateService>();
+    builder.Services.AddSingleton<AgentCommandCancelSender>();
     builder.Services.AddSingleton<OverlayCommandTerminalService>();
     builder.Services.AddSingleton<IToastService, ToastService>();
     builder.Services.AddSingleton<MatrixOverlayPreferenceService>();
@@ -100,6 +105,7 @@ try
     builder.Services.AddScoped<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
     builder.Services.AddScoped<WorkspaceFileVersionService>();
     builder.Services.AddScoped<WorkspaceCommitSyncHandler>();
+    builder.Services.AddScoped<WorkspaceBranchUpdateHandler>();
     builder.Services.AddScoped<WorkspaceSyncHandler>();
     builder.Services.AddScoped<DependencyUpdateOrchestrator>();
     builder.Services.AddScoped<WorkspaceUpdateHandler>();
@@ -144,6 +150,7 @@ try
         .PersistKeysToFileSystem(new DirectoryInfo(keyRingDir));
 
     var app = builder.Build();
+    AgentResponseDelivery.SetCancelNotifier(app.Services.GetRequiredService<AgentCommandCancelSender>().NotifyCancel);
     //var version = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
     var version = typeof(Program).Assembly
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
