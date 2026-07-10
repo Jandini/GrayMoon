@@ -144,7 +144,7 @@ public sealed class WorkspacePushService(
         if (!synchronizedPushPossible || _nuGetService == null || _connectorRepository == null)
         {
             onProgressMessage?.Invoke("Pushing all repositories...");
-            await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken);
+            await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken: cancellationToken);
             await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
             return;
         }
@@ -308,6 +308,7 @@ public sealed class WorkspacePushService(
                 levelProgress,
                 onRepoError,
                 onAppSideComplete: level == lastLevel ? null : onAppSideComplete,
+                refreshVersionAfterPush: true,
                 cancellationToken);
             await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
             pushedRepos.AddRange(reposAtLevel);
@@ -433,7 +434,7 @@ public sealed class WorkspacePushService(
             if (reposAtLevel.Count == 0) continue;
             var levelProgress = onProgressMessage == null ? (Action<string>?)null : msg => onProgressMessage($"{msg}\nLevel {level}");
             levelProgress?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
-            await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, levelProgress, onRepoError, onAppSideComplete: null, cancellationToken);
+            await PushReposAsync(workspace, reposAtLevel, bearerByRepoId, levelProgress, onRepoError, onAppSideComplete: null, cancellationToken: cancellationToken);
             await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
         }
 
@@ -491,7 +492,7 @@ public sealed class WorkspacePushService(
         }
 
         onProgressMessage?.Invoke($"Pushing {payload.Count} {(payload.Count == 1 ? "repository" : "repositories")}...");
-        await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken);
+        await PushReposAsync(workspace, payload, bearerByRepoId, onProgressMessage, onRepoError, onAppSideComplete, cancellationToken: cancellationToken);
         await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, payload, cancellationToken);
     }
 
@@ -718,6 +719,7 @@ public sealed class WorkspacePushService(
         Action<string>? onProgressMessage,
         Action<int, string>? onRepoError,
         Action? onAppSideComplete = null,
+        bool refreshVersionAfterPush = false,
         CancellationToken cancellationToken = default)
     {
         var completed = 0;
@@ -740,7 +742,8 @@ public sealed class WorkspacePushService(
                     repositoryName = repo.RepoName,
                     bearerToken = bearerByRepoId.GetValueOrDefault(repo.RepoId),
                     workspaceId = workspace.WorkspaceId,
-                    workspaceRoot
+                    workspaceRoot,
+                    refreshVersionAfterPush
                 };
                 var response = await _agentBridge.SendCommandAsync("PushRepository", args, cancellationToken);
                 var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data) is { Success: true };
