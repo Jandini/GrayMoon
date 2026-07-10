@@ -21,6 +21,8 @@ public sealed class DependencyUpdateOrchestrator(
     /// <summary>
     /// Runs the full update flow per dependency level:
     /// refresh projects, update+commit version files, sync+commit csproj deps, refresh repo versions.
+    /// Walks all dependency levels (up to <paramref name="maxLevel"/>) so version-file work that appears
+    /// after a lower-level commit is not skipped. Csproj sync is scoped to <paramref name="repoIdsToUpdate"/>.
     /// Stops on first error and reports it via <paramref name="onRepoError"/>.
     /// </summary>
     /// <param name="repoIdsToUpdate">Optional. When set, only these repositories are considered for the update plan and all steps.</param>
@@ -61,8 +63,10 @@ public sealed class DependencyUpdateOrchestrator(
         if (hadError)
             return new HashSet<int>();
 
-        // Step 2+: Process repositories by dependency level.
-        var levelRepoIds = await GetRepositoryIdsByDependencyLevelAsync(workspaceId, repoIdsToUpdate, OnRepoError);
+        // Step 2+: Walk every dependency level (up to maxLevel). Do not limit the level walk to the
+        // initial reposNeedingWork set - a lower-level csproj commit refreshes GitVersion and can mark
+        // higher-level version files out of date; those repos must still be visited for file updates.
+        var levelRepoIds = await GetRepositoryIdsByDependencyLevelAsync(workspaceId, selectedRepositoryIds: null, OnRepoError);
         if (maxLevel.HasValue)
             levelRepoIds = levelRepoIds.Where(x => x.Level <= maxLevel.Value).ToList();
         if (levelRepoIds.Count == 0)
@@ -76,7 +80,7 @@ public sealed class DependencyUpdateOrchestrator(
                 break;
 
             if (repoIds.Count == 0)
-                break;
+                continue;
 
             // Re-fetch per level: RefreshRepositoryVersionsAsync updates OutOfDateFileRepos in the DB
             // after each level commits, so re-reading here ensures newly out-of-date files at higher
@@ -86,6 +90,15 @@ public sealed class DependencyUpdateOrchestrator(
                 .Where(l => (l.OutOfDateFileRepos ?? 0) > 0)
                 .Select(l => l.RepositoryId)
                 .ToHashSet();
+
+            // Csproj sync stays scoped to the caller's selection (or all repos at this level when null).
+            var csprojScope = repoIdsToUpdate != null
+                ? (IReadOnlySet<int>)repoIds.Where(repoIdsToUpdate.Contains).ToHashSet()
+                : repoIds;
+
+            var hasFileWork = repoIds.Any(outOfDateFileRepoIds.Contains);
+            if (!hasFileWork && csprojScope.Count == 0)
+                continue;
 
             Action<string> levelProgress = msg => setProgress($"{msg}\nLevel {level}");
 
@@ -107,9 +120,19 @@ public sealed class DependencyUpdateOrchestrator(
                 break;
             }
 
-            var (payload, _) = await workspaceGitService.GetUpdatePlanAsync(workspaceId, repoIds, cancellationToken);
+            if (csprojScope.Count == 0)
+            {
+                if (vfCommittedRepoIds.Count > 0
+                    && !await RefreshRepositoryVersionsAsync(vfCommittedRepoIds, workspaceId, cancellationToken, levelProgress, onAppSideComplete, OnRepoError))
+                {
+                    hadError = true;
+                }
+                continue;
+            }
+
+            var (payload, _) = await workspaceGitService.GetUpdatePlanAsync(workspaceId, csprojScope, cancellationToken);
             var reposAtLevel = payload
-                .Where(p => repoIds.Contains(p.RepoId))
+                .Where(p => csprojScope.Contains(p.RepoId))
                 .ToList();
             if (reposAtLevel.Count == 0)
             {
@@ -127,7 +150,7 @@ public sealed class DependencyUpdateOrchestrator(
                 workspaceId,
                 onProgress: (c, t, _) => levelProgress($"Syncing {c} of {t}"),
                 onRepoError: OnRepoError,
-                repoIdsToSync: repoIds,
+                repoIdsToSync: csprojScope,
                 cancellationToken);
             allSyncedRepoIds.UnionWith(syncedRepoIds);
             if (hadError)
