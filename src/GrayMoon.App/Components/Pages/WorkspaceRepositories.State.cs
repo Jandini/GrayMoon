@@ -69,7 +69,11 @@ public sealed partial class WorkspaceRepositories
     private bool _disposed;
     private readonly SemaphoreSlim _reloadGate = new(1, 1);
     private string PageJobKey => new Uri(NavigationManager.Uri).AbsolutePath.ToLowerInvariant();
+    private string WorkspacePanelJobKey => $"/workspaces/{WorkspaceId}";
     private bool IsJobRunning => JobService.IsRunning(PageJobKey);
+    /// <summary>True when either the repos page or the floating notification panel has a job for this workspace.</summary>
+    private bool IsBackgroundJobRunning => IsJobRunning || JobService.IsRunning(WorkspacePanelJobKey);
+    private bool _pendingRefreshAfterJob;
     private int AgentTasksPendingCount => AgentQueueStateService.GetPendingCountForWorkspace(WorkspaceId);
     private const int RefreshDebounceMs = 200;
     private CancellationTokenSource? _refreshDebounceCts;

@@ -23,7 +23,11 @@ public sealed partial class WorkspaceRepositories
             _hubConnection.On<int>("WorkspaceSynced", async (workspaceId) =>
             {
                 if (workspaceId != WorkspaceId) return;
-                if (IsJobRunning) return;
+                if (IsBackgroundJobRunning)
+                {
+                    _pendingRefreshAfterJob = true;
+                    return;
+                }
                 CancellationTokenSource cts;
                 lock (_refreshDebounceLock)
                 {
@@ -68,9 +72,18 @@ public sealed partial class WorkspaceRepositories
     private void OnJobServiceChanged()
     {
         if (_disposed) return;
+        var shouldRefreshAfterJob = _pendingRefreshAfterJob && !IsBackgroundJobRunning;
+        if (shouldRefreshAfterJob)
+            _pendingRefreshAfterJob = false;
         // Overlay / IsJobRunning UI only. Grid refresh runs inside job bodies
         // (RefreshOnSuccess / ReloadWorkspaceDataAfterCancelAsync), not here.
-        _ = InvokeAsync(StateHasChanged);
+        _ = InvokeAsync(async () =>
+        {
+            if (_disposed) return;
+            StateHasChanged();
+            if (shouldRefreshAfterJob)
+                await RefreshFromSync();
+        });
     }
 
     private void SafeInvoke(Action callback)
