@@ -132,7 +132,7 @@ public sealed class WorkspaceProjectRepository(
             workspaceId, repositoryId, toRemove.Count, byName.Count);
     }
 
-    /// <summary>Replaces project dependencies for workspace projects from sync results. Only dependencies where the referenced package is a workspace project are persisted. When <paramref name="persistDependencyLevel"/> is false, this method does not persist levels (avoids partial uniqueEdges); callers such as <c>WorkspaceGitService.PersistVersionsAsync</c> follow with <c>RecomputeAndPersistRepositoryDependencyStatsAsync</c> so levels are recomputed from the full DB graph.</summary>
+    /// <summary>Replaces project dependencies for workspace projects from sync results. Only dependencies where the referenced package is a workspace project are persisted. When <paramref name="persistDependencyLevel"/> is true, levels are recomputed from the full DB graph (not the partial merge batch). When false, callers such as <c>WorkspaceGitService.PersistVersionsAsync</c> follow with <c>RecomputeAndPersistRepositoryDependencyStatsAsync</c>.</summary>
     public async Task MergeWorkspaceProjectDependenciesAsync(
         int workspaceId,
         IReadOnlyList<(int RepoId, IReadOnlyList<SyncProjectInfo>? ProjectsDetail)> syncResults,
@@ -207,7 +207,7 @@ public sealed class WorkspaceProjectRepository(
             workspaceId, dependentProjectIds.Count, uniqueEdges.Count);
 
         if (persistDependencyLevel)
-            await PersistRepositoryDependencyLevelAndDependenciesAsync(workspaceId, workspaceProjects, uniqueEdges, cancellationToken);
+            await RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
     }
 
     /// <summary>Recomputes DependencyLevel, Dependencies, and UnmatchedDeps from current DB state (workspace projects, project dependencies, and file version configs) and persists to WorkspaceRepositoryLink. Use after a repository version change (e.g. notify job) so the grid can refresh without re-reading .csproj files.</summary>
