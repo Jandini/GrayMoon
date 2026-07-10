@@ -99,13 +99,13 @@ public sealed class PushRepositoryCommand(
     private Task SendPostOperationSyncIfRequestedAsync(PushRepositoryRequest request, string repoPath, string branch)
     {
         if (request.RefreshVersionAfterPush)
-            return SendPostOperationSyncAsync(request.WorkspaceId, request.RepositoryId, repoPath, branch);
+            return SendPostOperationSyncAsync(request.WorkspaceId, request.RepositoryId, repoPath, branch, versionOnly: true);
 
-        _ = SendPostOperationSyncAsync(request.WorkspaceId, request.RepositoryId, repoPath, branch);
+        _ = SendPostOperationSyncAsync(request.WorkspaceId, request.RepositoryId, repoPath, branch, versionOnly: false);
         return Task.CompletedTask;
     }
 
-    private async Task SendPostOperationSyncAsync(int workspaceId, int repositoryId, string repoPath, string branch)
+    private async Task SendPostOperationSyncAsync(int workspaceId, int repositoryId, string repoPath, string branch, bool versionOnly)
     {
         try
         {
@@ -113,8 +113,17 @@ public sealed class PushRepositoryCommand(
             if (connection?.State != HubConnectionState.Connected) return;
 
             var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, CancellationToken.None);
-            var (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
-            var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, CancellationToken.None);
+            int? outgoing = null;
+            int? incoming = null;
+            bool? hasUpstream = null;
+            int? defaultBehind = null;
+            int? defaultAhead = null;
+            if (!versionOnly)
+            {
+                (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
+                (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, CancellationToken.None);
+            }
+
             var (versionResult, _) = await git.GetVersionAsync(repoPath, nonNormalize: true, CancellationToken.None);
             var version = versionResult?.InformationalVersion ?? "-";
             var versionBranch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? branch;
@@ -132,8 +141,8 @@ public sealed class PushRepositoryCommand(
                 DefaultBranchAhead = defaultAhead,
             };
             await connection.InvokeAsync(AgentHubMethods.SyncCommand, notification, CancellationToken.None);
-            logger.LogInformation("Post-push SyncCommand sent: workspace={WorkspaceId}, repo={RepoId}, outgoing={Outgoing}",
-                workspaceId, repositoryId, outgoing);
+            logger.LogInformation("Post-push SyncCommand sent: workspace={WorkspaceId}, repo={RepoId}, outgoing={Outgoing}, versionOnly={VersionOnly}",
+                workspaceId, repositoryId, outgoing, versionOnly);
         }
         catch (Exception ex)
         {

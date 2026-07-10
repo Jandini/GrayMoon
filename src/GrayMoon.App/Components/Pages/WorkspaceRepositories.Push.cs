@@ -228,6 +228,7 @@ public sealed partial class WorkspaceRepositories
         }
         finally
         {
+            _pendingRefreshAfterJob = false;
             await InvokeAsync(async () =>
             {
                 if (_disposed) return;
