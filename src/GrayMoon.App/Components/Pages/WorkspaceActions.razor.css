@@ -110,10 +110,14 @@
     align-items: center;
     justify-content: center;
     min-width: 1.25rem;
-    padding: 0 0.28rem;
+    min-height: 1.25rem;
+    padding: 0.1rem 0.28rem;
     font-size: 0.72rem;
     font-weight: 600;
-    line-height: 1.35;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    box-sizing: border-box;
     border-radius: var(--gha-status-filter-radius);
 }
 

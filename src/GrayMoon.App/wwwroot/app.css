@@ -1072,7 +1072,11 @@ table.resizable-columns th:hover .resize-handle::after {
 .repositories-table td.col-divergence .divergence-link {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
+    height: calc(1.5em + 2px);
+    line-height: 1;
     padding: 0 0.25rem;
+    box-sizing: border-box;
     border: 1px solid transparent;
     border-radius: 0.25rem;
     cursor: pointer;
@@ -1114,7 +1118,8 @@ table.resizable-columns th:hover .resize-handle::after {
     /* Reset button defaults */
     font-size: inherit;
     font-family: inherit;
-    line-height: inherit;
+    line-height: 1;
+    padding: 0 0.25rem;
 }
 
 .repositories-table td.col-divergence .divergence-link.divergence-link-behind--actionable:hover,
