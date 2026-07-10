@@ -22,4 +22,8 @@ public sealed class PushRepositoryRequest : WorkspaceCommandRequest
     /// <summary>Optional. When set, the agent uses this branch instead of resolving the current branch via git.</summary>
     [JsonPropertyName("branchName")]
     public string? BranchName { get; set; }
+
+    /// <summary>When true, the agent awaits GitVersion and SyncCommand after push before returning (orchestrator synchronized push).</summary>
+    [JsonPropertyName("refreshVersionAfterPush")]
+    public bool RefreshVersionAfterPush { get; set; }
 }
