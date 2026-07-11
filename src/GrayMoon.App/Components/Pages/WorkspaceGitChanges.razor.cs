@@ -36,9 +36,6 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     // Selection: the currently chosen file row (diff panel wiring lands in Stage 6 - Monaco).
     private GitChangesTreeRow? _selectedRow;
 
-    // Commit message drafts are kept per repository so switching selection within the workspace
-    // does not lose what the user typed for a different repo.
-    private readonly Dictionary<int, string> _commitDrafts = [];
     private readonly HashSet<int> _mutatingRepositoryIds = [];
 
     protected override async Task OnInitializedAsync()
@@ -127,12 +124,6 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _ = LoadDiffAsync(row);
     }
 
-    private string GetCommitDraft(int workspaceRepositoryId) =>
-        _commitDrafts.TryGetValue(workspaceRepositoryId, out var draft) ? draft : string.Empty;
-
-    private void SetCommitDraft(int workspaceRepositoryId, string value) =>
-        _commitDrafts[workspaceRepositoryId] = value;
-
     private bool IsMutating(int workspaceRepositoryId) => _mutatingRepositoryIds.Contains(workspaceRepositoryId);
 
     private async Task StageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths)
@@ -150,27 +141,6 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         {
             var result = await AgentClient.UnstageAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
             await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
-        });
-    }
-
-    private async Task CommitAsync(int workspaceRepositoryId, bool stageAllFirst)
-    {
-        var message = GetCommitDraft(workspaceRepositoryId);
-        if (string.IsNullOrWhiteSpace(message))
-        {
-            ToastService.ShowError("Enter a commit message.");
-            return;
-        }
-
-        await RunMutationAsync(workspaceRepositoryId, async (root, wsName, repoName, repositoryId) =>
-        {
-            var result = await AgentClient.CommitAsync(root, wsName, repoName, message, stageAllFirst, CancellationToken.None);
-            await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
-            if (result.Success)
-            {
-                _commitDrafts.Remove(workspaceRepositoryId);
-                ToastService.Show(string.IsNullOrEmpty(result.CommitSha) ? "Committed." : $"Committed {result.CommitSha[..Math.Min(7, result.CommitSha.Length)]}.");
-            }
         });
     }
 

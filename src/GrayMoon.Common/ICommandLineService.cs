@@ -8,6 +8,7 @@ public interface ICommandLineService
     /// <summary>
     /// Runs the executable with the given arguments. Optionally sets working directory and feeds stdin.
     /// Logs once at DEBUG after completion (safe parameters, elapsed ms, exit code). Tokens are redacted.
+    /// Per-line stdout/stderr DEBUG logs are omitted for git diff and git show file-content commands.
     /// </summary>
     /// <param name="fileName">Executable name or path (e.g. "git", "dotnet").</param>
     /// <param name="arguments">Command-line arguments. Pass null or empty if none.</param>

@@ -61,7 +61,7 @@
                                         disabled="@(_isWorkspaceCommitRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
                                         title="Creates one commit in each staged repository using the same message."
                                         @onclick="() => CommitWorkspaceAsync(stagedOnly: true)">
-                                    Commit Staged@(StagedRepositoryCount > 1 ? $" in {StagedRepositoryCount} Repositories" : "")
+                                    Commit Staged
                                 </button>
                             }
                             else
@@ -71,7 +71,7 @@
                                         disabled="@(_isWorkspaceCommitRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
                                         title="Stages all changes then creates one commit in each repository using the same message."
                                         @onclick="() => CommitWorkspaceAsync(stagedOnly: false)">
-                                    Commit All@(ChangedRepositoryCount > 1 ? $" in {ChangedRepositoryCount} Repositories" : "")
+                                    Commit All
                                 </button>
                             }
                         </div>
@@ -85,9 +85,6 @@
                                  OnStage="args => StageAsync(args.WorkspaceRepositoryId, args.Scope, args.Paths)"
                                  OnUnstage="args => UnstageAsync(args.WorkspaceRepositoryId, args.Scope, args.Paths)"
                                  IsMutating="IsMutating"
-                                 CommitDraftGetter="GetCommitDraft"
-                                 CommitDraftSetter="SetCommitDraft"
-                                 OnCommit="args => CommitAsync(args.WorkspaceRepositoryId, args.StageAllFirst)"
                                  OnStageAllChanged="StageAllChangedAsync"
                                  OnUnstageAllStaged="UnstageAllStagedAsync" />
             </div>
@@ -104,7 +101,8 @@
                 else
                 {
                     <div class="git-diff-toolbar">
-                        <span class="git-diff-toolbar__path">@_selectedRow.RepositoryName / @_selectedRow.FilePath</span>
+                        <span class="git-diff-toolbar__path"
+                              title="@($"{_selectedRow.RepositoryName} / {_selectedRow.FilePath}")">@_selectedRow.RepositoryName / @_selectedRow.FilePath</span>
                         <span class="git-diff-toolbar__context">@(_selectedRow.IsStagedSection ? "HEAD -> Index" : "Index -> Working tree")</span>
                         <span class="git-diff-toolbar__spacer"></span>
                         <button type="button"

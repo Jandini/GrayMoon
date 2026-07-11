@@ -46,33 +46,6 @@
                 </span>
             </div>
 
-            @if (row.Kind == GitChangesTreeRowKind.Repository && row.IsStagedSection && row.IsExpanded)
-            {
-                <div class="git-changes-commit-box" style="padding-left: @((row.Depth + 1) * 1.1)rem">
-                    <textarea class="form-control git-changes-commit-box__message"
-                              rows="2"
-                              maxlength="10000"
-                              placeholder="Commit message for @row.RepositoryName"
-                              value="@CommitDraftGetter(row.WorkspaceRepositoryId)"
-                              disabled="@IsMutating(row.WorkspaceRepositoryId)"
-                              @oninput="e => CommitDraftSetter(row.WorkspaceRepositoryId, (string?)e.Value ?? string.Empty)"
-                              @onkeydown="e => OnCommitKeyDown(e, row.WorkspaceRepositoryId)"></textarea>
-                    <div class="git-changes-commit-box__actions">
-                        <button type="button"
-                                class="btn btn-sm btn-primary"
-                                disabled="@(IsMutating(row.WorkspaceRepositoryId) || string.IsNullOrWhiteSpace(CommitDraftGetter(row.WorkspaceRepositoryId)))"
-                                @onclick="() => OnCommit.InvokeAsync(new GitChangesCommitEventArgs(row.WorkspaceRepositoryId, StageAllFirst: false))">
-                            Commit Staged
-                        </button>
-                        <button type="button"
-                                class="btn btn-sm btn-outline-secondary"
-                                disabled="@(IsMutating(row.WorkspaceRepositoryId) || string.IsNullOrWhiteSpace(CommitDraftGetter(row.WorkspaceRepositoryId)))"
-                                @onclick="() => OnCommit.InvokeAsync(new GitChangesCommitEventArgs(row.WorkspaceRepositoryId, StageAllFirst: true))">
-                            Commit All
-                        </button>
-                    </div>
-                </div>
-            }
         }
     }
 </div>
@@ -84,28 +57,15 @@
     [Parameter] public EventCallback<GitChangesTreeRow> OnSelectFile { get; set; }
     [Parameter] public EventCallback<GitChangesStageEventArgs> OnStage { get; set; }
     [Parameter] public EventCallback<GitChangesStageEventArgs> OnUnstage { get; set; }
-    [Parameter] public EventCallback<GitChangesCommitEventArgs> OnCommit { get; set; }
     [Parameter] public EventCallback OnStageAllChanged { get; set; }
     [Parameter] public EventCallback OnUnstageAllStaged { get; set; }
     [Parameter, EditorRequired] public Func<int, bool> IsMutating { get; set; } = _ => false;
-    [Parameter, EditorRequired] public Func<int, string> CommitDraftGetter { get; set; } = _ => string.Empty;
-    [Parameter, EditorRequired] public Action<int, string> CommitDraftSetter { get; set; } = (_, _) => { };
 
     private bool IsSelected(GitChangesTreeRow row) =>
         SelectedRow != null && SelectedRow.Kind == GitChangesTreeRowKind.File && SelectedRow.Key == row.Key;
 
     private Task OnLabelClick(GitChangesTreeRow row) =>
         row.Kind == GitChangesTreeRowKind.File ? OnSelectFile.InvokeAsync(row) : OnToggleExpand.InvokeAsync(row);
-
-    private Task OnCommitKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e, int workspaceRepositoryId)
-    {
-        if (e.CtrlKey && e.Key == "Enter")
-        {
-            return OnCommit.InvokeAsync(new GitChangesCommitEventArgs(workspaceRepositoryId, StageAllFirst: false));
-        }
-
-        return Task.CompletedTask;
-    }
 
     private static string IconFor(GitChangesTreeRow row) => row.Kind switch
     {
@@ -126,14 +86,13 @@
 
         return kind switch
         {
-            GitChangeKind.Added => "A",
+            GitChangeKind.Added or GitChangeKind.Untracked => "A",
             GitChangeKind.Modified => "M",
             GitChangeKind.Deleted => "D",
             GitChangeKind.Renamed => "R",
             GitChangeKind.Copied => "C",
             GitChangeKind.TypeChanged => "T",
             GitChangeKind.Unmerged => "U",
-            GitChangeKind.Untracked => "?",
             _ => "",
         };
     }
@@ -149,13 +108,13 @@
         return kind switch
         {
             GitChangeKind.Added => "Added",
+            GitChangeKind.Untracked => "New file",
             GitChangeKind.Modified => "Modified",
             GitChangeKind.Deleted => "Deleted",
             GitChangeKind.Renamed => "Renamed",
             GitChangeKind.Copied => "Copied",
             GitChangeKind.TypeChanged => "Type changed",
             GitChangeKind.Unmerged => "Unmerged",
-            GitChangeKind.Untracked => "Untracked",
             _ => "Unchanged",
         };
     }
@@ -170,10 +129,9 @@
         var kind = row.IsStagedSection ? row.IndexChange : row.WorktreeChange;
         return kind switch
         {
-            GitChangeKind.Added => "added",
+            GitChangeKind.Added or GitChangeKind.Untracked => "added",
             GitChangeKind.Deleted => "deleted",
             GitChangeKind.Renamed => "renamed",
-            GitChangeKind.Untracked => "untracked",
             _ => "modified",
         };
     }

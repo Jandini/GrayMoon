@@ -34,6 +34,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
 
         ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.CommandLine, $"$ {fileName} {LogSafe.ForLog(arguments)}"));
 
+        var suppressStreamLogging = ShouldSuppressStreamLogging(fileName, arguments);
         var stderrStreamKind = streamStderrAsStdout ? AgentCommandStreamKind.Stdout : AgentCommandStreamKind.Stderr;
 
         var startInfo = new ProcessStartInfo
@@ -69,19 +70,11 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
 
         var stdoutTask = ConsumeStreamAsync(
             process.StandardOutput,
-            segment =>
-            {
-                logger.LogDebug("Command stdout ({Executable}): {Segment}", fileName, TruncateForLog(LogSafe.ForLog(segment)));
-                ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.Stdout, segment));
-            },
+            segment => OnStreamSegment(fileName, suppressStreamLogging, AgentCommandStreamKind.Stdout, segment),
             cancellationToken);
         var stderrTask = ConsumeStreamAsync(
             process.StandardError,
-            segment =>
-            {
-                logger.LogDebug("Command stderr ({Executable}): {Segment}", fileName, TruncateForLog(LogSafe.ForLog(segment)));
-                ReportAmbient(new CommandLineStreamEvent(stderrStreamKind, segment));
-            },
+            segment => OnStreamSegment(fileName, suppressStreamLogging, stderrStreamKind, segment),
             cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         var stdout = await stdoutTask;
@@ -117,6 +110,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
 
         ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.CommandLine, $"$ {fileName} {loggedArguments}"));
 
+        var suppressStreamLogging = ShouldSuppressStreamLogging(fileName, arguments);
         var stderrStreamKind = streamStderrAsStdout ? AgentCommandStreamKind.Stdout : AgentCommandStreamKind.Stderr;
 
         var startInfo = new ProcessStartInfo
@@ -158,19 +152,11 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
 
         var stdoutTask = ConsumeStreamPreservingLineEndingsAsync(
             process.StandardOutput,
-            segment =>
-            {
-                logger.LogDebug("Command stdout ({Executable}): {Segment}", fileName, TruncateForLog(LogSafe.ForLog(segment)));
-                ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.Stdout, segment));
-            },
+            segment => OnStreamSegment(fileName, suppressStreamLogging, AgentCommandStreamKind.Stdout, segment),
             cancellationToken);
         var stderrTask = ConsumeStreamPreservingLineEndingsAsync(
             process.StandardError,
-            segment =>
-            {
-                logger.LogDebug("Command stderr ({Executable}): {Segment}", fileName, TruncateForLog(LogSafe.ForLog(segment)));
-                ReportAmbient(new CommandLineStreamEvent(stderrStreamKind, segment));
-            },
+            segment => OnStreamSegment(fileName, suppressStreamLogging, stderrStreamKind, segment),
             cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         var stdout = await stdoutTask;
@@ -338,6 +324,57 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
 
         var omitted = text.Length - MaxLoggedStreamLength;
         return $"{text[..MaxLoggedStreamLength]} ... (truncated, {omitted} chars omitted)";
+    }
+
+    /// <summary>
+    /// Git diff/show file-content commands can return large payloads; skip per-line DEBUG stream logs while
+    /// still capturing stdout/stderr on the result and forwarding to any ambient overlay sink.
+    /// </summary>
+    private static bool ShouldSuppressStreamLogging(string fileName, string arguments)
+    {
+        if (!string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var trimmed = arguments.TrimStart();
+        if (trimmed.StartsWith("diff", StringComparison.Ordinal)
+            && (trimmed.Length == 4 || trimmed[4] == ' '))
+            return true;
+
+        if (!trimmed.StartsWith("show ", StringComparison.Ordinal))
+            return false;
+
+        return trimmed.AsSpan(5).IndexOf(':') >= 0;
+    }
+
+    private static bool ShouldSuppressStreamLogging(string fileName, IReadOnlyList<string> arguments)
+    {
+        if (!string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase) || arguments.Count == 0)
+            return false;
+
+        if (string.Equals(arguments[0], "diff", StringComparison.Ordinal))
+            return true;
+
+        if (!string.Equals(arguments[0], "show", StringComparison.Ordinal))
+            return false;
+
+        for (var i = 1; i < arguments.Count; i++)
+        {
+            if (arguments[i].Contains(':', StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    private void OnStreamSegment(string fileName, bool suppressStreamLogging, AgentCommandStreamKind kind, string segment)
+    {
+        if (!suppressStreamLogging)
+        {
+            var label = kind == AgentCommandStreamKind.Stderr ? "stderr" : "stdout";
+            logger.LogDebug("Command {Stream} ({Executable}): {Segment}", label, fileName, TruncateForLog(LogSafe.ForLog(segment)));
+        }
+
+        ReportAmbient(new CommandLineStreamEvent(kind, segment));
     }
 
     private static void ReportAmbient(CommandLineStreamEvent e)
