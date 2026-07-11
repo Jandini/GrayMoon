@@ -25,6 +25,7 @@ main:has(.git-changes-page) {
 article.content:has(.git-changes-page) {
     flex: 1 1 auto;
     min-height: 0;
+    height: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -33,7 +34,7 @@ article.content:has(.git-changes-page) {
 .git-changes-page.page-container.grid-page {
     flex: 1 1 auto;
     min-height: 0;
-    height: auto;
+    height: 0;
     padding-bottom: 0;
     box-sizing: border-box;
     overflow: hidden;
@@ -51,7 +52,7 @@ article.content:has(.git-changes-page) {
 .git-changes-page .grid-page-body {
     flex: 1 1 auto;
     min-height: 0;
-    height: auto;
+    height: 0;
     max-height: none;
     overflow: hidden;
     display: flex;
@@ -61,7 +62,7 @@ article.content:has(.git-changes-page) {
 .git-changes-page .grid-page-body > .alert,
 .git-changes-page .grid-page-body > .git-changes-empty,
 .git-changes-page .grid-page-body > .graymoon-splitter {
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-height: 0;
 }
 
@@ -88,11 +89,10 @@ article.content:has(.git-changes-page) {
 /* Splitter */
 .git-changes-splitter {
     display: flex;
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-height: 0;
     min-width: 0;
     width: 100%;
-    height: 100%;
     overflow: hidden;
     gap: 0;
 }
@@ -100,7 +100,6 @@ article.content:has(.git-changes-page) {
 .git-changes-splitter__left {
     flex: 0 0 38%;
     min-width: 260px;
-    height: 100%;
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -111,7 +110,6 @@ article.content:has(.git-changes-page) {
     flex: 1 1 auto;
     min-width: 0;
     min-height: 0;
-    height: 100%;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -130,6 +128,7 @@ article.content:has(.git-changes-page) {
 }
 
 .git-changes-workspace-commit {
+    flex: 0 0 auto;
     padding: 0;
     border-bottom: 1px solid var(--border-color);
 }
@@ -268,9 +267,9 @@ article.content:has(.git-changes-page) {
     overflow: hidden;
 }
 
-/* Tree */
+/* Tree scrolls inside the left column; flex-basis 0 keeps overflow-y active when rows exceed panel height. */
 .git-changes-tree {
-    flex: 1 1 auto;
+    flex: 1 1 0;
     overflow-y: auto;
     min-height: 0;
     padding: 0.25rem 0;

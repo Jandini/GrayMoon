@@ -33,14 +33,20 @@
                 @if (ChangedRepositoryCount > 0)
                 {
                     <div class="git-changes-workspace-commit">
-                        <textarea class="form-control git-changes-workspace-commit__message"
+                        <form autocomplete="off" @onsubmit:preventDefault="true">
+                        <textarea id="git-changes-commit-message"
+                                  class="form-control git-changes-workspace-commit__message"
                                   rows="3"
                                   maxlength="10000"
                                   placeholder="Commit message (applies to all repositories below)"
                                   disabled="@_isWorkspaceCommitRunning"
                                   autocomplete="off"
+                                  autocorrect="off"
+                                  autocapitalize="off"
+                                  spellcheck="false"
                                   value="@_workspaceCommitMessage"
                                   @oninput="OnWorkspaceCommitMessageInput"></textarea>
+                        </form>
                         <div class="git-changes-workspace-commit__actions">
                             @if (StagedRepositoryCount > 0)
                             {
