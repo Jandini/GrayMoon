@@ -7,34 +7,23 @@
 const editors = new Map();
 let monacoReadyPromise = null;
 
-// Without this, Monaco spawns its language workers by wrapping vs/base/worker/workerMain.js in a Blob
-// (for cross-origin safety) and then AMD-requiring the language submodule (e.g. vs/language/html/
-// htmlWorker) *from inside that worker* using the same page-relative path string used on the main
-// thread. A blob: URL has no real location to resolve a relative fetch() against, so that nested
-// require fails with "Failed to parse URL from monaco/vs/language/html/htmlWorker.js". Declaring
-// getWorkerUrl tells Monaco to spawn each language's worker directly from its real vendored file
-// instead, bypassing the broken nested relative resolution entirely.
+// Without this, Monaco spawns its worker by wrapping vs/base/worker/workerMain.js in a Blob (for
+// cross-origin safety), which loses its real script location. workerMain.js is the AMD bootstrap - it
+// defines `define`/`require` inside the worker and then internally requires the actual language
+// submodule (e.g. vs/language/html/htmlWorker, itself just an AMD module, NOT a standalone worker
+// script) using that same page-relative path config used on the main thread. A blob: URL has no real
+// location to resolve that nested relative fetch() against, so it fails with "Failed to parse URL from
+// monaco/vs/language/html/htmlWorker.js". Declaring getWorkerUrl to point at the real, non-blob
+// workerMain.js file (for every label - it is the one shared bootstrap, not a per-language file) fixes
+// the nested resolution without bypassing the AMD bootstrap the submodules depend on.
 function ensureWorkerEnvironment() {
     if (window.MonacoEnvironment) {
         return;
     }
 
-    const workerFileByLabel = {
-        json: 'language/json/jsonWorker.js',
-        css: 'language/css/cssWorker.js',
-        scss: 'language/css/cssWorker.js',
-        less: 'language/css/cssWorker.js',
-        html: 'language/html/htmlWorker.js',
-        handlebars: 'language/html/htmlWorker.js',
-        razor: 'language/html/htmlWorker.js',
-        typescript: 'language/typescript/tsWorker.js',
-        javascript: 'language/typescript/tsWorker.js',
-    };
-
     window.MonacoEnvironment = {
-        getWorkerUrl(_moduleId, label) {
-            const workerFile = workerFileByLabel[label] ?? 'base/worker/workerMain.js';
-            return new URL(`monaco/vs/${workerFile}`, document.baseURI).href;
+        getWorkerUrl() {
+            return new URL('monaco/vs/base/worker/workerMain.js', document.baseURI).href;
         },
     };
 }
