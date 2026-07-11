@@ -10,7 +10,22 @@ public sealed partial class WorkspaceGitChanges
     [Inject] private IOptions<WorkspaceOptions> WorkspaceOptions { get; set; } = default!;
 
     private string _workspaceCommitMessage = string.Empty;
+    private bool _workspaceCommitMessageHasContent;
     private bool _isWorkspaceCommitRunning;
+
+    private void OnWorkspaceCommitMessageInput(ChangeEventArgs e)
+    {
+        var newValue = e.Value?.ToString() ?? string.Empty;
+        var hadContent = _workspaceCommitMessageHasContent;
+        var hasContent = !string.IsNullOrWhiteSpace(newValue);
+        _workspaceCommitMessage = newValue;
+        _workspaceCommitMessageHasContent = hasContent;
+
+        if (hadContent != hasContent)
+        {
+            StateHasChanged();
+        }
+    }
 
     private int StagedRepositoryCount => _view?.Repositories.Count(r => r.StagedCount > 0) ?? 0;
     private int ChangedRepositoryCount => _view?.Repositories.Count(r => r.StagedCount > 0 || r.ChangedCount > 0) ?? 0;
@@ -113,6 +128,7 @@ public sealed partial class WorkspaceGitChanges
         if (succeeded.Count > 0)
         {
             _workspaceCommitMessage = string.Empty;
+            _workspaceCommitMessageHasContent = false;
         }
 
         ToastService.Show(failed.Count == 0

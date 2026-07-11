@@ -1,5 +1,4 @@
 @namespace GrayMoon.App.Components.GitChanges
-@using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services.GitChanges
 
@@ -11,37 +10,10 @@
         </p>
         <span class="workspace-repos-title-spacer"></span>
     </div>
-    <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
-        <div class="workspace-grid-search-wrapper">
-            <FilterSearchInput Value="@FilterQuery"
-                               ValueChanged="OnFilterValueChanged"
-                               InputId="git-changes-filter"
-                               InputAdditionalClass="workspace-grid-search"
-                               Placeholder="Filter by repo, path, status..."
-                               Disabled="@(IsLoading || !HasChanges)" />
-        </div>
-        <button type="button"
-                class="btn btn-outline-secondary"
-                @onclick="OnRefreshClick"
-                disabled="@IsLoading">
-            @if (IsLoading)
-            {
-                <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
-            }
-            Refresh
-        </button>
-    </div>
 </div>
 
 @code {
-    [Parameter] public Workspace? Workspace { get; set; }
     [Parameter] public WorkspaceGitChangesView? View { get; set; }
-    [Parameter] public bool IsLoading { get; set; }
-    [Parameter] public EventCallback OnRefresh { get; set; }
-    [Parameter] public string FilterQuery { get; set; } = string.Empty;
-    [Parameter] public EventCallback<string> FilterQueryChanged { get; set; }
-
-    private bool HasChanges => View is { Repositories.Count: > 0 };
 
     private string Summary
     {
@@ -95,8 +67,4 @@
             return string.Join('\n', byBranch.Select(g => $"{g.Key}: {g.Count()}"));
         }
     }
-
-    private Task OnRefreshClick() => OnRefresh.InvokeAsync();
-
-    private Task OnFilterValueChanged(string value) => FilterQueryChanged.InvokeAsync(value);
 }

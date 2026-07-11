@@ -3,6 +3,14 @@
 @using GrayMoon.Common.Git
 
 <div class="git-changes-tree">
+    @if (!string.IsNullOrEmpty(OfflineNotice))
+    {
+        <div class="git-changes-offline-notice">
+            <i class="bi bi-plug" aria-hidden="true"></i>
+            @OfflineNotice
+        </div>
+    }
+
     @if (Rows.Count == 0)
     {
         <div class="git-changes-tree__empty text-muted">No changes match the current filter.</div>
@@ -52,6 +60,7 @@
 
 @code {
     [Parameter, EditorRequired] public IReadOnlyList<GitChangesTreeRow> Rows { get; set; } = [];
+    [Parameter] public string? OfflineNotice { get; set; }
     [Parameter] public GitChangesTreeRow? SelectedRow { get; set; }
     [Parameter] public EventCallback<GitChangesTreeRow> OnToggleExpand { get; set; }
     [Parameter] public EventCallback<GitChangesTreeRow> OnSelectFile { get; set; }

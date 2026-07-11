@@ -8,23 +8,10 @@
 
 <div class="container-fluid page-container grid-page git-changes-page">
     <div class="grid-page-header">
-        <GitChangesHeader Workspace="_workspace"
-                           View="_view"
-                           IsLoading="_isLoading"
-                           OnRefresh="LoadAsync"
-                           FilterQuery="@_filterQuery"
-                           FilterQueryChanged="OnFilterChanged" />
+        <GitChangesHeader View="_view" />
     </div>
 
     <div class="grid-page-body">
-    @if (!AgentBridge.IsAgentConnected)
-    {
-        <div class="git-changes-offline-banner">
-            <i class="bi bi-plug" aria-hidden="true"></i>
-            Agent offline &bull; showing persisted state@(_view?.Repositories.Count > 0 ? MostRecentPersistedLabel() : "")
-        </div>
-    }
-
     @if (_errorMessage != null)
     {
         <div class="alert alert-danger">@_errorMessage</div>
@@ -47,17 +34,17 @@
                 {
                     <div class="git-changes-workspace-commit">
                         <textarea class="form-control git-changes-workspace-commit__message"
-                                  rows="2"
+                                  rows="3"
                                   maxlength="10000"
                                   placeholder="Commit message (applies to all repositories below)"
                                   disabled="@_isWorkspaceCommitRunning"
-                                  @bind="_workspaceCommitMessage"
-                                  @bind:event="oninput"></textarea>
+                                  value="@_workspaceCommitMessage"
+                                  @oninput="OnWorkspaceCommitMessageInput"></textarea>
                         <div class="git-changes-workspace-commit__actions">
                             @if (StagedRepositoryCount > 0)
                             {
                                 <button type="button"
-                                        class="btn btn-sm btn-primary"
+                                        class="btn btn-primary"
                                         disabled="@(_isWorkspaceCommitRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
                                         title="Creates one commit in each staged repository using the same message."
                                         @onclick="() => CommitWorkspaceAsync(stagedOnly: true)">
@@ -67,7 +54,7 @@
                             else
                             {
                                 <button type="button"
-                                        class="btn btn-sm btn-outline-primary"
+                                        class="btn btn-outline-primary"
                                         disabled="@(_isWorkspaceCommitRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
                                         title="Stages all changes then creates one commit in each repository using the same message."
                                         @onclick="() => CommitWorkspaceAsync(stagedOnly: false)">
@@ -79,6 +66,7 @@
                 }
 
                 <GitChangesTree Rows="_rows"
+                                 OfflineNotice="@OfflineNotice"
                                  SelectedRow="_selectedRow"
                                  OnToggleExpand="ToggleExpanded"
                                  OnSelectFile="SelectFile"
@@ -87,6 +75,12 @@
                                  IsMutating="IsMutating"
                                  OnStageAllChanged="StageAllChangedAsync"
                                  OnUnstageAllStaged="UnstageAllStagedAsync" />
+
+                <GitChangesTreeFooter View="_view"
+                                      IsLoading="_isLoading"
+                                      OnRefresh="LoadAsync"
+                                      FilterQuery="@_filterQuery"
+                                      FilterQueryChanged="OnFilterChanged" />
             </div>
 
             <div class="graymoon-splitter__handle git-changes-splitter__handle" aria-hidden="true"></div>

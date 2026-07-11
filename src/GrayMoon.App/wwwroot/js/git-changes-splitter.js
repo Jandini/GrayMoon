@@ -65,8 +65,16 @@
         });
     }
 
+    function clearCommitMessageInlineSizing() {
+        document.querySelectorAll('.git-changes-workspace-commit__message').forEach((el) => {
+            el.style.removeProperty('height');
+            el.style.removeProperty('overflow-y');
+        });
+    }
+
     function initAll() {
         document.querySelectorAll('.graymoon-splitter').forEach(initSplitter);
+        clearCommitMessageInlineSizing();
     }
 
     document.addEventListener('DOMContentLoaded', initAll);

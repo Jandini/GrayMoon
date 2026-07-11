@@ -6,7 +6,6 @@ using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.JSInterop;
 
 namespace GrayMoon.App.Components.Pages;
 
@@ -84,6 +83,10 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         var latest = _view?.Repositories.Select(r => r.PersistedAt).Where(t => t.HasValue).Select(t => t!.Value).OrderDescending().FirstOrDefault();
         return latest is { } value ? $" from {value.ToLocalTime():t}" : string.Empty;
     }
+
+    private string? OfflineNotice => !AgentBridge.IsAgentConnected
+        ? $"Agent offline • showing persisted state{(_view?.Repositories.Count > 0 ? MostRecentPersistedLabel() : string.Empty)}"
+        : null;
 
     private void RebuildRows()
     {

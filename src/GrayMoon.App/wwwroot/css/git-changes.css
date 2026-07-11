@@ -9,23 +9,16 @@
     overflow: hidden;
 }
 
-/* Header follows the same workspace-repos-header/title-row convention as every other workspace page
-   (see app.css) - only the summary line gets page-specific spacing here; the filter and refresh
-   button reuse the shared workspace-grid-search-wrapper / btn-outline-secondary conventions. */
+/* Header is title + summary only; filter and refresh live in the tree footer. */
 .git-changes-header__summary {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-/* .grid-page-body (app.css) only caps growth with max-height - it never forces a floor, so on pages
-   like this one where content (tree/splitter) is shorter than the cap, the flex chain up to <main>
-   never gets a definite height (article.content isn't stretched) and the body just hugs its content
-   instead of filling the page. Force a definite height here (same calc(100vh - 168px) budget used as
-   max-height elsewhere, so the bottom margin matches every other grid page) so the splitter/empty/error
-   pane always extends to the bottom of the available area regardless of how few rows are in the tree. */
+/* Title-only header (no action row) - body gets the extra vertical space back. */
 .git-changes-page .grid-page-body {
-    height: calc(100vh - 168px);
+    height: calc(100vh - 110px);
     min-width: 0;
     overflow: hidden;
 }
@@ -37,21 +30,14 @@
     min-height: 0;
 }
 
-.git-changes-page .grid-page-body > .git-changes-offline-banner {
-    flex: 0 0 auto;
-}
-
-.git-changes-offline-banner {
+.git-changes-offline-notice {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.4rem 0.75rem;
-    margin-bottom: 0.5rem;
-    background: rgba(255, 193, 7, 0.12);
-    border: 1px solid var(--warning);
-    border-radius: 0.25rem;
+    gap: 0.35rem;
+    padding: 0.35rem 0.5rem 0.25rem;
     color: var(--warning);
-    font-size: 0.82rem;
+    font-size: 0.78rem;
+    min-width: 0;
 }
 
 .git-changes-empty {
@@ -105,9 +91,8 @@
 }
 
 .git-changes-workspace-commit {
-    padding: 0.6rem 0.5rem;
+    padding: 0;
     border-bottom: 1px solid var(--border-color);
-    background: var(--bg-secondary);
 }
 
 .git-changes-workspace-commit__message {
@@ -115,12 +100,38 @@
     color: var(--text-primary);
     border-color: var(--border-input);
     font-size: 0.84rem;
-    resize: vertical;
+    line-height: 1.5;
+    field-sizing: content;
+    min-height: calc(4.5em + .75rem + 2px) !important;
+    max-height: calc(12em + .75rem + 2px);
+    resize: none;
+    overflow-y: auto;
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a var(--bg-input);
+}
+
+.git-changes-workspace-commit__message::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.git-changes-workspace-commit__message::-webkit-scrollbar-track {
+    background: var(--bg-input);
+}
+
+.git-changes-workspace-commit__message::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.git-changes-workspace-commit__message::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
 }
 
 .git-changes-workspace-commit__actions {
     display: flex;
     justify-content: flex-end;
+    padding: 0 0 0.5rem 0;
     margin-top: 0.4rem;
 }
 
@@ -225,6 +236,54 @@
     min-height: 0;
     padding: 0.25rem 0;
     font-size: 0.85rem;
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a var(--bg-card, #252526);
+}
+
+.git-changes-tree::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.git-changes-tree::-webkit-scrollbar-track {
+    background: var(--bg-card, #252526);
+}
+
+.git-changes-tree::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.git-changes-tree::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}
+
+.git-changes-tree-footer {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    border-top: 1px solid var(--border-color);
+    min-width: 0;
+    overflow: hidden;
+}
+
+.git-changes-tree-footer .workspace-grid-search-wrapper {
+    min-width: 0;
+    width: auto;
+    max-width: none;
+    flex: 1 1 0%;
+}
+
+.git-changes-tree-footer__search {
+    flex: 1 1 0%;
+    min-width: 0;
+}
+
+.git-changes-tree-footer__refresh {
+    flex: 0 0 auto;
+    white-space: nowrap;
 }
 
 .git-changes-tree__empty {
