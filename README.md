@@ -125,6 +125,7 @@ The version configuration dialog now validates pattern lines against the actual 
 
 When a configured version pattern line does not exist in the file (for example a `PackageReference` was removed from a `.csproj` or a variable was dropped from a `.env`), GrayMoon previously counted it as out of date and showed it in the dependency tooltip as `-> expected-version` with nothing on the left. Those absent lines are now silently ignored: they do not contribute to the "X of Y" out-of-date badge count and produce no row in the file dependency tooltip. Only lines that actually exist in the file but carry a different version from the expected one are reported as out of date.
 
+
 ### One-click agent update from the badge
 
 When the agent version does not match the app, the header badge shows a red **update** label. Clicking it now triggers a self-update directly - no need to visit the Agent page and copy a command.

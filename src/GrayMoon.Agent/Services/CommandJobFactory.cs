@@ -94,6 +94,16 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid UpdateBranchFromDefault args"),
             "FetchCommits" => JsonSerializer.Deserialize<FetchCommitsRequest>(json, options)
                 ?? throw new ArgumentException("Invalid FetchCommits args"),
+            "GetGitChangeStatus" => JsonSerializer.Deserialize<GetGitChangeStatusRequest>(json, options)
+                ?? throw new ArgumentException("Invalid GetGitChangeStatus args"),
+            "GetGitFileDiff" => JsonSerializer.Deserialize<GetGitFileDiffRequest>(json, options)
+                ?? throw new ArgumentException("Invalid GetGitFileDiff args"),
+            "StageGitChanges" => JsonSerializer.Deserialize<StageGitChangesRequest>(json, options)
+                ?? throw new ArgumentException("Invalid StageGitChanges args"),
+            "UnstageGitChanges" => JsonSerializer.Deserialize<UnstageGitChangesRequest>(json, options)
+                ?? throw new ArgumentException("Invalid UnstageGitChanges args"),
+            "CommitGitChanges" => JsonSerializer.Deserialize<CommitGitChangesRequest>(json, options)
+                ?? throw new ArgumentException("Invalid CommitGitChanges args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

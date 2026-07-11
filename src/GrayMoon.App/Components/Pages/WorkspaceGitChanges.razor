@@ -6,8 +6,10 @@
 
 <PageTitle>Git Changes - GrayMoon</PageTitle>
 
-<div class="container-fluid page-container git-changes-page">
-    <GitChangesHeader Workspace="_workspace" View="_view" IsLoading="_isLoading" OnRefresh="LoadAsync" />
+<div class="container-fluid page-container grid-page git-changes-page">
+    <div class="grid-page-header">
+        <GitChangesHeader Workspace="_workspace" View="_view" IsLoading="_isLoading" OnRefresh="LoadAsync" />
+    </div>
 
     @if (!AgentBridge.IsAgentConnected)
     {
@@ -28,7 +30,6 @@
     else if (_view != null && _view.Repositories.Count == 0)
     {
         <div class="git-changes-empty text-muted">
-            <i class="bi bi-check2-circle" aria-hidden="true"></i>
             No changes across this workspace's repositories.
         </div>
     }

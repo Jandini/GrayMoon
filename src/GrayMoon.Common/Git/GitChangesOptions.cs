@@ -17,4 +17,11 @@ public sealed class GitChangesOptions
 
     /// <summary>Idle time with no renewing operation before a repository's watcher lease is disposed.</summary>
     public int WatcherIdleGraceMinutes { get; init; } = 10;
+
+    /// <summary>
+    /// How often the workspace background monitoring service (not the browser page) sweeps every known
+    /// workspace repository to seed/renew its Agent-side watcher lease. Must stay comfortably below
+    /// <see cref="WatcherIdleGraceMinutes"/> or leases would expire between sweeps. Default 3.
+    /// </summary>
+    public int WatcherRenewalIntervalMinutes { get; init; } = 3;
 }

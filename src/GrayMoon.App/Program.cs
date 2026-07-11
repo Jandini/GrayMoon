@@ -131,6 +131,7 @@ try
     builder.Services.AddHostedService<TokenHealthBackgroundService>();
     builder.Services.AddSingleton<WorkspaceGitChangesWriteQueue>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkspaceGitChangesWriteQueue>());
+    builder.Services.AddHostedService<GitChangesMonitoringBackgroundService>();
 
     // Connector services
     builder.Services.AddTransient<GitHubOverlayLoggingHandler>();
