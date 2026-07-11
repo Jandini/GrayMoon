@@ -139,12 +139,28 @@ export async function init(elementId, options) {
     const layoutSub = bindPaneHeaderResize(editor, originalHeaderEl, headersRowEl);
     updatePaneHeadersVisibility(headersRowEl, renderSideBySide);
 
+    // automaticLayout's own ResizeObserver doesn't reliably repaint after the container goes from
+    // display:none (0x0, detached from layout) to visible - e.g. right after SetDiffAsync sets models
+    // while the Blazor-controlled wrapper is still hidden. Force a real layout() whenever the container
+    // is observed with non-zero size so the diff always renders correctly on the first paint.
+    const resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+            const { width, height } = entry.contentRect;
+            if (width > 0 && height > 0) {
+                editor.layout();
+                break;
+            }
+        }
+    });
+    resizeObserver.observe(container);
+
     editors.set(elementId, {
         editor,
         navigator,
         originalModel: null,
         modifiedModel: null,
         layoutSub,
+        resizeObserver,
         headersRowEl,
     });
     return true;
@@ -224,6 +240,7 @@ export function dispose(elementId) {
 
     disposeModels(entry);
     entry.layoutSub?.dispose();
+    entry.resizeObserver?.disconnect();
     entry.navigator.dispose();
     entry.editor.dispose();
     editors.delete(elementId);

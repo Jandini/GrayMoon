@@ -18,8 +18,12 @@ public sealed partial class WorkspaceGitChanges
     private static bool RendersInMonaco(GitDiffContentState state) =>
         state is GitDiffContentState.Normal or GitDiffContentState.NewFile or GitDiffContentState.DeletedFile;
 
+    private int _diffRequestVersion;
+
     private async Task LoadDiffAsync(GitChangesTreeRow row)
     {
+        var requestVersion = ++_diffRequestVersion;
+
         _selectedDiff = null;
         _diffError = null;
         _isDiffLoading = true;
@@ -37,6 +41,11 @@ public sealed partial class WorkspaceGitChanges
                 .Include(l => l.Repository)
                 .FirstOrDefaultAsync(l => l.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
 
+            if (requestVersion != _diffRequestVersion)
+            {
+                return;
+            }
+
             if (link?.Workspace == null || link.Repository == null)
             {
                 _diffError = "Repository not found.";
@@ -44,6 +53,11 @@ public sealed partial class WorkspaceGitChanges
             }
 
             var root = await WorkspaceService.GetRootPathForWorkspaceAsync(link.Workspace);
+            if (requestVersion != _diffRequestVersion)
+            {
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(root))
             {
                 _diffError = "Workspace root path is not configured.";
@@ -53,6 +67,13 @@ public sealed partial class WorkspaceGitChanges
             var comparison = row.IsStagedSection ? GitDiffComparison.Staged : GitDiffComparison.Unstaged;
             var result = await AgentClient.GetDiffAsync(
                 root, link.Workspace.Name, link.Repository.RepositoryName, row.FilePath!, comparison, CancellationToken.None);
+
+            if (requestVersion != _diffRequestVersion)
+            {
+                // A newer file selection superseded this one while the fetch was in flight - discard
+                // this stale response instead of clobbering the current selection's diff.
+                return;
+            }
 
             if (!result.Success || result.Diff == null)
             {
@@ -64,6 +85,11 @@ public sealed partial class WorkspaceGitChanges
 
             if (RendersInMonaco(_selectedDiff.State) && _diffViewerRef != null)
             {
+                // Reveal the container (display:flex) before pushing models into Monaco, rather than only
+                // in the finally block below, so setModel() runs against an already-visible, correctly
+                // sized container instead of one still transitioning from display:none.
+                _isDiffLoading = false;
+                StateHasChanged();
                 await _diffViewerRef.SetDiffAsync(_selectedDiff);
             }
         }
@@ -74,8 +100,11 @@ public sealed partial class WorkspaceGitChanges
         }
         finally
         {
-            _isDiffLoading = false;
-            StateHasChanged();
+            if (requestVersion == _diffRequestVersion)
+            {
+                _isDiffLoading = false;
+                StateHasChanged();
+            }
         }
     }
 }
