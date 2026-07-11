@@ -21,8 +21,10 @@ When you complete a task, write a single sentence summarizing what was done. Kee
 # Build the solution
 dotnet build GrayMoon.slnx
 
-# Run tests (xUnit) - only GrayMoon.Common is covered; no integration tests exist
+# Run tests (xUnit) - three test projects: GrayMoon.Common.Tests, GrayMoon.Agent.Tests, GrayMoon.App.Tests
 dotnet test src/GrayMoon.Common.Tests/GrayMoon.Common.Tests.csproj
+dotnet test src/GrayMoon.Agent.Tests/GrayMoon.Agent.Tests.csproj
+dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj
 
 # Run a single test class
 dotnet test src/GrayMoon.Common.Tests/GrayMoon.Common.Tests.csproj --filter "FullyQualifiedName~FilterSearchExpressionTests"
@@ -46,7 +48,7 @@ CI pushes to Docker Hub on commits to `main`, on tag pushes, or on any branch co
 
 GrayMoon is a **two-process** system — never combine them:
 
-- **GrayMoon.App** (`src/GrayMoon.App`) — ASP.NET Core **.NET 8** + Blazor Server, runs in Docker. Exposes the web UI and two SignalR hubs (`/hub/agent` for App↔Agent commands, `/hubs/workspace-sync` for browser broadcast). Never touches the local filesystem or runs git directly. SQLite database via EF Core at `/app/db` (volume-mounted). Uses `EnsureCreated()` — no incremental migrations. **New DB columns must be nullable or have a default value.**
+- **GrayMoon.App** (`src/GrayMoon.App`) — ASP.NET Core **.NET 10** + Blazor Server, runs in Docker. Exposes the web UI and two SignalR hubs (`/hub/agent` for App↔Agent commands, `/hubs/workspace-sync` for browser broadcast). Never touches the local filesystem or runs git directly. SQLite database via EF Core at `/app/db` (volume-mounted). Uses `EnsureCreated()` — no incremental migrations. **New DB columns must be nullable or have a default value.**
 - **GrayMoon.Agent** (`src/GrayMoon.Agent`) — .NET **10** console app / dotnet tool (`graymoon-agent` command) that runs on the developer's host machine. Packaged as a single binary; supports Windows Service (`Microsoft.Extensions.Hosting.WindowsServices`) and Linux Systemd (`Microsoft.Extensions.Hosting.Systemd`) hosting. CLI entry via `AgentCli.Build()` with subcommands: `run` (default), `install`, `uninstall`, `start`, `stop`. Connects to the App via SignalR, executes all git and filesystem operations, and exposes a local HTTP listener on `127.0.0.1:9191` for git hook callbacks. Job queue: bounded channel with up to 16 concurrent workers. Three hosted services manage the Agent lifecycle: `SignalRConnectionHostedService` (maintains hub connection), `HookListenerHostedService` (HTTP listener for git hook POSTs), and `JobBackgroundService` (dequeues and executes jobs).
 - **GrayMoon.Abstractions** (`src/GrayMoon.Abstractions`) — Shared interfaces and DTOs used by both App and Agent. `Agent/AgentHubMethods.cs` contains all SignalR hub method name constants (`RequestCommand`, `ResponseCommand`, `SyncCommand`, `CommandOutput`, `ReportSemVer`, `ReportQueueStatus`).
 - **GrayMoon.Common** (`src/GrayMoon.Common`) — Shared utilities including `CommandLineService` (process execution wrapper) and `Search/FilterSearchExpression` (boolean expression parser used by every UI grid).
@@ -112,6 +114,15 @@ Connector tokens are AES-256-GCM encrypted at rest via `AesGcmTokenProtector` (b
 - **`WorkspaceFile.IsMissingOnDisk`** - nullable bool set by `CheckFileVersions` when the file path no longer exists. Missing files are excluded from badge computation and version update.
 - Agent commands `CheckFileVersions` and `UpdateFileVersions` live in `src/GrayMoon.Agent/Commands/`.
 - File-config token names also contribute dependency edges to the topological sort (alongside csproj project deps). `ImplicitReferencedRepoIdsBySource` separates `FromProject` vs `FromFile` for badge tooltip clarity.
+
+### Git Changes (in-app diff viewer)
+
+`WorkspaceGitChanges` (`/workspaces/{id}/changes`) shows a combined, multi-repo file tree of staged/unstaged changes across every repository in a workspace, with a Monaco diff viewer, and lets users stage/unstage/commit without leaving the app.
+
+- **Change detection is watcher-driven, not polled from the browser.** On the Agent, `GitRepositoryWatcherManager` lease-manages one `FileSystemWatcher` per repo (`GitRepositoryWatcher`) once the App has asked about that repo via the `GetGitChangeStatus` command. Watcher events are invalidation-only signals into `GitStatusRefreshCoordinator`, which debounces/coalesces them (state machine: `Clean`/`Dirty`/`Refreshing`/`RefreshingAndDirty`) behind a shared semaphore (`GitChangesOptions.MaxParallelRepositoryOperations`, default 16) so at most one scan plus one coalesced follow-up runs per repo at a time. Each scan shells out to `git status --porcelain=v2 -z --branch --untracked-files=all`, parsed by the process-free `GitPorcelainV2Parser` (Common). `GitChangesSnapshotCache` versions each result; `GitChangesSnapshotPublisher` pushes new snapshots to the App over the existing Agent-App SignalR connection.
+- **The browser never receives snapshot payloads directly.** The App's `GitChangesSnapshotPushHandler` (run off `WorkspaceGitChangesWriteQueue`, a `Channel`-backed `BackgroundService` that serializes all Git-Changes SQLite writes through `IDbContextFactory`) persists the snapshot to `WorkspaceGitRepositoryStatus`/`WorkspaceGitChangeEntry` tables, then broadcasts a lightweight `GitChangesUpdated` signal over `WorkspaceSyncHub`. The page's own hub connection (`WorkspaceGitChanges.Realtime.cs`) reacts by re-reading the persisted projection via `WorkspaceGitChangesReadService` - opening the page never triggers a fresh Agent scan.
+- **Stage/unstage/commit** flow through `IGitChangesAgentClient` to Agent commands `StageGitChangesCommand`/`UnstageGitChangesCommand`/`CommitGitChangesCommand`, which validate every path with `GitRepositoryPathValidator` (rejects absolute paths and `.`/`..` traversal) before calling `git add`/`git restore --staged`/`git commit -F -` via `GitCliRepositoryGitChangesService`. Large path sets are passed via `GitPathspecStdinWriter` (`--pathspec-from-file=-` on git >= 2.25, else batched args) to avoid Windows command-line length limits. Every mutation's resulting snapshot flows through the same write queue as watcher-driven updates - there is no separate optimistic UI state.
+- **Monaco** is vendored under `src/GrayMoon.App/wwwroot/monaco/` and loaded globally via `App.razor`. `GitDiffViewer.razor`/`.razor.js` is the one component in the app using per-instance `IJSObjectReference` module interop (rather than global `window.*` scripts) so each diff editor instance can be created, updated, and disposed independently; `MonacoLanguageMapper` (Common) maps file extensions to Monaco language ids.
 
 ### Custom dependencies
 
