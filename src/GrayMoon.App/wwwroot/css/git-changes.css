@@ -43,6 +43,19 @@
     text-overflow: ellipsis;
 }
 
+.git-changes-offline-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.75rem;
+    margin-bottom: 0.5rem;
+    background: rgba(255, 193, 7, 0.12);
+    border: 1px solid var(--warning);
+    border-radius: 0.25rem;
+    color: var(--warning);
+    font-size: 0.82rem;
+}
+
 .git-changes-empty {
     display: flex;
     align-items: center;
@@ -93,6 +106,26 @@
     border-bottom: 1px solid var(--border-color);
 }
 
+.git-changes-workspace-commit {
+    padding: 0.6rem 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+
+.git-changes-workspace-commit__message {
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-input);
+    font-size: 0.84rem;
+    resize: vertical;
+}
+
+.git-changes-workspace-commit__actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 0.4rem;
+}
+
 .git-changes-diff-placeholder {
     display: flex;
     align-items: center;
@@ -106,6 +139,43 @@
     font-family: var(--bs-font-monospace, monospace);
     color: var(--text-primary);
     margin-bottom: 0.5rem;
+}
+
+/* Diff toolbar + Monaco container */
+.git-diff-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.82rem;
+}
+
+.git-diff-toolbar__path {
+    font-family: var(--bs-font-monospace, monospace);
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.git-diff-toolbar__context {
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.git-diff-toolbar__spacer {
+    flex: 1 1 auto;
+}
+
+.git-diff-viewer-container {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.git-diff-viewer {
+    width: 100%;
+    height: 100%;
 }
 
 /* Tree */

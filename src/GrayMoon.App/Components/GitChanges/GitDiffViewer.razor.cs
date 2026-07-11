@@ -1,0 +1,145 @@
+using GrayMoon.Common.Git;
+using Microsoft.AspNetCore.Components;
+using Microsoft.JSInterop;
+
+namespace GrayMoon.App.Components.GitChanges;
+
+public enum GitDiffViewMode
+{
+    SideBySide,
+    Inline,
+}
+
+public sealed record GitDiffViewerOptions(bool WordWrap = false, bool IgnoreWhitespace = false);
+
+/// <summary>
+/// Thin Blazor wrapper around a single, kept-alive Monaco diff editor instance. Replaces its models on
+/// each <see cref="SetDiffAsync"/> call rather than creating a new editor per file. First release uses
+/// the built-in <c>vs-dark</c> theme unmodified, read-only, per the initial rollout requirements - theme
+/// selection is encapsulated entirely in <c>GitDiffViewer.razor.js</c> so a future <c>graymoon-dark</c>
+/// theme only requires changing that file.
+/// </summary>
+public sealed partial class GitDiffViewer : IAsyncDisposable
+{
+    [Inject] private IJSRuntime JSRuntime { get; set; } = default!;
+
+    private readonly string _elementId = $"git-diff-viewer-{Guid.NewGuid():N}";
+    private IJSObjectReference? _module;
+    private bool _initialized;
+    private bool _disposed;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _disposed)
+        {
+            return;
+        }
+
+        _module = await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./Components/GitChanges/GitDiffViewer.razor.js");
+        _initialized = await _module.InvokeAsync<bool>("init", _elementId, new { renderSideBySide = true });
+    }
+
+    public async Task SetDiffAsync(GitDiffDocument document)
+    {
+        if (!await EnsureReadyAsync())
+        {
+            return;
+        }
+
+        await _module!.InvokeVoidAsync(
+            "setDiff",
+            _elementId,
+            document.OriginalContent ?? string.Empty,
+            document.ModifiedContent ?? string.Empty,
+            document.LanguageId ?? "plaintext");
+    }
+
+    public async Task SetViewModeAsync(GitDiffViewMode mode)
+    {
+        if (!await EnsureReadyAsync())
+        {
+            return;
+        }
+
+        await _module!.InvokeVoidAsync("setViewMode", _elementId, mode == GitDiffViewMode.SideBySide ? "side-by-side" : "inline");
+    }
+
+    public async Task SetOptionsAsync(GitDiffViewerOptions options)
+    {
+        if (!await EnsureReadyAsync())
+        {
+            return;
+        }
+
+        await _module!.InvokeVoidAsync("setOptions", _elementId, new { wordWrap = options.WordWrap, ignoreWhitespace = options.IgnoreWhitespace });
+    }
+
+    public async Task GoToNextChangeAsync()
+    {
+        if (await EnsureReadyAsync())
+        {
+            await _module!.InvokeVoidAsync("goToNextChange", _elementId);
+        }
+    }
+
+    public async Task GoToPreviousChangeAsync()
+    {
+        if (await EnsureReadyAsync())
+        {
+            await _module!.InvokeVoidAsync("goToPreviousChange", _elementId);
+        }
+    }
+
+    public async Task ClearAsync()
+    {
+        if (await EnsureReadyAsync())
+        {
+            await _module!.InvokeVoidAsync("clear", _elementId);
+        }
+    }
+
+    private async Task<bool> EnsureReadyAsync()
+    {
+        if (_disposed)
+        {
+            return false;
+        }
+
+        // The editor initializes asynchronously in OnAfterRenderAsync; a caller that acts before the
+        // first render completes waits here instead of silently no-oping.
+        for (var attempt = 0; !_initialized && _module == null && attempt < 20 && !_disposed; attempt++)
+        {
+            await Task.Delay(25);
+        }
+
+        return _initialized && _module != null;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+
+        if (_module != null)
+        {
+            try
+            {
+                await _module.InvokeVoidAsync("dispose", _elementId);
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit already gone - nothing to clean up client-side.
+            }
+            catch (ObjectDisposedException)
+            {
+                // JS runtime already torn down.
+            }
+
+            await _module.DisposeAsync();
+        }
+    }
+}

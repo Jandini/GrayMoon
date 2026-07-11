@@ -9,6 +9,14 @@
 <div class="container-fluid page-container git-changes-page">
     <GitChangesHeader Workspace="_workspace" View="_view" IsLoading="_isLoading" OnRefresh="LoadAsync" />
 
+    @if (!AgentBridge.IsAgentConnected)
+    {
+        <div class="git-changes-offline-banner">
+            <i class="bi bi-plug" aria-hidden="true"></i>
+            Agent offline &bull; showing persisted state@(_view?.Repositories.Count > 0 ? MostRecentPersistedLabel() : "")
+        </div>
+    }
+
     @if (_errorMessage != null)
     {
         <div class="alert alert-danger">@_errorMessage</div>
@@ -28,6 +36,41 @@
     {
         <div class="graymoon-splitter git-changes-splitter" id="git-changes-splitter">
             <div class="graymoon-splitter__left git-changes-splitter__left">
+                @if (ChangedRepositoryCount > 0)
+                {
+                    <div class="git-changes-workspace-commit">
+                        <textarea class="form-control git-changes-workspace-commit__message"
+                                  rows="2"
+                                  maxlength="10000"
+                                  placeholder="Commit message (applies to all repositories below)"
+                                  disabled="@_isWorkspaceCommitRunning"
+                                  @bind="_workspaceCommitMessage"
+                                  @bind:event="oninput"></textarea>
+                        <div class="git-changes-workspace-commit__actions">
+                            @if (StagedRepositoryCount > 0)
+                            {
+                                <button type="button"
+                                        class="btn btn-sm btn-primary"
+                                        disabled="@(_isWorkspaceCommitRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
+                                        title="Creates one commit in each staged repository using the same message."
+                                        @onclick="() => CommitWorkspaceAsync(stagedOnly: true)">
+                                    Commit Staged@(StagedRepositoryCount > 1 ? $" in {StagedRepositoryCount} Repositories" : "")
+                                </button>
+                            }
+                            else
+                            {
+                                <button type="button"
+                                        class="btn btn-sm btn-outline-primary"
+                                        disabled="@(_isWorkspaceCommitRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
+                                        title="Stages all changes then creates one commit in each repository using the same message."
+                                        @onclick="() => CommitWorkspaceAsync(stagedOnly: false)">
+                                    Commit All@(ChangedRepositoryCount > 1 ? $" in {ChangedRepositoryCount} Repositories" : "")
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
+
                 <div class="git-changes-filter">
                     <FilterSearchInput Value="_filterQuery"
                                         ValueChanged="OnFilterChanged"
@@ -44,25 +87,81 @@
                                  IsMutating="IsMutating"
                                  CommitDraftGetter="GetCommitDraft"
                                  CommitDraftSetter="SetCommitDraft"
-                                 OnCommit="args => CommitAsync(args.WorkspaceRepositoryId, args.StageAllFirst)" />
+                                 OnCommit="args => CommitAsync(args.WorkspaceRepositoryId, args.StageAllFirst)"
+                                 OnStageAllChanged="StageAllChangedAsync"
+                                 OnUnstageAllStaged="UnstageAllStagedAsync" />
             </div>
 
             <div class="graymoon-splitter__handle git-changes-splitter__handle" aria-hidden="true"></div>
 
             <div class="graymoon-splitter__right git-changes-splitter__right">
-                <div class="git-changes-diff-placeholder text-muted">
-                    @if (_selectedRow is { Kind: GitChangesTreeRowKind.File } selected)
+                @if (_selectedRow is not { Kind: GitChangesTreeRowKind.File })
+                {
+                    <div class="git-changes-diff-placeholder text-muted">
+                        <div>Select a file to view its diff.</div>
+                    </div>
+                }
+                else
+                {
+                    <div class="git-diff-toolbar">
+                        <span class="git-diff-toolbar__path">@_selectedRow.RepositoryName / @_selectedRow.FilePath</span>
+                        <span class="git-diff-toolbar__context">@(_selectedRow.IsStagedSection ? "HEAD -> Index" : "Index -> Working tree")</span>
+                        <span class="git-diff-toolbar__spacer"></span>
+                        <button type="button"
+                                class="btn btn-sm btn-outline-secondary"
+                                title="Previous change"
+                                disabled="@(_selectedDiff == null || !RendersInMonaco(_selectedDiff.State))"
+                                @onclick="() => _diffViewerRef!.GoToPreviousChangeAsync()">
+                            <i class="bi bi-chevron-up" aria-hidden="true"></i>
+                        </button>
+                        <button type="button"
+                                class="btn btn-sm btn-outline-secondary"
+                                title="Next change"
+                                disabled="@(_selectedDiff == null || !RendersInMonaco(_selectedDiff.State))"
+                                @onclick="() => _diffViewerRef!.GoToNextChangeAsync()">
+                            <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                        </button>
+                    </div>
+
+                    @if (_isDiffLoading)
                     {
-                        <div>
-                            <div class="git-changes-diff-placeholder__path">@selected.RepositoryName / @selected.FilePath</div>
-                            <div>Diff viewer arrives in a later stage (Monaco integration).</div>
+                        <div class="git-changes-diff-placeholder text-muted">Loading diff…</div>
+                    }
+                    else if (_diffError != null)
+                    {
+                        <div class="alert alert-danger m-2">@_diffError</div>
+                    }
+                    else if (_selectedDiff != null && !RendersInMonaco(_selectedDiff.State))
+                    {
+                        <div class="git-changes-diff-placeholder text-muted">
+                            @switch (_selectedDiff.State)
+                            {
+                                case GitDiffContentState.Binary:
+                                    <div>
+                                        Binary file changed.
+                                        @if (_selectedDiff.OriginalSizeBytes != null || _selectedDiff.ModifiedSizeBytes != null)
+                                        {
+                                            <div>@(_selectedDiff.OriginalSizeBytes ?? 0) bytes &rarr; @(_selectedDiff.ModifiedSizeBytes ?? 0) bytes</div>
+                                        }
+                                    </div>
+                                    break;
+                                case GitDiffContentState.TooLarge:
+                                    <div>File is too large to diff automatically.</div>
+                                    break;
+                                case GitDiffContentState.UnsupportedEncoding:
+                                    <div>File encoding is not supported for preview.</div>
+                                    break;
+                                default:
+                                    <div>@(_diffError ?? "Unable to display this diff.")</div>
+                                    break;
+                            }
                         </div>
                     }
-                    else
-                    {
-                        <div>Select a file to view its diff.</div>
-                    }
-                </div>
+
+                    <div class="git-diff-viewer-container" style="display:@((_selectedDiff != null && RendersInMonaco(_selectedDiff.State)) ? "block" : "none")">
+                        <GitDiffViewer @ref="_diffViewerRef" />
+                    </div>
+                }
             </div>
         </div>
     }

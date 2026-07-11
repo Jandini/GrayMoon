@@ -85,6 +85,8 @@
     [Parameter] public EventCallback<GitChangesStageEventArgs> OnStage { get; set; }
     [Parameter] public EventCallback<GitChangesStageEventArgs> OnUnstage { get; set; }
     [Parameter] public EventCallback<GitChangesCommitEventArgs> OnCommit { get; set; }
+    [Parameter] public EventCallback OnStageAllChanged { get; set; }
+    [Parameter] public EventCallback OnUnstageAllStaged { get; set; }
     [Parameter, EditorRequired] public Func<int, bool> IsMutating { get; set; } = _ => false;
     [Parameter, EditorRequired] public Func<int, string> CommitDraftGetter { get; set; } = _ => string.Empty;
     [Parameter, EditorRequired] public Action<int, string> CommitDraftSetter { get; set; } = (_, _) => { };
@@ -189,8 +191,28 @@
             case GitChangesTreeRowKind.Repository:
                 RenderScopedAction(builder, row, GitChangeOperationScope.Repository, []);
                 break;
+            case GitChangesTreeRowKind.Section:
+                RenderSectionAction(builder, row);
+                break;
         }
     };
+
+    private void RenderSectionAction(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder, GitChangesTreeRow row)
+    {
+        var seq = 0;
+
+        builder.OpenElement(seq++, "button");
+        builder.AddAttribute(seq++, "type", "button");
+        builder.AddAttribute(seq++, "class", "git-changes-tree__action-btn");
+        builder.AddAttribute(seq++, "title", row.IsStagedSection ? "Unstage all items in Staged" : "Stage all items in Changed");
+        builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => row.IsStagedSection
+            ? OnUnstageAllStaged.InvokeAsync()
+            : OnStageAllChanged.InvokeAsync()));
+        builder.OpenElement(seq++, "i");
+        builder.AddAttribute(seq++, "class", row.IsStagedSection ? "bi bi-dash-lg" : "bi bi-plus-lg");
+        builder.CloseElement();
+        builder.CloseElement();
+    }
 
     private void RenderFileActions(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder, GitChangesTreeRow row)
     {

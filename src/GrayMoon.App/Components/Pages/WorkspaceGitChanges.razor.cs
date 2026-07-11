@@ -82,6 +82,12 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
     }
 
+    private string MostRecentPersistedLabel()
+    {
+        var latest = _view?.Repositories.Select(r => r.PersistedAt).Where(t => t.HasValue).Select(t => t!.Value).OrderDescending().FirstOrDefault();
+        return latest is { } value ? $" from {value.ToLocalTime():t}" : string.Empty;
+    }
+
     private void RebuildRows()
     {
         _rows = _view == null
@@ -118,6 +124,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         _selectedRow = row;
+        _ = LoadDiffAsync(row);
     }
 
     private string GetCommitDraft(int workspaceRepositoryId) =>
@@ -184,25 +191,14 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
         try
         {
-            var link = await DbContext.WorkspaceRepositories
-                .Include(l => l.Workspace)
-                .Include(l => l.Repository)
-                .FirstOrDefaultAsync(l => l.WorkspaceRepositoryId == workspaceRepositoryId);
-
-            if (link?.Workspace == null || link.Repository == null)
+            var resolved = await ResolveRepositoryAsync(workspaceRepositoryId);
+            if (resolved == null)
             {
-                ToastService.ShowError("Repository not found.");
+                ToastService.ShowError("Repository not found or workspace root is not configured.");
                 return;
             }
 
-            var root = await WorkspaceService.GetRootPathForWorkspaceAsync(link.Workspace);
-            if (string.IsNullOrWhiteSpace(root))
-            {
-                ToastService.ShowError("Workspace root path is not configured.");
-                return;
-            }
-
-            await action(root, link.Workspace.Name, link.Repository.RepositoryName, link.RepositoryId);
+            await action(resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, resolved.Value.RepositoryId);
         }
         catch (Exception ex)
         {
@@ -220,8 +216,10 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     /// Persists a mutation's returned snapshot through the same queue/handler used for Agent-pushed
     /// snapshots, so stage/unstage/commit never create a separate optimistic front-end truth - the tree
     /// always re-renders from the persisted SQLite projection, reloaded once the write completes.
+    /// <paramref name="reload"/> is false for multi-repository fan-out, which reloads once after every
+    /// repository's result has been persisted rather than once per repository.
     /// </summary>
-    private async Task PersistMutationResultAsync(int workspaceRepositoryId, int repositoryId, bool success, GitChangeSnapshot? snapshot, string? errorMessage)
+    private async Task PersistMutationResultAsync(int workspaceRepositoryId, int repositoryId, bool success, GitChangeSnapshot? snapshot, string? errorMessage, bool reload = true)
     {
         if (!success)
         {
@@ -240,10 +238,31 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             Snapshot = snapshot,
         });
 
+        if (!reload)
+        {
+            return;
+        }
+
         // The write queue processes on a background worker; give it a moment before reloading so the
         // page reflects the just-persisted state rather than racing the write.
         await Task.Delay(150);
         await LoadAsync();
+    }
+
+    private async Task<(string Root, string WorkspaceName, string RepositoryName, int RepositoryId)?> ResolveRepositoryAsync(int workspaceRepositoryId)
+    {
+        var link = await DbContext.WorkspaceRepositories
+            .Include(l => l.Workspace)
+            .Include(l => l.Repository)
+            .FirstOrDefaultAsync(l => l.WorkspaceRepositoryId == workspaceRepositoryId);
+
+        if (link?.Workspace == null || link.Repository == null)
+        {
+            return null;
+        }
+
+        var root = await WorkspaceService.GetRootPathForWorkspaceAsync(link.Workspace);
+        return string.IsNullOrWhiteSpace(root) ? null : (root, link.Workspace.Name, link.Repository.RepositoryName, link.RepositoryId);
     }
 
     public async ValueTask DisposeAsync()
