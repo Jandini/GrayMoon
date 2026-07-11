@@ -7,30 +7,32 @@
 }
 
 /* Header follows the same workspace-repos-header/title-row convention as every other workspace page
-   (see app.css) - only the refresh button and summary line get page-specific spacing here. */
-.git-changes-header__refresh {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-}
-
+   (see app.css) - only the summary line gets page-specific spacing here; the filter and refresh
+   button reuse the shared workspace-grid-search-wrapper / btn-outline-secondary conventions. */
 .git-changes-header__summary {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-/* Everything below the header (offline banner, empty state, splitter) fills the remaining height,
-   matching .grid-page-body's flex-fill behaviour on grid pages. */
-.git-changes-page > .git-changes-offline-banner,
-.git-changes-page > .alert,
-.git-changes-page > .git-changes-empty,
-.git-changes-page > .graymoon-splitter {
+/* .grid-page-body (app.css) only caps growth with max-height - it never forces a floor, so on pages
+   like this one where content (tree/splitter) is shorter than the cap, the flex chain up to <main>
+   never gets a definite height (article.content isn't stretched) and the body just hugs its content
+   instead of filling the page. Force a definite height here (same calc(100vh - 168px) budget used as
+   max-height elsewhere, so the bottom margin matches every other grid page) so the splitter/empty/error
+   pane always extends to the bottom of the available area regardless of how few rows are in the tree. */
+.git-changes-page .grid-page-body {
+    height: calc(100vh - 168px);
+}
+
+.git-changes-page .grid-page-body > .alert,
+.git-changes-page .grid-page-body > .git-changes-empty,
+.git-changes-page .grid-page-body > .graymoon-splitter {
     flex: 1 1 auto;
     min-height: 0;
 }
 
-.git-changes-page > .git-changes-offline-banner {
+.git-changes-page .grid-page-body > .git-changes-offline-banner {
     flex: 0 0 auto;
 }
 
@@ -90,11 +92,6 @@
 .git-changes-splitter__handle:hover {
     background: var(--accent-blue);
     opacity: 0.4;
-}
-
-.git-changes-filter {
-    padding: 0.5rem 0.25rem;
-    border-bottom: 1px solid var(--border-color);
 }
 
 .git-changes-workspace-commit {

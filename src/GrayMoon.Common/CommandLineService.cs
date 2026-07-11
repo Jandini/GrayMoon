@@ -45,7 +45,12 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
             RedirectStandardError = true,
             RedirectStandardInput = stdin != null,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            // Without this, redirected output defaults to the ambient console codepage (e.g. an OEM
+            // codepage on Windows) instead of UTF-8, mangling any non-ASCII output (em dashes, emoji,
+            // accented names) from git/dotnet into mojibake.
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
         };
      
         using var process = Process.Start(startInfo);
@@ -122,7 +127,11 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
             RedirectStandardError = true,
             RedirectStandardInput = stdinBytes != null,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            // See the other RunAsync overload: force UTF-8 for redirected output so git/dotnet content
+            // (e.g. git show file contents) round-trips exactly instead of via the ambient console codepage.
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
         };
 
         foreach (var argument in arguments)

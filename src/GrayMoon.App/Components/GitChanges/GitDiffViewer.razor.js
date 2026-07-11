@@ -37,6 +37,50 @@ function disposeModels(entry) {
     entry.modifiedModel = null;
 }
 
+// Monaco removed editor.createDiffNavigator() from the standalone API; this reimplements just enough
+// of it (next/previous change, centered on the modified side) using the still-supported
+// onDidUpdateDiff/getLineChanges surface.
+class SimpleDiffNavigator {
+    constructor(diffEditor) {
+        this._diffEditor = diffEditor;
+        this._changes = diffEditor.getLineChanges() || [];
+        this._index = -1;
+        this._subscription = diffEditor.onDidUpdateDiff(() => {
+            this._changes = diffEditor.getLineChanges() || [];
+            this._index = -1;
+        });
+    }
+
+    _revealChange(change) {
+        const modifiedEditor = this._diffEditor.getModifiedEditor();
+        const lineNumber = Math.max(change.modifiedStartLineNumber || change.originalStartLineNumber || 1, 1);
+        modifiedEditor.revealLineInCenter(lineNumber);
+        modifiedEditor.setPosition({ lineNumber, column: 1 });
+    }
+
+    next() {
+        if (!this._changes.length) {
+            return;
+        }
+
+        this._index = (this._index + 1) % this._changes.length;
+        this._revealChange(this._changes[this._index]);
+    }
+
+    previous() {
+        if (!this._changes.length) {
+            return;
+        }
+
+        this._index = this._index <= 0 ? this._changes.length - 1 : this._index - 1;
+        this._revealChange(this._changes[this._index]);
+    }
+
+    dispose() {
+        this._subscription?.dispose();
+    }
+}
+
 export async function init(elementId, options) {
     const container = document.getElementById(elementId);
     if (!container) {
@@ -61,10 +105,7 @@ export async function init(elementId, options) {
         renderOverviewRuler: true,
     });
 
-    const navigator = monaco.editor.createDiffNavigator(editor, {
-        followsCaret: true,
-        ignoreCharChanges: true,
-    });
+    const navigator = new SimpleDiffNavigator(editor);
 
     editors.set(elementId, { editor, navigator, originalModel: null, modifiedModel: null });
     return true;
@@ -140,6 +181,7 @@ export function dispose(elementId) {
     }
 
     disposeModels(entry);
+    entry.navigator.dispose();
     entry.editor.dispose();
     editors.delete(elementId);
 }

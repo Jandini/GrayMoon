@@ -105,9 +105,12 @@ public sealed partial class GitDiffViewer : IAsyncDisposable
             return false;
         }
 
-        // The editor initializes asynchronously in OnAfterRenderAsync; a caller that acts before the
-        // first render completes waits here instead of silently no-oping.
-        for (var attempt = 0; !_initialized && _module == null && attempt < 20 && !_disposed; attempt++)
+        // The editor initializes asynchronously in OnAfterRenderAsync (module import completes, then init()
+        // completes slightly later); a caller that acts anywhere in that window waits here instead of
+        // silently no-oping. Must be a disjunction: _module is assigned before _initialized is set, so a
+        // conjunction here would stop waiting the instant _module is non-null even though init() has not
+        // finished, letting the first SetDiffAsync call after page load silently skip setting the models.
+        for (var attempt = 0; (!_initialized || _module == null) && attempt < 20 && !_disposed; attempt++)
         {
             await Task.Delay(25);
         }
