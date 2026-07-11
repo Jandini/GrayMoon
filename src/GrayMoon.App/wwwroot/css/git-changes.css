@@ -16,11 +16,46 @@
     text-overflow: ellipsis;
 }
 
-/* Title-only header (no action row) - body gets the extra vertical space back. */
-.git-changes-page .grid-page-body {
-    height: calc(100vh - 110px);
-    min-width: 0;
+/* Title-only header; flex-fill from main so splitter uses the full column below the top bar. */
+main:has(.git-changes-page) {
+    min-height: 0;
     overflow: hidden;
+}
+
+article.content:has(.git-changes-page) {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.git-changes-page.page-container.grid-page {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    padding-bottom: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.git-changes-page .grid-page-header {
+    flex-shrink: 0;
+}
+
+/* Match workspace-repos-header-actions margins (filter moved to tree footer). */
+.git-changes-page .git-changes-header {
+    margin-bottom: 0.75rem;
+}
+
+.git-changes-page .grid-page-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    max-height: none;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
 .git-changes-page .grid-page-body > .alert,
@@ -29,6 +64,7 @@
     flex: 1 1 auto;
     min-height: 0;
 }
+
 
 .git-changes-offline-notice {
     display: flex;
@@ -56,6 +92,7 @@
     min-height: 0;
     min-width: 0;
     width: 100%;
+    height: 100%;
     overflow: hidden;
     gap: 0;
 }
@@ -63,6 +100,7 @@
 .git-changes-splitter__left {
     flex: 0 0 38%;
     min-width: 260px;
+    height: 100%;
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -73,6 +111,7 @@
     flex: 1 1 auto;
     min-width: 0;
     min-height: 0;
+    height: 100%;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -260,30 +299,101 @@
 
 .git-changes-tree-footer {
     flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem;
-    border-top: 1px solid var(--border-color);
+    padding: 0.4rem 0 0.5rem 0;
     min-width: 0;
-    overflow: hidden;
 }
 
-.git-changes-tree-footer .workspace-grid-search-wrapper {
+.git-changes-tree-footer__query {
+    display: flex;
+    align-items: stretch;
+    flex: 1 1 auto;
     min-width: 0;
-    width: auto;
-    max-width: none;
-    flex: 1 1 0%;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--border-light);
+    border-radius: var(--bs-border-radius, 0.375rem);
+    overflow: hidden;
+    background-color: transparent;
 }
 
 .git-changes-tree-footer__search {
-    flex: 1 1 0%;
+    flex: 1 1 auto;
     min-width: 0;
+    display: flex;
+}
+
+.git-changes-tree-footer__filter-wrap {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+    display: flex;
+}
+
+.git-changes-tree-footer__filter-wrap .filter-search-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+}
+
+.git-changes-tree-footer__filter,
+.git-changes-tree-footer__filter-wrap .filter-search-input {
+    height: 100%;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    outline: none;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    padding: 0.25rem 0.65rem;
+    min-height: calc(1.5em + 0.5rem + 2px);
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+}
+
+.git-changes-tree-footer__filter:focus,
+.git-changes-tree-footer__filter:focus-visible,
+.git-changes-tree-footer__filter-wrap .filter-search-input:focus,
+.git-changes-tree-footer__filter-wrap .filter-search-input:focus-visible {
+    border: none !important;
+    box-shadow: none !important;
+    outline: none;
+}
+
+.git-changes-tree-footer__filter-wrap.has-filter .filter-search-input {
+    padding-right: 2.25rem;
+}
+
+.git-changes-tree-footer__filter-wrap.filter-search-invalid .filter-search-input-invalid {
+    color: var(--error);
+    caret-color: var(--error);
+}
+
+.git-changes-tree-footer__filter-wrap .filter-search-clear {
+    right: 0.35rem;
 }
 
 .git-changes-tree-footer__refresh {
-    flex: 0 0 auto;
-    white-space: nowrap;
+    flex: 0 0 2.25rem;
+    width: 2.25rem;
+    min-width: 2.25rem;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-left: 1px solid var(--border-light) !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    outline: none;
+    line-height: 1;
+    font-size: 1rem;
+}
+
+.git-changes-tree-footer__refresh:focus,
+.git-changes-tree-footer__refresh:focus-visible {
+    box-shadow: none !important;
+    outline: none;
 }
 
 .git-changes-tree__empty {

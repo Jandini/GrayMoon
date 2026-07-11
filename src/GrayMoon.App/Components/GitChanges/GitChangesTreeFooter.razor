@@ -3,24 +3,33 @@
 @using GrayMoon.App.Services.GitChanges
 
 <div class="git-changes-tree-footer">
-    <div class="workspace-grid-search-wrapper git-changes-tree-footer__search">
-        <FilterSearchInput Value="@FilterQuery"
-                           ValueChanged="OnFilterValueChanged"
-                           InputId="git-changes-filter"
-                           InputAdditionalClass="workspace-grid-search"
-                           Placeholder="Filter by repo, path, status..."
-                           Disabled="@(IsLoading || !HasChanges)" />
+    <div class="git-changes-tree-footer__query">
+        <div class="git-changes-tree-footer__search">
+            <FilterSearchInput Value="@FilterQuery"
+                               ValueChanged="OnFilterValueChanged"
+                               InputId="git-changes-filter"
+                               InputAdditionalClass="git-changes-tree-footer__filter"
+                               WrapperAdditionalClass="git-changes-tree-footer__filter-wrap"
+                               EnableSyntaxHighlight="false"
+                               Placeholder="Filter by repo, path, status..."
+                               Disabled="@(IsLoading || !HasChanges)" />
+        </div>
+        <button type="button"
+                class="btn btn-outline-secondary git-changes-tree-footer__refresh"
+                title="Refresh"
+                aria-label="Refresh"
+                @onclick="OnRefreshClick"
+                disabled="@IsLoading">
+            @if (IsLoading)
+            {
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+            }
+            else
+            {
+                <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+            }
+        </button>
     </div>
-    <button type="button"
-            class="btn btn-outline-secondary git-changes-tree-footer__refresh"
-            @onclick="OnRefreshClick"
-            disabled="@IsLoading">
-        @if (IsLoading)
-        {
-            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
-        }
-        Refresh
-    </button>
 </div>
 
 @code {

@@ -38,6 +38,7 @@
                                   maxlength="10000"
                                   placeholder="Commit message (applies to all repositories below)"
                                   disabled="@_isWorkspaceCommitRunning"
+                                  autocomplete="off"
                                   value="@_workspaceCommitMessage"
                                   @oninput="OnWorkspaceCommitMessageInput"></textarea>
                         <div class="git-changes-workspace-commit__actions">
