@@ -1,0 +1,69 @@
+@page "/workspaces/{WorkspaceId:int}/changes"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using GrayMoon.App.Components.GitChanges
+@using GrayMoon.App.Services.GitChanges
+@using GrayMoon.Common.Git
+
+<PageTitle>Git Changes - GrayMoon</PageTitle>
+
+<div class="container-fluid page-container git-changes-page">
+    <GitChangesHeader Workspace="_workspace" View="_view" IsLoading="_isLoading" OnRefresh="LoadAsync" />
+
+    @if (_errorMessage != null)
+    {
+        <div class="alert alert-danger">@_errorMessage</div>
+    }
+    else if (_isLoading && _view == null)
+    {
+        <div class="git-changes-empty text-muted">Loading Git Changes…</div>
+    }
+    else if (_view != null && _view.Repositories.Count == 0)
+    {
+        <div class="git-changes-empty text-muted">
+            <i class="bi bi-check2-circle" aria-hidden="true"></i>
+            No changes across this workspace's repositories.
+        </div>
+    }
+    else
+    {
+        <div class="graymoon-splitter git-changes-splitter" id="git-changes-splitter">
+            <div class="graymoon-splitter__left git-changes-splitter__left">
+                <div class="git-changes-filter">
+                    <FilterSearchInput Value="_filterQuery"
+                                        ValueChanged="OnFilterChanged"
+                                        Placeholder="Filter by repo, path, status…"
+                                        InputId="git-changes-filter" />
+                </div>
+
+                <GitChangesTree Rows="_rows"
+                                 SelectedRow="_selectedRow"
+                                 OnToggleExpand="ToggleExpanded"
+                                 OnSelectFile="SelectFile"
+                                 OnStage="args => StageAsync(args.WorkspaceRepositoryId, args.Scope, args.Paths)"
+                                 OnUnstage="args => UnstageAsync(args.WorkspaceRepositoryId, args.Scope, args.Paths)"
+                                 IsMutating="IsMutating"
+                                 CommitDraftGetter="GetCommitDraft"
+                                 CommitDraftSetter="SetCommitDraft"
+                                 OnCommit="args => CommitAsync(args.WorkspaceRepositoryId, args.StageAllFirst)" />
+            </div>
+
+            <div class="graymoon-splitter__handle git-changes-splitter__handle" aria-hidden="true"></div>
+
+            <div class="graymoon-splitter__right git-changes-splitter__right">
+                <div class="git-changes-diff-placeholder text-muted">
+                    @if (_selectedRow is { Kind: GitChangesTreeRowKind.File } selected)
+                    {
+                        <div>
+                            <div class="git-changes-diff-placeholder__path">@selected.RepositoryName / @selected.FilePath</div>
+                            <div>Diff viewer arrives in a later stage (Monaco integration).</div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div>Select a file to view its diff.</div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+</div>

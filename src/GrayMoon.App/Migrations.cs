@@ -52,6 +52,7 @@ public static class Migrations
         await MigrateWorkspaceFileLineStatusUniqueIndexFixAsync(dbContext);
         await MigrateListQueryIndexesAsync(dbContext);
         await MigrateProjectDependenciesDependentIndexAsync(dbContext);
+        await MigrateWorkspaceGitChangesAsync(dbContext);
     }
 
     public static async Task MigrateRepositoriesTopicsAsync(AppDbContext dbContext)
@@ -1516,6 +1517,77 @@ public static class Migrations
         catch
         {
             // Migration may already be applied
+        }
+    }
+
+    /// <summary>Creates WorkspaceGitRepositoryStatus and WorkspaceGitChangeEntries for the Git Changes feature's
+    /// persisted read-model projection. Both are transient/derivable from git and safe to drop and recreate.</summary>
+    public static async Task MigrateWorkspaceGitChangesAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceGitRepositoryStatus'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = @"
+                    CREATE TABLE WorkspaceGitRepositoryStatus (
+                        WorkspaceRepositoryId INTEGER PRIMARY KEY,
+                        SnapshotVersion INTEGER NOT NULL DEFAULT 0,
+                        BranchName TEXT,
+                        HeadCommit TEXT,
+                        IsDetachedHead INTEGER NOT NULL DEFAULT 0,
+                        IsUnbornBranch INTEGER NOT NULL DEFAULT 0,
+                        IsMerging INTEGER NOT NULL DEFAULT 0,
+                        IsRebasing INTEGER NOT NULL DEFAULT 0,
+                        IsCherryPicking INTEGER NOT NULL DEFAULT 0,
+                        StagedCount INTEGER NOT NULL DEFAULT 0,
+                        ChangedCount INTEGER NOT NULL DEFAULT 0,
+                        ConflictCount INTEGER NOT NULL DEFAULT 0,
+                        AgentScannedAt TEXT NOT NULL,
+                        PersistedAt TEXT NOT NULL,
+                        LastErrorCode TEXT,
+                        LastErrorMessage TEXT,
+                        FOREIGN KEY (WorkspaceRepositoryId) REFERENCES WorkspaceRepositories(WorkspaceRepositoryId) ON DELETE CASCADE
+                    )";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='WorkspaceGitChangeEntries'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = @"
+                    CREATE TABLE WorkspaceGitChangeEntries (
+                        WorkspaceGitChangeEntryId INTEGER PRIMARY KEY AUTOINCREMENT,
+                        WorkspaceRepositoryId INTEGER NOT NULL,
+                        Path TEXT NOT NULL,
+                        OriginalPath TEXT,
+                        IndexChange INTEGER NOT NULL DEFAULT 0,
+                        WorktreeChange INTEGER NOT NULL DEFAULT 0,
+                        IsTracked INTEGER NOT NULL DEFAULT 1,
+                        IsConflicted INTEGER NOT NULL DEFAULT 0,
+                        IsSubmodule INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY (WorkspaceRepositoryId) REFERENCES WorkspaceRepositories(WorkspaceRepositoryId) ON DELETE CASCADE
+                    )";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='IX_WorkspaceGitChangeEntries_WorkspaceRepositoryId'";
+                if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                {
+                    cmd.CommandText = "CREATE INDEX IX_WorkspaceGitChangeEntries_WorkspaceRepositoryId ON WorkspaceGitChangeEntries(WorkspaceRepositoryId)";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
         }
     }
 }

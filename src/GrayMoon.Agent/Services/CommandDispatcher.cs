@@ -36,7 +36,12 @@ public sealed class CommandDispatcher(
     ICommandHandler<SelfUpdateRequest, SelfUpdateResponse> selfUpdateCommand,
     ICommandHandler<CheckFileVersionsRequest, CheckFileVersionsResponse> checkFileVersionsCommand,
     ICommandHandler<UpdateBranchFromDefaultRequest, UpdateBranchFromDefaultResponse> updateBranchFromDefaultCommand,
-    ICommandHandler<FetchCommitsRequest, FetchCommitsResponse> fetchCommitsCommand) : ICommandDispatcher
+    ICommandHandler<FetchCommitsRequest, FetchCommitsResponse> fetchCommitsCommand,
+    ICommandHandler<GetGitChangeStatusRequest, GetGitChangeStatusResponse> getGitChangeStatusCommand,
+    ICommandHandler<GetGitFileDiffRequest, GetGitFileDiffResponse> getGitFileDiffCommand,
+    ICommandHandler<StageGitChangesRequest, GitMutationResponse> stageGitChangesCommand,
+    ICommandHandler<UnstageGitChangesRequest, GitMutationResponse> unstageGitChangesCommand,
+    ICommandHandler<CommitGitChangesRequest, CommitGitChangesResponse> commitGitChangesCommand) : ICommandDispatcher
 {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
@@ -71,6 +76,11 @@ public sealed class CommandDispatcher(
         [AgentHubMethods.CheckFileVersions] = async (req, ct) => await checkFileVersionsCommand.ExecuteAsync((CheckFileVersionsRequest)req, ct),
         ["UpdateBranchFromDefault"] = async (req, ct) => await updateBranchFromDefaultCommand.ExecuteAsync((UpdateBranchFromDefaultRequest)req, ct),
         ["FetchCommits"] = async (req, ct) => await fetchCommitsCommand.ExecuteAsync((FetchCommitsRequest)req, ct),
+        ["GetGitChangeStatus"] = async (req, ct) => await getGitChangeStatusCommand.ExecuteAsync((GetGitChangeStatusRequest)req, ct),
+        ["GetGitFileDiff"] = async (req, ct) => await getGitFileDiffCommand.ExecuteAsync((GetGitFileDiffRequest)req, ct),
+        ["StageGitChanges"] = async (req, ct) => await stageGitChangesCommand.ExecuteAsync((StageGitChangesRequest)req, ct),
+        ["UnstageGitChanges"] = async (req, ct) => await unstageGitChangesCommand.ExecuteAsync((UnstageGitChangesRequest)req, ct),
+        ["CommitGitChanges"] = async (req, ct) => await commitGitChangesCommand.ExecuteAsync((CommitGitChangesRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

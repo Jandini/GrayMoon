@@ -1,0 +1,241 @@
+@namespace GrayMoon.App.Components.GitChanges
+@using GrayMoon.App.Services.GitChanges
+@using GrayMoon.Common.Git
+
+<div class="git-changes-tree">
+    @if (Rows.Count == 0)
+    {
+        <div class="git-changes-tree__empty text-muted">No changes match the current filter.</div>
+    }
+    else
+    {
+        @foreach (var row in Rows)
+        {
+            <div class="git-changes-tree__row git-changes-tree__row--@(row.Kind.ToString().ToLowerInvariant()) @(IsSelected(row) ? "git-changes-tree__row--selected" : "")"
+                 style="padding-left: @(row.Depth * 1.1)rem"
+                 @key="row.Key">
+
+                <span class="git-changes-tree__toggle" @onclick="() => OnToggleExpand.InvokeAsync(row)">
+                    @if (row.HasChildren)
+                    {
+                        <i class="bi @(row.IsExpanded ? "bi-chevron-down" : "bi-chevron-right")" aria-hidden="true"></i>
+                    }
+                </span>
+
+                <span class="git-changes-tree__icon">
+                    <i class="bi @IconFor(row)" aria-hidden="true"></i>
+                </span>
+
+                <span class="git-changes-tree__label" @onclick="() => OnLabelClick(row)">
+                    @row.Label
+                    @if (row.Kind == GitChangesTreeRowKind.File && !string.IsNullOrEmpty(row.OriginalPath))
+                    {
+                        <span class="git-changes-tree__rename-from text-muted">&larr; @row.OriginalPath</span>
+                    }
+                </span>
+
+                @if (row.Kind == GitChangesTreeRowKind.File)
+                {
+                    <span class="git-changes-tree__status git-changes-tree__status--@StatusClass(row)" title="@StatusLabel(row)">
+                        @StatusLetter(row)
+                    </span>
+                }
+
+                <span class="git-changes-tree__actions">
+                    @RenderActions(row)
+                </span>
+            </div>
+
+            @if (row.Kind == GitChangesTreeRowKind.Repository && row.IsStagedSection && row.IsExpanded)
+            {
+                <div class="git-changes-commit-box" style="padding-left: @((row.Depth + 1) * 1.1)rem">
+                    <textarea class="form-control git-changes-commit-box__message"
+                              rows="2"
+                              maxlength="10000"
+                              placeholder="Commit message for @row.RepositoryName"
+                              value="@CommitDraftGetter(row.WorkspaceRepositoryId)"
+                              disabled="@IsMutating(row.WorkspaceRepositoryId)"
+                              @oninput="e => CommitDraftSetter(row.WorkspaceRepositoryId, (string?)e.Value ?? string.Empty)"
+                              @onkeydown="e => OnCommitKeyDown(e, row.WorkspaceRepositoryId)"></textarea>
+                    <div class="git-changes-commit-box__actions">
+                        <button type="button"
+                                class="btn btn-sm btn-primary"
+                                disabled="@(IsMutating(row.WorkspaceRepositoryId) || string.IsNullOrWhiteSpace(CommitDraftGetter(row.WorkspaceRepositoryId)))"
+                                @onclick="() => OnCommit.InvokeAsync(new GitChangesCommitEventArgs(row.WorkspaceRepositoryId, StageAllFirst: false))">
+                            Commit Staged
+                        </button>
+                        <button type="button"
+                                class="btn btn-sm btn-outline-secondary"
+                                disabled="@(IsMutating(row.WorkspaceRepositoryId) || string.IsNullOrWhiteSpace(CommitDraftGetter(row.WorkspaceRepositoryId)))"
+                                @onclick="() => OnCommit.InvokeAsync(new GitChangesCommitEventArgs(row.WorkspaceRepositoryId, StageAllFirst: true))">
+                            Commit All
+                        </button>
+                    </div>
+                </div>
+            }
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<GitChangesTreeRow> Rows { get; set; } = [];
+    [Parameter] public GitChangesTreeRow? SelectedRow { get; set; }
+    [Parameter] public EventCallback<GitChangesTreeRow> OnToggleExpand { get; set; }
+    [Parameter] public EventCallback<GitChangesTreeRow> OnSelectFile { get; set; }
+    [Parameter] public EventCallback<GitChangesStageEventArgs> OnStage { get; set; }
+    [Parameter] public EventCallback<GitChangesStageEventArgs> OnUnstage { get; set; }
+    [Parameter] public EventCallback<GitChangesCommitEventArgs> OnCommit { get; set; }
+    [Parameter, EditorRequired] public Func<int, bool> IsMutating { get; set; } = _ => false;
+    [Parameter, EditorRequired] public Func<int, string> CommitDraftGetter { get; set; } = _ => string.Empty;
+    [Parameter, EditorRequired] public Action<int, string> CommitDraftSetter { get; set; } = (_, _) => { };
+
+    private bool IsSelected(GitChangesTreeRow row) =>
+        SelectedRow != null && SelectedRow.Kind == GitChangesTreeRowKind.File && SelectedRow.Key == row.Key;
+
+    private Task OnLabelClick(GitChangesTreeRow row) =>
+        row.Kind == GitChangesTreeRowKind.File ? OnSelectFile.InvokeAsync(row) : OnToggleExpand.InvokeAsync(row);
+
+    private Task OnCommitKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e, int workspaceRepositoryId)
+    {
+        if (e.CtrlKey && e.Key == "Enter")
+        {
+            return OnCommit.InvokeAsync(new GitChangesCommitEventArgs(workspaceRepositoryId, StageAllFirst: false));
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static string IconFor(GitChangesTreeRow row) => row.Kind switch
+    {
+        GitChangesTreeRowKind.Section => row.IsStagedSection ? "bi-check2-square" : "bi-pencil-square",
+        GitChangesTreeRowKind.Repository => "bi-git",
+        GitChangesTreeRowKind.Folder => "bi-folder",
+        GitChangesTreeRowKind.File => "bi-file-earmark",
+        _ => "bi-dash",
+    };
+
+    private static string StatusLetter(GitChangesTreeRow row)
+    {
+        var kind = row.IsStagedSection ? row.IndexChange : row.WorktreeChange;
+        if (row.IsConflicted)
+        {
+            return "U";
+        }
+
+        return kind switch
+        {
+            GitChangeKind.Added => "A",
+            GitChangeKind.Modified => "M",
+            GitChangeKind.Deleted => "D",
+            GitChangeKind.Renamed => "R",
+            GitChangeKind.Copied => "C",
+            GitChangeKind.TypeChanged => "T",
+            GitChangeKind.Unmerged => "U",
+            GitChangeKind.Untracked => "?",
+            _ => "",
+        };
+    }
+
+    private static string StatusLabel(GitChangesTreeRow row)
+    {
+        var kind = row.IsStagedSection ? row.IndexChange : row.WorktreeChange;
+        if (row.IsConflicted)
+        {
+            return "Conflict";
+        }
+
+        return kind switch
+        {
+            GitChangeKind.Added => "Added",
+            GitChangeKind.Modified => "Modified",
+            GitChangeKind.Deleted => "Deleted",
+            GitChangeKind.Renamed => "Renamed",
+            GitChangeKind.Copied => "Copied",
+            GitChangeKind.TypeChanged => "Type changed",
+            GitChangeKind.Unmerged => "Unmerged",
+            GitChangeKind.Untracked => "Untracked",
+            _ => "Unchanged",
+        };
+    }
+
+    private static string StatusClass(GitChangesTreeRow row)
+    {
+        if (row.IsConflicted)
+        {
+            return "conflict";
+        }
+
+        var kind = row.IsStagedSection ? row.IndexChange : row.WorktreeChange;
+        return kind switch
+        {
+            GitChangeKind.Added => "added",
+            GitChangeKind.Deleted => "deleted",
+            GitChangeKind.Renamed => "renamed",
+            GitChangeKind.Untracked => "untracked",
+            _ => "modified",
+        };
+    }
+
+    private RenderFragment RenderActions(GitChangesTreeRow row) => builder =>
+    {
+        switch (row.Kind)
+        {
+            case GitChangesTreeRowKind.File:
+                RenderFileActions(builder, row);
+                break;
+            case GitChangesTreeRowKind.Folder:
+                RenderScopedAction(builder, row, GitChangeOperationScope.Folder, FolderPathsOf(row));
+                break;
+            case GitChangesTreeRowKind.Repository:
+                RenderScopedAction(builder, row, GitChangeOperationScope.Repository, []);
+                break;
+        }
+    };
+
+    private void RenderFileActions(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder, GitChangesTreeRow row)
+    {
+        var seq = 0;
+        var paths = new[] { row.FilePath! };
+        var disabled = IsMutating(row.WorkspaceRepositoryId);
+
+        builder.OpenElement(seq++, "button");
+        builder.AddAttribute(seq++, "type", "button");
+        builder.AddAttribute(seq++, "class", "git-changes-tree__action-btn");
+        builder.AddAttribute(seq++, "disabled", disabled);
+        builder.AddAttribute(seq++, "title", row.IsStagedSection ? "Unstage" : "Stage");
+        builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => row.IsStagedSection
+            ? OnUnstage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, GitChangeOperationScope.ExplicitPaths, paths))
+            : OnStage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, GitChangeOperationScope.ExplicitPaths, paths))));
+        builder.OpenElement(seq++, "i");
+        builder.AddAttribute(seq++, "class", row.IsStagedSection ? "bi bi-dash-lg" : "bi bi-plus-lg");
+        builder.CloseElement();
+        builder.CloseElement();
+    }
+
+    private void RenderScopedAction(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder, GitChangesTreeRow row, GitChangeOperationScope scope, IReadOnlyList<string> paths)
+    {
+        var seq = 0;
+        var disabled = IsMutating(row.WorkspaceRepositoryId);
+
+        builder.OpenElement(seq++, "button");
+        builder.AddAttribute(seq++, "type", "button");
+        builder.AddAttribute(seq++, "class", "git-changes-tree__action-btn");
+        builder.AddAttribute(seq++, "disabled", disabled);
+        builder.AddAttribute(seq++, "title", row.IsStagedSection
+            ? (row.Kind == GitChangesTreeRowKind.Repository ? "Unstage repository" : "Unstage folder")
+            : (row.Kind == GitChangesTreeRowKind.Repository ? "Stage repository" : "Stage folder"));
+        builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => row.IsStagedSection
+            ? OnUnstage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, scope, paths))
+            : OnStage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, scope, paths))));
+        builder.OpenElement(seq++, "i");
+        builder.AddAttribute(seq++, "class", row.IsStagedSection ? "bi bi-dash-lg" : "bi bi-plus-lg");
+        builder.CloseElement();
+        builder.CloseElement();
+    }
+
+    private static string[] FolderPathsOf(GitChangesTreeRow row) =>
+        // Folder scope operations pass the folder's own repo-relative path as a directory pathspec;
+        // the Key encodes "<section>/<workspaceRepositoryId>/<segment>/<segment>/..." - strip the
+        // section/repo prefix to recover the folder's repo-relative path.
+        [string.Join('/', row.Key.Split('/').Skip(2))];
+}

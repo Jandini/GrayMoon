@@ -1,0 +1,251 @@
+/* Git Changes page - global (not CSS-isolated) so child components under Components/GitChanges/ share one stylesheet. */
+
+.git-changes-page {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+
+.git-changes-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 0.75rem;
+}
+
+.git-changes-header__title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.git-changes-header__title {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.git-changes-header__refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.git-changes-header__summary {
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.git-changes-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 3rem 1rem;
+    font-size: 0.95rem;
+}
+
+/* Splitter */
+.git-changes-splitter {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: 0;
+}
+
+.git-changes-splitter__left {
+    flex: 0 0 38%;
+    min-width: 260px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.git-changes-splitter__right {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid var(--border-color);
+}
+
+.git-changes-splitter__handle {
+    flex: 0 0 6px;
+    cursor: col-resize;
+    background: transparent;
+}
+
+.git-changes-splitter__handle:hover {
+    background: var(--accent-blue);
+    opacity: 0.4;
+}
+
+.git-changes-filter {
+    padding: 0.5rem 0.25rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.git-changes-diff-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1 1 auto;
+    text-align: center;
+    padding: 2rem;
+}
+
+.git-changes-diff-placeholder__path {
+    font-family: var(--bs-font-monospace, monospace);
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+}
+
+/* Tree */
+.git-changes-tree {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    min-height: 0;
+    padding: 0.25rem 0;
+    font-size: 0.85rem;
+}
+
+.git-changes-tree__empty {
+    padding: 1.5rem 1rem;
+    text-align: center;
+}
+
+.git-changes-tree__row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding-top: 0.2rem;
+    padding-bottom: 0.2rem;
+    padding-right: 0.5rem;
+    border-radius: 0.2rem;
+    cursor: default;
+}
+
+.git-changes-tree__row:hover {
+    background: var(--bg-hover);
+}
+
+.git-changes-tree__row--selected {
+    background: var(--bg-active);
+}
+
+.git-changes-tree__row--section {
+    font-weight: 600;
+    color: var(--text-primary);
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.03em;
+}
+
+.git-changes-tree__row--repository {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.git-changes-tree__toggle {
+    flex: 0 0 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+
+.git-changes-tree__icon {
+    flex: 0 0 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+}
+
+.git-changes-tree__label {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.git-changes-tree__rename-from {
+    margin-left: 0.4rem;
+    font-size: 0.78rem;
+}
+
+.git-changes-tree__status {
+    flex: 0 0 auto;
+    font-family: var(--bs-font-monospace, monospace);
+    font-weight: 700;
+    font-size: 0.72rem;
+    width: 1.1rem;
+    text-align: center;
+}
+
+.git-changes-tree__status--modified { color: var(--warning); }
+.git-changes-tree__status--added { color: var(--success); }
+.git-changes-tree__status--deleted { color: var(--error); }
+.git-changes-tree__status--renamed { color: var(--info); }
+.git-changes-tree__status--untracked { color: var(--text-secondary); }
+.git-changes-tree__status--conflict { color: var(--error); font-weight: 900; }
+
+.git-changes-tree__actions {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    opacity: 0;
+    transition: opacity 0.1s ease;
+}
+
+.git-changes-tree__row:hover .git-changes-tree__actions {
+    opacity: 1;
+}
+
+.git-changes-tree__action-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 0.1rem 0.35rem;
+    border-radius: 0.2rem;
+}
+
+.git-changes-tree__action-btn:hover:not(:disabled) {
+    background: var(--bg-active);
+    color: var(--text-primary);
+}
+
+.git-changes-tree__action-btn:disabled {
+    opacity: 0.4;
+}
+
+/* Inline commit box under a staged repository row */
+.git-changes-commit-box {
+    padding-top: 0.35rem;
+    padding-bottom: 0.6rem;
+    padding-right: 0.75rem;
+}
+
+.git-changes-commit-box__message {
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-input);
+    font-size: 0.82rem;
+    resize: vertical;
+}
+
+.git-changes-commit-box__actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+}

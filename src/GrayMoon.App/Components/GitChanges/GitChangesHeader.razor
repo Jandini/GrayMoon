@@ -1,0 +1,82 @@
+@namespace GrayMoon.App.Components.GitChanges
+@using GrayMoon.App.Models
+@using GrayMoon.App.Services.GitChanges
+
+<div class="git-changes-header">
+    <div class="git-changes-header__title-row">
+        <h1 class="git-changes-header__title">Git Changes</h1>
+        <button type="button"
+                class="btn btn-sm btn-outline-secondary git-changes-header__refresh"
+                @onclick="OnRefreshClick"
+                disabled="@IsLoading"
+                title="Refresh">
+            <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+            Refresh
+        </button>
+    </div>
+    <div class="git-changes-header__summary text-muted" title="@BranchTooltip">
+        @Summary
+    </div>
+</div>
+
+@code {
+    [Parameter] public Workspace? Workspace { get; set; }
+    [Parameter] public WorkspaceGitChangesView? View { get; set; }
+    [Parameter] public bool IsLoading { get; set; }
+    [Parameter] public EventCallback OnRefresh { get; set; }
+
+    private string Summary
+    {
+        get
+        {
+            if (View == null || View.Repositories.Count == 0)
+            {
+                return "No changed repositories.";
+            }
+
+            var repoCount = View.Repositories.Count;
+            var staged = View.Repositories.Sum(r => r.StagedCount);
+            var changed = View.Repositories.Sum(r => r.ChangedCount);
+
+            return $"{repoCount} {(repoCount == 1 ? "repository" : "repositories")} • {staged} staged • {changed} changed • {BranchLabel}";
+        }
+    }
+
+    private string BranchLabel
+    {
+        get
+        {
+            var branches = (View?.Repositories ?? [])
+                .Select(r => r.BranchName)
+                .Where(b => !string.IsNullOrWhiteSpace(b))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return branches.Count switch
+            {
+                0 => "-",
+                1 => branches[0]!,
+                _ => "multiple",
+            };
+        }
+    }
+
+    private string BranchTooltip
+    {
+        get
+        {
+            if (View == null)
+            {
+                return string.Empty;
+            }
+
+            var byBranch = View.Repositories
+                .GroupBy(r => string.IsNullOrWhiteSpace(r.BranchName) ? "(detached)" : r.BranchName!)
+                .OrderByDescending(g => g.Count());
+
+            return string.Join('\n', byBranch.Select(g => $"{g.Key}: {g.Count()}"));
+        }
+    }
+
+    private Task OnRefreshClick() => OnRefresh.InvokeAsync();
+}

@@ -1,6 +1,7 @@
 using System.Reflection;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Common;
+using GrayMoon.Common.Git;
 using GrayMoon.Agent.Commands;
 using GrayMoon.Agent.Hosted;
 using GrayMoon.Agent.Hub;
@@ -9,6 +10,7 @@ using GrayMoon.Agent.Jobs.Response;
 using GrayMoon.Agent.Logging;
 using GrayMoon.Agent.Queue;
 using GrayMoon.Agent.Services;
+using GrayMoon.Agent.Services.GitChanges;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -65,6 +67,7 @@ internal static class RunCommandHandler
         });
 
         builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection(AgentOptions.SectionName));
+        builder.Services.Configure<GitChangesOptions>(builder.Configuration.GetSection($"{AgentOptions.SectionName}:GitChanges"));
 
         var logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GrayMoon", "logs");
         Directory.CreateDirectory(logDirectory);
@@ -102,6 +105,13 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<CommandJobFactory>();
         builder.Services.AddSingleton<ICommandDispatcher, CommandDispatcher>();
 
+        builder.Services.AddSingleton<IRepositoryGitChangesService, GitCliRepositoryGitChangesService>();
+        builder.Services.AddSingleton<GitChangesSnapshotCache>();
+        builder.Services.AddSingleton<GitChangesRepositoryRegistry>();
+        builder.Services.AddSingleton<GitStatusRefreshCoordinator>();
+        builder.Services.AddSingleton<GitRepositoryWatcherManager>();
+        builder.Services.AddHostedService<GitChangesSnapshotPublisher>();
+
         builder.Services.AddSingleton<ICommandHandler<SyncRepositoryRequest, SyncRepositoryResponse>, SyncRepositoryCommand>();
         builder.Services.AddSingleton<ICommandHandler<RefreshRepositoryVersionRequest, RefreshRepositoryVersionResponse>, RefreshRepositoryVersionCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetCommitCountsRequest, GetCommitCountsResponse>, GetCommitCountsCommand>();
@@ -133,6 +143,11 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<SelfUpdateRequest, SelfUpdateResponse>, SelfUpdateCommand>();
         builder.Services.AddSingleton<ICommandHandler<UpdateBranchFromDefaultRequest, UpdateBranchFromDefaultResponse>, UpdateBranchFromDefaultCommand>();
         builder.Services.AddSingleton<ICommandHandler<FetchCommitsRequest, FetchCommitsResponse>, FetchCommitsCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetGitChangeStatusRequest, GetGitChangeStatusResponse>, GetGitChangeStatusCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetGitFileDiffRequest, GetGitFileDiffResponse>, GetGitFileDiffCommand>();
+        builder.Services.AddSingleton<ICommandHandler<StageGitChangesRequest, GitMutationResponse>, StageGitChangesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<UnstageGitChangesRequest, GitMutationResponse>, UnstageGitChangesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<CommitGitChangesRequest, CommitGitChangesResponse>, CommitGitChangesCommand>();
         builder.Services.AddSingleton<CheckoutHookSyncCommand>();
         builder.Services.AddSingleton<CommitHookSyncCommand>();
         builder.Services.AddSingleton<MergeHookSyncCommand>();

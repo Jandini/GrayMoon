@@ -1,6 +1,8 @@
 using GrayMoon.Abstractions.Agent;
 using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.GitChanges;
+using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.SignalR;
 
 namespace GrayMoon.App.Hubs;
@@ -9,6 +11,7 @@ public sealed class AgentHub(
     AgentConnectionTracker connectionTracker,
     AgentQueueStateService agentQueueStateService,
     AgentSyncNotificationQueue syncNotificationQueue,
+    WorkspaceGitChangesWriteQueue gitChangesWriteQueue,
     IServiceScopeFactory scopeFactory,
     ILogger<AgentHub> logger) : Hub
 {
@@ -94,6 +97,15 @@ public sealed class AgentHub(
     public Task ReportSemVer(string semVer)
     {
         connectionTracker.ReportAgentSemVer(Context.ConnectionId, semVer);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Invoked by the agent with an unsolicited Git Changes status snapshot for one repository
+    /// (watcher-driven or post-mutation refresh). Enqueues immediately; persistence and broadcast happen
+    /// on <see cref="WorkspaceGitChangesWriteQueue"/>'s background worker.</summary>
+    public Task GitChangesSnapshotUpdated(GitChangesSnapshotNotification notification)
+    {
+        gitChangesWriteQueue.Enqueue(notification);
         return Task.CompletedTask;
     }
 
