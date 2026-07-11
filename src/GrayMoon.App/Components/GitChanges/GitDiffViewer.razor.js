@@ -7,12 +7,46 @@
 const editors = new Map();
 let monacoReadyPromise = null;
 
+// Without this, Monaco spawns its language workers by wrapping vs/base/worker/workerMain.js in a Blob
+// (for cross-origin safety) and then AMD-requiring the language submodule (e.g. vs/language/html/
+// htmlWorker) *from inside that worker* using the same page-relative path string used on the main
+// thread. A blob: URL has no real location to resolve a relative fetch() against, so that nested
+// require fails with "Failed to parse URL from monaco/vs/language/html/htmlWorker.js". Declaring
+// getWorkerUrl tells Monaco to spawn each language's worker directly from its real vendored file
+// instead, bypassing the broken nested relative resolution entirely.
+function ensureWorkerEnvironment() {
+    if (window.MonacoEnvironment) {
+        return;
+    }
+
+    const workerFileByLabel = {
+        json: 'language/json/jsonWorker.js',
+        css: 'language/css/cssWorker.js',
+        scss: 'language/css/cssWorker.js',
+        less: 'language/css/cssWorker.js',
+        html: 'language/html/htmlWorker.js',
+        handlebars: 'language/html/htmlWorker.js',
+        razor: 'language/html/htmlWorker.js',
+        typescript: 'language/typescript/tsWorker.js',
+        javascript: 'language/typescript/tsWorker.js',
+    };
+
+    window.MonacoEnvironment = {
+        getWorkerUrl(_moduleId, label) {
+            const workerFile = workerFileByLabel[label] ?? 'base/worker/workerMain.js';
+            return new URL(`monaco/vs/${workerFile}`, document.baseURI).href;
+        },
+    };
+}
+
 function ensureMonacoLoaded() {
     if (monacoReadyPromise) {
         return monacoReadyPromise;
     }
 
     monacoReadyPromise = new Promise((resolve, reject) => {
+        ensureWorkerEnvironment();
+
         if (window.monaco) {
             resolve(window.monaco);
             return;
@@ -104,6 +138,8 @@ function updatePaneHeadersVisibility(headersRowEl, sideBySide) {
 }
 
 export async function init(elementId, options) {
+    console.log('[GitDiffViewer] init', elementId, 'editors.size before =', editors.size, 'domDiffEditors =', document.querySelectorAll('.monaco-diff-editor').length, 'domEditors =', document.querySelectorAll('.monaco-editor').length);
+
     const container = document.getElementById(elementId);
     if (!container) {
         return false;
@@ -173,13 +209,22 @@ export async function setDiff(elementId, originalContent, modifiedContent, langu
     }
 
     const monaco = await ensureMonacoLoaded();
-    disposeModels(entry);
 
     const resolvedLanguage = languageId || 'plaintext';
-    entry.originalModel = monaco.editor.createModel(originalContent ?? '', resolvedLanguage);
-    entry.modifiedModel = monaco.editor.createModel(modifiedContent ?? '', resolvedLanguage);
+    const newOriginalModel = monaco.editor.createModel(originalContent ?? '', resolvedLanguage);
+    const newModifiedModel = monaco.editor.createModel(modifiedContent ?? '', resolvedLanguage);
+    const oldOriginalModel = entry.originalModel;
+    const oldModifiedModel = entry.modifiedModel;
 
-    entry.editor.setModel({ original: entry.originalModel, modified: entry.modifiedModel });
+    // The diff editor must be pointed at the new models before the old ones are disposed - disposing a
+    // model while it's still assigned to the widget throws "TextModel got disposed before
+    // DiffEditorWidget model got reset", which (being uncaught) aborts whatever cleanup runs after it.
+    entry.editor.setModel({ original: newOriginalModel, modified: newModifiedModel });
+    entry.originalModel = newOriginalModel;
+    entry.modifiedModel = newModifiedModel;
+
+    oldOriginalModel?.dispose();
+    oldModifiedModel?.dispose();
 }
 
 export function setViewMode(elementId, mode) {
@@ -228,20 +273,25 @@ export function clear(elementId) {
         return;
     }
 
-    disposeModels(entry);
     entry.editor.setModel(null);
+    disposeModels(entry);
 }
 
 export function dispose(elementId) {
+    console.log('[GitDiffViewer] dispose called', elementId, 'hasEntry =', editors.has(elementId));
+
     const entry = editors.get(elementId);
     if (!entry) {
         return;
     }
 
-    disposeModels(entry);
     entry.layoutSub?.dispose();
     entry.resizeObserver?.disconnect();
     entry.navigator.dispose();
+    entry.editor.setModel(null);
     entry.editor.dispose();
+    disposeModels(entry);
     editors.delete(elementId);
+
+    console.log('[GitDiffViewer] dispose done', elementId, 'editors.size after =', editors.size, 'domDiffEditors =', document.querySelectorAll('.monaco-diff-editor').length);
 }
