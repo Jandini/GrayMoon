@@ -108,6 +108,48 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, ILogger<Gi
         return (r.ExitCode, r.Stdout, r.Stderr);
     }
 
+    /// <summary>
+    /// Argument-list based invocation for the Git Changes feature - never uses interpolated argument
+    /// strings, so paths and commit messages are passed to the process verbatim with no shell/quoting
+    /// risk. Still serialized per-repository via the same <see cref="RepoLocks"/> used by every other
+    /// git invocation.
+    /// </summary>
+    internal async Task<(int ExitCode, string? Stdout, string? Stderr)> RunAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory,
+        byte[]? stdinBytes,
+        CancellationToken ct)
+    {
+        if (RequiresRepoLock(fileName) && !string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            var repoLock = GetRepoLock(workingDirectory);
+            await repoLock.WaitAsync(ct);
+            try
+            {
+                return await RunCoreAsync(fileName, arguments, workingDirectory, stdinBytes, ct);
+            }
+            finally
+            {
+                repoLock.Release();
+            }
+        }
+
+        return await RunCoreAsync(fileName, arguments, workingDirectory, stdinBytes, ct);
+    }
+
+    private async Task<(int ExitCode, string? Stdout, string? Stderr)> RunCoreAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory,
+        byte[]? stdinBytes,
+        CancellationToken ct)
+    {
+        var gitLike = string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase);
+        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, stdinBytes, ct, gitLike, gitLike);
+        return (r.ExitCode, r.Stdout, r.Stderr);
+    }
+
     internal void ReportOverlayStderr(string message)
     {
         var sink = CommandLineStreamAmbient.Current.Value;
@@ -137,6 +179,9 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, ILogger<Gi
         || string.Equals(fileName, "dotnet-gitversion", StringComparison.OrdinalIgnoreCase)
         || (string.Equals(fileName, "dotnet", StringComparison.OrdinalIgnoreCase)
             && arguments.Contains("gitversion", StringComparison.OrdinalIgnoreCase));
+
+    private static bool RequiresRepoLock(string fileName)
+        => string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsGitLikeProgressStreaming(string fileName, string arguments)
     {

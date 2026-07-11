@@ -91,6 +91,91 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
         return new CommandLineResult(process.ExitCode, stdout, stderr);
     }
 
+    public async Task<CommandLineResult> RunAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory = null,
+        byte[]? stdinBytes = null,
+        CancellationToken cancellationToken = default,
+        bool streamStderrAsStdout = false,
+        bool mirrorFailureOutputAsStderr = false)
+    {
+        arguments ??= [];
+        var sw = Stopwatch.StartNew();
+        var cwd = string.IsNullOrEmpty(workingDirectory) ? "." : workingDirectory;
+        var loggedArguments = LogSafe.ForLog(string.Join(' ', arguments));
+        logger.LogDebug(
+            "Command starting {Executable} {Parameters} cwd={WorkingDirectory}",
+            fileName,
+            loggedArguments,
+            cwd);
+
+        ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.CommandLine, $"$ {fileName} {loggedArguments}"));
+
+        var stderrStreamKind = streamStderrAsStdout ? AgentCommandStreamKind.Stdout : AgentCommandStreamKind.Stderr;
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            WorkingDirectory = workingDirectory ?? "",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = stdinBytes != null,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo);
+        if (process == null)
+        {
+            sw.Stop();
+            logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode=-1)", fileName, loggedArguments, sw.ElapsedMilliseconds);
+            return new CommandLineResult(-1, null, "Failed to start process");
+        }
+
+        if (stdinBytes != null)
+        {
+            // Write raw bytes directly to the stream so the exact NUL-delimited UTF-8 payload is
+            // transmitted, bypassing any console-encoding assumptions StandardInput's StreamWriter would apply.
+            await process.StandardInput.BaseStream.WriteAsync(stdinBytes, cancellationToken);
+            await process.StandardInput.BaseStream.FlushAsync(cancellationToken);
+            process.StandardInput.Close();
+        }
+
+        var stdoutTask = ConsumeStreamPreservingLineEndingsAsync(
+            process.StandardOutput,
+            segment =>
+            {
+                logger.LogDebug("Command stdout ({Executable}): {Segment}", fileName, TruncateForLog(LogSafe.ForLog(segment)));
+                ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.Stdout, segment));
+            },
+            cancellationToken);
+        var stderrTask = ConsumeStreamPreservingLineEndingsAsync(
+            process.StandardError,
+            segment =>
+            {
+                logger.LogDebug("Command stderr ({Executable}): {Segment}", fileName, TruncateForLog(LogSafe.ForLog(segment)));
+                ReportAmbient(new CommandLineStreamEvent(stderrStreamKind, segment));
+            },
+            cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+        sw.Stop();
+
+        logger.LogDebug("Command {Executable} {Parameters} completed in {ElapsedMs}ms (ExitCode={ExitCode})", fileName, loggedArguments, sw.ElapsedMilliseconds, process.ExitCode);
+
+        if (mirrorFailureOutputAsStderr && process.ExitCode != 0)
+            MirrorCombinedOutputAsStderr(stdout, stderr);
+
+        return new CommandLineResult(process.ExitCode, stdout, stderr);
+    }
+
     private static void MirrorCombinedOutputAsStderr(string? stdout, string? stderr)
     {
         EmitLines(stdout);
@@ -113,6 +198,69 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
                 ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.Stderr, line));
             }
         }
+    }
+
+    /// <summary>
+    /// Same segmentation as <see cref="ConsumeStreamAsync"/> for live overlay streaming, but the returned
+    /// aggregate preserves every character exactly as read (no <see cref="StringBuilder.AppendLine(string?)"/>
+    /// substitution of <see cref="Environment.NewLine"/> for the original line terminator). Required for git
+    /// blob/file content, where the caller needs byte-faithful text - a file authored with LF endings must not
+    /// come back as CRLF just because the process is running on Windows.
+    /// </summary>
+    private static async Task<string> ConsumeStreamPreservingLineEndingsAsync(
+        StreamReader reader,
+        Action<string> onSegment,
+        CancellationToken cancellationToken)
+    {
+        var aggregate = new StringBuilder();
+        var segmentBuffer = new StringBuilder();
+        var afterCr = false;
+        var buffer = new char[8192];
+
+        void FlushSegment()
+        {
+            if (segmentBuffer.Length == 0)
+                return;
+
+            var segment = segmentBuffer.ToString();
+            segmentBuffer.Clear();
+            onSegment(segment);
+        }
+
+        while (true)
+        {
+            var read = await reader.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+                break;
+
+            for (var i = 0; i < read; i++)
+            {
+                var c = buffer[i];
+                aggregate.Append(c);
+
+                if (c == '\r')
+                {
+                    FlushSegment();
+                    afterCr = true;
+                }
+                else if (c == '\n')
+                {
+                    if (afterCr)
+                        afterCr = false;
+                    else
+                        FlushSegment();
+                }
+                else
+                {
+                    if (afterCr)
+                        afterCr = false;
+                    segmentBuffer.Append(c);
+                }
+            }
+        }
+
+        FlushSegment();
+        return aggregate.ToString();
     }
 
     /// <summary>

@@ -30,4 +30,20 @@ public interface ICommandLineService
         CancellationToken cancellationToken = default,
         bool streamStderrAsStdout = false,
         bool mirrorFailureOutputAsStderr = false);
+
+    /// <summary>
+    /// Runs the executable with an explicit argument list instead of a single argument string - no shell
+    /// quoting/escaping is applied, so this is the safe path for arguments built from untrusted input
+    /// (e.g. repository-relative file paths). <paramref name="stdinBytes"/> is written to the process's
+    /// raw stdin stream verbatim (not re-encoded), so callers control the exact bytes sent - required for
+    /// NUL-delimited UTF-8 pathspec input.
+    /// </summary>
+    Task<CommandLineResult> RunAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory = null,
+        byte[]? stdinBytes = null,
+        CancellationToken cancellationToken = default,
+        bool streamStderrAsStdout = false,
+        bool mirrorFailureOutputAsStderr = false);
 }
