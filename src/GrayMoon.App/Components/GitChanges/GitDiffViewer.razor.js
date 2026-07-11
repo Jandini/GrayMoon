@@ -81,6 +81,28 @@ class SimpleDiffNavigator {
     }
 }
 
+function bindPaneHeaderResize(diffEditor, originalHeaderEl, headersRowEl) {
+    if (!originalHeaderEl || !headersRowEl) {
+        return null;
+    }
+
+    const sync = () => {
+        const layout = diffEditor.getOriginalEditor().getLayoutInfo();
+        originalHeaderEl.style.width = `${layout.width}px`;
+    };
+
+    sync();
+    return diffEditor.getOriginalEditor().onDidLayoutChange(sync);
+}
+
+function updatePaneHeadersVisibility(headersRowEl, sideBySide) {
+    if (!headersRowEl) {
+        return;
+    }
+
+    headersRowEl.style.display = sideBySide ? 'flex' : 'none';
+}
+
 export async function init(elementId, options) {
     const container = document.getElementById(elementId);
     if (!container) {
@@ -94,11 +116,19 @@ export async function init(elementId, options) {
     const monaco = await ensureMonacoLoaded();
     monaco.editor.setTheme('vs-dark');
 
+    const renderSideBySide = options?.renderSideBySide ?? true;
+    const originalHeaderEl = options?.originalHeaderId
+        ? document.getElementById(options.originalHeaderId)
+        : null;
+    const headersRowEl = options?.headersRowId
+        ? document.getElementById(options.headersRowId)
+        : null;
+
     const editor = monaco.editor.createDiffEditor(container, {
         automaticLayout: true,
         readOnly: true,
         originalEditable: false,
-        renderSideBySide: options?.renderSideBySide ?? true,
+        renderSideBySide,
         ignoreTrimWhitespace: options?.ignoreWhitespace ?? false,
         wordWrap: options?.wordWrap ? 'on' : 'off',
         minimap: { enabled: false },
@@ -106,8 +136,17 @@ export async function init(elementId, options) {
     });
 
     const navigator = new SimpleDiffNavigator(editor);
+    const layoutSub = bindPaneHeaderResize(editor, originalHeaderEl, headersRowEl);
+    updatePaneHeadersVisibility(headersRowEl, renderSideBySide);
 
-    editors.set(elementId, { editor, navigator, originalModel: null, modifiedModel: null });
+    editors.set(elementId, {
+        editor,
+        navigator,
+        originalModel: null,
+        modifiedModel: null,
+        layoutSub,
+        headersRowEl,
+    });
     return true;
 }
 
@@ -133,7 +172,9 @@ export function setViewMode(elementId, mode) {
         return;
     }
 
-    entry.editor.updateOptions({ renderSideBySide: mode === 'side-by-side' });
+    const sideBySide = mode === 'side-by-side';
+    entry.editor.updateOptions({ renderSideBySide: sideBySide });
+    updatePaneHeadersVisibility(entry.headersRowEl, sideBySide);
 }
 
 export function setOptions(elementId, options) {
@@ -151,6 +192,7 @@ export function setOptions(elementId, options) {
     }
     if (options?.renderSideBySide !== undefined) {
         update.renderSideBySide = options.renderSideBySide;
+        updatePaneHeadersVisibility(entry.headersRowEl, options.renderSideBySide);
     }
 
     entry.editor.updateOptions(update);
@@ -181,6 +223,7 @@ export function dispose(elementId) {
     }
 
     disposeModels(entry);
+    entry.layoutSub?.dispose();
     entry.navigator.dispose();
     entry.editor.dispose();
     editors.delete(elementId);

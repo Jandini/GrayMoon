@@ -70,7 +70,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to load Git Changes for workspace {WorkspaceId}", WorkspaceId);
-            _errorMessage = "Failed to load Git Changes.";
+            _errorMessage = "Failed to load Changes.";
         }
         finally
         {

@@ -4,7 +4,7 @@
 @using GrayMoon.App.Services.GitChanges
 @using GrayMoon.Common.Git
 
-<PageTitle>Git Changes - GrayMoon</PageTitle>
+<PageTitle>Changes - GrayMoon</PageTitle>
 
 <div class="container-fluid page-container grid-page git-changes-page">
     <div class="grid-page-header">
@@ -31,7 +31,7 @@
     }
     else if (_isLoading && _view == null)
     {
-        <div class="git-changes-empty text-muted">Loading Git Changes…</div>
+        <div class="git-changes-empty text-muted">Loading Changes…</div>
     }
     else if (_view != null && _view.Repositories.Count == 0)
     {
@@ -103,8 +103,6 @@
                     <div class="git-diff-toolbar">
                         <span class="git-diff-toolbar__path"
                               title="@($"{_selectedRow.RepositoryName} / {_selectedRow.FilePath}")">@_selectedRow.RepositoryName / @_selectedRow.FilePath</span>
-                        <span class="git-diff-toolbar__context">@(_selectedRow.IsStagedSection ? "HEAD -> Index" : "Index -> Working tree")</span>
-                        <span class="git-diff-toolbar__spacer"></span>
                         <button type="button"
                                 class="btn btn-sm btn-outline-secondary"
                                 title="Previous change"
@@ -156,8 +154,10 @@
                         </div>
                     }
 
-                    <div class="git-diff-viewer-container" style="display:@((_selectedDiff != null && RendersInMonaco(_selectedDiff.State)) ? "block" : "none")">
-                        <GitDiffViewer @ref="_diffViewerRef" />
+                    <div class="git-diff-viewer-container" style="display:@((_selectedDiff != null && RendersInMonaco(_selectedDiff.State)) ? "flex" : "none")">
+                        <GitDiffViewer @ref="_diffViewerRef"
+                                       OriginalPaneLabel="@(_selectedRow.IsStagedSection ? "Committed" : "Staged")"
+                                       ModifiedPaneLabel="@(_selectedRow.IsStagedSection ? "Staged" : "Changed")" />
                     </div>
                 }
             </div>

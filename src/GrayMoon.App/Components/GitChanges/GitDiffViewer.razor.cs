@@ -23,7 +23,12 @@ public sealed partial class GitDiffViewer : IAsyncDisposable
 {
     [Inject] private IJSRuntime JSRuntime { get; set; } = default!;
 
+    [Parameter] public string OriginalPaneLabel { get; set; } = "Original";
+    [Parameter] public string ModifiedPaneLabel { get; set; } = "Modified";
+
     private readonly string _elementId = $"git-diff-viewer-{Guid.NewGuid():N}";
+    private readonly string _originalHeaderId = $"git-diff-header-original-{Guid.NewGuid():N}";
+    private readonly string _headersRowId = $"git-diff-headers-{Guid.NewGuid():N}";
     private IJSObjectReference? _module;
     private bool _initialized;
     private bool _disposed;
@@ -36,7 +41,12 @@ public sealed partial class GitDiffViewer : IAsyncDisposable
         }
 
         _module = await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./Components/GitChanges/GitDiffViewer.razor.js");
-        _initialized = await _module.InvokeAsync<bool>("init", _elementId, new { renderSideBySide = true });
+        _initialized = await _module.InvokeAsync<bool>("init", _elementId, new
+        {
+            renderSideBySide = true,
+            originalHeaderId = _originalHeaderId,
+            headersRowId = _headersRowId,
+        });
     }
 
     public async Task SetDiffAsync(GitDiffDocument document)
