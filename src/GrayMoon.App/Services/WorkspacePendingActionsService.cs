@@ -48,7 +48,7 @@ public sealed class WorkspacePendingActionsService
         IReadOnlyList<WorkspaceRepositoryLink> links,
         IReadOnlyDictionary<int, IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>>? mismatchedDeps = null)
     {
-        bool hasUnmatched = links.Any(wr => !wr.IsOnTag && (wr.UnmatchedDeps ?? 0) > 0);
+        bool hasUnmatched = links.Any(wr => !wr.IsOnTag && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0));
         bool isPushRecommended = links.Any(wr => !wr.IsOnTag && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false));
         bool hasIncoming = links.Any(wr =>
             !wr.IsOnTag
@@ -58,6 +58,7 @@ public sealed class WorkspacePendingActionsService
         var actionLinks = links
             .Where(wr => !wr.IsOnTag && (
                 (wr.UnmatchedDeps ?? 0) > 0 ||
+                (wr.OutOfDateFileRepos ?? 0) > 0 ||
                 (wr.OutgoingCommits ?? 0) > 0 ||
                 wr.BranchHasUpstream == false ||
                 (wr.IncomingCommits ?? 0) > 0))
@@ -86,7 +87,7 @@ public sealed class WorkspacePendingActionsService
             })
             .ToList();
         var lowestLevel = links
-            .Where(wr => !wr.IsOnTag && (wr.UnmatchedDeps ?? 0) > 0)
+            .Where(wr => !wr.IsOnTag && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0))
             .Min(wr => (int?)wr.DependencyLevel);
         return new WorkspaceNotification(
             workspaceId,
