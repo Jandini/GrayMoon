@@ -1,6 +1,7 @@
 @page "/workspaces/{WorkspaceId:int}/changes"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using GrayMoon.App.Components.GitChanges
+@using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Services.GitChanges
 @using GrayMoon.Common.Git
 
@@ -82,12 +83,6 @@
                                  IsMutating="IsMutating"
                                  OnStageAllChanged="StageAllChangedAsync"
                                  OnUnstageAllStaged="UnstageAllStagedAsync" />
-
-                <GitChangesTreeFooter View="_view"
-                                      IsLoading="_isLoading"
-                                      OnRefresh="LoadAsync"
-                                      FilterQuery="@_filterQuery"
-                                      FilterQueryChanged="OnFilterChanged" />
             </div>
 
             <div class="graymoon-splitter__handle git-changes-splitter__handle" aria-hidden="true"></div>
@@ -142,10 +137,35 @@
                                        OriginalSideLabel="@(_selectedRow.IsStagedSection ? "(HEAD)" : "(Index)")"
                                        ModifiedSideLabel="@(_selectedRow.IsStagedSection ? "(Index)" : "(Working Tree)")" />
                     </div>
+                }
 
-                    <div class="git-diff-toolbar">
-                        <span class="git-diff-toolbar__path"
-                              title="@($"{_selectedRow.RepositoryName} / {_selectedRow.FilePath}")">@($"{_selectedRow.RepositoryName} / {_selectedRow.FilePath}")</span>
+                <div class="git-diff-toolbar">
+                    <div class="git-diff-toolbar__filter">
+                        <FilterSearchInput Value="@_filterQuery"
+                                           ValueChanged="OnFilterChanged"
+                                           InputId="git-changes-filter"
+                                           InputAdditionalClass="git-diff-toolbar__filter-input"
+                                           WrapperAdditionalClass="git-diff-toolbar__filter-wrap"
+                                           EnableSyntaxHighlight="false"
+                                           Placeholder="Filter by repo, path, status..."
+                                           Disabled="@_isLoading" />
+                    </div>
+                    <div class="git-diff-toolbar__actions">
+                        <button type="button"
+                                class="btn btn-sm btn-outline-secondary"
+                                title="Refresh"
+                                aria-label="Refresh"
+                                disabled="@_isLoading"
+                                @onclick="LoadAsync">
+                            @if (_isLoading)
+                            {
+                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+                            }
+                        </button>
                         <button type="button"
                                 class="btn btn-sm btn-outline-secondary"
                                 title="Previous change"
@@ -161,7 +181,7 @@
                             <i class="bi bi-chevron-down" aria-hidden="true"></i>
                         </button>
                     </div>
-                }
+                </div>
             </div>
         </div>
     }
