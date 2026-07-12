@@ -68,10 +68,24 @@ class SimpleDiffNavigator {
         this._diffEditor = diffEditor;
         this._changes = diffEditor.getLineChanges() || [];
         this._index = -1;
+        this._pendingAutoReveal = false;
         this._subscription = diffEditor.onDidUpdateDiff(() => {
             this._changes = diffEditor.getLineChanges() || [];
             this._index = -1;
+
+            if (this._pendingAutoReveal) {
+                this._pendingAutoReveal = false;
+                this.next();
+            }
         });
+    }
+
+    // Diff computation is async (worker-backed), so the line changes for models just set via setDiff()
+    // aren't available yet - this arms a one-shot flag that the onDidUpdateDiff handler above consumes
+    // the moment Monaco finishes computing the new diff, landing on the first change without the caller
+    // needing to poll or click "next change" itself.
+    revealFirstChangeOnNextUpdate() {
+        this._pendingAutoReveal = true;
     }
 
     _revealChange(change) {
@@ -211,6 +225,7 @@ export async function setDiff(elementId, originalContent, modifiedContent, langu
     entry.editor.setModel({ original: newOriginalModel, modified: newModifiedModel });
     entry.originalModel = newOriginalModel;
     entry.modifiedModel = newModifiedModel;
+    entry.navigator.revealFirstChangeOnNextUpdate();
 
     oldOriginalModel?.dispose();
     oldModifiedModel?.dispose();

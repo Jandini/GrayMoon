@@ -24,7 +24,7 @@
     else if (_view != null && _view.Repositories.Count == 0)
     {
         <div class="git-changes-empty text-muted">
-            No changes across this workspace's repositories.
+            No changes
         </div>
     }
     else
@@ -74,6 +74,8 @@
 
                 <GitChangesTree Rows="_rows"
                                  OfflineNotice="@OfflineNotice"
+                                 IsFilterActive="@(!string.IsNullOrWhiteSpace(_filterQuery))"
+                                 HasChanges="@(ChangedRepositoryCount > 0)"
                                  SelectedRow="_selectedRow"
                                  OnToggleExpand="ToggleExpanded"
                                  OnSelectFile="SelectFile"
@@ -90,7 +92,7 @@
                 @if (_selectedRow is not { Kind: GitChangesTreeRowKind.File })
                 {
                     <div class="git-changes-diff-placeholder text-muted">
-                        <div>Select a file to view its diff.</div>
+                        <div>Select a file to view its diff</div>
                     </div>
                 }
                 else
@@ -156,14 +158,7 @@
                                 aria-label="Refresh"
                                 disabled="@(_isLoading || IsJobRunning)"
                                 @onclick="ManualRefreshAsync">
-                            @if (_isLoading || IsJobRunning)
-                            {
-                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                            }
-                            else
-                            {
-                                <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
-                            }
+                            <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
                         </button>
                         <button type="button"
                                 class="btn btn-sm btn-outline-secondary"

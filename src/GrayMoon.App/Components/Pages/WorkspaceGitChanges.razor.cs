@@ -69,6 +69,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             _workspace = await DbContext.Workspaces.AsNoTracking().FirstOrDefaultAsync(w => w.WorkspaceId == WorkspaceId);
             _view = await ReadService.GetWorkspaceAsync(WorkspaceId, CancellationToken.None);
             RebuildRows();
+            await ClearSelectionIfStaleAsync();
         }
         catch (Exception ex)
         {
@@ -121,6 +122,38 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _rows = _view == null
             ? []
             : GitChangesTreeBuilder.Build(_view, _filterQuery, _collapsedKeys);
+    }
+
+    /// <summary>
+    /// Clears the current file selection and diff (Monaco) whenever the selected file no longer has a
+    /// matching change entry in the freshly-reloaded view - e.g. after a commit removes it from Staged/
+    /// Changed. Runs off the underlying view rather than the rendered (filtered/collapsed) rows, so a
+    /// collapsed folder or an active filter never wrongly clears a still-valid selection.
+    /// </summary>
+    private async Task ClearSelectionIfStaleAsync()
+    {
+        if (_selectedRow is not { Kind: GitChangesTreeRowKind.File } row)
+        {
+            return;
+        }
+
+        var repo = _view?.Repositories.FirstOrDefault(r => r.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
+        var stillExists = repo != null && repo.Changes.Any(c =>
+            c.Path == row.FilePath && (row.IsStagedSection ? c.IsStaged : c.IsChanged));
+
+        if (stillExists)
+        {
+            return;
+        }
+
+        _selectedRow = null;
+        _selectedDiff = null;
+        _diffError = null;
+
+        if (_diffViewerRef != null)
+        {
+            await _diffViewerRef.ClearAsync();
+        }
     }
 
     private void OnFilterChanged(string value)

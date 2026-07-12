@@ -36,10 +36,11 @@
             }
 
             var repoCount = View.Repositories.Count;
+            var changedRepoCount = View.Repositories.Count(r => r.StagedCount > 0 || r.ChangedCount > 0);
             var staged = View.Repositories.Sum(r => r.StagedCount);
             var changed = View.Repositories.Sum(r => r.ChangedCount);
 
-            return $"{repoCount} {(repoCount == 1 ? "repository" : "repositories")} • {staged} staged • {changed} changed • {BranchLabel}";
+            return $"{changedRepoCount} of {repoCount} {(repoCount == 1 ? "repository" : "repositories")} | {staged} staged | {changed} changed | {BranchLabel}";
         }
     }
 
