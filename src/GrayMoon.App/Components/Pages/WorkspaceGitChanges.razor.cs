@@ -22,6 +22,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Inject] private IToastService ToastService { get; set; } = default!;
     [Inject] private NavigationManager NavigationManager { get; set; } = default!;
     [Inject] private ILogger<WorkspaceGitChanges> Logger { get; set; } = default!;
+    [Inject] private IBackgroundJobService JobService { get; set; } = default!;
 
     private Workspace? _workspace;
     private WorkspaceGitChangesView? _view;
@@ -39,11 +40,14 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     protected override async Task OnInitializedAsync()
     {
+        EnsureActivitySubscription();
         await LoadAsync();
     }
 
     protected override async Task OnParametersSetAsync()
     {
+        EnsureActivitySubscription();
+
         if (_view != null && _view.WorkspaceId == WorkspaceId)
         {
             return;
@@ -76,6 +80,30 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             _isLoading = false;
             StateHasChanged();
         }
+    }
+
+    /// <summary>
+    /// The Refresh button: a real, user-triggered rescan of every repository in the workspace (not just
+    /// the ones currently showing changes), run behind the standard LoadingOverlay/terminal job so it's
+    /// visibly a real operation. Relies on the same GitChangesUpdated -> LoadAsync pipeline used
+    /// everywhere else for incremental per-repository updates as results stream in.
+    /// </summary>
+    private void ManualRefreshAsync()
+    {
+        if (!AgentBridge.IsAgentConnected)
+        {
+            ToastService.ShowError("Agent not connected. Start GrayMoon.Agent and try again.");
+            return;
+        }
+
+        if (IsJobRunning)
+        {
+            return;
+        }
+
+        StartPageJob("Refreshing repositories...", (job, ct) =>
+            Scanner.ScanWorkspaceAsync(WorkspaceId, ct, progress =>
+                job.ReportProgress($"Refreshed {progress.Completed} of {progress.Total} repositories")));
     }
 
     private string MostRecentPersistedLabel()
@@ -127,24 +155,70 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _ = LoadDiffAsync(row);
     }
 
-    private bool IsMutating(int workspaceRepositoryId) => _mutatingRepositoryIds.Contains(workspaceRepositoryId);
+    // While a page job (bulk stage/unstage, commit, manual refresh) is running, disable every action
+    // button - not just the affected repository - since only one page job can run at a time anyway.
+    private bool IsMutating(int workspaceRepositoryId) => _mutatingRepositoryIds.Contains(workspaceRepositoryId) || IsJobRunning;
 
-    private async Task StageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths)
-    {
-        await RunMutationAsync(workspaceRepositoryId, async (root, wsName, repoName, repositoryId) =>
-        {
-            var result = await AgentClient.StageAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
-            await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
-        });
-    }
+    // File and folder scopes are fast, frequent clicks during diff review - keep them on the lightweight
+    // inline indicator (_mutatingRepositoryIds) rather than the full LoadingOverlay. Whole-repository
+    // scope stages/unstages every tracked and untracked file in one repository and can take a moment, so
+    // it gets the same overlay+terminal treatment as commit and the section-wide bulk actions.
+    private Task StageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths) =>
+        scope == GitChangeOperationScope.Repository
+            ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: true)
+            : RunMutationAsync(workspaceRepositoryId, async (root, wsName, repoName, repositoryId) =>
+            {
+                var result = await AgentClient.StageAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
+                await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
+            });
 
-    private async Task UnstageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths)
+    private Task UnstageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths) =>
+        scope == GitChangeOperationScope.Repository
+            ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: false)
+            : RunMutationAsync(workspaceRepositoryId, async (root, wsName, repoName, repositoryId) =>
+            {
+                var result = await AgentClient.UnstageAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
+                await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
+            });
+
+    private Task RunRepositoryScopedMutationJobAsync(int workspaceRepositoryId, bool isStage)
     {
-        await RunMutationAsync(workspaceRepositoryId, async (root, wsName, repoName, repositoryId) =>
+        if (!AgentBridge.IsAgentConnected)
         {
-            var result = await AgentClient.UnstageAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
-            await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
-        });
+            ToastService.ShowError("Agent not connected. Start GrayMoon.Agent and try again.");
+            return Task.CompletedTask;
+        }
+
+        if (IsJobRunning)
+        {
+            return Task.CompletedTask;
+        }
+
+        StartPageJob(
+            isStage ? "Staging repository..." : "Unstaging repository...",
+            async (job, ct) =>
+            {
+                var resolved = await ResolveRepositoryAsync(workspaceRepositoryId);
+                if (resolved == null)
+                {
+                    ToastService.ShowError("Repository not found or workspace root is not configured.");
+                    return;
+                }
+
+                var result = isStage
+                    ? await AgentClient.StageAsync(resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, GitChangeOperationScope.Repository, [], ct)
+                    : await AgentClient.UnstageAsync(resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, GitChangeOperationScope.Repository, [], ct);
+
+                // reload:false - StartPageJob's own ReloadOnSuccess (properly dispatcher-marshalled via
+                // InvokeAsync) does the final LoadAsync() once this job body returns; calling LoadAsync's
+                // StateHasChanged directly from here would run off the Blazor circuit's sync context.
+                await PersistMutationResultAsync(workspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);
+
+                // Give the write queue a moment to flush before the job's own reload runs.
+                await Task.Delay(150, ct);
+            });
+
+        return Task.CompletedTask;
     }
 
     private async Task RunMutationAsync(int workspaceRepositoryId, Func<string, string, string, int, Task> action)
@@ -246,6 +320,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         _disposed = true;
+        ReleaseActivitySubscription();
 
         if (_hubConnection != null)
         {

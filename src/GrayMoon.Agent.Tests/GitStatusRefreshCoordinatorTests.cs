@@ -119,6 +119,35 @@ public class GitStatusRefreshCoordinatorTests
     }
 
     [Fact]
+    public async Task Coalesced_caller_receives_the_follow_up_scan_not_the_stale_in_flight_scan()
+    {
+        var fake = new FakeRepositoryGitChangesService { Delay = TimeSpan.FromMilliseconds(150) };
+        using var coordinator = CreateCoordinator(fake);
+        const string repoPath = @"C:\repo-coalesce";
+
+        var firstScan = coordinator.RefreshNowAsync(repoPath, CancellationToken.None);
+        await Task.Delay(30); // ensure the first scan is actually in flight (Refreshing, not Clean)
+
+        // Arrives while scan #1 is still running - coalesces (RefreshingAndDirty) rather than starting a
+        // third scan, but must still be satisfied by a scan that started at or after this call, not by
+        // scan #1's already-in-flight (and therefore potentially pre-change) result.
+        var coalescedScan = coordinator.RefreshNowAsync(repoPath, CancellationToken.None);
+
+        var firstResult = await firstScan;
+        var coalescedResult = await coalescedScan;
+
+        Assert.Equal(2, fake.CallCount);
+        var observedVersions = fake.ObservedVersions.ToArray();
+        Assert.Equal(2, observedVersions.Length);
+
+        // Both callers must be satisfied by the follow-up (second) scan - never by the stale first scan
+        // that was already in flight when the coalesced caller arrived.
+        Assert.Equal(observedVersions[1], firstResult.Snapshot!.Version);
+        Assert.Equal(observedVersions[1], coalescedResult.Snapshot!.Version);
+        Assert.NotEqual(observedVersions[0], coalescedResult.Snapshot!.Version);
+    }
+
+    [Fact]
     public async Task Manual_refresh_promotes_a_pending_debounced_scan_to_run_immediately()
     {
         var fake = new FakeRepositoryGitChangesService { Delay = TimeSpan.FromMilliseconds(10) };

@@ -11,7 +11,6 @@ public sealed partial class WorkspaceGitChanges
 
     private string _workspaceCommitMessage = string.Empty;
     private bool _workspaceCommitMessageHasContent;
-    private bool _isWorkspaceCommitRunning;
 
     private void OnWorkspaceCommitMessageInput(ChangeEventArgs e)
     {
@@ -35,8 +34,10 @@ public sealed partial class WorkspaceGitChanges
     /// commits independently through the bounded fan-out below, one repository's failure never blocks
     /// or rolls back another's success. Mirrors the existing SemaphoreSlim + Task.WhenAll idiom used by
     /// PushOrchestrator/DependencyUpdateOrchestrator rather than introducing a new scheduler abstraction.
+    /// Runs behind the page's LoadingOverlay/terminal job - this can touch many files across many
+    /// repositories and run commit hooks, unlike the fast single-file/folder stage/unstage actions.
     /// </summary>
-    private async Task CommitWorkspaceAsync(bool stagedOnly)
+    private void CommitWorkspaceAsync(bool stagedOnly)
     {
         if (string.IsNullOrWhiteSpace(_workspaceCommitMessage))
         {
@@ -54,25 +55,27 @@ public sealed partial class WorkspaceGitChanges
             .Where(r => stagedOnly ? r.StagedCount > 0 : (r.StagedCount > 0 || r.ChangedCount > 0))
             .ToList();
 
-        if (targets.Count == 0 || _isWorkspaceCommitRunning)
+        if (targets.Count == 0 || IsJobRunning)
         {
             return;
         }
 
-        _isWorkspaceCommitRunning = true;
-        StateHasChanged();
-
         var message = _workspaceCommitMessage;
-        var succeeded = new List<string>();
-        var failed = new List<(string Repository, string Error)>();
+        var label = targets.Count == 1
+            ? $"Committing in {targets[0].RepositoryName}..."
+            : $"Committing in {targets.Count} repositories...";
 
-        try
+        StartPageJob(label, async (job, ct) =>
         {
+            var succeeded = new List<string>();
+            var failed = new List<(string Repository, string Error)>();
+            var completed = 0;
+
             using var semaphore = new SemaphoreSlim(Math.Max(1, WorkspaceOptions.Value.MaxParallelOperations));
 
             var tasks = targets.Select(async repo =>
             {
-                await semaphore.WaitAsync();
+                await semaphore.WaitAsync(ct);
                 try
                 {
                     var resolved = await ResolveRepositoryAsync(repo.WorkspaceRepositoryId);
@@ -88,7 +91,7 @@ public sealed partial class WorkspaceGitChanges
 
                     var result = await AgentClient.CommitAsync(
                         resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName,
-                        message, stageAllFirst: !stagedOnly, CancellationToken.None);
+                        message, stageAllFirst: !stagedOnly, ct);
 
                     await PersistMutationResultAsync(repo.WorkspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);
 
@@ -115,45 +118,48 @@ public sealed partial class WorkspaceGitChanges
                 finally
                 {
                     semaphore.Release();
+                    var done = Interlocked.Increment(ref completed);
+                    job.ReportProgress($"Committed {done} of {targets.Count} repositories...");
                 }
             });
 
             await Task.WhenAll(tasks);
-        }
-        finally
-        {
-            _isWorkspaceCommitRunning = false;
-        }
 
-        if (succeeded.Count > 0)
-        {
-            _workspaceCommitMessage = string.Empty;
-            _workspaceCommitMessageHasContent = false;
-        }
-
-        ToastService.Show(failed.Count == 0
-            ? $"Committed in {succeeded.Count} repositor{(succeeded.Count == 1 ? "y" : "ies")}."
-            : $"Committed in {succeeded.Count} repositor{(succeeded.Count == 1 ? "y" : "ies")}. Failed in {failed.Count}: {string.Join(", ", failed.Select(f => f.Repository))}.");
-
-        if (failed.Count > 0)
-        {
-            foreach (var (repository, error) in failed)
+            if (succeeded.Count > 0)
             {
-                Logger.LogWarning("Workspace commit failed for {Repository}: {Error}", repository, error);
+                SafeInvoke(() =>
+                {
+                    _workspaceCommitMessage = string.Empty;
+                    _workspaceCommitMessageHasContent = false;
+                });
             }
-        }
 
-        await Task.Delay(150);
-        await LoadAsync();
+            SafeInvoke(() => ToastService.Show(failed.Count == 0
+                ? $"Committed in {succeeded.Count} repositor{(succeeded.Count == 1 ? "y" : "ies")}."
+                : $"Committed in {succeeded.Count} repositor{(succeeded.Count == 1 ? "y" : "ies")}. Failed in {failed.Count}: {string.Join(", ", failed.Select(f => f.Repository))}."));
+
+            if (failed.Count > 0)
+            {
+                foreach (var (repository, error) in failed)
+                {
+                    Logger.LogWarning("Workspace commit failed for {Repository}: {Error}", repository, error);
+                }
+            }
+
+            // The write queue processes on a background worker; give it a moment before the job's
+            // final reload so the page reflects the just-persisted state rather than racing the write.
+            await Task.Delay(150, ct);
+        });
     }
 
-    private Task StageAllChangedAsync() => BulkSectionActionAsync(unstageStagedSection: false);
+    private void StageAllChangedAsync() => BulkSectionActionAsync(unstageStagedSection: false);
 
-    private Task UnstageAllStagedAsync() => BulkSectionActionAsync(unstageStagedSection: true);
+    private void UnstageAllStagedAsync() => BulkSectionActionAsync(unstageStagedSection: true);
 
     /// <summary>Stage all items in the Changed section, or unstage all items in the Staged section, across
-    /// every repository represented in that section. Same bounded fan-out idiom as <see cref="CommitWorkspaceAsync"/>.</summary>
-    private async Task BulkSectionActionAsync(bool unstageStagedSection)
+    /// every repository represented in that section. Same bounded fan-out idiom as <see cref="CommitWorkspaceAsync"/>,
+    /// also behind the page's LoadingOverlay/terminal job since it spans every repository in the section.</summary>
+    private void BulkSectionActionAsync(bool unstageStagedSection)
     {
         if (!AgentBridge.IsAgentConnected)
         {
@@ -165,21 +171,23 @@ public sealed partial class WorkspaceGitChanges
             .Where(r => unstageStagedSection ? r.StagedCount > 0 : r.ChangedCount > 0)
             .ToList();
 
-        if (targets.Count == 0 || _isWorkspaceCommitRunning)
+        if (targets.Count == 0 || IsJobRunning)
         {
             return;
         }
 
-        _isWorkspaceCommitRunning = true;
-        StateHasChanged();
+        var label = unstageStagedSection
+            ? $"Unstaging {targets.Count} repositories..."
+            : $"Staging {targets.Count} repositories...";
 
-        try
+        StartPageJob(label, async (job, ct) =>
         {
+            var completed = 0;
             using var semaphore = new SemaphoreSlim(Math.Max(1, WorkspaceOptions.Value.MaxParallelOperations));
 
             var tasks = targets.Select(async repo =>
             {
-                await semaphore.WaitAsync();
+                await semaphore.WaitAsync(ct);
                 try
                 {
                     var resolved = await ResolveRepositoryAsync(repo.WorkspaceRepositoryId);
@@ -189,8 +197,8 @@ public sealed partial class WorkspaceGitChanges
                     }
 
                     var result = unstageStagedSection
-                        ? await AgentClient.UnstageAsync(resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, GitChangeOperationScope.Repository, [], CancellationToken.None)
-                        : await AgentClient.StageAsync(resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, GitChangeOperationScope.Repository, [], CancellationToken.None);
+                        ? await AgentClient.UnstageAsync(resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, GitChangeOperationScope.Repository, [], ct)
+                        : await AgentClient.StageAsync(resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, GitChangeOperationScope.Repository, [], ct);
 
                     await PersistMutationResultAsync(repo.WorkspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);
                 }
@@ -201,17 +209,15 @@ public sealed partial class WorkspaceGitChanges
                 finally
                 {
                     semaphore.Release();
+                    var done = Interlocked.Increment(ref completed);
+                    job.ReportProgress(unstageStagedSection
+                        ? $"Unstaged {done} of {targets.Count} repositories..."
+                        : $"Staged {done} of {targets.Count} repositories...");
                 }
             });
 
             await Task.WhenAll(tasks);
-        }
-        finally
-        {
-            _isWorkspaceCommitRunning = false;
-        }
-
-        await Task.Delay(150);
-        await LoadAsync();
+            await Task.Delay(150, ct);
+        });
     }
 }

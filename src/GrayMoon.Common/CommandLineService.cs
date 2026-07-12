@@ -35,6 +35,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
         ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.CommandLine, $"$ {fileName} {LogSafe.ForLog(arguments)}"));
 
         var suppressStreamLogging = ShouldSuppressStreamLogging(fileName, arguments);
+        var suppressOverlayStdout = IsGitStatusCommand(fileName, arguments);
         var stderrStreamKind = streamStderrAsStdout ? AgentCommandStreamKind.Stdout : AgentCommandStreamKind.Stderr;
 
         var startInfo = new ProcessStartInfo
@@ -53,7 +54,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
         };
-     
+
         using var process = Process.Start(startInfo);
         if (process == null)
         {
@@ -70,11 +71,11 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
 
         var stdoutTask = ConsumeStreamAsync(
             process.StandardOutput,
-            segment => OnStreamSegment(fileName, suppressStreamLogging, AgentCommandStreamKind.Stdout, segment),
+            segment => OnStreamSegment(fileName, suppressStreamLogging, suppressOverlayStdout, AgentCommandStreamKind.Stdout, segment),
             cancellationToken);
         var stderrTask = ConsumeStreamAsync(
             process.StandardError,
-            segment => OnStreamSegment(fileName, suppressStreamLogging, stderrStreamKind, segment),
+            segment => OnStreamSegment(fileName, suppressStreamLogging, suppressOverlay: false, stderrStreamKind, segment),
             cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         var stdout = await stdoutTask;
@@ -111,6 +112,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
         ReportAmbient(new CommandLineStreamEvent(AgentCommandStreamKind.CommandLine, $"$ {fileName} {loggedArguments}"));
 
         var suppressStreamLogging = ShouldSuppressStreamLogging(fileName, arguments);
+        var suppressOverlayStdout = IsGitStatusCommand(fileName, arguments);
         var stderrStreamKind = streamStderrAsStdout ? AgentCommandStreamKind.Stdout : AgentCommandStreamKind.Stderr;
 
         var startInfo = new ProcessStartInfo
@@ -152,11 +154,11 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
 
         var stdoutTask = ConsumeStreamPreservingLineEndingsAsync(
             process.StandardOutput,
-            segment => OnStreamSegment(fileName, suppressStreamLogging, AgentCommandStreamKind.Stdout, segment),
+            segment => OnStreamSegment(fileName, suppressStreamLogging, suppressOverlayStdout, AgentCommandStreamKind.Stdout, segment),
             cancellationToken);
         var stderrTask = ConsumeStreamPreservingLineEndingsAsync(
             process.StandardError,
-            segment => OnStreamSegment(fileName, suppressStreamLogging, stderrStreamKind, segment),
+            segment => OnStreamSegment(fileName, suppressStreamLogging, suppressOverlay: false, stderrStreamKind, segment),
             cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         var stdout = await stdoutTask;
@@ -340,6 +342,9 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
             && (trimmed.Length == 4 || trimmed[4] == ' '))
             return true;
 
+        if (IsGitStatusCommand(fileName, arguments))
+            return true;
+
         if (!trimmed.StartsWith("show ", StringComparison.Ordinal))
             return false;
 
@@ -351,7 +356,7 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
         if (!string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase) || arguments.Count == 0)
             return false;
 
-        if (string.Equals(arguments[0], "diff", StringComparison.Ordinal))
+        if (string.Equals(arguments[0], "diff", StringComparison.Ordinal) || string.Equals(arguments[0], "status", StringComparison.Ordinal))
             return true;
 
         if (!string.Equals(arguments[0], "show", StringComparison.Ordinal))
@@ -366,12 +371,38 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
         return false;
     }
 
-    private void OnStreamSegment(string fileName, bool suppressStreamLogging, AgentCommandStreamKind kind, string segment)
+    /// <summary>
+    /// <c>git status</c> output (this feature always uses <c>--porcelain=v2 -z</c>, NUL-delimited machine
+    /// format) is not useful to a human reading the live overlay terminal, and Git Changes may run it for
+    /// every repository in a workspace during a single refresh - so its stdout is kept out of the overlay
+    /// entirely, not just out of the DEBUG log. The command-line echo (what was scanned) still shows;
+    /// only the raw payload is hidden. stderr is never suppressed here so scan errors stay visible.
+    /// </summary>
+    private static bool IsGitStatusCommand(string fileName, string arguments)
+    {
+        if (!string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var trimmed = arguments.TrimStart();
+        return trimmed.StartsWith("status", StringComparison.Ordinal) && (trimmed.Length == 6 || trimmed[6] == ' ');
+    }
+
+    private static bool IsGitStatusCommand(string fileName, IReadOnlyList<string> arguments) =>
+        string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase)
+        && arguments.Count > 0
+        && string.Equals(arguments[0], "status", StringComparison.Ordinal);
+
+    private void OnStreamSegment(string fileName, bool suppressStreamLogging, bool suppressOverlay, AgentCommandStreamKind kind, string segment)
     {
         if (!suppressStreamLogging)
         {
             var label = kind == AgentCommandStreamKind.Stderr ? "stderr" : "stdout";
             logger.LogDebug("Command {Stream} ({Executable}): {Segment}", label, fileName, TruncateForLog(LogSafe.ForLog(segment)));
+        }
+
+        if (suppressOverlay)
+        {
+            return;
         }
 
         ReportAmbient(new CommandLineStreamEvent(kind, segment));

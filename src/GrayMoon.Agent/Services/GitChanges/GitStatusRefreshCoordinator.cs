@@ -209,19 +209,22 @@ internal sealed class RepositoryRefreshTracker : IDisposable
     }
 
     /// <summary>Ends the current scan. Returns true when a follow-up scan must run immediately because a dirty
-    /// event arrived while this scan was in flight.</summary>
+    /// event arrived while this scan was in flight. A coalesced caller's completion is carried forward to the
+    /// follow-up scan rather than resolved with this scan's (pre-follow-up) result, so it always reflects state
+    /// at or after the moment it started waiting.</summary>
     public bool EndRefresh(GitChangeStatusResult result, out TaskCompletionSource<GitChangeStatusResult>? completionToSignal)
     {
         lock (_gate)
         {
-            completionToSignal = _pendingCompletion;
-            _pendingCompletion = null;
-
             if (_state == RepositoryRefreshState.RefreshingAndDirty)
             {
                 _state = RepositoryRefreshState.Refreshing;
+                completionToSignal = null;
                 return true;
             }
+
+            completionToSignal = _pendingCompletion;
+            _pendingCompletion = null;
 
             if (_state != RepositoryRefreshState.Disposed)
             {

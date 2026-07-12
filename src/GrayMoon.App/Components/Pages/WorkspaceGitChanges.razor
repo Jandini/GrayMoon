@@ -9,7 +9,7 @@
 
 <div class="container-fluid page-container grid-page git-changes-page">
     <div class="grid-page-header">
-        <GitChangesHeader View="_view" />
+        <GitChangesHeader View="_view" StatusText="@(_isWarmingUp ? _warmUpStatus : null)" />
     </div>
 
     <div class="grid-page-body">
@@ -40,7 +40,6 @@
                                   rows="3"
                                   maxlength="10000"
                                   placeholder="Commit message (applies to all repositories below)"
-                                  disabled="@_isWorkspaceCommitRunning"
                                   autocomplete="off"
                                   autocorrect="off"
                                   autocapitalize="off"
@@ -53,7 +52,7 @@
                             {
                                 <button type="button"
                                         class="btn btn-sm btn-primary"
-                                        disabled="@(_isWorkspaceCommitRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
+                                        disabled="@(IsJobRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
                                         title="Creates one commit in each staged repository using the same message."
                                         @onclick="() => CommitWorkspaceAsync(stagedOnly: true)">
                                     Commit Staged
@@ -63,7 +62,7 @@
                             {
                                 <button type="button"
                                         class="btn btn-sm btn-outline-primary"
-                                        disabled="@(_isWorkspaceCommitRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
+                                        disabled="@(IsJobRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
                                         title="Stages all changes then creates one commit in each repository using the same message."
                                         @onclick="() => CommitWorkspaceAsync(stagedOnly: false)">
                                     Commit All
@@ -153,11 +152,11 @@
                     <div class="git-diff-toolbar__actions">
                         <button type="button"
                                 class="btn btn-sm btn-outline-secondary"
-                                title="Refresh"
+                                title="Refresh - rescans every repository in this workspace"
                                 aria-label="Refresh"
-                                disabled="@_isLoading"
-                                @onclick="LoadAsync">
-                            @if (_isLoading)
+                                disabled="@(_isLoading || IsJobRunning)"
+                                @onclick="ManualRefreshAsync">
+                            @if (_isLoading || IsJobRunning)
                             {
                                 <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
                             }

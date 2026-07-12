@@ -16,6 +16,10 @@ public sealed class FakeRepositoryGitChangesService : IRepositoryGitChangesServi
     public int CallCount;
     public TimeSpan Delay = TimeSpan.FromMilliseconds(50);
 
+    /// <summary>Snapshot versions observed by each <see cref="GetStatusAsync"/> call, in call order - lets
+    /// tests identify which scan (first vs. follow-up) a given caller's result actually came from.</summary>
+    public readonly ConcurrentQueue<long> ObservedVersions = new();
+
     public int MaxConcurrentCalls => _maxConcurrentCalls;
 
     public int MaxConcurrentCallsForRepo(string repoPath) =>
@@ -24,6 +28,7 @@ public sealed class FakeRepositoryGitChangesService : IRepositoryGitChangesServi
     public async Task<GitChangeStatusResult> GetStatusAsync(string repoPath, long snapshotVersion, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref CallCount);
+        ObservedVersions.Enqueue(snapshotVersion);
 
         var globalActive = Interlocked.Increment(ref _activeCalls);
         InterlockedMax(ref _maxConcurrentCalls, globalActive);

@@ -18,9 +18,4 @@ public sealed class GetGitChangeStatusRequest : WorkspaceCommandRequest
     /// <summary>Database repository ID, echoed back on watcher-driven push notifications.</summary>
     [JsonPropertyName("repositoryId")]
     public int RepositoryId { get; set; }
-
-    /// <summary>When true, run an immediate authoritative scan even if a debounced scan is already
-    /// pending. When false, still returns a fresh scan but does not bypass in-flight coalescing.</summary>
-    [JsonPropertyName("forceRefresh")]
-    public bool ForceRefresh { get; set; }
 }

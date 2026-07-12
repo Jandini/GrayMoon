@@ -19,9 +19,17 @@ public sealed class GitChangesOptions
     public int WatcherIdleGraceMinutes { get; init; } = 10;
 
     /// <summary>
-    /// How often the workspace background monitoring service (not the browser page) sweeps every known
-    /// workspace repository to seed/renew its Agent-side watcher lease. Must stay comfortably below
+    /// How often the workspace background monitoring service (not the browser page) sweeps active
+    /// workspace repositories to seed/renew their Agent-side watcher lease. Must stay comfortably below
     /// <see cref="WatcherIdleGraceMinutes"/> or leases would expire between sweeps. Default 3.
     /// </summary>
     public int WatcherRenewalIntervalMinutes { get; init; } = 3;
+
+    /// <summary>
+    /// How long a workspace stays "active" (and therefore in scope for background monitoring) after its
+    /// last Git Changes page viewer navigates away or disconnects. Kept just under
+    /// <see cref="WatcherIdleGraceMinutes"/> so the App stops sweeping a workspace slightly before its
+    /// Agent-side watcher leases would idle out anyway. Default 8.
+    /// </summary>
+    public int WorkspaceActivityGraceMinutes { get; init; } = 8;
 }
