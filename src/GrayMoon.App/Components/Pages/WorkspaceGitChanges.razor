@@ -52,7 +52,7 @@
                             @if (StagedRepositoryCount > 0)
                             {
                                 <button type="button"
-                                        class="btn btn-primary"
+                                        class="btn btn-sm btn-primary"
                                         disabled="@(_isWorkspaceCommitRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
                                         title="Creates one commit in each staged repository using the same message."
                                         @onclick="() => CommitWorkspaceAsync(stagedOnly: true)">
@@ -62,7 +62,7 @@
                             else
                             {
                                 <button type="button"
-                                        class="btn btn-outline-primary"
+                                        class="btn btn-sm btn-outline-primary"
                                         disabled="@(_isWorkspaceCommitRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
                                         title="Stages all changes then creates one commit in each repository using the same message."
                                         @onclick="() => CommitWorkspaceAsync(stagedOnly: false)">

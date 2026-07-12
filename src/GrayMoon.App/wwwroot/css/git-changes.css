@@ -66,6 +66,12 @@ article.content:has(.git-changes-page) {
     min-height: 0;
 }
 
+.git-changes-page .grid-page-body > .alert,
+.git-changes-page .grid-page-body > .git-changes-empty {
+    border: 1px solid var(--border-color);
+    border-radius: 0.375rem;
+}
+
 
 .git-changes-offline-notice {
     display: flex;
@@ -86,7 +92,7 @@ article.content:has(.git-changes-page) {
     font-size: 0.95rem;
 }
 
-/* Splitter */
+/* Splitter - single bordered frame for tree + diff (+ commit in the left column). */
 .git-changes-splitter {
     display: flex;
     flex: 1 1 0;
@@ -95,6 +101,9 @@ article.content:has(.git-changes-page) {
     width: 100%;
     overflow: hidden;
     gap: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 0.375rem;
+    background-color: var(--bg-card, var(--bg-secondary));
 }
 
 .git-changes-splitter__left {
@@ -104,6 +113,7 @@ article.content:has(.git-changes-page) {
     flex-direction: column;
     min-height: 0;
     overflow: hidden;
+    border-right: 1px solid var(--border-color);
 }
 
 .git-changes-splitter__right {
@@ -113,7 +123,6 @@ article.content:has(.git-changes-page) {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border-left: 1px solid var(--border-color);
 }
 
 .git-changes-splitter__handle {
@@ -127,9 +136,10 @@ article.content:has(.git-changes-page) {
     opacity: 0.4;
 }
 
+/* Commit sits inside the left column; only the textarea keeps an input border (no second frame). */
 .git-changes-workspace-commit {
     flex: 0 0 auto;
-    padding: 0;
+    padding: 0.45rem 0.5rem 0.5rem;
     border-bottom: 1px solid var(--border-color);
 }
 
@@ -168,8 +178,7 @@ article.content:has(.git-changes-page) {
 
 .git-changes-workspace-commit__actions {
     display: flex;
-    justify-content: flex-end;
-    padding: 0 0 0.5rem 0;
+    justify-content: flex-start;
     margin-top: 0.4rem;
 }
 
@@ -225,10 +234,10 @@ article.content:has(.git-changes-page) {
     border-radius: 0 !important;
     box-shadow: none !important;
     outline: none;
-    font-size: 0.875rem;
-    line-height: 1.5;
-    padding: 0.35rem 0.65rem;
-    min-height: calc(1.5em + 0.7rem + 2px);
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    padding: 0.2rem 0.55rem;
+    min-height: calc(1.4em + 0.4rem + 2px);
     background-color: transparent;
     color: var(--text-primary);
 }
@@ -260,7 +269,7 @@ article.content:has(.git-changes-page) {
     align-items: center;
     gap: 0.35rem;
     flex: 0 0 auto;
-    padding: 0.3rem 0.45rem 0.3rem 0.35rem;
+    padding: 0.15rem 0.35rem 0.15rem 0.3rem;
     border-left: 1px solid var(--border-color);
 }
 
