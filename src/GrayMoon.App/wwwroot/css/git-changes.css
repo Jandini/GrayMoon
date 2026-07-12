@@ -16,26 +16,9 @@
     text-overflow: ellipsis;
 }
 
-/* Title-only header; flex-fill from main so splitter uses the full column below the top bar. */
-main:has(.git-changes-page) {
-    min-height: 0;
-    overflow: hidden;
-}
-
-article.content:has(.git-changes-page) {
-    flex: 1 1 auto;
-    min-height: 0;
-    height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
+/* Match other workspace grids: body height matches shared max-height so the
+   splitter frame ends above the viewport bottom like the repositories card. */
 .git-changes-page.page-container.grid-page {
-    flex: 1 1 auto;
-    min-height: 0;
-    height: 0;
-    padding-bottom: 0;
     box-sizing: border-box;
     overflow: hidden;
 }
@@ -52,8 +35,8 @@ article.content:has(.git-changes-page) {
 .git-changes-page .grid-page-body {
     flex: 1 1 auto;
     min-height: 0;
-    height: 0;
-    max-height: none;
+    height: calc(100vh - 148px);
+    max-height: calc(100vh - 148px);
     overflow: hidden;
     display: flex;
     flex-direction: column;
