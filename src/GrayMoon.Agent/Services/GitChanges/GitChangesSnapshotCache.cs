@@ -13,8 +13,14 @@ public sealed class GitChangesSnapshotCache
     private readonly ConcurrentDictionary<string, long> _versions = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, GitChangeSnapshot> _latestSnapshots = new(StringComparer.OrdinalIgnoreCase);
 
-    public long NextVersion(string repoPath) =>
-        _versions.AddOrUpdate(NormalizeKey(repoPath), 1, (_, current) => current + 1);
+    // Seeded from DateTime.UtcNow.Ticks rather than 1 so a restarted Agent process (which loses this
+    // in-memory counter) still issues versions far above whatever the App last persisted, instead of
+    // having every post-restart snapshot silently rejected as stale until the counter catches back up.
+    public long NextVersion(string repoPath)
+    {
+        var candidate = DateTime.UtcNow.Ticks;
+        return _versions.AddOrUpdate(NormalizeKey(repoPath), candidate, (_, current) => Math.Max(candidate, current + 1));
+    }
 
     public void SetLatest(string repoPath, GitChangeSnapshot snapshot) =>
         _latestSnapshots[NormalizeKey(repoPath)] = snapshot;

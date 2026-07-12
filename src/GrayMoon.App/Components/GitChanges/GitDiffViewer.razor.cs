@@ -40,13 +40,24 @@ public sealed partial class GitDiffViewer : IAsyncDisposable
             return;
         }
 
-        _module = await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./Components/GitChanges/GitDiffViewer.razor.js");
-        _initialized = await _module.InvokeAsync<bool>("init", _elementId, new
+        try
         {
-            renderSideBySide = true,
-            originalHeaderId = _originalHeaderId,
-            headersRowId = _headersRowId,
-        });
+            _module = await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./Components/GitChanges/GitDiffViewer.razor.js");
+            _initialized = await _module.InvokeAsync<bool>("init", _elementId, new
+            {
+                renderSideBySide = true,
+                originalHeaderId = _originalHeaderId,
+                headersRowId = _headersRowId,
+            });
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone - nothing to initialize.
+        }
+        catch (InvalidOperationException)
+        {
+            // Circuit tearing down mid-render.
+        }
     }
 
     public async Task SetDiffAsync(GitDiffDocument document)
@@ -56,12 +67,23 @@ public sealed partial class GitDiffViewer : IAsyncDisposable
             return;
         }
 
-        await _module!.InvokeVoidAsync(
-            "setDiff",
-            _elementId,
-            document.OriginalContent ?? string.Empty,
-            document.ModifiedContent ?? string.Empty,
-            document.LanguageId ?? "plaintext");
+        try
+        {
+            await _module!.InvokeVoidAsync(
+                "setDiff",
+                _elementId,
+                document.OriginalContent ?? string.Empty,
+                document.ModifiedContent ?? string.Empty,
+                document.LanguageId ?? "plaintext");
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone.
+        }
+        catch (InvalidOperationException)
+        {
+            // Circuit tearing down mid-call.
+        }
     }
 
     public async Task SetViewModeAsync(GitDiffViewMode mode)
@@ -71,7 +93,18 @@ public sealed partial class GitDiffViewer : IAsyncDisposable
             return;
         }
 
-        await _module!.InvokeVoidAsync("setViewMode", _elementId, mode == GitDiffViewMode.SideBySide ? "side-by-side" : "inline");
+        try
+        {
+            await _module!.InvokeVoidAsync("setViewMode", _elementId, mode == GitDiffViewMode.SideBySide ? "side-by-side" : "inline");
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone.
+        }
+        catch (InvalidOperationException)
+        {
+            // Circuit tearing down mid-call.
+        }
     }
 
     public async Task SetOptionsAsync(GitDiffViewerOptions options)
@@ -81,30 +114,80 @@ public sealed partial class GitDiffViewer : IAsyncDisposable
             return;
         }
 
-        await _module!.InvokeVoidAsync("setOptions", _elementId, new { wordWrap = options.WordWrap, ignoreWhitespace = options.IgnoreWhitespace });
+        try
+        {
+            await _module!.InvokeVoidAsync("setOptions", _elementId, new { wordWrap = options.WordWrap, ignoreWhitespace = options.IgnoreWhitespace });
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone.
+        }
+        catch (InvalidOperationException)
+        {
+            // Circuit tearing down mid-call.
+        }
     }
 
     public async Task GoToNextChangeAsync()
     {
-        if (await EnsureReadyAsync())
+        if (!await EnsureReadyAsync())
+        {
+            return;
+        }
+
+        try
         {
             await _module!.InvokeVoidAsync("goToNextChange", _elementId);
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone.
+        }
+        catch (InvalidOperationException)
+        {
+            // Circuit tearing down mid-call.
         }
     }
 
     public async Task GoToPreviousChangeAsync()
     {
-        if (await EnsureReadyAsync())
+        if (!await EnsureReadyAsync())
+        {
+            return;
+        }
+
+        try
         {
             await _module!.InvokeVoidAsync("goToPreviousChange", _elementId);
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone.
+        }
+        catch (InvalidOperationException)
+        {
+            // Circuit tearing down mid-call.
         }
     }
 
     public async Task ClearAsync()
     {
-        if (await EnsureReadyAsync())
+        if (!await EnsureReadyAsync())
+        {
+            return;
+        }
+
+        try
         {
             await _module!.InvokeVoidAsync("clear", _elementId);
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone.
+        }
+        catch (InvalidOperationException)
+        {
+            // Circuit tearing down mid-call.
         }
     }
 
@@ -142,6 +225,7 @@ public sealed partial class GitDiffViewer : IAsyncDisposable
             try
             {
                 await _module.InvokeVoidAsync("dispose", _elementId);
+                await _module.DisposeAsync();
             }
             catch (JSDisconnectedException)
             {
@@ -151,8 +235,10 @@ public sealed partial class GitDiffViewer : IAsyncDisposable
             {
                 // JS runtime already torn down.
             }
-
-            await _module.DisposeAsync();
+            catch (InvalidOperationException)
+            {
+                // Circuit tearing down mid-call.
+            }
         }
     }
 }
