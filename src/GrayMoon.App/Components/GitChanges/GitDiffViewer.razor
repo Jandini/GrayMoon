@@ -3,8 +3,20 @@
 
 <div class="git-diff-viewer-wrap">
     <div class="git-diff-pane-headers" id="@_headersRowId">
-        <div class="git-diff-pane-headers__original" id="@_originalHeaderId">@OriginalPaneLabel</div>
-        <div class="git-diff-pane-headers__modified">@ModifiedPaneLabel</div>
+        <div class="git-diff-pane-headers__original" id="@_originalHeaderId">
+            @if (!string.IsNullOrEmpty(FileName))
+            {
+                <strong class="git-diff-pane-headers__file">@FileName</strong>
+            }
+            <span class="git-diff-pane-headers__side">@OriginalSideLabel</span>
+        </div>
+        <div class="git-diff-pane-headers__modified">
+            @if (!string.IsNullOrEmpty(FileName))
+            {
+                <strong class="git-diff-pane-headers__file">@FileName</strong>
+            }
+            <span class="git-diff-pane-headers__side">@ModifiedSideLabel</span>
+        </div>
     </div>
     <div id="@_elementId" class="git-diff-viewer"></div>
 </div>

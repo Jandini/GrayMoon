@@ -23,8 +23,9 @@ public sealed partial class GitDiffViewer : IAsyncDisposable
 {
     [Inject] private IJSRuntime JSRuntime { get; set; } = default!;
 
-    [Parameter] public string OriginalPaneLabel { get; set; } = "Original";
-    [Parameter] public string ModifiedPaneLabel { get; set; } = "Modified";
+    [Parameter] public string? FileName { get; set; }
+    [Parameter] public string OriginalSideLabel { get; set; } = "(Index)";
+    [Parameter] public string ModifiedSideLabel { get; set; } = "(Working Tree)";
 
     private readonly string _elementId = $"git-diff-viewer-{Guid.NewGuid():N}";
     private readonly string _originalHeaderId = $"git-diff-header-original-{Guid.NewGuid():N}";

@@ -188,13 +188,13 @@ article.content:has(.git-changes-page) {
     margin-bottom: 0.5rem;
 }
 
-/* Diff toolbar + Monaco container */
+/* Diff toolbar + Monaco container (toolbar sits under Monaco as a footer) */
 .git-diff-toolbar {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     padding: 0.4rem 0 0.4rem 0.6rem;
-    border-bottom: 1px solid var(--border-color);
+    border-top: 1px solid var(--border-color);
     font-size: 0.82rem;
     min-width: 0;
     overflow: hidden;
@@ -225,8 +225,6 @@ article.content:has(.git-changes-page) {
     flex-shrink: 0;
     border-bottom: 1px solid var(--border-color);
     font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.03em;
     color: var(--text-secondary);
     background: var(--bg-secondary);
 }
@@ -248,6 +246,17 @@ article.content:has(.git-changes-page) {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.git-diff-pane-headers__file {
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-right: 0.35rem;
+}
+
+.git-diff-pane-headers__side {
+    font-weight: 400;
+    color: var(--text-secondary);
 }
 
 .git-diff-viewer-container {

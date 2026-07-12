@@ -101,25 +101,6 @@
                 }
                 else
                 {
-                    <div class="git-diff-toolbar">
-                        <span class="git-diff-toolbar__path"
-                              title="@($"{_selectedRow.RepositoryName} / {_selectedRow.FilePath}")">@_selectedRow.RepositoryName / @_selectedRow.FilePath</span>
-                        <button type="button"
-                                class="btn btn-sm btn-outline-secondary"
-                                title="Previous change"
-                                disabled="@(_selectedDiff == null || !RendersInMonaco(_selectedDiff.State))"
-                                @onclick="() => _diffViewerRef!.GoToPreviousChangeAsync()">
-                            <i class="bi bi-chevron-up" aria-hidden="true"></i>
-                        </button>
-                        <button type="button"
-                                class="btn btn-sm btn-outline-secondary"
-                                title="Next change"
-                                disabled="@(_selectedDiff == null || !RendersInMonaco(_selectedDiff.State))"
-                                @onclick="() => _diffViewerRef!.GoToNextChangeAsync()">
-                            <i class="bi bi-chevron-down" aria-hidden="true"></i>
-                        </button>
-                    </div>
-
                     @if (_isDiffLoading)
                     {
                         <div class="git-changes-diff-placeholder text-muted">Loading diff…</div>
@@ -157,8 +138,28 @@
 
                     <div class="git-diff-viewer-container" style="display:@((_selectedDiff != null && RendersInMonaco(_selectedDiff.State)) ? "flex" : "none")">
                         <GitDiffViewer @ref="_diffViewerRef"
-                                       OriginalPaneLabel="@(_selectedRow.IsStagedSection ? "Committed" : "Staged")"
-                                       ModifiedPaneLabel="@(_selectedRow.IsStagedSection ? "Staged" : "Changed")" />
+                                       FileName="@System.IO.Path.GetFileName(_selectedRow.FilePath)"
+                                       OriginalSideLabel="@(_selectedRow.IsStagedSection ? "(HEAD)" : "(Index)")"
+                                       ModifiedSideLabel="@(_selectedRow.IsStagedSection ? "(Index)" : "(Working Tree)")" />
+                    </div>
+
+                    <div class="git-diff-toolbar">
+                        <span class="git-diff-toolbar__path"
+                              title="@($"{_selectedRow.RepositoryName} / {_selectedRow.FilePath}")">@($"{_selectedRow.RepositoryName} / {_selectedRow.FilePath}")</span>
+                        <button type="button"
+                                class="btn btn-sm btn-outline-secondary"
+                                title="Previous change"
+                                disabled="@(_selectedDiff == null || !RendersInMonaco(_selectedDiff.State))"
+                                @onclick="() => _diffViewerRef!.GoToPreviousChangeAsync()">
+                            <i class="bi bi-chevron-up" aria-hidden="true"></i>
+                        </button>
+                        <button type="button"
+                                class="btn btn-sm btn-outline-secondary"
+                                title="Next change"
+                                disabled="@(_selectedDiff == null || !RendersInMonaco(_selectedDiff.State))"
+                                @onclick="() => _diffViewerRef!.GoToNextChangeAsync()">
+                            <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                        </button>
                     </div>
                 }
             </div>
