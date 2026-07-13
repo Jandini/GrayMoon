@@ -106,6 +106,13 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 ## What's new
 
+### Fixed: navigating to Changes no longer aborts running jobs or breaks the diff viewer
+
+Two related navigation bugs in the Git Changes page are fixed.
+
+- **Background jobs on Repositories no longer abort when you open Changes.** Starting an Update, Push, Sync, or similar operation on the workspace **Repositories** page and then navigating to **Changes** used to kill the job partway through (for example, an Update-then-Push run would never reach the push phase) because the still-running job called back into page state that had already been torn down. The job now keeps running to completion in the background regardless of which page you are on, exactly as intended.
+- **The Monaco diff viewer no longer breaks after leaving and returning to Changes.** Syntax highlighting disappearing, scrolling behaving erratically, and a tiny stray resizable box appearing near the top of the diff were all the same root cause: Monaco injects its own styling at runtime, and Blazor's navigation was silently discarding it every time you navigated away from and back to the Changes page. That styling is now preserved across navigation, so the diff viewer looks and behaves the same whether it is the first file you have opened or the fifth time you have returned to the page.
+
 ### Enterprise GitHub link support, dependency-count fixes, and workspace repositories code cleanup
 
 - **Works with GitHub Enterprise Server (GHES):** repository web links, owner/repo parsing, and pull-request URLs are no longer hardcoded to `github.com`. `RepositoryUrlHelper` now derives the host from any `git@host:...` SSH URL or `https://host/...` HTTPS URL, so clone links, PR pages, and "Open in GitHub" actions work correctly against GHES instances as well as github.com.

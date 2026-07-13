@@ -6,6 +6,55 @@
 
 const editors = new Map();
 let monacoReadyPromise = null;
+let headObserver = null;
+const injectedHeadNodes = [];
+
+// Blazor's enhanced navigation reconciles <head> against the server-rendered markup on every SPA
+// navigation - including every <link>/<style> Monaco injects at runtime (its base editor.main.css,
+// theme colors, and per-language syntax token colors are all added to <head> dynamically by Monaco's
+// own AMD loader, never part of any server response). Losing that CSS is what breaks Monaco on the
+// first navigation away from and back to a page hosting the editor: syntax highlighting disappears,
+// scrollbar/layout rules break ("scrolling goes crazy"), and Monaco's hidden input-capture
+// <textarea class="inputarea"> - normally invisible via `resize:none;color:transparent;z-index:-10` -
+// shows up as a tiny raw resizable box because that CSS is gone.
+//
+// `data-permanent` alone does NOT fix this. Read directly out of the shipped blazor.web.js: the head
+// reconciliation is a Myers-diff-style edit script over OLD vs NEW children, and `data-permanent` is
+// only consulted as a similarity check between a specific old node and a specific *candidate* new node
+// (it forces "infinite distance" - i.e. "these two are not the same element" - when their
+// data-permanent values differ, which stops the algorithm from silently reusing/rewriting an unrelated
+// matched pair). It says nothing about an old node that has literally no counterpart anywhere in the
+// new page's head, which is exactly Monaco's case - its CSS was never server-rendered on any page, so
+// there is nothing for it to match against and it is simply deleted as unneeded.
+//
+// The actual fix: track every <style>/<link> Monaco adds to <head>, and right before the editor is
+// used on each mount, re-attach any of them that enhanced navigation disconnected. Monaco itself won't
+// redo this - once window.monaco exists, ensureMonacoLoaded() never re-runs the AMD `require` that
+// injected this CSS the first time - so nothing else will put it back.
+function trackHeadInjections() {
+    if (headObserver) {
+        return;
+    }
+
+    headObserver = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            mutation.addedNodes.forEach((node) => {
+                if (node.nodeType === Node.ELEMENT_NODE && (node.tagName === 'STYLE' || node.tagName === 'LINK')) {
+                    injectedHeadNodes.push(node);
+                }
+            });
+        }
+    });
+    headObserver.observe(document.head, { childList: true });
+}
+
+function restoreHeadInjectionsIfMissing() {
+    for (const node of injectedHeadNodes) {
+        if (!node.isConnected) {
+            document.head.appendChild(node);
+        }
+    }
+}
 
 // Without this, Monaco spawns its worker by wrapping vs/base/worker/workerMain.js in a Blob (for
 // cross-origin safety), which loses its real script location. workerMain.js is the AMD bootstrap - it
@@ -34,6 +83,7 @@ function ensureMonacoLoaded() {
     }
 
     monacoReadyPromise = new Promise((resolve, reject) => {
+        trackHeadInjections();
         ensureWorkerEnvironment();
 
         if (window.monaco) {
@@ -142,6 +192,10 @@ function updatePaneHeadersVisibility(headersRowEl, sideBySide) {
 
 export async function init(elementId, options) {
     console.log('[GitDiffViewer] init', elementId, 'editors.size before =', editors.size, 'domDiffEditors =', document.querySelectorAll('.monaco-diff-editor').length, 'domEditors =', document.querySelectorAll('.monaco-editor').length);
+
+    // Put back whatever enhanced navigation stripped from <head> before Monaco (new or already-loaded)
+    // gets used again on this mount - see trackHeadInjections()/restoreHeadInjectionsIfMissing() above.
+    restoreHeadInjectionsIfMissing();
 
     const container = document.getElementById(elementId);
     if (!container) {
