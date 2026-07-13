@@ -17,11 +17,11 @@
     {
         <div class="alert alert-danger">@_errorMessage</div>
     }
-    else if (_isLoading && _view == null)
+    else if (_view == null)
     {
-        <div class="git-changes-empty text-muted">Loading Changes…</div>
+        @* Loading: the BackgroundJobOverlay (mounted in MainLayout) shows LoadingOverlay for the initial-load job. *@
     }
-    else if (_view != null && _view.Repositories.Count == 0)
+    else if (_view.Repositories.Count == 0)
     {
         <div class="git-changes-empty text-muted">
             No changes

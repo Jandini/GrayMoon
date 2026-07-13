@@ -38,22 +38,39 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     private readonly HashSet<int> _mutatingRepositoryIds = [];
 
-    protected override async Task OnInitializedAsync()
+    protected override Task OnInitializedAsync()
     {
         EnsureActivitySubscription();
-        await LoadAsync();
+        StartInitialLoadJob();
+        return Task.CompletedTask;
     }
 
-    protected override async Task OnParametersSetAsync()
+    protected override Task OnParametersSetAsync()
     {
         EnsureActivitySubscription();
 
         if (_view != null && _view.WorkspaceId == WorkspaceId)
         {
+            return Task.CompletedTask;
+        }
+
+        StartInitialLoadJob();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Runs the initial (or workspace-switch) load as a background job, the same JobService/BackgroundJobOverlay
+    /// pattern used for refresh and mutations, so opening this page shows the standard LoadingOverlay instead of
+    /// a subtle inline "Loading..." message, and the load survives navigating away and back mid-flight.
+    /// </summary>
+    private void StartInitialLoadJob()
+    {
+        if (IsJobRunning)
+        {
             return;
         }
 
-        await LoadAsync();
+        StartPageJob("Loading changes...", (_, _) => Task.CompletedTask);
     }
 
     // Reads the persisted SQLite projection only - never sends an Agent command. Opening or reloading
