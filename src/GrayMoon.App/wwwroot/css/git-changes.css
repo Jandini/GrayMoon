@@ -1,0 +1,490 @@
+/* Git Changes page - global (not CSS-isolated) so child components under Components/GitChanges/ share one stylesheet. */
+
+.git-changes-page {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    width: 100%;
+    overflow: hidden;
+}
+
+/* Header is title + summary only; filter and refresh live in the diff toolbar. */
+.git-changes-header__summary {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Match other workspace grids: body height matches shared max-height so the
+   splitter frame ends above the viewport bottom like the repositories card. */
+.git-changes-page.page-container.grid-page {
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.git-changes-page .grid-page-header {
+    flex-shrink: 0;
+}
+
+/* Match workspace-repos-header-actions margins (filter lives in the diff toolbar). */
+.git-changes-page .git-changes-header {
+    margin-bottom: 0.75rem;
+}
+
+.git-changes-page .grid-page-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: calc(100vh - 148px);
+    max-height: calc(100vh - 148px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.git-changes-page .grid-page-body > .alert,
+.git-changes-page .grid-page-body > .git-changes-empty,
+.git-changes-page .grid-page-body > .graymoon-splitter {
+    flex: 1 1 0;
+    min-height: 0;
+}
+
+.git-changes-page .grid-page-body > .alert,
+.git-changes-page .grid-page-body > .git-changes-empty {
+    border: 1px solid var(--border-color);
+    border-radius: 0.375rem;
+}
+
+
+.git-changes-offline-notice {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.5rem 0.25rem;
+    color: var(--warning);
+    font-size: 0.78rem;
+    min-width: 0;
+}
+
+.git-changes-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 3rem 1rem;
+    font-size: 0.95rem;
+}
+
+/* Splitter - single bordered frame for tree + diff (+ commit in the left column). */
+.git-changes-splitter {
+    display: flex;
+    flex: 1 1 0;
+    min-height: 0;
+    min-width: 0;
+    width: 100%;
+    overflow: hidden;
+    gap: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 0.375rem;
+    background-color: var(--bg-card, var(--bg-secondary));
+}
+
+.git-changes-splitter__left {
+    flex: 0 0 38%;
+    min-width: 260px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    border-right: 1px solid var(--border-color);
+}
+
+.git-changes-splitter__right {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.git-changes-splitter__handle {
+    flex: 0 0 6px;
+    cursor: col-resize;
+    background: transparent;
+}
+
+.git-changes-splitter__handle:hover {
+    background: var(--accent-blue);
+    opacity: 0.4;
+}
+
+/* Commit sits inside the left column; only the textarea keeps an input border (no second frame). */
+.git-changes-workspace-commit {
+    flex: 0 0 auto;
+    padding: 0.45rem 0.5rem 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.git-changes-workspace-commit__message {
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-input);
+    font-size: 0.84rem;
+    line-height: 1.5;
+    field-sizing: content;
+    min-height: calc(4.5em + .75rem + 2px) !important;
+    max-height: calc(12em + .75rem + 2px);
+    resize: none;
+    overflow-y: auto;
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a var(--bg-input);
+}
+
+.git-changes-workspace-commit__message::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.git-changes-workspace-commit__message::-webkit-scrollbar-track {
+    background: var(--bg-input);
+}
+
+.git-changes-workspace-commit__message::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.git-changes-workspace-commit__message::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}
+
+.git-changes-workspace-commit__actions {
+    display: flex;
+    justify-content: flex-start;
+    margin-top: 0.4rem;
+}
+
+.git-changes-diff-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1 1 auto;
+    text-align: center;
+    padding: 2rem;
+}
+
+.git-changes-diff-placeholder__path {
+    font-family: var(--bs-font-monospace, monospace);
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+}
+
+/* Diff toolbar under Monaco: filter fills the bar; refresh + change nav sit at the end. */
+.git-diff-toolbar {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
+    border-top: 1px solid var(--border-color);
+    font-size: 0.82rem;
+    min-width: 0;
+    overflow: hidden;
+    flex-shrink: 0;
+    background-color: var(--bg-card, var(--bg-secondary));
+}
+
+.git-diff-toolbar__filter {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+}
+
+.git-diff-toolbar__filter-wrap {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+    display: flex;
+}
+
+.git-diff-toolbar__filter-wrap .filter-search-input,
+.git-diff-toolbar__filter-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+    height: 100%;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    outline: none;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    padding: 0.2rem 0.55rem;
+    min-height: calc(1.4em + 0.4rem + 2px);
+    background-color: transparent;
+    color: var(--text-primary);
+}
+
+.git-diff-toolbar__filter-wrap .filter-search-input:focus,
+.git-diff-toolbar__filter-wrap .filter-search-input:focus-visible,
+.git-diff-toolbar__filter-input:focus,
+.git-diff-toolbar__filter-input:focus-visible {
+    border: none !important;
+    box-shadow: none !important;
+    outline: none;
+}
+
+.git-diff-toolbar__filter-wrap.has-filter .filter-search-input {
+    padding-right: 2.25rem;
+}
+
+.git-diff-toolbar__filter-wrap.filter-search-invalid .filter-search-input-invalid {
+    color: var(--error);
+    caret-color: var(--error);
+}
+
+.git-diff-toolbar__filter-wrap .filter-search-clear {
+    right: 0.35rem;
+}
+
+.git-diff-toolbar__actions {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex: 0 0 auto;
+    padding: 0.15rem 0.35rem 0.15rem 0.3rem;
+    border-left: 1px solid var(--border-color);
+}
+
+.git-diff-viewer-wrap {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.git-diff-pane-headers {
+    display: flex;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+}
+
+.git-diff-pane-headers__original {
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    padding: 0.25rem 0.6rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border-right: 1px solid var(--border-color);
+}
+
+.git-diff-pane-headers__modified {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0.25rem 0.6rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.git-diff-pane-headers__file {
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-right: 0.35rem;
+}
+
+.git-diff-pane-headers__side {
+    font-weight: 400;
+    color: var(--text-secondary);
+}
+
+.git-diff-viewer-container {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.git-diff-viewer {
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    width: 100%;
+    overflow: hidden;
+}
+
+/* Tree scrolls inside the left column; flex-basis 0 keeps overflow-y active when rows exceed panel height. */
+.git-changes-tree {
+    flex: 1 1 0;
+    overflow-y: auto;
+    min-height: 0;
+    padding: 0.25rem 0;
+    font-size: 0.85rem;
+    scrollbar-width: auto;
+    scrollbar-color: #5a5a5a var(--bg-card, #252526);
+}
+
+.git-changes-tree::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.git-changes-tree::-webkit-scrollbar-track {
+    background: var(--bg-card, #252526);
+}
+
+.git-changes-tree::-webkit-scrollbar-thumb {
+    background: #5a5a5a;
+    border-radius: 4px;
+}
+
+.git-changes-tree::-webkit-scrollbar-thumb:hover {
+    background: #6a6a6a;
+}
+
+.git-changes-tree__empty {
+    padding: 1.5rem 1rem;
+    text-align: center;
+}
+
+.git-changes-tree__row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding-top: 0.2rem;
+    padding-bottom: 0.2rem;
+    padding-right: 0.5rem;
+    border-radius: 0.2rem;
+    cursor: default;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.git-changes-tree__row:hover {
+    background: var(--bg-hover);
+}
+
+.git-changes-tree__row--selected {
+    background: var(--bg-active);
+}
+
+.git-changes-tree__row--section {
+    font-weight: 600;
+    color: var(--text-primary);
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.03em;
+}
+
+.git-changes-tree__row--repository {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.git-changes-tree__toggle {
+    flex: 0 0 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+
+.git-changes-tree__icon {
+    flex: 0 0 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+}
+
+.git-changes-tree__label {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.git-changes-tree__rename-from {
+    margin-left: 0.4rem;
+    font-size: 0.78rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.git-changes-tree__status {
+    flex: 0 0 auto;
+    font-family: var(--bs-font-monospace, monospace);
+    font-weight: 700;
+    font-size: 0.72rem;
+    width: 1.1rem;
+    text-align: center;
+}
+
+.git-changes-tree__status--modified { color: var(--warning); }
+.git-changes-tree__status--added { color: var(--success); }
+.git-changes-tree__status--deleted { color: var(--error); }
+.git-changes-tree__status--renamed { color: var(--info); }
+.git-changes-tree__status--untracked { color: var(--text-secondary); }
+.git-changes-tree__status--conflict { color: var(--error); font-weight: 900; }
+
+.git-changes-tree__actions {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    opacity: 0;
+    transition: opacity 0.1s ease;
+}
+
+.git-changes-tree__row:hover .git-changes-tree__actions {
+    opacity: 1;
+}
+
+.git-changes-tree__action-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 0.1rem 0.35rem;
+    border-radius: 0.2rem;
+}
+
+.git-changes-tree__action-btn:hover:not(:disabled) {
+    background: var(--bg-active);
+    color: var(--text-primary);
+}
+
+.git-changes-tree__action-btn:disabled {
+    opacity: 0.4;
+}
+
+/* Inline commit box under a staged repository row */
+.git-changes-commit-box {
+    padding-top: 0.35rem;
+    padding-bottom: 0.6rem;
+    padding-right: 0.75rem;
+}
+
+.git-changes-commit-box__message {
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-input);
+    font-size: 0.82rem;
+    resize: vertical;
+}
+
+.git-changes-commit-box__actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+}

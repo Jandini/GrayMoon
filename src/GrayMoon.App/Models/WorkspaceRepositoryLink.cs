@@ -92,4 +92,7 @@ public class WorkspaceRepositoryLink
 
     /// <summary>Persisted CI action status for this workspace-repo link. 1:1 optional.</summary>
     public WorkspaceRepositoryAction? Action { get; set; }
+
+    /// <summary>Persisted Git Changes status projection for this workspace-repo link. 1:1 optional.</summary>
+    public WorkspaceGitRepositoryStatus? GitStatus { get; set; }
 }

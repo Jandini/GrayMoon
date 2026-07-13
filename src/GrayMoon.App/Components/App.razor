@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["css/workspace-grid-search.css"]" />
     <link rel="stylesheet" href="@Assets["css/loading-overlay.css"]" />
+    <link rel="stylesheet" href="@Assets["css/git-changes.css"]" />
     <link rel="stylesheet" href="@Assets["GrayMoon.App.styles.css"]" />
     <ImportMap />
     <link rel="icon" type="image/svg+xml" href="moon.svg" />
@@ -32,6 +33,8 @@
     <script src="js/versionPatternEditor.js"></script>
     <script src="js/fileViewer.js"></script>
     <script src="js/filterSearchInput.js"></script>
+    <script src="js/git-changes-splitter.js"></script>
+    <script src="monaco/vs/loader.js"></script>
     <script src="js/infinite-scroll.js"></script>
     <script src="js/virtual-scroll.js"></script>
     <script src="js/ghaLogs.js"></script>
@@ -54,6 +57,11 @@
         window.scrollElementIntoViewById = (id) => {
             const el = document.getElementById(id);
             if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        };
+        window.scrollSelectedGitChangesRowIntoView = () => {
+            const el = document.querySelector('.git-changes-tree .git-changes-tree__row--selected');
+            if (el && el.scrollIntoView)
+                el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         };
         window.getAgentDownloadInfo = () => {
             const ua = navigator.userAgent.toLowerCase();

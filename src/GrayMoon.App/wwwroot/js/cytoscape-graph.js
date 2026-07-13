@@ -70,8 +70,7 @@ window.renderCytoscapeGraph = function (containerId, nodes, edges, roots) {
             }
         ],
         minZoom: 0.2,
-        maxZoom: 3,
-        wheelSensitivity: 0.3
+        maxZoom: 3
     });
 
     var nodeCount = (nodes || []).length;

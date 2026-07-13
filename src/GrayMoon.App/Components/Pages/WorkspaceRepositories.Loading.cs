@@ -340,19 +340,33 @@ public sealed partial class WorkspaceRepositories
             Logger.LogDebug(ex, "Reload after cancel skipped (invalid operation, e.g. circuit disposed) for workspace {WorkspaceId}", WorkspaceId);
         }
     }
-    /// <summary>Loads workspace using a new scope (fresh DbContext) so we get current DB values and avoid EF cache. Used by RefreshFromSync so the grid shows updated UnmatchedDeps after notify or Update.</summary>
+    /// <summary>Loads workspace using a new scope (fresh DbContext) so we get current DB values and avoid EF cache. Used by RefreshFromSync so the grid shows updated UnmatchedDeps after notify or Update.
+    /// Called directly from background job bodies (which survive page navigation), so a disposed page (e.g. user navigated away) must not fault the job - swallow disposal exceptions instead.</summary>
     private async Task ReloadWorkspaceDataFromFreshScopeAsync()
     {
-        var w = await ScopedExecutor.ExecuteAsync<WorkspaceRepository, Workspace?>(
-            repo => repo.GetHeaderAsync(WorkspaceId));
-        if (w == null)
+        if (_disposed) return;
+        try
         {
-            errorMessage = "Workspace not found.";
-            ClearGridState();
-            return;
+            var w = await ScopedExecutor.ExecuteAsync<WorkspaceRepository, Workspace?>(
+                repo => repo.GetHeaderAsync(WorkspaceId));
+            if (_disposed) return;
+            if (w == null)
+            {
+                errorMessage = "Workspace not found.";
+                ClearGridState();
+                return;
+            }
+            workspace = w;
+            await ResetAndLoadFromTopAsync();
         }
-        workspace = w;
-        await ResetAndLoadFromTopAsync();
+        catch (ObjectDisposedException ex)
+        {
+            Logger.LogDebug(ex, "Reload skipped (context disposed) for workspace {WorkspaceId}", WorkspaceId);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Logger.LogDebug(ex, "Reload skipped (invalid operation, e.g. circuit disposed) for workspace {WorkspaceId}", WorkspaceId);
+        }
     }
     /// <summary>Called when WorkspaceSynced is received (or after an operation): refresh header + visible rows only.</summary>
     private async Task RefreshFromSync()

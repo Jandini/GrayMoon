@@ -6,6 +6,8 @@
 
 main {
     flex: 1;
+    min-width: 0;
+    overflow-x: hidden;
     background-color: var(--bg-primary);
     display: flex;
     flex-direction: column;
@@ -13,6 +15,8 @@ main {
 
 article.content {
     position: relative;
+    min-width: 0;
+    overflow-x: hidden;
 }
 
 

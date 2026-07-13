@@ -9,4 +9,11 @@ public class AgentOptions
     public string? AppApiBaseUrl { get; set; }
     public int ListenPort { get; set; } = 9191;
     public int MaxConcurrentCommands { get; set; } = Environment.ProcessorCount * 2;
+
+    /// <summary>
+    /// Worker count for the dedicated read-only command pool (GetGitFileDiff, GetGitChangeStatus). Kept
+    /// small and separate from <see cref="MaxConcurrentCommands"/> so reads stay responsive even when the
+    /// main pool is fully occupied by long-running writes (push/update/sync).
+    /// </summary>
+    public int MaxConcurrentReadCommands { get; set; } = 4;
 }
