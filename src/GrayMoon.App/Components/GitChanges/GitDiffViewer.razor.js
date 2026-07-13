@@ -7,7 +7,7 @@
 const editors = new Map();
 let monacoReadyPromise = null;
 let headObserver = null;
-const injectedHeadNodes = [];
+const injectedHeadNodes = new Set();
 
 // Blazor's enhanced navigation reconciles <head> against the server-rendered markup on every SPA
 // navigation - including every <link>/<style> Monaco injects at runtime (its base editor.main.css,
@@ -31,6 +31,31 @@ const injectedHeadNodes = [];
 // used on each mount, re-attach any of them that enhanced navigation disconnected. Monaco itself won't
 // redo this - once window.monaco exists, ensureMonacoLoaded() never re-runs the AMD `require` that
 // injected this CSS the first time - so nothing else will put it back.
+//
+// The observer is filtered to Monaco's own signature rather than every STYLE/LINK ever added to head -
+// other libraries do this too (e.g. wwwroot/js/cytoscape.min.js, used on the Dependencies page, injects
+// its own <style id="__________cytoscape_stylesheet">), and an unfiltered observer would wrongly track
+// and could later wrongly restore those unrelated elements. Confirmed from
+// wwwroot/monaco/vs/editor/editor.main.js: Monaco's one <link> (editor.main.css) always gets
+// rel="stylesheet" plus a data-name attribute set to the AMD module id; its dynamically injected
+// <style> tags (theme colors, per-language token colors) always get type="text/css" and
+// media="screen", and never an id.
+function isMonacoHeadNode(node) {
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+        return false;
+    }
+
+    if (node.tagName === 'LINK') {
+        return node.rel === 'stylesheet' && node.hasAttribute('data-name');
+    }
+
+    if (node.tagName === 'STYLE') {
+        return node.type === 'text/css' && node.media === 'screen' && !node.id;
+    }
+
+    return false;
+}
+
 function trackHeadInjections() {
     if (headObserver) {
         return;
@@ -39,8 +64,8 @@ function trackHeadInjections() {
     headObserver = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
             mutation.addedNodes.forEach((node) => {
-                if (node.nodeType === Node.ELEMENT_NODE && (node.tagName === 'STYLE' || node.tagName === 'LINK')) {
-                    injectedHeadNodes.push(node);
+                if (isMonacoHeadNode(node)) {
+                    injectedHeadNodes.add(node);
                 }
             });
         }
@@ -191,8 +216,6 @@ function updatePaneHeadersVisibility(headersRowEl, sideBySide) {
 }
 
 export async function init(elementId, options) {
-    console.log('[GitDiffViewer] init', elementId, 'editors.size before =', editors.size, 'domDiffEditors =', document.querySelectorAll('.monaco-diff-editor').length, 'domEditors =', document.querySelectorAll('.monaco-editor').length);
-
     // Put back whatever enhanced navigation stripped from <head> before Monaco (new or already-loaded)
     // gets used again on this mount - see trackHeadInjections()/restoreHeadInjectionsIfMissing() above.
     restoreHeadInjectionsIfMissing();
@@ -336,8 +359,6 @@ export function clear(elementId) {
 }
 
 export function dispose(elementId) {
-    console.log('[GitDiffViewer] dispose called', elementId, 'hasEntry =', editors.has(elementId));
-
     const entry = editors.get(elementId);
     if (!entry) {
         return;
@@ -350,6 +371,4 @@ export function dispose(elementId) {
     entry.editor.dispose();
     disposeModels(entry);
     editors.delete(elementId);
-
-    console.log('[GitDiffViewer] dispose done', elementId, 'editors.size after =', editors.size, 'domDiffEditors =', document.querySelectorAll('.monaco-diff-editor').length);
 }
