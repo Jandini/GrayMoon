@@ -27,5 +27,7 @@ public sealed partial class WorkspaceGitChanges
 
             await _hubConnection.StartAsync();
         }
+
+        await ScrollSelectionIntoViewIfPendingAsync();
     }
 }

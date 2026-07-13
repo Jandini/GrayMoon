@@ -17,7 +17,14 @@ using Serilog.Context;
 
 namespace GrayMoon.Agent.Hosted;
 
-public sealed class JobBackgroundService(
+/// <summary>
+/// Dequeues <see cref="JobEnvelope"/> items from a queue and dispatches them via <see cref="ICommandDispatcher"/>,
+/// using a fixed-size pool of competing-consumer workers. Abstract because two differently-configured pools
+/// share this exact loop - <see cref="MainJobBackgroundService"/> (the main command queue) and
+/// <see cref="ReadJobBackgroundService"/> (the dedicated read-only command queue) - see each subclass for
+/// its queue and worker-count source.
+/// </summary>
+public abstract class JobBackgroundService(
     IJobQueue jobQueue,
     IAgentQueueTracker queueTracker,
     ICommandDispatcher dispatcher,
@@ -25,7 +32,7 @@ public sealed class JobBackgroundService(
     IHubConnectionProvider hubProvider,
     CommandJobCancellationRegistry cancellationRegistry,
     int maxConcurrent,
-    ILogger<JobBackgroundService> logger) : BackgroundService
+    ILogger logger) : BackgroundService
 {
     private readonly int _maxConcurrent = Math.Max(1, maxConcurrent);
     private const int MaxCommandStreamLineLength = 4096;

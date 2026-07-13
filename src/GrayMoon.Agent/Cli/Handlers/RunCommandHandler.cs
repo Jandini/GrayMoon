@@ -15,7 +15,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Serilog;
 using Serilog.Sinks.SystemConsole.Themes;
 
@@ -159,33 +158,8 @@ internal static class RunCommandHandler
 
         builder.Services.AddHostedService<SignalRConnectionHostedService>();
         builder.Services.AddHostedService<HookListenerHostedService>();
-
-        // Registered as two IHostedService instances of the same concrete JobBackgroundService type.
-        // Deliberately NOT using AddHostedService<JobBackgroundService>(factory) here - calling that twice
-        // for the same THostedService registers JobBackgroundService itself as a singleton twice, and
-        // because a bare GetRequiredService<JobBackgroundService>() always resolves the last-registered
-        // descriptor, both AddHostedService wrappers end up resolving (and starting) the SAME instance,
-        // silently leaving the other pool's queue with no consumer. Registering IHostedService directly
-        // avoids that indirection: IHost starts every IHostedService via GetServices<IHostedService>(),
-        // which returns one entry per descriptor regardless of them sharing a concrete type.
-        builder.Services.AddSingleton<IHostedService>(sp => new JobBackgroundService(
-            sp.GetRequiredService<IJobQueue>(),
-            sp.GetRequiredService<IAgentQueueTracker>(),
-            sp.GetRequiredService<ICommandDispatcher>(),
-            sp.GetRequiredService<INotifySyncHandler>(),
-            sp.GetRequiredService<IHubConnectionProvider>(),
-            sp.GetRequiredService<CommandJobCancellationRegistry>(),
-            sp.GetRequiredService<IOptions<AgentOptions>>().Value.MaxConcurrentCommands,
-            sp.GetRequiredService<ILogger<JobBackgroundService>>()));
-        builder.Services.AddSingleton<IHostedService>(sp => new JobBackgroundService(
-            sp.GetRequiredService<IReadJobQueue>(),
-            sp.GetRequiredService<ReadJobQueue>(),
-            sp.GetRequiredService<ICommandDispatcher>(),
-            sp.GetRequiredService<INotifySyncHandler>(),
-            sp.GetRequiredService<IHubConnectionProvider>(),
-            sp.GetRequiredService<CommandJobCancellationRegistry>(),
-            sp.GetRequiredService<IOptions<AgentOptions>>().Value.MaxConcurrentReadCommands,
-            sp.GetRequiredService<ILogger<JobBackgroundService>>()));
+        builder.Services.AddHostedService<MainJobBackgroundService>();
+        builder.Services.AddHostedService<ReadJobBackgroundService>();
 
         if (OperatingSystem.IsWindows())
             builder.Services.AddWindowsService();

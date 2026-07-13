@@ -6,6 +6,7 @@ using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.JSInterop;
 
 namespace GrayMoon.App.Components.Pages;
 
@@ -24,6 +25,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Inject] private ILogger<WorkspaceGitChanges> Logger { get; set; } = default!;
     [Inject] private IBackgroundJobService JobService { get; set; } = default!;
     [Inject] private WorkspaceGitChangesSelectionMemory SelectionMemory { get; set; } = default!;
+    [Inject] private IJSRuntime Js { get; set; } = default!;
 
     private Workspace? _workspace;
     private WorkspaceGitChangesView? _view;
@@ -33,6 +35,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private bool _isLoading = true;
     private string? _errorMessage;
     private bool _disposed;
+    private bool _scrollSelectionIntoViewPending;
 
     // Selection: the currently chosen file row (diff panel wiring lands in Stage 6 - Monaco).
     private GitChangesTreeRow? _selectedRow;
@@ -161,54 +164,103 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return;
         }
 
-        _selectedRow = null;
-        _selectedDiff = null;
-        _diffError = null;
-        SelectionMemory.Clear(WorkspaceId);
-
-        if (_diffViewerRef != null)
-        {
-            await _diffViewerRef.ClearAsync();
-        }
+        await ClearSelectionQuietlyAsync(clearMemory: true);
     }
 
     /// <summary>
     /// After a fresh page instance loads (SPA navigate-away-and-back), re-apply the circuit-scoped
     /// remembered file selection and reload its diff. Skipped when this page instance already has a
     /// selection (e.g. post-mutation reload) - ClearSelectionIfStaleAsync handles that path.
+    /// Never fails the page load: if the file was committed away outside GrayMoon (or the diff cannot
+    /// be loaded), selection and memory are cleared quietly.
     /// </summary>
     private async Task TryRestoreSelectionAsync()
     {
-        if (_selectedRow is { Kind: GitChangesTreeRowKind.File })
+        try
         {
-            return;
-        }
+            if (_disposed || _selectedRow is { Kind: GitChangesTreeRowKind.File })
+            {
+                return;
+            }
 
-        if (!SelectionMemory.TryGet(WorkspaceId, out var remembered))
+            if (!SelectionMemory.TryGet(WorkspaceId, out var remembered))
+            {
+                return;
+            }
+
+            if (!SelectionStillExists(remembered.WorkspaceRepositoryId, remembered.FilePath, remembered.IsStagedSection))
+            {
+                SelectionMemory.Clear(WorkspaceId);
+                return;
+            }
+
+            EnsureAncestorsExpanded(remembered.FilePath, remembered.WorkspaceRepositoryId, remembered.IsStagedSection);
+
+            var row = FindFileRow(remembered.WorkspaceRepositoryId, remembered.FilePath, remembered.IsStagedSection);
+            if (row == null)
+            {
+                // Still in the view but not rendered (active filter) - keep memory for a later visit.
+                return;
+            }
+
+            _selectedRow = row;
+            _scrollSelectionIntoViewPending = true;
+            await LoadDiffAsync(row);
+
+            if (_disposed)
+            {
+                return;
+            }
+
+            // Diff failed (agent offline, path gone after an external commit, etc.) - drop auto-selection
+            // so the page stays on the empty "Select a file" placeholder instead of a stuck error pane.
+            if (_diffError != null || _selectedDiff == null)
+            {
+                await ClearSelectionQuietlyAsync(clearMemory: true);
+            }
+        }
+        catch (Exception ex)
         {
-            return;
+            Logger.LogWarning(ex, "Failed to restore Git Changes selection for workspace {WorkspaceId}", WorkspaceId);
+            try
+            {
+                await ClearSelectionQuietlyAsync(clearMemory: true);
+            }
+            catch (Exception clearEx)
+            {
+                Logger.LogDebug(clearEx, "Failed to clear selection after restore failure");
+            }
         }
+    }
 
-        if (!SelectionStillExists(remembered.WorkspaceRepositoryId, remembered.FilePath, remembered.IsStagedSection))
-        {
-            SelectionMemory.Clear(WorkspaceId);
-            return;
-        }
-
-        var row = _rows.FirstOrDefault(r =>
+    private GitChangesTreeRow? FindFileRow(int workspaceRepositoryId, string filePath, bool isStagedSection) =>
+        _rows.FirstOrDefault(r =>
             r.Kind == GitChangesTreeRowKind.File
-            && r.WorkspaceRepositoryId == remembered.WorkspaceRepositoryId
-            && r.FilePath == remembered.FilePath
-            && r.IsStagedSection == remembered.IsStagedSection);
+            && r.WorkspaceRepositoryId == workspaceRepositoryId
+            && r.FilePath == filePath
+            && r.IsStagedSection == isStagedSection);
 
-        if (row == null)
+    /// <summary>
+    /// Expands any collapsed section/repo/folder ancestors so a restored file row is present in _rows
+    /// and can be scrolled into view.
+    /// </summary>
+    private void EnsureAncestorsExpanded(string filePath, int workspaceRepositoryId, bool isStagedSection)
+    {
+        var section = isStagedSection ? "staged" : "changed";
+        var current = $"{section}/{workspaceRepositoryId}";
+        var expanded = _collapsedKeys.Remove(section) | _collapsedKeys.Remove(current);
+
+        var segments = filePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < segments.Length - 1; i++)
         {
-            // Still valid in the view but not in rendered rows (e.g. filter) - leave memory intact.
-            return;
+            current = $"{current}/{segments[i]}";
+            expanded |= _collapsedKeys.Remove(current);
         }
 
-        _selectedRow = row;
-        await LoadDiffAsync(row);
+        if (expanded)
+        {
+            RebuildRows();
+        }
     }
 
     private bool SelectionStillExists(int workspaceRepositoryId, string filePath, bool isStagedSection)
@@ -216,6 +268,47 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         var repo = _view?.Repositories.FirstOrDefault(r => r.WorkspaceRepositoryId == workspaceRepositoryId);
         return repo != null && repo.Changes.Any(c =>
             c.Path == filePath && (isStagedSection ? c.IsStaged : c.IsChanged));
+    }
+
+    private async Task ClearSelectionQuietlyAsync(bool clearMemory)
+    {
+        _selectedRow = null;
+        _selectedDiff = null;
+        _diffError = null;
+        _scrollSelectionIntoViewPending = false;
+
+        if (clearMemory)
+        {
+            SelectionMemory.Clear(WorkspaceId);
+        }
+
+        if (_diffViewerRef != null)
+        {
+            await _diffViewerRef.ClearAsync();
+        }
+    }
+
+    private async Task ScrollSelectionIntoViewIfPendingAsync()
+    {
+        if (!_scrollSelectionIntoViewPending || _disposed || _selectedRow is not { Kind: GitChangesTreeRowKind.File })
+        {
+            return;
+        }
+
+        _scrollSelectionIntoViewPending = false;
+
+        try
+        {
+            await Js.InvokeVoidAsync("scrollSelectedGitChangesRowIntoView");
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit gone - nothing to scroll.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to scroll restored Git Changes selection into view");
+        }
     }
 
     private void OnFilterChanged(string value)
