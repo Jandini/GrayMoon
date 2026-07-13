@@ -54,7 +54,13 @@
 
     function onWrapActivated(e) {
 
-        const wrap = e.target.closest(TOOLTIP_SELECTOR);
+        const target = e.target;
+
+        const el = target instanceof Element ? target : target?.parentElement;
+
+        if (!el) return;
+
+        const wrap = el.closest(TOOLTIP_SELECTOR);
 
         if (wrap) positionTooltip(wrap);
 

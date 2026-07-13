@@ -23,6 +23,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Inject] private NavigationManager NavigationManager { get; set; } = default!;
     [Inject] private ILogger<WorkspaceGitChanges> Logger { get; set; } = default!;
     [Inject] private IBackgroundJobService JobService { get; set; } = default!;
+    [Inject] private WorkspaceGitChangesSelectionMemory SelectionMemory { get; set; } = default!;
 
     private Workspace? _workspace;
     private WorkspaceGitChangesView? _view;
@@ -86,6 +87,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             _workspace = await DbContext.Workspaces.AsNoTracking().FirstOrDefaultAsync(w => w.WorkspaceId == WorkspaceId);
             _view = await ReadService.GetWorkspaceAsync(WorkspaceId, CancellationToken.None);
             RebuildRows();
+            await TryRestoreSelectionAsync();
             await ClearSelectionIfStaleAsync();
         }
         catch (Exception ex)
@@ -154,11 +156,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return;
         }
 
-        var repo = _view?.Repositories.FirstOrDefault(r => r.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
-        var stillExists = repo != null && repo.Changes.Any(c =>
-            c.Path == row.FilePath && (row.IsStagedSection ? c.IsStaged : c.IsChanged));
-
-        if (stillExists)
+        if (SelectionStillExists(row.WorkspaceRepositoryId, row.FilePath!, row.IsStagedSection))
         {
             return;
         }
@@ -166,11 +164,58 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         _selectedRow = null;
         _selectedDiff = null;
         _diffError = null;
+        SelectionMemory.Clear(WorkspaceId);
 
         if (_diffViewerRef != null)
         {
             await _diffViewerRef.ClearAsync();
         }
+    }
+
+    /// <summary>
+    /// After a fresh page instance loads (SPA navigate-away-and-back), re-apply the circuit-scoped
+    /// remembered file selection and reload its diff. Skipped when this page instance already has a
+    /// selection (e.g. post-mutation reload) - ClearSelectionIfStaleAsync handles that path.
+    /// </summary>
+    private async Task TryRestoreSelectionAsync()
+    {
+        if (_selectedRow is { Kind: GitChangesTreeRowKind.File })
+        {
+            return;
+        }
+
+        if (!SelectionMemory.TryGet(WorkspaceId, out var remembered))
+        {
+            return;
+        }
+
+        if (!SelectionStillExists(remembered.WorkspaceRepositoryId, remembered.FilePath, remembered.IsStagedSection))
+        {
+            SelectionMemory.Clear(WorkspaceId);
+            return;
+        }
+
+        var row = _rows.FirstOrDefault(r =>
+            r.Kind == GitChangesTreeRowKind.File
+            && r.WorkspaceRepositoryId == remembered.WorkspaceRepositoryId
+            && r.FilePath == remembered.FilePath
+            && r.IsStagedSection == remembered.IsStagedSection);
+
+        if (row == null)
+        {
+            // Still valid in the view but not in rendered rows (e.g. filter) - leave memory intact.
+            return;
+        }
+
+        _selectedRow = row;
+        await LoadDiffAsync(row);
+    }
+
+    private bool SelectionStillExists(int workspaceRepositoryId, string filePath, bool isStagedSection)
+    {
+        var repo = _view?.Repositories.FirstOrDefault(r => r.WorkspaceRepositoryId == workspaceRepositoryId);
+        return repo != null && repo.Changes.Any(c =>
+            c.Path == filePath && (isStagedSection ? c.IsStaged : c.IsChanged));
     }
 
     private void OnFilterChanged(string value)
@@ -202,6 +247,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         _selectedRow = row;
+        SelectionMemory.Set(WorkspaceId, new WorkspaceGitChangesSelectionMemory.Selection(
+            row.WorkspaceRepositoryId, row.FilePath!, row.IsStagedSection));
         _ = LoadDiffAsync(row);
     }
 
