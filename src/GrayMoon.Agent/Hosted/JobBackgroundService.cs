@@ -13,7 +13,6 @@ using Microsoft.AspNetCore.SignalR.Client;
 using Polly;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Serilog.Context;
 
 namespace GrayMoon.Agent.Hosted;
@@ -25,10 +24,10 @@ public sealed class JobBackgroundService(
     INotifySyncHandler notifySyncHandler,
     IHubConnectionProvider hubProvider,
     CommandJobCancellationRegistry cancellationRegistry,
-    IOptions<AgentOptions> options,
+    int maxConcurrent,
     ILogger<JobBackgroundService> logger) : BackgroundService
 {
-    private readonly int _maxConcurrent = Math.Max(1, options.Value.MaxConcurrentCommands);
+    private readonly int _maxConcurrent = Math.Max(1, maxConcurrent);
     private const int MaxCommandStreamLineLength = 4096;
     private readonly ResiliencePipeline _responseSendPipeline = ResponseCommandSendPipeline.Create(logger);
 

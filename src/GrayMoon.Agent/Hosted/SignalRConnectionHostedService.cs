@@ -28,11 +28,16 @@ internal sealed class FiveSecondRetryPolicy : IRetryPolicy
 public sealed class SignalRConnectionHostedService(
     IHubConnectionProvider hubProvider,
     IJobQueue jobQueue,
+    IReadJobQueue readJobQueue,
     CommandJobFactory commandJobFactory,
     CommandJobCancellationRegistry cancellationRegistry,
     IOptions<AgentOptions> options,
     ILogger<SignalRConnectionHostedService> logger) : IHostedService, IAsyncDisposable
 {
+    /// <summary>Commands that only read repository state (never touch the index or working tree) and can
+    /// run on the dedicated read pool instead of queuing behind long-running writes.</summary>
+    private static readonly HashSet<string> ReadOnlyCommands = ["GetGitFileDiff", "GetGitChangeStatus"];
+
     private readonly AgentOptions _options = options.Value;
     private HubConnection? _connection;
     private CancellationTokenSource? _hostCts;
@@ -91,7 +96,8 @@ public sealed class SignalRConnectionHostedService(
                 }
 
                 var envelope = commandJobFactory.CreateCommandJob(requestId, command, args);
-                await jobQueue.EnqueueAsync(envelope, jobCts.Token);
+                var targetQueue = ReadOnlyCommands.Contains(command) ? (IJobQueue)readJobQueue : jobQueue;
+                await targetQueue.EnqueueAsync(envelope, jobCts.Token);
             }
             catch (OperationCanceledException)
             {

@@ -24,10 +24,11 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
 
         var (exitCode, stdout, stderr) = await runner.RunAsync(
             "git",
-            ["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all"],
+            ["--no-optional-locks", "status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all"],
             repoPath,
             null,
-            cancellationToken);
+            cancellationToken,
+            GitLockIntent.Read);
 
         if (exitCode != 0)
         {
@@ -434,7 +435,7 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
 
     private async Task<string?> ResolveGitDirAsync(string repoPath, CancellationToken cancellationToken)
     {
-        var (exitCode, stdout, _) = await runner.RunAsync("git", ["rev-parse", "--git-dir"], repoPath, null, cancellationToken);
+        var (exitCode, stdout, _) = await runner.RunAsync("git", ["--no-optional-locks", "rev-parse", "--git-dir"], repoPath, null, cancellationToken, GitLockIntent.Read);
         if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
         {
             return null;
@@ -447,10 +448,10 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
     private async Task<bool> IsBinaryAsync(string repoPath, string relativePath, GitDiffComparison comparison, CancellationToken cancellationToken)
     {
         string[] args = comparison == GitDiffComparison.Staged
-            ? ["diff", "--cached", "--numstat", "--", relativePath]
-            : ["diff", "--numstat", "--", relativePath];
+            ? ["--no-optional-locks", "diff", "--cached", "--numstat", "--", relativePath]
+            : ["--no-optional-locks", "diff", "--numstat", "--", relativePath];
 
-        var (exitCode, stdout, _) = await runner.RunAsync("git", args, repoPath, null, cancellationToken);
+        var (exitCode, stdout, _) = await runner.RunAsync("git", args, repoPath, null, cancellationToken, GitLockIntent.Read);
         if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
         {
             return false;
@@ -480,7 +481,7 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
 
     private async Task<long?> GetBlobSizeAsync(string repoPath, string objectSpec, CancellationToken cancellationToken)
     {
-        var (exitCode, stdout, _) = await runner.RunAsync("git", ["cat-file", "-s", objectSpec], repoPath, null, cancellationToken);
+        var (exitCode, stdout, _) = await runner.RunAsync("git", ["--no-optional-locks", "cat-file", "-s", objectSpec], repoPath, null, cancellationToken, GitLockIntent.Read);
         if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
         {
             return null;
@@ -491,13 +492,13 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
 
     private async Task<string?> ShowIndexContentAsync(string repoPath, string relativePath, CancellationToken cancellationToken)
     {
-        var (exitCode, stdout, _) = await runner.RunAsync("git", ["show", $":0:{relativePath}"], repoPath, null, cancellationToken);
+        var (exitCode, stdout, _) = await runner.RunAsync("git", ["--no-optional-locks", "show", $":0:{relativePath}"], repoPath, null, cancellationToken, GitLockIntent.Read);
         return exitCode == 0 ? stdout ?? string.Empty : null;
     }
 
     private async Task<string?> ShowRefContentAsync(string repoPath, string refName, string relativePath, CancellationToken cancellationToken)
     {
-        var (exitCode, stdout, _) = await runner.RunAsync("git", ["show", $"{refName}:{relativePath}"], repoPath, null, cancellationToken);
+        var (exitCode, stdout, _) = await runner.RunAsync("git", ["--no-optional-locks", "show", $"{refName}:{relativePath}"], repoPath, null, cancellationToken, GitLockIntent.Read);
         return exitCode == 0 ? stdout ?? string.Empty : null;
     }
 
