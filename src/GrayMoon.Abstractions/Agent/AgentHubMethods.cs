@@ -31,4 +31,7 @@ public static class AgentHubMethods
 
     /// <summary>App → Agent: check configured version files and return per-line staleness (read-only, no file writes).</summary>
     public const string CheckFileVersions = "CheckFileVersions";
+
+    /// <summary>Agent → App: an unsolicited Git Changes status snapshot for one repository (watcher-driven or post-mutation refresh).</summary>
+    public const string GitChangesSnapshotUpdated = "GitChangesSnapshotUpdated";
 }

@@ -1,0 +1,82 @@
+@namespace GrayMoon.App.Components.GitChanges
+@using GrayMoon.App.Models
+@using GrayMoon.App.Services.GitChanges
+
+<div class="workspace-repos-header git-changes-header">
+    <div class="workspace-repos-title-row">
+        <h2 class="workspace-repos-title">Changes</h2>
+        <p class="text-muted mb-0 workspace-repos-subtitle git-changes-header__summary" title="@BranchTooltip">
+            @Summary
+        </p>
+        @if (!string.IsNullOrEmpty(StatusText))
+        {
+            <span class="text-muted small git-changes-header__status">
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                @StatusText
+            </span>
+        }
+        <span class="workspace-repos-title-spacer"></span>
+    </div>
+</div>
+
+@code {
+    [Parameter] public WorkspaceGitChangesView? View { get; set; }
+
+    /// <summary>Non-blocking status text (e.g. an automatic warm-up scan in progress). Never used for
+    /// user-triggered operations - those get the full LoadingOverlay via BackgroundJobService instead.</summary>
+    [Parameter] public string? StatusText { get; set; }
+
+    private string Summary
+    {
+        get
+        {
+            if (View == null || View.Repositories.Count == 0)
+            {
+                return "No changed repositories.";
+            }
+
+            var repoCount = View.Repositories.Count;
+            var changedRepoCount = View.Repositories.Count(r => r.StagedCount > 0 || r.ChangedCount > 0);
+            var staged = View.Repositories.Sum(r => r.StagedCount);
+            var changed = View.Repositories.Sum(r => r.ChangedCount);
+
+            return $"{changedRepoCount} of {repoCount} {(repoCount == 1 ? "repository" : "repositories")} | {staged} staged | {changed} changed | {BranchLabel}";
+        }
+    }
+
+    private string BranchLabel
+    {
+        get
+        {
+            var branches = (View?.Repositories ?? [])
+                .Select(r => r.BranchName)
+                .Where(b => !string.IsNullOrWhiteSpace(b))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return branches.Count switch
+            {
+                0 => "-",
+                1 => branches[0]!,
+                _ => "multiple",
+            };
+        }
+    }
+
+    private string BranchTooltip
+    {
+        get
+        {
+            if (View == null)
+            {
+                return string.Empty;
+            }
+
+            var byBranch = View.Repositories
+                .GroupBy(r => string.IsNullOrWhiteSpace(r.BranchName) ? "(detached)" : r.BranchName!)
+                .OrderByDescending(g => g.Count());
+
+            return string.Join('\n', byBranch.Select(g => $"{g.Key}: {g.Count()}"));
+        }
+    }
+}

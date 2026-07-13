@@ -25,7 +25,7 @@
                     {
                         var (nodeCount, edgeCount) = GetFilteredCounts();
                         var searchNote = HasSearchFilter ? " - matching search" : "";
-                        <span>@($"{nodeCount} repositories, {edgeCount} dependencies{searchNote}")</span>
+                        <span>@($"{nodeCount} repositories | {edgeCount} dependencies{searchNote}")</span>
                     }
                     else if (!isLoading && workspace != null && graph != null && graph.Nodes.Count == 0)
                     {

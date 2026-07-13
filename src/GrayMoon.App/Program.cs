@@ -7,9 +7,11 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.GitChanges;
 using GrayMoon.App.Services.Queries;
 using GrayMoon.App.Services.Security;
 using GrayMoon.Common;
+using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -31,6 +33,7 @@ try
     builder.Configuration.AddEnvironmentVariables();
 
     builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection("Workspace"));
+    builder.Services.Configure<GitChangesOptions>(builder.Configuration.GetSection("GitChanges"));
 
     // Add services to the container.
     builder.Services.AddRazorComponents()
@@ -109,6 +112,13 @@ try
     builder.Services.AddScoped<IWorkspacePageService, WorkspacePageService>();
     builder.Services.AddScoped<IWorkspaceTopBarService, WorkspaceTopBarService>();
 
+    builder.Services.AddScoped<IWorkspaceGitChangesReadService, WorkspaceGitChangesReadService>();
+    builder.Services.AddScoped<IGitChangesAgentClient, GitChangesAgentClient>();
+    builder.Services.AddScoped<GitChangesSnapshotPushHandler>();
+    builder.Services.AddScoped<WorkspaceGitChangesSelectionMemory>();
+    builder.Services.AddSingleton<IWorkspaceGitChangesActivityTracker, WorkspaceGitChangesActivityTracker>();
+    builder.Services.AddSingleton<IGitChangesWorkspaceScanner, GitChangesWorkspaceScanner>();
+
     builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
     builder.Services.AddSingleton<IScopedServiceExecutor, ScopedServiceExecutor>();
 
@@ -122,6 +132,9 @@ try
     builder.Services.AddSingleton<AgentSyncNotificationQueue>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentSyncNotificationQueue>());
     builder.Services.AddHostedService<TokenHealthBackgroundService>();
+    builder.Services.AddSingleton<WorkspaceGitChangesWriteQueue>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkspaceGitChangesWriteQueue>());
+    builder.Services.AddHostedService<GitChangesMonitoringBackgroundService>();
 
     // Connector services
     builder.Services.AddTransient<GitHubOverlayLoggingHandler>();

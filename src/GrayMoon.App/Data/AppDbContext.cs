@@ -19,6 +19,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<WorkspaceFileLineStatus> WorkspaceFileLineStatuses => Set<WorkspaceFileLineStatus>();
     public DbSet<WorkspaceRepositoryCustomDependency> WorkspaceRepositoryCustomDependencies => Set<WorkspaceRepositoryCustomDependency>();
     public DbSet<Setting> Settings => Set<Setting>();
+    public DbSet<WorkspaceGitRepositoryStatus> WorkspaceGitRepositoryStatuses => Set<WorkspaceGitRepositoryStatus>();
+    public DbSet<WorkspaceGitChangeEntry> WorkspaceGitChangeEntries => Set<WorkspaceGitChangeEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -173,6 +175,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasOne(wr => wr.Action)
                 .WithOne(a => a.WorkspaceRepository)
                 .HasForeignKey<WorkspaceRepositoryAction>(a => a.WorkspaceRepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(wr => wr.GitStatus)
+                .WithOne(s => s.WorkspaceRepository)
+                .HasForeignKey<WorkspaceGitRepositoryStatus>(s => s.WorkspaceRepositoryId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -370,6 +377,37 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasIndex(s => s.Key).IsUnique();
             entity.Property(s => s.Key).IsRequired().HasMaxLength(200);
             entity.Property(s => s.Value).HasMaxLength(2000);
+        });
+
+        modelBuilder.Entity<WorkspaceGitRepositoryStatus>(entity =>
+        {
+            entity.ToTable("WorkspaceGitRepositoryStatus");
+            entity.HasKey(s => s.WorkspaceRepositoryId);
+
+            entity.Property(s => s.BranchName).HasMaxLength(200);
+            entity.Property(s => s.HeadCommit).HasMaxLength(64);
+            entity.Property(s => s.LastErrorCode).HasMaxLength(100);
+            entity.Property(s => s.LastErrorMessage).HasMaxLength(2000);
+        });
+
+        modelBuilder.Entity<WorkspaceGitChangeEntry>(entity =>
+        {
+            entity.ToTable("WorkspaceGitChangeEntries");
+            entity.HasKey(e => e.WorkspaceGitChangeEntryId);
+            entity.Property(e => e.WorkspaceGitChangeEntryId).ValueGeneratedOnAdd();
+
+            entity.HasIndex(e => e.WorkspaceRepositoryId)
+                .HasDatabaseName("IX_WorkspaceGitChangeEntries_WorkspaceRepositoryId");
+
+            entity.Property(e => e.Path).IsRequired().HasMaxLength(2000);
+            entity.Property(e => e.OriginalPath).HasMaxLength(2000);
+            entity.Property(e => e.IndexChange).HasConversion<int>();
+            entity.Property(e => e.WorktreeChange).HasConversion<int>();
+
+            entity.HasOne<WorkspaceRepositoryLink>()
+                .WithMany()
+                .HasForeignKey(e => e.WorkspaceRepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
