@@ -6,10 +6,10 @@
     var (text, bgColor) = Status.Value switch
     {
         RepoSyncStatus.InSync => ("in sync", "#0e639c"),
-        RepoSyncStatus.NeedsSync => ("sync", "#dc3545"),
+        RepoSyncStatus.NeedsSync => ("sync", "#a50c1b"),
         RepoSyncStatus.NotCloned => ("not cloned", "#6c757d"),
-        RepoSyncStatus.VersionMismatch => ("version", "#dc3545"),
-        RepoSyncStatus.Error => ("error", "#dc3545"),
+        RepoSyncStatus.VersionMismatch => ("version", "#a50c1b"),
+        RepoSyncStatus.Error => ("error", "#a50c1b"),
         _ => ("sync", "#6c757d")
     };
     var needsSync = Status.Value != RepoSyncStatus.InSync;
