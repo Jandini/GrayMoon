@@ -76,7 +76,7 @@
                             else
                             {
                                 <button type="button"
-                                        class="btn btn-sm btn-outline-primary"
+                                        class="@(string.IsNullOrWhiteSpace(_workspaceCommitMessage) ? "btn btn-sm btn-outline-primary" : "btn btn-sm btn-primary")"
                                         disabled="@(IsJobRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
                                         title="Stages all changes then creates one commit in each repository using the same message."
                                         @onclick="() => CommitWorkspaceAsync(stagedOnly: false)">

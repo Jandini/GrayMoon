@@ -28,6 +28,9 @@ public sealed record GitChangesTreeRow
     public int WorkspaceRepositoryId { get; init; }
     public string? RepositoryName { get; init; }
 
+    /// <summary>Current branch name. Set only on Repository rows.</summary>
+    public string? BranchName { get; init; }
+
     /// <summary>Repository-relative path. Set only on File rows.</summary>
     public string? FilePath { get; init; }
     public string? OriginalPath { get; init; }
@@ -126,6 +129,7 @@ public static class GitChangesTreeBuilder
                 IsStagedSection = isStagedSection,
                 WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
                 RepositoryName = repo.RepositoryName,
+                BranchName = repo.BranchName,
                 HasChildren = true,
                 IsExpanded = repoExpanded,
             });

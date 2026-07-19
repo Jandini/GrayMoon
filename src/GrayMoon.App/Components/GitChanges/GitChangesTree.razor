@@ -34,10 +34,21 @@
                 </span>
 
                 <span class="git-changes-tree__label" @onclick="() => OnLabelClick(row)">
-                    @row.Label
-                    @if (row.Kind == GitChangesTreeRowKind.File && !string.IsNullOrEmpty(row.OriginalPath))
+                    @if (row.Kind == GitChangesTreeRowKind.Repository)
                     {
-                        <span class="git-changes-tree__rename-from text-muted">&larr; @row.OriginalPath</span>
+                        <span class="git-changes-tree__repo-name">@row.Label</span>
+                        @if (!string.IsNullOrEmpty(row.BranchName))
+                        {
+                            <span class="git-changes-tree__repo-branch" title="@row.BranchName">@row.BranchName</span>
+                        }
+                    }
+                    else
+                    {
+                        @row.Label
+                        @if (row.Kind == GitChangesTreeRowKind.File && !string.IsNullOrEmpty(row.OriginalPath))
+                        {
+                            <span class="git-changes-tree__rename-from text-muted">&larr; @row.OriginalPath</span>
+                        }
                     }
                 </span>
 

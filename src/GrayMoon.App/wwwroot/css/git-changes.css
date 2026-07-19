@@ -372,6 +372,35 @@
     cursor: pointer;
 }
 
+/* Repository rows lay out name + branch as siblings so the branch can truncate
+   independently while the repository name stays the primary, higher-priority label. */
+.git-changes-tree__row--repository .git-changes-tree__label {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+}
+
+.git-changes-tree__repo-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.git-changes-tree__repo-branch {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-secondary);
+    font-weight: 400;
+    font-size: 0.78rem;
+    opacity: 0.85;
+}
+
 .git-changes-tree__rename-from {
     margin-left: 0.4rem;
     font-size: 0.78rem;
