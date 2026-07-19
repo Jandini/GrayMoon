@@ -29,6 +29,7 @@ public sealed class SignalRConnectionHostedService(
     IHubConnectionProvider hubProvider,
     IJobQueue jobQueue,
     IReadJobQueue readJobQueue,
+    IDiffJobQueue diffJobQueue,
     CommandJobFactory commandJobFactory,
     CommandJobCancellationRegistry cancellationRegistry,
     IOptions<AgentOptions> options,
@@ -36,7 +37,12 @@ public sealed class SignalRConnectionHostedService(
 {
     /// <summary>Commands that only read repository state (never touch the index or working tree) and can
     /// run on the dedicated read pool instead of queuing behind long-running writes.</summary>
-    private static readonly HashSet<string> ReadOnlyCommands = ["GetGitFileDiff", "GetGitChangeStatus"];
+    private static readonly HashSet<string> ReadOnlyCommands = ["GetGitChangeStatus"];
+
+    /// <summary>Diff commands get their own dedicated pool, separate from <see cref="ReadOnlyCommands"/>,
+    /// so opening a diff never queues behind a workspace status rescan (which can fan out many
+    /// GetGitChangeStatus calls) or any other command.</summary>
+    private static readonly HashSet<string> DiffCommands = ["GetGitFileDiff"];
 
     private readonly AgentOptions _options = options.Value;
     private HubConnection? _connection;
@@ -96,7 +102,9 @@ public sealed class SignalRConnectionHostedService(
                 }
 
                 var envelope = commandJobFactory.CreateCommandJob(requestId, command, args);
-                var targetQueue = ReadOnlyCommands.Contains(command) ? (IJobQueue)readJobQueue : jobQueue;
+                var targetQueue = DiffCommands.Contains(command)
+                    ? (IJobQueue)diffJobQueue
+                    : ReadOnlyCommands.Contains(command) ? (IJobQueue)readJobQueue : jobQueue;
                 await targetQueue.EnqueueAsync(envelope, jobCts.Token);
             }
             catch (OperationCanceledException)
