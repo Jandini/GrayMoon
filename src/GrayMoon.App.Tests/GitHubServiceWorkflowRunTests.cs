@@ -28,7 +28,7 @@ public sealed class GitHubServiceWorkflowRunTests
         var handler = new RecordingHandler();
         var httpClient = new HttpClient(handler);
         var configuration = new ConfigurationBuilder().Build();
-        var service = new GitHubService(httpClient, configuration, NullLogger<GitHubService>.Instance);
+        var service = new GitHubService(httpClient, configuration, new GitHubRateLimitTracker(), NullLogger<GitHubService>.Instance);
         return (service, handler);
     }
 

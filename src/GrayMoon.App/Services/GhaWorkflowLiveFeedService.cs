@@ -9,33 +9,31 @@ namespace GrayMoon.App.Services;
 public sealed class GhaWorkflowLiveFeedService(
     GitHubService gitHubService,
     ConnectorRepository connectorRepository,
+    IGitHubRateLimitTracker rateLimitTracker,
     ILogger<GhaWorkflowLiveFeedService> logger)
 {
     public const int PollIntervalActiveMs = 2_000;
     public const int PollIntervalWaitingJobsMs = 3_000;
     public const int PollIntervalIdleMs = 15_000;
 
-    // Shared across all terminals in the same circuit — one 429 pauses all of them.
-    private DateTimeOffset? _rateLimitedUntil;
-
     public async Task<GhaWorkflowLiveFeedUpdate> PollOnceAsync(
         GhaWorkflowLiveFeedState state,
         CancellationToken cancellationToken)
     {
-        // Gate: skip the API call while rate-limited; stagger per-RunId so terminals don't all resume simultaneously.
-        if (_rateLimitedUntil.HasValue)
+        // Gate: skip the API call while rate-limited. Shared per connector via IGitHubRateLimitTracker (not a
+        // per-instance field) so a 429 hit by one poller (this terminal, another terminal, or push discovery -
+        // which resolves its own GhaWorkflowLiveFeedService in a separate DI scope) pauses every poller for
+        // that connector. Stagger per-RunId so terminals don't all resume simultaneously.
+        var pausedUntil = rateLimitTracker.GetPausedUntil(state.ConnectorName);
+        if (pausedUntil.HasValue)
         {
-            var remaining = (int)(_rateLimitedUntil.Value - DateTimeOffset.UtcNow).TotalMilliseconds;
-            if (remaining > 0)
-            {
-                var jitter = (int)(state.RunId % 2_000);
-                return new GhaWorkflowLiveFeedUpdate(
-                    Caption: state.LastCaption,
-                    StepProgress: state.LastStepProgress,
-                    NewLines: [],
-                    DelayMs: Math.Min(remaining + jitter, 60_000));
-            }
-            _rateLimitedUntil = null;
+            var remaining = (int)(pausedUntil.Value - DateTimeOffset.UtcNow).TotalMilliseconds;
+            var jitter = (int)(state.RunId % 2_000);
+            return new GhaWorkflowLiveFeedUpdate(
+                Caption: state.LastCaption,
+                StepProgress: state.LastStepProgress,
+                NewLines: [],
+                DelayMs: Math.Min(Math.Max(remaining, 0) + jitter, 60_000));
         }
 
         try
@@ -118,7 +116,7 @@ public sealed class GhaWorkflowLiveFeedService(
                 var resumeAt = resetEpoch.HasValue
                     ? DateTimeOffset.FromUnixTimeSeconds(resetEpoch.Value).AddSeconds(5)
                     : DateTimeOffset.UtcNow.AddSeconds(60);
-                _rateLimitedUntil = resumeAt;
+                rateLimitTracker.PauseUntil(state.ConnectorName, resumeAt);
                 var waitMs = (int)Math.Clamp((resumeAt - DateTimeOffset.UtcNow).TotalMilliseconds, 60_000, 600_000);
                 var jitter = (int)(state.RunId % 2_000);
                 var label = resetEpoch.HasValue

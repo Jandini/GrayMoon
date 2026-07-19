@@ -76,6 +76,7 @@ try
     builder.Services.AddSingleton<MatrixOverlayPreferenceService>();
     builder.Services.AddSingleton<CommandTerminalOverlayPreferenceService>();
     builder.Services.AddSingleton<LoadingOverlayUiSettingsService>();
+    builder.Services.AddSingleton<IGitHubRateLimitTracker, GitHubRateLimitTracker>();
     builder.Services.AddScoped<SyncCommandHandler>();
     builder.Services.AddScoped<IAgentBridge, AgentBridge>();
     builder.Services.AddScoped<WorkspaceService>();
@@ -85,6 +86,7 @@ try
     builder.Services.AddScoped<IRepositoryListQueryService, RepositoryListQueryService>();
     builder.Services.AddScoped<IWorkspaceProjectListQueryService, WorkspaceProjectListQueryService>();
     builder.Services.AddScoped<IWorkspaceRepositoryLinkListQueryService, WorkspaceRepositoryLinkListQueryService>();
+    builder.Services.AddMemoryCache();
     builder.Services.AddScoped<GitHubActionsService>();
     builder.Services.AddScoped<GhaWorkflowLiveFeedService>();
     builder.Services.AddScoped<GitHubPullRequestService>();
