@@ -61,6 +61,9 @@ public sealed partial class WorkspaceActions : IDisposable
     private bool isRerunningAll;
     private int _rerunTotal;
     private volatile int _rerunCompleted;
+
+    /// <summary>Verb shown in <see cref="RerunAllOverlayMessage"/> for whichever bulk operation is in flight ("Re-running" vs "Starting").</summary>
+    private string _bulkOperationVerb = "Re-running";
     private CancellationTokenSource _cts = new();
     private HubConnection? _hubConnection;
     private CancellationTokenSource? _syncDebounceCts;
@@ -92,7 +95,17 @@ public sealed partial class WorkspaceActions : IDisposable
     private string? _logsWorkflowName;
 
     private bool _rerunMenuOpen;
-    private WorkflowActionLine? _openRerunMenuLine;
+
+    /// <summary>
+    /// Latch key (see <see cref="GetLineLatchKey"/>) of the per-row Run-again menu currently open, or null when none is.
+    /// The menu itself is rendered with <c>position: fixed</c> at <see cref="_rerunLineMenuTop"/>/<see cref="_rerunLineMenuLeft"/>
+    /// (captured from the click event) rather than anchored via CSS to its trigger button, because the actions grid's
+    /// scrollable <c>tbody</c> (and its ancestors) clip absolutely-positioned overflow - see WorkspaceActions.razor.css.
+    /// </summary>
+    private long? _openRerunLineMenuKey;
+
+    private double _rerunLineMenuTop;
+    private double _rerunLineMenuLeft;
 
     private enum ActionLineFilterBucket
     {
@@ -106,6 +119,10 @@ public sealed partial class WorkspaceActions : IDisposable
     internal bool HasFailedRows => rows.Any(row =>
         row.WorkflowLines.Any(line =>
             IsLineFailedForBranch(row, line)));
+
+    /// <summary>True when at least one failed workflow (anywhere in the grid) also supports workflow_dispatch, so the bulk "Run again" option has something to act on.</summary>
+    internal bool HasFailedRowsSupportingRunAgain => rows.Any(row =>
+        row.WorkflowLines.Any(line => CanRunAgain(row, line)));
 
     internal int ErrorCount => rows.Count(r => !string.IsNullOrWhiteSpace(r.ErrorMessage));
 
@@ -126,8 +143,8 @@ public sealed partial class WorkspaceActions : IDisposable
 
     internal string RerunAllOverlayMessage =>
         _rerunCompleted == 0
-            ? "Re-running actions..."
-            : $"Re-running {_rerunCompleted} of {_rerunTotal}";
+            ? $"{_bulkOperationVerb} actions..."
+            : $"{_bulkOperationVerb} {_rerunCompleted} of {_rerunTotal}";
 
     internal bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
 
@@ -235,17 +252,40 @@ public sealed partial class WorkspaceActions : IDisposable
         await RerunAllFailedJobsOnlyAsync();
     }
 
-    internal bool IsRerunLineMenuOpen(WorkflowActionLine line) => ReferenceEquals(_openRerunMenuLine, line);
-
-    internal void ToggleRerunLineMenu(WorkflowActionLine line)
+    internal async Task HandleRunAgainAllClick()
     {
-        _openRerunMenuLine = ReferenceEquals(_openRerunMenuLine, line) ? null : line;
+        CloseRerunMenu();
+        await RunAgainAllFailedAsync();
+    }
+
+    internal bool IsRerunLineMenuOpen(WorkflowActionLine line)
+    {
+        var key = GetLineLatchKey(line);
+        return key > 0 && _openRerunLineMenuKey == key;
+    }
+
+    /// <summary>Uses the click's viewport coordinates (rather than the trigger button's position) so the fixed-position menu renders correctly regardless of the grid's scroll offset.</summary>
+    internal void ToggleRerunLineMenu(WorkflowActionLine line, MouseEventArgs args)
+    {
+        var key = GetLineLatchKey(line);
+        if (key <= 0) return;
+
+        if (_openRerunLineMenuKey == key)
+        {
+            _openRerunLineMenuKey = null;
+            StateHasChanged();
+            return;
+        }
+
+        _rerunLineMenuTop = args.ClientY + 4;
+        _rerunLineMenuLeft = args.ClientX;
+        _openRerunLineMenuKey = key;
         StateHasChanged();
     }
 
     internal void CloseRerunLineMenu()
     {
-        _openRerunMenuLine = null;
+        _openRerunLineMenuKey = null;
         StateHasChanged();
     }
 
@@ -1145,6 +1185,7 @@ public sealed partial class WorkspaceActions : IDisposable
             WorkspaceId,
             failedPairs.Count);
 
+        _bulkOperationVerb = "Re-running";
         _rerunTotal = failedPairs.Count;
         _rerunCompleted = 0;
         isRerunningAll = true;
@@ -1222,6 +1263,7 @@ public sealed partial class WorkspaceActions : IDisposable
             WorkspaceId,
             failedPairs.Count);
 
+        _bulkOperationVerb = "Re-running";
         _rerunTotal = failedPairs.Count;
         _rerunCompleted = 0;
         isRerunningAll = true;
@@ -1271,6 +1313,86 @@ public sealed partial class WorkspaceActions : IDisposable
                 "GHA Re-run failed jobs only finished (API phase): WorkspaceId={WorkspaceId} attempted={Count}",
                 WorkspaceId,
                 failedPairs.Count);
+        }
+        finally
+        {
+            isRerunningAll = false;
+            await InvokeAsync(StateHasChanged);
+            _ = RefreshAllAsync();
+        }
+    }
+
+    /// <summary>Bulk "Run again": dispatches a new run (latest commit on the selected branch) for every failed workflow that supports workflow_dispatch, skipping any that don't.</summary>
+    internal async Task RunAgainAllFailedAsync()
+    {
+        var eligiblePairs = new List<(WorkspaceActionRow Row, WorkflowActionLine Line)>();
+        foreach (var row in rows)
+        {
+            foreach (var line in row.WorkflowLines)
+            {
+                if (CanRunAgain(row, line))
+                    eligiblePairs.Add((row, line));
+            }
+        }
+
+        if (eligiblePairs.Count == 0) return;
+
+        Logger.LogInformation(
+            "GHA Run again all failed requested: WorkspaceId={WorkspaceId} count={Count}",
+            WorkspaceId,
+            eligiblePairs.Count);
+
+        _bulkOperationVerb = "Starting";
+        _rerunTotal = eligiblePairs.Count;
+        _rerunCompleted = 0;
+        isRerunningAll = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
+            var tasks = eligiblePairs.Select(async pair =>
+            {
+                await semaphore.WaitAsync(_cts.Token);
+                try
+                {
+                    var actionEntry = BuildActionEntry(pair.Row, pair.Line);
+                    Logger.LogInformation(
+                        "GHA Run again all: invoking {Owner}/{Repo} branch={Branch} workflow={WorkflowName} WorkflowId={WorkflowId}",
+                        actionEntry.Owner,
+                        actionEntry.RepositoryName,
+                        actionEntry.HeadBranch,
+                        actionEntry.WorkflowName,
+                        actionEntry.WorkflowId);
+                    await GitHubActionsService.RunWorkflowAsync(actionEntry);
+                    Logger.LogInformation(
+                        "GHA Run again all: API ok {Owner}/{Repo} workflow={WorkflowName} WorkflowId={WorkflowId}",
+                        actionEntry.Owner,
+                        actionEntry.RepositoryName,
+                        actionEntry.WorkflowName,
+                        actionEntry.WorkflowId);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex,
+                        "GHA Run again all item failed: WorkspaceId={WorkspaceId} {Owner}/{Repo} WorkflowId={WorkflowId}",
+                        WorkspaceId,
+                        pair.Row.Repo.OrgName,
+                        pair.Row.Repo.RepositoryName,
+                        pair.Line.Action?.WorkflowId);
+                }
+                finally
+                {
+                    semaphore.Release();
+                    Interlocked.Increment(ref _rerunCompleted);
+                    await InvokeAsync(StateHasChanged);
+                }
+            });
+            await Task.WhenAll(tasks);
+            Logger.LogInformation(
+                "GHA Run again all finished (API phase): WorkspaceId={WorkspaceId} attempted={Count}",
+                WorkspaceId,
+                eligiblePairs.Count);
         }
         finally
         {

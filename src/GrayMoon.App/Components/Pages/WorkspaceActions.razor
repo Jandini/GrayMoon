@@ -152,6 +152,18 @@
                                         Re-run Failed Jobs Only
                                     </button>
                                 </li>
+                                @if (HasFailedRowsSupportingRunAgain)
+                                {
+                                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                                    <li>
+                                        <button class="dropdown-item" type="button"
+                                                role="menuitem"
+                                                @onclick="HandleRunAgainAllClick"
+                                                disabled="@(isRerunningAll || isRefreshing || isLoading)">
+                                            Run again
+                                        </button>
+                                    </li>
+                                }
                             </ul>
                         }
                     </div>
@@ -192,7 +204,7 @@
                                     <th class="col-actions">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody @onscroll="CloseRerunLineMenu">
                                 @if (isLoading)
                                 {
                                     <tr>
@@ -349,7 +361,7 @@
                                                                             class="btn btn-outline-primary dropdown-toggle dropdown-toggle-split action-run-btn-split-toggle"
                                                                             aria-label="Toggle Re-run menu"
                                                                             aria-expanded="@(IsRerunLineMenuOpen(line) ? "true" : "false")"
-                                                                            @onclick="() => ToggleRerunLineMenu(line)"
+                                                                            @onclick="(MouseEventArgs args) => ToggleRerunLineMenu(line, args)"
                                                                             @onclick:stopPropagation
                                                                             disabled="@line.RunInProgress">
                                                                         <span class="visually-hidden">Toggle Dropdown</span>
@@ -357,7 +369,8 @@
                                                                     @if (IsRerunLineMenuOpen(line))
                                                                     {
                                                                         <div class="branch-menu-backdrop" @onclick="CloseRerunLineMenu"></div>
-                                                                        <ul class="dropdown-menu show shadow branch-menu-list" role="menu">
+                                                                        <ul class="dropdown-menu show shadow action-run-menu-fixed" role="menu"
+                                                                            style="@($"top:{_rerunLineMenuTop.ToString(System.Globalization.CultureInfo.InvariantCulture)}px; left:{_rerunLineMenuLeft.ToString(System.Globalization.CultureInfo.InvariantCulture)}px;")">
                                                                             <li>
                                                                                 <button class="dropdown-item" type="button" role="menuitem"
                                                                                         @onclick="() => HandleRunAgainClick(row, line)"
