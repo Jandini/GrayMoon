@@ -12,6 +12,17 @@ public sealed partial class WorkspaceGitChanges
     private string _workspaceCommitMessage = string.Empty;
     private bool _workspaceCommitMessageHasContent;
 
+    /// <summary>
+    /// Restores the in-progress commit message for the current WorkspaceId from the circuit-scoped
+    /// memory. Called on initial load and whenever the page switches to a different workspace, so
+    /// navigating away and back (or between workspaces) never loses an unsubmitted message.
+    /// </summary>
+    private void RestoreWorkspaceCommitMessage()
+    {
+        _workspaceCommitMessage = CommitMessageMemory.Get(WorkspaceId);
+        _workspaceCommitMessageHasContent = !string.IsNullOrWhiteSpace(_workspaceCommitMessage);
+    }
+
     private void OnWorkspaceCommitMessageInput(ChangeEventArgs e)
     {
         var newValue = e.Value?.ToString() ?? string.Empty;
@@ -19,6 +30,7 @@ public sealed partial class WorkspaceGitChanges
         var hasContent = !string.IsNullOrWhiteSpace(newValue);
         _workspaceCommitMessage = newValue;
         _workspaceCommitMessageHasContent = hasContent;
+        CommitMessageMemory.Set(WorkspaceId, newValue);
 
         if (hadContent != hasContent)
         {
@@ -131,6 +143,7 @@ public sealed partial class WorkspaceGitChanges
                 {
                     _workspaceCommitMessage = string.Empty;
                     _workspaceCommitMessageHasContent = false;
+                    CommitMessageMemory.Clear(WorkspaceId);
                 });
             }
 

@@ -25,6 +25,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Inject] private ILogger<WorkspaceGitChanges> Logger { get; set; } = default!;
     [Inject] private IBackgroundJobService JobService { get; set; } = default!;
     [Inject] private WorkspaceGitChangesSelectionMemory SelectionMemory { get; set; } = default!;
+    [Inject] private WorkspaceGitChangesCommitMessageMemory CommitMessageMemory { get; set; } = default!;
     [Inject] private IJSRuntime Js { get; set; } = default!;
 
     private Workspace? _workspace;
@@ -45,6 +46,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     protected override Task OnInitializedAsync()
     {
         EnsureActivitySubscription();
+        RestoreWorkspaceCommitMessage();
         StartInitialLoadJob();
         return Task.CompletedTask;
     }
@@ -58,6 +60,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return Task.CompletedTask;
         }
 
+        RestoreWorkspaceCommitMessage();
         StartInitialLoadJob();
         return Task.CompletedTask;
     }
