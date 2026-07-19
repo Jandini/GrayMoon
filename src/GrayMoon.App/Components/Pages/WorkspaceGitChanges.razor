@@ -159,3 +159,9 @@
     }
     </div>
 </div>
+
+<DefaultBranchWarningModal IsVisible="@_defaultBranchWarningModal.IsVisible"
+                           Message="@_defaultBranchWarningModal.Message"
+                           RepoItems="@_defaultBranchWarningModal.RepoItems"
+                           OnProceed="@OnDefaultBranchWarningProceedAsync"
+                           OnCancel="@CloseDefaultBranchWarningModal" />

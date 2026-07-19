@@ -1,4 +1,5 @@
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Options;
@@ -63,11 +64,47 @@ public sealed partial class WorkspaceGitChanges
             return;
         }
 
+        if (IsJobRunning || _defaultBranchWarningModal.IsVisible)
+        {
+            return;
+        }
+
         var targets = (_view?.Repositories ?? [])
             .Where(r => stagedOnly ? r.StagedCount > 0 : (r.StagedCount > 0 || r.ChangedCount > 0))
             .ToList();
 
-        if (targets.Count == 0 || IsJobRunning)
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        var reposOnDefaultBranch = targets
+            .Where(r => !string.IsNullOrWhiteSpace(r.DefaultBranchName)
+                && string.Equals(r.BranchName, r.DefaultBranchName, StringComparison.Ordinal))
+            .ToList();
+
+        if (reposOnDefaultBranch.Count > 0)
+        {
+            var repoItems = reposOnDefaultBranch
+                .Select(r => new DefaultBranchWarningItem(r.RepositoryName, r.DefaultBranchName!))
+                .ToList();
+            ShowDefaultBranchWarning(
+                "The following repositories are on their default branch. Committing will write directly to the default (protected) branch.",
+                repoItems,
+                () =>
+                {
+                    CommitWorkspaceCoreAsync(stagedOnly, targets);
+                    return Task.CompletedTask;
+                });
+            return;
+        }
+
+        CommitWorkspaceCoreAsync(stagedOnly, targets);
+    }
+
+    private void CommitWorkspaceCoreAsync(bool stagedOnly, List<WorkspaceGitChangesRepositoryView> targets)
+    {
+        if (IsJobRunning)
         {
             return;
         }
