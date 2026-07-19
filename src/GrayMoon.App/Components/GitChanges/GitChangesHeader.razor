@@ -1,6 +1,8 @@
 @namespace GrayMoon.App.Components.GitChanges
+@using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services.GitChanges
+@using Microsoft.AspNetCore.Components.Web
 
 <div class="workspace-repos-header git-changes-header">
     <div class="workspace-repos-title-row">
@@ -17,6 +19,43 @@
         }
         <span class="workspace-repos-title-spacer"></span>
     </div>
+    @if (HasChanges)
+    {
+        <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
+            <div class="workspace-grid-search-wrapper">
+                <FilterSearchInput Value="@FilterQuery"
+                                   ValueChanged="OnFilterValueChangedAsync"
+                                   InputId="git-changes-filter"
+                                   InputAdditionalClass="workspace-grid-search"
+                                   Placeholder="Filter by repo, path, status..."
+                                   EnableSyntaxHighlight="false"
+                                   Disabled="@IsFilterDisabled" />
+            </div>
+            <button type="button"
+                    class="btn btn-outline-secondary"
+                    title="Next change"
+                    aria-label="Next change"
+                    disabled="@IsChangeNavDisabled"
+                    @onclick="() => OnNextChange.InvokeAsync()">
+                <i class="bi bi-chevron-down" aria-hidden="true"></i>
+            </button>
+            <button type="button"
+                    class="btn btn-outline-secondary"
+                    title="Previous change"
+                    aria-label="Previous change"
+                    disabled="@IsChangeNavDisabled"
+                    @onclick="() => OnPreviousChange.InvokeAsync()">
+                <i class="bi bi-chevron-up" aria-hidden="true"></i>
+            </button>
+            <button type="button"
+                    class="btn btn-outline-secondary"
+                    title="Refresh - rescans every repository in this workspace"
+                    aria-label="Refresh"
+                    @onclick="() => OnRefresh.InvokeAsync()">
+                <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+            </button>
+        </div>
+    }
 </div>
 
 @code {
@@ -25,6 +64,21 @@
     /// <summary>Non-blocking status text (e.g. an automatic warm-up scan in progress). Never used for
     /// user-triggered operations - those get the full LoadingOverlay via BackgroundJobService instead.</summary>
     [Parameter] public string? StatusText { get; set; }
+
+    /// <summary>Gates the entire actions row (filter, change nav, refresh) - hidden while there are no
+    /// changes anywhere in the workspace, so the empty state is a clean "No changes" message instead.</summary>
+    [Parameter] public bool HasChanges { get; set; }
+
+    [Parameter] public string FilterQuery { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> FilterQueryChanged { get; set; }
+    [Parameter] public bool IsFilterDisabled { get; set; }
+
+    [Parameter] public EventCallback OnRefresh { get; set; }
+    [Parameter] public EventCallback OnPreviousChange { get; set; }
+    [Parameter] public EventCallback OnNextChange { get; set; }
+    [Parameter] public bool IsChangeNavDisabled { get; set; }
+
+    private Task OnFilterValueChangedAsync(string value) => FilterQueryChanged.InvokeAsync(value);
 
     private string Summary
     {
