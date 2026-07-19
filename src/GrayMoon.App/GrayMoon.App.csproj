@@ -19,6 +19,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="GrayMoon.App.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <EmbeddedResource Include="Resources\install-agent.ps1" />
     <EmbeddedResource Include="Resources\uninstall-agent.ps1" />
   </ItemGroup>

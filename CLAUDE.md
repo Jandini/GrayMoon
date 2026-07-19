@@ -42,8 +42,6 @@ dotnet tool restore
 docker build --build-arg VERSION=1.0.0 -t graymoon .
 ```
 
-CI pushes to Docker Hub on commits to `main`, on tag pushes, or on any branch commit whose message contains `prerelease`.
-
 ## Architecture
 
 GrayMoon is a **two-process** system — never combine them:
@@ -63,16 +61,7 @@ Git hooks (`post-commit`, `post-checkout`, `post-merge`, `pre-push`) POST JSON t
 
 ### Agent command structure
 
-The Agent uses `System.CommandLine`. Each agent operation implements `ICommandHandler<TRequest, TResponse>` in `src/GrayMoon.Agent/Commands/`. To add a new command: (1) define request/response DTOs, (2) create the handler class, (3) register it via `AddSingleton<ICommandHandler<TRequest, TResponse>, YourCommand>()` in `RunCommandHandler.cs`, (4) add it to the dispatcher dictionary in `CommandDispatcher.cs`, (5) add the hub method constant to `AgentHubMethods.cs`, (6) call via `AgentBridge.SendCommandAsync` on the App side.
-
-### App layer structure
-
-The App is organized into:
-- `Components/Pages/` — Blazor Server pages and interactive components
-- `Components/Shared/` and `Components/Modals/` — reusable UI components
-- `Services/` — 60+ domain services (GitHub API, workspace operations, push orchestration, dependency update, etc.)
-- `Data/` — EF Core `DbContext`, entity models, and repository classes
-- `Api/Endpoints/` — REST API endpoints grouped by domain (About, Agent, Branch, Connector, Settings, Sync, Workspace)
+The Agent uses `System.CommandLine`. Each agent operation implements `ICommandHandler<TRequest, TResponse>` in `src/GrayMoon.Agent/Commands/`. See the `add-agent-command` skill for the step-by-step recipe to add a new one.
 
 ### Orchestrators
 
@@ -131,7 +120,7 @@ Connector tokens are AES-256-GCM encrypted at rest via `AesGcmTokenProtector` (b
 
 ### Database schema
 
-Schema is owned by EF Core but applied via `EnsureCreated()`. Core tables: `Connectors`, `Repositories`, `Workspaces`, `WorkspaceRepositories` (join with live state), `WorkspaceRepositoryPullRequest` (1:1 with link), `WorkspaceRepositoryActions` (CI status per link), `WorkspaceProject`, `ProjectDependency`, `WorkspaceFile`, `WorkspaceFileVersionConfig`, `WorkspaceFileLineStatuses`, `WorkspaceRepositoryCustomDependencies`, `RepositoryBranch`, `Settings`.
+Schema is owned by EF Core but applied via `EnsureCreated()`.
 
 After `EnsureCreated()`, startup calls `Migrations.RunAllAsync(dbContext)` (`src/GrayMoon.App/Migrations.cs`). Each migration is an idempotent `ALTER TABLE` guarded by `pragma_table_info()`. To add a new column: add a `public static async Task MigrateXxxAsync(AppDbContext dbContext)` method to `Migrations.cs` (check `pragma_table_info('TableName') WHERE name='ColumnName'` before executing the `ALTER TABLE`), then call it at the end of `RunAllAsync`. No EF Core migration assembly is used.
 

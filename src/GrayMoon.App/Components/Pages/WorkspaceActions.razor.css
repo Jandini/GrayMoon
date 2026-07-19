@@ -37,6 +37,28 @@
     border-left-color: rgba(255, 255, 255, 0.4);
 }
 
+.action-run-btn-split-toggle {
+    height: 1.5rem;
+    min-width: 1.25rem;
+    padding-left: 0.35rem;
+    padding-right: 0.35rem;
+}
+
+/*
+ * Per-row Run-again menu: positioned with `position: fixed` at the click's viewport
+ * coordinates (set inline via style="top:...px; left:...px;") instead of anchored
+ * via CSS to its trigger button. The actions grid confines scrolling to `tbody`
+ * (grid-page-body, table-responsive, and tbody all clip overflow in app.css), which
+ * would clip a `position: absolute` dropdown almost universally; `position: fixed`
+ * escapes that clipping the same way `.gm-gh-dropdown` does elsewhere in app.css.
+ */
+.action-run-menu-fixed {
+    position: fixed;
+    transform: translateX(-90%);
+    z-index: 2000;
+    min-width: 9rem;
+}
+
 /*
  * Title row: use same baseline alignment as app.css .workspace-repos-header .workspace-repos-title-row
  * (do not override with flex-end - that sat the subtitle lower than the h2 text).
