@@ -42,6 +42,14 @@
                             <span class="git-changes-tree__repo-branch" title="@row.BranchName">@row.BranchName</span>
                         }
                     }
+                    else if (row.Kind == GitChangesTreeRowKind.Section)
+                    {
+                        @row.Label
+                        @if (row.Count.HasValue)
+                        {
+                            <span class="git-changes-tree__count-badge">@row.Count</span>
+                        }
+                    }
                     else
                     {
                         @row.Label

@@ -397,6 +397,39 @@
     cursor: pointer;
 }
 
+/* Section rows (CHANGES/STAGED) lay out the label text and the count badge as inline siblings
+   so the badge sits beside the text without affecting the row's line box / height. Keeps the same
+   flex: 1 1 0 as the base rule so it still fills the row and keeps __actions pinned to the right. */
+.git-changes-tree__row--section .git-changes-tree__label {
+    display: inline-flex;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.35rem;
+}
+
+/* Compact count badge for the CHANGES/STAGED section rows only. Fixed height/line-height (rather
+   than relying on default badge padding) keeps it shorter than the row's own line box so it never
+   stretches the row; box-sizing: border-box keeps padding from pushing past that height. */
+.git-changes-tree__count-badge {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    height: 0.95rem;
+    line-height: 0.95rem;
+    padding: 0 0.35rem;
+    border-radius: 999px;
+    background-color: #5a5a5a;
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: normal;
+    white-space: nowrap;
+}
+
 /* Repository rows lay out name + branch as siblings so the branch can truncate
    independently while the repository name stays the primary, higher-priority label. */
 .git-changes-tree__row--repository .git-changes-tree__label {

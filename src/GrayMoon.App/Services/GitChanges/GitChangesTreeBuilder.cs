@@ -22,6 +22,9 @@ public sealed record GitChangesTreeRow
     public required int Depth { get; init; }
     public required string Label { get; init; }
 
+    /// <summary>Item count shown as a badge beside the label. Set only on Section rows.</summary>
+    public int? Count { get; init; }
+
     /// <summary>True for the Staged section and everything under it; false for Changed.</summary>
     public bool IsStagedSection { get; init; }
 
@@ -104,7 +107,8 @@ public static class GitChangesTreeBuilder
             Key = sectionKey,
             Kind = GitChangesTreeRowKind.Section,
             Depth = 0,
-            Label = $"{sectionLabel} ({totalCount})",
+            Label = sectionLabel,
+            Count = totalCount,
             IsStagedSection = isStagedSection,
             HasChildren = true,
             IsExpanded = sectionExpanded,
