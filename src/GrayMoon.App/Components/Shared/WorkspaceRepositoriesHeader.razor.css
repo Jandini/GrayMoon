@@ -1,11 +1,19 @@
-.branch-menu-list {
-    position: absolute;
-    top: 100%;
-    left: 0;
+/* Fixed so menus do not expand article.content scroll overflow (see workspace-repos-header-menus.js). */
+.workspace-repository-actions-menu {
+    position: fixed;
+    top: -9999px;
+    left: -9999px;
     right: auto;
-    margin-top: 0.125rem;
+    margin-top: 0;
     z-index: 1051;
-    min-width: 100%;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    box-sizing: border-box;
+}
+
+.branch-menu-list {
+    min-width: 0;
 }
 
 .branch-menu-backdrop {
@@ -40,11 +48,6 @@
 
 .btn-group > .btn-warning + .btn-warning.dropdown-toggle-split {
     border-left-color: #000;
-}
-
-.branch-menu-list-end {
-    right: 0;
-    left: auto;
 }
 
 .dropdown-item--level-only,

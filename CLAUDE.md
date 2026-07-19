@@ -42,8 +42,6 @@ dotnet tool restore
 docker build --build-arg VERSION=1.0.0 -t graymoon .
 ```
 
-CI pushes to Docker Hub on commits to `main`, on tag pushes, or on any branch commit whose message contains `prerelease`.
-
 ## Architecture
 
 GrayMoon is a **two-process** system — never combine them:
@@ -63,16 +61,7 @@ Git hooks (`post-commit`, `post-checkout`, `post-merge`, `pre-push`) POST JSON t
 
 ### Agent command structure
 
-The Agent uses `System.CommandLine`. Each agent operation implements `ICommandHandler<TRequest, TResponse>` in `src/GrayMoon.Agent/Commands/`. To add a new command: (1) define request/response DTOs, (2) create the handler class, (3) register it via `AddSingleton<ICommandHandler<TRequest, TResponse>, YourCommand>()` in `RunCommandHandler.cs`, (4) add it to the dispatcher dictionary in `CommandDispatcher.cs`, (5) add the hub method constant to `AgentHubMethods.cs`, (6) call via `AgentBridge.SendCommandAsync` on the App side.
-
-### App layer structure
-
-The App is organized into:
-- `Components/Pages/` — Blazor Server pages and interactive components
-- `Components/Shared/` and `Components/Modals/` — reusable UI components
-- `Services/` — 60+ domain services (GitHub API, workspace operations, push orchestration, dependency update, etc.)
-- `Data/` — EF Core `DbContext`, entity models, and repository classes
-- `Api/Endpoints/` — REST API endpoints grouped by domain (About, Agent, Branch, Connector, Settings, Sync, Workspace)
+The Agent uses `System.CommandLine`. Each agent operation implements `ICommandHandler<TRequest, TResponse>` in `src/GrayMoon.Agent/Commands/`. See the `add-agent-command` skill for the step-by-step recipe to add a new one.
 
 ### Orchestrators
 
@@ -89,9 +78,11 @@ Three orchestrators coordinate multi-step workflows across repositories:
 
 ### GHA live feed services
 
-`GhaWorkflowLiveFeedService` polls `GetWorkflowRunJobsAsync` (jobs + steps) on adaptive intervals (2 s active, 3 s waiting, 15 s idle). It tracks step-status transitions and feeds the left pane of `GhaWorkflowLiveTerminal`. Rate limit state (`_rateLimitedUntil`) is shared across all terminals in the same Blazor circuit so one 429 pauses all.
+`GhaWorkflowLiveFeedService` polls `GetWorkflowRunJobsAsync` (jobs + steps) on adaptive intervals (2 s active, 3 s waiting, 15 s idle). It tracks step-status transitions and feeds the left pane of `GhaWorkflowLiveTerminal`. Rate-limit backoff state lives in `IGitHubRateLimitTracker` (singleton, keyed by connector name), not a field on the service itself - this matters because `WorkspacePushService` resolves its own `GhaWorkflowLiveFeedService` from a separate DI scope (via `ScopedExecutor`/`ServiceScopeFactory.CreateAsyncScope()`) during a push, so a per-instance field would not have been shared with the terminals on the page; routing the gate through the tracker singleton means a 429 hit by any poller for a connector pauses every poller for that connector, regardless of scope.
 
-`GhaStepLogFeedService` polls `GetJobLogsAsync` (the full job log text) and supports two modes: incremental group-parsed step output (`PollStepLogsAsync`) and a raw tail (`PollStepLogTailAsync`) that strips timestamps, filters blank lines, and returns the last N lines of the full log without parsing group markers.
+`GhaLogsModal.LoadLogsAsync` fetches logs on demand (not polled) when the modal opens: one `GetWorkflowRunJobsAsync` call to list jobs, then one `GetJobLogsAsync` call per job, each returning the full log text (no incremental/tail fetching).
+
+`GitHubActionsService.GetWorkflowStatusesForBranchAsync` caches its static parts via `IMemoryCache` - the workflow list (5 min TTL) and per-workflow `workflow_dispatch` YAML detection (12 h TTL, keyed by connector+owner+repo+workflow id+path) - since neither changes tick to tick. `GetWorkflowRunsForBranchAsync` (the actual run status) is never cached and is fetched fresh on every call, so grid/terminal responsiveness is unaffected.
 
 ### Filter search expression (GrayMoon.Common)
 
@@ -131,7 +122,7 @@ Connector tokens are AES-256-GCM encrypted at rest via `AesGcmTokenProtector` (b
 
 ### Database schema
 
-Schema is owned by EF Core but applied via `EnsureCreated()`. Core tables: `Connectors`, `Repositories`, `Workspaces`, `WorkspaceRepositories` (join with live state), `WorkspaceRepositoryPullRequest` (1:1 with link), `WorkspaceRepositoryActions` (CI status per link), `WorkspaceProject`, `ProjectDependency`, `WorkspaceFile`, `WorkspaceFileVersionConfig`, `WorkspaceFileLineStatuses`, `WorkspaceRepositoryCustomDependencies`, `RepositoryBranch`, `Settings`.
+Schema is owned by EF Core but applied via `EnsureCreated()`.
 
 After `EnsureCreated()`, startup calls `Migrations.RunAllAsync(dbContext)` (`src/GrayMoon.App/Migrations.cs`). Each migration is an idempotent `ALTER TABLE` guarded by `pragma_table_info()`. To add a new column: add a `public static async Task MigrateXxxAsync(AppDbContext dbContext)` method to `Migrations.cs` (check `pragma_table_info('TableName') WHERE name='ColumnName'` before executing the `ALTER TABLE`), then call it at the end of `RunAllAsync`. No EF Core migration assembly is used.
 
