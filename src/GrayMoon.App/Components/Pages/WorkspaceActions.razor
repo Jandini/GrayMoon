@@ -329,7 +329,48 @@
                                                     @if (string.IsNullOrWhiteSpace(row.ErrorMessage))
                                                     {
                                                         <div class="d-flex gap-2 align-items-center">
-                                                            @if (CanRerun(row, line))
+                                                            @if (CanRunAgain(row, line))
+                                                            {
+                                                                <div class="btn-group position-relative">
+                                                                    <button class="btn btn-outline-primary action-run-btn"
+                                                                            @onclick="() => RerunWorkflowAsync(row, line)"
+                                                                            disabled="@line.RunInProgress"
+                                                                            title="Re-run failed workflow: @line.Action?.WorkflowName">
+                                                                        @if (line.RunInProgress)
+                                                                        {
+                                                                            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                                                        }
+                                                                        else
+                                                                        {
+                                                                            @:Re-run
+                                                                        }
+                                                                    </button>
+                                                                    <button type="button"
+                                                                            class="btn btn-outline-primary dropdown-toggle dropdown-toggle-split action-run-btn-split-toggle"
+                                                                            aria-label="Toggle Re-run menu"
+                                                                            aria-expanded="@(IsRerunLineMenuOpen(line) ? "true" : "false")"
+                                                                            @onclick="() => ToggleRerunLineMenu(line)"
+                                                                            @onclick:stopPropagation
+                                                                            disabled="@line.RunInProgress">
+                                                                        <span class="visually-hidden">Toggle Dropdown</span>
+                                                                    </button>
+                                                                    @if (IsRerunLineMenuOpen(line))
+                                                                    {
+                                                                        <div class="branch-menu-backdrop" @onclick="CloseRerunLineMenu"></div>
+                                                                        <ul class="dropdown-menu show shadow branch-menu-list" role="menu">
+                                                                            <li>
+                                                                                <button class="dropdown-item" type="button" role="menuitem"
+                                                                                        @onclick="() => HandleRunAgainClick(row, line)"
+                                                                                        disabled="@line.RunInProgress"
+                                                                                        title="@($"Run a new workflow on branch {row.Link.BranchName}")">
+                                                                                    Run again
+                                                                                </button>
+                                                                            </li>
+                                                                        </ul>
+                                                                    }
+                                                                </div>
+                                                            }
+                                                            else if (CanRerun(row, line))
                                                             {
                                                                 <button class="btn btn-outline-primary action-run-btn"
                                                                         @onclick="() => RerunWorkflowAsync(row, line)"

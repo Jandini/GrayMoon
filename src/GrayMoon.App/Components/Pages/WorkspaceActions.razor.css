@@ -37,6 +37,13 @@
     border-left-color: rgba(255, 255, 255, 0.4);
 }
 
+.action-run-btn-split-toggle {
+    height: 1.5rem;
+    min-width: 1.25rem;
+    padding-left: 0.35rem;
+    padding-right: 0.35rem;
+}
+
 /*
  * Title row: use same baseline alignment as app.css .workspace-repos-header .workspace-repos-title-row
  * (do not override with flex-end - that sat the subtitle lower than the h2 text).

@@ -92,6 +92,7 @@ public sealed partial class WorkspaceActions : IDisposable
     private string? _logsWorkflowName;
 
     private bool _rerunMenuOpen;
+    private WorkflowActionLine? _openRerunMenuLine;
 
     private enum ActionLineFilterBucket
     {
@@ -232,6 +233,26 @@ public sealed partial class WorkspaceActions : IDisposable
     {
         CloseRerunMenu();
         await RerunAllFailedJobsOnlyAsync();
+    }
+
+    internal bool IsRerunLineMenuOpen(WorkflowActionLine line) => ReferenceEquals(_openRerunMenuLine, line);
+
+    internal void ToggleRerunLineMenu(WorkflowActionLine line)
+    {
+        _openRerunMenuLine = ReferenceEquals(_openRerunMenuLine, line) ? null : line;
+        StateHasChanged();
+    }
+
+    internal void CloseRerunLineMenu()
+    {
+        _openRerunMenuLine = null;
+        StateHasChanged();
+    }
+
+    internal async Task HandleRunAgainClick(WorkspaceActionRow row, WorkflowActionLine line)
+    {
+        CloseRerunLineMenu();
+        await RunWorkflowAsync(row, line);
     }
 
     internal void ToggleShowErrors()
@@ -1341,6 +1362,10 @@ public sealed partial class WorkspaceActions : IDisposable
         (line.Action?.SupportsWorkflowDispatch ?? false) &&
         (line.Action?.WorkflowId ?? 0) > 0 &&
         !string.IsNullOrWhiteSpace(row.Link.BranchName);
+
+    /// <summary>Failed run that also supports workflow_dispatch: show Re-run as a split button with a "Run again" (new dispatch) option.</summary>
+    internal static bool CanRunAgain(WorkspaceActionRow row, WorkflowActionLine line) =>
+        CanRerun(row, line) && CanRun(row, line);
 
     internal static bool CanAbort(WorkspaceActionRow row, WorkflowActionLine line) =>
         IsLineRunningForBranch(row, line) && (line.Action?.RunId ?? 0) > 0;
