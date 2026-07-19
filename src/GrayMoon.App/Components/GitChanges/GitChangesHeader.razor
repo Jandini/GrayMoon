@@ -7,9 +7,30 @@
 <div class="workspace-repos-header git-changes-header">
     <div class="workspace-repos-title-row">
         <h2 class="workspace-repos-title">Changes</h2>
-        <p class="text-muted mb-0 workspace-repos-subtitle git-changes-header__summary" title="@BranchTooltip">
-            @Summary
-        </p>
+        <div class="text-muted mb-0 workspace-repos-subtitle git-changes-header__summary">
+            @if (View == null || View.Repositories.Count == 0)
+            {
+                <span class="git-changes-header__summary-item">No changed repositories.</span>
+            }
+            else
+            {
+                <span class="git-changes-header__summary-item">
+                    @ChangedRepoCount of @RepoCount @RepoCountWord
+                </span>
+                <span class="git-changes-header__summary-item @(StagedCount > 0 ? "git-changes-header__summary-item--active" : null)">
+                    <i class="bi bi-plus-square git-changes-header__summary-icon" aria-hidden="true"></i>
+                    @StagedCount staged
+                </span>
+                <span class="git-changes-header__summary-item @(ChangedCount > 0 ? "git-changes-header__summary-item--active" : null)">
+                    <i class="bi bi-pencil-fill git-changes-header__summary-icon" aria-hidden="true"></i>
+                    @ChangedCount changed
+                </span>
+                <span class="git-changes-header__summary-item" title="@BranchTooltip">
+                    <i class="bi bi-git git-changes-header__summary-icon" aria-hidden="true"></i>
+                    @BranchLabel
+                </span>
+            }
+        </div>
         @if (!string.IsNullOrEmpty(StatusText))
         {
             <span class="text-muted small git-changes-header__status">
@@ -80,23 +101,15 @@
 
     private Task OnFilterValueChangedAsync(string value) => FilterQueryChanged.InvokeAsync(value);
 
-    private string Summary
-    {
-        get
-        {
-            if (View == null || View.Repositories.Count == 0)
-            {
-                return "No changed repositories.";
-            }
+    private int RepoCount => View?.Repositories.Count ?? 0;
 
-            var repoCount = View.Repositories.Count;
-            var changedRepoCount = View.Repositories.Count(r => r.StagedCount > 0 || r.ChangedCount > 0);
-            var staged = View.Repositories.Sum(r => r.StagedCount);
-            var changed = View.Repositories.Sum(r => r.ChangedCount);
+    private string RepoCountWord => RepoCount == 1 ? "repository" : "repositories";
 
-            return $"{changedRepoCount} of {repoCount} {(repoCount == 1 ? "repository" : "repositories")} | {staged} staged | {changed} changed | {BranchLabel}";
-        }
-    }
+    private int ChangedRepoCount => View?.Repositories.Count(r => r.StagedCount > 0 || r.ChangedCount > 0) ?? 0;
+
+    private int StagedCount => View?.Repositories.Sum(r => r.StagedCount) ?? 0;
+
+    private int ChangedCount => View?.Repositories.Sum(r => r.ChangedCount) ?? 0;
 
     private string BranchLabel
     {
