@@ -48,8 +48,7 @@
     min-height: 0;
 }
 
-.git-changes-page .grid-page-body > .alert,
-.git-changes-page .grid-page-body > .git-changes-empty {
+.git-changes-page .grid-page-body > .alert {
     border: 1px solid var(--border-color);
     border-radius: 0.375rem;
 }
