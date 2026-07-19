@@ -1,5 +1,6 @@
 @using GrayMoon.Common.Search
 @inject IJSRuntime Js
+@implements IDisposable
 
 <div class="filter-search-wrap @GetSearchWrapClass() @WrapperAdditionalClass">
     @if (ShowSearchHighlight)
@@ -8,7 +9,7 @@
              @ref="_searchBackdrop"
              aria-hidden="true">
             <div class="filter-search-backdrop-inner">
-                @foreach (var segment in FilterSearchExpression.GetHighlightSegments(Value))
+                @foreach (var segment in GetHighlightSegments())
                 {
                     <span class="@GetHighlightClass(segment.Kind)">@segment.Text</span>
                 }
@@ -18,14 +19,14 @@
     <input id="@InputId"
            class="form-control filter-search-input @GetSearchInputClass() @InputAdditionalClass"
            placeholder="@Placeholder"
-           value="@Value"
+           value="@_liveValue"
            disabled="@Disabled"
            autocomplete="off"
-           @oninput="OnInputAsync"
+           @oninput="OnInput"
            @onscroll="OnSearchScrollAsync"
            @onkeydown="OnKeyDown"
            @ref="_inputElement" />
-    @if (!string.IsNullOrEmpty(Value))
+    @if (!string.IsNullOrEmpty(_liveValue))
     {
         <button type="button"
                 class="filter-search-clear"
@@ -43,6 +44,26 @@
     private ElementReference _inputElement;
     private ElementReference _searchBackdrop;
 
+    /// <summary>What's currently typed - updates instantly on every keystroke so display/coloring never
+    /// waits on a parent round trip. Only <see cref="ScheduleCommit"/> (debounced) pushes this out via
+    /// <see cref="ValueChanged"/>, which is what parents wire into (potentially expensive) filtering.</summary>
+    private string _liveValue = string.Empty;
+
+    /// <summary>Last value this component itself pushed via <see cref="ValueChanged"/>. Used to tell an
+    /// external reset of <see cref="Value"/> (e.g. an Escape-to-clear handler on the parent, or the parent
+    /// simply resetting its bound field) apart from the parent merely echoing back what we just sent.</summary>
+    private string? _lastEmittedValue;
+
+    private bool _initialized;
+    private CancellationTokenSource? _debounceCts;
+
+    private string? _highlightCacheKey;
+    private bool _highlightCacheIsValid = true;
+    private IReadOnlyList<FilterSearchExpressionHighlightSegment> _highlightCacheSegments =
+        Array.Empty<FilterSearchExpressionHighlightSegment>();
+
+    private string? _lastSyncedValue;
+
     [Parameter] public string Value { get; set; } = string.Empty;
     [Parameter] public EventCallback<string> ValueChanged { get; set; }
     [Parameter] public string Placeholder { get; set; } = "Search…";
@@ -52,28 +73,84 @@
     [Parameter] public string ClearAriaLabel { get; set; } = "Clear search filter";
     [Parameter] public bool Disabled { get; set; }
     [Parameter] public bool EnableSyntaxHighlight { get; set; } = true;
+
+    /// <summary>Delay before a keystroke is pushed to <see cref="ValueChanged"/>. Local display/coloring is
+    /// never delayed by this - only the (typically expensive) downstream filtering/rebuild is. Set to 0 to
+    /// commit immediately.</summary>
+    [Parameter] public int DebounceMilliseconds { get; set; } = 150;
+
     [Parameter] public EventCallback<KeyboardEventArgs> OnKeyDown { get; set; }
     [Parameter] public EventCallback OnClear { get; set; }
 
-    private bool IsSearchSyntaxValid => FilterSearchExpression.IsValidQuery(Value);
+    private bool IsSearchSyntaxValid
+    {
+        get
+        {
+            EnsureHighlightCache();
+            return _highlightCacheIsValid;
+        }
+    }
 
     private bool ShowSearchHighlight =>
-        EnableSyntaxHighlight && !string.IsNullOrEmpty(Value) && IsSearchSyntaxValid && !Disabled;
+        EnableSyntaxHighlight && !string.IsNullOrEmpty(_liveValue) && IsSearchSyntaxValid && !Disabled;
 
     public ValueTask FocusAsync() => _inputElement.FocusAsync();
 
+    protected override void OnParametersSet()
+    {
+        if (!_initialized)
+        {
+            _initialized = true;
+            _liveValue = Value;
+            _lastEmittedValue = Value;
+            return;
+        }
+
+        if (Value != _lastEmittedValue)
+        {
+            // The parent changed Value on its own (Clear/Escape handler, external reset, etc.), not as an
+            // echo of something we just committed - adopt it immediately and drop any pending debounce.
+            _debounceCts?.Cancel();
+            _liveValue = Value;
+            _lastEmittedValue = Value;
+        }
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (ShowSearchHighlight)
+        if (!ShowSearchHighlight || _lastSyncedValue == _liveValue)
         {
-            await OnSearchScrollAsync();
+            return;
         }
+
+        _lastSyncedValue = _liveValue;
+        await OnSearchScrollAsync();
+    }
+
+    private IReadOnlyList<FilterSearchExpressionHighlightSegment> GetHighlightSegments()
+    {
+        EnsureHighlightCache();
+        return _highlightCacheSegments;
+    }
+
+    private void EnsureHighlightCache()
+    {
+        if (_highlightCacheKey == _liveValue)
+        {
+            return;
+        }
+
+        _highlightCacheKey = _liveValue;
+        _highlightCacheIsValid = FilterSearchExpression.IsValidQuery(_liveValue);
+        _highlightCacheSegments = _highlightCacheIsValid
+            ? FilterSearchExpression.GetHighlightSegments(_liveValue)
+            : Array.Empty<FilterSearchExpressionHighlightSegment>();
     }
 
     private string GetSearchWrapClass()
     {
         var classes = new List<string>();
-        if (!string.IsNullOrEmpty(Value))
+        if (!string.IsNullOrEmpty(_liveValue))
         {
             classes.Add("has-filter");
         }
@@ -89,17 +166,62 @@
     private string GetSearchInputClass() =>
         ShowSearchHighlight ? "filter-search-input-overlay" : IsSearchSyntaxValid ? string.Empty : "filter-search-input-invalid";
 
-    private async Task OnInputAsync(ChangeEventArgs e)
+    private void OnInput(ChangeEventArgs e)
     {
         var value = e.Value?.ToString() ?? string.Empty;
-        Value = value;
-        await ValueChanged.InvokeAsync(value);
+        if (value == _liveValue)
+        {
+            return;
+        }
+
+        _liveValue = value;
+        ScheduleCommit(value);
+    }
+
+    private void ScheduleCommit(string value)
+    {
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
+
+        if (DebounceMilliseconds <= 0)
+        {
+            _debounceCts = null;
+            _lastEmittedValue = value;
+            _ = ValueChanged.InvokeAsync(value);
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _debounceCts = cts;
+        _ = CommitAfterDelayAsync(value, cts);
+    }
+
+    private async Task CommitAfterDelayAsync(string value, CancellationTokenSource cts)
+    {
+        try
+        {
+            await Task.Delay(DebounceMilliseconds, cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (cts.IsCancellationRequested)
+        {
+            return;
+        }
+
+        _lastEmittedValue = value;
+        await InvokeAsync(() => ValueChanged.InvokeAsync(value));
     }
 
     private async Task ClearAsync()
     {
-        Value = string.Empty;
-        await ValueChanged.InvokeAsync(Value);
+        _debounceCts?.Cancel();
+        _liveValue = string.Empty;
+        _lastEmittedValue = string.Empty;
+        await ValueChanged.InvokeAsync(string.Empty);
         if (OnClear.HasDelegate)
         {
             await OnClear.InvokeAsync();
@@ -133,4 +255,10 @@
         FilterSearchHighlightKind.Whitespace => "filter-search-token-ws",
         _ => "filter-search-token-text",
     };
+
+    public void Dispose()
+    {
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
+    }
 }

@@ -7,16 +7,15 @@ public sealed partial class WorkspaceRepositories
 {
     private async Task OnSearchTermChangedAsync(string value)
     {
+        // FilterSearchInput already debounces before invoking this - the actual query load only runs
+        // once the user pauses typing, so no additional delay is needed here.
         searchTerm = value;
-        await _queryLoader.DebounceSearchAsync(async () =>
+        _effectiveSearch = value;
+        await ResetAndLoadFromTopAsync();
+        if (!_disposed)
         {
-            _effectiveSearch = searchTerm;
-            await ResetAndLoadFromTopAsync();
-            if (!_disposed)
-            {
-                await InvokeAsync(StateHasChanged);
-            }
-        });
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private void OnSearchChanged(ChangeEventArgs e)
