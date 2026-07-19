@@ -90,7 +90,7 @@
 
     private static string IconFor(GitChangesTreeRow row) => row.Kind switch
     {
-        GitChangesTreeRowKind.Section => row.IsStagedSection ? "bi-check2-square" : "bi-pencil-square",
+        GitChangesTreeRowKind.Section => row.IsStagedSection ? "bi-pencil-square" : "bi-pencil",
         GitChangesTreeRowKind.Repository => "bi-git",
         GitChangesTreeRowKind.Folder => "bi-folder",
         GitChangesTreeRowKind.File => "bi-file-earmark",
