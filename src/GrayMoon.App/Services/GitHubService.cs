@@ -14,6 +14,7 @@ public class GitHubService : IConnectorService
     private readonly HttpClient _httpClient;
     private readonly ILogger<GitHubService> _logger;
     private readonly GitHubOptions _options;
+    private readonly IGitHubRateLimitTracker _rateLimitTracker;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -21,10 +22,11 @@ public class GitHubService : IConnectorService
 
     public ConnectorType ConnectorType => ConnectorType.GitHub;
 
-    public GitHubService(HttpClient httpClient, IConfiguration configuration, ILogger<GitHubService> logger)
+    public GitHubService(HttpClient httpClient, IConfiguration configuration, IGitHubRateLimitTracker rateLimitTracker, ILogger<GitHubService> logger)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _rateLimitTracker = rateLimitTracker ?? throw new ArgumentNullException(nameof(rateLimitTracker));
         _options = configuration.GetSection("GitHub").Get<GitHubOptions>() ?? new GitHubOptions();
 
         var baseUrl = string.IsNullOrWhiteSpace(_options.ApiBaseUrl)
@@ -730,11 +732,22 @@ public class GitHubService : IConnectorService
     private async Task<HttpResponseMessage> GetResponseAsync(Connector connector, string requestUri, CancellationToken cancellationToken, bool skipRateLimitRetry = false)
     {
         var pipeline = skipRateLimitRetry ? GitHubLiveFeedRetryPipeline : GitHubGetRetryPipeline;
-        return await pipeline.ExecuteAsync(async (ct) =>
+        var response = await pipeline.ExecuteAsync(async (ct) =>
         {
             using var request = CreateGetRequest(connector, requestUri);
             return await _httpClient.SendAsync(request, ct);
         }, cancellationToken);
+
+        RecordRateLimit(connector, response);
+        return response;
+    }
+
+    /// <summary>Records rate-limit headers from every response, not only failures, so remaining quota is visible before a call ever fails.</summary>
+    private void RecordRateLimit(Connector connector, HttpResponseMessage response)
+    {
+        var snapshot = GitHubApiErrorHelper.TryParseRateLimitHeaders(response);
+        if (snapshot.HasValue)
+            _rateLimitTracker.Record(connector.ConnectorName, snapshot.Value);
     }
 
     private async Task<T?> GetAsync<T>(string requestUri)

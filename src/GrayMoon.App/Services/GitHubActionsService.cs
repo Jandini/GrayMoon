@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace GrayMoon.App.Services;
 
@@ -8,8 +9,14 @@ public class GitHubActionsService(
     ConnectorRepository connectorRepository,
     GitHubRepositoryService repositoryService,
     GitHubService gitHubService,
+    IMemoryCache memoryCache,
     ILogger<GitHubActionsService> logger)
 {
+    /// <summary>Workflow list rarely changes; short TTL so new/removed workflows still show up promptly.</summary>
+    private static readonly TimeSpan WorkflowListCacheTtl = TimeSpan.FromMinutes(5);
+
+    /// <summary>Whether a workflow file supports <c>workflow_dispatch</c> essentially never changes for a given workflow id/path, so this is cached far longer than the run status itself.</summary>
+    private static readonly TimeSpan WorkflowDispatchSupportCacheTtl = TimeSpan.FromHours(12);
     public async Task<List<GitHubActionEntry>> GetLatestActionsAsync()
     {
         var results = new List<GitHubActionEntry>();
@@ -150,11 +157,12 @@ public class GitHubActionsService(
         var owner = repository.OrgName!;
         var repoName = repository.RepositoryName;
 
-        var workflows = (await gitHubService.GetWorkflowsAsync(connector, owner, repoName, cancellationToken))
+        var workflows = (await GetCachedWorkflowsAsync(connector, owner, repoName, cancellationToken))
             .Where(w => string.Equals(w.State, "active", StringComparison.OrdinalIgnoreCase))
             .OrderBy(w => w.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        // Live/dynamic - always fetched fresh, never cached.
         var runs = await gitHubService.GetWorkflowRunsForBranchAsync(
             connector, owner, repoName, branch, perPage: 100);
         var latestByWorkflowId = runs
@@ -166,8 +174,8 @@ public class GitHubActionsService(
         {
             var dispatchPairs = await Task.WhenAll(workflows.Select(async wf =>
             {
-                var yaml = await gitHubService.GetRepositoryFileUtf8TextAsync(connector, owner, repoName, wf.Path, cancellationToken);
-                return (wf.Id, Supports: YamlAppearsToHaveWorkflowDispatch(yaml));
+                var supports = await GetCachedDispatchSupportAsync(connector, owner, repoName, wf.Id, wf.Path, cancellationToken);
+                return (wf.Id, Supports: supports);
             }));
             var dispatchById = dispatchPairs.ToDictionary(x => x.Id, x => x.Supports);
 
@@ -202,10 +210,9 @@ public class GitHubActionsService(
             foreach (var run in latestByWorkflowId.Values.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase))
             {
                 var meta = await gitHubService.GetWorkflowByIdAsync(connector, owner, repoName, run.WorkflowId, cancellationToken);
-                var yaml = string.IsNullOrWhiteSpace(meta?.Path)
-                    ? null
-                    : await gitHubService.GetRepositoryFileUtf8TextAsync(connector, owner, repoName, meta.Path, cancellationToken);
-                var supportsDispatch = YamlAppearsToHaveWorkflowDispatch(yaml);
+                var supportsDispatch = string.IsNullOrWhiteSpace(meta?.Path)
+                    ? false
+                    : await GetCachedDispatchSupportAsync(connector, owner, repoName, run.WorkflowId, meta.Path, cancellationToken);
                 var workflowPageUrl = RepositoryUrlHelper.BuildWorkflowPageUrl(
                     meta?.HtmlUrl,
                     repository.CloneUrl,
@@ -230,6 +237,32 @@ public class GitHubActionsService(
         }
 
         return result;
+    }
+
+    /// <summary>Cached workflow list - this rarely changes, unlike run status, which must stay live.</summary>
+    private Task<List<GitHubWorkflowDto>> GetCachedWorkflowsAsync(Connector connector, string owner, string repoName, CancellationToken cancellationToken)
+    {
+        var cacheKey = $"gha:workflows:{connector.ConnectorName}:{owner}/{repoName}";
+        return memoryCache.GetOrCreateAsync(cacheKey, entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = WorkflowListCacheTtl;
+            return gitHubService.GetWorkflowsAsync(connector, owner, repoName, cancellationToken);
+        })!;
+    }
+
+    /// <summary>Cached <c>workflow_dispatch</c> support for a workflow file - fetches and parses the YAML at most once per TTL per workflow id/path, since this essentially never changes.</summary>
+    private Task<bool> GetCachedDispatchSupportAsync(Connector connector, string owner, string repoName, long workflowId, string? workflowPath, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(workflowPath))
+            return Task.FromResult(false);
+
+        var cacheKey = $"gha:dispatch:{connector.ConnectorName}:{owner}/{repoName}:{workflowId}:{workflowPath}";
+        return memoryCache.GetOrCreateAsync(cacheKey, async entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = WorkflowDispatchSupportCacheTtl;
+            var yaml = await gitHubService.GetRepositoryFileUtf8TextAsync(connector, owner, repoName, workflowPath, cancellationToken);
+            return YamlAppearsToHaveWorkflowDispatch(yaml);
+        });
     }
 
     /// <summary>Detects a <c>workflow_dispatch</c> trigger in workflow YAML without a full parser.</summary>

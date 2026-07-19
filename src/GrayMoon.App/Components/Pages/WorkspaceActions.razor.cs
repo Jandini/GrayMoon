@@ -630,9 +630,33 @@ public sealed partial class WorkspaceActions : IDisposable
 
     private void StartBackgroundRefresh()
     {
+        var token = _cts.Token;
+        var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
         foreach (var row in rows.Where(r => !string.IsNullOrWhiteSpace(r.Link.BranchName)))
         {
-            _ = RefreshRowAsync(row, _cts.Token);
+            _ = RefreshRowThrottledAsync(row, semaphore, token);
+        }
+    }
+
+    /// <summary>Bounds full-grid refresh fan-out to <see cref="MaxConcurrency"/> concurrent GitHub calls, avoiding secondary rate-limit ("abuse") bursts on large workspaces.</summary>
+    private async Task RefreshRowThrottledAsync(WorkspaceActionRow row, SemaphoreSlim semaphore, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await semaphore.WaitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        try
+        {
+            await RefreshRowAsync(row, cancellationToken);
+        }
+        finally
+        {
+            semaphore.Release();
         }
     }
 
@@ -957,9 +981,10 @@ public sealed partial class WorkspaceActions : IDisposable
             _cts = new CancellationTokenSource();
 
             var token = _cts.Token;
+            using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
             var tasks = rows
                 .Where(r => !string.IsNullOrWhiteSpace(r.Link.BranchName))
-                .Select(row => RefreshRowAsync(row, token))
+                .Select(row => RefreshRowThrottledAsync(row, semaphore, token))
                 .ToList();
 
             await Task.WhenAll(tasks);

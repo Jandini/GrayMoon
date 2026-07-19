@@ -78,9 +78,11 @@ Three orchestrators coordinate multi-step workflows across repositories:
 
 ### GHA live feed services
 
-`GhaWorkflowLiveFeedService` polls `GetWorkflowRunJobsAsync` (jobs + steps) on adaptive intervals (2 s active, 3 s waiting, 15 s idle). It tracks step-status transitions and feeds the left pane of `GhaWorkflowLiveTerminal`. Rate limit state (`_rateLimitedUntil`) is shared across all terminals in the same Blazor circuit so one 429 pauses all.
+`GhaWorkflowLiveFeedService` polls `GetWorkflowRunJobsAsync` (jobs + steps) on adaptive intervals (2 s active, 3 s waiting, 15 s idle). It tracks step-status transitions and feeds the left pane of `GhaWorkflowLiveTerminal`. Rate-limit backoff state lives in `IGitHubRateLimitTracker` (singleton, keyed by connector name), not a field on the service itself - this matters because `WorkspacePushService` resolves its own `GhaWorkflowLiveFeedService` from a separate DI scope (via `ScopedExecutor`/`ServiceScopeFactory.CreateAsyncScope()`) during a push, so a per-instance field would not have been shared with the terminals on the page; routing the gate through the tracker singleton means a 429 hit by any poller for a connector pauses every poller for that connector, regardless of scope.
 
-`GhaStepLogFeedService` polls `GetJobLogsAsync` (the full job log text) and supports two modes: incremental group-parsed step output (`PollStepLogsAsync`) and a raw tail (`PollStepLogTailAsync`) that strips timestamps, filters blank lines, and returns the last N lines of the full log without parsing group markers.
+`GhaLogsModal.LoadLogsAsync` fetches logs on demand (not polled) when the modal opens: one `GetWorkflowRunJobsAsync` call to list jobs, then one `GetJobLogsAsync` call per job, each returning the full log text (no incremental/tail fetching).
+
+`GitHubActionsService.GetWorkflowStatusesForBranchAsync` caches its static parts via `IMemoryCache` - the workflow list (5 min TTL) and per-workflow `workflow_dispatch` YAML detection (12 h TTL, keyed by connector+owner+repo+workflow id+path) - since neither changes tick to tick. `GetWorkflowRunsForBranchAsync` (the actual run status) is never cached and is fetched fresh on every call, so grid/terminal responsiveness is unaffected.
 
 ### Filter search expression (GrayMoon.Common)
 
