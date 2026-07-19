@@ -62,19 +62,23 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         return Task.CompletedTask;
     }
 
+    private Task? _initialLoadTask;
+
     /// <summary>
-    /// Runs the initial (or workspace-switch) load as a background job, the same JobService/BackgroundJobOverlay
-    /// pattern used for refresh and mutations, so opening this page shows the standard LoadingOverlay instead of
-    /// a subtle inline "Loading..." message, and the load survives navigating away and back mid-flight.
+    /// Runs the initial (or workspace-switch) load inline behind the lightweight _isLoading flag instead
+    /// of a background job, so opening this page (including re-opening it with a remembered file
+    /// selection) never shows the BackgroundJobOverlay's "Loading changes..." LoadingOverlay - the tree
+    /// itself renders as soon as the persisted projection is read, which is fast since it never sends an
+    /// Agent command.
     /// </summary>
     private void StartInitialLoadJob()
     {
-        if (IsJobRunning)
+        if (_initialLoadTask is { IsCompleted: false })
         {
             return;
         }
 
-        StartPageJob("Loading changes...", (_, _) => Task.CompletedTask);
+        _initialLoadTask = LoadAsync();
     }
 
     // Reads the persisted SQLite projection only - never sends an Agent command. Opening or reloading
@@ -90,7 +94,6 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             _workspace = await DbContext.Workspaces.AsNoTracking().FirstOrDefaultAsync(w => w.WorkspaceId == WorkspaceId);
             _view = await ReadService.GetWorkspaceAsync(WorkspaceId, CancellationToken.None);
             RebuildRows();
-            await TryRestoreSelectionAsync();
             await ClearSelectionIfStaleAsync();
         }
         catch (Exception ex)
@@ -102,6 +105,16 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         {
             _isLoading = false;
             StateHasChanged();
+        }
+
+        // Restoring a remembered file selection re-fetches its diff from the Agent, which can be slow
+        // (and, unlike the tree read above, is a real Agent command) - it must never gate _isLoading (and
+        // therefore the Refresh button) or the tree render above. TryRestoreSelectionAsync only does work
+        // when this page instance has no selection yet (first load / workspace switch); later reloads
+        // triggered by Refresh or a mutation already have a selection and return immediately.
+        if (_errorMessage == null)
+        {
+            await TryRestoreSelectionAsync();
         }
     }
 
@@ -121,6 +134,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
         if (IsJobRunning)
         {
+            ToastService.Show("Another Git Changes operation is already running.");
             return;
         }
 
