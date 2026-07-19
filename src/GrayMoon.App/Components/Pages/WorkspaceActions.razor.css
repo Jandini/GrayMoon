@@ -1,12 +1,22 @@
-/* Dropdown menu positioning (mirrors WorkspaceRepositoriesHeader.razor.css) */
-.branch-menu-list {
-    position: absolute;
-    top: 100%;
-    left: 0;
+/*
+ * Fixed so the header Re-run menu does not expand article.content scroll overflow
+ * (see workspace-repos-header-menus.js; mirrors WorkspaceRepositoriesHeader.razor.css).
+ */
+.workspace-repository-actions-menu {
+    position: fixed;
+    top: -9999px;
+    left: -9999px;
     right: auto;
-    margin-top: 0.125rem;
+    margin-top: 0;
     z-index: 1051;
-    min-width: 100%;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    box-sizing: border-box;
+}
+
+.branch-menu-list {
+    min-width: 0;
 }
 
 .branch-menu-backdrop {
