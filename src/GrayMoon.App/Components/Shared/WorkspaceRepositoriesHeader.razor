@@ -63,7 +63,7 @@
             @if (_branchMenuOpen)
             {
                 <div class="branch-menu-backdrop" @onclick="CloseBranchMenu"></div>
-                <ul class="dropdown-menu show shadow branch-menu-list"
+                <ul class="dropdown-menu show shadow branch-menu-list workspace-repository-actions-menu"
                     role="menu">
                     <li>
                         <button class="dropdown-item" type="button"
@@ -132,7 +132,7 @@
                 @if (_pushUpdatedMenuOpen)
                 {
                     <div class="branch-menu-backdrop" @onclick="ClosePushUpdatedMenu"></div>
-                    <ul class="dropdown-menu show shadow branch-menu-list"
+                    <ul class="dropdown-menu show shadow branch-menu-list workspace-repository-actions-menu"
                         role="menu">
                         @if (LowestLevelNeedingWork.HasValue)
                         {
@@ -209,7 +209,7 @@
                 @if (_updateMenuOpen)
                 {
                     <div class="branch-menu-backdrop" @onclick="CloseUpdateMenu"></div>
-                    <ul class="dropdown-menu show shadow branch-menu-list"
+                    <ul class="dropdown-menu show shadow branch-menu-list workspace-repository-actions-menu"
                         role="menu">
                         <li>
                             <button class="dropdown-item" type="button"
@@ -269,7 +269,7 @@
                     @if (_pushMenuOpen)
                     {
                         <div class="branch-menu-backdrop" @onclick="ClosePushMenu"></div>
-                        <ul class="dropdown-menu show shadow branch-menu-list" role="menu">
+                        <ul class="dropdown-menu show shadow branch-menu-list workspace-repository-actions-menu" role="menu">
                             <li>
                                 <button class="dropdown-item" type="button" role="menuitem"
                                         disabled="@(WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || AgentTasksPendingCount > 0)"
@@ -309,7 +309,7 @@
             @if (_syncMenuOpen)
             {
                 <div class="branch-menu-backdrop" @onclick="CloseSyncMenu"></div>
-                <ul class="dropdown-menu show shadow branch-menu-list branch-menu-list-end"
+                <ul class="dropdown-menu show shadow branch-menu-list branch-menu-list-end workspace-repository-actions-menu"
                     role="menu">
                     <li>
                         <button class="dropdown-item" type="button"
