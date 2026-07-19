@@ -33,7 +33,8 @@
     else if (ChangedRepositoryCount == 0)
     {
         <div class="git-changes-empty text-muted">
-            <div>No changes</div>
+            <i class="bi bi-git git-changes-empty__bg-icon" aria-hidden="true"></i>
+            <div class="git-changes-empty__label">No changes</div>
             <button type="button"
                     class="btn btn-outline-secondary git-changes-empty__refresh"
                     @onclick="ManualRefreshAsync">
