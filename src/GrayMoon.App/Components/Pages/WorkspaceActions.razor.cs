@@ -723,7 +723,14 @@ public sealed partial class WorkspaceActions : IDisposable
                     EnsureAutoPollRunning();
             }
         }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
+        {
+            // Expected: either this call's own token was cancelled, or this call coalesced onto an
+            // in-flight fetch (WorkspaceActionService.FetchAndPersistAsync) that got cancelled by a
+            // newer refresh superseding it (e.g. clicking Refresh while a background poll is in flight).
+            // Not a genuine failure, so no error badge should be shown.
+        }
+        catch (Exception ex)
         {
             Logger.LogError(ex, "Error refreshing action for {Repo}/{Branch}", row.Repo.RepositoryName, row.Link.BranchName);
             row.ErrorMessage = GetFriendlyErrorMessage(ex);
