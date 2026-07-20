@@ -33,13 +33,28 @@
     else if (ChangedRepositoryCount == 0)
     {
         <div class="git-changes-empty text-muted">
-            <i class="bi bi-git git-changes-empty__bg-icon" aria-hidden="true"></i>
-            <div class="git-changes-empty__label">No changes</div>
-            <button type="button"
-                    class="btn btn-outline-secondary git-changes-empty__refresh"
-                    @onclick="ManualRefreshAsync">
-                Refresh
-            </button>
+            @if (_isEmptyStateRefreshing)
+            {
+                <div class="spinner-border" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <div class="git-changes-empty__label">@_emptyStateRefreshStatus</div>
+                <button type="button"
+                        class="btn btn-outline-secondary btn-sm git-changes-empty__refresh"
+                        @onclick="AbortEmptyStateRefresh">
+                    Abort
+                </button>
+            }
+            else
+            {
+                <i class="bi bi-git git-changes-empty__bg-icon" aria-hidden="true"></i>
+                <div class="git-changes-empty__label">No changes</div>
+                <button type="button"
+                        class="btn btn-outline-secondary git-changes-empty__refresh"
+                        @onclick="ManualRefreshAsync">
+                    Refresh
+                </button>
+            }
         </div>
     }
     else
