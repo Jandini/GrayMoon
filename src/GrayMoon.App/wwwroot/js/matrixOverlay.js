@@ -1,8 +1,13 @@
 (function () {
   const state = new Map(); // canvasId -> state object
 
+  // Cap the backing-store resolution: full devicePixelRatio (2-3x on modern
+  // displays) multiplies fill/text work by dpr^2 for a purely decorative
+  // effect, so we clamp it well below native sharpness.
+  const MAX_DPR = 1.25;
+
   function resize(canvas, ctx) {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
     const rect = canvas.getBoundingClientRect();
     const w = Math.max(1, Math.floor(rect.width));
     const h = Math.max(1, Math.floor(rect.height));
@@ -34,7 +39,7 @@
     if (!ctx) return;
 
     const fontSize = Math.max(10, (options?.fontSize ?? 16) | 0);
-    const frameIntervalMs = Math.max(16, (options?.frameIntervalMs ?? 50) | 0);
+    const frameIntervalMs = Math.max(33, (options?.frameIntervalMs ?? 66) | 0);
     const fadeAlpha = Math.min(1, Math.max(0, options?.fadeAlpha ?? 0.08)); // trail length
     const characterOpacity = Math.min(1, Math.max(0, options?.characterOpacity ?? 0.65));
     const dropSpeed = Math.min(2, Math.max(0.1, options?.dropSpeed ?? 0.6)); // fall speed (lower = slower)
@@ -71,11 +76,11 @@
       fadeAlpha,
       characterOpacity,
       onResize,
-      timerId: null
+      timerId: null,
+      onVisibilityChange: null
     };
 
-    // Throttled loop (stable FPS, less battery use than full raf)
-    s.timerId = window.setInterval(() => {
+    const tick = () => {
       if (!s.running) return;
 
       // translucent black fill = trail
@@ -97,7 +102,30 @@
         if (y > h && Math.random() > 0.975) drops[i] = 0;
         else drops[i] += dropSpeed;
       }
-    }, frameIntervalMs);
+    };
+
+    const startTimer = () => {
+      if (s.timerId) return;
+      // Throttled loop (stable FPS, less battery use than full raf)
+      s.timerId = window.setInterval(tick, frameIntervalMs);
+    };
+
+    const stopTimer = () => {
+      if (!s.timerId) return;
+      window.clearInterval(s.timerId);
+      s.timerId = null;
+    };
+
+    // Backgrounded tabs still tick this timer (browsers only throttle to
+    // ~1/s), so fully stop drawing while the overlay isn't visible on
+    // screen to avoid burning CPU on a hidden tab.
+    s.onVisibilityChange = () => {
+      if (document.hidden) stopTimer();
+      else startTimer();
+    };
+    document.addEventListener("visibilitychange", s.onVisibilityChange);
+
+    if (!document.hidden) startTimer();
 
     state.set(canvasId, s);
   }
@@ -109,6 +137,7 @@
     s.running = false;
     if (s.timerId) window.clearInterval(s.timerId);
     window.removeEventListener("resize", s.onResize);
+    if (s.onVisibilityChange) document.removeEventListener("visibilitychange", s.onVisibilityChange);
 
     // clear canvas
     try {
