@@ -19,14 +19,31 @@
     return { w, h };
   }
 
+  // Flattened once at module load instead of rebuilt (3 array + string
+  // allocations) on every single glyph draw - this ran once per column per
+  // frame (~100+ times/frame), so hoisting it is a real allocation-count win.
+  const CHAR_POOL = Array.from(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" +
+    "!@#$%^&*()-_=+[]{};:,.<>/?\\|" +
+    "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ"
+  );
+
   function randomChar() {
-    const pools = [
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-      "!@#$%^&*()-_=+[]{};:,.<>/?\\|",
-      "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ"
-    ];
-    const p = pools[(Math.random() * pools.length) | 0];
-    return p[(Math.random() * p.length) | 0];
+    return CHAR_POOL[(Math.random() * CHAR_POOL.length) | 0];
+  }
+
+  // Quantized grayscale palette instead of formatting a new "rgba(...)"
+  // string per glyph per frame (the intensity variation only needs a handful
+  // of visually distinct steps, not a continuous 0-255 range).
+  const COLOR_STEPS = 12;
+
+  function buildColorPalette(characterOpacity) {
+    const palette = new Array(COLOR_STEPS);
+    for (let i = 0; i < COLOR_STEPS; i++) {
+      const intensity = 180 + Math.round((i / (COLOR_STEPS - 1)) * 75);
+      palette[i] = `rgba(${intensity}, ${intensity}, ${intensity}, ${characterOpacity})`;
+    }
+    return palette;
   }
 
   function start(canvasId, options) {
@@ -51,6 +68,9 @@
 
     ctx.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`;
     ctx.textBaseline = "top";
+
+    const fadeFillStyle = `rgba(0, 0, 0, ${fadeAlpha})`;
+    const colorPalette = buildColorPalette(characterOpacity);
 
     const onResize = () => {
       ({ w, h } = resize(canvas, ctx));
@@ -84,7 +104,7 @@
       if (!s.running) return;
 
       // translucent black fill = trail
-      ctx.fillStyle = `rgba(0, 0, 0, ${fadeAlpha})`;
+      ctx.fillStyle = fadeFillStyle;
       ctx.fillRect(0, 0, w, h);
 
       for (let i = 0; i < drops.length; i++) {
@@ -94,8 +114,7 @@
         const c = randomChar();
 
         // Grayscale intensity range (brighter + dimmer variation)
-        const intensity = 180 + ((Math.random() * 75) | 0);
-        ctx.fillStyle = `rgba(${intensity}, ${intensity}, ${intensity}, ${characterOpacity})`;
+        ctx.fillStyle = colorPalette[(Math.random() * COLOR_STEPS) | 0];
         ctx.fillText(c, x, y);
 
         // reset occasionally for randomness
