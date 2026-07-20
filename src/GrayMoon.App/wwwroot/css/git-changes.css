@@ -495,11 +495,28 @@
     opacity: 1;
 }
 
+/* Keep the action visible without hovering while its file/folder mutation is in flight -
+   otherwise the spinner replacing the +/- icon would be invisible until the mouse moved away
+   and back over the row. */
+.git-changes-tree__row:has(.git-changes-tree__action-spinner) .git-changes-tree__actions {
+    opacity: 1;
+}
+
+/* Fixed-size square box (not sized by its glyph/spinner content) so swapping the +/- icon for the
+   spinner - or between the two different icon glyphs - never changes the button's own footprint,
+   which would otherwise nudge sibling actions or the row's measured height. */
 .git-changes-tree__action-btn {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 1.3rem;
+    height: 1.3rem;
     border: none;
     background: transparent;
     color: var(--text-secondary);
-    padding: 0.1rem 0.35rem;
+    padding: 0;
     border-radius: 0.2rem;
 }
 
@@ -510,6 +527,25 @@
 
 .git-changes-tree__action-btn:disabled {
     opacity: 0.4;
+}
+
+/* Small inline spinner that swaps in for the +/- glyph on File/Folder rows (non-repo-level
+   actions) while their repository's lightweight mutation indicator is active. Sized to match
+   the existing bi-plus-lg/bi-dash-lg glyphs so the button's own size (and therefore the row
+   height) never changes. */
+.git-changes-tree__action-spinner {
+    display: inline-block;
+    width: 0.65rem;
+    height: 0.65rem;
+    box-sizing: border-box;
+    border: 0.1rem solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: git-changes-tree-spin 0.6s linear infinite;
+}
+
+@keyframes git-changes-tree-spin {
+    to { transform: rotate(360deg); }
 }
 
 /* Inline commit box under a staged repository row */

@@ -94,9 +94,10 @@
                                  SelectedRow="_selectedRow"
                                  OnToggleExpand="ToggleExpanded"
                                  OnSelectFile="SelectFile"
-                                 OnStage="args => StageAsync(args.WorkspaceRepositoryId, args.Scope, args.Paths)"
-                                 OnUnstage="args => UnstageAsync(args.WorkspaceRepositoryId, args.Scope, args.Paths)"
+                                 OnStage="args => StageAsync(args.WorkspaceRepositoryId, args.Scope, args.Paths, args.RowKey)"
+                                 OnUnstage="args => UnstageAsync(args.WorkspaceRepositoryId, args.Scope, args.Paths, args.RowKey)"
                                  IsMutating="IsMutating"
+                                 IsRowMutating="IsRowMutating"
                                  OnStageAllChanged="StageAllChangedAsync"
                                  OnUnstageAllStaged="UnstageAllStagedAsync" />
             </div>

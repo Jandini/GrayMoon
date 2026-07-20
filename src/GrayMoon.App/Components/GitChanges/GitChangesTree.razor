@@ -89,6 +89,10 @@
     [Parameter] public EventCallback OnStageAllChanged { get; set; }
     [Parameter] public EventCallback OnUnstageAllStaged { get; set; }
     [Parameter, EditorRequired] public Func<int, bool> IsMutating { get; set; } = _ => false;
+    /// <summary>True only when this exact row has a File/Folder-scope mutation in flight - used to swap
+    /// that single row's +/- icon for a spinner without affecting any other row (descendant, sibling,
+    /// or otherwise) in the same repository.</summary>
+    [Parameter, EditorRequired] public Func<GitChangesTreeRow, bool> IsRowMutating { get; set; } = _ => false;
 
     private bool IsSelected(GitChangesTreeRow row) =>
         SelectedRow != null && SelectedRow.Kind == GitChangesTreeRowKind.File && SelectedRow.Key == row.Key;
@@ -213,11 +217,9 @@
         builder.AddAttribute(seq++, "disabled", disabled);
         builder.AddAttribute(seq++, "title", row.IsStagedSection ? "Unstage" : "Stage");
         builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => row.IsStagedSection
-            ? OnUnstage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, GitChangeOperationScope.ExplicitPaths, paths))
-            : OnStage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, GitChangeOperationScope.ExplicitPaths, paths))));
-        builder.OpenElement(seq++, "i");
-        builder.AddAttribute(seq++, "class", row.IsStagedSection ? "bi bi-dash-lg" : "bi bi-plus-lg");
-        builder.CloseElement();
+            ? OnUnstage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, GitChangeOperationScope.ExplicitPaths, paths, row.Key))
+            : OnStage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, GitChangeOperationScope.ExplicitPaths, paths, row.Key))));
+        RenderActionIcon(builder, ref seq, row, IsRowMutating(row));
         builder.CloseElement();
     }
 
@@ -234,11 +236,30 @@
             ? (row.Kind == GitChangesTreeRowKind.Repository ? "Unstage repository" : "Unstage folder")
             : (row.Kind == GitChangesTreeRowKind.Repository ? "Stage repository" : "Stage folder"));
         builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => row.IsStagedSection
-            ? OnUnstage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, scope, paths))
-            : OnStage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, scope, paths))));
+            ? OnUnstage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, scope, paths, row.Key))
+            : OnStage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, scope, paths, row.Key))));
+        // Repository scope runs as a full background job (LoadingOverlay), not the lightweight inline
+        // indicator, so it never has a row-scoped spinner - only File/Folder actions do.
+        RenderActionIcon(builder, ref seq, row, row.Kind != GitChangesTreeRowKind.Repository && IsRowMutating(row));
+        builder.CloseElement();
+    }
+
+    /// <summary>Renders the stage/unstage glyph inside an already-open action button. Swaps the +/- icon for
+    /// a small inline spinner when <paramref name="showSpinner"/> is true - used for File/Folder rows (below
+    /// repo level) while their repository's mutation is in flight, so the affected sub-items visibly show
+    /// work happening instead of just going gray like the repository-level button does.</summary>
+    private static void RenderActionIcon(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder, ref int seq, GitChangesTreeRow row, bool showSpinner)
+    {
+        if (showSpinner)
+        {
+            builder.OpenElement(seq++, "span");
+            builder.AddAttribute(seq++, "class", "git-changes-tree__action-spinner");
+            builder.CloseElement();
+            return;
+        }
+
         builder.OpenElement(seq++, "i");
         builder.AddAttribute(seq++, "class", row.IsStagedSection ? "bi bi-dash-lg" : "bi bi-plus-lg");
-        builder.CloseElement();
         builder.CloseElement();
     }
 

@@ -43,6 +43,11 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     private readonly HashSet<int> _mutatingRepositoryIds = [];
 
+    // Populated alongside _mutatingRepositoryIds with the tree row key that initiated the in-flight
+    // File/Folder mutation, so the spinner shown to the user can be scoped to that exact row (and its
+    // descendants, for a folder) rather than every row in the affected repository.
+    private readonly Dictionary<int, string> _mutatingRowKeyByRepository = new();
+
     protected override Task OnInitializedAsync()
     {
         EnsureActivitySubscription();
@@ -366,23 +371,30 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     // button - not just the affected repository - since only one page job can run at a time anyway.
     private bool IsMutating(int workspaceRepositoryId) => _mutatingRepositoryIds.Contains(workspaceRepositoryId) || IsJobRunning;
 
+    // True only for the exact row that was clicked - never its descendants, siblings, or any other row
+    // in the repository. GitChangesTree calls this to decide whether a File/Folder action button shows
+    // a spinner instead of its +/- icon.
+    private bool IsRowMutating(GitChangesTreeRow row) =>
+        _mutatingRowKeyByRepository.TryGetValue(row.WorkspaceRepositoryId, out var mutatingKey)
+        && row.Key == mutatingKey;
+
     // File and folder scopes are fast, frequent clicks during diff review - keep them on the lightweight
     // inline indicator (_mutatingRepositoryIds) rather than the full LoadingOverlay. Whole-repository
     // scope stages/unstages every tracked and untracked file in one repository and can take a moment, so
     // it gets the same overlay+terminal treatment as commit and the section-wide bulk actions.
-    private Task StageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths) =>
+    private Task StageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey) =>
         scope == GitChangeOperationScope.Repository
             ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: true)
-            : RunMutationAsync(workspaceRepositoryId, async (root, wsName, repoName, repositoryId) =>
+            : RunMutationAsync(workspaceRepositoryId, rowKey, async (root, wsName, repoName, repositoryId) =>
             {
                 var result = await AgentClient.StageAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
             });
 
-    private Task UnstageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths) =>
+    private Task UnstageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey) =>
         scope == GitChangeOperationScope.Repository
             ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: false)
-            : RunMutationAsync(workspaceRepositoryId, async (root, wsName, repoName, repositoryId) =>
+            : RunMutationAsync(workspaceRepositoryId, rowKey, async (root, wsName, repoName, repositoryId) =>
             {
                 var result = await AgentClient.UnstageAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
@@ -428,7 +440,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    private async Task RunMutationAsync(int workspaceRepositoryId, Func<string, string, string, int, Task> action)
+    private async Task RunMutationAsync(int workspaceRepositoryId, string rowKey, Func<string, string, string, int, Task> action)
     {
         if (!AgentBridge.IsAgentConnected)
         {
@@ -441,6 +453,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return; // A mutation for this repository is already in flight.
         }
 
+        _mutatingRowKeyByRepository[workspaceRepositoryId] = rowKey;
         StateHasChanged();
 
         try
@@ -462,6 +475,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         finally
         {
             _mutatingRepositoryIds.Remove(workspaceRepositoryId);
+            _mutatingRowKeyByRepository.Remove(workspaceRepositoryId);
             StateHasChanged();
         }
     }
