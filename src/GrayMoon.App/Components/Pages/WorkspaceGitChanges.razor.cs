@@ -38,14 +38,6 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private bool _disposed;
     private bool _scrollSelectionIntoViewPending;
 
-    // Empty-state ("No changes") refresh: a non-overlay refresh path. Unlike ManualRefreshAsync's
-    // StartPageJob branch (used once there are already persisted changed repositories), this never
-    // touches the JobService/BackgroundJobOverlay - the empty state's own "No changes"/Refresh UI is
-    // swapped inline for a centred spinner + progress text + Abort button for the duration of the scan.
-    private bool _isEmptyStateRefreshing;
-    private string? _emptyStateRefreshStatus;
-    private CancellationTokenSource? _emptyStateRefreshCts;
-
     // Selection: the currently chosen file row (diff panel wiring lands in Stage 6 - Monaco).
     private GitChangesTreeRow? _selectedRow;
 
@@ -58,10 +50,21 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     protected override Task OnInitializedAsync()
     {
+        JobService.Changed += OnJobServiceChanged;
         EnsureActivitySubscription();
         RestoreWorkspaceCommitMessage();
         StartInitialLoadJob();
         return Task.CompletedTask;
+    }
+
+    private void OnJobServiceChanged()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(StateHasChanged);
     }
 
     protected override Task OnParametersSetAsync()
@@ -140,9 +143,9 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     /// tree/splitter is showing), this runs behind the standard LoadingOverlay/terminal job so it's
     /// visibly a real operation - unchanged from before. When the page is showing the empty "No changes"
     /// state, the overlay would otherwise cover that same message/button, so it instead runs via the
-    /// non-overlay inline refresh (see StartEmptyStateRefreshAsync). Both rely on the same
-    /// GitChangesUpdated -> LoadAsync pipeline used everywhere else for incremental per-repository
-    /// updates as results stream in.
+    /// non-overlay EmptyScanJobKey job (inline spinner + Abort). Both survive navigation via
+    /// BackgroundJobService and rely on the same GitChangesUpdated -> LoadAsync pipeline for
+    /// incremental per-repository updates as results stream in.
     /// </summary>
     private void ManualRefreshAsync()
     {
@@ -152,7 +155,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return;
         }
 
-        if (IsJobRunning || _isEmptyStateRefreshing)
+        if (IsAnyScanRunning)
         {
             ToastService.Show("Another Git Changes operation is already running.");
             return;
@@ -160,7 +163,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
         if (ChangedRepositoryCount == 0)
         {
-            StartEmptyStateRefreshAsync();
+            StartEmptyScanJob("Refreshing repositories...");
             return;
         }
 
@@ -168,65 +171,6 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             Scanner.ScanWorkspaceAsync(WorkspaceId, ct, progress =>
                 job.ReportProgress($"Refreshed {progress.Completed} of {progress.Total} repositories")));
     }
-
-    /// <summary>
-    /// Non-overlay refresh for the empty "No changes" state - swaps the "No changes"/Refresh UI for a
-    /// centred spinner + progress text + Abort button, using the same progress text format the
-    /// LoadingOverlay path uses ("Refreshing x of y repositories..."). Restores the normal empty-state
-    /// UI once the scan completes, is aborted, or fails.
-    /// </summary>
-    private void StartEmptyStateRefreshAsync()
-    {
-        _isEmptyStateRefreshing = true;
-        _emptyStateRefreshStatus = "Refreshing repositories...";
-        _emptyStateRefreshCts = new CancellationTokenSource();
-        var ct = _emptyStateRefreshCts.Token;
-
-        _ = RunEmptyStateRefreshAsync(ct);
-    }
-
-    private async Task RunEmptyStateRefreshAsync(CancellationToken ct)
-    {
-        try
-        {
-            await Scanner.ScanWorkspaceAsync(WorkspaceId, ct, progress =>
-                SafeInvoke(() => _emptyStateRefreshStatus = $"Refreshing {progress.Completed} of {progress.Total} repositories..."));
-
-            if (_disposed)
-            {
-                return;
-            }
-
-            await InvokeAsync(async () =>
-            {
-                if (!_disposed)
-                {
-                    await LoadAsync();
-                }
-            });
-        }
-        catch (OperationCanceledException)
-        {
-            // Aborted by the user - fall through to restore the normal empty-state UI below.
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Git Changes empty-state refresh failed for workspace {WorkspaceId}", WorkspaceId);
-            SafeInvoke(() => ToastService.ShowError("Refresh failed. See logs for details."));
-        }
-        finally
-        {
-            SafeInvoke(() =>
-            {
-                _isEmptyStateRefreshing = false;
-                _emptyStateRefreshStatus = null;
-            });
-            _emptyStateRefreshCts?.Dispose();
-            _emptyStateRefreshCts = null;
-        }
-    }
-
-    private void AbortEmptyStateRefresh() => _emptyStateRefreshCts?.Cancel();
 
     private string MostRecentPersistedLabel()
     {
@@ -618,11 +562,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         _disposed = true;
+        JobService.Changed -= OnJobServiceChanged;
         ReleaseActivitySubscription();
-
-        _emptyStateRefreshCts?.Cancel();
-        _emptyStateRefreshCts?.Dispose();
-        _emptyStateRefreshCts = null;
 
         if (_hubConnection != null)
         {

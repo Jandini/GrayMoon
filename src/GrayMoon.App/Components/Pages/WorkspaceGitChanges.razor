@@ -10,7 +10,6 @@
 <div class="container-fluid page-container grid-page git-changes-page">
     <div class="grid-page-header">
         <GitChangesHeader View="_view"
-                           StatusText="@(_isWarmingUp ? _warmUpStatus : null)"
                            HasChanges="@(ChangedRepositoryCount > 0)"
                            FilterQuery="@_filterQuery"
                            FilterQueryChanged="OnFilterChanged"
@@ -34,19 +33,19 @@
     {
         <div class="git-changes-empty text-muted">
             <i class="bi bi-git git-changes-empty__bg-icon" aria-hidden="true"></i>
-            @if (_isEmptyStateRefreshing)
+            @if (IsEmptyScanRunning)
             {
                 <div class="spinner-border" role="status">
                     <span class="visually-hidden">Loading...</span>
                 </div>
-                <div class="git-changes-empty__label">@_emptyStateRefreshStatus</div>
+                <div class="git-changes-empty__label">@(EmptyScanStatus ?? "Refreshing repositories...")</div>
                 <button type="button"
                         class="btn btn-outline-secondary btn-sm git-changes-empty__refresh"
                         @onclick="AbortEmptyStateRefresh">
                     Abort
                 </button>
             }
-            else if (!_isWarmingUp)
+            else
             {
                 <div class="git-changes-empty__label">No changes</div>
                 <button type="button"
