@@ -50,10 +50,21 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     protected override Task OnInitializedAsync()
     {
+        JobService.Changed += OnJobServiceChanged;
         EnsureActivitySubscription();
         RestoreWorkspaceCommitMessage();
         StartInitialLoadJob();
         return Task.CompletedTask;
+    }
+
+    private void OnJobServiceChanged()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(StateHasChanged);
     }
 
     protected override Task OnParametersSetAsync()
@@ -128,9 +139,13 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     /// <summary>
     /// The Refresh button: a real, user-triggered rescan of every repository in the workspace (not just
-    /// the ones currently showing changes), run behind the standard LoadingOverlay/terminal job so it's
-    /// visibly a real operation. Relies on the same GitChangesUpdated -> LoadAsync pipeline used
-    /// everywhere else for incremental per-repository updates as results stream in.
+    /// the ones currently showing changes). When previously changed files are already persisted (the
+    /// tree/splitter is showing), this runs behind the standard LoadingOverlay/terminal job so it's
+    /// visibly a real operation - unchanged from before. When the page is showing the empty "No changes"
+    /// state, the overlay would otherwise cover that same message/button, so it instead runs via the
+    /// non-overlay EmptyScanJobKey job (inline spinner + Abort). Both survive navigation via
+    /// BackgroundJobService and rely on the same GitChangesUpdated -> LoadAsync pipeline for
+    /// incremental per-repository updates as results stream in.
     /// </summary>
     private void ManualRefreshAsync()
     {
@@ -140,9 +155,15 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return;
         }
 
-        if (IsJobRunning)
+        if (IsAnyScanRunning)
         {
             ToastService.Show("Another Git Changes operation is already running.");
+            return;
+        }
+
+        if (ChangedRepositoryCount == 0)
+        {
+            StartEmptyScanJob("Refreshing repositories...");
             return;
         }
 
@@ -541,6 +562,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         _disposed = true;
+        JobService.Changed -= OnJobServiceChanged;
         ReleaseActivitySubscription();
 
         if (_hubConnection != null)

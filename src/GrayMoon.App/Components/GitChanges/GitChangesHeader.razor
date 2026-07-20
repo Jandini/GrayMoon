@@ -31,13 +31,6 @@
                 </span>
             }
         </div>
-        @if (!string.IsNullOrEmpty(StatusText))
-        {
-            <span class="text-muted small git-changes-header__status">
-                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                @StatusText
-            </span>
-        }
         <span class="workspace-repos-title-spacer"></span>
     </div>
     @if (HasChanges)
@@ -80,10 +73,6 @@
 
 @code {
     [Parameter] public WorkspaceGitChangesView? View { get; set; }
-
-    /// <summary>Non-blocking status text (e.g. an automatic warm-up scan in progress). Never used for
-    /// user-triggered operations - those get the full LoadingOverlay via BackgroundJobService instead.</summary>
-    [Parameter] public string? StatusText { get; set; }
 
     /// <summary>Gates the entire actions row (filter, change nav, refresh) - hidden while there are no
     /// changes anywhere in the workspace, so the empty state is a clean "No changes" message instead.</summary>

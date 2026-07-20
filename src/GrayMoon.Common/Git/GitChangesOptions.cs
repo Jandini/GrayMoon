@@ -3,14 +3,13 @@ namespace GrayMoon.Common.Git;
 /// <summary>Bounded-concurrency and debounce tuning for the Git Changes feature. Configurable, benchmark-driven.</summary>
 public sealed class GitChangesOptions
 {
-    /// <summary>Max repositories with a concurrent status scan in flight. Default 16.</summary>
-    public int MaxParallelRepositoryOperations { get; init; } = 16;
-
-    /// <summary>Max repositories with a concurrent mutation (stage/unstage/commit) in flight. Default 4.</summary>
-    public int MaxParallelRepositoryMutations { get; init; } = 4;
-
-    /// <summary>Max concurrent diff content loads. Default 4.</summary>
-    public int MaxParallelDiffLoads { get; init; } = 4;
+    /// <summary>
+    /// Single shared concurrency bound for every repository-level batch operation in the Git Changes
+    /// feature - status scans (background sweep, on-open warm-up, manual Refresh), stage/unstage/commit
+    /// fan-out, and diff loads all gate on this one value rather than each carrying its own hard-coded
+    /// limit. Default 8.
+    /// </summary>
+    public int MaxParallelRepositoryOperations { get; init; } = 8;
 
     /// <summary>Debounce window after a watcher event before running an authoritative status scan.</summary>
     public int WatcherDebounceMilliseconds { get; init; } = 400;

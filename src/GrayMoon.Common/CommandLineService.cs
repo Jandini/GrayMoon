@@ -337,32 +337,41 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
         if (!string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        var trimmed = arguments.TrimStart();
-        if (trimmed.StartsWith("diff", StringComparison.Ordinal)
-            && (trimmed.Length == 4 || trimmed[4] == ' '))
-            return true;
-
-        if (IsGitStatusCommand(fileName, arguments))
-            return true;
-
-        if (!trimmed.StartsWith("show ", StringComparison.Ordinal))
+        if (!TryGetGitSubcommand(arguments, out var subcommandAndRest))
             return false;
 
-        return trimmed.AsSpan(5).IndexOf(':') >= 0;
+        if (subcommandAndRest.StartsWith("diff", StringComparison.Ordinal)
+            && (subcommandAndRest.Length == 4 || subcommandAndRest[4] == ' '))
+            return true;
+
+        if (subcommandAndRest.StartsWith("status", StringComparison.Ordinal)
+            && (subcommandAndRest.Length == 6 || subcommandAndRest[6] == ' '))
+            return true;
+
+        if (!subcommandAndRest.StartsWith("show ", StringComparison.Ordinal))
+            return false;
+
+        return subcommandAndRest.AsSpan(5).IndexOf(':') >= 0;
     }
 
     private static bool ShouldSuppressStreamLogging(string fileName, IReadOnlyList<string> arguments)
     {
-        if (!string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase) || arguments.Count == 0)
+        if (!string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        if (string.Equals(arguments[0], "diff", StringComparison.Ordinal) || string.Equals(arguments[0], "status", StringComparison.Ordinal))
+        var subIdx = FindGitSubcommandIndex(arguments);
+        if (subIdx < 0)
+            return false;
+
+        var subcommand = arguments[subIdx];
+        if (string.Equals(subcommand, "diff", StringComparison.Ordinal)
+            || string.Equals(subcommand, "status", StringComparison.Ordinal))
             return true;
 
-        if (!string.Equals(arguments[0], "show", StringComparison.Ordinal))
+        if (!string.Equals(subcommand, "show", StringComparison.Ordinal))
             return false;
 
-        for (var i = 1; i < arguments.Count; i++)
+        for (var i = subIdx + 1; i < arguments.Count; i++)
         {
             if (arguments[i].Contains(':', StringComparison.Ordinal))
                 return true;
@@ -383,14 +392,82 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger) : ICo
         if (!string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        var trimmed = arguments.TrimStart();
-        return trimmed.StartsWith("status", StringComparison.Ordinal) && (trimmed.Length == 6 || trimmed[6] == ' ');
+        if (!TryGetGitSubcommand(arguments, out var subcommandAndRest))
+            return false;
+
+        return subcommandAndRest.StartsWith("status", StringComparison.Ordinal)
+            && (subcommandAndRest.Length == 6 || subcommandAndRest[6] == ' ');
     }
 
-    private static bool IsGitStatusCommand(string fileName, IReadOnlyList<string> arguments) =>
-        string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase)
-        && arguments.Count > 0
-        && string.Equals(arguments[0], "status", StringComparison.Ordinal);
+    private static bool IsGitStatusCommand(string fileName, IReadOnlyList<string> arguments)
+    {
+        if (!string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var subIdx = FindGitSubcommandIndex(arguments);
+        return subIdx >= 0 && string.Equals(arguments[subIdx], "status", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Skips leading global git options (e.g. <c>--no-optional-locks</c>, <c>-C path</c>, <c>-c key=value</c>)
+    /// so callers that prepend them still match subcommand-based suppress rules.
+    /// </summary>
+    private static int FindGitSubcommandIndex(IReadOnlyList<string> arguments)
+    {
+        for (var i = 0; i < arguments.Count; i++)
+        {
+            var arg = arguments[i];
+            if (arg.Length == 0 || arg[0] != '-')
+                return i;
+
+            // Global options that take the next argv as their value.
+            if (arg is "-C" or "-c")
+                i++;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Same as <see cref="FindGitSubcommandIndex"/> for the joined-arguments overload.
+    /// </summary>
+    private static bool TryGetGitSubcommand(string arguments, out string subcommandAndRest)
+    {
+        var trimmed = arguments.TrimStart();
+        while (trimmed.Length > 0 && trimmed[0] == '-')
+        {
+            var space = trimmed.IndexOf(' ');
+            if (space < 0)
+            {
+                subcommandAndRest = "";
+                return false;
+            }
+
+            var option = trimmed[..space];
+            trimmed = trimmed[(space + 1)..].TrimStart();
+
+            if (option is "-C" or "-c")
+            {
+                space = trimmed.IndexOf(' ');
+                if (space < 0)
+                {
+                    subcommandAndRest = "";
+                    return false;
+                }
+
+                trimmed = trimmed[(space + 1)..].TrimStart();
+            }
+        }
+
+        if (trimmed.Length == 0)
+        {
+            subcommandAndRest = "";
+            return false;
+        }
+
+        subcommandAndRest = trimmed;
+        return true;
+    }
 
     private void OnStreamSegment(string fileName, bool suppressStreamLogging, bool suppressOverlay, AgentCommandStreamKind kind, string segment)
     {
