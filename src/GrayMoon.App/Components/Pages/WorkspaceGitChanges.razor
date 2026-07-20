@@ -33,6 +33,7 @@
     else if (ChangedRepositoryCount == 0)
     {
         <div class="git-changes-empty text-muted">
+            <i class="bi bi-git git-changes-empty__bg-icon" aria-hidden="true"></i>
             @if (_isEmptyStateRefreshing)
             {
                 <div class="spinner-border" role="status">
@@ -47,7 +48,6 @@
             }
             else
             {
-                <i class="bi bi-git git-changes-empty__bg-icon" aria-hidden="true"></i>
                 <div class="git-changes-empty__label">No changes</div>
                 <button type="button"
                         class="btn btn-outline-secondary git-changes-empty__refresh"
