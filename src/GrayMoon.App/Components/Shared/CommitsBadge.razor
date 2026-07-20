@@ -48,7 +48,7 @@ else
     private bool NotUpstreamed => !IsOnTag && BranchHasUpstream == false;
     private bool HasCommits => Y > 0 || X > 0;
     private bool Clickable => !Disabled && !IsOnTag && (HasCommits || NotUpstreamed);
-    private string BgColor => Y > 0 ? "#a50c1b" : (X > 0 || NotUpstreamed ? "#ffc107" : "#198754");
+    private string BgColor => Y > 0 ? "#dc3545" : (X > 0 || NotUpstreamed ? "#ffc107" : "#198754");
     private string TextColor => (X > 0 || NotUpstreamed) && Y == 0 ? "#000" : "#fff";
     private string CssClass => NotUpstreamed ? "badge commits-badge commits-badge-not-upstreamed" : "badge";
     private string DisplayText => $"↑{X} ↓{Y}";

@@ -109,7 +109,7 @@
     font-size: min(40rem, 60vh, 60vw);
     line-height: 1;
     color: var(--border-color);
-    opacity: 0.75;
+    opacity: 0.25;
     pointer-events: none;
     z-index: 0;
 }
@@ -121,7 +121,7 @@
 
 .git-changes-empty__label {
     font-weight: 300;
-    color: var(--text-primary);
+    color: var(--text-muted);
 }
 
 .git-changes-empty__refresh {
