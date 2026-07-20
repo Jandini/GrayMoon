@@ -9,11 +9,35 @@
     overflow: hidden;
 }
 
-/* Header is title + summary only; filter and refresh live in the diff toolbar. */
 .git-changes-header__summary {
-    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
+    gap: 1.1rem;
+}
+
+.git-changes-header__summary-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.git-changes-header__summary-icon {
+    font-size: 0.85rem;
+    opacity: 0.75;
+}
+
+/* Staged/changed counts stand out in a near-white color once they are non-zero, instead of
+   blending into the muted gray summary text. */
+.git-changes-header__summary-item--active {
+    color: var(--text-primary);
+}
+
+.git-changes-header__summary-item--active .git-changes-header__summary-icon {
+    opacity: 0.95;
 }
 
 /* Match other workspace grids: body height matches shared max-height so the
@@ -27,7 +51,7 @@
     flex-shrink: 0;
 }
 
-/* Match workspace-repos-header-actions margins (filter lives in the diff toolbar). */
+/* Match workspace-repos-header-actions margins (actions row is only present when there are changes). */
 .git-changes-page .git-changes-header {
     margin-bottom: 0.75rem;
 }
@@ -35,8 +59,8 @@
 .git-changes-page .grid-page-body {
     flex: 1 1 auto;
     min-height: 0;
-    height: calc(100vh - 148px);
-    max-height: calc(100vh - 148px);
+    height: calc(100vh - 168px);
+    max-height: calc(100vh - 192px);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -49,8 +73,7 @@
     min-height: 0;
 }
 
-.git-changes-page .grid-page-body > .alert,
-.git-changes-page .grid-page-body > .git-changes-empty {
+.git-changes-page .grid-page-body > .alert {
     border: 1px solid var(--border-color);
     border-radius: 0.375rem;
 }
@@ -67,12 +90,47 @@
 }
 
 .git-changes-empty {
+    position: relative;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
+    gap: 0.75rem;
     padding: 3rem 1rem;
     font-size: 0.95rem;
+    overflow: hidden;
+}
+
+.git-changes-empty__bg-icon {
+    position: absolute;
+    top: 56%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: min(40rem, 60vh, 60vw);
+    line-height: 1;
+    color: var(--border-color);
+    opacity: 0.25;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.git-changes-empty > *:not(.git-changes-empty__bg-icon) {
+    position: relative;
+    z-index: 1;
+}
+
+.git-changes-empty__label {
+    font-weight: 300;
+    color: var(--text-muted);
+}
+
+.git-changes-empty__refresh {
+    color: var(--text-muted);
+    border-color: var(--border-color);
+}
+
+.git-changes-empty__refresh:hover {
+    color: var(--text-primary);
 }
 
 /* Splitter - single bordered frame for tree + diff (+ commit in the left column). */
@@ -178,82 +236,6 @@
     font-family: var(--bs-font-monospace, monospace);
     color: var(--text-primary);
     margin-bottom: 0.5rem;
-}
-
-/* Diff toolbar under Monaco: filter fills the bar; refresh + change nav sit at the end. */
-.git-diff-toolbar {
-    display: flex;
-    align-items: stretch;
-    gap: 0;
-    padding: 0;
-    border-top: 1px solid var(--border-color);
-    font-size: 0.82rem;
-    min-width: 0;
-    overflow: hidden;
-    flex-shrink: 0;
-    background-color: var(--bg-card, var(--bg-secondary));
-}
-
-.git-diff-toolbar__filter {
-    flex: 1 1 0;
-    min-width: 0;
-    display: flex;
-}
-
-.git-diff-toolbar__filter-wrap {
-    flex: 1 1 auto;
-    min-width: 0;
-    width: 100%;
-    display: flex;
-}
-
-.git-diff-toolbar__filter-wrap .filter-search-input,
-.git-diff-toolbar__filter-input {
-    flex: 1 1 auto;
-    min-width: 0;
-    width: 100%;
-    height: 100%;
-    border: none !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-    outline: none;
-    font-size: 0.8125rem;
-    line-height: 1.4;
-    padding: 0.2rem 0.55rem;
-    min-height: calc(1.4em + 0.4rem + 2px);
-    background-color: transparent;
-    color: var(--text-primary);
-}
-
-.git-diff-toolbar__filter-wrap .filter-search-input:focus,
-.git-diff-toolbar__filter-wrap .filter-search-input:focus-visible,
-.git-diff-toolbar__filter-input:focus,
-.git-diff-toolbar__filter-input:focus-visible {
-    border: none !important;
-    box-shadow: none !important;
-    outline: none;
-}
-
-.git-diff-toolbar__filter-wrap.has-filter .filter-search-input {
-    padding-right: 2.25rem;
-}
-
-.git-diff-toolbar__filter-wrap.filter-search-invalid .filter-search-input-invalid {
-    color: var(--error);
-    caret-color: var(--error);
-}
-
-.git-diff-toolbar__filter-wrap .filter-search-clear {
-    right: 0.35rem;
-}
-
-.git-diff-toolbar__actions {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    flex: 0 0 auto;
-    padding: 0.15rem 0.35rem 0.15rem 0.3rem;
-    border-left: 1px solid var(--border-color);
 }
 
 .git-diff-viewer-wrap {
@@ -415,6 +397,68 @@
     cursor: pointer;
 }
 
+/* Section rows (CHANGES/STAGED) lay out the label text and the count badge as inline siblings
+   so the badge sits beside the text without affecting the row's line box / height. Keeps the same
+   flex: 1 1 0 as the base rule so it still fills the row and keeps __actions pinned to the right. */
+.git-changes-tree__row--section .git-changes-tree__label {
+    display: inline-flex;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.35rem;
+}
+
+/* Compact count badge for the CHANGES/STAGED section rows only. Fixed height/line-height (rather
+   than relying on default badge padding) keeps it shorter than the row's own line box so it never
+   stretches the row; box-sizing: border-box keeps padding from pushing past that height. */
+.git-changes-tree__count-badge {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    height: 0.95rem;
+    line-height: 0.95rem;
+    padding: 0 0.35rem;
+    border-radius: 999px;
+    background-color: #5a5a5a;
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: normal;
+    white-space: nowrap;
+}
+
+/* Repository rows lay out name + branch as siblings so the branch can truncate
+   independently while the repository name stays the primary, higher-priority label. */
+.git-changes-tree__row--repository .git-changes-tree__label {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+}
+
+.git-changes-tree__repo-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.git-changes-tree__repo-branch {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-secondary);
+    font-weight: 400;
+    font-size: 0.78rem;
+    opacity: 0.85;
+}
+
 .git-changes-tree__rename-from {
     margin-left: 0.4rem;
     font-size: 0.78rem;
@@ -451,11 +495,28 @@
     opacity: 1;
 }
 
+/* Keep the action visible without hovering while its file/folder mutation is in flight -
+   otherwise the spinner replacing the +/- icon would be invisible until the mouse moved away
+   and back over the row. */
+.git-changes-tree__row:has(.git-changes-tree__action-spinner) .git-changes-tree__actions {
+    opacity: 1;
+}
+
+/* Fixed-size square box (not sized by its glyph/spinner content) so swapping the +/- icon for the
+   spinner - or between the two different icon glyphs - never changes the button's own footprint,
+   which would otherwise nudge sibling actions or the row's measured height. */
 .git-changes-tree__action-btn {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 1.3rem;
+    height: 1.3rem;
     border: none;
     background: transparent;
     color: var(--text-secondary);
-    padding: 0.1rem 0.35rem;
+    padding: 0;
     border-radius: 0.2rem;
 }
 
@@ -466,6 +527,25 @@
 
 .git-changes-tree__action-btn:disabled {
     opacity: 0.4;
+}
+
+/* Small inline spinner that swaps in for the +/- glyph on File/Folder rows (non-repo-level
+   actions) while their repository's lightweight mutation indicator is active. Sized to match
+   the existing bi-plus-lg/bi-dash-lg glyphs so the button's own size (and therefore the row
+   height) never changes. */
+.git-changes-tree__action-spinner {
+    display: inline-block;
+    width: 0.65rem;
+    height: 0.65rem;
+    box-sizing: border-box;
+    border: 0.1rem solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: git-changes-tree-spin 0.6s linear infinite;
+}
+
+@keyframes git-changes-tree-spin {
+    to { transform: rotate(360deg); }
 }
 
 /* Inline commit box under a staged repository row */

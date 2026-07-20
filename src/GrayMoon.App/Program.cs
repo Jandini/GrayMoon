@@ -118,6 +118,7 @@ try
     builder.Services.AddScoped<IGitChangesAgentClient, GitChangesAgentClient>();
     builder.Services.AddScoped<GitChangesSnapshotPushHandler>();
     builder.Services.AddScoped<WorkspaceGitChangesSelectionMemory>();
+    builder.Services.AddScoped<WorkspaceGitChangesCommitMessageMemory>();
     builder.Services.AddSingleton<IWorkspaceGitChangesActivityTracker, WorkspaceGitChangesActivityTracker>();
     builder.Services.AddSingleton<IGitChangesWorkspaceScanner, GitChangesWorkspaceScanner>();
 

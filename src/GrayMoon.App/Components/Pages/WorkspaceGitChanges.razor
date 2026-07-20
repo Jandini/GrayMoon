@@ -9,7 +9,16 @@
 
 <div class="container-fluid page-container grid-page git-changes-page">
     <div class="grid-page-header">
-        <GitChangesHeader View="_view" StatusText="@(_isWarmingUp ? _warmUpStatus : null)" />
+        <GitChangesHeader View="_view"
+                           StatusText="@(_isWarmingUp ? _warmUpStatus : null)"
+                           HasChanges="@(ChangedRepositoryCount > 0)"
+                           FilterQuery="@_filterQuery"
+                           FilterQueryChanged="OnFilterChanged"
+                           IsFilterDisabled="@_isLoading"
+                           OnRefresh="ManualRefreshAsync"
+                           OnPreviousChange="() => _diffViewerRef!.GoToPreviousChangeAsync()"
+                           OnNextChange="() => _diffViewerRef!.GoToNextChangeAsync()"
+                           IsChangeNavDisabled="@(_selectedDiff == null || !RendersInMonaco(_selectedDiff.State))" />
     </div>
 
     <div class="grid-page-body">
@@ -21,10 +30,16 @@
     {
         @* Loading: the BackgroundJobOverlay (mounted in MainLayout) shows LoadingOverlay for the initial-load job. *@
     }
-    else if (_view.Repositories.Count == 0)
+    else if (ChangedRepositoryCount == 0)
     {
         <div class="git-changes-empty text-muted">
-            No changes
+            <i class="bi bi-git git-changes-empty__bg-icon" aria-hidden="true"></i>
+            <div class="git-changes-empty__label">No changes</div>
+            <button type="button"
+                    class="btn btn-outline-secondary git-changes-empty__refresh"
+                    @onclick="ManualRefreshAsync">
+                Refresh
+            </button>
         </div>
     }
     else
@@ -61,7 +76,7 @@
                             else
                             {
                                 <button type="button"
-                                        class="btn btn-sm btn-outline-primary"
+                                        class="@(string.IsNullOrWhiteSpace(_workspaceCommitMessage) ? "btn btn-sm btn-outline-primary" : "btn btn-sm btn-primary")"
                                         disabled="@(IsJobRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
                                         title="Stages all changes then creates one commit in each repository using the same message."
                                         @onclick="() => CommitWorkspaceAsync(stagedOnly: false)">
@@ -79,9 +94,10 @@
                                  SelectedRow="_selectedRow"
                                  OnToggleExpand="ToggleExpanded"
                                  OnSelectFile="SelectFile"
-                                 OnStage="args => StageAsync(args.WorkspaceRepositoryId, args.Scope, args.Paths)"
-                                 OnUnstage="args => UnstageAsync(args.WorkspaceRepositoryId, args.Scope, args.Paths)"
+                                 OnStage="args => StageAsync(args.WorkspaceRepositoryId, args.Scope, args.Paths, args.RowKey)"
+                                 OnUnstage="args => UnstageAsync(args.WorkspaceRepositoryId, args.Scope, args.Paths, args.RowKey)"
                                  IsMutating="IsMutating"
+                                 IsRowMutating="IsRowMutating"
                                  OnStageAllChanged="StageAllChangedAsync"
                                  OnUnstageAllStaged="UnstageAllStagedAsync" />
             </div>
@@ -139,45 +155,14 @@
                                        ModifiedSideLabel="@(_selectedRow.IsStagedSection ? "(Index)" : "(Working Tree)")" />
                     </div>
                 }
-
-                <div class="git-diff-toolbar">
-                    <div class="git-diff-toolbar__filter">
-                        <FilterSearchInput Value="@_filterQuery"
-                                           ValueChanged="OnFilterChanged"
-                                           InputId="git-changes-filter"
-                                           InputAdditionalClass="git-diff-toolbar__filter-input"
-                                           WrapperAdditionalClass="git-diff-toolbar__filter-wrap"
-                                           EnableSyntaxHighlight="false"
-                                           Placeholder="Filter by repo, path, status..."
-                                           Disabled="@_isLoading" />
-                    </div>
-                    <div class="git-diff-toolbar__actions">
-                        <button type="button"
-                                class="btn btn-sm btn-outline-secondary"
-                                title="Refresh - rescans every repository in this workspace"
-                                aria-label="Refresh"
-                                disabled="@(_isLoading || IsJobRunning)"
-                                @onclick="ManualRefreshAsync">
-                            <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
-                        </button>
-                        <button type="button"
-                                class="btn btn-sm btn-outline-secondary"
-                                title="Previous change"
-                                disabled="@(_selectedDiff == null || !RendersInMonaco(_selectedDiff.State))"
-                                @onclick="() => _diffViewerRef!.GoToPreviousChangeAsync()">
-                            <i class="bi bi-chevron-up" aria-hidden="true"></i>
-                        </button>
-                        <button type="button"
-                                class="btn btn-sm btn-outline-secondary"
-                                title="Next change"
-                                disabled="@(_selectedDiff == null || !RendersInMonaco(_selectedDiff.State))"
-                                @onclick="() => _diffViewerRef!.GoToNextChangeAsync()">
-                            <i class="bi bi-chevron-down" aria-hidden="true"></i>
-                        </button>
-                    </div>
-                </div>
             </div>
         </div>
     }
     </div>
 </div>
+
+<DefaultBranchWarningModal IsVisible="@_defaultBranchWarningModal.IsVisible"
+                           Message="@_defaultBranchWarningModal.Message"
+                           RepoItems="@_defaultBranchWarningModal.RepoItems"
+                           OnProceed="@OnDefaultBranchWarningProceedAsync"
+                           OnCancel="@CloseDefaultBranchWarningModal" />

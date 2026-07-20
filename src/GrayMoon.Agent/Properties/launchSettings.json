@@ -3,9 +3,10 @@
   "profiles": {
     "http": {
       "commandName": "Project",
-      "commandLineArgs": "run -u http://localhost:5125/hub/agent",
+      "commandLineArgs": "run -u http://localhost:5125/hub/agent -p 9192",
       "environmentVariables": {
-        "DOTNET_ENVIRONMENT": "Development"
+        "DOTNET_ENVIRONMENT": "Development",
+        "ASPNETCORE_ENVIRONMENT": "Development"
       }
     }
   }

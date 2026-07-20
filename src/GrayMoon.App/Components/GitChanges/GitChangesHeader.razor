@@ -1,13 +1,36 @@
 @namespace GrayMoon.App.Components.GitChanges
+@using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services.GitChanges
+@using Microsoft.AspNetCore.Components.Web
 
 <div class="workspace-repos-header git-changes-header">
     <div class="workspace-repos-title-row">
         <h2 class="workspace-repos-title">Changes</h2>
-        <p class="text-muted mb-0 workspace-repos-subtitle git-changes-header__summary" title="@BranchTooltip">
-            @Summary
-        </p>
+        <div class="text-muted mb-0 workspace-repos-subtitle git-changes-header__summary">
+            @if (View == null || View.Repositories.Count == 0)
+            {
+                <span class="git-changes-header__summary-item">No changed repositories.</span>
+            }
+            else
+            {
+                <span class="git-changes-header__summary-item">
+                    @ChangedRepoCount of @RepoCount @RepoCountWord
+                </span>
+                <span class="git-changes-header__summary-item @(StagedCount > 0 ? "git-changes-header__summary-item--active" : null)">
+                    <i class="bi bi-pencil-square git-changes-header__summary-icon" aria-hidden="true"></i>
+                    @StagedCount staged
+                </span>
+                <span class="git-changes-header__summary-item @(ChangedCount > 0 ? "git-changes-header__summary-item--active" : null)">
+                    <i class="bi bi-pencil-fill git-changes-header__summary-icon" aria-hidden="true"></i>
+                    @ChangedCount changed
+                </span>
+                <span class="git-changes-header__summary-item" title="@BranchTooltip">
+                    <i class="bi bi-git git-changes-header__summary-icon" aria-hidden="true"></i>
+                    @BranchLabel
+                </span>
+            }
+        </div>
         @if (!string.IsNullOrEmpty(StatusText))
         {
             <span class="text-muted small git-changes-header__status">
@@ -17,6 +40,42 @@
         }
         <span class="workspace-repos-title-spacer"></span>
     </div>
+    @if (HasChanges)
+    {
+        <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
+            <div class="workspace-grid-search-wrapper">
+                <FilterSearchInput Value="@FilterQuery"
+                                   ValueChanged="OnFilterValueChangedAsync"
+                                   InputId="git-changes-filter"
+                                   InputAdditionalClass="workspace-grid-search"
+                                   Placeholder="Filter by repo, path, status..."
+                                   Disabled="@IsFilterDisabled" />
+            </div>
+            <button type="button"
+                    class="btn btn-outline-secondary"
+                    title="Next change"
+                    aria-label="Next change"
+                    disabled="@IsChangeNavDisabled"
+                    @onclick="() => OnNextChange.InvokeAsync()">
+                <i class="bi bi-chevron-down" aria-hidden="true"></i>
+            </button>
+            <button type="button"
+                    class="btn btn-outline-secondary"
+                    title="Previous change"
+                    aria-label="Previous change"
+                    disabled="@IsChangeNavDisabled"
+                    @onclick="() => OnPreviousChange.InvokeAsync()">
+                <i class="bi bi-chevron-up" aria-hidden="true"></i>
+            </button>
+            <button type="button"
+                    class="btn btn-outline-secondary"
+                    title="Refresh - rescans every repository in this workspace"
+                    aria-label="Refresh"
+                    @onclick="() => OnRefresh.InvokeAsync()">
+                <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+            </button>
+        </div>
+    }
 </div>
 
 @code {
@@ -26,23 +85,30 @@
     /// user-triggered operations - those get the full LoadingOverlay via BackgroundJobService instead.</summary>
     [Parameter] public string? StatusText { get; set; }
 
-    private string Summary
-    {
-        get
-        {
-            if (View == null || View.Repositories.Count == 0)
-            {
-                return "No changed repositories.";
-            }
+    /// <summary>Gates the entire actions row (filter, change nav, refresh) - hidden while there are no
+    /// changes anywhere in the workspace, so the empty state is a clean "No changes" message instead.</summary>
+    [Parameter] public bool HasChanges { get; set; }
 
-            var repoCount = View.Repositories.Count;
-            var changedRepoCount = View.Repositories.Count(r => r.StagedCount > 0 || r.ChangedCount > 0);
-            var staged = View.Repositories.Sum(r => r.StagedCount);
-            var changed = View.Repositories.Sum(r => r.ChangedCount);
+    [Parameter] public string FilterQuery { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> FilterQueryChanged { get; set; }
+    [Parameter] public bool IsFilterDisabled { get; set; }
 
-            return $"{changedRepoCount} of {repoCount} {(repoCount == 1 ? "repository" : "repositories")} | {staged} staged | {changed} changed | {BranchLabel}";
-        }
-    }
+    [Parameter] public EventCallback OnRefresh { get; set; }
+    [Parameter] public EventCallback OnPreviousChange { get; set; }
+    [Parameter] public EventCallback OnNextChange { get; set; }
+    [Parameter] public bool IsChangeNavDisabled { get; set; }
+
+    private Task OnFilterValueChangedAsync(string value) => FilterQueryChanged.InvokeAsync(value);
+
+    private int RepoCount => View?.Repositories.Count ?? 0;
+
+    private string RepoCountWord => RepoCount == 1 ? "repository" : "repositories";
+
+    private int ChangedRepoCount => View?.Repositories.Count(r => r.StagedCount > 0 || r.ChangedCount > 0) ?? 0;
+
+    private int StagedCount => View?.Repositories.Sum(r => r.StagedCount) ?? 0;
+
+    private int ChangedCount => View?.Repositories.Sum(r => r.ChangedCount) ?? 0;
 
     private string BranchLabel
     {

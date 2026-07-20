@@ -8,7 +8,11 @@ internal static class Extensions
 {
     internal static IConfigurationBuilder AddApplicationSettings(this IConfigurationBuilder builder)
     {
-        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
+        // Prefer DOTNET_ENVIRONMENT (generic host / launchSettings); fall back to ASPNETCORE_ENVIRONMENT.
+        var environment =
+            Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
+            ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
+            ?? "Production";
 
         return builder
             .AddEmbeddedJsonFile("appsettings.json")

@@ -1,4 +1,5 @@
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Options;
@@ -12,6 +13,17 @@ public sealed partial class WorkspaceGitChanges
     private string _workspaceCommitMessage = string.Empty;
     private bool _workspaceCommitMessageHasContent;
 
+    /// <summary>
+    /// Restores the in-progress commit message for the current WorkspaceId from the circuit-scoped
+    /// memory. Called on initial load and whenever the page switches to a different workspace, so
+    /// navigating away and back (or between workspaces) never loses an unsubmitted message.
+    /// </summary>
+    private void RestoreWorkspaceCommitMessage()
+    {
+        _workspaceCommitMessage = CommitMessageMemory.Get(WorkspaceId);
+        _workspaceCommitMessageHasContent = !string.IsNullOrWhiteSpace(_workspaceCommitMessage);
+    }
+
     private void OnWorkspaceCommitMessageInput(ChangeEventArgs e)
     {
         var newValue = e.Value?.ToString() ?? string.Empty;
@@ -19,6 +31,7 @@ public sealed partial class WorkspaceGitChanges
         var hasContent = !string.IsNullOrWhiteSpace(newValue);
         _workspaceCommitMessage = newValue;
         _workspaceCommitMessageHasContent = hasContent;
+        CommitMessageMemory.Set(WorkspaceId, newValue);
 
         if (hadContent != hasContent)
         {
@@ -51,11 +64,47 @@ public sealed partial class WorkspaceGitChanges
             return;
         }
 
+        if (IsJobRunning || _defaultBranchWarningModal.IsVisible)
+        {
+            return;
+        }
+
         var targets = (_view?.Repositories ?? [])
             .Where(r => stagedOnly ? r.StagedCount > 0 : (r.StagedCount > 0 || r.ChangedCount > 0))
             .ToList();
 
-        if (targets.Count == 0 || IsJobRunning)
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        var reposOnDefaultBranch = targets
+            .Where(r => !string.IsNullOrWhiteSpace(r.DefaultBranchName)
+                && string.Equals(r.BranchName, r.DefaultBranchName, StringComparison.Ordinal))
+            .ToList();
+
+        if (reposOnDefaultBranch.Count > 0)
+        {
+            var repoItems = reposOnDefaultBranch
+                .Select(r => new DefaultBranchWarningItem(r.RepositoryName, r.DefaultBranchName!))
+                .ToList();
+            ShowDefaultBranchWarning(
+                "The following repositories are on their default branch. Committing will write directly to the default (protected) branch.",
+                repoItems,
+                () =>
+                {
+                    CommitWorkspaceCoreAsync(stagedOnly, targets);
+                    return Task.CompletedTask;
+                });
+            return;
+        }
+
+        CommitWorkspaceCoreAsync(stagedOnly, targets);
+    }
+
+    private void CommitWorkspaceCoreAsync(bool stagedOnly, List<WorkspaceGitChangesRepositoryView> targets)
+    {
+        if (IsJobRunning)
         {
             return;
         }
@@ -131,6 +180,7 @@ public sealed partial class WorkspaceGitChanges
                 {
                     _workspaceCommitMessage = string.Empty;
                     _workspaceCommitMessageHasContent = false;
+                    CommitMessageMemory.Clear(WorkspaceId);
                 });
             }
 
