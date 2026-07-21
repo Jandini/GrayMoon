@@ -54,10 +54,15 @@
     </main>
 </div>
 
-<div id="blazor-error-ui">
-    An unhandled error has occurred.
-    <a href="" class="reload">Reload</a>
-    <a class="dismiss">🗙</a>
+<div id="blazor-error-ui" role="alertdialog" aria-modal="true" aria-labelledby="blazor-error-title">
+    <div class="blazor-error-card">
+        <i class="bi bi-arrow-clockwise blazor-error-icon" aria-hidden="true"></i>
+        <div class="blazor-error-copy">
+            <h2 id="blazor-error-title">GrayMoon needs to reload</h2>
+            <p>The current session can no longer continue. Reload the page to reconnect and restore the latest state.</p>
+        </div>
+        <a href="" class="reload">Reload page</a>
+    </div>
 </div>
 
 @code {
