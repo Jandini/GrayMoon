@@ -9,7 +9,8 @@ namespace GrayMoon.App.Services;
 /// </summary>
 public sealed class PushOrchestrator(
     WorkspacePushService workspacePushService,
-    IServiceProvider serviceProvider)
+    IServiceProvider serviceProvider,
+    ILogger<PushOrchestrator> logger)
 {
     public async Task RunAsync(
         int workspaceId,
@@ -20,8 +21,13 @@ public sealed class PushOrchestrator(
         Action<string> showToast,
         Action? onAppSideComplete = null,
         IReadOnlySet<int>? syncedRepoIds = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? runId = null)
     {
+        logger.LogInformation(
+            "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: starting push. Mode={Mode}, RepoCount={RepoCount}, RequiredPackages={RequiredPackages}",
+            runId, workspaceId, synchronizedPush ? "synchronized" : "parallel", repoIds.Count, requiredPackageIds.Count);
+
         if (synchronizedPush)
         {
             setProgress("Syncing package registries for required packages...");
@@ -37,7 +43,8 @@ public sealed class PushOrchestrator(
                 onAppSideComplete,
                 packageRegistriesAlreadySynced: requiredPackageIds.Count > 0,
                 syncedRepoIds: syncedRepoIds,
-                cancellationToken: cancellationToken);
+                cancellationToken: cancellationToken,
+                runId: runId);
         }
         else
         {
@@ -50,6 +57,8 @@ public sealed class PushOrchestrator(
                 onAppSideComplete: null,
                 cancellationToken: cancellationToken);
         }
+
+        logger.LogInformation("[PushOrchestrator {RunId}] Workspace {WorkspaceId}: push finished.", runId, workspaceId);
     }
 
     public Task<(bool Success, string? ErrorMessage)> PushSingleAsync(

@@ -2,6 +2,7 @@ using System.Text.Json;
 using GrayMoon.Abstractions.Agent;
 using GrayMoon.App.Hubs;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services;
 
@@ -16,8 +17,11 @@ public sealed class AgentBridge(
     IHubContext<AgentHub> hubContext,
     AgentConnectionTracker connectionTracker,
     AgentCommandCancelSender cancelSender,
+    IOptions<AgentBridgeOptions> options,
     ILogger<AgentBridge> logger) : IAgentBridge
 {
+    private readonly TimeSpan _commandTimeout = TimeSpan.FromSeconds(Math.Max(1, options.Value.CommandTimeoutSeconds));
+
     public bool IsAgentConnected => connectionTracker.GetAgentConnectionId() != null;
 
     public async Task<AgentCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default)
@@ -31,13 +35,28 @@ public sealed class AgentBridge(
 
         var sink = TerminalSinkContext.Current;
         Action<AgentCommandStreamLine>? onLine = sink != null ? sink.Append : null;
-        var task = AgentResponseDelivery.WaitAsync(requestId, cancellationToken, onLine);
+
+        using var timeoutCts = new CancellationTokenSource(_commandTimeout);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        var task = AgentResponseDelivery.WaitAsync(requestId, linkedCts.Token, onLine);
 
         try
         {
             await hubContext.Clients.Client(connectionId).SendAsync(AgentHubMethods.RequestCommand, requestId, command, argsJson, cancellationToken);
             logger.LogDebug("Sent RequestCommand: {RequestId}, {Command}", requestId, command);
             return await task;
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            // Overall command timeout, not a caller-initiated cancellation: notify the agent to stop
+            // work on this request, then fail fast with a normal response instead of throwing - callers
+            // across the app already handle a false/error AgentCommandResponse, so no call-site changes
+            // are needed to get this "fail fast, let the user retry" behavior everywhere.
+            cancelSender.NotifyCancel(requestId);
+            logger.LogWarning(
+                "Agent command {Command} ({RequestId}) timed out after {TimeoutSeconds}s waiting for a response",
+                command, requestId, _commandTimeout.TotalSeconds);
+            return new AgentCommandResponse(false, null, $"Agent command timed out after {_commandTimeout.TotalSeconds:0}s.");
         }
         catch (OperationCanceledException)
         {

@@ -34,6 +34,7 @@ try
 
     builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection("Workspace"));
     builder.Services.Configure<GitChangesOptions>(builder.Configuration.GetSection("GitChanges"));
+    builder.Services.Configure<AgentBridgeOptions>(builder.Configuration.GetSection(AgentBridgeOptions.SectionName));
 
     // Add services to the container.
     builder.Services.AddRazorComponents()

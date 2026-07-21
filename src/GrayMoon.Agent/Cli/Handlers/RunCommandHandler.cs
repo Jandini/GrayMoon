@@ -68,6 +68,11 @@ internal static class RunCommandHandler
 
         builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection(AgentOptions.SectionName));
         builder.Services.Configure<GitChangesOptions>(builder.Configuration.GetSection($"{AgentOptions.SectionName}:GitChanges"));
+        builder.Services.Configure<GitProcessOptions>(builder.Configuration.GetSection($"{AgentOptions.SectionName}:GitProcess"));
+        // ProcessExecutionOptions.DefaultTimeoutSeconds mirrors GitProcessOptions.DefaultTimeoutSeconds -
+        // same "GitProcess" section, so CommandLineService's own fallback timeout stays in sync with the
+        // tier GitProcessRunner resolves for local/fast git operations.
+        builder.Services.Configure<ProcessExecutionOptions>(builder.Configuration.GetSection($"{AgentOptions.SectionName}:GitProcess"));
 
         var logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GrayMoon", "logs");
         Directory.CreateDirectory(logDirectory);

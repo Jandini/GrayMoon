@@ -15,7 +15,7 @@ public class AgentOptions
     /// small and separate from <see cref="MaxConcurrentCommands"/> so reads stay responsive even when the
     /// main pool is fully occupied by long-running writes (push/update/sync).
     /// </summary>
-    public int MaxConcurrentReadCommands { get; set; } = 4;
+    public int MaxConcurrentReadCommands { get; set; } = 8;
 
     /// <summary>
     /// Worker count for the dedicated diff command pool (GetGitFileDiff). Kept separate from both

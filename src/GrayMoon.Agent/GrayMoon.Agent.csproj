@@ -24,6 +24,9 @@
 		<Compile Remove="Example\**\*" />
 	</ItemGroup>
 	<ItemGroup>
+		<InternalsVisibleTo Include="GrayMoon.Agent.Tests" />
+	</ItemGroup>
+	<ItemGroup>
 		<Content Include="appsettings.json">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</Content>
