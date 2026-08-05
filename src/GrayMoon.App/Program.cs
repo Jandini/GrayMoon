@@ -271,9 +271,19 @@ try
 catch (Exception ex)
 {
     Log.Fatal(ex, "Application terminated unexpectedly");
-    return 1;
+    return IsAddressInUseException(ex) ? DesktopHostingExtensions.AddressInUseExitCode : 1;
 }
 finally
 {
     await Log.CloseAndFlushAsync();
+}
+
+static bool IsAddressInUseException(Exception? ex)
+{
+    while (ex is not null)
+    {
+        if (ex is Microsoft.AspNetCore.Connections.AddressInUseException) return true;
+        ex = ex.InnerException;
+    }
+    return false;
 }
