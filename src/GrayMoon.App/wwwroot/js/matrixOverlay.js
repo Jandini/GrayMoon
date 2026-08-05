@@ -1,8 +1,13 @@
 (function () {
   const state = new Map(); // canvasId -> state object
 
+  // Cap the backing-store resolution: full devicePixelRatio (2-3x on modern
+  // displays) multiplies fill/text work by dpr^2 for a purely decorative
+  // effect, so we clamp it well below native sharpness.
+  const MAX_DPR = 1.25;
+
   function resize(canvas, ctx) {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
     const rect = canvas.getBoundingClientRect();
     const w = Math.max(1, Math.floor(rect.width));
     const h = Math.max(1, Math.floor(rect.height));
@@ -14,14 +19,31 @@
     return { w, h };
   }
 
+  // Flattened once at module load instead of rebuilt (3 array + string
+  // allocations) on every single glyph draw - this ran once per column per
+  // frame (~100+ times/frame), so hoisting it is a real allocation-count win.
+  const CHAR_POOL = Array.from(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" +
+    "!@#$%^&*()-_=+[]{};:,.<>/?\\|" +
+    "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ"
+  );
+
   function randomChar() {
-    const pools = [
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-      "!@#$%^&*()-_=+[]{};:,.<>/?\\|",
-      "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ"
-    ];
-    const p = pools[(Math.random() * pools.length) | 0];
-    return p[(Math.random() * p.length) | 0];
+    return CHAR_POOL[(Math.random() * CHAR_POOL.length) | 0];
+  }
+
+  // Quantized grayscale palette instead of formatting a new "rgba(...)"
+  // string per glyph per frame (the intensity variation only needs a handful
+  // of visually distinct steps, not a continuous 0-255 range).
+  const COLOR_STEPS = 12;
+
+  function buildColorPalette(characterOpacity) {
+    const palette = new Array(COLOR_STEPS);
+    for (let i = 0; i < COLOR_STEPS; i++) {
+      const intensity = 180 + Math.round((i / (COLOR_STEPS - 1)) * 75);
+      palette[i] = `rgba(${intensity}, ${intensity}, ${intensity}, ${characterOpacity})`;
+    }
+    return palette;
   }
 
   function start(canvasId, options) {
@@ -34,7 +56,7 @@
     if (!ctx) return;
 
     const fontSize = Math.max(10, (options?.fontSize ?? 16) | 0);
-    const frameIntervalMs = Math.max(16, (options?.frameIntervalMs ?? 50) | 0);
+    const frameIntervalMs = Math.max(33, (options?.frameIntervalMs ?? 66) | 0);
     const fadeAlpha = Math.min(1, Math.max(0, options?.fadeAlpha ?? 0.08)); // trail length
     const characterOpacity = Math.min(1, Math.max(0, options?.characterOpacity ?? 0.65));
     const dropSpeed = Math.min(2, Math.max(0.1, options?.dropSpeed ?? 0.6)); // fall speed (lower = slower)
@@ -46,6 +68,9 @@
 
     ctx.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`;
     ctx.textBaseline = "top";
+
+    const fadeFillStyle = `rgba(0, 0, 0, ${fadeAlpha})`;
+    const colorPalette = buildColorPalette(characterOpacity);
 
     const onResize = () => {
       ({ w, h } = resize(canvas, ctx));
@@ -71,15 +96,15 @@
       fadeAlpha,
       characterOpacity,
       onResize,
-      timerId: null
+      timerId: null,
+      onVisibilityChange: null
     };
 
-    // Throttled loop (stable FPS, less battery use than full raf)
-    s.timerId = window.setInterval(() => {
+    const tick = () => {
       if (!s.running) return;
 
       // translucent black fill = trail
-      ctx.fillStyle = `rgba(0, 0, 0, ${fadeAlpha})`;
+      ctx.fillStyle = fadeFillStyle;
       ctx.fillRect(0, 0, w, h);
 
       for (let i = 0; i < drops.length; i++) {
@@ -89,15 +114,37 @@
         const c = randomChar();
 
         // Grayscale intensity range (brighter + dimmer variation)
-        const intensity = 180 + ((Math.random() * 75) | 0);
-        ctx.fillStyle = `rgba(${intensity}, ${intensity}, ${intensity}, ${characterOpacity})`;
+        ctx.fillStyle = colorPalette[(Math.random() * COLOR_STEPS) | 0];
         ctx.fillText(c, x, y);
 
         // reset occasionally for randomness
         if (y > h && Math.random() > 0.975) drops[i] = 0;
         else drops[i] += dropSpeed;
       }
-    }, frameIntervalMs);
+    };
+
+    const startTimer = () => {
+      if (s.timerId) return;
+      // Throttled loop (stable FPS, less battery use than full raf)
+      s.timerId = window.setInterval(tick, frameIntervalMs);
+    };
+
+    const stopTimer = () => {
+      if (!s.timerId) return;
+      window.clearInterval(s.timerId);
+      s.timerId = null;
+    };
+
+    // Backgrounded tabs still tick this timer (browsers only throttle to
+    // ~1/s), so fully stop drawing while the overlay isn't visible on
+    // screen to avoid burning CPU on a hidden tab.
+    s.onVisibilityChange = () => {
+      if (document.hidden) stopTimer();
+      else startTimer();
+    };
+    document.addEventListener("visibilitychange", s.onVisibilityChange);
+
+    if (!document.hidden) startTimer();
 
     state.set(canvasId, s);
   }
@@ -109,6 +156,7 @@
     s.running = false;
     if (s.timerId) window.clearInterval(s.timerId);
     window.removeEventListener("resize", s.onResize);
+    if (s.onVisibilityChange) document.removeEventListener("visibilitychange", s.onVisibilityChange);
 
     // clear canvas
     try {

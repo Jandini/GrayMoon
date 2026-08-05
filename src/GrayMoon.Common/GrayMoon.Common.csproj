@@ -11,6 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="..\GrayMoon.Abstractions\GrayMoon.Abstractions.csproj" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.*" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.*" />
   </ItemGroup>
 
 </Project>

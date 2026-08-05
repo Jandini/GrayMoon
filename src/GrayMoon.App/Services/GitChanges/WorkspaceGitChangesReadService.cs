@@ -32,7 +32,7 @@ public sealed class WorkspaceGitChangesReadService(IDbContextFactory<AppDbContex
 
         var repoInfoById = await db.WorkspaceRepositories
             .Where(wr => workspaceRepositoryIds.Contains(wr.WorkspaceRepositoryId))
-            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, RepositoryName = wr.Repository!.RepositoryName })
+            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, RepositoryName = wr.Repository!.RepositoryName, wr.DefaultBranchName })
             .ToDictionaryAsync(r => r.WorkspaceRepositoryId, cancellationToken);
 
         var entriesByRepo = (await db.WorkspaceGitChangeEntries
@@ -65,6 +65,7 @@ public sealed class WorkspaceGitChangesReadService(IDbContextFactory<AppDbContex
                     RepositoryId = info.RepositoryId,
                     RepositoryName = info.RepositoryName,
                     BranchName = s.BranchName,
+                    DefaultBranchName = info.DefaultBranchName,
                     HeadCommit = s.HeadCommit,
                     IsDetachedHead = s.IsDetachedHead,
                     IsUnbornBranch = s.IsUnbornBranch,

@@ -37,7 +37,8 @@ public sealed class WorkspacePushHandler(
         Action<string> showToast,
         Action? onAppSideComplete = null,
         IReadOnlySet<int>? syncedRepoIds = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? runId = null)
     {
         try
         {
@@ -50,13 +51,14 @@ public sealed class WorkspacePushHandler(
                 showToast,
                 onAppSideComplete,
                 syncedRepoIds,
-                cancellationToken);
+                cancellationToken,
+                runId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             if (ex is SynchronizedPushNotPossibleException)
                 throw;
-            logger.LogError(ex, "Push with dependencies failed for workspace {WorkspaceId}", workspaceId);
+            logger.LogError(ex, "[PushOrchestrator {RunId}] Push with dependencies failed for workspace {WorkspaceId}", runId, workspaceId);
             showToast(ex.Message);
             throw;
         }

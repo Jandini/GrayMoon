@@ -25,6 +25,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Inject] private ILogger<WorkspaceGitChanges> Logger { get; set; } = default!;
     [Inject] private IBackgroundJobService JobService { get; set; } = default!;
     [Inject] private WorkspaceGitChangesSelectionMemory SelectionMemory { get; set; } = default!;
+    [Inject] private WorkspaceGitChangesCommitMessageMemory CommitMessageMemory { get; set; } = default!;
     [Inject] private IJSRuntime Js { get; set; } = default!;
 
     private Workspace? _workspace;
@@ -42,11 +43,28 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     private readonly HashSet<int> _mutatingRepositoryIds = [];
 
+    // Populated alongside _mutatingRepositoryIds with the tree row key that initiated the in-flight
+    // File/Folder mutation, so the spinner shown to the user can be scoped to that exact row (and its
+    // descendants, for a folder) rather than every row in the affected repository.
+    private readonly Dictionary<int, string> _mutatingRowKeyByRepository = new();
+
     protected override Task OnInitializedAsync()
     {
+        JobService.Changed += OnJobServiceChanged;
         EnsureActivitySubscription();
+        RestoreWorkspaceCommitMessage();
         StartInitialLoadJob();
         return Task.CompletedTask;
+    }
+
+    private void OnJobServiceChanged()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(StateHasChanged);
     }
 
     protected override Task OnParametersSetAsync()
@@ -58,23 +76,28 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return Task.CompletedTask;
         }
 
+        RestoreWorkspaceCommitMessage();
         StartInitialLoadJob();
         return Task.CompletedTask;
     }
 
+    private Task? _initialLoadTask;
+
     /// <summary>
-    /// Runs the initial (or workspace-switch) load as a background job, the same JobService/BackgroundJobOverlay
-    /// pattern used for refresh and mutations, so opening this page shows the standard LoadingOverlay instead of
-    /// a subtle inline "Loading..." message, and the load survives navigating away and back mid-flight.
+    /// Runs the initial (or workspace-switch) load inline behind the lightweight _isLoading flag instead
+    /// of a background job, so opening this page (including re-opening it with a remembered file
+    /// selection) never shows the BackgroundJobOverlay's "Loading changes..." LoadingOverlay - the tree
+    /// itself renders as soon as the persisted projection is read, which is fast since it never sends an
+    /// Agent command.
     /// </summary>
     private void StartInitialLoadJob()
     {
-        if (IsJobRunning)
+        if (_initialLoadTask is { IsCompleted: false })
         {
             return;
         }
 
-        StartPageJob("Loading changes...", (_, _) => Task.CompletedTask);
+        _initialLoadTask = LoadAsync();
     }
 
     // Reads the persisted SQLite projection only - never sends an Agent command. Opening or reloading
@@ -90,7 +113,6 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             _workspace = await DbContext.Workspaces.AsNoTracking().FirstOrDefaultAsync(w => w.WorkspaceId == WorkspaceId);
             _view = await ReadService.GetWorkspaceAsync(WorkspaceId, CancellationToken.None);
             RebuildRows();
-            await TryRestoreSelectionAsync();
             await ClearSelectionIfStaleAsync();
         }
         catch (Exception ex)
@@ -103,13 +125,27 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             _isLoading = false;
             StateHasChanged();
         }
+
+        // Restoring a remembered file selection re-fetches its diff from the Agent, which can be slow
+        // (and, unlike the tree read above, is a real Agent command) - it must never gate _isLoading (and
+        // therefore the Refresh button) or the tree render above. TryRestoreSelectionAsync only does work
+        // when this page instance has no selection yet (first load / workspace switch); later reloads
+        // triggered by Refresh or a mutation already have a selection and return immediately.
+        if (_errorMessage == null)
+        {
+            await TryRestoreSelectionAsync();
+        }
     }
 
     /// <summary>
     /// The Refresh button: a real, user-triggered rescan of every repository in the workspace (not just
-    /// the ones currently showing changes), run behind the standard LoadingOverlay/terminal job so it's
-    /// visibly a real operation. Relies on the same GitChangesUpdated -> LoadAsync pipeline used
-    /// everywhere else for incremental per-repository updates as results stream in.
+    /// the ones currently showing changes). When previously changed files are already persisted (the
+    /// tree/splitter is showing), this runs behind the standard LoadingOverlay/terminal job so it's
+    /// visibly a real operation - unchanged from before. When the page is showing the empty "No changes"
+    /// state, the overlay would otherwise cover that same message/button, so it instead runs via the
+    /// non-overlay EmptyScanJobKey job (inline spinner + Abort). Both survive navigation via
+    /// BackgroundJobService and rely on the same GitChangesUpdated -> LoadAsync pipeline for
+    /// incremental per-repository updates as results stream in.
     /// </summary>
     private void ManualRefreshAsync()
     {
@@ -119,8 +155,15 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return;
         }
 
-        if (IsJobRunning)
+        if (IsAnyScanRunning)
         {
+            ToastService.Show("Another Git Changes operation is already running.");
+            return;
+        }
+
+        if (ChangedRepositoryCount == 0)
+        {
+            StartEmptyScanJob("Refreshing repositories...");
             return;
         }
 
@@ -349,23 +392,30 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     // button - not just the affected repository - since only one page job can run at a time anyway.
     private bool IsMutating(int workspaceRepositoryId) => _mutatingRepositoryIds.Contains(workspaceRepositoryId) || IsJobRunning;
 
+    // True only for the exact row that was clicked - never its descendants, siblings, or any other row
+    // in the repository. GitChangesTree calls this to decide whether a File/Folder action button shows
+    // a spinner instead of its +/- icon.
+    private bool IsRowMutating(GitChangesTreeRow row) =>
+        _mutatingRowKeyByRepository.TryGetValue(row.WorkspaceRepositoryId, out var mutatingKey)
+        && row.Key == mutatingKey;
+
     // File and folder scopes are fast, frequent clicks during diff review - keep them on the lightweight
     // inline indicator (_mutatingRepositoryIds) rather than the full LoadingOverlay. Whole-repository
     // scope stages/unstages every tracked and untracked file in one repository and can take a moment, so
     // it gets the same overlay+terminal treatment as commit and the section-wide bulk actions.
-    private Task StageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths) =>
+    private Task StageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey) =>
         scope == GitChangeOperationScope.Repository
             ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: true)
-            : RunMutationAsync(workspaceRepositoryId, async (root, wsName, repoName, repositoryId) =>
+            : RunMutationAsync(workspaceRepositoryId, rowKey, async (root, wsName, repoName, repositoryId) =>
             {
                 var result = await AgentClient.StageAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
             });
 
-    private Task UnstageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths) =>
+    private Task UnstageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey) =>
         scope == GitChangeOperationScope.Repository
             ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: false)
-            : RunMutationAsync(workspaceRepositoryId, async (root, wsName, repoName, repositoryId) =>
+            : RunMutationAsync(workspaceRepositoryId, rowKey, async (root, wsName, repoName, repositoryId) =>
             {
                 var result = await AgentClient.UnstageAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
@@ -411,7 +461,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    private async Task RunMutationAsync(int workspaceRepositoryId, Func<string, string, string, int, Task> action)
+    private async Task RunMutationAsync(int workspaceRepositoryId, string rowKey, Func<string, string, string, int, Task> action)
     {
         if (!AgentBridge.IsAgentConnected)
         {
@@ -424,6 +474,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return; // A mutation for this repository is already in flight.
         }
 
+        _mutatingRowKeyByRepository[workspaceRepositoryId] = rowKey;
         StateHasChanged();
 
         try
@@ -445,6 +496,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         finally
         {
             _mutatingRepositoryIds.Remove(workspaceRepositoryId);
+            _mutatingRowKeyByRepository.Remove(workspaceRepositoryId);
             StateHasChanged();
         }
     }
@@ -510,6 +562,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         _disposed = true;
+        JobService.Changed -= OnJobServiceChanged;
         ReleaseActivitySubscription();
 
         if (_hubConnection != null)

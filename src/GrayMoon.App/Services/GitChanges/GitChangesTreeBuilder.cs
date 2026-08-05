@@ -22,11 +22,17 @@ public sealed record GitChangesTreeRow
     public required int Depth { get; init; }
     public required string Label { get; init; }
 
+    /// <summary>Item count shown as a badge beside the label. Set only on Section rows.</summary>
+    public int? Count { get; init; }
+
     /// <summary>True for the Staged section and everything under it; false for Changed.</summary>
     public bool IsStagedSection { get; init; }
 
     public int WorkspaceRepositoryId { get; init; }
     public string? RepositoryName { get; init; }
+
+    /// <summary>Current branch name. Set only on Repository rows.</summary>
+    public string? BranchName { get; init; }
 
     /// <summary>Repository-relative path. Set only on File rows.</summary>
     public string? FilePath { get; init; }
@@ -101,7 +107,8 @@ public static class GitChangesTreeBuilder
             Key = sectionKey,
             Kind = GitChangesTreeRowKind.Section,
             Depth = 0,
-            Label = $"{sectionLabel} ({totalCount})",
+            Label = sectionLabel,
+            Count = totalCount,
             IsStagedSection = isStagedSection,
             HasChildren = true,
             IsExpanded = sectionExpanded,
@@ -126,6 +133,7 @@ public static class GitChangesTreeBuilder
                 IsStagedSection = isStagedSection,
                 WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
                 RepositoryName = repo.RepositoryName,
+                BranchName = repo.BranchName,
                 HasChildren = true,
                 IsExpanded = repoExpanded,
             });

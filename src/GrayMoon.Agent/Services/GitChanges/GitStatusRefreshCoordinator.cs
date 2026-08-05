@@ -18,7 +18,7 @@ public enum RepositoryRefreshState
 
 /// <summary>
 /// Per-repository debounce coordinator, backed by a global bounded semaphore shared across all
-/// repositories (<see cref="GitChangesOptions.MaxParallelRepositoryOperations"/>, default 16). A watcher
+/// repositories (<see cref="GitChangesOptions.MaxParallelRepositoryOperations"/>, default 8). A watcher
 /// event marks a repository dirty; after a debounce window, exactly one authoritative git status scan
 /// runs. A dirty event that arrives while a scan is already in flight is coalesced into a single
 /// follow-up scan - a repository never has more than one active and one pending refresh.

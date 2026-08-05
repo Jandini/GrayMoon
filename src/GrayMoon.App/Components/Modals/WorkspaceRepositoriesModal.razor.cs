@@ -91,16 +91,15 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
 
     private async Task OnRepositorySearchChangedAsync(string value)
     {
+        // FilterSearchInput already debounces before invoking this - the actual query load only runs
+        // once the user pauses typing, so no additional delay is needed here.
         repositorySearch = value;
-        await _queryLoader.DebounceSearchAsync(async () =>
+        _effectiveSearch = value;
+        await ResetAndLoadFromTopAsync();
+        if (!_disposed)
         {
-            _effectiveSearch = repositorySearch;
-            await ResetAndLoadFromTopAsync();
-            if (!_disposed)
-            {
-                await InvokeAsync(StateHasChanged);
-            }
-        });
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private void ToggleSelectedOnly(bool value)

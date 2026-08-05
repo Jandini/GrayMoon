@@ -1,4 +1,5 @@
 using GrayMoon.App.Components.GitChanges;
+using GrayMoon.App.Services;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Common.Git;
 using Microsoft.EntityFrameworkCore;
@@ -65,8 +66,15 @@ public sealed partial class WorkspaceGitChanges
             }
 
             var comparison = row.IsStagedSection ? GitDiffComparison.Staged : GitDiffComparison.Unstaged;
-            var result = await AgentClient.GetDiffAsync(
-                root, link.Workspace.Name, link.Repository.RepositoryName, row.FilePath!, comparison, CancellationToken.None);
+            GitChangesDiffResult result;
+            using (TerminalSinkContext.Suppress())
+            {
+                // File content, not a command log - never let this leak into a background job's
+                // LoadingOverlay terminal, even when LoadDiffAsync runs inside one (e.g. restoring a
+                // remembered selection right after a Refresh job's reload).
+                result = await AgentClient.GetDiffAsync(
+                    root, link.Workspace.Name, link.Repository.RepositoryName, row.FilePath!, comparison, CancellationToken.None);
+            }
 
             if (requestVersion != _diffRequestVersion)
             {

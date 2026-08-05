@@ -21,7 +21,8 @@ public sealed class WorkspaceUpdateHandler(
         IReadOnlySet<int>? repoIdsToUpdate = null,
         string? commitMessage = null,
         bool includeDepsInCommitMessage = true,
-        int? maxLevel = null)
+        int? maxLevel = null,
+        string? runId = null)
     {
         try
         {
@@ -34,11 +35,12 @@ public sealed class WorkspaceUpdateHandler(
                 repoIdsToUpdate,
                 commitMessage,
                 includeDepsInCommitMessage,
-                maxLevel);
+                maxLevel,
+                runId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Error running dependency update for workspace {WorkspaceId}", workspaceId);
+            logger.LogError(ex, "[UpdateOrchestrator {RunId}] Error running dependency update for workspace {WorkspaceId}", runId, workspaceId);
             throw;
         }
     }

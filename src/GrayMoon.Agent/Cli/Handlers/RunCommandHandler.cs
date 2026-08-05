@@ -34,8 +34,8 @@ internal static class RunCommandHandler
 
         var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
         Log.Information(
-            "GrayMoon Agent. Version: {Version}. AppHubUrl: {AppHubUrl}, ListenPort: {ListenPort}, MaxConcurrentCommands: {MaxConcurrentCommands}",
-            version, options.AppHubUrl, options.ListenPort, options.MaxConcurrentCommands);
+            "GrayMoon Agent. Version: {Version}. AppHubUrl: {AppHubUrl}, ListenPort: {ListenPort}, MaxConcurrentCommands: {MaxConcurrentCommands}, MaxConcurrentReadCommands: {MaxConcurrentReadCommands}, MaxConcurrentDiffCommands: {MaxConcurrentDiffCommands}",
+            version, options.AppHubUrl, options.ListenPort, options.MaxConcurrentCommands, options.MaxConcurrentReadCommands, options.MaxConcurrentDiffCommands);
 
         var builder = Host.CreateApplicationBuilder(args: Array.Empty<string>());
         builder.Configuration.Sources.Insert(0, new ChainedConfigurationSource { Configuration = appConfig });
@@ -68,6 +68,11 @@ internal static class RunCommandHandler
 
         builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection(AgentOptions.SectionName));
         builder.Services.Configure<GitChangesOptions>(builder.Configuration.GetSection($"{AgentOptions.SectionName}:GitChanges"));
+        builder.Services.Configure<GitProcessOptions>(builder.Configuration.GetSection($"{AgentOptions.SectionName}:GitProcess"));
+        // ProcessExecutionOptions.DefaultTimeoutSeconds mirrors GitProcessOptions.DefaultTimeoutSeconds -
+        // same "GitProcess" section, so CommandLineService's own fallback timeout stays in sync with the
+        // tier GitProcessRunner resolves for local/fast git operations.
+        builder.Services.Configure<ProcessExecutionOptions>(builder.Configuration.GetSection($"{AgentOptions.SectionName}:GitProcess"));
 
         var logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GrayMoon", "logs");
         Directory.CreateDirectory(logDirectory);
@@ -95,6 +100,8 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<IAgentQueueTracker>(sp => sp.GetRequiredService<TrackedJobQueue>());
         builder.Services.AddSingleton<ReadJobQueue>();
         builder.Services.AddSingleton<IReadJobQueue>(sp => sp.GetRequiredService<ReadJobQueue>());
+        builder.Services.AddSingleton<DiffJobQueue>();
+        builder.Services.AddSingleton<IDiffJobQueue>(sp => sp.GetRequiredService<DiffJobQueue>());
         builder.Services.AddSingleton<CommandJobCancellationRegistry>();
         builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
         builder.Services.AddSingleton<GitProcessRunner>();
@@ -160,6 +167,7 @@ internal static class RunCommandHandler
         builder.Services.AddHostedService<HookListenerHostedService>();
         builder.Services.AddHostedService<MainJobBackgroundService>();
         builder.Services.AddHostedService<ReadJobBackgroundService>();
+        builder.Services.AddHostedService<DiffJobBackgroundService>();
 
         if (OperatingSystem.IsWindows())
             builder.Services.AddWindowsService();

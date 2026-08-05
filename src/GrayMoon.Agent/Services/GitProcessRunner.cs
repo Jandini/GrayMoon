@@ -1,7 +1,10 @@
 using System.Collections.Concurrent;
+using System.Threading;
 using GrayMoon.Abstractions.Agent;
 using GrayMoon.Common;
+using GrayMoon.Common.Git;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Polly;
 
 namespace GrayMoon.Agent.Services;
@@ -20,31 +23,47 @@ public enum GitLockIntent
     Read,
 }
 
-public sealed class GitProcessRunner(ICommandLineService commandLine, ILogger<GitProcessRunner> logger)
+public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<GitProcessOptions> gitProcessOptions, ILogger<GitProcessRunner> logger)
 {
+    private static readonly string[] NetworkSubcommands = ["fetch", "pull", "push", "ls-remote"];
+
+    private readonly TimeSpan _defaultTimeout = TimeSpan.FromSeconds(Math.Max(1, gitProcessOptions.Value.DefaultTimeoutSeconds));
+    private readonly TimeSpan _networkTimeout = TimeSpan.FromSeconds(Math.Max(1, gitProcessOptions.Value.NetworkTimeoutSeconds));
+    private readonly TimeSpan _gitVersionTimeout = TimeSpan.FromSeconds(Math.Max(1, gitProcessOptions.Value.GitVersionTimeoutSeconds));
+
+    /// <summary>
+    /// <see cref="Timeout.InfiniteTimeSpan"/> when <see cref="GitProcessOptions.CloneTimeoutSeconds"/> is
+    /// 0 (the default) - both <see cref="CommandLineService"/>'s <c>CancellationTokenSource(TimeSpan)</c>
+    /// constructor and Polly's <c>AddTimeout</c> understand that sentinel as "never time out" (the former
+    /// natively; the latter is special-cased in <see cref="GitResiliencePipelines.CreateClonePipeline"/>
+    /// since Polly rejects a non-positive duration), so a long-running clone is never killed or retried
+    /// away just for taking a while.
+    /// </summary>
+    private readonly TimeSpan _cloneTimeout = ResolveCloneTimeout(gitProcessOptions.Value);
+
     internal static readonly ConcurrentDictionary<string, SemaphoreSlim> RepoLocks =
         new(StringComparer.OrdinalIgnoreCase);
 
     internal readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> SafeDirectoryPipeline =
-        GitResiliencePipelines.CreateSafeDirectoryPipeline(logger);
+        GitResiliencePipelines.CreateSafeDirectoryPipeline(logger, TimeSpan.FromSeconds(Math.Max(1, gitProcessOptions.Value.NetworkTimeoutSeconds)));
 
     internal readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> ClonePipeline =
-        GitResiliencePipelines.CreateClonePipeline(logger);
+        GitResiliencePipelines.CreateClonePipeline(logger, ResolveCloneTimeout(gitProcessOptions.Value));
 
     internal readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> FetchPipeline =
-        GitResiliencePipelines.CreateFetchPipeline(logger);
+        GitResiliencePipelines.CreateFetchPipeline(logger, TimeSpan.FromSeconds(Math.Max(1, gitProcessOptions.Value.NetworkTimeoutSeconds)));
 
     internal readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> PullPipeline =
-        GitResiliencePipelines.CreatePullPipeline(logger);
+        GitResiliencePipelines.CreatePullPipeline(logger, TimeSpan.FromSeconds(Math.Max(1, gitProcessOptions.Value.NetworkTimeoutSeconds)));
 
     internal readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> PushPipeline =
-        GitResiliencePipelines.CreatePushPipeline(logger);
+        GitResiliencePipelines.CreatePushPipeline(logger, TimeSpan.FromSeconds(Math.Max(1, gitProcessOptions.Value.NetworkTimeoutSeconds)));
 
     internal readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> LsRemotePipeline =
-        GitResiliencePipelines.CreateLsRemotePipeline(logger);
+        GitResiliencePipelines.CreateLsRemotePipeline(logger, TimeSpan.FromSeconds(Math.Max(1, gitProcessOptions.Value.NetworkTimeoutSeconds)));
 
     internal readonly ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> MinimalFetchPipeline =
-        GitResiliencePipelines.CreateMinimalFetchPipeline(logger);
+        GitResiliencePipelines.CreateMinimalFetchPipeline(logger, TimeSpan.FromSeconds(Math.Max(1, gitProcessOptions.Value.NetworkTimeoutSeconds)));
 
     internal async Task<(int ExitCode, string? Stdout, string? Stderr)> RunAsync(
         string fileName,
@@ -82,7 +101,8 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, ILogger<Gi
         var gitLike = IsGitLikeProgressStreaming(fileName, arguments);
         var stderrAsOut = streamStderrAsStdout ?? gitLike;
         var mirror = mirrorFailureOutputAsStderr ?? gitLike;
-        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, null, ct, stderrAsOut, mirror);
+        var timeout = ResolveTimeout(fileName, arguments);
+        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, null, ct, stderrAsOut, mirror, timeout);
         return (r.ExitCode, r.Stdout, r.Stderr);
     }
 
@@ -118,7 +138,8 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, ILogger<Gi
         CancellationToken ct)
     {
         var gitLike = IsGitLikeProgressStreaming(fileName, arguments);
-        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, stdinContent, ct, gitLike, gitLike);
+        var timeout = ResolveTimeout(fileName, arguments);
+        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, stdinContent, ct, gitLike, gitLike, timeout);
         return (r.ExitCode, r.Stdout, r.Stderr);
     }
 
@@ -163,7 +184,8 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, ILogger<Gi
         CancellationToken ct)
     {
         var gitLike = string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase);
-        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, stdinBytes, ct, gitLike, gitLike);
+        var timeout = ResolveTimeout(fileName, arguments);
+        var r = await commandLine.RunAsync(fileName, arguments, workingDirectory, stdinBytes, ct, gitLike, gitLike, timeout);
         return (r.ExitCode, r.Stdout, r.Stderr);
     }
 
@@ -208,5 +230,105 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, ILogger<Gi
             return true;
         return string.Equals(fileName, "dotnet", StringComparison.OrdinalIgnoreCase)
                && arguments.Contains("gitversion", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Picks the timeout tier for one invocation: GitVersion (scans full history, can be slower than a
+    /// plain git call), clone (its own unbounded-by-default tier - see <see cref="_cloneTimeout"/>),
+    /// network (fetch/pull/push/ls-remote - can legitimately take longer on large repos/slow networks),
+    /// or the default (everything else - status, diff/show, rev-parse, cat-file, add, restore, reset,
+    /// commit, branch/tag queries, config, etc.).
+    /// </summary>
+    internal TimeSpan ResolveTimeout(string fileName, string arguments)
+    {
+        if (IsGitVersionInvocation(fileName, arguments))
+            return _gitVersionTimeout;
+
+        if (string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase))
+        {
+            if (StartsWithSubcommand(arguments, "clone"))
+                return _cloneTimeout;
+
+            if (StartsWithNetworkSubcommand(arguments))
+                return _networkTimeout;
+        }
+
+        return _defaultTimeout;
+    }
+
+    internal TimeSpan ResolveTimeout(string fileName, IReadOnlyList<string> arguments)
+    {
+        if (string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase))
+        {
+            if (StartsWithSubcommand(arguments, "clone"))
+                return _cloneTimeout;
+
+            if (StartsWithNetworkSubcommand(arguments))
+                return _networkTimeout;
+        }
+
+        return _defaultTimeout;
+    }
+
+    private static bool IsGitVersionInvocation(string fileName, string arguments)
+        => string.Equals(fileName, "dotnet-gitversion", StringComparison.OrdinalIgnoreCase)
+        || (string.Equals(fileName, "dotnet", StringComparison.OrdinalIgnoreCase)
+            && arguments.Contains("gitversion", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// 0 (or negative) means "no timeout" per <see cref="GitProcessOptions.CloneTimeoutSeconds"/>'s doc -
+    /// <see cref="Timeout.InfiniteTimeSpan"/> is the sentinel both <c>CancellationTokenSource(TimeSpan)</c>
+    /// and (with explicit handling) Polly's <c>AddTimeout</c> treat as "never fires".
+    /// </summary>
+    private static TimeSpan ResolveCloneTimeout(GitProcessOptions options)
+        => options.CloneTimeoutSeconds <= 0 ? Timeout.InfiniteTimeSpan : TimeSpan.FromSeconds(options.CloneTimeoutSeconds);
+
+    /// <summary>
+    /// Every fetch/pull/push/ls-remote invocation in this codebase passes the subcommand as the first
+    /// token with no leading global options (see <c>GitService.cs</c>), so a simple leading-token check
+    /// is sufficient here - this is not a general-purpose git argument parser.
+    /// </summary>
+    private static bool StartsWithNetworkSubcommand(string arguments)
+    {
+        foreach (var sub in NetworkSubcommands)
+        {
+            if (StartsWithSubcommand(arguments, sub))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool StartsWithNetworkSubcommand(IReadOnlyList<string> arguments)
+    {
+        foreach (var arg in arguments)
+        {
+            if (arg.Length == 0)
+                continue;
+
+            return Array.IndexOf(NetworkSubcommands, arg) >= 0;
+        }
+
+        return false;
+    }
+
+    private static bool StartsWithSubcommand(string arguments, string subcommand)
+    {
+        var trimmed = arguments.TrimStart();
+        return trimmed.StartsWith(subcommand, StringComparison.Ordinal)
+            && (trimmed.Length == subcommand.Length || trimmed[subcommand.Length] == ' ');
+    }
+
+    private static bool StartsWithSubcommand(IReadOnlyList<string> arguments, string subcommand)
+    {
+        foreach (var arg in arguments)
+        {
+            if (arg.Length == 0)
+                continue;
+
+            return string.Equals(arg, subcommand, StringComparison.Ordinal);
+        }
+
+        return false;
     }
 }

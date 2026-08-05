@@ -255,17 +255,18 @@ public sealed partial class WorkspaceRepositories
 
         JobService.StartJob(PageJobKey, $"Updating Level {level}...", async (job, ct) =>
         {
+            var runId = Guid.NewGuid().ToString("N")[..8];
+            Logger.LogInformation("[PushUpdated {RunId}] Level-Only Update & Push starting for workspace {WorkspaceId}, up to level {Level}", runId, WorkspaceId, level);
+
             // Phase 1: update repos needing work up to the target level
             IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
             try
             {
-                var allLinks = await GetAllLinksForOperationAsync();
-                var reposNeedingWork = allLinks
-                    .Where(wr => !wr.IsOnTag && (wr.DependencyLevel ?? 0) <= level)
-                    .Where(wr => (wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
-                    .Select(wr => wr.RepositoryId)
-                    .ToHashSet();
-
+                // Do not pre-filter by a snapshot of repos already flagged as out of date: a level-1/2
+                // commit made during this run can only mark higher levels (up to and including the
+                // target level) out of date once refreshed, which happens after this snapshot is taken.
+                // The orchestrator already scopes/skips per level live (via maxLevel), so no repo-id
+                // scope is needed here.
                 syncedRepoIds = await ScopedExecutor.ExecuteAsync<WorkspaceUpdateHandler, IReadOnlySet<int>>(
                     svc => svc.RunUpdateAsync(
                         WorkspaceId,
@@ -274,8 +275,9 @@ public sealed partial class WorkspaceRepositories
                         (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
                         commitMessage: commitMessage,
                         includeDepsInCommitMessage: includeDepsInCommitMessage,
-                        repoIdsToUpdate: reposNeedingWork,
-                        maxLevel: level));
+                        repoIdsToUpdate: null,
+                        maxLevel: level,
+                        runId: runId));
 
                 await ReloadWorkspaceDataFromFreshScopeAsync();
                 _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
@@ -318,7 +320,7 @@ public sealed partial class WorkspaceRepositories
             // Phase 3: execute push (per-level restore of synced repos handled inside push service)
             try
             {
-                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds);
+                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds, runId: runId);
             }
             catch (SynchronizedPushNotPossibleException ex)
             {
@@ -328,7 +330,7 @@ public sealed partial class WorkspaceRepositories
                     {
                         JobService.StartJob(PageJobKey, "Preparing push...", async (j, c) =>
                         {
-                            await ExecutePushCoreAsync(j, c, pushRepoIds, synchronizedPush: false, requiredPackageIds, syncedRepoIds);
+                            await ExecutePushCoreAsync(j, c, pushRepoIds, synchronizedPush: false, requiredPackageIds, syncedRepoIds, runId: runId);
                             await RestoreSyncedPackagesCoreAsync(syncedRepoIds, j, c);
                         });
                         return Task.CompletedTask;
@@ -336,6 +338,8 @@ public sealed partial class WorkspaceRepositories
                     confirmButtonText: "Continue"));
                 return;
             }
+
+            Logger.LogInformation("[PushUpdated {RunId}] Level-Only Update & Push completed for workspace {WorkspaceId}", runId, WorkspaceId);
         });
 
         return Task.CompletedTask;
@@ -350,26 +354,27 @@ public sealed partial class WorkspaceRepositories
 
         JobService.StartJob(PageJobKey, "Updating dependencies...", async (job, ct) =>
         {
-            // Phase 1: update - fresh scope so DbContext does not compete with circuit page loads
+            var runId = Guid.NewGuid().ToString("N")[..8];
+            Logger.LogInformation("[PushUpdated {RunId}] Update & Push starting for workspace {WorkspaceId}", runId, WorkspaceId);
+
+            // Phase 1: update - fresh scope so DbContext does not compete with circuit page loads.
+            // Do not pre-filter by a snapshot of repos already flagged as out of date: a lower-level
+            // commit made during this run only marks higher levels out of date once refreshed, which
+            // happens after this snapshot would be taken. The orchestrator already scopes/skips per
+            // level live, so no repo-id scope is needed here (see plain "Update", which also passes null).
             IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
             try
             {
-                var allLinks = await GetAllLinksForOperationAsync();
-                var reposNeedingWork = allLinks
-                    .Where(wr => !wr.IsOnTag)
-                    .Where(wr => (wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
-                    .Select(wr => wr.RepositoryId)
-                    .ToHashSet();
-
                 syncedRepoIds = await ScopedExecutor.ExecuteAsync<WorkspaceUpdateHandler, IReadOnlySet<int>>(
                     svc => svc.RunUpdateAsync(
                         WorkspaceId,
                         ct,
                         job.ReportProgress,
                         (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
-                        repoIdsToUpdate: reposNeedingWork,
+                        repoIdsToUpdate: null,
                         commitMessage: commitMessage,
-                        includeDepsInCommitMessage: includeDepsInCommitMessage));
+                        includeDepsInCommitMessage: includeDepsInCommitMessage,
+                        runId: runId));
 
                 await ReloadWorkspaceDataFromFreshScopeAsync();
                 _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
@@ -410,7 +415,7 @@ public sealed partial class WorkspaceRepositories
             // Phase 3: execute push (per-level restore of synced repos handled inside push service)
             try
             {
-                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds);
+                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds, runId: runId);
             }
             catch (SynchronizedPushNotPossibleException ex)
             {
@@ -420,7 +425,7 @@ public sealed partial class WorkspaceRepositories
                     {
                         JobService.StartJob(PageJobKey, "Preparing push...", async (j, c) =>
                         {
-                            await ExecutePushCoreAsync(j, c, pushRepoIds, synchronizedPush: false, requiredPackageIds, syncedRepoIds);
+                            await ExecutePushCoreAsync(j, c, pushRepoIds, synchronizedPush: false, requiredPackageIds, syncedRepoIds, runId: runId);
                             await RestoreSyncedPackagesCoreAsync(syncedRepoIds, j, c);
                         });
                         return Task.CompletedTask;
@@ -428,6 +433,8 @@ public sealed partial class WorkspaceRepositories
                     confirmButtonText: "Continue"));
                 return;
             }
+
+            Logger.LogInformation("[PushUpdated {RunId}] Update & Push completed for workspace {WorkspaceId}", runId, WorkspaceId);
         });
 
         return Task.CompletedTask;

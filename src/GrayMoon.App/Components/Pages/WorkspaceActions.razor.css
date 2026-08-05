@@ -66,7 +66,16 @@
     position: fixed;
     transform: translateX(-90%);
     z-index: 2000;
-    min-width: 9rem;
+    min-width: 0;
+    width: max-content;
+    padding: 0.2rem 0;
+    font-size: 0.75rem;
+}
+
+.action-run-menu-fixed .dropdown-item {
+    font-size: 0.75rem;
+    line-height: 1.2;
+    padding: 0.2rem 0.55rem;
 }
 
 /*

@@ -24,10 +24,17 @@
 		<Compile Remove="Example\**\*" />
 	</ItemGroup>
 	<ItemGroup>
+		<InternalsVisibleTo Include="GrayMoon.Agent.Tests" />
+	</ItemGroup>
+	<ItemGroup>
 		<Content Include="appsettings.json">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</Content>
+		<Content Include="appsettings.Development.json">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
 		<EmbeddedResource Include="appsettings.json" />
+		<EmbeddedResource Include="appsettings.Development.json" />
 	</ItemGroup>
 
 	<ItemGroup>

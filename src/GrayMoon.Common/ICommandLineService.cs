@@ -22,7 +22,13 @@ public interface ICommandLineService
     /// <param name="mirrorFailureOutputAsStderr">
     /// When true and exit code is non-zero, combined stdout+stderr is sent to the overlay again as stderr lines (red).
     /// </param>
-    /// <returns>Exit code (or -1 if process failed to start), stdout, and stderr.</returns>
+    /// <param name="timeout">
+    /// Maximum time the process may run before it is killed (including its full process tree) and the
+    /// call returns a synthetic failed result (ExitCode -1, Stderr describing the timeout) instead of
+    /// waiting forever. Defaults to <see cref="ProcessExecutionOptions.DefaultTimeoutSeconds"/> when not
+    /// specified - there is always a bound, even if the caller passes nothing.
+    /// </param>
+    /// <returns>Exit code (or -1 if process failed to start, or timed out), stdout, and stderr.</returns>
     Task<CommandLineResult> RunAsync(
         string fileName,
         string arguments,
@@ -30,7 +36,8 @@ public interface ICommandLineService
         string? stdin = null,
         CancellationToken cancellationToken = default,
         bool streamStderrAsStdout = false,
-        bool mirrorFailureOutputAsStderr = false);
+        bool mirrorFailureOutputAsStderr = false,
+        TimeSpan? timeout = null);
 
     /// <summary>
     /// Runs the executable with an explicit argument list instead of a single argument string - no shell
@@ -39,6 +46,7 @@ public interface ICommandLineService
     /// raw stdin stream verbatim (not re-encoded), so callers control the exact bytes sent - required for
     /// NUL-delimited UTF-8 pathspec input.
     /// </summary>
+    /// <param name="timeout">See the other overload's <c>timeout</c> parameter.</param>
     Task<CommandLineResult> RunAsync(
         string fileName,
         IReadOnlyList<string> arguments,
@@ -46,5 +54,6 @@ public interface ICommandLineService
         byte[]? stdinBytes = null,
         CancellationToken cancellationToken = default,
         bool streamStderrAsStdout = false,
-        bool mirrorFailureOutputAsStderr = false);
+        bool mirrorFailureOutputAsStderr = false,
+        TimeSpan? timeout = null);
 }

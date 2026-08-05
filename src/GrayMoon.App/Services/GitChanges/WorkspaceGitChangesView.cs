@@ -15,6 +15,7 @@ public sealed record WorkspaceGitChangesRepositoryView
     public required string RepositoryName { get; init; }
 
     public string? BranchName { get; init; }
+    public string? DefaultBranchName { get; init; }
     public string? HeadCommit { get; init; }
 
     public bool IsDetachedHead { get; init; }

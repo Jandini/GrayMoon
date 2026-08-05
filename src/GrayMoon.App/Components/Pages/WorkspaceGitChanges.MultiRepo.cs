@@ -1,4 +1,5 @@
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Options;
@@ -7,10 +8,21 @@ namespace GrayMoon.App.Components.Pages;
 
 public sealed partial class WorkspaceGitChanges
 {
-    [Inject] private IOptions<WorkspaceOptions> WorkspaceOptions { get; set; } = default!;
+    [Inject] private IOptions<GitChangesOptions> GitChangesOptions { get; set; } = default!;
 
     private string _workspaceCommitMessage = string.Empty;
     private bool _workspaceCommitMessageHasContent;
+
+    /// <summary>
+    /// Restores the in-progress commit message for the current WorkspaceId from the circuit-scoped
+    /// memory. Called on initial load and whenever the page switches to a different workspace, so
+    /// navigating away and back (or between workspaces) never loses an unsubmitted message.
+    /// </summary>
+    private void RestoreWorkspaceCommitMessage()
+    {
+        _workspaceCommitMessage = CommitMessageMemory.Get(WorkspaceId);
+        _workspaceCommitMessageHasContent = !string.IsNullOrWhiteSpace(_workspaceCommitMessage);
+    }
 
     private void OnWorkspaceCommitMessageInput(ChangeEventArgs e)
     {
@@ -19,6 +31,7 @@ public sealed partial class WorkspaceGitChanges
         var hasContent = !string.IsNullOrWhiteSpace(newValue);
         _workspaceCommitMessage = newValue;
         _workspaceCommitMessageHasContent = hasContent;
+        CommitMessageMemory.Set(WorkspaceId, newValue);
 
         if (hadContent != hasContent)
         {
@@ -33,7 +46,9 @@ public sealed partial class WorkspaceGitChanges
     /// Commits with one shared message across every applicable repository. Not atomic: each repository
     /// commits independently through the bounded fan-out below, one repository's failure never blocks
     /// or rolls back another's success. Mirrors the existing SemaphoreSlim + Task.WhenAll idiom used by
-    /// PushOrchestrator/DependencyUpdateOrchestrator rather than introducing a new scheduler abstraction.
+    /// PushOrchestrator/DependencyUpdateOrchestrator rather than introducing a new scheduler abstraction,
+    /// bounded by the shared <see cref="GitChangesOptions.MaxParallelRepositoryOperations"/> - the same
+    /// limit used by the workspace status scan - rather than a separately hard-coded value.
     /// Runs behind the page's LoadingOverlay/terminal job - this can touch many files across many
     /// repositories and run commit hooks, unlike the fast single-file/folder stage/unstage actions.
     /// </summary>
@@ -51,11 +66,47 @@ public sealed partial class WorkspaceGitChanges
             return;
         }
 
+        if (IsJobRunning || _defaultBranchWarningModal.IsVisible)
+        {
+            return;
+        }
+
         var targets = (_view?.Repositories ?? [])
             .Where(r => stagedOnly ? r.StagedCount > 0 : (r.StagedCount > 0 || r.ChangedCount > 0))
             .ToList();
 
-        if (targets.Count == 0 || IsJobRunning)
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        var reposOnDefaultBranch = targets
+            .Where(r => !string.IsNullOrWhiteSpace(r.DefaultBranchName)
+                && string.Equals(r.BranchName, r.DefaultBranchName, StringComparison.Ordinal))
+            .ToList();
+
+        if (reposOnDefaultBranch.Count > 0)
+        {
+            var repoItems = reposOnDefaultBranch
+                .Select(r => new DefaultBranchWarningItem(r.RepositoryName, r.DefaultBranchName!))
+                .ToList();
+            ShowDefaultBranchWarning(
+                "The following repositories are on their default branch. Committing will write directly to the default (protected) branch.",
+                repoItems,
+                () =>
+                {
+                    CommitWorkspaceCoreAsync(stagedOnly, targets);
+                    return Task.CompletedTask;
+                });
+            return;
+        }
+
+        CommitWorkspaceCoreAsync(stagedOnly, targets);
+    }
+
+    private void CommitWorkspaceCoreAsync(bool stagedOnly, List<WorkspaceGitChangesRepositoryView> targets)
+    {
+        if (IsJobRunning)
         {
             return;
         }
@@ -71,7 +122,7 @@ public sealed partial class WorkspaceGitChanges
             var failed = new List<(string Repository, string Error)>();
             var completed = 0;
 
-            using var semaphore = new SemaphoreSlim(Math.Max(1, WorkspaceOptions.Value.MaxParallelOperations));
+            using var semaphore = new SemaphoreSlim(Math.Max(1, GitChangesOptions.Value.MaxParallelRepositoryOperations));
 
             var tasks = targets.Select(async repo =>
             {
@@ -131,6 +182,7 @@ public sealed partial class WorkspaceGitChanges
                 {
                     _workspaceCommitMessage = string.Empty;
                     _workspaceCommitMessageHasContent = false;
+                    CommitMessageMemory.Clear(WorkspaceId);
                 });
             }
 
@@ -158,7 +210,8 @@ public sealed partial class WorkspaceGitChanges
 
     /// <summary>Stage all items in the Changed section, or unstage all items in the Staged section, across
     /// every repository represented in that section. Same bounded fan-out idiom as <see cref="CommitWorkspaceAsync"/>,
-    /// also behind the page's LoadingOverlay/terminal job since it spans every repository in the section.</summary>
+    /// sharing the same <see cref="GitChangesOptions.MaxParallelRepositoryOperations"/> limit, also behind
+    /// the page's LoadingOverlay/terminal job since it spans every repository in the section.</summary>
     private void BulkSectionActionAsync(bool unstageStagedSection)
     {
         if (!AgentBridge.IsAgentConnected)
@@ -183,7 +236,7 @@ public sealed partial class WorkspaceGitChanges
         StartPageJob(label, async (job, ct) =>
         {
             var completed = 0;
-            using var semaphore = new SemaphoreSlim(Math.Max(1, WorkspaceOptions.Value.MaxParallelOperations));
+            using var semaphore = new SemaphoreSlim(Math.Max(1, GitChangesOptions.Value.MaxParallelRepositoryOperations));
 
             var tasks = targets.Select(async repo =>
             {

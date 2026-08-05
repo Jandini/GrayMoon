@@ -436,6 +436,18 @@ it here since you asked, but wanted you to have the full picture before deciding
 | `WatcherIdleGraceMinutes` | 10 | How long a repository's watcher survives with no renewing operation before being disposed. |
 | `WatcherRenewalIntervalMinutes` | 3 | (Added with the Section 5 fix.) How often the background monitor sweeps every repository to renew leases. Clamped to stay below `WatcherIdleGraceMinutes`. |
 
+### 9.1 Agent command queue pools (`AgentOptions`, bound from `"GrayMoon"` config section)
+
+Separate from `GitChangesOptions` above, the Agent routes every SignalR command into one of three
+independently-sized worker pools (`src/GrayMoon.Agent/Hosted/SignalRConnectionHostedService.cs`), so a
+command type is never blocked behind an unrelated one:
+
+| Setting | Default | Commands routed here |
+|---|---|---|
+| `MaxConcurrentCommands` | `ProcessorCount * 2` | Everything else (stage/unstage/commit, push, update, sync, etc.) - the main `TrackedJobQueue`. |
+| `MaxConcurrentReadCommands` | 4 | `GetGitChangeStatus` only - the dedicated `ReadJobQueue`. A workspace rescan can fan out up to `MaxParallelRepositoryOperations` (16) of these concurrently, saturating this pool for the duration of the scan. |
+| `MaxConcurrentDiffCommands` | 4 | `GetGitFileDiff` only - the dedicated `DiffJobQueue`. Kept separate from `MaxConcurrentReadCommands` specifically so opening a diff never queues behind a `GetGitChangeStatus` rescan. |
+
 ---
 
 ## 10. File map
@@ -457,7 +469,7 @@ it here since you asked, but wanted you to have the full picture before deciding
 | Agent | `Services/GitChanges/GitCliRepositoryGitChangesService.cs` | All actual `git` invocations for this feature. |
 | Agent | `Services/GitChanges/GitPathspecStdinWriter.cs` | NUL-delimited pathspec stdin + bounded-batch fallback. |
 | Agent | `Commands/GetGitChangeStatusCommand.cs` | Registers + leases + triggers the scan (Section 3.6). |
-| Agent | `Commands/GetGitFileDiffCommand.cs` | Diff load command. |
+| Agent | `Commands/GetGitFileDiffCommand.cs` | Diff load command - routed to its own `DiffJobQueue`/`DiffJobBackgroundService` pool (Section 9.1), independent of `GetGitChangeStatus`. |
 | Agent | `Commands/StageGitChangesCommand.cs` / `UnstageGitChangesCommand.cs` / `CommitGitChangesCommand.cs` | Mutations. |
 | App | `Services/GitChanges/GitChangesAgentClient.cs` | Wraps `IAgentBridge` for the five commands. |
 | App | `Services/GitChanges/WorkspaceGitChangesWriteQueue.cs` | Single writer queue into SQLite. |

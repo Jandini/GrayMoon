@@ -4,6 +4,7 @@ using GrayMoon.Agent.Services.GitChanges;
 using GrayMoon.Common;
 using GrayMoon.Common.Git;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace GrayMoon.Agent.Tests;
 
@@ -14,8 +15,8 @@ public sealed class GitCliRepositoryGitChangesServiceTests : IDisposable
 
     public GitCliRepositoryGitChangesServiceTests()
     {
-        var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance);
-        var runner = new GitProcessRunner(commandLine, NullLogger<GitProcessRunner>.Instance);
+        var commandLine = new CommandLineService(NullLogger<CommandLineService>.Instance, Options.Create(new ProcessExecutionOptions()));
+        var runner = new GitProcessRunner(commandLine, Options.Create(new GitProcessOptions()), NullLogger<GitProcessRunner>.Instance);
         _service = new GitCliRepositoryGitChangesService(runner, NullLogger<GitCliRepositoryGitChangesService>.Instance);
     }
 

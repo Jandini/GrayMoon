@@ -46,6 +46,7 @@ try
 
     builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection("Workspace"));
     builder.Services.Configure<GitChangesOptions>(builder.Configuration.GetSection("GitChanges"));
+    builder.Services.Configure<AgentBridgeOptions>(builder.Configuration.GetSection(AgentBridgeOptions.SectionName));
 
     // Add services to the container.
     builder.Services.AddRazorComponents()
@@ -130,6 +131,7 @@ try
     builder.Services.AddScoped<IGitChangesAgentClient, GitChangesAgentClient>();
     builder.Services.AddScoped<GitChangesSnapshotPushHandler>();
     builder.Services.AddScoped<WorkspaceGitChangesSelectionMemory>();
+    builder.Services.AddScoped<WorkspaceGitChangesCommitMessageMemory>();
     builder.Services.AddSingleton<IWorkspaceGitChangesActivityTracker, WorkspaceGitChangesActivityTracker>();
     builder.Services.AddSingleton<IGitChangesWorkspaceScanner, GitChangesWorkspaceScanner>();
 

@@ -106,6 +106,14 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 ## What's new
 
+### Git Changes refresh keeps running when you leave the page
+
+Workspace **Changes** refresh now uses the same circuit-scoped background job pipeline as **Repositories**, so a scan is not cancelled when you navigate away.
+
+- **Empty workspace ("No changes"):** Refresh (and the automatic warm-up scan when you first open Changes for an inactive workspace) runs as a non-overlay background job. The page shows an inline spinner with progress (`Refreshing x of y repositories...`) and an **Abort** button. Leave the page and the scan continues; come back while it is still running and the spinner returns.
+- **When there are already changes:** Refresh still uses the standard LoadingOverlay / terminal job for that Changes URL, so you can navigate away and see the overlay again when you return.
+- **No header subtitle status:** the old warm-up-only subtitle next to the Changes title is gone - progress for empty/warm-up scans lives in the empty-state UI (or updates the tree silently when changes are already showing).
+
 ### Fixed: navigating to Changes no longer aborts running jobs or breaks the diff viewer
 
 Two related navigation bugs in the Git Changes page are fixed.

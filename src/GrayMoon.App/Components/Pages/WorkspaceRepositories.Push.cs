@@ -206,7 +206,8 @@ public sealed partial class WorkspaceRepositories
         IReadOnlySet<int> repoIds,
         bool synchronizedPush,
         IReadOnlySet<string> requiredPackageIds,
-        IReadOnlySet<int>? syncedRepoIds = null)
+        IReadOnlySet<int>? syncedRepoIds = null,
+        string? runId = null)
     {
         try
         {
@@ -219,7 +220,8 @@ public sealed partial class WorkspaceRepositories
                     job.ReportProgress,
                     ToastService.ShowError,
                     syncedRepoIds: syncedRepoIds,
-                    cancellationToken: ct));
+                    cancellationToken: ct,
+                    runId: runId));
         }
         catch (OperationCanceledException)
         {

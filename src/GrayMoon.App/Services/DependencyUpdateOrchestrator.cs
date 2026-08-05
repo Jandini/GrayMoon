@@ -14,7 +14,8 @@ public sealed class DependencyUpdateOrchestrator(
     WorkspaceFileVersionService fileVersionService,
     WorkspaceRepository workspaceRepository,
     IOptions<WorkspaceOptions> workspaceOptions,
-    IServiceScopeFactory scopeFactory)
+    IServiceScopeFactory scopeFactory,
+    ILogger<DependencyUpdateOrchestrator> logger)
 {
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 8);
 
@@ -29,6 +30,7 @@ public sealed class DependencyUpdateOrchestrator(
     /// <param name="commitMessage">Optional user-supplied commit subject line. When provided, replaces the default subject in all commits created during this update.</param>
     /// <param name="includeDepsInCommitMessage">When true, the list of updated packages is appended to the commit message body.</param>
     /// <param name="maxLevel">Optional. When set, only repositories at or below this dependency level are processed; higher levels are skipped.</param>
+    /// <param name="runId">Optional caller-supplied correlation id included in every log line for this run so it can be filtered from application logs.</param>
     public async Task<IReadOnlySet<int>> RunAsync(
         int workspaceId,
         CancellationToken cancellationToken,
@@ -38,17 +40,28 @@ public sealed class DependencyUpdateOrchestrator(
         IReadOnlySet<int>? repoIdsToUpdate = null,
         string? commitMessage = null,
         bool includeDepsInCommitMessage = true,
-        int? maxLevel = null)
+        int? maxLevel = null,
+        string? runId = null)
     {
         // Non-null empty set means the caller determined no repos need work.
         if (repoIdsToUpdate is { Count: 0 })
+        {
+            logger.LogInformation("[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: caller passed an empty repoIdsToUpdate set; nothing to do.", runId, workspaceId);
             return new HashSet<int>();
+        }
+
+        logger.LogInformation(
+            "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: starting update run. Scope={Scope}, MaxLevel={MaxLevel}",
+            runId, workspaceId,
+            repoIdsToUpdate == null ? "all repos (live, per level)" : $"{repoIdsToUpdate.Count} repo(s): [{string.Join(",", repoIdsToUpdate)}]",
+            maxLevel?.ToString() ?? "none");
 
         var hadError = false;
         var allSyncedRepoIds = new HashSet<int>();
         void OnRepoError(int repoId, string msg)
         {
             hadError = true;
+            logger.LogWarning("[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: repo {RepoId} error: {Message}", runId, workspaceId, repoId, msg);
             onRepoError(repoId, msg);
         }
 
@@ -61,7 +74,10 @@ public sealed class DependencyUpdateOrchestrator(
             repositoryIds: repoIdsToUpdate,
             cancellationToken);
         if (hadError)
+        {
+            logger.LogWarning("[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: aborting after RefreshWorkspaceProjectsAsync error.", runId, workspaceId);
             return new HashSet<int>();
+        }
 
         // Step 2+: Walk every dependency level (up to maxLevel). Do not limit the level walk to the
         // initial reposNeedingWork set - a lower-level csproj commit refreshes GitVersion and can mark
@@ -73,6 +89,11 @@ public sealed class DependencyUpdateOrchestrator(
             hadError = true;
         if (hadError)
             return new HashSet<int>();
+
+        logger.LogInformation(
+            "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: {LevelCount} level(s) to walk: {Levels}",
+            runId, workspaceId, levelRepoIds.Count,
+            string.Join(", ", levelRepoIds.Select(l => $"L{l.Level}={l.RepoIds.Count} repo(s)")));
 
         foreach (var (level, repoIds) in levelRepoIds)
         {
@@ -97,8 +118,27 @@ public sealed class DependencyUpdateOrchestrator(
                 : repoIds;
 
             var hasFileWork = repoIds.Any(outOfDateFileRepoIds.Contains);
+
+            if (repoIdsToUpdate != null)
+            {
+                var excludedByScope = repoIds.Where(id => !repoIdsToUpdate.Contains(id)).ToList();
+                if (excludedByScope.Count > 0)
+                {
+                    logger.LogInformation(
+                        "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: {ExcludedCount} repo(s) excluded from csproj scope by caller's repoIdsToUpdate: [{ExcludedIds}]",
+                        runId, workspaceId, level, excludedByScope.Count, string.Join(",", excludedByScope));
+                }
+            }
+
+            logger.LogInformation(
+                "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: starting. TotalRepos={TotalRepos}, CsprojScope={CsprojScope}, HasFileWork={HasFileWork}",
+                runId, workspaceId, level, repoIds.Count, csprojScope.Count, hasFileWork);
+
             if (!hasFileWork && csprojScope.Count == 0)
+            {
+                logger.LogInformation("[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: skipped (no file work, empty csproj scope).", runId, workspaceId, level);
                 continue;
+            }
 
             Action<string> levelProgress = msg => setProgress($"{msg}\nLevel {level}");
 
@@ -113,12 +153,17 @@ public sealed class DependencyUpdateOrchestrator(
                 levelProgress,
                 onAppSideComplete,
                 OnRepoError,
-                commitMessage);
+                commitMessage,
+                runId);
             if (!vfOk)
             {
                 hadError = true;
                 break;
             }
+
+            logger.LogInformation(
+                "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: version-file commit result: {CommittedCount} repo(s) committed: [{CommittedIds}]",
+                runId, workspaceId, level, vfCommittedRepoIds.Count, string.Join(",", vfCommittedRepoIds));
 
             if (csprojScope.Count == 0)
             {
@@ -134,6 +179,11 @@ public sealed class DependencyUpdateOrchestrator(
             var reposAtLevel = payload
                 .Where(p => csprojScope.Contains(p.RepoId))
                 .ToList();
+
+            logger.LogInformation(
+                "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: GetUpdatePlanAsync found {PendingCount} of {ScopeCount} scoped repo(s) with pending csproj changes: [{PendingIds}]",
+                runId, workspaceId, level, reposAtLevel.Count, csprojScope.Count, string.Join(",", reposAtLevel.Select(r => r.RepoId)));
+
             if (reposAtLevel.Count == 0)
             {
                 // No csproj work at this level, but version-file commits may need a version refresh.
@@ -153,6 +203,11 @@ public sealed class DependencyUpdateOrchestrator(
                 repoIdsToSync: csprojScope,
                 cancellationToken);
             allSyncedRepoIds.UnionWith(syncedRepoIds);
+
+            logger.LogInformation(
+                "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: SyncDependenciesAsync synced {SyncedCount} of {AttemptedCount} repo(s): [{SyncedIds}]",
+                runId, workspaceId, level, syncedRepoIds.Count, reposAtLevel.Count, string.Join(",", syncedRepoIds));
+
             if (hadError)
                 break;
 
@@ -192,6 +247,11 @@ public sealed class DependencyUpdateOrchestrator(
                 if (committed)
                     csprojCommittedRepoIds.Add(repoId);
             }
+
+            logger.LogInformation(
+                "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: committed csproj changes for {CommittedCount} repo(s): [{CommittedIds}]",
+                runId, workspaceId, level, csprojCommittedRepoIds.Count, string.Join(",", csprojCommittedRepoIds));
+
             if (hadError)
                 break;
 
@@ -204,6 +264,8 @@ public sealed class DependencyUpdateOrchestrator(
                 hadError = true;
                 break;
             }
+
+            logger.LogInformation("[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: completed.", runId, workspaceId, level);
         }
 
         // Finalize: broadcast so grid refreshes, then run one file-version check for the whole update.
@@ -213,6 +275,10 @@ public sealed class DependencyUpdateOrchestrator(
             await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
             await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken);
         }
+
+        logger.LogInformation(
+            "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: run finished. HadError={HadError}, TotalSyncedRepos={SyncedCount}",
+            runId, workspaceId, hadError, hadError ? 0 : allSyncedRepoIds.Count);
 
         return hadError ? new HashSet<int>() : allSyncedRepoIds;
     }
@@ -319,7 +385,8 @@ public sealed class DependencyUpdateOrchestrator(
         Action<string> setProgress,
         Action? onAppSideComplete,
         Action<int, string> onRepoError,
-        string? commitMessageOverride = null)
+        string? commitMessageOverride = null,
+        string? runId = null)
     {
         // Only call agent for repos that actually have out-of-date version files.
         var fileRepoIds = outOfDateFileRepoIds.Count > 0
@@ -328,6 +395,10 @@ public sealed class DependencyUpdateOrchestrator(
 
         if (fileRepoIds.Count == 0)
             return (true, []);
+
+        logger.LogInformation(
+            "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: {FileRepoCount} repo(s) have out-of-date version files: [{FileRepoIds}]",
+            runId, workspaceId, level, fileRepoIds.Count, string.Join(",", fileRepoIds));
 
         setProgress("Updating version files...");
         var (_, _, fileError, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
