@@ -37,12 +37,26 @@ try
         builder.Services.AddHostedService<DesktopStartupService>();
     }
 
+    // GrayMoon.Desktop launches this process with GRAYMOON_-prefixed env vars (e.g.
+    // GRAYMOON_Desktop__LogDirectory) so it does not collide with ASPNETCORE_/other host env vars.
+    builder.Configuration.AddEnvironmentVariables(prefix: "GRAYMOON_");
+
+    var logDirectory = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "GrayMoon",
+        "Logs");
+    Directory.CreateDirectory(logDirectory);
+
     builder.Logging.ClearProviders();
     builder.Host.UseSerilog((context, services, configuration) => configuration
         .ReadFrom.Configuration(context.Configuration)
         .ReadFrom.Services(services)
-        .Enrich.FromLogContext());
-    builder.Configuration.AddEnvironmentVariables();
+        .Enrich.FromLogContext()
+        .WriteTo.File(
+            path: Path.Combine(logDirectory, "graymoon-app-.log"),
+            rollingInterval: RollingInterval.Day,
+            retainedFileCountLimit: 14,
+            outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}"));
 
     builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection("Workspace"));
     builder.Services.Configure<GitChangesOptions>(builder.Configuration.GetSection("GitChanges"));
