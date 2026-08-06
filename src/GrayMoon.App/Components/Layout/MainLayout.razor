@@ -82,7 +82,7 @@
 
         AgentConnectionTracker.OnStateChanged((sync) => { _ = InvokeAsync(StateHasChanged); });
 
-        var showTerminal = await AppSettingRepository.GetBoolAsync(AppSettingRepository.TerminalShowByDefaultKey, defaultValue: false);
+        var showTerminal = await AppSettingRepository.GetBoolAsync(AppSettingRepository.TerminalShowByDefaultKey, defaultValue: true);
         CommandTerminalOverlayPreference.IsVisible = showTerminal;
 
         var transparent = await AppSettingRepository.GetBoolAsync(AppSettingRepository.TerminalTransparentBackdropKey, defaultValue: true);

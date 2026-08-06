@@ -12,7 +12,7 @@ public enum TerminalColorScheme
 public sealed class LoadingOverlayUiSettingsService
 {
     private bool _transparentBackdrop = true;
-    private TerminalColorScheme _terminalColorScheme = TerminalColorScheme.Green;
+    private TerminalColorScheme _terminalColorScheme = TerminalColorScheme.Yellow;
 
     /// <summary>When true, the loading overlay dim layer is lighter and more of the app shows through.</summary>
     public bool TransparentBackdrop
