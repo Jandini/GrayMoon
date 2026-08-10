@@ -16,6 +16,12 @@
     <ProjectReference Include="..\GrayMoon.Common\GrayMoon.Common.csproj" />
     <None Include="..\..\.github\workflows\docker-build.yml" Link="docker-build.yml" />
     <None Include="..\..\README.md" Link="README.md" />
+    <None Update="appsettings.Development.json">
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </None>
+    <Content Update="appsettings.Development.json">
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>
@@ -26,6 +32,30 @@
     <EmbeddedResource Include="Resources\install-agent.ps1" />
     <EmbeddedResource Include="Resources\uninstall-agent.ps1" />
   </ItemGroup>
+
+  <!--
+    Publishes GrayMoon.Agent for Windows and packages it as a zip alongside GrayMoon.App's
+    publish output, so the desktop bundle's /api/agent/download endpoint always has something
+    to serve. Runs automatically after `dotnet publish` (Visual Studio Publish, CI, or the
+    GrayMoon.Desktop bundle script) - never on plain Build, so everyday F5/Ctrl+Shift+B stays fast.
+    Windows-only (uses Compress-Archive); the Dockerfile's own build-agent stage still produces
+    the Linux zip for the containerized deployment.
+  -->
+  <Target Name="PublishAgentBundle" AfterTargets="Publish" Condition="'$(OS)' == 'Windows_NT'">
+    <PropertyGroup>
+      <AgentProj>$(MSBuildThisFileDirectory)..\GrayMoon.Agent\GrayMoon.Agent.csproj</AgentProj>
+      <AgentPublishDir>$(IntermediateOutputPath)agent-publish\</AgentPublishDir>
+      <AgentZipPath>$(PublishDir)agent\graymoon-agent-windows.zip</AgentZipPath>
+    </PropertyGroup>
+    <Error Text="GrayMoon.Agent.csproj not found at $(AgentProj). GrayMoon.Desktop publishing requires the GrayMoon and GrayMoon.Desktop repositories checked out as sibling directories."
+           Condition="!Exists('$(AgentProj)')" />
+    <Exec Command="dotnet publish &quot;$(AgentProj)&quot; -c $(Configuration) -r win-x64 --self-contained false -o &quot;$(AgentPublishDir)&quot;"
+          Condition="Exists('$(AgentProj)')" />
+    <MakeDir Directories="$(PublishDir)agent" Condition="Exists('$(AgentProj)') AND !Exists('$(PublishDir)agent')" />
+    <Delete Files="$(AgentZipPath)" Condition="Exists('$(AgentZipPath)')" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;Compress-Archive -Path '$(AgentPublishDir)*' -DestinationPath '$(AgentZipPath)' -Force&quot;"
+          Condition="Exists('$(AgentProj)')" />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.*" />
@@ -38,6 +68,7 @@
 	<PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
     <PackageReference Include="Polly" Version="8.4.2" />
     <PackageReference Include="Serilog.AspNetCore" Version="8.0.2" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
   </ItemGroup>
 
 </Project>

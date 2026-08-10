@@ -3,6 +3,7 @@ using GrayMoon.App;
 using GrayMoon.App.Api;
 using GrayMoon.App.Components;
 using GrayMoon.App.Data;
+using GrayMoon.App.Desktop;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
@@ -25,12 +26,37 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
 
+    // Desktop mode: launched with --desktop <pipe-name> by GrayMoon.Desktop.exe
+    var desktopPipeIndex = Array.IndexOf(args, "--desktop");
+    var isDesktopMode = desktopPipeIndex >= 0 && desktopPipeIndex + 1 < args.Length;
+    var desktopPipeName = isDesktopMode ? args[desktopPipeIndex + 1] : null;
+
+    if (isDesktopMode && desktopPipeName is not null)
+    {
+        builder.WebHost.UseDesktopMode(desktopPipeName);
+        builder.Services.AddHostedService<DesktopStartupService>();
+    }
+
+    // GrayMoon.Desktop launches this process with GRAYMOON_-prefixed env vars (e.g.
+    // GRAYMOON_Desktop__LogDirectory) so it does not collide with ASPNETCORE_/other host env vars.
+    builder.Configuration.AddEnvironmentVariables(prefix: "GRAYMOON_");
+
+    var logDirectory = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "GrayMoon",
+        "Logs");
+    Directory.CreateDirectory(logDirectory);
+
     builder.Logging.ClearProviders();
     builder.Host.UseSerilog((context, services, configuration) => configuration
         .ReadFrom.Configuration(context.Configuration)
         .ReadFrom.Services(services)
-        .Enrich.FromLogContext());
-    builder.Configuration.AddEnvironmentVariables();
+        .Enrich.FromLogContext()
+        .WriteTo.File(
+            path: Path.Combine(logDirectory, "graymoon-app-.log"),
+            rollingInterval: RollingInterval.Day,
+            retainedFileCountLimit: 14,
+            outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}"));
 
     builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection("Workspace"));
     builder.Services.Configure<GitChangesOptions>(builder.Configuration.GetSection("GitChanges"));
@@ -213,7 +239,8 @@ try
     }
 
     // Only redirect to HTTPS when URLs include HTTPS (skip in container when only HTTP is used)
-    if ((app.Configuration["ASPNETCORE_URLS"] ?? "").Contains("https", StringComparison.OrdinalIgnoreCase))
+    // Also skip in desktop mode — loopback HTTP only, no HTTPS needed.
+    if (!isDesktopMode && (app.Configuration["ASPNETCORE_URLS"] ?? "").Contains("https", StringComparison.OrdinalIgnoreCase))
     {
         app.UseHttpsRedirection();
     }
@@ -227,6 +254,14 @@ try
     app.MapHub<WorkspaceSyncHub>("/hubs/workspace-sync");
     app.MapHub<AgentHub>("/hub/agent");
 
+    // Desktop-mode-only endpoints
+    if (isDesktopMode)
+    {
+        app.MapHub<DesktopNotificationHub>("/hubs/desktop");
+    }
+
+    app.MapGet("/health", () => Results.Ok());
+
     app.MapRazorComponents<App>()
         .AddInteractiveServerRenderMode();
 
@@ -236,9 +271,19 @@ try
 catch (Exception ex)
 {
     Log.Fatal(ex, "Application terminated unexpectedly");
-    return 1;
+    return IsAddressInUseException(ex) ? DesktopHostingExtensions.AddressInUseExitCode : 1;
 }
 finally
 {
     await Log.CloseAndFlushAsync();
+}
+
+static bool IsAddressInUseException(Exception? ex)
+{
+    while (ex is not null)
+    {
+        if (ex is Microsoft.AspNetCore.Connections.AddressInUseException) return true;
+        ex = ex.InnerException;
+    }
+    return false;
 }

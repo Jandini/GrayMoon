@@ -62,13 +62,13 @@ public class AppSettingRepository(AppDbContext db)
         return bool.TryParse(value, out var b) ? b : defaultValue;
     }
 
-    public static TerminalColorScheme ParseTerminalColorScheme(string? value, TerminalColorScheme defaultValue = TerminalColorScheme.Green)
+    public static TerminalColorScheme ParseTerminalColorScheme(string? value, TerminalColorScheme defaultValue = TerminalColorScheme.Yellow)
     {
         if (string.IsNullOrWhiteSpace(value)) return defaultValue;
         return Enum.TryParse<TerminalColorScheme>(value, ignoreCase: true, out var s) ? s : defaultValue;
     }
 
-    public async Task<TerminalColorScheme> GetTerminalColorSchemeAsync(TerminalColorScheme defaultValue = TerminalColorScheme.Green)
+    public async Task<TerminalColorScheme> GetTerminalColorSchemeAsync(TerminalColorScheme defaultValue = TerminalColorScheme.Yellow)
     {
         var raw = await GetValueAsync(TerminalColorSchemeKey);
         return ParseTerminalColorScheme(raw, defaultValue);

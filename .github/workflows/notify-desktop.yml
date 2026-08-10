@@ -1,0 +1,98 @@
+name: Notify GrayMoon.Desktop
+
+# Runs after docker-build.yml succeeds on main or tags.
+# Sends a repository_dispatch to GrayMoon.Desktop so it can trigger an integration build.
+#
+# Required secrets:
+#   DESKTOP_APP_ID          — GitHub App ID with write:contents + actions:write on GrayMoon.Desktop
+#   DESKTOP_APP_PRIVATE_KEY — GitHub App private key (PEM)
+#
+# Loop prevention: this workflow only fires on GrayMoon push events and only dispatches
+# to GrayMoon.Desktop. GrayMoon.Desktop never dispatches back to GrayMoon.
+
+on:
+  workflow_run:
+    workflows: ["Docker Build"]
+    types:
+      - completed
+    branches:
+      - main
+  push:
+    tags:
+      - "*.*.*"
+
+jobs:
+  notify-desktop:
+    name: Notify GrayMoon.Desktop
+    runs-on: ubuntu-latest
+    # Only dispatch when the Docker build succeeded (for workflow_run trigger)
+    # and always dispatch for direct tag pushes
+    if: >
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Resolve GrayMoon SHA
+        id: resolve
+        run: |
+          SHA="${{ github.sha }}"
+          REF="${{ github.ref }}"
+
+          # For workflow_run, use the SHA from the triggering run
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            SHA="${{ github.event.workflow_run.head_sha }}"
+            REF="${{ github.event.workflow_run.head_branch }}"
+          fi
+
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "ref=$REF" >> $GITHUB_OUTPUT
+
+          # Determine channel
+          if [[ "$REF" == refs/tags/* ]]; then
+            echo "channel=stable" >> $GITHUB_OUTPUT
+          else
+            echo "channel=main" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Restore dotnet tools
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get GrayMoon version
+        id: version
+        run: |
+          dotnet tool restore
+          VERSION=$(dotnet gitversion /nofetch /verbosity quiet /showvariable InformationalVersion 2>/dev/null || echo "unknown")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.DESKTOP_APP_ID }}
+          private-key: ${{ secrets.DESKTOP_APP_PRIVATE_KEY }}
+          repositories: GrayMoon.Desktop
+
+      - name: Dispatch to GrayMoon.Desktop
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh api \
+            --method POST \
+            repos/Jandini/GrayMoon.Desktop/dispatches \
+            --field event_type=graymoon-updated \
+            --field client_payload[gm_ref]="${{ steps.resolve.outputs.ref }}" \
+            --field client_payload[gm_sha]="${{ steps.resolve.outputs.sha }}" \
+            --field client_payload[gm_version]="${{ steps.version.outputs.version }}" \
+            --field client_payload[gm_channel]="${{ steps.resolve.outputs.channel }}" \
+            --field client_payload[gm_run_id]="${{ github.run_id }}"
+
+          echo "Dispatched graymoon-updated to GrayMoon.Desktop"
+          echo "  ref     : ${{ steps.resolve.outputs.ref }}"
+          echo "  sha     : ${{ steps.resolve.outputs.sha }}"
+          echo "  version : ${{ steps.version.outputs.version }}"
+          echo "  channel : ${{ steps.resolve.outputs.channel }}"
