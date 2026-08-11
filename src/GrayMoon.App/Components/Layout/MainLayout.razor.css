@@ -236,13 +236,14 @@ article.content {
         pointer-events: none;
     }
 
+    /* Collapsed: keep overflow scroll, hide the scrollbar track/thumb */
     .page--navbar-collapsed .sidebar ::deep .nav-scrollable {
-        scrollbar-width: thin;
-        scrollbar-color: #5a5a5a var(--bg-card, #252526);
+        scrollbar-width: none;
+        -ms-overflow-style: none;
     }
 
     .page--navbar-collapsed .sidebar ::deep .nav-scrollable::-webkit-scrollbar {
-        width: 3px;
+        display: none;
     }
 
     .top-row {
