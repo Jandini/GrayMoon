@@ -1,7 +1,7 @@
 /* Toast bubble - matches app dark theme, non-intrusive */
 .toast-bubble {
     position: fixed;
-    top: calc(3.5rem + 1rem); /* Below top-row (3.5rem) + spacing (1rem) */
+    top: calc(var(--topbar-height) + 1rem); /* Below top-row + spacing (1rem) */
     left: 50%;
     transform: translateX(-50%);
     z-index: 9999;

@@ -13,6 +13,7 @@ public class AppSettingRepository(AppDbContext db)
     public const string TerminalTransparentBackdropKey = "Terminal.TransparentBackdrop";
     public const string TerminalColorSchemeKey = "Terminal.ColorScheme";
     public const string SidebarCollapsedKey = "Sidebar.Collapsed";
+    public const string TopBarShowKey = "TopBar.Show";
 
     public async Task<string?> GetValueAsync(string key)
     {
