@@ -1,0 +1,27 @@
+@rendermode @(new InteractiveServerRenderMode(prerender: true))
+@implements IDisposable
+@inject DesktopTopBarState DesktopTopBar
+@inject IJSRuntime JsRuntime
+
+@* Renders no markup. A Layout cannot declare its own @rendermode (RouteView passes it the page's
+   Body RenderFragment, which cannot cross the SSR/interactive boundary), so MainLayout - and the
+   top bar markup it renders - is always static/SSR-only and is never part of a live circuit. This
+   tiny component is the live circuit instead: it just outlives the page and flips the CSS class
+   directly via JS the instant GrayMoon.Desktop's tray toggles DesktopTopBarState, with no
+   server-driven re-render and no page reload. See MainLayout.razor.css for the
+   .page--topbar-hidden rule this toggles. *@
+
+@code {
+    protected override void OnInitialized()
+    {
+        DesktopTopBar.Changed += OnDesktopTopBarChanged;
+    }
+
+    private void OnDesktopTopBarChanged(bool visible) =>
+        _ = InvokeAsync(() => JsRuntime.InvokeVoidAsync("graymoonToggleClass", ".page", "page--topbar-hidden", !visible));
+
+    void IDisposable.Dispose()
+    {
+        DesktopTopBar.Changed -= OnDesktopTopBarChanged;
+    }
+}

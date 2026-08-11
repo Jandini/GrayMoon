@@ -15,6 +15,7 @@
 
 <Toast />
 <WorkspaceActionNotificationPanel />
+<DesktopTopBarSync />
 
 <div class="page @(NavbarCollapse.IsCollapsed ? "page--navbar-collapsed" : "") @(!DesktopTopBar.IsVisible ? "page--topbar-hidden" : "")">
     <div class="sidebar" id="sidebar">
@@ -22,34 +23,31 @@
     </div>
 
     <main>
-        @if (DesktopTopBar.IsVisible)
-        {
-            <div class="top-row px-4 top-row-main">
-                <div class="top-row-workspace-title" role="status" aria-live="polite">
-                    @if (!string.IsNullOrEmpty(WorkspaceTopBarService.WorkspaceDisplayName))
-                    {
-                        <a href="@WorkspacesListHref"
-                           class="h2 workspace-repos-title top-row-workspace-title__text top-row-workspace-title__link my-0"
-                           title="@WorkspaceTopBarService.WorkspaceDisplayName"
-                           aria-label="Go to Workspaces">
-                            @WorkspaceTopBarService.WorkspaceDisplayName
-                        </a>
-                    }
-                </div>
-                <div class="top-row-main-trailing">
-                @if (!string.IsNullOrEmpty(version))
+        <div class="top-row px-4 top-row-main">
+            <div class="top-row-workspace-title" role="status" aria-live="polite">
+                @if (!string.IsNullOrEmpty(WorkspaceTopBarService.WorkspaceDisplayName))
                 {
-                    <span class="header-version">
-                        <a href="https://github.com/Jandini/GrayMoon" target="_blank" rel="noopener noreferrer" class="header-github-link" title="GrayMoon on GitHub" aria-label="GrayMoon on GitHub">
-                            <i class="bi bi-github" aria-hidden="true"></i>
-                        </a>
-                        @version
-                    </span>
+                    <a href="@WorkspacesListHref"
+                       class="h2 workspace-repos-title top-row-workspace-title__text top-row-workspace-title__link my-0"
+                       title="@WorkspaceTopBarService.WorkspaceDisplayName"
+                       aria-label="Go to Workspaces">
+                        @WorkspaceTopBarService.WorkspaceDisplayName
+                    </a>
                 }
-                <AgentStatusBadge />
-                </div>
             </div>
-        }
+            <div class="top-row-main-trailing">
+            @if (!string.IsNullOrEmpty(version))
+            {
+                <span class="header-version">
+                    <a href="https://github.com/Jandini/GrayMoon" target="_blank" rel="noopener noreferrer" class="header-github-link" title="GrayMoon on GitHub" aria-label="GrayMoon on GitHub">
+                        <i class="bi bi-github" aria-hidden="true"></i>
+                    </a>
+                    @version
+                </span>
+            }
+            <AgentStatusBadge />
+            </div>
+        </div>
 
         <article class="content px-4">
             @Body
@@ -71,11 +69,6 @@
 
 @code {
     private string? version;
-
-    protected override void OnInitialized()
-    {
-        DesktopTopBar.Changed += OnDesktopTopBarChanged;
-    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -110,11 +103,8 @@
 
     private void OnWorkspaceTopBarChanged() => _ = InvokeAsync(StateHasChanged);
 
-    private void OnDesktopTopBarChanged(bool visible) => _ = InvokeAsync(StateHasChanged);
-
     void IDisposable.Dispose()
     {
         WorkspaceTopBarService.Changed -= OnWorkspaceTopBarChanged;
-        DesktopTopBar.Changed -= OnDesktopTopBarChanged;
     }
 }

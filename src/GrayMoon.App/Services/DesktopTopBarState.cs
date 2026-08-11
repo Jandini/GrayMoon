@@ -12,7 +12,10 @@ namespace GrayMoon.App.Services;
 /// GrayMoon.Desktop's tray menu toggles this live, without a page reload, by calling
 /// <c>SetTopBarVisible</c> on <c>/hubs/desktop</c> (see DesktopNotificationHub); that handler
 /// persists the change and calls <see cref="SetVisible"/>, which raises <see cref="Changed"/> so
-/// every already-connected circuit re-renders immediately.
+/// every already-connected circuit re-renders immediately. Live re-rendering requires
+/// <c>MainLayout</c> itself to declare an interactive <c>@rendermode</c> - a Layout wrapping an
+/// interactive page is otherwise rendered statically once (SSR only) and never joins the live
+/// circuit, so it would never receive this event.
 /// </summary>
 public sealed class DesktopTopBarState
 {

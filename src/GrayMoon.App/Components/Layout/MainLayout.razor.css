@@ -32,6 +32,14 @@ article.content {
     border-top: 1px solid var(--border-color);
 }
 
+/* Markup is always rendered (so the live toggle below can flip visibility with no server
+   round-trip); hidden purely via CSS when the class above is applied. Covers both the main
+   column's top row and the sidebar's GrayMoon brand strip (NavMenu.razor). */
+.page--topbar-hidden .top-row-main,
+.page--topbar-hidden .sidebar ::deep .top-row {
+    display: none;
+}
+
 .top-row {
     background-color: var(--bg-tertiary);
     border-bottom: 1px solid var(--border-color);
