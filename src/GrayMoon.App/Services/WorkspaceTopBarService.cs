@@ -76,7 +76,13 @@ public sealed class WorkspaceTopBarService : IWorkspaceTopBarService, IDisposabl
 
         if (workspaceId is null)
         {
-            if (_workspaceDisplayName is not null || _cachedWorkspaceId is not null)
+            // Compare against the shared desktop tracker too, not just this instance's own cache:
+            // a fresh circuit (e.g. after an F5 hard refresh or a WebView2 full navigation) starts
+            // with both local fields null even though the singleton tracker may still hold a stale
+            // workspace selection pushed by a previous circuit, which would otherwise leave the
+            // desktop window title stuck on the old workspace name.
+            var trackerHasStaleSelection = _desktopContextTracker.Current is { WorkspaceId: not null } or { WorkspaceName: not null };
+            if (_workspaceDisplayName is not null || _cachedWorkspaceId is not null || trackerHasStaleSelection)
             {
                 _cachedWorkspaceId = null;
                 _workspaceDisplayName = null;

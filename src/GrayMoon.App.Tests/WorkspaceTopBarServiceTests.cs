@@ -114,6 +114,36 @@ public sealed class WorkspaceTopBarServiceTests
     }
 
     [Fact]
+    public async Task Non_workspace_route_resets_stale_tracker_from_a_previous_circuit()
+    {
+        // Simulates a fresh circuit (e.g. after an F5 hard refresh or a WebView2 full navigation)
+        // starting on a non-workspace route while the shared singleton tracker still holds the
+        // last workspace selected by a previous circuit.
+        var (connection, dbContext, workspaceId) = await CreateSeededDbAsync();
+        await using var _ = connection;
+        await using var __ = dbContext;
+
+        var navigationManager = new TestNavigationManager("http://localhost/dashboard");
+        var hubContext = new FakeHubContext<DesktopNotificationHub>();
+        var tracker = new DesktopWorkspaceContextTracker
+        {
+            Current = new WorkspaceContext(workspaceId, "Acme Workspace")
+        };
+        var service = new WorkspaceTopBarService(navigationManager, CreateWorkspaceRepository(dbContext), hubContext, tracker);
+
+        await service.EnsureSynchronizedAsync();
+
+        Assert.Null(service.WorkspaceDisplayName);
+
+        var sent = Assert.Single(hubContext.ClientsImpl.AllProxy.Sent, s => s.Method == "WorkspaceChanged");
+        var context = Assert.IsType<WorkspaceContext>(sent.Args[0]);
+        Assert.Null(context.WorkspaceId);
+        Assert.Null(context.WorkspaceName);
+        Assert.NotNull(tracker.Current);
+        Assert.Null(tracker.Current!.WorkspaceName);
+    }
+
+    [Fact]
     public async Task Non_workspace_route_never_pushes_when_nothing_was_ever_selected()
     {
         var (connection, dbContext, _) = await CreateSeededDbAsync();

@@ -501,10 +501,15 @@ h1:focus {
     min-width: 0;
 }
 
+/* max-height is derived from --topbar-height (see :root / .page--topbar-hidden in
+   MainLayout.razor.css) instead of a hardcoded viewport offset, so grid pages (Repositories,
+   Connectors, Agent, etc.) expand to fill the reclaimed space when the desktop top bar is
+   hidden. 168px assumes the default 3.5rem (56px) top bar; subtracting the variable keeps
+   that same remainder (112px) while letting it shrink when the bar is hidden. */
 .grid-page-body {
     flex: 1 1 auto;
     min-height: 0;
-    max-height: calc(100vh - 168px);
+    max-height: calc(100vh - var(--topbar-height) - 112px);
     overflow: hidden;
     display: flex;
     flex-direction: column;

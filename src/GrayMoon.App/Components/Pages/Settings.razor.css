@@ -7,14 +7,16 @@
     border-radius: 0.375rem;
 }
 
-/* Scroll the settings stack; cards keep natural height (no flex stretch). Dark scrollbar. */
+/* Scroll the settings stack; cards keep natural height (no flex stretch). Dark scrollbar.
+   max-height is derived from --topbar-height so the scroll area expands when the desktop top
+   bar is hidden (190px assumes the default 3.5rem/56px top bar; remainder is 134px). */
 .settings-page .settings-page__scroll {
     overflow-y: auto;
     overflow-x: hidden;
     display: block;
     flex: 1 1 auto;
     min-height: 0;
-    max-height: calc(100vh - 190px);
+    max-height: calc(100vh - var(--topbar-height) - 134px);
     scrollbar-width: thin;
     scrollbar-color: rgba(95, 95, 105, 0.95) rgba(22, 22, 28, 0.92);
 }
