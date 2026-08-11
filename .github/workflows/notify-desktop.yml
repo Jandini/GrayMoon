@@ -3,9 +3,12 @@ name: Notify GrayMoon.Desktop
 # Runs after docker-build.yml succeeds on main or tags.
 # Sends a repository_dispatch to GrayMoon.Desktop so it can trigger an integration build.
 #
-# Required secrets:
-#   DESKTOP_APP_ID          — GitHub App ID with write:contents + actions:write on GrayMoon.Desktop
-#   DESKTOP_APP_PRIVATE_KEY — GitHub App private key (PEM)
+# Required secrets (GrayMoon repository -> Settings -> Secrets and variables -> Actions):
+#   DESKTOP_APP_ID          - GitHub App Client ID with write:contents + actions:write on GrayMoon.Desktop
+#   DESKTOP_APP_PRIVATE_KEY - GitHub App private key (PEM)
+#
+# Use the same GitHub App as GrayMoon.Desktop's GRAYMOON_APP_* secrets, installed on both repos
+# with read access to GrayMoon and write/actions access to GrayMoon.Desktop.
 #
 # Loop prevention: this workflow only fires on GrayMoon push events and only dispatches
 # to GrayMoon.Desktop. GrayMoon.Desktop never dispatches back to GrayMoon.
@@ -57,8 +60,20 @@ jobs:
             echo "channel=main" >> $GITHUB_OUTPUT
           fi
 
+      - name: Verify dispatch credentials
+        env:
+          DESKTOP_APP_ID: ${{ secrets.DESKTOP_APP_ID }}
+          DESKTOP_APP_PRIVATE_KEY: ${{ secrets.DESKTOP_APP_PRIVATE_KEY }}
+        run: |
+          if [ -z "$DESKTOP_APP_ID" ] || [ -z "$DESKTOP_APP_PRIVATE_KEY" ]; then
+            echo "::error::Missing DESKTOP_APP_ID and/or DESKTOP_APP_PRIVATE_KEY repository secrets."
+            echo "::error::Add them under GrayMoon -> Settings -> Secrets and variables -> Actions."
+            echo "::error::Use the GitHub App Client ID and private key with write/actions access to GrayMoon.Desktop."
+            exit 1
+          fi
+
       - name: Restore dotnet tools
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -71,9 +86,9 @@ jobs:
 
       - name: Generate GitHub App token
         id: app-token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.DESKTOP_APP_ID }}
+          client-id: ${{ secrets.DESKTOP_APP_ID }}
           private-key: ${{ secrets.DESKTOP_APP_PRIVATE_KEY }}
           repositories: GrayMoon.Desktop
 
