@@ -11,8 +11,24 @@ namespace GrayMoon.App.Hubs;
 ///
 /// Wire contract: see GrayMoon.Desktop/Models/DesktopNotification.cs
 /// Notification method name: "Notify"
+///
+/// Push the currently selected workspace by calling
+/// Clients.All.SendAsync("WorkspaceChanged", context) with a <see cref="WorkspaceContext"/>.
+/// Wire contract: see GrayMoon.Desktop/Models/WorkspaceContext.cs
+/// Notification method name: "WorkspaceChanged"
 /// </summary>
-public sealed class DesktopNotificationHub : Hub
+public sealed class DesktopNotificationHub(DesktopWorkspaceContextTracker workspaceContextTracker) : Hub
 {
-    // Hub is empty — server pushes notifications; clients only subscribe.
+    public override async Task OnConnectedAsync()
+    {
+        await base.OnConnectedAsync();
+
+        // Catch up a newly-connected (or reconnected) client with the last known workspace
+        // selection, so the window title is never left stale after a connection gap.
+        var current = workspaceContextTracker.Current;
+        if (current is not null)
+        {
+            await Clients.Caller.SendAsync("WorkspaceChanged", current);
+        }
+    }
 }

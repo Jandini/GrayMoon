@@ -140,6 +140,7 @@ try
     builder.Services.AddScoped<IBackgroundJobService, BackgroundJobService>();
     builder.Services.AddScoped<IWorkspacePageService, WorkspacePageService>();
     builder.Services.AddScoped<IWorkspaceTopBarService, WorkspaceTopBarService>();
+    builder.Services.AddSingleton<DesktopWorkspaceContextTracker>();
 
     builder.Services.AddScoped<IWorkspaceGitChangesReadService, WorkspaceGitChangesReadService>();
     builder.Services.AddScoped<IGitChangesAgentClient, GitChangesAgentClient>();
