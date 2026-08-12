@@ -11,11 +11,13 @@
 @inject IWorkspaceTopBarService WorkspaceTopBarService
 @inject NavigationManager NavigationManager
 @inject NavbarCollapseService NavbarCollapse
+@inject DesktopTopBarState DesktopTopBar
 
 <Toast />
 <WorkspaceActionNotificationPanel />
+<DesktopTopBarSync />
 
-<div class="page @(NavbarCollapse.IsCollapsed ? "page--navbar-collapsed" : "")">
+<div class="page @(NavbarCollapse.IsCollapsed ? "page--navbar-collapsed" : "") @(!DesktopTopBar.IsVisible ? "page--topbar-hidden" : "")">
     <div class="sidebar" id="sidebar">
         <NavMenu />
     </div>

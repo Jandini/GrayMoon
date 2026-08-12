@@ -3,6 +3,12 @@
 @inject NavbarCollapseService NavbarCollapse
 @using GrayMoon.App.Services
 
+@* Always rendered - hidden purely via CSS (.page--topbar-hidden .sidebar .top-row in
+   MainLayout.razor.css) so GrayMoon.Desktop's tray toggle can flip it with no server round-trip.
+   A child of MainLayout has no way to react to DesktopTopBarState.Changed live: a Layout cannot
+   declare its own @rendermode (see DesktopTopBarSync.razor for why), so MainLayout - and every
+   component it renders, including this one - is always static/SSR-only and never joins a live
+   circuit. *@
 <div class="top-row navbar navbar-dark">
     <div class="container-fluid d-flex justify-content-center align-items-center">
         <a class="navbar-brand" href="">

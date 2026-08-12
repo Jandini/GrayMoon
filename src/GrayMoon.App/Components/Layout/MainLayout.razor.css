@@ -24,6 +24,22 @@ article.content {
     background-color: var(--bg-secondary);
 }
 
+/* Top bar hidden (GrayMoon Desktop preference, persisted in the App's own database and mirrored
+   in-memory - see DesktopTopBarState): the top-row markup is never emitted, so the loading
+   overlay must stop reserving space for it, and the window edge gets a thin divider in its place. */
+.page--topbar-hidden {
+    --topbar-height: 0px;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Markup is always rendered (so the live toggle below can flip visibility with no server
+   round-trip); hidden purely via CSS when the class above is applied. Covers both the main
+   column's top row and the sidebar's GrayMoon brand strip (NavMenu.razor). */
+.page--topbar-hidden .top-row-main,
+.page--topbar-hidden .sidebar ::deep .top-row {
+    display: none;
+}
+
 .top-row {
     background-color: var(--bg-tertiary);
     border-bottom: 1px solid var(--border-color);
@@ -58,7 +74,7 @@ article.content {
     color: var(--text-primary);
     margin-top: 0;
     margin-bottom: 0;
-    font-size: calc((1.325rem + 0.9vw) * 0.72);
+    font-size: var(--topbar-workspace-title-font-size);
     max-width: calc(100% - 5.75rem);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -72,7 +88,7 @@ article.content {
     cursor: pointer;
     position: relative;
     z-index: 1;
-    font-size: calc((1.325rem + 0.9vw) * 0.72);
+    font-size: var(--topbar-workspace-title-font-size);
 }
 
 /* Override generic .top-row ::deep a:hover (blue + underline); workspace title: white, no underline, pointer only */
@@ -190,10 +206,10 @@ article.content {
         flex-direction: column;
     }
 
-    /* Collapsed: width = topbar height; update --sidebar-width for loading overlay */
-    .page--navbar-collapsed {
-        --sidebar-width: 3.5rem;
-    }
+/* Collapsed: width = topbar height; update --sidebar-width for loading overlay */
+.page--navbar-collapsed {
+    --sidebar-width: 3.5rem;
+}
 
     .page--navbar-collapsed .sidebar {
         width: 3.5rem;
@@ -236,13 +252,14 @@ article.content {
         pointer-events: none;
     }
 
+    /* Collapsed: keep overflow scroll, hide the scrollbar track/thumb */
     .page--navbar-collapsed .sidebar ::deep .nav-scrollable {
-        scrollbar-width: thin;
-        scrollbar-color: #5a5a5a var(--bg-card, #252526);
+        scrollbar-width: none;
+        -ms-overflow-style: none;
     }
 
     .page--navbar-collapsed .sidebar ::deep .nav-scrollable::-webkit-scrollbar {
-        width: 3px;
+        display: none;
     }
 
     .top-row {
@@ -271,7 +288,7 @@ article.content {
     main .top-row-workspace-title__text,
     main .top-row-workspace-title ::deep a.top-row-workspace-title__link {
         max-width: min(38rem, calc(100vw - 360px - 1.5rem), calc(100vw - 24rem));
-        font-size: calc((1.325rem + 0.9vw) * 0.72);
+        font-size: var(--topbar-workspace-title-font-size);
         pointer-events: auto;
     }
 
@@ -305,7 +322,7 @@ article.content {
 @media (min-width: 1200px) {
     main .top-row-workspace-title__text,
     main .top-row-workspace-title ::deep a.top-row-workspace-title__link {
-        font-size: 1.44rem;
+        font-size: calc(1.44rem * 0.7);
     }
 }
 

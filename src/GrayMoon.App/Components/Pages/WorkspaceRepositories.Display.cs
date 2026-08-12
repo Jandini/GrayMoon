@@ -7,15 +7,20 @@ public sealed partial class WorkspaceRepositories
 {
     private async Task CopyVersionToClipboard(string version)
     {
+        if (string.IsNullOrEmpty(version))
+            return;
+
         try
         {
             await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", version);
+            ToastService.Show($"{version} copied to the clipboard");
             clickedVersions.Add(version);
             StateHasChanged();
         }
         catch (Exception ex)
         {
             Logger.LogDebug(ex, "Clipboard copy failed for version {Version}", version);
+            ToastService.Show("Could not copy to clipboard.");
         }
     }
 
@@ -26,10 +31,12 @@ public sealed partial class WorkspaceRepositories
         try
         {
             await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            ToastService.Show("Dependency list copied to the clipboard");
         }
         catch (Exception ex)
         {
             Logger.LogDebug(ex, "Clipboard copy failed for dependencies");
+            ToastService.Show("Could not copy to clipboard.");
         }
     }
 

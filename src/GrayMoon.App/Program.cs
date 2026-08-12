@@ -95,6 +95,7 @@ try
     builder.Services.AddScoped<WorkspaceRepository>();
     builder.Services.AddScoped<AppSettingRepository>();
     builder.Services.AddScoped<NavbarCollapseService>();
+    builder.Services.AddSingleton<DesktopTopBarState>();
     builder.Services.AddSingleton<AgentConnectionTracker>();
     builder.Services.AddSingleton<AgentQueueStateService>();
     builder.Services.AddSingleton<AgentCommandCancelSender>();
@@ -140,6 +141,7 @@ try
     builder.Services.AddScoped<IBackgroundJobService, BackgroundJobService>();
     builder.Services.AddScoped<IWorkspacePageService, WorkspacePageService>();
     builder.Services.AddScoped<IWorkspaceTopBarService, WorkspaceTopBarService>();
+    builder.Services.AddSingleton<DesktopWorkspaceContextTracker>();
 
     builder.Services.AddScoped<IWorkspaceGitChangesReadService, WorkspaceGitChangesReadService>();
     builder.Services.AddScoped<IGitChangesAgentClient, GitChangesAgentClient>();
@@ -219,6 +221,12 @@ try
         await dbContext.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
         await dbContext.Database.ExecuteSqlRawAsync("PRAGMA busy_timeout=5000;");
         await dbContext.Database.ExecuteSqlRawAsync("PRAGMA synchronous=NORMAL;");
+
+        // Load the persisted top bar visibility before any Blazor circuit or Desktop hub
+        // connection can ask for it - see DesktopTopBarState.
+        var appSettingRepository = services.GetRequiredService<AppSettingRepository>();
+        var topBarVisible = await appSettingRepository.GetBoolAsync(AppSettingRepository.TopBarShowKey, defaultValue: true);
+        services.GetRequiredService<DesktopTopBarState>().LoadSilently(topBarVisible);
     }
 
     static string? GetDatabasePath(string connectionString)

@@ -201,7 +201,8 @@
 
         window.graymoonShowToast = function (message) {
             const el = document.createElement('div');
-            el.style.cssText = 'position:fixed;top:calc(3.5rem + 1rem);left:50%;transform:translateX(-50%);z-index:9999;'
+            const topbarHeight = getComputedStyle(document.documentElement).getPropertyValue('--topbar-height').trim() || '3.5rem';
+            el.style.cssText = `position:fixed;top:calc(${topbarHeight} + 1rem);left:50%;transform:translateX(-50%);z-index:9999;`
                 + 'max-width:min(90vw,420px);padding:0.5rem 1rem;background-color:#252526;color:#cccccc;'
                 + 'border:1px solid #3e3e42;border-radius:0.375rem;box-shadow:0 4px 12px rgba(0,0,0,0.35);'
                 + 'font-size:0.875rem;pointer-events:none;text-align:center;';

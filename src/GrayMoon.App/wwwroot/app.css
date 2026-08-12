@@ -60,6 +60,10 @@
     /* Layout dimensions (mobile-first; overridden at >= 641px) */
     --sidebar-width: 0px;
     --topbar-height: 2.75rem;
+
+    /* Bootstrap h2 base is calc(1.325rem + 0.9vw); page titles use 70% of that */
+    --page-title-font-size: calc((1.325rem + 0.9vw) * 0.7);
+    --topbar-workspace-title-font-size: calc(var(--page-title-font-size) * 0.72);
 }
 
 @media (min-width: 641px) {
@@ -462,6 +466,10 @@ h1:focus {
     flex-shrink: 0;
 }
 
+.grid-page-header h2 {
+    font-size: var(--page-title-font-size);
+}
+
 /* Workspace repositories page: header with title row + actions row (search + buttons) */
 .workspace-repos-header .workspace-repos-title-row {
     display: flex;
@@ -501,10 +509,15 @@ h1:focus {
     min-width: 0;
 }
 
+/* max-height is derived from --topbar-height (see :root / .page--topbar-hidden in
+   MainLayout.razor.css) instead of a hardcoded viewport offset, so grid pages (Repositories,
+   Connectors, Agent, etc.) expand to fill the reclaimed space when the desktop top bar is
+   hidden. 168px assumes the default 3.5rem (56px) top bar; subtracting the variable keeps
+   that same remainder (112px) while letting it shrink when the bar is hidden. */
 .grid-page-body {
     flex: 1 1 auto;
     min-height: 0;
-    max-height: calc(100vh - 168px);
+    max-height: calc(100vh - var(--topbar-height) - 112px);
     overflow: hidden;
     display: flex;
     flex-direction: column;
