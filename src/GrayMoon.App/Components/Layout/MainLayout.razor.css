@@ -74,7 +74,7 @@ article.content {
     color: var(--text-primary);
     margin-top: 0;
     margin-bottom: 0;
-    font-size: calc((1.325rem + 0.9vw) * 0.72);
+    font-size: var(--topbar-workspace-title-font-size);
     max-width: calc(100% - 5.75rem);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -88,7 +88,7 @@ article.content {
     cursor: pointer;
     position: relative;
     z-index: 1;
-    font-size: calc((1.325rem + 0.9vw) * 0.72);
+    font-size: var(--topbar-workspace-title-font-size);
 }
 
 /* Override generic .top-row ::deep a:hover (blue + underline); workspace title: white, no underline, pointer only */
@@ -288,7 +288,7 @@ article.content {
     main .top-row-workspace-title__text,
     main .top-row-workspace-title ::deep a.top-row-workspace-title__link {
         max-width: min(38rem, calc(100vw - 360px - 1.5rem), calc(100vw - 24rem));
-        font-size: calc((1.325rem + 0.9vw) * 0.72);
+        font-size: var(--topbar-workspace-title-font-size);
         pointer-events: auto;
     }
 
@@ -322,7 +322,7 @@ article.content {
 @media (min-width: 1200px) {
     main .top-row-workspace-title__text,
     main .top-row-workspace-title ::deep a.top-row-workspace-title__link {
-        font-size: 1.44rem;
+        font-size: calc(1.44rem * 0.7);
     }
 }
 
