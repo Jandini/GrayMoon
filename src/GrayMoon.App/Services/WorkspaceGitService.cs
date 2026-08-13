@@ -1026,6 +1026,12 @@ public class WorkspaceGitService(
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
 
+        // The PR refresh above (before the sync) looked up the PR for the OLD branch, purely to decide
+        // forceDeleteLocalBranch. Now that BranchName has switched to the default branch, refresh again so the
+        // persisted PR row reflects the branch actually checked out (GitHub has no PR for the default branch
+        // against itself, so this clears any stale merged/closed PR badge instead of leaving it stuck).
+        await _workspacePullRequestService.RefreshPullRequestsAsync(workspaceId, [repositoryId], force: true, cancellationToken);
+
         // Persist fresh csproj data from the default branch so dependency stats reflect the new branch content.
         var projectsDetail = GetProjectsDetail(syncResponse?.Projects);
         if (projectsDetail is { Count: > 0 })
