@@ -20,7 +20,6 @@ public sealed class SyncCommandHandler(
         var totalSw = Stopwatch.StartNew();
         await using var scope = scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var workspaceProjectRepository = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
 
         var wr = await dbContext.WorkspaceRepositories
             .FirstOrDefaultAsync(wr => wr.WorkspaceId == n.WorkspaceId && wr.RepositoryId == n.RepositoryId);
@@ -30,53 +29,22 @@ public sealed class SyncCommandHandler(
             return;
         }
 
-        wr.GitVersion = n.Version == "-" ? null : n.Version;
-        wr.BranchName = n.Branch == "-" ? null : n.Branch;
+        var stateWriter = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryStateWriter>();
+        var snapshot = n.State ?? BuildSnapshotFromFlatNotification(n);
+        await stateWriter.ApplyAsync(n.WorkspaceId, n.RepositoryId, snapshot, new RepositoryStateWriteOptions
+        {
+            SyncStatus = SyncStatusWrite.Derive,
+            ErrorMessageForcesInSync = true,
+            ReconcilePullRequest = true,
+        });
 
-        // Tag handling: when on a tag the repo has no branch and write actions are blocked. Clear divergence
-        // and upstream fields so the UI does not render misleading "push to set upstream" or commit-count badges.
-        if (!string.IsNullOrWhiteSpace(n.Tag))
-        {
-            wr.CheckedOutTag = n.Tag;
-            wr.BranchName = null;
-            wr.BranchHasUpstream = null;
-            wr.OutgoingCommits = null;
-            wr.IncomingCommits = null;
-            wr.DefaultBranchBehindCommits = null;
-            wr.DefaultBranchAheadCommits = null;
-        }
-        else
-        {
-            // Real branch reported: clear any persisted tag so we resume normal branch behavior.
-            wr.CheckedOutTag = null;
-            wr.HasNewerTag = null;
-            if (n.OutgoingCommits.HasValue) wr.OutgoingCommits = n.OutgoingCommits;
-            if (n.IncomingCommits.HasValue) wr.IncomingCommits = n.IncomingCommits;
-            if (n.HasUpstream.HasValue) wr.BranchHasUpstream = n.HasUpstream.Value;
-            if (n.DefaultBranchBehind.HasValue) wr.DefaultBranchBehindCommits = n.DefaultBranchBehind;
-            if (n.DefaultBranchAhead.HasValue) wr.DefaultBranchAheadCommits = n.DefaultBranchAhead;
-        }
-        var hasValidVersion = n.Version != "-" && (n.Branch != "-" || !string.IsNullOrWhiteSpace(n.Tag));
-        var hasDefaultBranch = !string.IsNullOrWhiteSpace(wr.DefaultBranchName);
-        // When there is an error message (e.g. fetch failed), keep status InSync so the UI does not show "retry"; the error is shown in the error badge only.
-        if (!string.IsNullOrWhiteSpace(n.ErrorMessage))
-        {
-            wr.SyncStatus = RepoSyncStatus.InSync;
-        }
-        else
-        {
-            wr.SyncStatus = !hasValidVersion
-                ? RepoSyncStatus.Error
-                : (hasDefaultBranch ? RepoSyncStatus.InSync : RepoSyncStatus.NeedsSync);
-        }
+        var branchWriter = scope.ServiceProvider.GetRequiredService<RepositoryBranchWriter>();
 
-        await dbContext.SaveChangesAsync();
-
-        // Persist tags and compute HasNewerTag when the agent includes a tag list (checkout-to-tag sync)
+        // Persist tags and compute HasNewerTag when the agent includes a tag list (checkout-to-tag sync).
+        // Runs after the state write because it is what decides HasNewerTag, which the writer clears.
         if (n.RemoteTags != null)
         {
-            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            await workspaceGitService.PersistBranchesAsync(
+            await branchWriter.PersistAsync(
                 wr.WorkspaceRepositoryId,
                 localBranches: null,
                 remoteBranches: null,
@@ -86,46 +54,14 @@ public sealed class SyncCommandHandler(
                 cancellationToken: default);
         }
 
-        // Prune remote branches from DB that no longer exist in git (fetch --prune ran on the agent side)
-        if (n.RemoteBranches != null)
+        // Prune remote branches from DB that no longer exist in git (fetch --prune ran on the agent side).
+        // The hook flow reports remotes without persisting a full branch list, so this cannot go through the
+        // writer's branch-replace path.
+        if (n.RemoteBranches != null && !snapshot.BranchesProbed)
         {
-            var freshRemotes = n.RemoteBranches
-                .Where(b => !string.IsNullOrWhiteSpace(b))
-                .Select(b => b.StartsWith("origin/", StringComparison.OrdinalIgnoreCase) ? b : "origin/" + b)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var dbRemotes = await dbContext.RepositoryBranches
-                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsRemote)
-                .ToListAsync();
-            var stale = dbRemotes.Where(rb => !freshRemotes.Contains(rb.BranchName ?? "")).ToList();
-            if (stale.Count > 0)
-            {
-                dbContext.RepositoryBranches.RemoveRange(stale);
-                await dbContext.SaveChangesAsync();
-                logger.LogInformation("SyncCommand pruned {Count} stale remote branch(es) for repo {RepositoryId}", stale.Count, n.RepositoryId);
-            }
-        }
-
-        if (n.Projects is { Count: > 0 })
-        {
-            var syncProjects = n.Projects
-                .Where(p => !string.IsNullOrWhiteSpace(p.Name))
-                .Select(p => new SyncProjectInfo(
-                    p.Name.Trim(),
-                    p.ProjectType >= 0 && p.ProjectType <= 4 ? (ProjectType)p.ProjectType : ProjectType.Library,
-                    p.ProjectPath ?? "",
-                    p.TargetFramework ?? "",
-                    p.PackageId,
-                    (p.PackageReferences ?? new List<RepositorySyncPackageReferenceNotification>())
-                        .Where(pr => !string.IsNullOrWhiteSpace(pr.Name))
-                        .Select(pr => new SyncPackageReference(pr.Name.Trim(), pr.Version ?? ""))
-                        .ToList()))
-                .ToList();
-
-            await workspaceProjectRepository.MergeWorkspaceProjectsAsync(n.WorkspaceId, n.RepositoryId, syncProjects);
-            await workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(
-                n.WorkspaceId,
-                [(n.RepositoryId, (IReadOnlyList<SyncProjectInfo>?)syncProjects)],
-                persistDependencyLevel: false);
+            var pruned = await branchWriter.PruneRemoteBranchesAsync(wr.WorkspaceRepositoryId, n.RemoteBranches);
+            if (pruned > 0)
+                logger.LogInformation("SyncCommand pruned {Count} stale remote branch(es) for repo {RepositoryId}", pruned, n.RepositoryId);
         }
 
         var allLinks = await dbContext.WorkspaceRepositories
@@ -143,28 +79,14 @@ public sealed class SyncCommandHandler(
         }
 
         var depsSw = Stopwatch.StartNew();
-        try
-        {
-            var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
-            await fileVersionService.CheckAndPersistFileVersionStatusAsync(n.WorkspaceId);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "SyncCommand CheckAndPersist failed for workspace {WorkspaceId}", n.WorkspaceId);
-        }
-
-        await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(n.WorkspaceId);
+        var recomputeScope = scope.ServiceProvider.GetRequiredService<WorkspaceStateRecomputeScope>();
+        await recomputeScope.RecomputeAsync(n.WorkspaceId);
         logger.LogDebug(
             "SyncCommand dependency stats persisted in {ElapsedMs}ms for workspace={WorkspaceId}, repo={RepositoryId}",
             depsSw.ElapsedMilliseconds, n.WorkspaceId, n.RepositoryId);
 
-        var prSw = Stopwatch.StartNew();
-        var workspacePullRequestService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
-        await workspacePullRequestService.RefreshPullRequestsAsync(n.WorkspaceId, [n.RepositoryId]);
-        logger.LogDebug(
-            "SyncCommand RefreshPullRequests completed in {ElapsedMs}ms for workspace={WorkspaceId}, repo={RepositoryId}",
-            prSw.ElapsedMilliseconds, n.WorkspaceId, n.RepositoryId);
-
+        // RepositorySynced carries the repository id that WorkspaceActions targets its GitHub Actions
+        // refresh with, so it stays per repository even though the workspace broadcast is coalesced.
         await hubContext.Clients.All.SendAsync("RepositorySynced", n.WorkspaceId, n.RepositoryId);
         await hubContext.Clients.All.SendAsync("WorkspaceSynced", n.WorkspaceId);
         if (!string.IsNullOrWhiteSpace(n.ErrorMessage))
@@ -173,5 +95,35 @@ public sealed class SyncCommandHandler(
         logger.LogDebug(
             "SyncCommand persisted in {ElapsedMs}ms: workspace={WorkspaceId}, repo={RepositoryId}, version={Version}, branch={Branch}",
             totalSw.ElapsedMilliseconds, n.WorkspaceId, n.RepositoryId, n.Version, n.Branch);
+    }
+
+    /// <summary>
+    /// Builds a snapshot from the flat notification fields, for agents that predate
+    /// <see cref="RepositorySyncNotification.State"/>. Only the groups those agents actually populate are
+    /// marked probed, so an older agent can never clear a column it knows nothing about.
+    /// </summary>
+    private static RepositoryStateSnapshot BuildSnapshotFromFlatNotification(RepositorySyncNotification n)
+    {
+        var onTag = !string.IsNullOrWhiteSpace(n.Tag);
+        return new RepositoryStateSnapshot
+        {
+            BranchName = n.Branch,
+            CheckedOutTag = n.Tag,
+            GitVersion = n.Version == "-" ? null : n.Version,
+            OutgoingCommits = n.OutgoingCommits,
+            IncomingCommits = n.IncomingCommits,
+            DefaultBranchBehind = n.DefaultBranchBehind,
+            DefaultBranchAhead = n.DefaultBranchAhead,
+            HasUpstream = n.HasUpstream,
+            Projects = n.Projects,
+            ErrorMessage = n.ErrorMessage,
+            IdentityProbed = true,
+            GitVersionProbed = n.Version != "-",
+            CommitCountsProbed = !onTag && (n.OutgoingCommits.HasValue || n.IncomingCommits.HasValue),
+            UpstreamProbed = !onTag && n.HasUpstream.HasValue,
+            // The flat shape has no local-branch or tag list, and its remote list is pruned separately.
+            BranchesProbed = false,
+            ProjectsProbed = n.Projects is { Count: > 0 },
+        };
     }
 }

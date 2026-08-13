@@ -1,4 +1,5 @@
 using GrayMoon.App.Api.Endpoints;
+using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
@@ -21,6 +22,7 @@ public sealed class WorkspaceBranchUpdateHandler(
     WorkspaceService workspaceService,
     ConnectorHealthService connectorHealthService,
     AppDbContext dbContext,
+    WorkspaceRepositoryStateWriter stateWriter,
     IHubContext<WorkspaceSyncHub> hubContext,
     ILogger<WorkspaceBranchUpdateHandler> logger)
 {
@@ -81,15 +83,16 @@ public sealed class WorkspaceBranchUpdateHandler(
 
             if (commandSuccess && updateResponse != null)
             {
-                if (updateResponse.OutgoingCommits.HasValue)
-                    wr.OutgoingCommits = updateResponse.OutgoingCommits.Value;
-                if (updateResponse.IncomingCommits.HasValue)
-                    wr.IncomingCommits = updateResponse.IncomingCommits.Value;
-                if (updateResponse.DefaultBranchBehind.HasValue)
-                    wr.DefaultBranchBehindCommits = updateResponse.DefaultBranchBehind.Value;
-                if (updateResponse.DefaultBranchAhead.HasValue)
-                    wr.DefaultBranchAheadCommits = updateResponse.DefaultBranchAhead.Value;
-                await dbContext.SaveChangesAsync(cancellationToken);
+                // A merge from default only moves commit counts; branch identity, version and projects are
+                // untouched, so no other group is marked probed and none of those columns is rewritten.
+                await stateWriter.ApplyAsync(workspaceId, repositoryId, new RepositoryStateSnapshot
+                {
+                    OutgoingCommits = updateResponse.OutgoingCommits,
+                    IncomingCommits = updateResponse.IncomingCommits,
+                    DefaultBranchBehind = updateResponse.DefaultBranchBehind,
+                    DefaultBranchAhead = updateResponse.DefaultBranchAhead,
+                    CommitCountsProbed = updateResponse.OutgoingCommits.HasValue || updateResponse.IncomingCommits.HasValue,
+                }, cancellationToken: cancellationToken);
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
             }
 

@@ -14,18 +14,10 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || repositoryIds == null || repositoryIds.Count == 0)
             return;
 
-        var nonDefaultRepoIds = repositoryIds
-            .Select(id => TryGetLink(id))
-            .Where(wr =>
-            {
-                if (wr == null || wr.IsOnTag || string.IsNullOrWhiteSpace(wr.BranchName))
-                    return false;
-                if (string.IsNullOrWhiteSpace(wr.DefaultBranchName))
-                    return true;
-                return !string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal);
-            })
-            .Select(wr => wr!.RepositoryId)
-            .Distinct()
+        var freshLinks = await GetFreshLinkStatesAsync(repositoryIds.Distinct().ToList());
+        var nonDefaultRepoIds = freshLinks.Values
+            .Where(s => s.NeedsSyncToDefault)
+            .Select(s => s.Link.RepositoryId)
             .ToList();
 
         if (nonDefaultRepoIds.Count == 0)
@@ -56,25 +48,27 @@ public sealed partial class WorkspaceRepositories
             Logger.LogDebug(ex, "PR refresh before sync-to-default check failed for workspace {WorkspaceId}", WorkspaceId);
         }
 
-        // Synchronous pre-check using persisted state (no agent call needed)
+        // Pre-check against the state just persisted by the PR refresh above; no agent call needed.
+        var freshLinks = await GetFreshLinkStatesAsync(repositoryIds);
         var checkResults = repositoryIds
+            .Where(freshLinks.ContainsKey)
             .Select(repoId =>
             {
-                var wr = TryGetLink(repoId);
-                return new SyncToDefaultCheckResult(repoId, wr?.DefaultBranchAheadCommits, wr?.BranchHasUpstream);
+                var state = freshLinks[repoId];
+                return new SyncToDefaultCheckResult(repoId, state.Link.DefaultBranchAheadCommits, state.Link.BranchHasUpstream);
             })
             .ToList();
         var safeRepoIds = checkResults
-            .Where(r => (r.DefaultAhead ?? 0) == 0 || IsPrMergedForRepo(r.RepoId))
+            .Where(r => (r.DefaultAhead ?? 0) == 0 || freshLinks[r.RepoId].IsPullRequestMergedOrClosed)
             .Select(r => r.RepoId)
             .ToList();
         var blocked = checkResults
-            .Where(r => (r.DefaultAhead ?? 0) > 0 && !IsPrMergedForRepo(r.RepoId))
+            .Where(r => (r.DefaultAhead ?? 0) > 0 && !freshLinks[r.RepoId].IsPullRequestMergedOrClosed)
             .ToList();
 
         foreach (var r in blocked)
         {
-            var name = TryGetLink(r.RepoId)?.Repository?.RepositoryName ?? r.RepoId.ToString();
+            var name = freshLinks[r.RepoId].Link.Repository?.RepositoryName ?? r.RepoId.ToString();
             ToastService.Show($"{name}: skipped sync to default (commits ahead of default, PR not merged).");
         }
 
@@ -115,25 +109,32 @@ public sealed partial class WorkspaceRepositories
                         }
                     }));
 
+                    // The fetches above rewrote BranchHasUpstream, so rebuild the dialog from the database
+                    // rather than from whatever the grid cache still holds.
+                    var refreshed = await GetFreshLinkStatesAsync(safeRepoIds);
+                    var updatedResults = _syncToDefaultCheckResults?
+                        .Select(r => new SyncToDefaultCheckResult(
+                            r.RepoId,
+                            r.DefaultAhead,
+                            refreshed.TryGetValue(r.RepoId, out var s) ? s.Link.BranchHasUpstream : r.HasUpstream))
+                        .ToList();
+
                     await InvokeAsync(async () =>
                     {
                         if (_disposed) return;
                         await RefreshFromSync();
 
-                        // Rebuild check results with fresh HasUpstream from DB
-                        _syncToDefaultCheckResults = _syncToDefaultCheckResults?
+                        _syncToDefaultCheckResults = updatedResults;
+                        var repoItems = updatedResults?
                             .Select(r =>
                             {
-                                var wr2 = TryGetLink(r.RepoId);
-                                return new SyncToDefaultCheckResult(r.RepoId, r.DefaultAhead, wr2?.BranchHasUpstream);
-                            })
-                            .ToList();
-
-                        var repoItems = _syncToDefaultCheckResults?
-                            .Select(r =>
-                            {
-                                var wr2 = TryGetLink(r.RepoId);
-                                return new SyncToDefaultRepoItem(wr2?.Repository?.RepositoryName ?? r.RepoId.ToString(), wr2?.BranchName ?? "", r.HasUpstream == true, PrState: null, CommitsAhead: 0);
+                                refreshed.TryGetValue(r.RepoId, out var s);
+                                return new SyncToDefaultRepoItem(
+                                    s?.Link.Repository?.RepositoryName ?? r.RepoId.ToString(),
+                                    s?.Link.BranchName ?? "",
+                                    r.HasUpstream == true,
+                                    PrState: null,
+                                    CommitsAhead: 0);
                             })
                             .ToList() ?? new List<SyncToDefaultRepoItem>();
                         ShowSyncToDefaultOptions(dialogMessage, repoItems, (deleteRemote, allowForce) => SyncToDefaultLevelAsync(safeRepoIds, deleteRemote, allowForce));
@@ -152,21 +153,6 @@ public sealed partial class WorkspaceRepositories
                     throw;
                 }
             });
-    }
-
-    /// <summary>
-    /// True if the workspace has a PR for this repository's current branch that is either merged
-    /// or closed (treated the same as merged for sync-to-default safety checks).
-    /// </summary>
-    private bool IsPrMergedForRepo(int repositoryId)
-    {
-        if (!prByRepositoryId.TryGetValue(repositoryId, out var pr) || pr == null)
-            return false;
-
-        if (pr.IsMerged)
-            return true;
-
-        return string.Equals(pr.State, "closed", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task SyncToDefaultFromModalAsync((int RepositoryId, string? RepositoryName, string CurrentBranchName, string DefaultBranch) request)
@@ -188,15 +174,18 @@ public sealed partial class WorkspaceRepositories
         try
         {
             // Use persisted workspace link state (updated by hooks); no agent GetCommitCounts call.
-            var wr = await TryGetLinkAsync(repositoryId);
-            var defaultAhead = wr?.DefaultBranchAheadCommits ?? 0;
-            var hasUpstream = wr?.BranchHasUpstream == true;
+            var states = await GetFreshLinkStatesAsync([repositoryId]);
+            states.TryGetValue(repositoryId, out var state);
+            var defaultAhead = state?.Link.DefaultBranchAheadCommits ?? 0;
+            var hasUpstream = state?.Link.BranchHasUpstream == true;
 
             if (defaultAhead > 0)
             {
                 try
                 {
                     await WorkspacePageService.WorkspacePullRequestService.RefreshPullRequestsAsync(WorkspaceId, new[] { repositoryId }, force: true);
+                    states = await GetFreshLinkStatesAsync([repositoryId]);
+                    states.TryGetValue(repositoryId, out state);
                     await ReloadWorkspaceDataFromFreshScopeAsync();
                     ApplySyncStateFromLoadedItems();
                     await InvokeAsync(StateHasChanged);
@@ -207,7 +196,7 @@ public sealed partial class WorkspaceRepositories
                 }
             }
 
-            if (defaultAhead > 0 && !IsPrMergedForRepo(repositoryId))
+            if (defaultAhead > 0 && state?.IsPullRequestMergedOrClosed != true)
             {
                 ToastService.Show("Skipped sync to default: commits ahead of default branch and PR is not merged.");
                 return;
@@ -215,8 +204,8 @@ public sealed partial class WorkspaceRepositories
 
             if (hasUpstream)
             {
-                var branchName = wr?.BranchName ?? currentBranchName;
-                prByRepositoryId.TryGetValue(repositoryId, out var singlePr);
+                var branchName = state?.Link.BranchName ?? currentBranchName;
+                var singlePr = state?.PullRequest;
                 var singlePrState = singlePr == null ? null : singlePr.IsMerged ? "merged" : singlePr.IsClosed ? "closed" : "open";
                 ShowSyncToDefaultOptions(
                     "This will checkout the default branch, remove the current branch locally, and pull the latest.",
@@ -248,6 +237,11 @@ public sealed partial class WorkspaceRepositories
         {
             var (success, errMsg) = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, (bool Success, string? ErrorMessage)>(
                 svc => svc.SyncToDefaultDirectAsync(WorkspaceId, repositoryId, currentBranchName, deleteRemoteBranch, allowForceDeleteLocalBranch, ct));
+
+            // The sync persists this repository's own state; workspace-wide dependency and file-version
+            // stats are recomputed here, once, as the batch boundary for this action.
+            await ScopedExecutor.ExecuteAsync<WorkspaceGitService>(
+                svc => svc.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId, ct));
 
             if (success)
             {
@@ -305,10 +299,12 @@ public sealed partial class WorkspaceRepositories
 
             using var semaphore = new SemaphoreSlim(maxParallel, maxParallel);
 
+            var linkStates = await GetFreshLinkStatesAsync(repositoryIds);
+
             var tasks = repositoryIds.Select(async repositoryId =>
             {
-                var wr = await TryGetLinkAsync(repositoryId);
-                var currentBranchName = wr?.BranchName;
+                linkStates.TryGetValue(repositoryId, out var linkState);
+                var currentBranchName = linkState?.Link.BranchName;
                 if (string.IsNullOrWhiteSpace(currentBranchName))
                 {
                     var c = Interlocked.Increment(ref completedCount);
@@ -324,8 +320,7 @@ public sealed partial class WorkspaceRepositories
                     var (success, errMsg) = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, (bool Success, string? ErrorMessage)>(
                         svc => svc.SyncToDefaultDirectAsync(
                             WorkspaceId, repositoryId, currentBranchName,
-                            deleteRemoteBranch && repoHasRemote, allowForceDeleteLocalBranch, ct,
-                            recomputeDependencyStats: false));
+                            deleteRemoteBranch && repoHasRemote, allowForceDeleteLocalBranch, ct));
 
                     return (repositoryId, success, errMsg);
                 }
@@ -345,10 +340,10 @@ public sealed partial class WorkspaceRepositories
 
             var results = await Task.WhenAll(tasks);
 
-            // All repos in the level synced their own git/project state above without touching workspace-wide
-            // dependency/file-version stats (recomputeDependencyStats: false); recompute once here, after every
-            // repo's fresh data is persisted, so the recompute reads a complete snapshot instead of racing N
-            // concurrent whole-workspace reads-then-overwrites.
+            // Each repository persisted its own git/project state above; workspace-wide dependency and
+            // file-version stats are recomputed once here, after every repository in the level has finished,
+            // so the recompute reads a complete snapshot instead of racing N concurrent whole-workspace
+            // read-then-overwrite passes.
             await ScopedExecutor.ExecuteAsync<WorkspaceGitService>(
                 svc => svc.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId, ct));
 
@@ -441,27 +436,28 @@ public sealed partial class WorkspaceRepositories
                         }
                     }));
 
+                    // Both the PR refresh and the branch fetches above wrote to the database, so build the
+                    // dialog from it rather than from the grid cache the page last rendered.
+                    var refreshed = await GetFreshLinkStatesAsync(eligibleIds);
+                    var repoItems = eligibleIds
+                        .Select(repoId =>
+                        {
+                            refreshed.TryGetValue(repoId, out var s);
+                            var pr = s?.PullRequest;
+                            var prState = pr == null ? null : pr.IsMerged ? "merged" : pr.IsClosed ? "closed" : "open";
+                            return new SyncToDefaultRepoItem(
+                                s?.Link.Repository?.RepositoryName ?? repoId.ToString(),
+                                s?.Link.BranchName ?? "",
+                                s?.Link.BranchHasUpstream == true,
+                                prState,
+                                s?.Link.DefaultBranchAheadCommits ?? 0);
+                        })
+                        .ToList();
+
                     await InvokeAsync(async () =>
                     {
                         if (_disposed) return;
                         await RefreshFromSync();
-
-                        var repoItems = eligibleIds
-                            .Select(repoId =>
-                            {
-                                var wr2 = TryGetLink(repoId);
-                                prByRepositoryId.TryGetValue(repoId, out var pr);
-                                var prState = pr == null ? null : pr.IsMerged ? "merged" : pr.IsClosed ? "closed" : "open";
-                                var commitsAhead = wr2?.DefaultBranchAheadCommits ?? 0;
-                                return new SyncToDefaultRepoItem(
-                                    wr2?.Repository?.RepositoryName ?? repoId.ToString(),
-                                    wr2?.BranchName ?? "",
-                                    wr2?.BranchHasUpstream == true,
-                                    prState,
-                                    commitsAhead);
-                            })
-                            .ToList();
-
                         ShowSyncToDefaultOptions(dialogMessage, repoItems, (deleteRemote, allowForce) => ExecuteSyncAllToDefaultAsync(repoItems, deleteRemote));
                         StateHasChanged();
                     });
@@ -491,11 +487,16 @@ public sealed partial class WorkspaceRepositories
         var repoIdByName = allLinks.ToDictionary(
             wr => wr.Repository?.RepositoryName ?? string.Empty,
             wr => wr.RepositoryId);
+        var openPrRepoIds = repoItems
+            .Where(r => r.PrState == "open" && repoIdByName.ContainsKey(r.RepoName))
+            .Select(r => repoIdByName[r.RepoName])
+            .ToList();
+        var openPrStates = await GetFreshLinkStatesAsync(openPrRepoIds);
         var prNumberByRepoName = new Dictionary<string, int>();
         foreach (var item in repoItems.Where(r => r.PrState == "open"))
         {
             if (!repoIdByName.TryGetValue(item.RepoName, out var repoId)) continue;
-            if (prByRepositoryId.TryGetValue(repoId, out var pr) && pr != null && pr.Number > 0)
+            if (openPrStates.TryGetValue(repoId, out var s) && s.PullRequest is { Number: > 0 } pr)
                 prNumberByRepoName[item.RepoName] = pr.Number;
         }
 
@@ -509,6 +510,8 @@ public sealed partial class WorkspaceRepositories
 
             using var semaphore = new SemaphoreSlim(maxParallel, maxParallel);
 
+            var linkStates = await GetFreshLinkStatesAsync(repoIdByName.Values.ToList());
+
             var tasks = repoItems.Select(async item =>
             {
                 if (!repoIdByName.TryGetValue(item.RepoName, out var repoId))
@@ -517,8 +520,8 @@ public sealed partial class WorkspaceRepositories
                     return (RepoId: 0, Success: false, ErrorMsg: (string?)"Repository not found");
                 }
 
-                var wr = TryGetLink(repoId);
-                var currentBranch = wr?.BranchName ?? item.BranchName;
+                linkStates.TryGetValue(repoId, out var linkState);
+                var currentBranch = linkState?.Link.BranchName ?? item.BranchName;
                 if (string.IsNullOrWhiteSpace(currentBranch))
                 {
                     Interlocked.Increment(ref completedCount);
@@ -544,8 +547,7 @@ public sealed partial class WorkspaceRepositories
                     var (success, errMsg) = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, (bool Success, string? ErrorMessage)>(
                         svc => svc.SyncToDefaultDirectAsync(
                             WorkspaceId, repoId, currentBranch,
-                            deleteRemoteBranch && item.HasRemote, allowForceDeleteLocalBranch: true, ct,
-                            recomputeDependencyStats: false));
+                            deleteRemoteBranch && item.HasRemote, allowForceDeleteLocalBranch: true, ct));
 
                     return (RepoId: repoId, Success: success, ErrorMsg: errMsg);
                 }

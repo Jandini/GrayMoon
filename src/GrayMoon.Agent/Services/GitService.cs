@@ -308,11 +308,19 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
     public async Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false)
     {
+        var probe = await ProbeCommitCountsAsync(repoPath, branchName, defaultBranchOriginRef, ct, skipUpstreamCheck);
+        return (probe.Outgoing, probe.Incoming, probe.HasUpstream);
+    }
+
+    public async Task<CommitCountsProbeResult> ProbeCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false)
+    {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
-            return (null, null, false);
+            return CommitCountsProbeResult.Unknown;
 
         var sw = Stopwatch.StartNew();
 
+        // Whether the branch has a configured upstream is only knowable when we actually ask git for it.
+        var upstreamProbed = !skipUpstreamCheck;
         var upstreamRef = skipUpstreamCheck ? null : await GetUpstreamRefAsync(repoPath, branchName, ct);
         if (string.IsNullOrWhiteSpace(upstreamRef))
         {
@@ -320,20 +328,20 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             if (defaultBranch == null)
             {
                 logger.LogDebug("No configured upstream for branch {Branch} and no default branch found for {RepoPath}, skipping commit counts", branchName, repoPath);
-                return (null, null, false);
+                return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
             }
 
             var (exitDefault, stdoutDefault, stderrDefault) = await runner.RunAsync("git", $"rev-list --count {defaultBranch}..HEAD", repoPath, ct);
             if (exitDefault != 0)
             {
                 logger.LogWarning("Git rev-list (outgoing vs default branch) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitDefault, stdoutDefault, stderrDefault);
-                return (null, null, false);
+                return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
             }
 
             var aheadCount = int.TryParse((stdoutDefault ?? "").Trim(), out var ahead) ? ahead : (int?)null;
             sw.Stop();
             logger.LogDebug("GetCommitCounts (vs default branch, no upstream) completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
-            return (aheadCount, null, false);
+            return new CommitCountsProbeResult(aheadCount, null, false, CountsProbed: true, UpstreamProbed: upstreamProbed);
         }
 
         var originBranch = upstreamRef!;
@@ -345,20 +353,20 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             if (defaultBranch == null)
             {
                 logger.LogDebug("Configured upstream for {Branch}, but remote {OriginBranch} not found and no default branch for {RepoPath}, skipping commit counts", branchName, originBranch, repoPath);
-                return (null, null, false);
+                return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
             }
 
             var (exitDefault, stdoutDefault, stderrDefault) = await runner.RunAsync("git", $"rev-list --count {defaultBranch}..HEAD", repoPath, ct);
             if (exitDefault != 0)
             {
                 logger.LogWarning("Git rev-list (outgoing vs default branch) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitDefault, stdoutDefault, stderrDefault);
-                return (null, null, false);
+                return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
             }
 
             var aheadCount = int.TryParse((stdoutDefault ?? "").Trim(), out var ahead) ? ahead : (int?)null;
             sw.Stop();
             logger.LogDebug("GetCommitCounts (vs default branch, missing remote upstream) completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
-            return (aheadCount, null, false);
+            return new CommitCountsProbeResult(aheadCount, null, false, CountsProbed: true, UpstreamProbed: upstreamProbed);
         }
 
         // Single atomic call: left=incoming (in originBranch not HEAD), right=outgoing (in HEAD not originBranch).
@@ -366,7 +374,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (exitLR != 0)
         {
             logger.LogWarning("Git rev-list --left-right (commit counts) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitLR, stdoutLR, stderrLR);
-            return (null, null, true);
+            return new CommitCountsProbeResult(null, null, true, CountsProbed: false, UpstreamProbed: upstreamProbed);
         }
 
         var parts = (stdoutLR ?? "").Trim().Split('\t', StringSplitOptions.RemoveEmptyEntries);
@@ -374,7 +382,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var outVal = parts.Length >= 2 && int.TryParse(parts[1], out var oc) ? oc : (int?)null;
         sw.Stop();
         logger.LogDebug("GetCommitCounts completed in {ElapsedMs}ms for {RepoPath} (up{Outgoing} dn{Incoming})", sw.ElapsedMilliseconds, repoPath, outVal, inVal);
-        return (outVal, inVal, true);
+        return new CommitCountsProbeResult(outVal, inVal, true, CountsProbed: true, UpstreamProbed: upstreamProbed);
     }
 
     public async Task<(int? DefaultBehind, int? DefaultAhead, string? DefaultBranchName)> GetCommitCountsVsDefaultAsync(string repoPath, string? defaultBranchOriginRef, CancellationToken ct)

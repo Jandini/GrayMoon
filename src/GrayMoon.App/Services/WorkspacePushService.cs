@@ -1,4 +1,5 @@
 using GrayMoon.Abstractions.Agent;
+using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
@@ -20,6 +21,8 @@ public sealed class WorkspacePushService(
     WorkspaceRepository workspaceRepository,
     WorkspaceDependencyService workspaceDependencyService,
     WorkspaceProjectRepository workspaceProjectRepository,
+    WorkspaceRepositoryStateWriter stateWriter,
+    WorkspaceStateRecomputeScope recomputeScope,
     AppDbContext dbContext,
     Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<WorkspacePushService> logger,
@@ -37,6 +40,8 @@ public sealed class WorkspacePushService(
     private readonly WorkspaceRepository _workspaceRepository = workspaceRepository ?? throw new ArgumentNullException(nameof(workspaceRepository));
     private readonly WorkspaceDependencyService _workspaceDependencyService = workspaceDependencyService ?? throw new ArgumentNullException(nameof(workspaceDependencyService));
     private readonly WorkspaceProjectRepository _workspaceProjectRepository = workspaceProjectRepository ?? throw new ArgumentNullException(nameof(workspaceProjectRepository));
+    private readonly WorkspaceRepositoryStateWriter _stateWriter = stateWriter ?? throw new ArgumentNullException(nameof(stateWriter));
+    private readonly WorkspaceStateRecomputeScope _recomputeScope = recomputeScope ?? throw new ArgumentNullException(nameof(recomputeScope));
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly ILogger<WorkspacePushService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 16);
@@ -890,38 +895,34 @@ public sealed class WorkspacePushService(
                     workspaceRoot
                 }, cancellationToken);
                 if (!response.Success || response.Data == null)
-                    return (RepoId: repo.RepoId, Outgoing: (int?)null, Incoming: (int?)null, HasUpstream: (bool?)null, DefaultBehind: (int?)null, DefaultAhead: (int?)null);
-                var data = AgentResponseJson.DeserializeAgentResponse<AgentCommitCountsResponse>(response.Data);
-                return (RepoId: repo.RepoId, Outgoing: data?.OutgoingCommits, Incoming: data?.IncomingCommits, HasUpstream: data?.HasUpstream, DefaultBehind: data?.DefaultBranchBehind, DefaultAhead: data?.DefaultBranchAhead);
+                    return (RepoId: repo.RepoId, Data: (AgentCommitCountsResponse?)null);
+                return (RepoId: repo.RepoId, Data: AgentResponseJson.DeserializeAgentResponse<AgentCommitCountsResponse>(response.Data));
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "GetCommitCounts failed for repo {RepoId} ({RepoName})", repo.RepoId, repo.RepoName);
-                return (RepoId: repo.RepoId, Outgoing: (int?)null, Incoming: (int?)null, HasUpstream: (bool?)null, DefaultBehind: (int?)null, DefaultAhead: (int?)null);
+                return (RepoId: repo.RepoId, Data: (AgentCommitCountsResponse?)null);
             }
         }));
 
-        var resultByRepo = results.ToDictionary(r => r.RepoId);
-        foreach (var wr in links)
+        // A failed or missing response leaves the persisted counts alone: nothing is marked probed, so the
+        // writer has nothing to replace. Overwriting them with nulls would blank the badges after a
+        // transient agent hiccup.
+        foreach (var r in results.Where(r => r.Data != null))
         {
-            if (!string.IsNullOrWhiteSpace(wr.CheckedOutTag))
-                continue;
-            if (resultByRepo.TryGetValue(wr.RepositoryId, out var r))
+            await _stateWriter.ApplyAsync(workspaceId, r.RepoId, new RepositoryStateSnapshot
             {
-                wr.OutgoingCommits = r.Outgoing;
-                wr.IncomingCommits = r.Incoming;
-                if (r.HasUpstream.HasValue)
-                    wr.BranchHasUpstream = r.HasUpstream.Value;
-                if (r.DefaultBehind.HasValue) wr.DefaultBranchBehindCommits = r.DefaultBehind;
-                if (r.DefaultAhead.HasValue) wr.DefaultBranchAheadCommits = r.DefaultAhead;
-            }
+                OutgoingCommits = r.Data!.OutgoingCommits,
+                IncomingCommits = r.Data.IncomingCommits,
+                DefaultBranchBehind = r.Data.DefaultBranchBehind,
+                DefaultBranchAhead = r.Data.DefaultBranchAhead,
+                HasUpstream = r.Data.HasUpstream,
+                CommitCountsProbed = true,
+                UpstreamProbed = r.Data.HasUpstream.HasValue,
+            }, cancellationToken: cancellationToken);
         }
-        await _dbContext.SaveChangesAsync(cancellationToken);
 
-        await _workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
-
-        if (_hubContext != null)
-            await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
+        await _recomputeScope.CompleteAsync(workspaceId, cancellationToken);
     }
 }
 

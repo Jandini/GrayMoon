@@ -31,6 +31,14 @@ public sealed class BranchesResponse
 
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
+
+    /// <summary>Whether the checked-out branch has a configured upstream, read from git config rather than matched by name against the remote list. Null from agents that predate this field.</summary>
+    [JsonPropertyName("hasUpstream")]
+    public bool? HasUpstream { get; set; }
+
+    /// <summary>False when the agent could not determine the upstream (or predates the field), in which case <see cref="HasUpstream"/> must not overwrite persisted state.</summary>
+    [JsonPropertyName("upstreamProbed")]
+    public bool UpstreamProbed { get; set; }
 }
 
 /// <summary>Response from POST /api/branches/checkout. Agent may send PascalCase; use case-insensitive deserialization.</summary>
@@ -167,6 +175,10 @@ public sealed class SyncToDefaultBranchResponse
 
     [JsonPropertyName("projects")]
     public List<AgentProjectDto>? Projects { get; set; }
+
+    /// <summary>Authoritative post-checkout state with per-group probe markers. Null from agents that predate this field.</summary>
+    [JsonPropertyName("state")]
+    public GrayMoon.Abstractions.Notifications.RepositoryStateSnapshot? State { get; set; }
 }
 
 /// <summary>API response for POST /api/branches/delete (camelCase).</summary>

@@ -120,6 +120,9 @@ try
     builder.Services.AddScoped<GitHubPullRequestService>();
     builder.Services.AddScoped<WorkspacePullRequestRepository>();
     builder.Services.AddScoped<WorkspacePullRequestService>();
+    builder.Services.AddScoped<RepositoryBranchWriter>();
+    builder.Services.AddScoped<WorkspaceRepositoryStateWriter>();
+    builder.Services.AddScoped<WorkspaceStateRecomputeScope>();
     builder.Services.AddScoped<WorkspaceActionRepository>();
     builder.Services.AddScoped<WorkspaceActionService>();
     builder.Services.AddScoped<PackageRegistrySyncService>();
