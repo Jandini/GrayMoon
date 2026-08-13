@@ -26,6 +26,12 @@ public sealed class CheckoutHookSyncCommand(IGitService git, ICsProjFileService 
         var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
         var findProjectsTask = csProjFileService.FindAsync(payload.RepositoryPath, cancellationToken);
 
+        // Resolve the current branch cheaply (before running GitVersion) so the minimal fetch below can
+        // target this branch's own configured upstream, not just the default branch. Using a placeholder
+        // here would make FetchMinimalAsync's upstream lookup miss (no branch named "-"), silently skipping
+        // the fetch of this branch's own remote-tracking ref and leaving it stale for the HasUpstream check below.
+        var currentBranchForFetch = await git.GetCurrentBranchNameAsync(payload.RepositoryPath, cancellationToken) ?? "-";
+
         // Minimal fetch: only current branch and default branch, not all branches/tags.
         string? token = await tokenProvider.GetTokenForRepositoryAsync(payload.RepositoryId, cancellationToken);
         string? fetchError = null;
@@ -36,7 +42,7 @@ public sealed class CheckoutHookSyncCommand(IGitService git, ICsProjFileService 
         else
         {
             // Use minimal fetch before running GitVersion; GitVersion is invoked with /nofetch.
-            var (fetchSuccess, err) = await git.FetchMinimalAsync(payload.RepositoryPath, "-", defaultRef, token, cancellationToken);
+            var (fetchSuccess, err) = await git.FetchMinimalAsync(payload.RepositoryPath, currentBranchForFetch, defaultRef, token, cancellationToken);
             if (!fetchSuccess)
                 fetchError = err;
         }
@@ -66,22 +72,25 @@ public sealed class CheckoutHookSyncCommand(IGitService git, ICsProjFileService 
         int? incoming = null;
         int? defaultBehind = null;
         int? defaultAhead = null;
-        if (branch != "-")
-        {
-            var (o, i, _) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, defaultRef, cancellationToken);
-            outgoing = o;
-            incoming = i;
-            var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(payload.RepositoryPath, defaultRef, cancellationToken);
-            defaultBehind = db;
-            defaultAhead = da;
-        }
-
         bool? hasUpstream = null;
         IReadOnlyList<string>? remoteBranches = null;
         if (branch != "-")
         {
+            // HasUpstream comes from GetCommitCountsAsync's own GetUpstreamRefAsync check (the branch's actual
+            // git-configured upstream, refreshed by the fetch above), not from whether a local remote-tracking
+            // ref happens to already exist - that local-ref check could report "no upstream" for a branch that
+            // does have one configured but whose ref this clone hadn't fetched yet, resetting a correct
+            // BranchHasUpstream=true (e.g. set right after a push) back to false on the next checkout.
+            var (o, i, hu) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, defaultRef, cancellationToken);
+            outgoing = o;
+            incoming = i;
+            hasUpstream = hu;
+            var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(payload.RepositoryPath, defaultRef, cancellationToken);
+            defaultBehind = db;
+            defaultAhead = da;
+
+            // Still needed (separately from HasUpstream) so the app can prune deleted remote branches from the DB.
             remoteBranches = await git.GetRemoteBranchesFromRefsAsync(payload.RepositoryPath, cancellationToken);
-            hasUpstream = remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
         }
 
         var projects = await findProjectsTask;
