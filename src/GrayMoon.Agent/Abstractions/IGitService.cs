@@ -53,8 +53,8 @@ public interface IGitService
     Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct, bool skipHooks = false);
     /// <summary>Creates a new branch from the given base branch and checks it out. Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct, bool skipHooks = false);
-    /// <summary>Deletes a local or remote branch. Returns (success, errorMessage). For remote, runs git push origin --delete. For local, when <paramref name="force"/> is true, uses git branch -D.</summary>
-    Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct);
+    /// <summary>Deletes a local or remote branch. Returns (success, errorMessage). For remote, runs git push origin --delete. For local, when <paramref name="force"/> is true, uses git branch -D. When <paramref name="skipHooks"/> is true, hooks are disabled for the remote delete, so the pre-push hook does not queue a sync for a branch the caller is about to leave behind.</summary>
+    Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false);
     /// <summary>Gets the default branch name (e.g., "main" or "master") without "origin/" prefix.</summary>
     Task<string?> GetDefaultBranchNameAsync(string repoPath, CancellationToken ct);
     /// <summary>Gets all tag names in the repository (newest first when supported, then alphabetical).</summary>

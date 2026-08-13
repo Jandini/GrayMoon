@@ -30,6 +30,10 @@ public sealed class AgentVersionBranchResponse
     [JsonPropertyName("hasUpstream")]
     public bool? HasUpstream { get; set; }
 
+    /// <summary>True when the agent resolved <see cref="HasUpstream"/> from git config. Absent from agents that predate it, which leaves the persisted flag alone.</summary>
+    [JsonPropertyName("upstreamProbed")]
+    public bool UpstreamProbed { get; set; }
+
     [JsonPropertyName("remoteBranches")]
     public List<string>? RemoteBranches { get; set; }
 

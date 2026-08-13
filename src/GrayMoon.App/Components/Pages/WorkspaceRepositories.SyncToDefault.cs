@@ -202,15 +202,18 @@ public sealed partial class WorkspaceRepositories
                 return;
             }
 
-            if (hasUpstream)
+            // The dialog is what asks for permission to delete the local branch, so it is also needed when
+            // there is no remote branch to delete but the branch still carries commits the default branch
+            // does not have.
+            if (hasUpstream || defaultAhead > 0)
             {
                 var branchName = state?.Link.BranchName ?? currentBranchName;
                 var singlePr = state?.PullRequest;
                 var singlePrState = singlePr == null ? null : singlePr.IsMerged ? "merged" : singlePr.IsClosed ? "closed" : "open";
                 ShowSyncToDefaultOptions(
                     "This will checkout the default branch, remove the current branch locally, and pull the latest.",
-                    [new SyncToDefaultRepoItem(repositoryName!, branchName, true, singlePrState, defaultAhead)],
-                    (deleteRemote, allowForce) => SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemote, defaultBranch, allowForce));
+                    [new SyncToDefaultRepoItem(repositoryName!, branchName, hasUpstream, singlePrState, defaultAhead)],
+                    (deleteRemote, allowForce) => SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemote && hasUpstream, defaultBranch, allowForce));
             }
             else
             {
@@ -458,7 +461,7 @@ public sealed partial class WorkspaceRepositories
                     {
                         if (_disposed) return;
                         await RefreshFromSync();
-                        ShowSyncToDefaultOptions(dialogMessage, repoItems, (deleteRemote, allowForce) => ExecuteSyncAllToDefaultAsync(repoItems, deleteRemote));
+                        ShowSyncToDefaultOptions(dialogMessage, repoItems, (deleteRemote, allowForce) => ExecuteSyncAllToDefaultAsync(repoItems, deleteRemote, allowForce));
                         StateHasChanged();
                     });
                 }
@@ -478,7 +481,8 @@ public sealed partial class WorkspaceRepositories
 
     private async Task ExecuteSyncAllToDefaultAsync(
         IReadOnlyList<SyncToDefaultRepoItem> repoItems,
-        bool deleteRemoteBranch)
+        bool deleteRemoteBranch,
+        bool allowForceDeleteLocalBranch)
     {
         if (workspace == null || repoItems.Count == 0 || IsJobRunning)
             return;
@@ -547,7 +551,7 @@ public sealed partial class WorkspaceRepositories
                     var (success, errMsg) = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, (bool Success, string? ErrorMessage)>(
                         svc => svc.SyncToDefaultDirectAsync(
                             WorkspaceId, repoId, currentBranch,
-                            deleteRemoteBranch && item.HasRemote, allowForceDeleteLocalBranch: true, ct));
+                            deleteRemoteBranch && item.HasRemote, allowForceDeleteLocalBranch, ct));
 
                     return (RepoId: repoId, Success: success, ErrorMsg: errMsg);
                 }

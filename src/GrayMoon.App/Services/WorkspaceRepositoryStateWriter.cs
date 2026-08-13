@@ -85,9 +85,11 @@ public sealed class WorkspaceRepositoryStateWriter(
         // A repository pinned to a tag has no branch to count against, so those columns stay cleared
         // regardless of what the snapshot reports.
         var onTag = !string.IsNullOrWhiteSpace(wr.CheckedOutTag);
-        var branchChanged = !string.Equals(previousBranch, wr.BranchName, StringComparison.Ordinal);
         if (!onTag)
         {
+            // Only a probed group is written. An unprobed group keeps the value the grid is already showing
+            // until a flow that did probe replaces it - blanking it to "-" mid-operation reads as a bug even
+            // though the counts are about to arrive.
             if (snapshot.CommitCountsProbed)
             {
                 wr.OutgoingCommits = snapshot.OutgoingCommits;
@@ -95,21 +97,9 @@ public sealed class WorkspaceRepositoryStateWriter(
                 wr.DefaultBranchBehindCommits = snapshot.DefaultBranchBehind;
                 wr.DefaultBranchAheadCommits = snapshot.DefaultBranchAhead;
             }
-            else if (branchChanged)
-            {
-                // These counts are branch-scoped. Keeping the previous branch's numbers after a checkout
-                // renders divergence badges for a branch that is no longer checked out, so clear them and
-                // let whichever flow probes next fill them in.
-                wr.OutgoingCommits = null;
-                wr.IncomingCommits = null;
-                wr.DefaultBranchBehindCommits = null;
-                wr.DefaultBranchAheadCommits = null;
-            }
 
             if (snapshot.UpstreamProbed)
                 wr.BranchHasUpstream = snapshot.HasUpstream;
-            else if (branchChanged)
-                wr.BranchHasUpstream = null;
         }
 
         // Written whenever the agent knows it, independently of any marker: every flow that can report

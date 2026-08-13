@@ -93,21 +93,22 @@ public sealed class WorkspaceRepositoryStateWriterTests
     }
 
     [Fact]
-    public async Task Unprobed_commit_counts_are_cleared_when_the_branch_changes()
+    public async Task Unprobed_commit_counts_survive_a_branch_change()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
 
-        // A plain checkout reports the new branch but no counts. The previous branch's numbers describe a
-        // branch that is no longer checked out, so they must not survive until the hook catches up.
+        // A plain checkout reports the new branch but no counts. Blanking the badges to "-" for the seconds
+        // until the hook catches up looks like a fault, so the previous values stay on screen until a flow
+        // that actually probed them replaces them.
         await ApplyAsync(ctx, new RepositoryStateSnapshot { BranchName = "main", IdentityProbed = true });
 
         var after = await ctx.ReadLinkAsync();
         Assert.Equal("main", after.BranchName);
-        Assert.Null(after.OutgoingCommits);
-        Assert.Null(after.IncomingCommits);
-        Assert.Null(after.DefaultBranchAheadCommits);
-        Assert.Null(after.DefaultBranchBehindCommits);
-        Assert.Null(after.BranchHasUpstream);
+        Assert.Equal(3, after.OutgoingCommits);
+        Assert.Equal(2, after.IncomingCommits);
+        Assert.Equal(4, after.DefaultBranchAheadCommits);
+        Assert.Equal(5, after.DefaultBranchBehindCommits);
+        Assert.True(after.BranchHasUpstream);
     }
 
     [Fact]

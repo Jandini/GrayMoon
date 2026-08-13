@@ -971,7 +971,12 @@ public class WorkspaceGitService(
         var prInfo = wrWithPr?.PullRequest?.PullRequestNumber.HasValue == true
             ? wrWithPr.PullRequest.ToPullRequestInfo()
             : null;
-        var forceDeleteLocalBranch = allowForceDeleteLocalBranch && (prInfo?.IsMerged == true || prInfo?.IsClosed == true);
+        // "Delete local branches" is the user's own confirmation, given on a dialog that lists how many
+        // commits each repository would lose and only enables Proceed after a countdown. Requiring a merged
+        // or closed pull request on top of it made git fall back to "git branch -d", which refuses to delete
+        // exactly the unmerged branches the dialog just promised to remove, so the branch survived the sync.
+        // A merged or closed pull request stays an independent reason the branch is safe to drop.
+        var forceDeleteLocalBranch = allowForceDeleteLocalBranch || prInfo?.IsMerged == true || prInfo?.IsClosed == true;
 
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         var args = new
@@ -1179,6 +1184,7 @@ public class WorkspaceGitService(
         var projectsDetail = GetProjectsDetail(response.Data);
         var (outgoingCommits, incomingCommits, defaultBehind, defaultAhead) = GetCommitCounts(response.Data);
         var (localBranches, remoteBranches, defaultBranch, tags, currentTag) = GetBranches(response.Data);
+        var (hasUpstream, upstreamProbed) = GetUpstream(response.Data);
         // Prefer Tag from the top-level response, fall back to currentTag from the branches block.
         var resolvedTag = !string.IsNullOrWhiteSpace(tag) ? tag : currentTag;
         var combinedError = CombineRepoErrors(gitFetchError, gitVersionError);
@@ -1201,6 +1207,7 @@ public class WorkspaceGitService(
             IncomingCommits = incomingCommits,
             DefaultBranchBehindCommits = defaultBehind,
             DefaultBranchAheadCommits = defaultAhead,
+            HasUpstream = hasUpstream,
             LocalBranches = localBranches,
             RemoteBranches = remoteBranches,
             DefaultBranch = defaultBranch,
@@ -1215,6 +1222,7 @@ public class WorkspaceGitService(
                 IncomingCommits = incomingCommits,
                 DefaultBranchBehind = defaultBehind,
                 DefaultBranchAhead = defaultAhead,
+                HasUpstream = onTag ? null : hasUpstream,
                 LocalBranches = localBranches?.ToList(),
                 RemoteBranches = remoteBranches?.ToList(),
                 Tags = tags?.ToList(),
@@ -1223,9 +1231,7 @@ public class WorkspaceGitService(
                 IdentityProbed = probed,
                 GitVersionProbed = probed && version != "-",
                 CommitCountsProbed = probed && !onTag,
-                // SyncRepository reports no git-config upstream, only branch lists, so the upstream flag
-                // is left to the hook and refresh flows that actually probe it.
-                UpstreamProbed = false,
+                UpstreamProbed = probed && !onTag && upstreamProbed,
                 BranchesProbed = probed && localBranches != null,
                 ProjectsProbed = probed && HasProjectsBlock(response.Data),
             }
@@ -1277,6 +1283,13 @@ public class WorkspaceGitService(
                 ProjectsProbed = false,
             }
         };
+    }
+
+    /// <summary>Reads the agent's git-config upstream answer plus whether it actually resolved it, so an agent that omits both leaves the persisted flag alone.</summary>
+    private static (bool? HasUpstream, bool UpstreamProbed) GetUpstream(object data)
+    {
+        var r = AgentResponseJson.DeserializeAgentResponse<AgentVersionBranchResponse>(data);
+        return (r?.HasUpstream, r?.UpstreamProbed ?? false);
     }
 
     private static (bool? HasUpstream, IReadOnlyList<string>? RemoteBranches, IReadOnlyList<string>? LocalBranches) GetRefreshBranchesAndUpstream(object data)

@@ -36,10 +36,13 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, IRepositoryState
             };
         }
 
-        // If the user confirmed remote branch deletion, delete it before fetch so --prune removes the tracking ref
+        // If the user confirmed remote branch deletion, delete it before fetch so --prune removes the tracking ref.
+        // Skip hooks: a delete is still a push, so the pre-push hook would queue a PushHookSync for the branch
+        // this flow is about to abandon. That job polls for a couple of seconds and then reports counts for the
+        // deleted branch, landing after this command's own authoritative snapshot and overwriting it.
         if (request.DeleteRemoteBranch && !string.Equals(currentBranchName, defaultBranch, StringComparison.OrdinalIgnoreCase))
         {
-            var (remoteDeleteOk, remoteDeleteErr) = await git.DeleteBranchAsync(repoPath, currentBranchName, isRemote: true, force: false, cancellationToken);
+            var (remoteDeleteOk, remoteDeleteErr) = await git.DeleteBranchAsync(repoPath, currentBranchName, isRemote: true, force: false, cancellationToken, skipHooks: true);
             if (!remoteDeleteOk)
                 logger.LogWarning("Remote branch delete failed for {Branch} in {RepoPath}: {Error}", currentBranchName, repoPath, remoteDeleteErr);
         }

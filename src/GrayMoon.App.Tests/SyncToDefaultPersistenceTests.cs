@@ -110,6 +110,27 @@ public sealed class SyncToDefaultPersistenceTests
         Assert.Equal("Acme.Api", projects[0].ProjectName);
     }
 
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task Local_branch_force_delete_follows_the_users_confirmation_without_a_pull_request(
+        bool allowForceDeleteLocalBranch,
+        bool expectedForceDelete)
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        ctx.AgentBridge.Respond("SyncToDefaultBranch", SuccessfulResponse());
+
+        await using var scope = ctx.CreateScope();
+        var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+        await git.SyncToDefaultDirectAsync(
+            ctx.WorkspaceId, ctx.RepositoryId, "feature/x",
+            deleteRemoteBranch: false, allowForceDeleteLocalBranch, CancellationToken.None);
+
+        var args = ctx.AgentBridge.Calls.Single(c => c.Command == "SyncToDefaultBranch").Args;
+        var force = args.GetType().GetProperty("forceDeleteLocalBranch")!.GetValue(args);
+        Assert.Equal(expectedForceDelete, force);
+    }
+
     [Fact]
     public async Task Failed_agent_command_reports_the_inner_error_and_leaves_the_row_untouched()
     {
