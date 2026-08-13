@@ -324,7 +324,8 @@ public sealed partial class WorkspaceRepositories
                     var (success, errMsg) = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, (bool Success, string? ErrorMessage)>(
                         svc => svc.SyncToDefaultDirectAsync(
                             WorkspaceId, repositoryId, currentBranchName,
-                            deleteRemoteBranch && repoHasRemote, allowForceDeleteLocalBranch, ct));
+                            deleteRemoteBranch && repoHasRemote, allowForceDeleteLocalBranch, ct,
+                            recomputeDependencyStats: false));
 
                     return (repositoryId, success, errMsg);
                 }
@@ -343,6 +344,14 @@ public sealed partial class WorkspaceRepositories
             });
 
             var results = await Task.WhenAll(tasks);
+
+            // All repos in the level synced their own git/project state above without touching workspace-wide
+            // dependency/file-version stats (recomputeDependencyStats: false); recompute once here, after every
+            // repo's fresh data is persisted, so the recompute reads a complete snapshot instead of racing N
+            // concurrent whole-workspace reads-then-overwrites.
+            await ScopedExecutor.ExecuteAsync<WorkspaceGitService>(
+                svc => svc.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId, ct));
+
             SafeInvoke(() =>
             {
                 foreach (var (repoId, success, errMsg) in results)
@@ -535,7 +544,8 @@ public sealed partial class WorkspaceRepositories
                     var (success, errMsg) = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, (bool Success, string? ErrorMessage)>(
                         svc => svc.SyncToDefaultDirectAsync(
                             WorkspaceId, repoId, currentBranch,
-                            deleteRemoteBranch && item.HasRemote, allowForceDeleteLocalBranch: true, ct));
+                            deleteRemoteBranch && item.HasRemote, allowForceDeleteLocalBranch: true, ct,
+                            recomputeDependencyStats: false));
 
                     return (RepoId: repoId, Success: success, ErrorMsg: errMsg);
                 }
@@ -554,6 +564,11 @@ public sealed partial class WorkspaceRepositories
             });
 
             var results = await Task.WhenAll(tasks);
+
+            // Recompute workspace-wide dependency/file-version stats exactly once, after every repo in this
+            // "sync all to default" batch has finished, instead of racing N concurrent per-repo recomputes.
+            await ScopedExecutor.ExecuteAsync<WorkspaceGitService>(
+                svc => svc.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId, ct));
 
             var successCount = results.Count(r => r.Success);
             var failureCount = results.Count(r => !r.Success);

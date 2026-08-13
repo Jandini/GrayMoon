@@ -929,14 +929,21 @@ public class WorkspaceGitService(
         return (true, null);
     }
 
-    /// <summary>Syncs a single repository to its default branch by calling the agent directly, so CommandOutput flows to TerminalSinkContext when called inside a background job.</summary>
+    /// <summary>
+    /// Syncs a single repository to its default branch by calling the agent directly, so CommandOutput flows to TerminalSinkContext when called inside a background job.
+    /// <paramref name="recomputeDependencyStats"/> controls whether this call recomputes and broadcasts workspace-wide dependency/file-version stats itself.
+    /// Callers that sync multiple repositories in parallel (e.g. a dependency-level "sync to default") must pass <c>false</c> here and instead recompute once,
+    /// after all of that batch's repositories have finished syncing - <see cref="RecomputeAndBroadcastWorkspaceSyncedAsync"/> reads and rewrites every repository's
+    /// stats from a full workspace snapshot, so N concurrent calls for the same workspace race on which snapshot's write lands last.
+    /// </summary>
     public async Task<(bool Success, string? ErrorMessage)> SyncToDefaultDirectAsync(
         int workspaceId,
         int repositoryId,
         string currentBranchName,
         bool deleteRemoteBranch,
         bool allowForceDeleteLocalBranch,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool recomputeDependencyStats = true)
     {
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
@@ -1027,7 +1034,8 @@ public class WorkspaceGitService(
             workspaceId, [(repositoryId, projectsDetail)], persistDependencyLevel: false, cancellationToken);
 
         // Recompute dependency and file-version stats now that GitVersion and ProjectDependencies are fresh, then broadcast.
-        await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+        if (recomputeDependencyStats)
+            await RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
 
         return (true, null);
     }
