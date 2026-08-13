@@ -124,7 +124,9 @@ Connector tokens are AES-256-GCM encrypted at rest via `AesGcmTokenProtector` (b
 
 Schema is owned by EF Core but applied via `EnsureCreated()`.
 
-After `EnsureCreated()`, startup calls `Migrations.RunAllAsync(dbContext)` (`src/GrayMoon.App/Migrations.cs`). Each migration is an idempotent `ALTER TABLE` guarded by `pragma_table_info()`. To add a new column: add a `public static async Task MigrateXxxAsync(AppDbContext dbContext)` method to `Migrations.cs` (check `pragma_table_info('TableName') WHERE name='ColumnName'` before executing the `ALTER TABLE`), then call it at the end of `RunAllAsync`. No EF Core migration assembly is used.
+**Pre-release (current state):** GrayMoon has not shipped yet, so there is no installed database on an older schema to patch. `src/GrayMoon.App/Migrations.cs` only runs one-time data seeding (`SeedDefaultWorkspaceRootPathAsync`) - no schema-patching migrations. To change the schema now, just update the entity class and the corresponding `modelBuilder.Entity<T>(...)` block in `AppDbContext.OnModelCreating` (`src/GrayMoon.App/Data/AppDbContext.cs`); `EnsureCreated()` will produce the new shape on any fresh database. No EF Core migration assembly is used.
+
+**Post-release:** once a real release ships, this reverses. From that point on, every schema change needs both the `AppDbContext` model update above *and* a new idempotent `public static async Task MigrateXxxAsync(AppDbContext dbContext)` method added to `Migrations.cs` (guarded by `pragma_table_info('TableName') WHERE name='ColumnName'` or `sqlite_master` checks before running `ALTER TABLE`/`CREATE INDEX`/etc.), called at the end of `RunAllAsync`, so already-installed user databases get patched at next startup. Never delete a `Migrate*Async` method once it has shipped - some user's database may still depend on it running.
 
 ### Background job system
 

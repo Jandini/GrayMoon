@@ -276,6 +276,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasIndex(rb => new { rb.WorkspaceRepositoryId, rb.BranchName, rb.IsRemote })
                 .IsUnique();
 
+            entity.HasIndex(rb => rb.WorkspaceRepositoryId)
+                .HasDatabaseName("IX_RepositoryBranches_WorkspaceRepositoryId");
+
             entity.Property(rb => rb.BranchName)
                 .IsRequired()
                 .HasMaxLength(200);
@@ -303,6 +306,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             entity.HasIndex(f => new { f.WorkspaceId, f.RepositoryId, f.FilePath })
                 .IsUnique();
+
+            entity.HasIndex(f => f.WorkspaceId)
+                .HasDatabaseName("IX_WorkspaceFiles_WorkspaceId");
 
             entity.Property(f => f.FileName)
                 .IsRequired()
