@@ -78,6 +78,8 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<WorkspaceDependencyService>();
         services.AddScoped<WorkspaceFileVersionService>();
         services.AddScoped<WorkspaceGitService>();
+        services.AddScoped<ConnectorHealthService>();
+        services.AddScoped<WorkspaceCommitSyncHandler>();
         services.AddScoped<WorkspaceRepositoryLinkListQueryService>();
         services.AddScoped<SyncCommandHandler>();
 
@@ -100,6 +102,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
             ConnectorType = ConnectorType.GitHub,
             ApiBaseUrl = "https://api.github.com",
             IsActive = true,
+            IsHealthy = true,
             UserToken = userToken,
         };
         db.Connectors.Add(connector);

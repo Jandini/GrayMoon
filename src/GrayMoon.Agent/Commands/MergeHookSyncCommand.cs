@@ -10,7 +10,7 @@ namespace GrayMoon.Agent.Commands;
 /// Handles post-merge hooks: re-runs GitVersion and gets commit counts.
 /// No git fetch - the merge already brought remote changes in; existing remote tracking refs are current enough.
 /// </summary>
-public sealed class MergeHookSyncCommand(IGitService git, ICsProjFileService csProjFileService, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<MergeHookSyncCommand> logger)
+public sealed class MergeHookSyncCommand(IRepositoryStateProbe stateProbe, IHubConnectionProvider hubProvider, ILogger<MergeHookSyncCommand> logger)
 {
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
@@ -20,64 +20,17 @@ public sealed class MergeHookSyncCommand(IGitService git, ICsProjFileService csP
             return;
         }
 
-        var (versionResult, _) = await git.GetVersionAsync(payload.RepositoryPath, cancellationToken);
-        var version = versionResult?.InformationalVersion ?? "-";
-        var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
-        var findProjectsTask = csProjFileService.FindAsync(payload.RepositoryPath, cancellationToken);
-
-        var currentTag = await git.GetCheckedOutTagAsync(payload.RepositoryPath, cancellationToken);
-        if (currentTag != null)
-            branch = "-";
-
-        int? outgoing = null;
-        int? incoming = null;
-        int? defaultBehind = null;
-        int? defaultAhead = null;
-        if (branch != "-")
+        // One probe for version, branch/tag, commit counts, upstream and projects, so a merge reports the
+        // same state groups a checkout does - including the comparison against the default branch, which a
+        // pull moves just as much as the comparison against the upstream.
+        var (state, _) = await stateProbe.CaptureAsync(payload.RepositoryPath, new RepositoryStateProbeOptions
         {
-            var (o, i, _) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, null, cancellationToken);
-            outgoing = o;
-            incoming = i;
-            var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(payload.RepositoryPath, null, cancellationToken);
-            defaultBehind = db;
-            defaultAhead = da;
-        }
+            IncludeGitVersion = true,
+            IncludeProjects = true
+        }, cancellationToken);
 
-        bool? hasUpstream = null;
-        if (branch != "-")
-        {
-            string? token = await tokenProvider.GetTokenForRepositoryAsync(payload.RepositoryId, cancellationToken);
-            if (token == null)
-            {
-                logger.LogDebug("MergeHookSync: no token available for repo {RepositoryId}; skipping remote branch query.", payload.RepositoryId);
-            }
-            else
-            {
-                var remoteBranches = await git.GetRemoteBranchesAsync(payload.RepositoryPath, token, cancellationToken);
-                hasUpstream = remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
-            }
-        }
-
-        var projects = await findProjectsTask;
-        var syncProjects = projects?
-            .Where(p => !string.IsNullOrWhiteSpace(p.Name))
-            .Select(p => new RepositorySyncProjectNotification
-            {
-                Name = p.Name.Trim(),
-                ProjectType = (int)p.ProjectType,
-                ProjectPath = p.ProjectPath ?? "",
-                TargetFramework = p.TargetFramework ?? "",
-                PackageId = p.PackageId,
-                PackageReferences = p.PackageReferences
-                    .Where(pr => !string.IsNullOrWhiteSpace(pr.Name))
-                    .Select(pr => new RepositorySyncPackageReferenceNotification
-                    {
-                        Name = pr.Name.Trim(),
-                        Version = pr.Version ?? ""
-                    })
-                    .ToList()
-            })
-            .ToList();
+        var version = state.GitVersion ?? "-";
+        var branch = state.BranchName ?? "-";
 
         var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)
@@ -88,18 +41,19 @@ public sealed class MergeHookSyncCommand(IGitService git, ICsProjFileService csP
                 RepositoryId = payload.RepositoryId,
                 Version = version,
                 Branch = branch,
-                Tag = currentTag,
-                OutgoingCommits = outgoing,
-                IncomingCommits = incoming,
-                HasUpstream = hasUpstream,
-                DefaultBranchBehind = defaultBehind,
-                DefaultBranchAhead = defaultAhead,
-                Projects = syncProjects,
-                ErrorMessage = null
+                Tag = state.CheckedOutTag,
+                OutgoingCommits = state.OutgoingCommits,
+                IncomingCommits = state.IncomingCommits,
+                HasUpstream = state.HasUpstream,
+                DefaultBranchBehind = state.DefaultBranchBehind,
+                DefaultBranchAhead = state.DefaultBranchAhead,
+                Projects = state.Projects,
+                ErrorMessage = null,
+                State = state
             };
             await connection.InvokeAsync(AgentHubMethods.SyncCommand, notification, cancellationToken);
             logger.LogInformation("MergeHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}, hasUpstream={HasUpstream}",
-                payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream);
+                payload.WorkspaceId, payload.RepositoryId, version, branch, state.OutgoingCommits, state.IncomingCommits, state.HasUpstream);
         }
         else
         {
