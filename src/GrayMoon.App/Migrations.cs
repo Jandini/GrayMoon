@@ -53,6 +53,7 @@ public static class Migrations
         await MigrateListQueryIndexesAsync(dbContext);
         await MigrateProjectDependenciesDependentIndexAsync(dbContext);
         await MigrateWorkspaceGitChangesAsync(dbContext);
+        await SeedDefaultWorkspaceRootPathAsync(dbContext);
     }
 
     public static async Task MigrateRepositoriesTopicsAsync(AppDbContext dbContext)
@@ -1584,6 +1585,45 @@ public static class Migrations
                     await cmd.ExecuteNonQueryAsync();
                 }
             }
+        }
+        catch
+        {
+            // Migration may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>
+    /// Seeds the global workspace root path setting (Settings.WorkspaceRootPath) with C:\Workspace the first
+    /// time the app runs against a fresh database - i.e. whenever no row for that key exists yet. Skipped once
+    /// a row exists (including an explicitly cleared one), so it never overrides a user's own choice.
+    /// </summary>
+    public static async Task SeedDefaultWorkspaceRootPathAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='Settings'";
+            if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+                return;
+
+            cmd.CommandText = "SELECT COUNT(*) FROM Settings WHERE Key = @key";
+            var keyParam = cmd.CreateParameter();
+            keyParam.ParameterName = "@key";
+            keyParam.Value = Repositories.AppSettingRepository.WorkspaceRootPathKey;
+            cmd.Parameters.Add(keyParam);
+            if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0)
+                return;
+
+            cmd.CommandText = "INSERT INTO Settings (Key, Value) VALUES (@key, @value)";
+            var valueParam = cmd.CreateParameter();
+            valueParam.ParameterName = "@value";
+            valueParam.Value = @"C:\Workspace";
+            cmd.Parameters.Add(valueParam);
+            await cmd.ExecuteNonQueryAsync();
         }
         catch
         {
