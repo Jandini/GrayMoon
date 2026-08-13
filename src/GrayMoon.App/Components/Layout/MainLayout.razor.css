@@ -66,7 +66,7 @@ article.content {
     padding-inline: 0.35rem;
 }
 
-/* Same family/weight/line-height as page h2 (.h2); ~72% scale for top bar */
+/* Same family/weight/line-height as page h2 (.h2); original ~72% scale, kept independent of page-title font size */
 .top-row-workspace-title__text {
     pointer-events: auto;
     display: inline-block;
@@ -322,7 +322,7 @@ article.content {
 @media (min-width: 1200px) {
     main .top-row-workspace-title__text,
     main .top-row-workspace-title ::deep a.top-row-workspace-title__link {
-        font-size: calc(1.44rem * 0.7);
+        font-size: 1.44rem;
     }
 }
 

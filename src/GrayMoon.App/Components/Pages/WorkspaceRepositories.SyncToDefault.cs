@@ -328,6 +328,11 @@ public sealed partial class WorkspaceRepositories
 
                     return (repositoryId, success, errMsg);
                 }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Logger.LogError(ex, "Error syncing to default branch for repository {RepositoryId}", repositoryId);
+                    return (repositoryId, false, (string?)"Sync to default branch failed. The GrayMoon Agent may be offline.");
+                }
                 finally
                 {
                     semaphore.Release();
@@ -533,6 +538,11 @@ public sealed partial class WorkspaceRepositories
                             deleteRemoteBranch && item.HasRemote, allowForceDeleteLocalBranch: true, ct));
 
                     return (RepoId: repoId, Success: success, ErrorMsg: errMsg);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Logger.LogError(ex, "Error syncing to default branch for repository {RepositoryId}", repoId);
+                    return (RepoId: repoId, Success: false, ErrorMsg: (string?)"Sync to default branch failed. The GrayMoon Agent may be offline.");
                 }
                 finally
                 {

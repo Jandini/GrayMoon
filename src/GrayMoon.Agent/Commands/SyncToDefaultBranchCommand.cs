@@ -75,8 +75,11 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, ICsProjFileServi
                 logger.LogWarning("Local branch delete failed for {Branch} in {RepoPath}: {Error}", currentBranchName, repoPath, localDeleteErr);
         }
 
-        // Always pull after switching to default so local is up to date
-        var (pullSuccess, mergeConflict, pullError) = await git.PullAsync(repoPath, defaultBranch, request.BearerToken, cancellationToken);
+        // Always pull after switching to default so local is up to date. Skip hooks: this orchestrated
+        // flow recomputes and returns commit counts/version itself below, so a hook-triggered NotifyJob
+        // racing (and, under multi-repo sync, queuing well behind) this authoritative write would just
+        // clobber it later with a redundant recompute.
+        var (pullSuccess, mergeConflict, pullError) = await git.PullAsync(repoPath, defaultBranch, request.BearerToken, cancellationToken, skipHooks: true);
         if (!pullSuccess)
         {
             return new SyncToDefaultBranchResponse

@@ -63,7 +63,8 @@
 
     /* Bootstrap h2 base is calc(1.325rem + 0.9vw); page titles use 70% of that */
     --page-title-font-size: calc((1.325rem + 0.9vw) * 0.7);
-    --topbar-workspace-title-font-size: calc(var(--page-title-font-size) * 0.72);
+    /* Kept at original (pre page-title-reduction) scale; intentionally not derived from --page-title-font-size */
+    --topbar-workspace-title-font-size: calc((1.325rem + 0.9vw) * 0.72);
 }
 
 @media (min-width: 641px) {
