@@ -408,21 +408,23 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (behind, ahead, defaultBranchName);
     }
 
-    public async Task<(bool Success, bool MergeConflict, string? ErrorMessage)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct)
+    public async Task<(bool Success, bool MergeConflict, string? ErrorMessage)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct, bool skipHooks = false)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (false, false, "Invalid repository path or branch name");
+
+        var hooksPrefix = GetHooksConfigPrefix(skipHooks);
 
         string args;
         var logArgs = "";
         if (string.IsNullOrWhiteSpace(bearerToken))
         {
-            args = $"pull origin {branchName}";
+            args = $"{hooksPrefix}pull origin {branchName}";
             logArgs = args;
         }
         else
         {
-            args = $"{BuildAuthHeaderArgs(bearerToken)} pull origin {branchName}";
+            args = $"{BuildAuthHeaderArgs(bearerToken)} {hooksPrefix}pull origin {branchName}";
             logArgs = "***";
         }
 
