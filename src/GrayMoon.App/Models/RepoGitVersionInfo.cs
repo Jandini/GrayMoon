@@ -29,4 +29,12 @@ public class RepoGitVersionInfo
     public bool? HasUpstream { get; init; }
     /// <summary>Error message when sync failed for this repo.</summary>
     public string? ErrorMessage { get; init; }
+
+    /// <summary>
+    /// The same state expressed with per-group probe markers, for persistence through
+    /// <see cref="GrayMoon.Abstractions.Notifications.RepositoryStateSnapshot"/>. The flat properties above
+    /// stay for the callers that only read values; the snapshot is what decides which columns may be replaced.
+    /// Null when the response could not be parsed at all.
+    /// </summary>
+    public Abstractions.Notifications.RepositoryStateSnapshot? Snapshot { get; init; }
 }

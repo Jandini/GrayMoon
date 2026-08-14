@@ -1,3 +1,4 @@
+using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
@@ -154,6 +155,7 @@ public static class BranchEndpoints
         GitHubRepositoryRepository repoRepository,
         AppDbContext dbContext,
         WorkspaceGitService workspaceGitService,
+        WorkspaceRepositoryStateWriter stateWriter,
         IHubContext<WorkspaceSyncHub> hubContext,
         ILoggerFactory loggerFactory)
     {
@@ -210,15 +212,13 @@ public static class BranchEndpoints
                     return Results.Ok(new CheckoutBranchApiResult(false, tagError));
 
                 // Persist pinned-to-tag state immediately so the UI gating kicks in even before the
-                // checkout hook arrives. Clear branch-only fields to avoid stale push/divergence badges.
-                wr.CheckedOutTag = tagCheckout?.CurrentTag ?? branchName.Trim();
-                wr.BranchName = null;
-                wr.BranchHasUpstream = null;
-                wr.OutgoingCommits = null;
-                wr.IncomingCommits = null;
-                wr.DefaultBranchBehindCommits = null;
-                wr.DefaultBranchAheadCommits = null;
-                await dbContext.SaveChangesAsync(CancellationToken.None);
+                // checkout hook arrives. The writer clears the branch-only fields that a tag checkout
+                // invalidates and drops the pull request the old branch had.
+                await stateWriter.ApplyAsync(workspaceId, repositoryId, new RepositoryStateSnapshot
+                {
+                    CheckedOutTag = tagCheckout?.CurrentTag ?? branchName.Trim(),
+                    IdentityProbed = true,
+                }, new RepositoryStateWriteOptions { ReconcilePullRequest = true });
 
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
 
@@ -250,10 +250,13 @@ public static class BranchEndpoints
             if (!string.IsNullOrWhiteSpace(localBranchName) && wr != null)
             {
                 await workspaceGitService.EnsureLocalBranchPersistedAsync(wr.WorkspaceRepositoryId, localBranchName, CancellationToken.None);
-                wr.BranchName = localBranchName;
-                // Switching to a real branch clears any pinned tag state.
-                wr.CheckedOutTag = null;
-                await dbContext.SaveChangesAsync(CancellationToken.None);
+                // Switching to a real branch clears any pinned tag state and the previous branch's pull
+                // request. Commit counts and upstream arrive with the checkout hook (CheckoutHookSync).
+                await stateWriter.ApplyAsync(workspaceId, repositoryId, new RepositoryStateSnapshot
+                {
+                    BranchName = localBranchName,
+                    IdentityProbed = true,
+                }, new RepositoryStateWriteOptions { ReconcilePullRequest = true });
             }
 
             // Broadcast update to refresh UI (branch name). BranchHasUpstream and commit counts will be updated when the checkout hook notify runs (CheckoutHookSync → SyncCommand).
@@ -271,14 +274,10 @@ public static class BranchEndpoints
     private static async Task<IResult> SyncToDefaultBranch(
         SyncToDefaultBranchApiRequest? body,
         IAgentBridge agentBridge,
-        WorkspaceService workspaceService,
         WorkspaceRepository workspaceRepository,
         GitHubRepositoryRepository repoRepository,
-        WorkspacePullRequestRepository workspacePullRequestRepository,
-        WorkspacePullRequestService workspacePullRequestService,
         AppDbContext dbContext,
         WorkspaceGitService workspaceGitService,
-        IHubContext<WorkspaceSyncHub> hubContext,
         ConnectorHealthService connectorHealthService,
         ILoggerFactory loggerFactory)
     {
@@ -294,17 +293,16 @@ public static class BranchEndpoints
         if (workspaceId <= 0 || repositoryId <= 0 || string.IsNullOrWhiteSpace(currentBranchName))
             return Results.BadRequest("workspaceId, repositoryId, and currentBranchName are required.");
 
-        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
-        if (workspace == null)
+        if (await workspaceRepository.GetByIdAsync(workspaceId) == null)
             return Results.NotFound("Workspace not found.");
 
         var repo = await repoRepository.GetByIdAsync(repositoryId);
         if (repo == null)
             return Results.NotFound("Repository not found.");
 
-        var wr = await dbContext.WorkspaceRepositories
-            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId);
-        if (wr == null)
+        var isLinked = await dbContext.WorkspaceRepositories
+            .AnyAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId);
+        if (!isLinked)
             return Results.NotFound("Repository is not in the given workspace.");
 
         if (!agentBridge.IsAgentConnected)
@@ -314,65 +312,23 @@ public static class BranchEndpoints
         {
             await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, CancellationToken.None);
 
-            await workspacePullRequestService.RefreshPullRequestsAsync(workspaceId, [repositoryId], force: true, CancellationToken.None);
-            var prByRepo = await workspacePullRequestRepository.GetByWorkspaceIdAsync(workspaceId, CancellationToken.None);
-            var forceDeleteLocalBranch = body.AllowForceDeleteLocalBranch
-                && prByRepo.TryGetValue(repositoryId, out var pr)
-                && (pr?.IsMerged == true || pr?.IsClosed == true);
+            // Delegates to the same service the UI uses, so both routes persist branch, version, commit
+            // counts, upstream, projects and the pull request through one writer instead of this endpoint
+            // keeping its own thinner copy of the persistence.
+            var (success, errorMessage) = await workspaceGitService.SyncToDefaultDirectAsync(
+                workspaceId,
+                repositoryId,
+                currentBranchName!,
+                deleteRemoteBranch,
+                body.AllowForceDeleteLocalBranch,
+                CancellationToken.None);
 
-            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, CancellationToken.None);
-            var args = new
-            {
-                workspaceName = workspace.Name,
-                repositoryName = repo.RepositoryName,
-                currentBranchName,
-                bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
-                workspaceRoot,
-                forceDeleteLocalBranch,
-                deleteRemoteBranch
-            };
-            var response = await agentBridge.SendCommandAsync("SyncToDefaultBranch", args, CancellationToken.None);
+            if (!success)
+                return Results.Problem(errorMessage ?? "Failed to sync to default branch", statusCode: 500);
 
-            // Agent sends success=true when command completes without throwing; actual success is in response.Data
-            var syncResponse = AgentResponseJson.DeserializeAgentResponse<SyncToDefaultBranchResponse>(response.Data);
-            var commandSuccess = syncResponse?.Success ?? response.Success;
-            var errorMessage = syncResponse?.ErrorMessage ?? response.Error ?? "Failed to sync to default branch";
+            await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, CancellationToken.None);
 
-            if (!commandSuccess)
-                return Results.Problem(errorMessage, statusCode: 500);
-
-            // Persist the full branch state returned by the agent (fetch --prune was run, so stale remote branches are gone)
-            if (syncResponse?.LocalBranches != null)
-            {
-                var localBranches = syncResponse.LocalBranches.Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
-                var remoteBranches = syncResponse.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? new List<string>();
-                var tags = syncResponse.Tags?.Where(t => !string.IsNullOrWhiteSpace(t)).ToList() ?? new List<string>();
-                await workspaceGitService.PersistBranchesAsync(
-                    wr.WorkspaceRepositoryId,
-                    localBranches,
-                    remoteBranches,
-                    syncResponse.DefaultBranch,
-                    tags,
-                    syncResponse.CurrentTag,
-                    CancellationToken.None);
-            }
-            else
-            {
-                // Fallback for older agents: prune only the previous local branch
-                var toRemove = await dbContext.RepositoryBranches
-                    .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && !rb.IsRemote && rb.BranchName == currentBranchName)
-                    .ToListAsync(CancellationToken.None);
-                if (toRemove.Count > 0)
-                {
-                    dbContext.RepositoryBranches.RemoveRange(toRemove);
-                    await dbContext.SaveChangesAsync(CancellationToken.None);
-                }
-            }
-
-            // Broadcast update to refresh UI
-            await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
-
-            return Results.Ok(response.Data);
+            return Results.Ok(new { success = true });
         }
         catch (Exception ex)
         {
@@ -451,14 +407,13 @@ public static class BranchEndpoints
                     tags,
                     refreshResponse.CurrentTag,
                     CancellationToken.None);
-                if (string.IsNullOrWhiteSpace(refreshResponse.CurrentTag))
+                // Only the agent's git-config probe may set this. Matching the branch name against the
+                // remote list marked any same-named branch as having an upstream, which showed the upstream
+                // badge on branches that had never been pushed.
+                if (refreshResponse.UpstreamProbed && string.IsNullOrWhiteSpace(refreshResponse.CurrentTag))
                 {
-                    var hasUpstream = ComputeBranchHasUpstream(refreshResponse.CurrentBranch, remoteBranches);
-                    if (hasUpstream.HasValue)
-                    {
-                        wr.BranchHasUpstream = hasUpstream.Value;
-                        await dbContext.SaveChangesAsync(CancellationToken.None);
-                    }
+                    wr.BranchHasUpstream = refreshResponse.HasUpstream;
+                    await dbContext.SaveChangesAsync(CancellationToken.None);
                 }
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
             }
@@ -942,18 +897,6 @@ public static class BranchEndpoints
         });
     }
 
-    /// <summary>Returns true if the current branch has a matching remote (e.g. origin/branchName or branchName), false otherwise. Returns null when unknown (no branch name or no remote list).</summary>
-    private static bool? ComputeBranchHasUpstream(string? currentBranchName, IReadOnlyList<string>? remoteBranches)
-    {
-        if (string.IsNullOrWhiteSpace(currentBranchName) || remoteBranches == null || remoteBranches.Count == 0)
-            return null;
-        var branch = currentBranchName.Trim();
-        var hasUpstream = remoteBranches.Any(r => !string.IsNullOrEmpty(r) &&
-            (string.Equals(r, branch, StringComparison.OrdinalIgnoreCase)
-             || string.Equals(r, "origin/" + branch, StringComparison.OrdinalIgnoreCase)
-             || r.EndsWith("/" + branch, StringComparison.OrdinalIgnoreCase)));
-        return hasUpstream;
-    }
 }
 
 public sealed class RefreshBranchesApiRequest

@@ -27,4 +27,12 @@ public sealed class RefreshBranchesResponse
 
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
+
+    /// <summary>Whether the checked-out branch has a configured upstream, read from git config rather than matched by name against the remote list.</summary>
+    [JsonPropertyName("hasUpstream")]
+    public bool? HasUpstream { get; set; }
+
+    /// <summary>False when the upstream could not be determined, in which case <see cref="HasUpstream"/> must not overwrite persisted state.</summary>
+    [JsonPropertyName("upstreamProbed")]
+    public bool UpstreamProbed { get; set; }
 }

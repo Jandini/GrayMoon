@@ -420,6 +420,9 @@ public sealed partial class WorkspaceRepositories
         var repo = wr?.Repository;
         if (wr == null || repo == null || string.IsNullOrWhiteSpace(wr.BranchName) || wr.IsOnTag)
             return;
+        if (!string.IsNullOrWhiteSpace(wr.DefaultBranchName)
+            && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.OrdinalIgnoreCase))
+            return;
 
         var repoUrl = RepositoryUrlHelper.GetRepositoryUrl(repo.CloneUrl);
         var currentBranch = wr.BranchName;

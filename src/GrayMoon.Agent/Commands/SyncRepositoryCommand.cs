@@ -33,6 +33,8 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
         IReadOnlyList<CsProjFileInfo>? projects = null;
         int? outgoingCommits = null;
         int? incomingCommits = null;
+        bool? hasUpstream = null;
+        var upstreamProbed = false;
         string? versionError = null;
         string? fetchError = null;
         if (git.DirectoryExists(repoPath))
@@ -86,13 +88,17 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
 
             if (branch != "-")
             {
-                var countsTask = git.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
+                var countsTask = git.ProbeCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
                 var vsDefaultTask = git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);
                 await Task.WhenAll(countsTask, vsDefaultTask);
-                var (outgoing, incoming, _) = await countsTask;
+                var counts = await countsTask;
                 (defaultBehind, defaultAhead, defaultBranch) = await vsDefaultTask;
-                outgoingCommits = outgoing;
-                incomingCommits = incoming;
+                outgoingCommits = counts.Outgoing;
+                incomingCommits = counts.Incoming;
+                // Sync is the flow users reach for when a row looks wrong, so it has to report the upstream
+                // flag too. Leaving it out meant a stale "no upstream" survived every sync.
+                hasUpstream = counts.HasUpstream;
+                upstreamProbed = counts.UpstreamProbed;
             }
             else if (defaultRef != null)
             {
@@ -132,7 +138,9 @@ public sealed class SyncRepositoryCommand(IGitService git, ICsProjFileService cs
                 GitVersionError = versionError,
                 GitFetchError = fetchError,
                 DefaultBranchBehind = defaultBehind,
-                DefaultBranchAhead = defaultAhead
+                DefaultBranchAhead = defaultAhead,
+                HasUpstream = hasUpstream,
+                UpstreamProbed = upstreamProbed
             };
         }
 

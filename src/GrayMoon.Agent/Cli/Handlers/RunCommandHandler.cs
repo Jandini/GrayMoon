@@ -110,6 +110,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<IAgentTokenProvider, AgentTokenProvider>();
         builder.Services.AddSingleton<ICsProjFileParser, CsProjFileParser>();
         builder.Services.AddSingleton<ICsProjFileService, CsProjFileService>();
+        builder.Services.AddSingleton<IRepositoryStateProbe, RepositoryStateProbe>();
         builder.Services.AddSingleton<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
         builder.Services.AddSingleton<CommandJobFactory>();
         builder.Services.AddSingleton<ICommandDispatcher, CommandDispatcher>();

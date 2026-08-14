@@ -30,6 +30,12 @@ public sealed class PushHookSyncCommand(IGitService git, IHubConnectionProvider 
         if (currentTag != null)
             branch = "-";
 
+        // The ref name as git knows it, which is what the deferred pass counts against and compares HEAD to.
+        // GitVersion's branch name can be escaped (slashes replaced), so it is not usable as a ref.
+        var pushedBranch = currentTag == null
+            ? await git.GetCurrentBranchNameAsync(payload.RepositoryPath, cancellationToken)
+            : null;
+
         var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)
         {
@@ -56,8 +62,10 @@ public sealed class PushHookSyncCommand(IGitService git, IHubConnectionProvider 
         }
 
         // Fire-and-forget: poll until push completes, then send final SyncCommand with real counts.
-        // Uses CancellationToken.None so it outlives the job's own token.
-        _ = SendDeferredPostPushCountsAsync(payload, branch);
+        // Uses CancellationToken.None so it outlives the job's own token. A detached HEAD has no branch to
+        // count against, so there is nothing to defer.
+        if (!string.IsNullOrWhiteSpace(pushedBranch))
+            _ = SendDeferredPostPushCountsAsync(payload, pushedBranch!);
     }
 
     /// <summary>
@@ -82,6 +90,9 @@ public sealed class PushHookSyncCommand(IGitService git, IHubConnectionProvider 
                     return;
                 }
 
+                if (!await StillOnPushedBranchAsync(repoPath, branch, payload.RepositoryId))
+                    return;
+
                 var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, CancellationToken.None);
                 var (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, branch, defaultRef, CancellationToken.None);
 
@@ -101,6 +112,10 @@ public sealed class PushHookSyncCommand(IGitService git, IHubConnectionProvider 
                 var finalTag = await git.GetCheckedOutTagAsync(repoPath, CancellationToken.None);
                 if (finalTag != null)
                     finalBranch = "-";
+
+                // GitVersion alone can take seconds, so re-check rather than trusting the check above.
+                if (!await StillOnPushedBranchAsync(repoPath, branch, payload.RepositoryId))
+                    return;
 
                 var finalNotification = new RepositorySyncNotification
                 {
@@ -128,6 +143,23 @@ public sealed class PushHookSyncCommand(IGitService git, IHubConnectionProvider 
 
         logger.LogWarning("PushHookSync deferred: gave up after {MaxChecks} attempts for workspace={WorkspaceId}, repo={RepoId}",
             maxChecks, payload.WorkspaceId, payload.RepositoryId);
+    }
+
+    /// <summary>
+    /// True while HEAD is still on the branch that was pushed. The deferred notification pairs counts taken
+    /// for that branch with a branch name read at send time, so once HEAD has moved - a checkout, or a
+    /// sync-to-default that deleted this very branch - the two disagree and sending would stamp one branch's
+    /// upstream flag and counts onto another. Whatever moved HEAD reports its own state, so this pass bails.
+    /// </summary>
+    private async Task<bool> StillOnPushedBranchAsync(string repoPath, string pushedBranch, int repositoryId)
+    {
+        var currentBranch = await git.GetCurrentBranchNameAsync(repoPath, CancellationToken.None);
+        if (string.Equals(currentBranch, pushedBranch, StringComparison.Ordinal))
+            return true;
+
+        logger.LogInformation("PushHookSync deferred: HEAD moved from {PushedBranch} to {CurrentBranch} for repo {RepoId}, dropping notification",
+            pushedBranch, currentBranch ?? "<detached>", repositoryId);
+        return false;
     }
 }
 

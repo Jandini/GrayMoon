@@ -4,7 +4,7 @@ using GrayMoon.Agent.Jobs.Response;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class RefreshBranchesCommand(IGitService git, IAgentTokenProvider tokenProvider) : ICommandHandler<RefreshBranchesRequest, RefreshBranchesResponse>
+public sealed class RefreshBranchesCommand(IGitService git, IRepositoryStateProbe stateProbe, IAgentTokenProvider tokenProvider) : ICommandHandler<RefreshBranchesRequest, RefreshBranchesResponse>
 {
     public async Task<RefreshBranchesResponse> ExecuteAsync(RefreshBranchesRequest request, CancellationToken cancellationToken = default)
     {
@@ -43,23 +43,25 @@ public sealed class RefreshBranchesCommand(IGitService git, IAgentTokenProvider 
             }
         }
 
-        var localBranches = await git.GetLocalBranchesAsync(repoPath, cancellationToken);
-        var remoteBranches = await git.GetRemoteBranchesFromRefsAsync(repoPath, cancellationToken);
-        var defaultBranch = await git.GetDefaultBranchNameAsync(repoPath, cancellationToken);
-        var currentBranch = await git.GetCurrentBranchNameAsync(repoPath, cancellationToken);
-        var tags = await git.GetTagsAsync(repoPath, cancellationToken);
-        var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
+        // The probe reports the branch's git-configured upstream alongside the lists, so read-only fetch
+        // flows get the same answer the hook and sync flows do instead of matching names against remotes.
+        var (state, _) = await stateProbe.CaptureAsync(repoPath, new RepositoryStateProbeOptions
+        {
+            IncludeBranchLists = true
+        }, cancellationToken);
 
         return new RefreshBranchesResponse
         {
             Success = true,
-            LocalBranches = localBranches,
-            RemoteBranches = remoteBranches,
+            LocalBranches = state.LocalBranches ?? [],
+            RemoteBranches = state.RemoteBranches ?? [],
             // When on a tag (detached HEAD), don't echo a fake branch name.
-            CurrentBranch = currentTag == null ? currentBranch : null,
-            DefaultBranch = defaultBranch,
-            Tags = tags,
-            CurrentTag = currentTag
+            CurrentBranch = state.BranchName,
+            DefaultBranch = state.DefaultBranchName,
+            Tags = state.Tags ?? [],
+            CurrentTag = state.CheckedOutTag,
+            HasUpstream = state.HasUpstream,
+            UpstreamProbed = state.UpstreamProbed
         };
     }
 }

@@ -34,16 +34,22 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git, IAgentToken
 
             int? defaultBehind = null;
             int? defaultAhead = null;
+            bool? hasUpstream = null;
             if (branch != "-")
             {
                 var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
-                var countsTask = git.GetCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
+                var countsTask = git.ProbeCommitCountsAsync(repoPath, branch, defaultRef, cancellationToken);
                 var vsDefaultTask = git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);
                 await Task.WhenAll(countsTask, vsDefaultTask);
-                var (outgoing, incoming, _) = await countsTask;
+                var counts = await countsTask;
                 (defaultBehind, defaultAhead, _) = await vsDefaultTask;
-                outgoingCommits = outgoing;
-                incomingCommits = incoming;
+                outgoingCommits = counts.Outgoing;
+                incomingCommits = counts.Incoming;
+                // Upstream comes from the branch's git-configured upstream. Matching the branch name against
+                // the remote list, as this used to, called any branch that merely shares a name with a remote
+                // ref upstreamed, and said nothing at all when the remote list came back empty.
+                if (counts.UpstreamProbed)
+                    hasUpstream = counts.HasUpstream;
             }
 
             string? token = null;
@@ -54,9 +60,6 @@ public sealed class RefreshRepositoryVersionCommand(IGitService git, IAgentToken
                 ? Array.Empty<string>()
                 : await git.GetRemoteBranchesAsync(repoPath, token, cancellationToken);
             var localBranches = await git.GetLocalBranchesAsync(repoPath, cancellationToken);
-            bool? hasUpstream = null;
-            if (branch != "-" && remoteBranches.Count > 0)
-                hasUpstream = remoteBranches.Any(r => string.Equals(r, branch, StringComparison.OrdinalIgnoreCase));
 
             return new RefreshRepositoryVersionResponse
             {

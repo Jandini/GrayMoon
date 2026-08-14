@@ -17,9 +17,14 @@
             var ahead = DefaultAhead ?? 0;
             var hasRepoUrl = !string.IsNullOrWhiteSpace(RepositoryUrl);
             var hasDefaultBranch = !string.IsNullOrWhiteSpace(DefaultBranchName);
+            // On the default branch, behind vs origin/default is the same as incoming vs upstream.
+            // Pull already handles that; "update from default" would merge a branch into itself.
+            var isOnDefault = hasDefaultBranch
+                && !string.IsNullOrWhiteSpace(BranchName)
+                && string.Equals(BranchName, DefaultBranchName, StringComparison.OrdinalIgnoreCase);
             string? aheadUrl = null;
             string? behindUrl = null;
-            if (hasRepoUrl && hasDefaultBranch && !string.IsNullOrWhiteSpace(BranchName))
+            if (hasRepoUrl && hasDefaultBranch && !string.IsNullOrWhiteSpace(BranchName) && !isOnDefault)
             {
                 var encDefault = Uri.EscapeDataString(DefaultBranchName!);
                 var encBranch = Uri.EscapeDataString(BranchName);
@@ -41,7 +46,7 @@
                     ? "This branch is 1 commit behind the default branch"
                     : $"This branch is {behind} commits behind the default branch");
 
-            @if (behind > 0 && OnUpdateBranchClick.HasDelegate)
+            @if (behind > 0 && !isOnDefault && OnUpdateBranchClick.HasDelegate)
             {
                 <button type="button" class="divergence-link divergence-link-behind divergence-link-behind--actionable" title="@behindTitle" @onclick="OnUpdateBranchClick">@behind</button>
             }
@@ -74,6 +79,6 @@
     [Parameter] public string? DefaultBranchName { get; set; }
     /// <summary>True when the repository is checked out at a tag (detached HEAD); divergence vs. default branch is not meaningful, render blank.</summary>
     [Parameter] public bool IsOnTag { get; set; }
-    /// <summary>When set, the behind count renders as an actionable red button that invokes this callback instead of opening GitHub.</summary>
+    /// <summary>When set, the behind count on a non-default branch renders as an actionable red button that invokes this callback instead of opening GitHub. Ignored when the current branch is the default branch - that case is a pull, not an update-from-default.</summary>
     [Parameter] public EventCallback OnUpdateBranchClick { get; set; }
 }

@@ -117,6 +117,42 @@ public sealed partial class WorkspaceRepositories
         var snapshots = await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId);
         return snapshots.Select(WorkspaceRepositoryLinkListMapper.ToLink).ToList();
     }
+
+    /// <summary>The persisted link plus pull request for each of the given repositories, read straight from the database.</summary>
+    /// <remarks>
+    /// Unlike <see cref="TryGetLink"/> and <see cref="TryGetLinkAsync"/> this never serves the grid's
+    /// in-memory cache. Eligibility and safety decisions for an action must see what the state writer just
+    /// persisted; the cache is only as fresh as the last render, so filtering on it is how a repository that
+    /// has already moved to its default branch still gets queued for another sync.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<int, FreshLinkState>> GetFreshLinkStatesAsync(IReadOnlyCollection<int> repositoryIds)
+    {
+        if (repositoryIds.Count == 0)
+            return new Dictionary<int, FreshLinkState>();
+
+        var wanted = repositoryIds.ToHashSet();
+        var snapshots = await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId);
+        return snapshots
+            .Where(dto => wanted.Contains(dto.RepositoryId))
+            .ToDictionary(
+                dto => dto.RepositoryId,
+                dto => new FreshLinkState(
+                    WorkspaceRepositoryLinkListMapper.ToLink(dto),
+                    WorkspaceRepositoryLinkListMapper.ToPullRequestInfo(dto)));
+    }
+
+    private sealed record FreshLinkState(WorkspaceRepositoryLink Link, PullRequestInfo? PullRequest)
+    {
+        /// <summary>True when the branch's pull request is merged or closed, which is what makes discarding the branch safe even with commits ahead of default.</summary>
+        public bool IsPullRequestMergedOrClosed =>
+            PullRequest != null && (PullRequest.IsMerged || string.Equals(PullRequest.State, "closed", StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>True when the repository is on a branch other than its default and so has somewhere to sync to.</summary>
+        public bool NeedsSyncToDefault =>
+            !Link.IsOnTag
+            && !string.IsNullOrWhiteSpace(Link.BranchName)
+            && !string.Equals(Link.BranchName, Link.DefaultBranchName, StringComparison.Ordinal);
+    }
     private Task<IReadOnlyList<int>> GetRepositoryIdsAtLevelAsync(int? levelKey) =>
         LinkListQueryService.GetRepositoryIdsAtLevelAsync(WorkspaceId, levelKey, _effectiveSearch);
     private WorkspaceRepositoryLink? FindLink(IReadOnlyList<WorkspaceRepositoryLink> links, int repositoryId) =>

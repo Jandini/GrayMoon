@@ -12,7 +12,7 @@ namespace GrayMoon.Agent.Commands;
 /// upstream/default comparisons correct without paying the cost of a full fetch of all branches
 /// and tags (full fetch is done by Sync and branch list flows).
 /// </summary>
-public sealed class CheckoutHookSyncCommand(IGitService git, ICsProjFileService csProjFileService, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<CheckoutHookSyncCommand> logger)
+public sealed class CheckoutHookSyncCommand(IGitService git, IRepositoryStateProbe stateProbe, IAgentTokenProvider tokenProvider, IHubConnectionProvider hubProvider, ILogger<CheckoutHookSyncCommand> logger)
 {
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
@@ -22,9 +22,8 @@ public sealed class CheckoutHookSyncCommand(IGitService git, ICsProjFileService 
             return;
         }
 
-        // Resolve default origin ref once so minimal fetch and commit-count calls share it.
+        // Resolve default origin ref once so minimal fetch and the probe's commit-count calls share it.
         var defaultRef = await git.GetDefaultBranchOriginRefAsync(payload.RepositoryPath, cancellationToken);
-        var findProjectsTask = csProjFileService.FindAsync(payload.RepositoryPath, cancellationToken);
 
         // Resolve the current branch cheaply (before running GitVersion) so the minimal fetch below can
         // target this branch's own configured upstream, not just the default branch. Using a placeholder
@@ -47,20 +46,25 @@ public sealed class CheckoutHookSyncCommand(IGitService git, ICsProjFileService 
                 fetchError = err;
         }
 
-        // Run GitVersion after minimal fetch, with /nofetch and /nonormalize for faster execution.
-        var (versionResult, _) = await git.GetVersionAsync(payload.RepositoryPath, nonNormalize: true, cancellationToken);
-        var version = versionResult?.InformationalVersion ?? "-";
-        var branch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? "-";
-
-        // Detect detached HEAD / tag state. When on a tag, GitVersion's BranchName is "(no branch)";
-        // we treat that as no branch and report Tag instead so the UI can gate writes.
-        var currentTag = await git.GetCheckedOutTagAsync(payload.RepositoryPath, cancellationToken);
-        if (currentTag != null)
-            branch = "-";
+        // One probe for version, branch/tag, commit counts, upstream and projects. HasUpstream comes from
+        // the branch's actual git-configured upstream (refreshed by the fetch above), not from whether a
+        // local remote-tracking ref happens to already exist - that local-ref check could report "no
+        // upstream" for a branch that does have one configured but whose ref this clone hadn't fetched yet,
+        // resetting a correct BranchHasUpstream=true (e.g. set right after a push) back to false.
+        var (state, _) = await stateProbe.CaptureAsync(payload.RepositoryPath, new RepositoryStateProbeOptions
+        {
+            IncludeGitVersion = true,
+            GitVersionNonNormalize = true,
+            IncludeProjects = true,
+            // Remote branches let the app prune deleted ones; the full branch/tag lists are the Sync flow's job.
+            IncludeRemoteBranchesOnly = true,
+            DefaultBranchOriginRef = defaultRef,
+            ErrorMessage = fetchError
+        }, cancellationToken);
 
         // When on a tag, fetch remote tags so the app can compare and show an "upgrade" badge.
         IReadOnlyList<string>? remoteTags = null;
-        if (currentTag != null && token != null)
+        if (state.CheckedOutTag != null && token != null)
         {
             var (fetchTagsSuccess, fetchTagsError) = await git.FetchTagsAsync(payload.RepositoryPath, token, cancellationToken);
             if (!fetchTagsSuccess)
@@ -68,51 +72,9 @@ public sealed class CheckoutHookSyncCommand(IGitService git, ICsProjFileService 
             remoteTags = await git.GetTagsAsync(payload.RepositoryPath, cancellationToken);
         }
 
-        int? outgoing = null;
-        int? incoming = null;
-        int? defaultBehind = null;
-        int? defaultAhead = null;
-        bool? hasUpstream = null;
-        IReadOnlyList<string>? remoteBranches = null;
-        if (branch != "-")
-        {
-            // HasUpstream comes from GetCommitCountsAsync's own GetUpstreamRefAsync check (the branch's actual
-            // git-configured upstream, refreshed by the fetch above), not from whether a local remote-tracking
-            // ref happens to already exist - that local-ref check could report "no upstream" for a branch that
-            // does have one configured but whose ref this clone hadn't fetched yet, resetting a correct
-            // BranchHasUpstream=true (e.g. set right after a push) back to false on the next checkout.
-            var (o, i, hu) = await git.GetCommitCountsAsync(payload.RepositoryPath, branch, defaultRef, cancellationToken);
-            outgoing = o;
-            incoming = i;
-            hasUpstream = hu;
-            var (db, da, _) = await git.GetCommitCountsVsDefaultAsync(payload.RepositoryPath, defaultRef, cancellationToken);
-            defaultBehind = db;
-            defaultAhead = da;
-
-            // Still needed (separately from HasUpstream) so the app can prune deleted remote branches from the DB.
-            remoteBranches = await git.GetRemoteBranchesFromRefsAsync(payload.RepositoryPath, cancellationToken);
-        }
-
-        var projects = await findProjectsTask;
-        var syncProjects = projects?
-            .Where(p => !string.IsNullOrWhiteSpace(p.Name))
-            .Select(p => new RepositorySyncProjectNotification
-            {
-                Name = p.Name.Trim(),
-                ProjectType = (int)p.ProjectType,
-                ProjectPath = p.ProjectPath ?? "",
-                TargetFramework = p.TargetFramework ?? "",
-                PackageId = p.PackageId,
-                PackageReferences = p.PackageReferences
-                    .Where(pr => !string.IsNullOrWhiteSpace(pr.Name))
-                    .Select(pr => new RepositorySyncPackageReferenceNotification
-                    {
-                        Name = pr.Name.Trim(),
-                        Version = pr.Version ?? ""
-                    })
-                    .ToList()
-            })
-            .ToList();
+        var version = state.GitVersion ?? "-";
+        var branch = state.BranchName ?? "-";
+        var remoteBranches = fetchError == null ? state.RemoteBranches : null;
 
         var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)
@@ -123,22 +85,23 @@ public sealed class CheckoutHookSyncCommand(IGitService git, ICsProjFileService 
                 RepositoryId = payload.RepositoryId,
                 Version = version,
                 Branch = branch,
-                Tag = currentTag,
-                OutgoingCommits = outgoing,
-                IncomingCommits = incoming,
-                HasUpstream = hasUpstream,
-                DefaultBranchBehind = defaultBehind,
-                DefaultBranchAhead = defaultAhead,
-                Projects = syncProjects,
+                Tag = state.CheckedOutTag,
+                OutgoingCommits = state.OutgoingCommits,
+                IncomingCommits = state.IncomingCommits,
+                HasUpstream = state.HasUpstream,
+                DefaultBranchBehind = state.DefaultBranchBehind,
+                DefaultBranchAhead = state.DefaultBranchAhead,
+                Projects = state.Projects,
                 ErrorMessage = fetchError,
                 // Include remote branches when fetch succeeded so the app can prune deleted remote branches from the DB
-                RemoteBranches = fetchError == null && remoteBranches != null ? remoteBranches.ToList() : null,
+                RemoteBranches = remoteBranches,
                 // Include tag list when on a tag so the app can persist tags and compute HasNewerTag
-                RemoteTags = remoteTags?.ToList()
+                RemoteTags = remoteTags?.ToList(),
+                State = state
             };
             await connection.InvokeAsync(AgentHubMethods.SyncCommand, notification, cancellationToken);
             logger.LogInformation("CheckoutHookSync sent: workspace={WorkspaceId}, repo={RepoId}, version={Version}, branch={Branch}, ↑{Outgoing} ↓{Incoming}, hasUpstream={HasUpstream}",
-                payload.WorkspaceId, payload.RepositoryId, version, branch, outgoing, incoming, hasUpstream);
+                payload.WorkspaceId, payload.RepositoryId, version, branch, state.OutgoingCommits, state.IncomingCommits, state.HasUpstream);
         }
         else
         {

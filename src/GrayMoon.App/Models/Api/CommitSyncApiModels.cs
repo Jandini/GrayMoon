@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using GrayMoon.Abstractions.Notifications;
 
 namespace GrayMoon.App.Models.Api;
 
@@ -23,6 +24,19 @@ public sealed class CommitSyncResponse
     [JsonPropertyName("incomingCommits")]
     public int? IncomingCommits { get; set; }
 
+    [JsonPropertyName("defaultBranchBehind")]
+    public int? DefaultBranchBehind { get; set; }
+
+    [JsonPropertyName("defaultBranchAhead")]
+    public int? DefaultBranchAhead { get; set; }
+
+    [JsonPropertyName("hasUpstream")]
+    public bool? HasUpstream { get; set; }
+
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
+
+    /// <summary>Full post-pull state. Null from agents that predate it, in which case only the flat count fields are usable.</summary>
+    [JsonPropertyName("state")]
+    public RepositoryStateSnapshot? State { get; set; }
 }

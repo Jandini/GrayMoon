@@ -7,6 +7,22 @@ using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services;
 
+/// <summary>What happened when a repository's pull request state was refreshed.</summary>
+public enum PullRequestRefreshOutcome
+{
+    /// <summary>GitHub answered and the row was rewritten.</summary>
+    Refreshed,
+
+    /// <summary>A recent lookup for the same branch was reused; the row is unchanged and still current.</summary>
+    CacheHit,
+
+    /// <summary>The repository cannot have a pull request (no branch checked out) and the row was cleared.</summary>
+    Cleared,
+
+    /// <summary>The lookup threw. The persisted row is stale and the caller should treat the PR state as unknown.</summary>
+    Failed,
+}
+
 /// <summary>Single service for PR persistence and refresh. Fetches via GitHub API and persists via WorkspacePullRequestRepository.</summary>
 public sealed class WorkspacePullRequestService(
     WorkspacePullRequestRepository pullRequestRepository,
@@ -26,10 +42,18 @@ public sealed class WorkspacePullRequestService(
         return await pullRequestRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
     }
 
-    /// <summary>Fetches PR from API for the given repos and persists. Call after sync, refresh, push, or hooks.</summary>
-    public async Task RefreshPullRequestsAsync(int workspaceId, IReadOnlyList<int> repositoryIds, bool force = false, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Fetches PR state from the API for the given repos and persists it. Call after sync, refresh, push, or hooks.
+    /// Returns the outcome per repository so callers can tell "there is no PR" apart from "we could not find out".
+    /// </summary>
+    public async Task<IReadOnlyDictionary<int, PullRequestRefreshOutcome>> RefreshPullRequestsAsync(
+        int workspaceId,
+        IReadOnlyList<int> repositoryIds,
+        bool force = false,
+        CancellationToken cancellationToken = default)
     {
-        if (repositoryIds.Count == 0) return;
+        var outcomes = new Dictionary<int, PullRequestRefreshOutcome>();
+        if (repositoryIds.Count == 0) return outcomes;
 
         var links = await dbContext.WorkspaceRepositories
             .AsNoTracking()
@@ -38,8 +62,17 @@ public sealed class WorkspacePullRequestService(
             .Where(wr => wr.WorkspaceId == workspaceId && repositoryIds.Contains(wr.RepositoryId))
             .ToListAsync(cancellationToken);
 
+        // A repository with no branch checked out (or pinned to a tag) cannot have a pull request, so
+        // clear the row rather than skipping it and leaving the previous branch's badge on screen.
+        var toClear = links.Where(wr => wr.Repository == null || string.IsNullOrWhiteSpace(wr.BranchName)).ToList();
+        foreach (var wr in toClear)
+        {
+            await pullRequestRepository.UpsertAsync(wr.WorkspaceRepositoryId, null, cancellationToken);
+            outcomes[wr.RepositoryId] = PullRequestRefreshOutcome.Cleared;
+        }
+
         var toRefresh = links.Where(wr => wr.Repository != null && !string.IsNullOrWhiteSpace(wr.BranchName)).ToList();
-        if (toRefresh.Count == 0) return;
+        if (toRefresh.Count == 0) return outcomes;
 
         using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
         var fetchTasks = toRefresh.Select(async wr =>
@@ -52,17 +85,17 @@ public sealed class WorkspacePullRequestService(
                 if (!force && _cache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow - cached.FetchedAt < CacheTtl)
                 {
                     logger.LogTrace("PR cache hit for repo {RepositoryId}, branch {Branch}", wr.RepositoryId, branch);
-                    return (Wr: wr, Pr: (PullRequestInfo?)null, Skip: true);
+                    return (Wr: wr, Pr: (PullRequestInfo?)null, Outcome: PullRequestRefreshOutcome.CacheHit);
                 }
 
                 var pr = await gitHubPullRequestService.GetPullRequestForBranchAsync(wr.Repository!, wr.Repository!.Connector, branch, cancellationToken);
                 _cache[cacheKey] = (pr, DateTime.UtcNow);
-                return (Wr: wr, Pr: pr, Skip: false);
+                return (Wr: wr, Pr: pr, Outcome: PullRequestRefreshOutcome.Refreshed);
             }
             catch (Exception ex)
             {
-                logger.LogDebug(ex, "RefreshPullRequest failed. WorkspaceId={WorkspaceId}, RepositoryId={RepositoryId}", workspaceId, wr.RepositoryId);
-                return (Wr: wr, Pr: (PullRequestInfo?)null, Skip: true);
+                logger.LogWarning(ex, "RefreshPullRequest failed. WorkspaceId={WorkspaceId}, RepositoryId={RepositoryId}", workspaceId, wr.RepositoryId);
+                return (Wr: wr, Pr: (PullRequestInfo?)null, Outcome: PullRequestRefreshOutcome.Failed);
             }
             finally
             {
@@ -71,10 +104,36 @@ public sealed class WorkspacePullRequestService(
         });
         var fetched = await Task.WhenAll(fetchTasks);
 
-        foreach (var result in fetched.Where(r => !r.Skip))
-            await pullRequestRepository.UpsertAsync(result.Wr.WorkspaceRepositoryId, result.Pr, cancellationToken);
+        foreach (var result in fetched)
+        {
+            outcomes[result.Wr.RepositoryId] = result.Outcome;
+            if (result.Outcome == PullRequestRefreshOutcome.Refreshed)
+                await pullRequestRepository.UpsertAsync(result.Wr.WorkspaceRepositoryId, result.Pr, cancellationToken);
+        }
 
         logger.LogTrace("Refreshed PR for {Count} repo(s) in workspace {WorkspaceId}", toRefresh.Count, workspaceId);
+        return outcomes;
+    }
+
+    /// <summary>Clears the persisted pull request for a repository without contacting GitHub. Used when the checked-out branch cannot have one (default branch, tag, or no branch at all).</summary>
+    public async Task ClearPullRequestAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
+    {
+        var workspaceRepositoryId = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Where(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId)
+            .Select(wr => wr.WorkspaceRepositoryId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (workspaceRepositoryId == 0)
+            return;
+
+        await pullRequestRepository.UpsertAsync(workspaceRepositoryId, null, cancellationToken);
+    }
+
+    /// <summary>Drops every cached PR lookup for a repository. Call on branch change so the old branch's entry cannot be served after a later checkout back onto it.</summary>
+    public void EvictCacheForRepository(int repositoryId)
+    {
+        foreach (var key in _cache.Keys.Where(k => k.RepoId == repositoryId).ToList())
+            _cache.TryRemove(key, out _);
     }
 
     /// <summary>Closes an open pull request for the given repository. Looks up the connector from the workspace link and calls GitHub API. Logs and returns silently on error.</summary>

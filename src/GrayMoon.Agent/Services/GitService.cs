@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Models;
 using Microsoft.Extensions.Logging;
@@ -272,27 +273,33 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return (true, null);
         }
 
-        var refArgs = string.Join(" ", refsToFetch);
-
-        string args;
-        var logArgs = "";
-        if (string.IsNullOrWhiteSpace(bearerToken))
-        {
-            args = $"fetch origin --prune {refArgs}";
-            logArgs = args;
-        }
-        else
-        {
-            args = $"{BuildAuthHeaderArgs(bearerToken)} fetch origin --prune {refArgs}";
-            logArgs = "***";
-        }
-
-        logger.LogDebug("Git minimal fetch invoking git for {RepoPath}. Args={Args}, Refs={Refs}", repoPath, logArgs, string.Join(", ", refsToFetch));
-
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await runner.MinimalFetchPipeline.ExecuteAsync(
-            async cancellationToken => await runner.RunAsync("git", args, repoPath, cancellationToken),
-            ct);
+        var (exitCode, stdout, stderr) = await RunMinimalFetchAsync(repoPath, refsToFetch, bearerToken, ct);
+
+        // A branch whose remote counterpart has been deleted keeps its upstream in git config, so it lands
+        // in the ref list and takes the whole fetch down with it ("couldn't find remote ref demo"). The
+        // branch simply not existing on the remote is state to report, not a failure to surface on the row,
+        // so drop those refs and fetch what is left.
+        if (exitCode != 0)
+        {
+            var missing = ParseMissingRemoteRefs(CombineOutput(stdout, stderr));
+            if (missing.Count > 0)
+            {
+                var remaining = refsToFetch.Where(r => !missing.Contains(r, StringComparer.OrdinalIgnoreCase)).ToList();
+                logger.LogInformation("Git minimal fetch for {RepoPath}: remote ref(s) {Missing} no longer exist, retrying with {Remaining}",
+                    repoPath, string.Join(", ", missing), remaining.Count == 0 ? "<none>" : string.Join(", ", remaining));
+
+                if (remaining.Count == 0)
+                {
+                    sw.Stop();
+                    return (true, null);
+                }
+
+                refsToFetch = remaining;
+                (exitCode, stdout, stderr) = await RunMinimalFetchAsync(repoPath, refsToFetch, bearerToken, ct);
+            }
+        }
+
         sw.Stop();
         logger.LogDebug("Git minimal fetch git process completed for {RepoPath} in {ElapsedMs}ms. ExitCode={ExitCode}", repoPath, sw.ElapsedMilliseconds, exitCode);
         if (exitCode != 0)
@@ -306,13 +313,59 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, null);
     }
 
+    private async Task<(int ExitCode, string? Stdout, string? Stderr)> RunMinimalFetchAsync(string repoPath, IReadOnlyList<string> refsToFetch, string? bearerToken, CancellationToken ct)
+    {
+        var refArgs = string.Join(" ", refsToFetch);
+        var args = string.IsNullOrWhiteSpace(bearerToken)
+            ? $"fetch origin --prune {refArgs}"
+            : $"{BuildAuthHeaderArgs(bearerToken)} fetch origin --prune {refArgs}";
+
+        logger.LogDebug("Git minimal fetch invoking git for {RepoPath}. Args={Args}, Refs={Refs}",
+            repoPath, string.IsNullOrWhiteSpace(bearerToken) ? args : "***", string.Join(", ", refsToFetch));
+
+        return await runner.MinimalFetchPipeline.ExecuteAsync(
+            async cancellationToken => await runner.RunAsync("git", args, repoPath, cancellationToken),
+            ct);
+    }
+
+    /// <summary>Ref names git reported as absent on the remote, from "couldn't find remote ref &lt;name&gt;" lines.</summary>
+    internal static List<string> ParseMissingRemoteRefs(string? output)
+    {
+        var missing = new List<string>();
+        if (string.IsNullOrWhiteSpace(output))
+            return missing;
+
+        foreach (Match match in MissingRemoteRefRegex.Matches(output))
+        {
+            var name = match.Groups[1].Value.Trim().TrimEnd('.', ',', ';', '\'', '"');
+            if (name.StartsWith("refs/heads/", StringComparison.OrdinalIgnoreCase))
+                name = name.Substring("refs/heads/".Length);
+            if (name.Length > 0 && !missing.Contains(name, StringComparer.OrdinalIgnoreCase))
+                missing.Add(name);
+        }
+
+        return missing;
+    }
+
+    private static readonly Regex MissingRemoteRefRegex = new(
+        @"couldn't find remote ref (\S+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     public async Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false)
     {
+        var probe = await ProbeCommitCountsAsync(repoPath, branchName, defaultBranchOriginRef, ct, skipUpstreamCheck);
+        return (probe.Outgoing, probe.Incoming, probe.HasUpstream);
+    }
+
+    public async Task<CommitCountsProbeResult> ProbeCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false)
+    {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
-            return (null, null, false);
+            return CommitCountsProbeResult.Unknown;
 
         var sw = Stopwatch.StartNew();
 
+        // Whether the branch has a configured upstream is only knowable when we actually ask git for it.
+        var upstreamProbed = !skipUpstreamCheck;
         var upstreamRef = skipUpstreamCheck ? null : await GetUpstreamRefAsync(repoPath, branchName, ct);
         if (string.IsNullOrWhiteSpace(upstreamRef))
         {
@@ -320,20 +373,20 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             if (defaultBranch == null)
             {
                 logger.LogDebug("No configured upstream for branch {Branch} and no default branch found for {RepoPath}, skipping commit counts", branchName, repoPath);
-                return (null, null, false);
+                return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
             }
 
             var (exitDefault, stdoutDefault, stderrDefault) = await runner.RunAsync("git", $"rev-list --count {defaultBranch}..HEAD", repoPath, ct);
             if (exitDefault != 0)
             {
                 logger.LogWarning("Git rev-list (outgoing vs default branch) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitDefault, stdoutDefault, stderrDefault);
-                return (null, null, false);
+                return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
             }
 
             var aheadCount = int.TryParse((stdoutDefault ?? "").Trim(), out var ahead) ? ahead : (int?)null;
             sw.Stop();
             logger.LogDebug("GetCommitCounts (vs default branch, no upstream) completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
-            return (aheadCount, null, false);
+            return new CommitCountsProbeResult(aheadCount, null, false, CountsProbed: true, UpstreamProbed: upstreamProbed);
         }
 
         var originBranch = upstreamRef!;
@@ -345,20 +398,20 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             if (defaultBranch == null)
             {
                 logger.LogDebug("Configured upstream for {Branch}, but remote {OriginBranch} not found and no default branch for {RepoPath}, skipping commit counts", branchName, originBranch, repoPath);
-                return (null, null, false);
+                return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
             }
 
             var (exitDefault, stdoutDefault, stderrDefault) = await runner.RunAsync("git", $"rev-list --count {defaultBranch}..HEAD", repoPath, ct);
             if (exitDefault != 0)
             {
                 logger.LogWarning("Git rev-list (outgoing vs default branch) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitDefault, stdoutDefault, stderrDefault);
-                return (null, null, false);
+                return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
             }
 
             var aheadCount = int.TryParse((stdoutDefault ?? "").Trim(), out var ahead) ? ahead : (int?)null;
             sw.Stop();
             logger.LogDebug("GetCommitCounts (vs default branch, missing remote upstream) completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
-            return (aheadCount, null, false);
+            return new CommitCountsProbeResult(aheadCount, null, false, CountsProbed: true, UpstreamProbed: upstreamProbed);
         }
 
         // Single atomic call: left=incoming (in originBranch not HEAD), right=outgoing (in HEAD not originBranch).
@@ -366,7 +419,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (exitLR != 0)
         {
             logger.LogWarning("Git rev-list --left-right (commit counts) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitLR, stdoutLR, stderrLR);
-            return (null, null, true);
+            return new CommitCountsProbeResult(null, null, true, CountsProbed: false, UpstreamProbed: upstreamProbed);
         }
 
         var parts = (stdoutLR ?? "").Trim().Split('\t', StringSplitOptions.RemoveEmptyEntries);
@@ -374,7 +427,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var outVal = parts.Length >= 2 && int.TryParse(parts[1], out var oc) ? oc : (int?)null;
         sw.Stop();
         logger.LogDebug("GetCommitCounts completed in {ElapsedMs}ms for {RepoPath} (up{Outgoing} dn{Incoming})", sw.ElapsedMilliseconds, repoPath, outVal, inVal);
-        return (outVal, inVal, true);
+        return new CommitCountsProbeResult(outVal, inVal, true, CountsProbed: true, UpstreamProbed: upstreamProbed);
     }
 
     public async Task<(int? DefaultBehind, int? DefaultAhead, string? DefaultBranchName)> GetCommitCountsVsDefaultAsync(string repoPath, string? defaultBranchOriginRef, CancellationToken ct)
@@ -713,7 +766,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return (true, null);
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct)
+    public async Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (false, "Invalid repository path or branch name");
@@ -725,8 +778,9 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 name = name.Substring("origin/".Length);
             if (string.IsNullOrWhiteSpace(name))
                 return (false, "Invalid branch name");
+            var hooksPrefix = GetHooksConfigPrefix(skipHooks);
             var (exitCode, stdout, stderr) = await runner.PushPipeline.ExecuteAsync(
-                async cancellationToken => await runner.RunAsync("git", $"push origin --delete {name}", repoPath, cancellationToken),
+                async cancellationToken => await runner.RunAsync("git", $"{hooksPrefix}push origin --delete {name}", repoPath, cancellationToken),
                 ct);
             if (exitCode != 0)
             {

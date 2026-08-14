@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class SyncToDefaultBranchCommand(IGitService git, ICsProjFileService csProjFileService, ILogger<SyncToDefaultBranchCommand> logger) : ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse>
+public sealed class SyncToDefaultBranchCommand(IGitService git, IRepositoryStateProbe stateProbe, ILogger<SyncToDefaultBranchCommand> logger) : ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse>
 {
     public async Task<SyncToDefaultBranchResponse> ExecuteAsync(SyncToDefaultBranchRequest request, CancellationToken cancellationToken = default)
     {
@@ -36,10 +36,13 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, ICsProjFileServi
             };
         }
 
-        // If the user confirmed remote branch deletion, delete it before fetch so --prune removes the tracking ref
+        // If the user confirmed remote branch deletion, delete it before fetch so --prune removes the tracking ref.
+        // Skip hooks: a delete is still a push, so the pre-push hook would queue a PushHookSync for the branch
+        // this flow is about to abandon. That job polls for a couple of seconds and then reports counts for the
+        // deleted branch, landing after this command's own authoritative snapshot and overwriting it.
         if (request.DeleteRemoteBranch && !string.Equals(currentBranchName, defaultBranch, StringComparison.OrdinalIgnoreCase))
         {
-            var (remoteDeleteOk, remoteDeleteErr) = await git.DeleteBranchAsync(repoPath, currentBranchName, isRemote: true, force: false, cancellationToken);
+            var (remoteDeleteOk, remoteDeleteErr) = await git.DeleteBranchAsync(repoPath, currentBranchName, isRemote: true, force: false, cancellationToken, skipHooks: true);
             if (!remoteDeleteOk)
                 logger.LogWarning("Remote branch delete failed for {Branch} in {RepoPath}: {Error}", currentBranchName, repoPath, remoteDeleteErr);
         }
@@ -91,36 +94,31 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, ICsProjFileServi
             };
         }
 
-        var defaultRef = await git.GetDefaultBranchOriginRefAsync(repoPath, cancellationToken);
-        var (outgoing, incoming, hasUpstream) = await git.GetCommitCountsAsync(repoPath, defaultBranch, defaultRef, cancellationToken);
-        var (defaultBehind, defaultAhead, _) = await git.GetCommitCountsVsDefaultAsync(repoPath, defaultRef, cancellationToken);
-
-        var localBranches = await git.GetLocalBranchesAsync(repoPath, cancellationToken);
-        var remoteBranches = await git.GetRemoteBranchesFromRefsAsync(repoPath, cancellationToken);
-        var tags = await git.GetTagsAsync(repoPath, cancellationToken);
-        var currentTag = await git.GetCheckedOutTagAsync(repoPath, cancellationToken);
-
-        var (versionResult, _) = await git.GetVersionAsync(repoPath, cancellationToken);
-        var gitVersion = versionResult?.InformationalVersion;
-
-        var projects = await csProjFileService.FindAsync(repoPath, cancellationToken);
+        var (state, rawProjects) = await stateProbe.CaptureAsync(repoPath, new RepositoryStateProbeOptions
+        {
+            IncludeGitVersion = true,
+            IncludeBranchLists = true,
+            IncludeProjects = true,
+            BranchNameOverride = defaultBranch
+        }, cancellationToken);
 
         return new SyncToDefaultBranchResponse
         {
             Success = true,
-            CurrentBranch = defaultBranch,
-            DefaultBranch = defaultBranch,
-            LocalBranches = localBranches,
-            RemoteBranches = remoteBranches,
-            Tags = tags,
-            CurrentTag = currentTag,
-            OutgoingCommits = outgoing,
-            IncomingCommits = incoming,
-            HasUpstream = hasUpstream,
-            DefaultBranchBehind = defaultBehind,
-            DefaultBranchAhead = defaultAhead,
-            GitVersion = gitVersion,
-            Projects = projects
+            CurrentBranch = state.BranchName ?? defaultBranch,
+            DefaultBranch = state.DefaultBranchName ?? defaultBranch,
+            LocalBranches = state.LocalBranches,
+            RemoteBranches = state.RemoteBranches,
+            Tags = state.Tags,
+            CurrentTag = state.CheckedOutTag,
+            OutgoingCommits = state.OutgoingCommits,
+            IncomingCommits = state.IncomingCommits,
+            HasUpstream = state.HasUpstream,
+            DefaultBranchBehind = state.DefaultBranchBehind,
+            DefaultBranchAhead = state.DefaultBranchAhead,
+            GitVersion = state.GitVersion,
+            Projects = rawProjects,
+            State = state
         };
     }
 }

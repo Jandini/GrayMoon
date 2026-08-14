@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using GrayMoon.Abstractions.Notifications;
 using GrayMoon.Agent.Models;
 
 namespace GrayMoon.Agent.Jobs.Response;
@@ -49,4 +50,8 @@ public sealed class SyncToDefaultBranchResponse
 
     [JsonPropertyName("projects")]
     public IReadOnlyList<CsProjFileInfo>? Projects { get; set; }
+
+    /// <summary>Authoritative post-checkout state with per-group probe markers. Null from agents that predate this field.</summary>
+    [JsonPropertyName("state")]
+    public RepositoryStateSnapshot? State { get; set; }
 }

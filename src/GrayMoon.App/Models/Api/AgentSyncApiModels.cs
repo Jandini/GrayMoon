@@ -5,6 +5,13 @@ namespace GrayMoon.App.Models.Api;
 /// <summary>Agent SyncRepository / GetRepositoryVersion / RefreshRepositoryVersion response shape (version, branch, hasUpstream, branches).</summary>
 public sealed class AgentVersionBranchResponse
 {
+    /// <summary>The command's own result, distinct from the transport envelope. Null from commands that do not report one. When false the command bailed out early and every state field below is absent rather than genuinely null.</summary>
+    [JsonPropertyName("success")]
+    public bool? Success { get; set; }
+
+    [JsonPropertyName("errorMessage")]
+    public string? ErrorMessage { get; set; }
+
     [JsonPropertyName("version")]
     public string? Version { get; set; }
 
@@ -22,6 +29,10 @@ public sealed class AgentVersionBranchResponse
 
     [JsonPropertyName("hasUpstream")]
     public bool? HasUpstream { get; set; }
+
+    /// <summary>True when the agent resolved <see cref="HasUpstream"/> from git config. Absent from agents that predate it, which leaves the persisted flag alone.</summary>
+    [JsonPropertyName("upstreamProbed")]
+    public bool UpstreamProbed { get; set; }
 
     [JsonPropertyName("remoteBranches")]
     public List<string>? RemoteBranches { get; set; }

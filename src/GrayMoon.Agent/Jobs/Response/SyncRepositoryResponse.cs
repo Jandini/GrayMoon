@@ -52,4 +52,12 @@ public sealed class SyncRepositoryResponse
 
     [JsonPropertyName("tags")]
     public IReadOnlyList<string>? Tags { get; set; }
+
+    /// <summary>Whether the checked-out branch has a git-configured upstream. Null when it could not be determined.</summary>
+    [JsonPropertyName("hasUpstream")]
+    public bool? HasUpstream { get; set; }
+
+    /// <summary>True when <see cref="HasUpstream"/> was actually resolved, so the app may replace the persisted flag with it.</summary>
+    [JsonPropertyName("upstreamProbed")]
+    public bool UpstreamProbed { get; set; }
 }
