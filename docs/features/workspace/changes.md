@@ -92,6 +92,6 @@ If any target repo is on its default branch, a warning lists those repos before 
 
 The agent must be online. Empty message shows the error toast "Enter a commit message."
 
-When every repo is clean, the page shows **No changes**. Repos that now have outgoing (unpushed) commits appear on the floating [notification card](../shared.md#workspace-action-notification-cards) with **Push**:
+When every repo is clean, the page shows **No changes**. Outgoing (unpushed) commits do not appear in this tree; they show on the floating [notification card](../shared.md#workspace-action-notification-cards) so you can **Push** every listed repo without opening Repositories:
 
-![Changes empty after commit](../screenshots/workspace-changes-after-commit.png)
+![Notification on Changes: commits ready to push](../screenshots/workspace-notification-push.png)

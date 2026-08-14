@@ -129,6 +129,10 @@ What the user sees:
 - Backdrop is translucent or solid black depending on Settings "Transparent loading overlay".
 - While a job is running, navigating away and back to the **same URL path** still shows this overlay (jobs are keyed by path). A pending-agent-task count in the workspace Repositories header also appears: "Agent is completing N task(s)" with a small spinner if the overlay is not already visible.
 
+A push started from the notification card (or from the Repositories header **Push**) uses job key `/workspaces/{id}`, so this overlay appears on Repositories:
+
+![Push loading overlay](screenshots/workspace-push-overlay.png)
+
 ## Reconnect / session dialogs
 
 - **GrayMoon needs to reload** - circuit died. Copy: "The current session can no longer continue. Reload the page to reconnect and restore the latest state." Action: **Reload page**.
@@ -139,18 +143,33 @@ What the user sees:
 
 ## Workspace action notification cards
 
-Floating cards (bottom/side) for workspaces that need attention. Hidden while you are already on that workspace's pages, and hidden while a job for that workspace is running.
+Floating cards in the bottom-right for workspaces that need attention. They exist so you can **Push / Pull / Update without opening that workspace's Repositories page**. The same header actions live on Repositories; the card is a shortcut from anywhere else.
+
+The card for a workspace is hidden only while you are on that workspace's Repositories URL (`/workspaces/{id}`), because those buttons are already in the header. It stays visible on other pages of the same workspace (Changes, Projects, Packages, Files, Dependencies, Actions) and on first-level pages (Home, Workspaces, ...). It is also hidden while a job for that workspace is running.
+
+![Notification: commits ready to push](screenshots/workspace-notification-push.png)
 
 Each card shows:
 
-- Workspace name (link to `/workspaces/{id}`) and a dismiss (x).
-- Description of pending work.
-- Per-repo rows: repo name, unmatched-deps badge (`N of M`, hover shows package `current -> new`), and commit badges (same meaning as the Repositories grid commits badge - see [workspace/repositories.md](workspace/repositories.md)).
+- Workspace name (link to `/workspaces/{id}`) and a dismiss (x). Dismiss hides the card until pending state changes again.
+- Description of pending work, joined with commas:
+  - `dependency updates pending`
+  - `incoming commits to pull`
+  - `commits ready to push` (outgoing commits and/or a branch with no upstream, and no incoming)
+- Per-repo rows: repo name, unmatched-deps badge (`N of M`, hover shows package `current -> new`), and [commits badges](workspace/repositories.md#commits-badge-out-in) (same meaning as the Repositories grid).
 - "... and more" link if more repos exist than the card lists.
+
+In the screenshot after committing on a new branch:
+
+- **GrayMoon** - yellow `↑2` (two outgoing commits, no incoming). Incoming is omitted when the branch has no upstream yet; otherwise a clean pair is `↑N ↓0`.
+- **GrayMoon.Desktop** - yellow cloud-up (new branch, nothing to count as outgoing yet, **Push to set upstream**).
+- Yellow **Push** (split). One click pushes every listed repo in one job (sets upstream where needed). Caret: **Undo Push Commits**.
 
 Primary actions (depend on state):
 
 - **Push Updated** (yellow) with split menu: Level N Only, Update Only, Update Files, Push Only, Undo Push Commits (when outgoing commits exist).
-- Other combinations for incoming commits / push-only / pull, matching the workspace Repositories header buttons.
+- **Push** (yellow) when there is nothing to update and no incoming: push all listed repos at once.
+- **Pull** (red) when any listed repo has incoming commits.
+- **Update** (red) when unmatched deps exist together with incoming commits.
 
-Hovering a dependency count badge shows a tooltip "Dependencies requiring update:" with `PackageId` and `current -> new`.
+A job started from the card is keyed to `/workspaces/{id}` (the Repositories path), so navigating to Repositories during the run shows the [loading overlay](#loading-overlay) there.

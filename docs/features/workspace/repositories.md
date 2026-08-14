@@ -6,6 +6,12 @@ This is the main workspace grid. Opening a workspace from [Workspaces](../02-wor
 
 ![Workspace Repositories](../screenshots/workspace-repositories.png)
 
+The screenshots above are a two-repo workspace (GrayMoon). A larger workspace looks the same, with more **Level** groups. **MezzoRecovery** (`/workspaces/2`) has 11 repositories: Level 1 libraries and shared tooling, Level 2 packages that consume those libraries, and Level 3 services / standalone tools that consume the packages.
+
+![MezzoRecovery repositories](../screenshots/workspace2-repositories.png)
+
+Level 3 here is `MezzoRecovery.Api` (service), `MezzoRecovery.TapeTools` (tool), and `MezzoRecovery.Agent` (agent/service). Level 2 is `MezzoRecovery.Tape` and `MezzoRecovery.Mezzo`. Level 1 holds the remaining six (including `TapeDrive`, `TapeImage`, `Website`, `DockerBase`, `Solution`, and the root `MezzoRecovery` repo). Green dependency-count badges on higher levels show how many workspace packages that repo consumes.
+
 ## Header
 
 - Title: **Repositories**
@@ -18,6 +24,10 @@ This is the main workspace grid. Opening a workspace from [Workspaces](../02-wor
 Plain terms match **repository name**, **branch**, **git version**, **level** (`level 1`, `no dependencies`), and **sync status** words (`in sync`, `sync`, `not cloned`, `version`, `error`).
 
 `topic:` is accepted by the parser but does not match workspace rows (catalog-only field).
+
+Spaces are **AND**. Use `or` (orange in the search bar) to keep several name fragments. On MezzoRecovery, `api or tools` returns both `MezzoRecovery.Api` and `MezzoRecovery.TapeTools` (`2 repositories found`) and hides empty levels. Parentheses work too: `(api or tools) main`.
+
+![Search: api or tools](../screenshots/workspace2-search-api-or-tools.png)
 
 ## Header action buttons
 
@@ -52,8 +62,24 @@ Update modals ask for a commit message and whether to include dependency bumps, 
 ### Pull / Push
 
 - Incoming commits on any repo: red **Pull**.
-- Outgoing commits / push recommended: yellow **Push** with split **Undo Push Commits**.
+- Outgoing commits / push recommended (including a branch with no upstream): yellow **Push** with split **Undo Push Commits**.
 - Otherwise outline **Push**.
+
+The header **Push** is the same action as the yellow **Push** on the [notification card](../shared.md#workspace-action-notification-cards). The card is hidden on this page (the header already has the button) and visible on Changes and other non-Repositories pages so you can push several repos in one go without opening this grid.
+
+![Repositories with outgoing commits](../screenshots/workspace-repositories-outgoing.png)
+
+In this state (new branch `functionality-documentation`, nothing pulled from default):
+
+- Header **Push** is yellow. The notification card is not shown here.
+- **Divergence** (`behind | ahead` of default): GrayMoon is `0 | 2` - zero incoming from default, two commits ahead. Desktop is `0 | 0` on the same new branch with no extra commits.
+- **Commits badge**: GrayMoon yellow `↑2` (outgoing only; no `↓` incoming). Desktop yellow cloud-up (no upstream yet). With incoming the badge would turn red `↑N ↓M` and the header would become **Pull** instead.
+- **PR badge**: GrayMoon `create` (ahead of default, no open PR). Desktop `none`.
+- **in sync** stays blue: local git status matches what the agent last reported; it is not "already pushed".
+
+One **Push** sends every repo that has outgoing commits or no upstream. Overlay: spinner, **Pushing...**, **Abort**. After a successful push the header **Push** goes back to outline, commits badges go green `↑0 ↓0`, and the cloud-up icon is gone (upstream exists):
+
+![Repositories after Push](../screenshots/workspace-repositories-after-push.png)
 
 Undo Push opens a modal listing repos/commits to roll back.
 
