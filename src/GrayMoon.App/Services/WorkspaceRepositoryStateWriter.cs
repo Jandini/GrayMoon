@@ -94,8 +94,14 @@ public sealed class WorkspaceRepositoryStateWriter(
             {
                 wr.OutgoingCommits = snapshot.OutgoingCommits;
                 wr.IncomingCommits = snapshot.IncomingCommits;
-                wr.DefaultBranchBehindCommits = snapshot.DefaultBranchBehind;
-                wr.DefaultBranchAheadCommits = snapshot.DefaultBranchAhead;
+                // Ahead/behind vs default is a separate comparison. A pair of nulls means that comparison
+                // did not finish (or was never run), not "no divergence" - writing them would flash "-"
+                // until a later snapshot arrives. 0 is a real answer and still replaces.
+                if (snapshot.DefaultBranchBehind.HasValue || snapshot.DefaultBranchAhead.HasValue)
+                {
+                    wr.DefaultBranchBehindCommits = snapshot.DefaultBranchBehind;
+                    wr.DefaultBranchAheadCommits = snapshot.DefaultBranchAhead;
+                }
             }
 
             if (snapshot.UpstreamProbed)

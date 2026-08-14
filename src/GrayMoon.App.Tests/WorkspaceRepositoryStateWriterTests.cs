@@ -93,6 +93,29 @@ public sealed class WorkspaceRepositoryStateWriterTests
     }
 
     [Fact]
+    public async Task Probed_null_ahead_behind_keeps_the_previous_divergence()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+
+        // Outgoing/incoming can arrive before the vs-default comparison finishes. Those two nulls are
+        // "not ready", not "no divergence" - writing them would flash "-" on the ahead/behind badge.
+        await ApplyAsync(ctx, new RepositoryStateSnapshot
+        {
+            OutgoingCommits = 0,
+            IncomingCommits = 0,
+            DefaultBranchAhead = null,
+            DefaultBranchBehind = null,
+            CommitCountsProbed = true,
+        });
+
+        var after = await ctx.ReadLinkAsync();
+        Assert.Equal(0, after.OutgoingCommits);
+        Assert.Equal(0, after.IncomingCommits);
+        Assert.Equal(4, after.DefaultBranchAheadCommits);
+        Assert.Equal(5, after.DefaultBranchBehindCommits);
+    }
+
+    [Fact]
     public async Task Unprobed_commit_counts_survive_a_branch_change()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();

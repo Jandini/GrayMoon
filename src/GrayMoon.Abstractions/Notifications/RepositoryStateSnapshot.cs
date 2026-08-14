@@ -55,7 +55,11 @@ public sealed class RepositoryStateSnapshot
     /// <summary>GitVersion ran and <see cref="GitVersion"/> is authoritative.</summary>
     public bool GitVersionProbed { get; init; }
 
-    /// <summary>The four commit counts were computed. False when the underlying git command failed, so callers never infer meaning from a null count.</summary>
+    /// <summary>
+    /// Outgoing and incoming were computed. False when the underlying git command failed, so callers never
+    /// infer meaning from a null count. Ahead/behind vs default is only replaced when at least one of those
+    /// two values is present; a pair of nulls is treated as "not ready yet" so the previous numbers stay.
+    /// </summary>
     public bool CommitCountsProbed { get; init; }
 
     /// <summary><see cref="HasUpstream"/> was resolved from git config.</summary>
