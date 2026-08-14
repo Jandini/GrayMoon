@@ -55,8 +55,6 @@ See [Commit across repositories](#commit-across-repositories) for the shared mes
 
 Tree rows (indent by depth):
 
-Tree rows (indent by depth):
-
 | Kind | Icon | Extra | Actions |
 | --- | --- | --- | --- |
 | Repository | git | branch name | +/- stage or unstage the whole repo |
@@ -93,3 +91,7 @@ Repos with no matching changes are skipped. Overlay progress is `Committing in N
 If any target repo is on its default branch, a warning lists those repos before anything is written: committing would go straight to the protected default branch. **Proceed** continues; **Cancel** aborts.
 
 The agent must be online. Empty message shows the error toast "Enter a commit message."
+
+When every repo is clean, the page shows **No changes**. Repos that now have outgoing (unpushed) commits appear on the floating [notification card](../shared.md#workspace-action-notification-cards) with **Push**:
+
+![Changes empty after commit](../screenshots/workspace-changes-after-commit.png)
