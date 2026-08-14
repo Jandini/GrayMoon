@@ -1,10 +1,14 @@
-# Workspace pages
+Workspace pages
 
 Opening a workspace from [Workspaces](../02-workspaces.md) replaces the first-level sidebar with workspace navigation. The top bar shows the workspace name (click it to return to the Workspaces list). Examples in these pages use **GrayMoon** (`/workspaces/1`, two repos) and **MezzoRecovery** (`/workspaces/2`, 11 repos: services, libraries, and standalone tools that share the same packages).
 
 | Page | Doc |
 | --- | --- |
 | Repositories | [repositories.md](repositories.md) |
+| New Branch | [new-branch.md](new-branch.md) |
+| Switch Branch | [switch-branch.md](switch-branch.md) |
+| New Feature | [new-feature.md](new-feature.md) |
+| Sync To Default | [sync-to-default.md](sync-to-default.md) |
 | Changes | [changes.md](changes.md) |
 | Projects | [projects.md](projects.md) |
 | Packages | [packages.md](packages.md) |

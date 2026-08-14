@@ -60,3 +60,17 @@ Footer note:
 - Otherwise "Install the missing prerequisites above." and the **Host** tab itself is styled as missing.
 
 If host info fails to load, a muted error string is shown instead of the grid. While loading: "Loading…"
+
+## Live git tracking
+
+The Agent is what keeps GrayMoon up to date when you use git **outside** the app (IDE, terminal, another GUI). After a repo is cloned, the Agent writes git hooks into it (`post-commit`, `post-checkout`, `post-merge`, `pre-push`). Those hooks POST to the Agent's local listener (`http://127.0.0.1:9191/hook/...`) on every matching git event, whether GrayMoon started the command or not.
+
+The Agent then recounts outgoing and incoming commits (and version / branch) and sends that snapshot to the App. The App persists it and refreshes the [workspace action notification cards](shared.md#workspace-action-notification-cards). You do not have to open Repositories or click **Sync** for the card to appear.
+
+That is why the same **commits ready to push** card shows on the Agent page itself - the Host tab is the machine that is watching the repos:
+
+![Agent Host with push notification](screenshots/agent-host-notification-push.png)
+
+The card is **per workspace**, with one row per repository that still needs action. Here the GrayMoon workspace has two repos; only **GrayMoon** is listed (`↑1 ↓0`) because **GrayMoon.Desktop** is already `↑0 ↓0`. After a multi-repo commit both rows appear on the same card (see [shared.md](shared.md#workspace-action-notification-cards)).
+
+If you **push outside** GrayMoon, the `pre-push` hook fires. The Agent waits until outgoing commits drop to 0, then the App updates. That repo leaves the card; when nothing in the workspace still needs push, pull, or update, the card disappears.

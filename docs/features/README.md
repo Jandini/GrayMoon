@@ -1,14 +1,19 @@
-# GrayMoon UI features
+GrayMoon UI features
 
 This folder documents every user-visible feature in the GrayMoon web UI, starting from the first-level pages and then the nested workspace pages those routes open.
 
 Screenshots are local PNG files under [`screenshots/`](screenshots/). They were captured from a running instance at `http://127.0.0.1:8384/`.
+
+## Getting started (clean install)
+
+Agent already installed, empty database: [getting-started/](getting-started/) - [add connectors](getting-started/01-connectors.md), [fetch the catalog](getting-started/02-fetch-repositories.md), [create a workspace and Sync-clone](getting-started/03-workspace-clone.md).
 
 ## How to read this
 
 - **First-level pages** are the six sidebar items when you are not inside a workspace: Home, Workspaces, Repositories, Connectors, Agent, Settings.
 - **Workspace pages** replace that sidebar once you open a workspace (click a workspace name). They are documented under [`workspace/`](workspace/).
 - Repeating controls (search, toasts, loading overlay, agent badge) are defined once in [`shared.md`](shared.md) and referenced from page docs.
+- **Layout** (sidebar collapse, top bar) is [00-layout.md](00-layout.md).
 
 ## First-level pages
 
@@ -26,6 +31,10 @@ Screenshots are local PNG files under [`screenshots/`](screenshots/). They were 
 | Page | Route | Doc |
 | --- | --- | --- |
 | Repositories | `/workspaces/{id}` | [workspace/repositories.md](workspace/repositories.md) |
+| New Branch | (from Repositories **Branch**) | [workspace/new-branch.md](workspace/new-branch.md) |
+| Switch Branch | (from Repositories **Branch**) | [workspace/switch-branch.md](workspace/switch-branch.md) |
+| New Feature | (from Repositories **Branch**) | [workspace/new-feature.md](workspace/new-feature.md) |
+| Sync To Default | (from Repositories **Branch**) | [workspace/sync-to-default.md](workspace/sync-to-default.md) |
 | Changes | `/workspaces/{id}/changes` | [workspace/changes.md](workspace/changes.md) |
 | Projects | `/workspaces/{id}/projects` | [workspace/projects.md](workspace/projects.md) |
 | Packages | `/workspaces/{id}/packages` | [workspace/packages.md](workspace/packages.md) |
@@ -35,4 +44,4 @@ Screenshots are local PNG files under [`screenshots/`](screenshots/). They were 
 
 ## Shared chrome
 
-See [shared.md](shared.md) for sidebar, top bar, agent badge, filter search, toasts, loading overlay, reconnect dialog, and workspace action notification cards.
+See [00-layout.md](00-layout.md) for sidebar collapse and top bar, and [shared.md](shared.md) for agent badge, filter search, toasts, loading overlay, reconnect dialog, and workspace action notification cards.

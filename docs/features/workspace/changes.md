@@ -2,13 +2,84 @@
 
 Route: `/workspaces/{id}/changes`
 
+Combined git status for **every repository in the workspace**: one tree, one commit box, one Monaco diff. Stage, unstage, and commit without opening each repo in a separate IDE window.
+
+Visual Studio's Git Changes window stops at **25 repositories** in a solution. GrayMoon does not have that cap. The page is the workspace: MezzoRecovery is 11 repos here; a larger workspace is the same UI.
+
+Updates are watcher-driven. The browser does not poll. The Agent watches working trees and pushes snapshots to the App; this page re-reads the persisted projection. You can edit in Cursor, Visual Studio, VS Code, or `git` on the CLI. GrayMoon stays current. Commit wherever is comfortable - the [notification card](../shared.md#workspace-action-notification-cards) and Repositories grid pick up outgoing commits through git hooks even when this tree is empty.
+
+The two-repo GrayMoon workspace looks like this (new markdown file selected):
+
 ![Workspace Changes](../screenshots/workspace-changes.png)
 
-Combined git status for every repository in the workspace: file tree, stage/unstage, commit, and a Monaco diff viewer. Updates are watcher-driven (the page does not poll from the browser). After [New Branch](repositories.md#new-branch), the header branch label is the new common name (here `functionality-documentation`).
-
-Click a file in the tree to load its diff. New files show an empty **(Index)** pane (hashed) and the full working-tree content as added lines:
-
 ![Changes: markdown file selected](../screenshots/workspace-changes-md-diff.png)
+
+The walkthrough below is MezzoRecovery (`/workspaces/2`, 11 repos) on `new-branch-demo` after [New Branch](new-branch.md) and [Update Only / Push Only](repositories.md#update-vs-push-updated). Working trees started clean.
+
+## MezzoRecovery: review comments across 1, then 2, then 5 repos
+
+Empty: **No changes**, **Refresh**, header `0 of 11 repositories`, `0 staged`, `0 changed`, branch `new-branch-demo`.
+
+![Empty Changes on MezzoRecovery](../screenshots/workspace2-changes-empty.png)
+
+A one-line comment was added to `MezzoRecovery.Api` `Program.cs` on disk (the same kind of small edit an AI or a teammate would leave). The watcher picked it up: header **1 of 11 repositories**, **1 changed**. Click the file for a side-by-side diff (**Index** vs **Working Tree**). Status letter **M**.
+
+![One repository with a diff](../screenshots/workspace2-changes-1-repo.png)
+
+A second comment in `MezzoRecovery.Agent` `Program.cs`. Header **2 of 11**. Same commit box still applies to every repo in the tree. You do not switch windows to compare the two edits.
+
+![Two repositories in one tree](../screenshots/workspace2-changes-2-repos.png)
+
+Three more comment-only edits (`TapeTools` `Program.cs`, `Tape` `TapeCloneService.cs`, `Mezzo` `MezzoServiceFactory.cs`) plus a second file in Api (`AgentHub.cs`). Header **5 of 11 repositories**, **6 changed**. One place to review AI-generated (or any) comments across the graph.
+
+![Five repositories, six files](../screenshots/workspace2-changes-5-repos.png)
+
+That is the point of this page: the workspace is the review surface, not 5 (or 50) separate Git Changes windows.
+
+## Stage and unstage
+
+Each row has **+** (stage) or **-** (unstage): file, folder, whole repository, or the entire **Changed** / **Staged** section.
+
+Staging only `MezzoRecovery.Api` `Program.cs` splits the tree: **STAGED (1)** and **CHANGED (5)**. The primary button becomes **Commit Staged**. Api still has `AgentHub.cs` unstaged. Diff labels for a staged file are **(HEAD)** vs **(Index)**.
+
+![One file staged, the rest still Changed](../screenshots/workspace2-changes-staged.png)
+
+**-** on that file puts it back. Header returns to **0 staged**, **6 changed**, button **Commit All**.
+
+![After unstage](../screenshots/workspace2-changes-unstaged.png)
+
+Staging two whole repos (Agent and Tape) is the same **+** on the repository rows. **2 staged**, **4 changed**, **Commit Staged** again. Unstaged files are left alone when you commit staged.
+
+![Two repos staged for Commit Staged](../screenshots/workspace2-changes-commit-staged.png)
+
+## Commit Staged, then Commit All
+
+One message box at the top of the left pane. Placeholder: **Commit message (applies to all repositories below)**. The same text is used for each git commit, in parallel. Draft is remembered if you leave the page.
+
+- **Commit All** - when nothing is staged. Stages everything then commits in each repo that has changes.
+- **Commit Staged** (blue) - when any repo has staged files. Only staged paths are committed.
+
+**Commit Staged** with `chore: document agent formatter and tape clone logging` committed Agent and Tape. Toast **Committed in 2 repositories.** Remaining three repos stayed in **CHANGED**. The floating card appeared at once: **commits ready to push** (and, because those commits moved GitVersion on package repos, some consumers also show unmatched `N of M`).
+
+![After Commit Staged: remaining files plus notification card](../screenshots/workspace2-changes-after-commit-staged.png)
+
+**Commit All** on the rest (`chore: document host startup, hub policy, and format detection`) cleared the tree: **No changes**, `0 of 11`. Outgoing commits do **not** live in this tree. They live on the card.
+
+![Working tree clean; card still tracks outgoing](../screenshots/workspace2-changes-after-commit.png)
+
+GrayMoon is tracking. You could have made those same commits in Visual Studio or `git commit` in a terminal. Hooks (`post-commit`, and `pre-push` later) update the Agent; the card and the Repositories grid stay honest. This page is optional, not a gate.
+
+## Push from the card
+
+The card on Changes is the same [workspace action notification](../shared.md#workspace-action-notification-cards) as on Agent and other non-Repositories pages. After the comment commits it listed Mezzo, Tape, Agent, Api, TapeTools with yellow `↑1 ↓0`. Some rows also had red unmatched-dep badges: a commit in a package repo bumps GitVersion, so consumers look out of date until **Update**. That is expected, not a failed commit.
+
+The card primary was yellow **Push Updated** (unmatched deps + outgoing, no incoming). This run used the caret **Push Only**: push the comment commits without another `.csproj` rewrite. Combined **Push Updated** is [documented on Repositories](repositories.md#update-vs-push-updated) and will be shown as one click later.
+
+![Card menu: Push Only](../screenshots/workspace2-changes-card-push-menu.png)
+
+After **Push Only**, every `↑1` dropped off. The working tree was already empty. The card shrank to **dependency updates pending** on the consumers (Agent, Api, TapeTools). Those badges stay until an Update (or until the next demo drops these branches).
+
+![After Push Only: No changes, unmatched deps remain on the card](../screenshots/workspace2-changes-after-push.png)
 
 ## Header
 
@@ -72,13 +143,13 @@ Optional **offline notice** banner if the agent is unreachable.
 
 ### Right: diff
 
-- Placeholder: "Select a file to view its diff" or "Loading diff…"
+- Placeholder: "Select a file to view its diff" or "Loading diff..."
 - Monaco side-by-side for text: labels **(HEAD)** vs **(Index)** when staged, or **(Index)** vs **(Working Tree)** when unstaged.
 - Non-Monaco states: "Binary file changed" (with byte sizes), "File is too large to diff automatically.", "File encoding is not supported for preview."
 
 ## Commit across repositories
 
-One message box at the top of the left pane commits every repository that currently has changes. You do not pick repos one by one: the same text is used for each git commit, in parallel.
+One message box at the top of the left pane commits every repository that currently has matching changes. You do not pick repos one by one.
 
 ![Commit message ready for Commit All](../screenshots/workspace-changes-commit-message.png)
 
@@ -92,6 +163,8 @@ If any target repo is on its default branch, a warning lists those repos before 
 
 The agent must be online. Empty message shows the error toast "Enter a commit message."
 
-When every repo is clean, the page shows **No changes**. Outgoing (unpushed) commits do not appear in this tree; they show on the floating [notification card](../shared.md#workspace-action-notification-cards) so you can **Push** every listed repo without opening Repositories:
+When every repo is clean, the page shows **No changes**. Outgoing (unpushed) commits do not appear in this tree; they show on the floating [notification card](../shared.md#workspace-action-notification-cards). The header still says `0 of 2 repositories` because the working trees are clean - the Agent is separately tracking the unpushed commit on **GrayMoon** (`↑1 ↓0`). **Push** on the card applies to every listed repo in that workspace.
 
-![Notification on Changes: commits ready to push](../screenshots/workspace-notification-push.png)
+![Notification on Changes: commits ready to push](../screenshots/workspace-notification-agent-tracking.png)
+
+The same card appears on [Agent](../05-agent.md#live-git-tracking) and other pages. If the commit is pushed outside GrayMoon, the Agent updates the counts and the card goes away.

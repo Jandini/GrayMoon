@@ -1,4 +1,4 @@
-# Workspace Repositories
+orkspace Repositories
 
 Route: `/workspaces/{id}`
 
@@ -39,11 +39,11 @@ Primary **Branch** opens the Branch modal on the **New Branch** tab. The caret o
 
 ![Branch menu](../screenshots/workspace-branch-menu.png)
 
-- **New Feature** - wizard: create branches (and optional dependency update / commit / push) across selected repos.
-- **New Branch** - same modal as the primary button (see [New Branch](#new-branch) below).
-- **Switch Branch** - same modal, **Switch Branch** tab: check out a common branch across the workspace.
+- **New Feature** - wizard: new branch, optional dependency update, synchronized push. [new-feature.md](new-feature.md).
+- **New Branch** - same dialog as the primary button ([new-branch.md](new-branch.md)).
+- **Switch Branch** - same dialog, **Switch Branch** tab. [switch-branch.md](switch-branch.md).
 - **Create PRs...** - open the new-PR modal for every eligible repo.
-- **Sync To Default** - check out / reset toward each repo's default branch. Confirmations cover deleting local/remote feature branches and force-delete.
+- **Sync To Default** - abandon the current feature branch across the workspace: checkout default, delete that branch, pull latest. [sync-to-default.md](sync-to-default.md).
 
 ### Update vs Push Updated
 
@@ -57,7 +57,86 @@ Otherwise:
 - **Update** - outline, or **red** if unmatched deps exist together with incoming commits (update is still offered, pull is separate).
 - Split: **Update**, **Update Files**, **Update & Push...**
 
+**Push Updated** is those two halves in one job: **Update Only** (rewrite `.csproj` / version-file tokens and commit) then **Push Only** (push by dependency level). The primary button runs both. The caret is how you run them separately. Combined **Push Updated** (one click) is demonstrated later; the walkthrough below is the split path on MezzoRecovery after [new-branch.md](new-branch.md) created `new-branch-demo`.
+
 Update modals ask for a commit message and whether to include dependency bumps, then run under the [loading overlay](../shared.md#loading-overlay).
+
+#### After New Branch: unmatched deps and no upstream
+
+![After New Branch on MezzoRecovery](../screenshots/workspace2-after-new-branch.png)
+
+Every row is on `new-branch-demo`. GitVersion strings include the branch name (`0.1.0-new-branch-demo.39`). Two different problems show up at once:
+
+- **No upstream.** Yellow cloud-up on every commits badge: the branch exists only locally. `git push` has not created `origin/new-branch-demo` yet. **in sync** stays blue (working tree matches HEAD). Divergence is still `0 | 0` because nothing has been committed on top of `main`.
+- **Unmatched package deps on higher levels.** Level 1 stays gray `0` (nothing in-workspace to consume). Level 2 / 3 show red `N of M` (`2 of 2`, `4 of 4`, `1 of 1`) because those `.csproj` files still pin the **main** package versions, while GitVersion on the packages now says `-new-branch-demo`. Header **Push Updated** (yellow) is the shortcut for that pair of problems.
+
+Hover a mismatch badge for the list. TapeTools `4 of 4`:
+
+![Unmatched deps hover on TapeTools](../screenshots/workspace2-dep-badge-hover.png)
+
+Title **Dependencies requiring update:** then each workspace package as `current -> new` (`MezzoRecovery.Mezzo 0.1.1-main.39 -> 0.1.1-new-branch-demo.39`, and the same for Tape, TapeDrive, TapeImage). Footer: **Click to update this repository only.** That click would update one row; workspace **Update Only** does every unmatched repo.
+
+The **Push Updated** caret:
+
+![Push Updated menu](../screenshots/workspace2-push-updated-dropdown.png)
+
+- **Level 2 Only** - lowest level that still needs work (here Level 2; Level 1 has nothing to rewrite).
+- **Update Only** - bump `.csproj` / files and commit. Does not push.
+- **Update Files** - version-file tokens only.
+- **Push Only** - push what is already committed (and set upstream). Does not rewrite deps.
+- **Undo Push Commits** - roll back local update commits.
+
+#### Update Only
+
+**Update Only** opens **Update dependencies**: rewrite `.csproj` (and configured version files) to the current package versions, then commit in each affected repo.
+
+![Update dependencies modal](../screenshots/workspace2-update-only-modal.png)
+
+Optional commit message (placeholder `chore(deps): update package versions`). **Include updated dependencies in commit message** is on by default. **Proceed** runs the job.
+
+Overlay: spinner, **Updating version N of M...**, **Abort**, live git log (`git add` on `.csproj`, commit). This run was **Updating version 2 of 3...**:
+
+![Update Only overlay](../screenshots/workspace2-update-only-overlay.png)
+
+When it finishes, unmatched badges are gone and the header is no longer **Push Updated** (nothing left to update). Yellow **Push** is the remaining half - same action as **Push Only** on the previous menu.
+
+![After Update Only](../screenshots/workspace2-after-update-only.png)
+
+What changed:
+
+- Dep badges on Level 2 / 3 are **green counts** (`2`, `4`, `1`) - `.csproj` now pins `-new-branch-demo` versions. Level 1 stays `0`.
+- **Divergence** on updated repos is `0 | 1`: one commit ahead of default `main` (the deps commit). Level 1 stays `0 | 0` (nothing to rewrite there).
+- **Outgoing:** Level 2 / 3 yellow `↑1`. Level 1 still yellow cloud-up (branch still has no upstream, and no extra commit).
+- **PR** badge is yellow **create** on repos that are ahead of default.
+- Header: outline **Update**, yellow **Push**, blue **Fetch**.
+
+#### Push Only and synchronized push
+
+Yellow **Push** (or **Push Only** while **Push Updated** is still showing) pushes every repo that has outgoing commits or no upstream. When the graph has package deps, GrayMoon first shows the **Push** dialog:
+
+![Synchronized Push dialog](../screenshots/workspace2-sync-push-modal.png)
+
+- **11 repositories have package dependencies.** Push includes those repos and their dependency paths.
+- **Required packages** grouped by level (the NuGet ids consumers will need after the lower level is pushed): Level 1 `TapeImage.Abstractions`, `TapeDrive`, `TapeImage`; Level 2 `Tape`, `Mezzo`. Versions are already `-new-branch-demo`.
+- **Synchronized Push** (checked by default): *Registries will be synced for required packages; then push runs by level and waits for packages in registry before each level.* Unchecked: push by level without waiting.
+
+Leave it checked. This is why the workspace has **NuGet connectors**: GrayMoon maps each required package to a connector and polls that feed. It does **not** drive CI, wait on GitHub Actions conclusions, or publish packages itself. After a level is pushed, CI (or whatever normally packs) has to put the nupkg on the feed. GM only waits until the version is **there**, then starts the next level so consumers restore the branch-specific package instead of a stale `main` one.
+
+Timeout is **3 minutes per package** at that level (`PushWaitDependencyTimeoutMinutesPerDependency`, default 3; total wait = package count x 3 minutes). Here the overlay showed **Waiting for 3 packages...** with a countdown from `08:59` (3 packages x 3 minutes). If CI does not publish those nupkgs within that window, **GrayMoon WILL STOP**. It will not keep waiting, skip the level, or retry forever.
+
+**Proceed** starts the job. Overlay: spinner, wait/push progress, **Abort**, live git + registry log. Right after Level 1 was pushed, GM waited on those packages before Level 2:
+
+![Push Only overlay waiting for packages](../screenshots/workspace2-push-only-overlay.png)
+
+Later, before Level 3, the same overlay showed **Level 3**, **Found 3 of 4 packages**, and a shorter countdown. GHA polling can appear in the terminal; that is status only. The gate that unblocks the next level is still "is this nupkg on the NuGet connector feed?", not a green check on the workflow.
+
+![Push wait Found 3 of 4 packages](../screenshots/workspace2-push-only-waiting-packages.png)
+
+Together, **Update Only** then **Push Only** is what the primary **Push Updated** button does in one click. [New Feature](new-feature.md) is that pair plus creating the branch first.
+
+When this push finished, every commits badge was green `↑0 ↓0` (upstream exists, nothing left to push). Header **Push** went back to outline. Divergence on the updated repos stayed `0 | 1` (the deps commit is on the remote branch, still one commit ahead of `main`). **create** stays until a PR is opened. Green dep counts stay: packages match.
+
+![After Push Only](../screenshots/workspace2-after-push-only.png)
 
 ### Pull / Push
 
@@ -85,30 +164,54 @@ Undo Push opens a modal listing repos/commits to roll back.
 
 ### Sync (split)
 
-- Primary is **Sync** (blue), or **Fetch** if quick-fetch is the remembered primary. Turns **red** when the workspace is out of sync.
-- Menu: **Fetch** (remote tips only), **Sync** (clone/fetch/checkout/status), **Restore** (dotnet restore).
+On MezzoRecovery (`/workspaces/2`, 11 repositories) the primary starts as blue **Sync**. The caret opens **Fetch**, **Sync**, and **Restore**. The button turns **red** when the workspace is out of sync.
+
+![Sync as primary](../screenshots/workspace2-sync-button.png)
+
+![Sync menu: Fetch, Sync, Restore](../screenshots/workspace2-sync-dropdown.png)
+
+The last choice is remembered in the browser (`graymoon:sync-mode`). After you run **Fetch**, the primary label becomes **Fetch** so the cheap refresh stays one click away. Pick **Sync** from the menu to switch it back.
+
+#### Sync
+
+Full refresh of every workspace repo (in parallel, up to 16 at a time). For each repo the Agent:
+
+1. Clones it if the folder is missing.
+2. Runs `git fetch origin --prune --tags`.
+3. Runs GitVersion (version string + branch).
+4. Writes the live git hooks (`post-commit`, `post-checkout`, `post-merge`, `pre-push`).
+5. Recounts outgoing / incoming vs upstream **and** ahead / behind vs the default branch (the `0 | 0` divergence pair).
+6. Refreshes local/remote branch lists and tags.
+7. Scans `.csproj` files (projects, package references, dependency levels).
+8. Rechecks file-version tokens.
+
+Overlay: spinner, **Synchronizing...** then **Synchronized N of M**, **Abort**, and the live git terminal (fetch, `for-each-ref`, `rev-list`, GitVersion). This run finished at **Synchronized 11 of 11**:
+
+![Sync overlay](../screenshots/workspace2-sync-overlay.png)
+
+Sync does **not** merge or pull. Incoming counts update so you can decide to Pull; working trees stay as they are.
+
+#### Fetch
+
+Lighter than Sync. The Agent only fetches remotes (with tags) and recounts commits. It skips GitVersion, `.csproj` scanning, and hook rewriting. Overlay: **Fetching commits...** then **Fetched N of M**. **Fetch does not clone.** If the workspace folder does not exist yet, pick **Sync** from the caret - same for **Restore**, which needs `.csproj` files already on disk. First-day clone: [getting-started/03-workspace-clone.md](../getting-started/03-workspace-clone.md).
+
+That is the daily team-collaboration action: see whether teammates moved **your branch** (incoming `↓N` / commits badge) or the **default branch** (divergence `behind | ahead`, for example `2 | 0` when `main` gained commits you do not have). It does not merge those commits.
+
+On this MezzoRecovery run Fetch brought **no incoming** - every row stayed `↑0 ↓0` and `0 | 0`. Incoming will be simulated separately later.
+
+After Fetch the primary button itself becomes **Fetch**:
+
+![Fetch as primary](../screenshots/workspace2-fetch-primary.png)
+
+#### Restore
+
+Runs `dotnet restore --force --no-cache` on every tracked project in the workspace (repos checked out on a tag are skipped). Overlay: **Restoring packages...**, **Abort**, and the restore log. A toast reports how many projects were restored.
+
+![Restore overlay](../screenshots/workspace2-restore-overlay.png)
 
 ## New Branch
 
-Creates the same local branch in every repository in the workspace (or skips repos that are on a tag, if that checkbox is shown).
-
-1. On Repositories, open **Branch** (primary) or **Branch** caret then **New Branch**.
-2. The modal title is `{WorkspaceName} Branch` (for example **GrayMoon Branch**). Tabs: **New Branch** (active) and **Switch Branch**.
-
-![New Branch modal](../screenshots/workspace-new-branch-modal.png)
-
-3. **Branch name** - required. Placeholder `e.g. feature/my-feature`. **Create** stays disabled until the name is non-empty. Enter submits the same as **Create**.
-4. **Based on** - defaults to each repo's default branch, shown as that name with a green **Default** badge (or `multiple` if defaults differ). The dropdown also lists branches that exist in every repo.
-5. **Skip repos on tags** - only appears when at least one repo is checked out on a tag. Checked: tagged repos are left alone. Unchecked: those repos are included.
-6. **Create** / **Cancel**. If the name already exists in one or more repos, a warning asks to **Proceed** (check out the existing branch there) or **Cancel**.
-
-![New Branch modal with name filled](../screenshots/workspace-new-branch-modal-filled.png)
-
-The job runs under the [loading overlay](../shared.md#loading-overlay). When it finishes, the grid **Branch** column (and GitVersion **Version** strings) show the new name on every included repo:
-
-![Repositories after New Branch](../screenshots/workspace-branch-created.png)
-
-Clicking a row **Branch** cell opens the same modal on **Switch Branch** (or tag checkout when the repo is on a tag).
+Workspace-wide create / switch lives in one dialog. Full write-up (MezzoRecovery `new-branch-demo`): [new-branch.md](new-branch.md). **New Feature** (branch + update + synchronized push in one job) is [new-feature.md](new-feature.md).
 
 ## Grid grouping: dependency levels
 
@@ -119,7 +222,7 @@ Each level header:
 - Title **Level N** (or **No dependencies**).
 - Diagram icon - opens the Dependencies page filtered to that level.
 - Share icon - copy open PR URLs for the level.
-- Rewind - sync this level to default branch.
+- Rewind - sync this level to default branch. Workspace-wide discard is the header **Branch** caret **Sync To Default** ([sync-to-default.md](sync-to-default.md)); the level rewind skips unmerged ahead commits.
 - Up/down arrows - sync commits for the level.
 - Git icon - open PRs for the level.
 - Repeat arrows - synchronize every repo in the level.
@@ -133,7 +236,7 @@ Level actions are disabled when a job is running or repos in the group are on ta
 | --- | --- | --- |
 | Repository | Name as a link to the GitHub repo | Tooltip is the project type: Service, Package, Executable, Library, Test |
 | Version | GitVersion string, or `-` | Click copies the version (brief clicked styling). Tooltip: "Click to copy version" |
-| Branch | Current branch, or a tag icon + tag name | Click opens Switch Branch (or tag checkout). On a tag: "Repository is pinned to a tag." |
+| Branch | Current branch, or a tag icon + tag name | Click opens the per-repo branch dialog (Locals / Remotes / Tags / New Branch). Workspace-wide Switch Branch is the header **Branch** caret ([switch-branch.md](switch-branch.md)). On a tag: "Repository is pinned to a tag." |
 | Metrics | Five badges in one cell (see below) | |
 
 If a per-repo operation fails, a dismissible red **Error:** banner appears under the row.
@@ -199,13 +302,13 @@ Disabled while a job runs or the row is on a tag.
 
 - Select repositories (from the subtitle count)
 - New Feature
-- New / Switch Branch (workspace-wide or per row)
+- New Branch (workspace-wide) / Switch Branch (workspace-wide [switch-branch.md](switch-branch.md), or per-row branch dialog)
 - New Pull Request (one repo, one level, or all)
 - Update branch from default
 - Update dependencies (workspace, level-only, or single repo)
 - Custom dependencies (which workspace repos this repo should wait on)
 - Push with dependencies
-- Confirm / default-branch warning / sync-to-default options (delete remote branches, allow force-delete local)
+- Confirm / default-branch warning / [Sync To Default](sync-to-default.md) options (delete remote / local branches)
 - Version-files commit (when file tokens were rewritten)
 - Undo push
 - Operation error

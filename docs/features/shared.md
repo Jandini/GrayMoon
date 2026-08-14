@@ -4,10 +4,10 @@ These controls appear across pages. Page docs reference this file instead of rep
 
 ## Sidebar navigation
 
-The left sidebar is always present.
+The left sidebar is always present. Collapsing it (icons only) is documented with a screenshot in [00-layout.md](00-layout.md).
 
-- **Brand** - moon icon + "GrayMoon" at the top. Clicking it goes to Home (`/`).
-- **Toggle sidebar** - chevron button at the bottom of the sidebar. Collapses the sidebar to icons only (labels hide). Click again to expand. Preference is persisted in Settings-adjacent app storage (`SidebarCollapsed`).
+- **Brand** - moon icon + "GrayMoon" at the top. Clicking it goes to Home (`/`). Hidden when the sidebar is collapsed.
+- **Toggle sidebar** - chevron button at the bottom of the sidebar. Collapses the sidebar to icons only (labels hide). Click again to expand. Preference is persisted as `Sidebar.Collapsed`.
 - **First-level items** (when URL is not `/workspaces/{id}/...`):
 
   | Label | Icon | Route |
@@ -44,7 +44,7 @@ Right of the content area:
 - **App version** - informational version string next to the GitHub icon (for example `0.1.0-upstream-fix.261`).
 - **Agent status badge** - see below.
 
-GrayMoon Desktop can hide this entire top bar (tray toggle). The sidebar brand row stays in the DOM and is hidden with CSS when the desktop top bar is off.
+GrayMoon Desktop can hide this entire top bar (tray toggle). That control is not in the web UX. The sidebar brand row stays in the DOM and is hidden with CSS (`page--topbar-hidden`) when the desktop top bar is off. See [00-layout.md](00-layout.md).
 
 ## Agent status badge
 
@@ -148,6 +148,14 @@ Floating cards in the bottom-right for workspaces that need attention. They exis
 The card for a workspace is hidden only while you are on that workspace's Repositories URL (`/workspaces/{id}`), because those buttons are already in the header. It stays visible on other pages of the same workspace (Changes, Projects, Packages, Files, Dependencies, Actions) and on first-level pages (Home, Workspaces, ...). It is also hidden while a job for that workspace is running.
 
 ![Notification: commits ready to push](screenshots/workspace-notification-push.png)
+
+One card covers **every repository in that workspace** that still needs action (outgoing, incoming, or unmatched deps), not only the repo you last touched. After the first commits on `functionality-documentation`, both **GrayMoon** and **GrayMoon.Desktop** sat on the same card. After Desktop was pushed, only GrayMoon remained (`↑1 ↓0`) - still the same workspace card, visible from Changes, Agent, and other non-Repositories pages:
+
+![Notification after Agent tracked an outside-visible commit](screenshots/workspace-notification-agent-tracking.png)
+
+The counts come from the [Agent](05-agent.md#live-git-tracking), not from the browser. Git hooks notify the Agent on commit / checkout / merge / push even when you run git in another tool. GrayMoon stays current; you can sit on Changes (**No changes** in the working tree) and still see unpushed commits on the card.
+
+If you push that commit **outside** GrayMoon, the Agent's `pre-push` hook updates the counts. The repo row drops off; when the workspace has nothing left to push, pull, or update, the card disappears.
 
 Each card shows:
 
