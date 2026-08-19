@@ -81,7 +81,7 @@ Enter submits **Check out** when it is enabled.
 
 ### Tags
 
-**Skip repos on tags** appears in the footer only when at least one repo is on a tag. Checked (the default): tagged repos are left alone. Unchecked: those repos are included in the checkout.
+**Skip repos on tags** appears in the footer only when at least one repo is on a tag. Checked (the default): tagged repos are left alone. Unchecked: those repos are included in the checkout. Walkthrough (per-repo and workspace-wide): [checkout-from-tags-to-main.md](checkout-from-tags-to-main.md).
 
 ### When git can still refuse
 

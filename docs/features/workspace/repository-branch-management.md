@@ -122,7 +122,7 @@ Earlier snapshot with only TapeDrive and TapeImage on **0.1.0**:
 
 Other repos still on `main` (e.g. **MezzoRecovery** at Level 1, Level 2/3 packages) continue to show full divergence, PR, and commit badges. Freezing is per-repo, not workspace-wide.
 
-To unfreeze: open the branch dialog, **Locals** or **Remotes** tab, select `main`, **Check out**.
+To unfreeze: open the branch dialog, **Locals** or **Remotes** tab, select `main`, **Check out**. Step-by-step with screenshots: [checkout-from-tags-to-main.md](checkout-from-tags-to-main.md).
 
 When a newer release tag is published on origin, workspace **Fetch** shows a yellow **upgrade** badge in the PR column. After checking out the newer tag, downstream repos may show red dependency badges - see [tag-upgrade.md](tag-upgrade.md#why-higher-levels-suddenly-show-out-of-date-dependencies).
 

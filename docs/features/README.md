@@ -31,8 +31,10 @@ Clean database, Agent not installed yet: [getting-started/](getting-started/) - 
 | Page | Route | Doc |
 | --- | --- | --- |
 | Repositories | `/workspaces/{id}` | [workspace/repositories.md](workspace/repositories.md) |
+| Restore (NuGet) | (from Repositories **Sync** caret) | [workspace/restore.md](workspace/restore.md) |
 | New Branch | (from Repositories **Branch**) | [workspace/new-branch.md](workspace/new-branch.md) |
 | Switch Branch | (from Repositories **Branch**) | [workspace/switch-branch.md](workspace/switch-branch.md) |
+| Checkout from tags to main | (from Repositories **Branch** or row tag click) | [workspace/checkout-from-tags-to-main.md](workspace/checkout-from-tags-to-main.md) |
 | New Feature | (from Repositories **Branch**) | [workspace/new-feature.md](workspace/new-feature.md) |
 | Sync To Default | (from Repositories **Branch**) | [workspace/sync-to-default.md](workspace/sync-to-default.md) |
 | Changes | `/workspaces/{id}/changes` | [workspace/changes.md](workspace/changes.md) |

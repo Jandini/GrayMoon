@@ -209,6 +209,8 @@ After Fetch the primary button itself becomes **Fetch**:
 
 Runs `dotnet restore --force --no-cache` on every tracked project in the workspace (repos checked out on a tag are skipped). Overlay: **Restoring packages...**, **Abort**, and the restore log. A toast reports how many projects were restored.
 
+Full write-up (why it exists, automatic restore during push, IDE cache behavior): [restore.md](restore.md).
+
 ![Restore overlay](../screenshots/workspace2-restore-overlay.png)
 
 ## New Branch
