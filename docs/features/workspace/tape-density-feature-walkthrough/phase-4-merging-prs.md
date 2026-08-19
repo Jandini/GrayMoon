@@ -1,8 +1,8 @@
-﻿# Feature walkthrough: Phase 4 - Merge PRs and Sync to Default (Level 1)
+﻿# Feature walkthrough: Phase 4 - Merge PRs and Sync to Default
 
-This phase follows [Phase 4 - Create coordinated PRs](phase-4-create-prs.md). PRs for the `tape-density` feature are open (or already merged on GitHub). This step shows the **happy path**: merge Level 1 PRs, then use the **Level 1** header rewind to drop the feature branch and pull latest `main` in dependency order.
+This phase follows [Phase 4 - Create coordinated PRs](phase-4-create-prs.md). PRs for the `tape-density` feature are open (or already merged on GitHub). This step shows the **happy path**: merge PRs level by level, run scoped **Level N Only** updates between merge waves, then use each **Level N** header rewind to drop the feature branch and pull latest `main` in dependency order.
 
-We document Level 1 rewind and **Level 2 Only** here. Level 3 stays on `tape-density` until its PRs merge and you rewind that level separately.
+We document the full merge path: Level 1 rewind, **Level 2 Only**, Level 2 merge/close in GitHub, Level 2 rewind, **Push Updated** for Level 3, Level 3 merge in GitHub, and Level 3 rewind. The walkthrough ends with all 11 repos on `main`.
 
 See also the general reference: [Sync To Default](../../sync-to-default.md).
 
@@ -205,12 +205,216 @@ After **Level 2 Only**, not every Level 2 PR carries feature edits. **`MezzoReco
 
 On the grid, Tape shows a file-count beside the PR badge (e.g. **`4`** next to `#39`). Mezzo shows **`#52`** with a green check but **no file-count** - a signal the PR has little or nothing left to land as product code. In that case you can **close** PR `#52` on GitHub instead of merging it, then continue with Tape and the rest of the level merge plan. You perform that decision in GitHub; GrayMoon will reflect merged/closed state on the next sync.
 
-## Pause point
+## After you merge and close Level 2 PRs in GitHub
 
-Level 2 deps are aligned, pushed, and checks are green. Next steps (you merge in GitHub):
+You performed the merge decisions in GitHub (GrayMoon only reflects the outcome):
 
-1. Open Level 2 PRs (row badge or **2 repositories** header menu -> **Pull Requests**). Merge **`MezzoRecovery.Tape`** (`#39`). Close **`MezzoRecovery.Mezzo`** (`#52`) if it has no file changes.
-2. **Level 2** header rewind (**Sync to default branch...**).
-3. **Level 3 Only** from the **Push Updated** menu, then merge Level 3 PRs in GitHub and **Level 3** header rewind.
+1. **Merge** `MezzoRecovery.Tape` (`#39`) - feature work plus the deps alignment commit from **Level 2 Only**.
+2. **Close** `MezzoRecovery.Mezzo` (`#52`) - no file changes left to land; closing avoids an empty merge.
 
-Each level: scoped **Level N Only**, merge (or close) PRs in GitHub, rewind - not one workspace-wide push that runs ahead into the next level.
+Refresh the grid (**Sync** or reload). GrayMoon paints **purple merged** on Tape and **red closed** on Mezzo. Both rows still show branch **`tape-density`** locally until you run **Level 2** header rewind.
+
+![Level 2 after GitHub merge/close - still on tape-density locally](../../screenshots/workspace2-tape-density-level2-merged-closed-before-sync.png)
+
+| Row | GitHub outcome | Grid badge | Branch (local) |
+| --- | --- | --- | --- |
+| **MezzoRecovery.Tape** | Merged `#39` | purple **merged** | `tape-density` |
+| **MezzoRecovery.Mezzo** | Closed `#52` | red **closed** | `tape-density` |
+| **Level 3** | Open PRs unchanged | green `#42` / `#66` / `#37` | `tape-density` |
+| **Level 1** | Already rewound | **none** | `main` |
+
+That mixed state is correct. Merged and closed PRs are finished on GitHub; local clones still need per-level cleanup.
+
+## Level 2 rewind - fetch, then dialog
+
+On the **Level 2** header, click **Sync to default branch...** (rewind icon). Same pattern as Level 1: fetch job first, then dialog scoped to Level 2 only.
+
+![Level 2 Sync to Default dialog (merged + closed PRs)](../../screenshots/workspace2-tape-density-level2-sync-to-default-dialog.png)
+
+Dialog details for this **merged/closed-PR** case:
+
+- **Lead copy:** *This will sync 2 repositories to their default branch: checkout default, remove the current branch locally, and pull.*
+- **Repo list** - `MezzoRecovery.Tape` leaving `tape-density`; `MezzoRecovery.Mezzo` leaving `tape-density` with a gray **remote** hint (closed PR; origin may still have the feature branch until delete runs).
+- **No red alert** - merged and closed PRs are treated as resolved work, not commits about to be destroyed.
+- **Delete remote branch** and **Delete local branches** - both default **on**. After checkout of `main`, GrayMoon removes the local `tape-density` ref and deletes the remote feature branch when it existed.
+- **Proceed** stays **blue** with no countdown.
+
+Click **Proceed**. Overlay **Synchronizing to default branch...**, then per-repo checkout / pull / branch cleanup for Tape and Mezzo only.
+
+## After Level 2 Sync to Default
+
+![After Level 2 Sync to Default - both Level 2 repos on main](../../screenshots/workspace2-tape-density-level2-sync-to-default-after.png)
+
+Level 2 after this step:
+
+| Column | Level 2 state |
+| --- | --- |
+| **Branch** | `main` on Tape and Mezzo |
+| **Version** | `*-main.*` GitVersion strings |
+| **PR** | **none** (merged PR closed; closed PR stays closed; feature branch ref gone locally) |
+| **Deps** | green badges (`2`, `1`) - Level 1 package pins match |
+| **Commits** | **in sync** with origin |
+
+Level 3 **unchanged** - still on `tape-density` with open PRs. Red dependency badges remain (e.g. TapeTools **4 of 4**, Api **2 of 2**) because Level 2 packages now report `*-main.*` while Level 3 `.csproj` files still pin `-tape-density` Level 2 versions. Header **Push Updated** stays yellow; the split menu will offer **Level 3 Only** next.
+
+## Push Updated vs Level 3 Only (final dependency level)
+
+After Level 2 rewind, Level 3 is the **only** level with red dependency badges. The split-menu label becomes **Level 3 Only**. At this point it matches primary **Push Updated** exactly:
+
+| Action | Scope | When only Level 3 has red badges |
+| --- | --- | --- |
+| **Push Updated** (primary click) | Every level that still needs work | Rewrites Level 3 `.csproj` refs to Level 2 `-main.*` packages, commits, synchronized push through Level 3 |
+| **Level 3 Only** (split menu, first item) | Lowest level needing work (`maxLevel: 3`) | Same job - there is no lower level left to skip and no higher level to accidentally include |
+
+During earlier merge waves you needed **Level 2 Only** so Level 3 PRs stayed stable while Level 2 landed. Now every repo below Level 3 is already on `main` with green badges, so scoping buys nothing. Click the yellow **Push Updated** button or choose **Level 3 Only** from the caret - either path runs update + push for Api, TapeTools, and Agent only.
+
+See the full menu shape in [Phase 3 - Push Updated caret](phase-3-commit-push-gha.md#push-updated-caret---full-menu) (the first scoped item label tracks the lowest red-badge level).
+
+## Run Level 3 update (Push Updated)
+
+We clicked primary **Push Updated** here. **Level 3 Only** would have opened the same **Update dependencies** modal and run the same job.
+
+### Before
+
+Level 1 and Level 2 are on `main` with green dep badges. Level 3 still shows red **`2 of 2`**, **`4 of 4`**, **`2 of 2`** on `tape-density` with open PRs `#42`, `#66`, `#37`. Header is yellow **Push Updated**.
+
+![Before Level 3 update - red Level 3 dep badges, Push Updated header](../../screenshots/workspace2-tape-density-before-level3-only.png)
+
+### Update dependencies modal
+
+GrayMoon opens the **Update dependencies** modal (same shell as Level 2 Only and Phase 3 **Push Updated**).
+
+![Update dependencies modal (Level 3 / Push Updated)](../../screenshots/workspace2-tape-density-level3-only-update-modal.png)
+
+Leave the default message (`chore(deps): update package versions`) and **Include updated dependencies in commit message** on. Click **Proceed**.
+
+### What the job does
+
+One background job runs **Updating Level 3...** then synchronized push through Level 3:
+
+1. **Update phase** - rewrites `.csproj` in `MezzoRecovery.Api`, `MezzoRecovery.TapeTools`, and `MezzoRecovery.Agent` so Level 1 and Level 2 `<PackageReference>` versions point at `-main.*` (matching clones after Level 2 rewind). Level 1 / 2 repos are not edited.
+2. **Commit phase** - one deps commit per Level 3 repo with the shared message.
+3. **Push phase** - synchronized push publishes Level 3 package refs on `tape-density` and stops (Level 3 is the top level; no NuGet wait for downstream consumers).
+
+### GitHub Actions after push
+
+Pushing the deps commit re-runs workflows on the open Level 3 PRs. Switch to the **Actions** sidebar to watch CI live (same page used in [Phase 3](phase-3-commit-push-gha.md)): filter **running**, expand a workflow row for step-level logs. PR check badges on Repositories stay **orange** until runs finish; **Sync** or a refresh picks up green.
+
+![Actions - Level 3 workflows running after Push Updated](../../screenshots/workspace2-tape-density-level3-actions-running.png)
+
+In this frame, **Build Api** and **Agent AOT publish and deploy (legacy)** are **running** on `tape-density`; other rows may already show **success** from earlier pushes on the same branch.
+
+Return to **Repositories** when the overlay completes (or leave Actions open and navigate back later).
+
+### After Push Updated
+
+![After Level 3 Push Updated - green Level 3 dep badges](../../screenshots/workspace2-tape-density-level3-only-after.png)
+
+| Area | What changed | What did not change |
+| --- | --- | --- |
+| **Level 3** | Dep badges green (`2`, `4`, `2`). Each repo gained a deps commit and push (`0 \| N` ahead of `main`). Open PR badges `#42` / `#66` / `#37` still point at the same PRs - now including the alignment commit. | Branch still `tape-density`. |
+| **Level 2 / 1** | Still `main`, green deps, PR **none**. | Unchanged. |
+| **Header** | Yellow **Push Updated** drops; header shows separate **Update** and **Push** (no unmatched deps left to rewrite). | - |
+
+Wait for GHA on the Level 3 PRs to turn green (same pattern as [Level 2 PR checks](#pr-checks-turn-green-after-gha-completes)), then merge in GitHub.
+
+## Merge Level 3 PRs in GitHub (your action)
+
+GrayMoon does not merge for you. When checks are green:
+
+1. Open each Level 3 PR via the row badge (`#42`, `#66`, `#37`) or hover **3 repositories** on the Level 3 header -> **Open in GitHub...** -> **Pull Requests**.
+2. Merge each PR on GitHub (all three carry feature work plus the deps alignment commit from **Push Updated**).
+
+Refresh the grid (**Sync** or reload). GrayMoon paints **purple merged** on Api, TapeTools, and Agent. All three rows still show branch **`tape-density`** locally until you run **Level 3** header rewind.
+
+![Level 3 after GitHub merge - still on tape-density locally](../../screenshots/workspace2-tape-density-level3-merged-before-sync.png)
+
+| Row | GitHub outcome | Grid badge | Branch (local) |
+| --- | --- | --- | --- |
+| **MezzoRecovery.Api** | Merged `#42` | purple **merged** | `tape-density` |
+| **MezzoRecovery.TapeTools** | Merged `#66` | purple **merged** | `tape-density` |
+| **MezzoRecovery.Agent** | Merged `#37` | purple **merged** | `tape-density` |
+| **Level 2 / 1** | Already rewound | **none** | `main` |
+
+## Level 3 rewind - fetch, then dialog
+
+On the **Level 3** header, click **Sync to default branch...**. Fetch job first, then dialog scoped to Level 3 only.
+
+![Level 3 Sync to Default dialog (three merged repos)](../../screenshots/workspace2-tape-density-level3-sync-to-default-dialog.png)
+
+Dialog details (same merged-PR pattern as Level 1 and Level 2):
+
+- **Lead copy:** *This will sync 3 repositories to their default branch...*
+- **Repo list** - Api, TapeTools, Agent leaving `tape-density`.
+- **No red alert** - merged PRs are resolved work.
+- **Delete remote branch** and **Delete local branches** - both default **on**.
+- **Proceed** stays **blue** with no countdown.
+
+Click **Proceed**. Overlay **Synchronizing to default branch...**, then checkout / pull / branch cleanup for all three Level 3 repos.
+
+## After Level 3 Sync to Default - walkthrough complete
+
+![All 11 repositories on main - feature complete](../../screenshots/workspace2-tape-density-all-repos-on-main-after.png)
+
+Every row in the workspace:
+
+| Column | Final state |
+| --- | --- |
+| **Branch** | `main` on all 11 repos |
+| **Version** | `*-main.*` GitVersion strings |
+| **PR** | **none** - merged PRs closed; feature branch refs gone |
+| **Deps** | green badges - every package pin matches live GitVersion |
+| **Commits** | **in sync** with origin |
+| **Header** | **Update** / **Push** / **Sync** - no yellow **Push Updated** (nothing left to align) |
+
+The `tape-density` feature is fully landed. Local clones match GitHub default; the feature branch no longer exists locally or on origin (when delete-remote was checked).
+
+## Summary - the PR merge rhythm (simple)
+
+Cross-repo features in GrayMoon follow one repeating pattern. **You** own review and merge decisions in GitHub. **GrayMoon** owns coordination, dependency math, and fast cleanup across every clone.
+
+### What you do (human, in GitHub)
+
+- **Review** each PR - read the diff, comment, request changes, approve.
+- **Merge or close** when satisfied (e.g. close Mezzo `#52` when it had no file changes).
+- **Decide timing** - merge Level 1 before Level 2, Level 2 before Level 3. GrayMoon shows check badges and merge state but never merges for you.
+
+### What GrayMoon does (coordination)
+
+| Step | GrayMoon action | Why it matters |
+| --- | --- | --- |
+| **Create PRs** | Same title/body across repos, batched by dependency level | No missed repo; reviewers see a consistent story |
+| **Track status** | Purple **merged**, red **closed**, green open PR badges; orange/green check badges | One grid replaces checking 11 GitHub tabs |
+| **Scoped update** | **Level N Only** rewrites `.csproj` pins for one dependency wave at a time | Consumers pick up packages their upstream level just landed on `main` - without extra commits on PRs still in review |
+| **Push + NuGet wait** | Synchronized push publishes packages level-by-level | Downstream `.csproj` updates see the correct package version on the registry |
+| **Per-level rewind** | **Sync to default branch...** on each Level N header | Every clone checks out `main`, deletes the feature branch, pulls latest - in dependency order |
+| **Live CI** | **Actions** page polls GHA; Repositories shows check badges | Spot failing workflows without leaving the workspace |
+
+### The level-by-level loop (this walkthrough)
+
+For each dependency level from bottom (Level 1) to top (Level 3):
+
+1. **Merge** (or close) that level's PRs in GitHub.
+2. **Rewind** that level in GrayMoon (**Sync to default branch...** on the level header).
+3. **Update the next level** - **Level N Only** from the **Push Updated** menu (or primary **Push Updated** when only the top level remains).
+4. Wait for **GHA green**, then repeat for the next level.
+
+Level 1 had six repos; Level 2 had Tape merged and Mezzo closed; Level 3 had three merges. After the last rewind, all 11 repos sit on `main` with green deps - done.
+
+### Why not one big Push Updated during merge?
+
+If you clicked full **Push Updated** while Level 2 and Level 3 PRs were still open, GrayMoon would commit deps bumps onto every consumer at once. Reviewers would see moving targets, CI would re-run on PRs they already approved, and you would need another update pass after each merge wave anyway. **Level N Only** keeps each PR set stable until its level merges, then adds exactly one alignment commit before you merge that level.
+
+At the **final** level, **Push Updated** and **Level 3 Only** are the same job - there is nothing below Level 3 left to protect.
+
+### GrayMoon vs traditional multi-repo merge
+
+| Traditional | With GrayMoon |
+| --- | --- |
+| Manually track which of 11 repos have open PRs, merged PRs, or stale branches | One Repositories grid with PR badges, branch column, and dep badges |
+| Hand-edit `.csproj` package versions after each merge wave | **Level N Only** or **Push Updated** rewrites pins and commits in one job |
+| Push repos one-by-one; guess when NuGet packages are available | Synchronized push with NuGet wait between levels |
+| `git checkout main && git pull && git branch -d tape-density` in 11 folders | Per-level **Sync to default branch** - fetch, dialog, proceed |
+| Easy to forget a repo or leave a stale feature branch | Level headers scope rewind; delete-remote cleans origin too |
+
+**Bottom line:** code review stays human. Branch creation, dependency alignment, push ordering, PR tracking, and cleanup across the whole workspace is what GrayMoon accelerates.

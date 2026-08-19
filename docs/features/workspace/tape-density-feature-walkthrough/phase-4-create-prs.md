@@ -63,5 +63,5 @@ At the end, the Repositories grid shows green PR badges with the created PR numb
 
 After PRs are created, merge them **by dependency level** on GitHub (Level 1 first). Then use the **Level 1** header rewind (**Sync to default branch...**) to check out `main`, delete the merged feature branch, and pull latest default in those clones.
 
-Continue in [Phase 4 - Merge PRs and Sync to Default (Level 1)](phase-4-merging-prs.md).
+Continue in [Phase 4 - Merge PRs and Sync to Default](phase-4-merging-prs.md).
 

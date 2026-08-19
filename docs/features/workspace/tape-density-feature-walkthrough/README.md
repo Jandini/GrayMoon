@@ -1,109 +1,126 @@
 ﻿# Feature walkthrough: `tape-density` (multi-repo development)
 
-This walkthrough demonstrates how to develop a feature across a multi-repository GrayMoon workspace, using a realistic case scenario in `MezzoRecovery`.
+This walkthrough demonstrates the full lifecycle of a cross-repo feature in GrayMoon, using the **MezzoRecovery** workspace (11 repositories, 3 dependency levels).
 
-## What this walkthrough is showing
+## What this walkthrough shows
 
-GrayMoon helps you coordinate the full lifecycle of a cross-repo feature:
+GrayMoon coordinates multi-repository development from branch creation through PR merge and cleanup:
 
-1. Create a feature branch across multiple repositories in one place (optionally including dependency rollouts).
-2. Apply and validate a baseline implementation plan locally (you implement the actual changes).
-3. Demo what changed in GrayMoon (status, diffs, and the â€œwhat is ready to commit/pushâ€ signals).
-4. Create one coordinated set of pull requests across the impacted repositories.
+1. **Create** a feature branch across every impacted repo in one job.
+2. **Implement** the feature locally (you write the code; GrayMoon tracks changes).
+3. **Commit and push** with dependency-aware ordering and NuGet wait.
+4. **Create coordinated PRs** with shared title and body, batched by dependency level.
+5. **Merge level by level** - you review and merge in GitHub; GrayMoon aligns deps, tracks status, and rewinds each level back to `main`.
 
-In this specific case, we are implementing the plan titled **â€œTape density LTO generation trackingâ€** (your existing plan file: `tape_density_lto_generation_tracking_cbf37004.plan.md`).
+Case scenario: **Tape density LTO generation tracking** (plan file: `tape_density_lto_generation_tracking_cbf37004.plan.md`).
 
-## Privacy / redaction rules for this doc
+## Workspace
 
-To keep your private project details safe:
+| Field | Value |
+| --- | --- |
+| Workspace | **MezzoRecovery** |
+| Id | **2** |
+| Route | `/workspaces/2` |
+| URL | `http://localhost:8384/workspaces/2` |
 
-- We will avoid deep code snippets and internal implementation specifics from the `MezzoRecovery` repo.
-- We will freely describe everything else that is not private: repository names, libraries/packages, dependency relationships, and the user-visible behavior in GrayMoon.
-- Any code-level detail will be summarized at a â€œuser-relevant outcomeâ€ level (what the feature does, not how each method is written).
+## Privacy / redaction
 
-## Workspace used in the demo
+- No deep code snippets from private repos.
+- Repository names, packages, dependency relationships, and GrayMoon UI behavior are documented freely.
+- Code detail is summarized at user-relevant outcome level only.
 
-- Workspace: **MezzoRecovery**
-- Workspace id: **2**
-- Route: `/workspaces/2`
-- URL (for your browser): `http://localhost:8384/workspaces/2`
+## Walkthrough phases (all complete)
 
-## How the steps are controlled (pause points)
+| Phase | Doc | What happened |
+| --- | --- | --- |
+| 1 - Preparation | [phase-1-preparation.md](phase-1-preparation.md) | Workspace setup, connectors, clone/sync |
+| 2 - New Feature | [phase-2-new-feature.md](phase-2-new-feature.md) | **New Feature** -> `tape-density` branch, deps update, synchronized push |
+| 2 - Baseline coding | [phase-2-baseline-implementation.md](phase-2-baseline-implementation.md) | Multi-repo AI workspace; Changes page; 5 repos edited |
+| 3 - Commit + push + GHA | [phase-3-commit-push-gha.md](phase-3-commit-push-gha.md) | Commit All, **Push Updated**, Actions live feed |
+| 4 - Create PRs | [phase-4-create-prs.md](phase-4-create-prs.md) | Coordinated PRs by dependency level |
+| 4 - Merge + sync | [phase-4-merging-prs.md](phase-4-merging-prs.md) | Level-by-level merge in GitHub, scoped updates, per-level **Sync to Default** |
 
-You said you want every step controlled by you. This doc is organized as â€œpause pointsâ€:
+Final screenshot: all 11 repos on `main`, green deps, PR **none** - [all repos on main after Level 3 rewind](../screenshots/workspace2-tape-density-all-repos-on-main-after.png).
 
-- I will describe what to do in GrayMoon and what to look for.
-- You will perform the action.
-- You will confirm what happened (or paste any user-visible output).
-- Only then will I move to the next step and capture the next screenshot(s), if needed.
+## Step plan (summary)
 
-When a step involves a potentially destructive action (reset, push, etc.), the doc includes an explicit â€œconfirm before proceedâ€ note.
+### Step 1 - Create feature branch `tape-density`
 
-## Step plan (high level)
+GrayMoon created the branch, updated dependencies per level, and pushed with NuGet wait. See [Phase 2 - New Feature](phase-2-new-feature.md).
 
-### Step 1 - Create the feature branch: `tape-density`
+### Step 2 - Baseline implementation (you)
 
-Documented in [Phase 2 - New Feature](phase-2-new-feature.md) (screenshots captured from `/workspaces/2`).
+You implemented the plan locally. GrayMoon **Changes** tracked edits across repos. See [Phase 2 - Baseline implementation](phase-2-baseline-implementation.md).
 
-Goal: Use GrayMoon to create a coordinated feature branch across the workspace.
+### Step 3 - Commit, push, GitHub Actions
 
-What GrayMoon did in Phase 2:
+**Commit All**, **Push Updated**, synchronized push overlay, Actions before/after. See [Phase 3](phase-3-commit-push-gha.md).
 
-- Open **New Feature** from the Branch menu.
-- Branch name `tape-density`, based on `main`, **Update dependencies** and **Push changes** on.
-- One job: create branches, commit dependency updates per level, synchronized push with NuGet wait.
+### Step 4 - Create coordinated PRs
 
-Pause point: implement the baseline plan locally (your execution). See [Phase 2 - Baseline implementation (AI coding)](phase-2-baseline-implementation.md).
+Bulk PR creation by dependency level plus per-repo `create` badges for stragglers. See [Phase 4 - Create PRs](phase-4-create-prs.md).
 
-### Step 2 - Baseline implementation (you execute)
+### Step 5 - Merge PRs and Sync to Default
 
-Documented in [Phase 2 - Baseline implementation (AI coding)](phase-2-baseline-implementation.md).
+Level-by-level merge rhythm documented in [Phase 4 - Merge PRs](phase-4-merging-prs.md):
 
-Goal: Implement the tape-density plan locally with your AI IDE against the full sibling-repo workspace. GrayMoon already prepared the branch; **Changes** starts empty (`0 of 11 repositories`).
+| Level | Your action (GitHub) | GrayMoon action |
+| --- | --- | --- |
+| **1** | Merge Level 1 PRs | Level 1 rewind -> all Level 1 on `main` |
+| **2** | **Level 2 Only** update, merge Tape `#39`, close Mezzo `#52` | Level 2 rewind |
+| **3** | **Push Updated** (same as Level 3 Only), merge `#42` / `#66` / `#37` | Level 3 rewind -> **all 11 on `main`** |
 
-Progress captured in the baseline doc: first edits (3 repos), growing to **5 of 11 repos**, collapsed/expanded tree, staging/unstaging, and commit-message demo.
+## The PR merge rhythm (simple)
 
-### Step 3 - Commit, push, and GitHub Actions
+```mermaid
+flowchart TD
+  A[Create PRs in GrayMoon] --> B[Review PRs in GitHub - human]
+  B --> C{Checks green?}
+  C -->|No| B
+  C -->|Yes| D[Merge or close in GitHub - human]
+  D --> E[Sync to Default for that level - GrayMoon]
+  E --> F{More levels?}
+  F -->|Yes| G[Level N Only or Push Updated - GrayMoon]
+  G --> H[Wait for GHA - Actions page]
+  H --> B
+  F -->|No| I[All repos on main - done]
+```
 
-Documented in [Phase 3 - Commit, push, and GitHub Actions](phase-3-commit-push-gha.md).
+**You** review code and click Merge in GitHub. **GrayMoon** never merges for you.
 
-**Done:** Commit All (one message, five repos), notification card, **Push Updated**, synchronized push overlay, Actions before/after push, **none** filter, **Run Deploy MezzoRecovery to VPS** on **`tape-density`**, sidebar navigation between Repositories and Actions.
+**GrayMoon** creates branches, tracks PR/check status on one grid, rewrites package pins in dependency order, pushes with NuGet wait, and rewinds each level back to `main` with one header click.
 
-### Step 4 - Explain and create coordinated PRs
+## Benefits vs traditional multi-repo workflow
 
-Goal: Create pull requests for the set of repositories affected by the feature.
+| Pain (traditional) | GrayMoon answer (this walkthrough) |
+| --- | --- |
+| Same branch name in 11 repos by hand | **New Feature** - one job, one branch name everywhere |
+| `.csproj` package versions drift after upstream merges | **Level N Only** / **Push Updated** - rewrite + commit + push in order |
+| Push repo 3 before repo 2's package hits NuGet | Synchronized push with NuGet wait between levels |
+| Miss a repo when opening PRs | Coordinated PR creation; grid shows `create` where still needed |
+| 11 tabs to check PR merge state | Purple **merged**, red **closed**, green open badges on one page |
+| Manual `git checkout main && git pull && branch -d` per repo | Per-level **Sync to default branch** - fetch, confirm, proceed |
+| Stale `tape-density` branch left on origin | Delete remote branch checkbox in rewind dialog |
+| CI status scattered across GitHub | **Actions** page with live step feed; check badges on Repositories |
+| Multi-repo diff review | **Changes** page - combined tree + Monaco diff viewer |
 
-What we will demonstrate:
+## Who does what
 
-- GrayMoonâ€™s PR creation flow for multi-repo workspaces.
-- How dependency ordering and â€œonly PR what is neededâ€ reduces noise compared to a traditional approach.
-- How PR labels and statuses help you keep the team aligned.
+| Task | Owner |
+| --- | --- |
+| Write feature code | **You** (local IDE / AI assistant) |
+| Code review, approve, merge PRs | **You** (GitHub) |
+| Branch creation across repos | **GrayMoon** |
+| Dependency version rewrites | **GrayMoon** |
+| Ordered push + NuGet wait | **GrayMoon** |
+| PR creation with shared title/body | **GrayMoon** |
+| PR/check/branch status on grid | **GrayMoon** |
+| Per-level checkout `main` + branch cleanup | **GrayMoon** |
+| Git hook sync when you edit outside GM | **GrayMoon Agent** |
 
-**Done:** Created coordinated PRs (same title/body) across dependency-level batches, then completed any remaining repos via the per-repository `create` badge. See [Phase 4 - Create coordinated PRs](phase-4-create-prs.md).
+Human judgment stays in GitHub. GrayMoon removes the repetitive coordination tax across repositories.
 
-### Step 5 - Merge Level 1 PRs and Sync to Default (Level 1)
+## Related reference docs
 
-Goal: After Level 1 PRs merge on GitHub, rewind Level 1 so those clones leave `tape-density`, pick up latest `main`, and drop the merged feature branch locally.
-
-**Done:** Full Repositories page before sync, Level 1 rewind dialog (two merged repos still on `tape-density`), grid after all Level 1 rows are on `main`, then **Level 2 Only** (menu, update modal, after grid). Level 3 PRs unchanged; Level 3 red badges reflect Level 2 package moves only. See [Phase 4 - Merge PRs and Sync to Default (Level 1)](phase-4-merging-prs.md).
-
-## Benefits vs a traditional multi-repo workflow
-
-In this scenario, the walkthrough highlights these â€œday to dayâ€ benefits:
-
-- One UI controls the feature branch story across many repos (instead of hand-coordinating branch names and checkouts).
-- When dependency rollouts matter, GrayMoon can apply them in a coordinated order and keep the â€œrestore and pushâ€ story consistent (reducing CI surprises).
-- Git hooks update GrayMoonâ€™s view of what is â€œready to push/pullâ€ even when you change repos outside the app.
-- PR creation is coordinated: less risk of missing a repo, and less PR churn from â€œaccidentalâ€ changes.
-
-## Phases
-
-- **Phase 1 (Preparation):** [phase-1-preparation.md](phase-1-preparation.md)
-- **Phase 2 (New Feature):** [phase-2-new-feature.md](phase-2-new-feature.md) - create `tape-density` branch, dependency update, synchronized push
-- **Phase 2 (Baseline - AI coding):** [phase-2-baseline-implementation.md](phase-2-baseline-implementation.md) - multi-repo workspace for AI, empty Changes baseline, **start coding here**
-- **Phase 3 (Commit + push + Actions):** [phase-3-commit-push-gha.md](phase-3-commit-push-gha.md) - Commit All, Push Updated, GHA live feed
-- **Phase 4 (PRs):** [phase-4-create-prs.md](phase-4-create-prs.md) - coordinated PR creation across repos
-- **Phase 4 (Merge + Level 1 sync):** [phase-4-merging-prs.md](phase-4-merging-prs.md) - merge Level 1 PRs, per-level Sync to Default
-
-Also: no additional plan/code details will be shown beyond user-relevant outcomes.
-
+- [Sync To Default](../../sync-to-default.md) - workspace-wide vs per-level rewind
+- [Switch Branch](../../switch-branch.md) - checkout without deleting branches
