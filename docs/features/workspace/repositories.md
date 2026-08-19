@@ -84,7 +84,7 @@ The **Push Updated** caret:
 - **Update Only** - bump `.csproj` / files and commit. Does not push.
 - **Update Files** - version-file tokens only.
 - **Push Only** - push what is already committed (and set upstream). Does not rewrite deps.
-- **Undo Push Commits** - roll back local update commits.
+- **Undo Push Commits** - roll back local update commits. Full walkthrough: [undo-push-commits.md](undo-push-commits.md).
 
 #### Update Only
 
@@ -160,7 +160,7 @@ One **Push** sends every repo that has outgoing commits or no upstream. Overlay:
 
 ![Repositories after Push](../screenshots/workspace-repositories-after-push.png)
 
-Undo Push opens a modal listing repos/commits to roll back.
+**Undo Push Commits** opens a modal listing each repo with outgoing commits and a **Keep changes** checkbox (mixed vs hard reset). It resets local branches to `origin` only - nothing is pushed. Use when you committed on the default branch by mistake or cannot push to a protected branch. MezzoRecovery example: [undo-push-commits.md](undo-push-commits.md).
 
 ### Sync (split)
 

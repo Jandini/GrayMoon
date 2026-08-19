@@ -171,11 +171,11 @@ In the screenshot after committing on a new branch:
 
 - **GrayMoon** - yellow `↑2` (two outgoing commits, no incoming). Incoming is omitted when the branch has no upstream yet; otherwise a clean pair is `↑N ↓0`.
 - **GrayMoon.Desktop** - yellow cloud-up (new branch, nothing to count as outgoing yet, **Push to set upstream**).
-- Yellow **Push** (split). One click pushes every listed repo in one job (sets upstream where needed). Caret: **Undo Push Commits**.
+- Yellow **Push** (split). One click pushes every listed repo in one job (sets upstream where needed). Caret: **Undo Push Commits** (local reset to origin; see [undo-push-commits.md](workspace/undo-push-commits.md)).
 
 Primary actions (depend on state):
 
-- **Push Updated** (yellow) with split menu: Level N Only, Update Only, Update Files, Push Only, Undo Push Commits (when outgoing commits exist).
+- **Push Updated** (yellow) with split menu: Level N Only, Update Only, Update Files, Push Only, **Undo Push Commits** (when outgoing commits exist; [undo-push-commits.md](workspace/undo-push-commits.md)).
 - **Push** (yellow) when there is nothing to update and no incoming: push all listed repos at once.
 - **Pull** (red) when any listed repo has incoming commits.
 - **Update** (red) when unmatched deps exist together with incoming commits.

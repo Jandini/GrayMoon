@@ -184,3 +184,4 @@ Best practice: create or switch to a feature branch before clicking **Proceed**,
 | PR column badges (including **upgrade**) | [repositories.md - Pull request badge](repositories.md#pull-request-badge) |
 | Dependencies badge column | [repositories.md - Dependencies badge](repositories.md#dependencies-badge) |
 | Commit default-branch warning | [changes.md - Commit across repositories](changes.md#commit-across-repositories) |
+| Undo accidental commits on main before push | [undo-push-commits.md](undo-push-commits.md) |
