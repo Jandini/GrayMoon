@@ -1,4 +1,4 @@
-orkspace Repositories
+# Workspace Repositories
 
 Route: `/workspaces/{id}`
 
@@ -195,6 +195,8 @@ Sync does **not** merge or pull. Incoming counts update so you can decide to Pul
 
 Lighter than Sync. The Agent only fetches remotes (with tags) and recounts commits. It skips GitVersion, `.csproj` scanning, and hook rewriting. Overlay: **Fetching commits...** then **Fetched N of M**. **Fetch does not clone.** If the workspace folder does not exist yet, pick **Sync** from the caret - same for **Restore**, which needs `.csproj` files already on disk. First-day clone: [getting-started/03-workspace-clone.md](../getting-started/03-workspace-clone.md).
 
+For repos pinned to a tag, Fetch also refreshes the tag list and may show a yellow **upgrade** badge when a newer release tag exists on origin. See [tag-upgrade.md](tag-upgrade.md).
+
 That is the daily team-collaboration action: see whether teammates moved **your branch** (incoming `↓N` / commits badge) or the **default branch** (divergence `behind | ahead`, for example `2 | 0` when `main` gained commits you do not have). It does not merge those commits.
 
 On this MezzoRecovery run Fetch brought **no incoming** - every row stayed `↑0 ↓0` and `0 | 0`. Incoming will be simulated separately later.
@@ -236,8 +238,8 @@ Level actions are disabled when a job is running or repos in the group are on ta
 | --- | --- | --- |
 | Repository | Name as a link to the GitHub repo | Tooltip is the project type: Service, Package, Executable, Library, Test |
 | Version | GitVersion string, or `-` | Click copies the version (brief clicked styling). Tooltip: "Click to copy version" |
-| Branch | Current branch, or a tag icon + tag name | Click opens the per-repo branch dialog (Locals / Remotes / Tags / New Branch). Workspace-wide Switch Branch is the header **Branch** caret ([switch-branch.md](switch-branch.md)). On a tag: "Repository is pinned to a tag." |
-| Metrics | Five badges in one cell (see below) | |
+| Branch | Current branch, or a tag icon + tag name | Click opens the per-repo branch dialog (**Locals** / **Remotes** / **Tags** / **New Branch**). See [repository-branch-management.md](repository-branch-management.md). Workspace-wide Switch Branch is the header **Branch** caret ([switch-branch.md](switch-branch.md)). On a tag: "Repository is pinned to a tag." |
+| Metrics | Five badges in one cell (see below) | On a tag (**frozen** row): divergence (behind \| ahead), PR, and outgoing/incoming commits badges are **not displayed**; branch shows tag icon + tag name. See [Frozen on the Repositories grid](repository-branch-management.md#frozen-on-the-repositories-grid). |
 
 If a per-repo operation fails, a dismissible red **Error:** banner appears under the row.
 
@@ -259,7 +261,7 @@ Commits behind | ahead of the default branch. Blank when on a tag. `-` when unkn
 | extra number badge | Files changed on that PR | Opens `{prUrl}/changes` |
 | `merged` (purple) | Merged | Opens PR |
 | `closed` (red) | Closed without merge | Opens PR |
-| `upgrade` (yellow) | Repo is on a tag and a newer tag exists | Opens switch-branch on the tags tab |
+| `upgrade` (yellow) | Repo is on a tag and a newer tag exists on origin | Opens branch dialog on **Tags** tab. Full walkthrough: [tag-upgrade.md](tag-upgrade.md) |
 | blank | On a tag without a newer tag | PRs need a branch |
 
 Hovering an open-PR badge refreshes mergeability from GitHub.
@@ -273,6 +275,8 @@ Hovering an open-PR badge refreshes mergeability from GitHub.
 | yellow/red `N of M` | Unmatched package deps and/or out-of-date file tokens | Hover: `current -> new` lines, copy, hint "Click to update this repository only" (or files / both). Click: update **this repo only** (unless on a tag) |
 
 On a tag the mismatch badge is read-only ("checkout a branch first").
+
+When an upstream repo checks out a newer **tag**, consumers on branches often flip from green to red - the tooltip shows `current -> expected` where **expected** is the upstream tag version. Walkthrough: [tag-upgrade.md - out-of-date dependencies](tag-upgrade.md#why-higher-levels-suddenly-show-out-of-date-dependencies).
 
 **Show dependencies** jumps to the Dependencies graph for that repo.
 
@@ -302,7 +306,7 @@ Disabled while a job runs or the row is on a tag.
 
 - Select repositories (from the subtitle count)
 - New Feature
-- New Branch (workspace-wide) / Switch Branch (workspace-wide [switch-branch.md](switch-branch.md), or per-row branch dialog)
+- New Branch (workspace-wide) / Switch Branch (workspace-wide [switch-branch.md](switch-branch.md), or per-row branch dialog - [repository-branch-management.md](repository-branch-management.md))
 - New Pull Request (one repo, one level, or all)
 - Update branch from default
 - Update dependencies (workspace, level-only, or single repo)

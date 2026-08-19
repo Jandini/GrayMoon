@@ -7,6 +7,8 @@ Opening a workspace from [Workspaces](../02-workspaces.md) replaces the first-le
 | Repositories | [repositories.md](repositories.md) |
 | New Branch | [new-branch.md](new-branch.md) |
 | Switch Branch | [switch-branch.md](switch-branch.md) |
+| Repository branch management | [repository-branch-management.md](repository-branch-management.md) |
+| Tag upgrade (Fetch -> upgrade badge -> checkout) | [tag-upgrade.md](tag-upgrade.md) |
 | New Feature | [new-feature.md](new-feature.md) |
 | Sync To Default | [sync-to-default.md](sync-to-default.md) |
 | Changes | [changes.md](changes.md) |

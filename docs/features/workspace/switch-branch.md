@@ -1,4 +1,4 @@
-witch Branch
+# Switch Branch
 
 Route: Repositories, header **Branch** caret, **Switch Branch**.
 
@@ -89,9 +89,11 @@ GrayMoon does not require a clean working tree before **Check out**. If a repo h
 
 ### Per-repo branch dialog
 
-Clicking a row **Branch** cell is a **different** dialog: **Branch - {repo}**, with tabs **Locals** / **Remotes** / **Tags** / **New Branch**. That one repo can check out any of *its* branches, including names that are not common to the workspace. Workspace-wide Switch Branch (this page) is only the header **Branch** caret.
+Clicking a row **Branch** cell opens a **different** dialog: **Branch - {repo}**, with tabs **Locals** / **Remotes** / **Tags** / **New Branch**. That one repo can check out any of *its* branches, create a branch, delete locals/remotes, or check out a tag - including names that are not common to the workspace. Full walkthrough (tabs, deletion, checkout): [Repository branch management](repository-branch-management.md).
 
-On a tag, the row click opens that per-repo dialog on **Tags**. The `upgrade` PR badge (newer tag exists) does the same.
+Workspace-wide Switch Branch (this page) is only the header **Branch** caret.
+
+On a tag, the row click opens that per-repo dialog on **Tags**. The `upgrade` PR badge (newer tag exists) does the same. Tag checkout and frozen-repo behavior: [repository-branch-management.md](repository-branch-management.md#frozen-on-the-repositories-grid).
 
 ## What Check out does not do
 
