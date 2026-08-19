@@ -9,7 +9,11 @@ Opening a workspace from [Workspaces](../02-workspaces.md) replaces the first-le
 | Switch Branch | [switch-branch.md](switch-branch.md) |
 | Repository branch management | [repository-branch-management.md](repository-branch-management.md) |
 | Tag upgrade (Fetch -> upgrade badge -> checkout) | [tag-upgrade.md](tag-upgrade.md) |
+| Feature walkthrough: `library-update` (deps only, frozen tags) | [library-update-feature-walkthrough/README.md](library-update-feature-walkthrough/README.md) |
+| Feature walkthrough: `tape-density` (full lifecycle) | [tape-density-feature-walkthrough/README.md](tape-density-feature-walkthrough/README.md) |
 | Undo Push Commits (local reset before push) | [undo-push-commits.md](undo-push-commits.md) |
+| Feature walkthrough: `library-update` (deps-only) | [library-update-feature-walkthrough/README.md](library-update-feature-walkthrough/README.md) |
+| Feature walkthrough: `tape-density` (full lifecycle) | [tape-density-feature-walkthrough/README.md](tape-density-feature-walkthrough/README.md) |
 | New Feature | [new-feature.md](new-feature.md) |
 | Sync To Default | [sync-to-default.md](sync-to-default.md) |
 | Changes | [changes.md](changes.md) |
