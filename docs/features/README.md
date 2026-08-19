@@ -6,7 +6,7 @@ Screenshots are local PNG files under [`screenshots/`](screenshots/). They were 
 
 ## Getting started (clean install)
 
-Agent already installed, empty database: [getting-started/](getting-started/) - [add connectors](getting-started/01-connectors.md), [fetch the catalog](getting-started/02-fetch-repositories.md), [create a workspace and Sync-clone](getting-started/03-workspace-clone.md).
+Clean database, Agent not installed yet: [getting-started/](getting-started/) - [install the Agent](getting-started/00-agent.md), [add and activate working connectors](getting-started/01-connectors.md) (each **Active** with **OK** status), [fetch the catalog](getting-started/02-fetch-repositories.md), [create a workspace and Sync-clone](getting-started/03-workspace-clone.md).
 
 ## How to read this
 

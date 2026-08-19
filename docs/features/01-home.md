@@ -34,13 +34,23 @@ Each tile has an icon, title, one-line description, and a button.
 - Description: "Install, update, or uninstall the GrayMoon Agent service."
 - Button label and color depend on agent connection (same meaning as the [agent status badge](shared.md#agent-status-badge)):
 
-  | Agent state | Button text | Button color |
-  | --- | --- | --- |
-  | Online | Manage Agent | blue (primary) |
-  | Version mismatch | Upgrade Agent | red |
-  | Offline / connecting / anything else | Install Agent | red |
+| Agent state | Button text | Button color |
+| --- | --- | --- |
+| Online | Manage Agent | blue (primary) |
+| Version mismatch | Upgrade Agent | red |
+| Offline / connecting / anything else | Install Agent | red |
 
-- Click -> `/agent`
+When the Agent is not installed, Home looks like this (red **Install Agent**, red **offline** badge):
+
+![Home with Install Agent](screenshots/home-install-agent.png)
+
+When the Agent is connected but its version does not match the App, the tile is red **Upgrade Agent** and the top-bar badge is red **update**:
+
+![Home with Upgrade Agent](screenshots/home-upgrade-agent.png)
+
+**Upgrade Agent** goes to `/agent` (Update tab). Clicking the **update** badge starts a self-update instead of navigating - see [Agent - Self-update from the badge](05-agent.md#self-update-from-the-badge).
+
+- Click the tile -> `/agent`
 
 ### Connectors
 

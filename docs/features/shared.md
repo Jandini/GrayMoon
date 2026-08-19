@@ -10,27 +10,27 @@ The left sidebar is always present. Collapsing it (icons only) is documented wit
 - **Toggle sidebar** - chevron button at the bottom of the sidebar. Collapses the sidebar to icons only (labels hide). Click again to expand. Preference is persisted as `Sidebar.Collapsed`.
 - **First-level items** (when URL is not `/workspaces/{id}/...`):
 
-  | Label | Icon | Route |
-  | --- | --- | --- |
-  | Home | house | `/` |
-  | Workspaces | grid | `/workspaces` |
-  | Repositories | GitHub octocat | `/repositories` |
-  | Connectors | plug | `/connectors` |
-  | Agent | CPU | `/agent` |
-  | Settings | gear | `/settings` |
+| Label | Icon | Route |
+| --- | --- | --- |
+| Home | house | `/` |
+| Workspaces | grid | `/workspaces` |
+| Repositories | GitHub octocat | `/repositories` |
+| Connectors | plug | `/connectors` |
+| Agent | CPU | `/agent` |
+| Settings | gear | `/settings` |
 
 - **Workspace items** (when URL is `/workspaces/{id}` or a nested workspace path). Labels in the sidebar are short; tooltips/aria still use the full names:
 
-  | Sidebar text | Aria / meaning | Route |
-  | --- | --- | --- |
-  | Home | Home | `/` |
-  | Repositories | Workspace repositories grid | `/workspaces/{id}` |
-  | Changes | Git changes | `/workspaces/{id}/changes` |
-  | Projects | Projects | `/workspaces/{id}/projects` |
-  | Packages | Packages | `/workspaces/{id}/packages` |
-  | Files | Files | `/workspaces/{id}/files` |
-  | Deps | Dependencies graph | `/workspaces/{id}/dependencies` |
-  | Actions | GitHub Actions | `/workspaces/{id}/actions` |
+| Sidebar text | Aria / meaning | Route |
+| --- | --- | --- |
+| Home | Home | `/` |
+| Repositories | Workspace repositories grid | `/workspaces/{id}` |
+| Changes | Git changes | `/workspaces/{id}/changes` |
+| Projects | Projects | `/workspaces/{id}/projects` |
+| Packages | Packages | `/workspaces/{id}/packages` |
+| Files | Files | `/workspaces/{id}/files` |
+| Deps | Dependencies graph | `/workspaces/{id}/dependencies` |
+| Actions | GitHub Actions | `/workspaces/{id}/actions` |
 
 - The active item is highlighted (blue background).
 - On narrow viewports a hamburger checkbox still exists for the Bootstrap navbar toggler.
@@ -56,7 +56,7 @@ Always visible in the top-right. Clicking it usually navigates to `/agent`.
 | Online, jobs queued | `running` | green | Go to Agent page |
 | Connecting | `connecting` | gray | Go to Agent page |
 | Offline | `offline` | red | Go to Agent page |
-| Version mismatch | `update` | red | Starts an in-place agent self-update (does not navigate first) |
+| Version mismatch | `update` | red | Starts an in-place agent self-update (does not navigate first). See [Agent - Self-update from the badge](05-agent.md#self-update-from-the-badge). |
 | Update in progress | `updating` | blue | Disabled visually while the update command runs |
 
 Tooltips:

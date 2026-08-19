@@ -4,7 +4,7 @@ Route: `/workspaces/{id}/actions`
 
 GitHub Actions workflows for every repository in the workspace, on the repo's current branch. Status is live-polled while runs are active.
 
-MezzoRecovery (`/workspaces/2`) after a refresh: **15 workflows**, all last-run **success**. The **success 15** chip is the status filter (only statuses that currently exist are shown).
+MezzoRecovery (`/workspaces/2`) on **`main`**: **15 workflows**, all last-run **success**. The **success 15** chip is the status filter (only statuses that currently exist are shown). On a **feature branch** such as **`tape-density`**, expect **success**, **none**, and **running** chips together after push - see [None filter on a feature branch](#none-filter-on-a-feature-branch).
 
 ![MezzoRecovery Actions filters](../screenshots/workspace2-actions-filters.png)
 
@@ -36,6 +36,30 @@ Turning a chip **off** hides those rows. Combined with search:
 - chips hide everything: "No workflows match the current filters."
 
 On MezzoRecovery only **success** exists, so there is a single green chip. Workspace 1 (GrayMoon) shows **failed**, **success**, and **none** together - see [Failed workflow (workspace 1)](#failed-workflow-workspace-1).
+
+On a **feature branch** such as **`tape-density`**, push-triggered **Build** workflows usually flip to **success** after the first push. **Deploy** and other **`workflow_dispatch`-only** workflows often stay **none** until you run them manually from GrayMoon - see [None filter on a feature branch](#none-filter-on-a-feature-branch).
+
+#### None filter on a feature branch
+
+Turn **success** off and **none** on to list workflows that have **never run on the current branch** (Last Run **never**, gray **none** badge):
+
+![None filter on tape-density - untriggered workflows](../screenshots/workspace2-tape-density-actions-none-filter.png)
+
+On MezzoRecovery **`tape-density`** this typically surfaces **5 workflows**, for example:
+
+| Repository | Workflow | Why it is **none** |
+| --- | --- | --- |
+| MezzoRecovery | Deploy MezzoRecovery to VPS | `workflow_dispatch` only - not triggered by push |
+| MezzoRecovery.TapeTools | Build AOT (linux-x64) | dispatch-only variant |
+| MezzoRecovery.DockerBase | Build and push dotnet-aot images | dispatch-only |
+| MezzoRecovery.DockerBase | Build and push dotnet-aspnet image | dispatch-only |
+| MezzoRecovery.Solution | (workflow list placeholder) | no run on this branch yet |
+
+Chip counts (**success 11**, **none 4** in the header) are **workspace totals**, not the filtered row count. Subtitle shows **5 workflows** when only **none** rows match.
+
+Use this view after a feature push to answer: "What still has not run on **`tape-density`**?" - especially deployment workflows you may want to trigger before a demo.
+
+Combine with search: `deploy` with **success** and **none** both on finds **Deploy MezzoRecovery to VPS** (none) plus Agent **publish and deploy** rows (success on **`tape-density`**) - see [Search](#search).
 
 ### Search
 
@@ -93,7 +117,11 @@ Header **Re-run** (when any failed row exists):
 
 ## Run: Deploy MezzoRecovery to VPS
 
-On MezzoRecovery, **Deploy MezzoRecovery to VPS** supports **Run** (`workflow_dispatch`). Last run was success; **Run** starts a **new** run on `main`.
+On MezzoRecovery, **Deploy MezzoRecovery to VPS** supports **Run** (`workflow_dispatch`). **Run** starts a new GitHub run on the repository's **current branch** in the workspace grid - on **`main`** that is the production deploy path; on a feature branch such as **`tape-density`** you can deploy that branch directly from GrayMoon without opening GitHub.
+
+### From `main` (reference)
+
+Last run was success; **Run** starts a **new** run on `main`.
 
 After **Run**:
 
@@ -108,6 +136,20 @@ After **Run**:
 This run went through **Setup .NET**, GitVersion, and the remaining deploy steps (14 steps). When GitHub finishes, status returns to **success**, **Run** / **Logs** come back, and the running chip disappears.
 
 ![Deploy VPS success](../screenshots/workspace2-actions-deploy-success.png)
+
+### From a feature branch (`tape-density` walkthrough)
+
+After [pushing the feature branch](../workspace/tape-density-feature-walkthrough/phase-3-commit-push-gha.md), open **Actions**, filter **none**, and **Run** **Deploy MezzoRecovery to VPS**:
+
+![Deploy VPS running on tape-density](../screenshots/workspace2-tape-density-actions-deploy-vps-running.png)
+
+- Branch column: **`tape-density`** (same branch as the Repositories grid)
+- Status: orange **running**, Last Run **just now**
+- Header: **running 1** chip appears
+- Row action: **Abort** (cancel on GitHub)
+- Live terminal under the row: step progress (e.g. **Setup .NET** at step 4 of 14)
+
+GrayMoon dispatches `workflow_dispatch` on **`tape-density`** - you do not switch branch in GitHub first. When the run finishes, status returns to **success** and **Run** / **Logs** come back.
 
 ### Logs after the run
 

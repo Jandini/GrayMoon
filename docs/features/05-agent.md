@@ -19,18 +19,54 @@ The default tab depends on connection:
 
 **Host** is hidden entirely until the agent is Online or Version mismatch.
 
-### Install / Update
+### Install
 
 ![Agent Install](screenshots/agent-install.png)
 
-- When the agent version does not match the app: note "The agent is running version **{semver}**, which is not compatible with this application. Run the command below to update." Tab label becomes **Update**.
-- Otherwise the tab is **Install**.
+- Tab label is **Install** when the agent is offline or already compatible.
 - Copy: "Run this PowerShell command as Administrator to install the GrayMoon Agent as a Windows service:"
 - Read-only command box: `irm {appBase}/api/agent/install | iex`
 - **Copy** copies that command. Clipboard failures show an error toast (denied, needs HTTPS, or connection lost).
 - Note: the script downloads, installs, and starts the service.
 - Note: Windows service requires .NET 10 x64 runtime, with a **Download the .NET 10 runtime** link.
 - Footer: "You can download and run the agent executable manually." **Download** starts a browser download of the agent binary.
+
+A **fresh** Windows install always prompts for the current user's password so `GrayMoonAgent` can run as that account. You must enter the password; the service will not install without it. The installer then grants **Log on as a service** and starts the service. First-day walkthrough: [getting-started/00-agent.md](getting-started/00-agent.md).
+
+![PowerShell Agent install](screenshots/agent-install.gif)
+
+```
+PS C:\Windows\System32> irm http://127.0.0.1:8384/api/agent/install | iex
+GrayMoon Agent Installation
+Preparing installation directory...
+Downloading agent from http://127.0.0.1:8384...
+Download completed.
+Extracting agent...
+Installing service...
+Service will run as: MATT80\matt
+Password for MATT80\matt: *********
+Granting 'Log on as a service' right...
+Creating Windows service...
+Service 'GrayMoonAgent' installed and started successfully.
+
+Installation completed!
+```
+
+### Update
+
+The same **Install** command is the update path. There is no separate update script. When the connected agent semver does not match the App, the tab label becomes **Update** (styled red) and a note names the running agent version:
+
+![Agent Update](screenshots/agent-update.png)
+
+- Note: "The agent is running version **{semver}**, which is not compatible with this application. Run the command below to update."
+- Command is unchanged: `irm {appBase}/api/agent/install | iex`
+- **Host** stays visible (the agent is still connected). The Host **Agent** row shows the old semver next to the App version in the top bar:
+
+![Agent Host during version mismatch](screenshots/agent-update-host.png)
+
+Because `GrayMoonAgent` already exists, the script does **not** ask for a password. It stops the running service, replaces the files under `C:\Program Files\GrayMoon`, updates the existing service configuration, and starts it again. After reconnect the badge returns to green **online** and the tab label is **Install** again.
+
+Home shows the same mismatch as a red **Upgrade Agent** tile (see [Home](01-home.md#agent)). Walkthrough: [getting-started/00-agent.md](getting-started/00-agent.md#update).
 
 ### Uninstall
 
@@ -39,7 +75,19 @@ The default tab depends on connection:
 - "Run this PowerShell command as Administrator to uninstall the GrayMoon Agent Windows service:"
 - Command: `irm {appBase}/api/agent/uninstall | iex`
 - **Copy** (outline danger).
-- Note: the script stops and removes the service.
+- Note: the script stops and removes the service, then deletes `C:\Program Files\GrayMoon`.
+
+```
+PS C:\Windows\System32> irm http://127.0.0.1:8384/api/agent/uninstall | iex
+GrayMoon Agent Uninstallation
+Removing service...
+Stopping service...
+Service 'GrayMoonAgent' removed.
+Removing installation directory...
+Installation directory removed.
+
+Uninstallation completed!
+```
 
 ### Host
 
@@ -60,6 +108,24 @@ Footer note:
 - Otherwise "Install the missing prerequisites above." and the **Host** tab itself is styled as missing.
 
 If host info fails to load, a muted error string is shown instead of the grid. While loading: "Loading…"
+
+## Self-update from the badge
+
+When versions do not match, the [top-bar badge](shared.md#agent-status-badge) is red **update** instead of green **online**. Tooltip: "Agent version mismatch. Agent version: {semver}. Click to update." Home uses the same state for the red **Upgrade Agent** button.
+
+![Home with Upgrade Agent](screenshots/home-upgrade-agent.png)
+
+Clicking the **update** badge starts an in-place self-update. It does **not** navigate to `/agent` first.
+
+1. The App sends a `SelfUpdate` command to the running agent over SignalR, with the same install URL (`{appBase}/api/agent/install`).
+2. The badge turns blue **updating** immediately and stays there while the service restarts.
+3. On Windows the agent launches a detached process: `powershell.exe -NoProfile -NonInteractive -Command "irm .../api/agent/install | iex"`. That is the same install script as the **Update** tab.
+4. The script stops the old service, downloads the App's current agent zip, replaces the files, and starts the service again (no password prompt; the service already exists).
+5. When the new agent connects and its version matches the App, the badge returns to green **online**.
+
+If the command cannot be dispatched (agent not connected, process failed to start), a toast shows **Agent update failed.** and the app navigates to `/agent` so you can run the command manually.
+
+Badge self-update is Windows-only. On Linux, run the install script from the **Update** tab yourself.
 
 ## Live git tracking
 

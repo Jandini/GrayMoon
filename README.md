@@ -48,6 +48,8 @@ GrayMoon runs as two parts:
 
 Keep both running for full functionality.
 
+You also need **working connectors** (GitHub and NuGet as needed): each must be **Active** with status **OK** before fetch, clone, push, package checks, or GitHub Actions work. See [getting started - connectors](docs/features/getting-started/01-connectors.md).
+
 ## Docker
 
 Run on port `8384`; optional volume to persist the SQLite database:
@@ -89,20 +91,26 @@ The app runs in a container and does not run git or access your workspace filesy
 
 When the agent is connected, the app shows an **online** badge; sync and repository operations use the agent.
 
-On the **Agent** page, GrayMoon provides an **Install/Upgrade** command you can run on the host (PowerShell), for example:
+On the **Agent** page, copy the **Install** command and run it in an **Administrator** PowerShell window. A fresh Windows install prompts for the current user's password (required) so the `GrayMoonAgent` service can run as that account:
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('http://localhost:8384/api/agent/install'))
+irm http://localhost:8384/api/agent/install | iex
 ```
+
+![PowerShell Agent install](docs/features/screenshots/agent-install.gif)
+
+Walkthrough with the full install and uninstall output: [docs/features/getting-started/00-agent.md](docs/features/getting-started/00-agent.md).
 
 ## Typical workflow
 
-1. Configure connectors and fetch repositories.
-2. Create a workspace and select the repositories needed for a feature.
-3. Clone/check out repositories into the workspace.
-4. Create or switch a branch across selected repositories.
-5. Run dependency/version updates (GrayMoon updates the impacted `PackageReference` versions for you when needed).
-6. Continue working in your IDE while GrayMoon tracks changes in the background; GrayMoon UI does not need to stay open as long as the Docker app and agent services are running.
+1. Install the Agent Windows service (Administrator PowerShell; a user password is required).
+2. Add connectors, turn them **Active**, and confirm **OK** status (fix **Error** before continuing).
+3. Fetch repositories from GitHub.
+4. Create a workspace and select the repositories needed for a feature.
+5. Clone/check out repositories into the workspace.
+6. Create or switch a branch across selected repositories.
+7. Run dependency/version updates (GrayMoon updates the impacted `PackageReference` versions for you when needed).
+8. Continue working in your IDE while GrayMoon tracks changes in the background; GrayMoon UI does not need to stay open as long as the Docker app and agent services are running.
 
 ## What's new
 
