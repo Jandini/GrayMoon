@@ -212,7 +212,7 @@ You performed the merge decisions in GitHub (GrayMoon only reflects the outcome)
 1. **Merge** `MezzoRecovery.Tape` (`#39`) - feature work plus the deps alignment commit from **Level 2 Only**.
 2. **Close** `MezzoRecovery.Mezzo` (`#52`) - no file changes left to land; closing avoids an empty merge.
 
-Refresh the grid (**Sync** or reload). GrayMoon paints **purple merged** on Tape and **red closed** on Mezzo. Both rows still show branch **`tape-density`** locally until you run **Level 2** header rewind.
+Refresh the grid - hover PR badges, press **F5** (persisted state only), run header **Sync**, or click **Level 2** header **Sync to default branch...** (`<<`, which refreshes PR status for the level before the dialog). See [Refreshing PR status](../../repositories.md#refreshing-pr-status). GrayMoon paints **purple merged** on Tape and **red closed** on Mezzo. Both rows still show branch **`tape-density`** locally until you run **Level 2** header rewind.
 
 ![Level 2 after GitHub merge/close - still on tape-density locally](../../screenshots/workspace2-tape-density-level2-merged-closed-before-sync.png)
 
@@ -227,7 +227,7 @@ That mixed state is correct. Merged and closed PRs are finished on GitHub; local
 
 ## Level 2 rewind - fetch, then dialog
 
-On the **Level 2** header, click **Sync to default branch...** (rewind icon). Same pattern as Level 1: fetch job first, then dialog scoped to Level 2 only.
+On the **Level 2** header, click **Sync to default branch...** (rewind icon). Same pattern as Level 1: PR refresh for the level first, then fetch job, then dialog scoped to Level 2 only. No need to hover badges before clicking.
 
 ![Level 2 Sync to Default dialog (merged + closed PRs)](../../screenshots/workspace2-tape-density-level2-sync-to-default-dialog.png)
 
@@ -325,7 +325,7 @@ GrayMoon does not merge for you. When checks are green:
 1. Open each Level 3 PR via the row badge (`#42`, `#66`, `#37`) or hover **3 repositories** on the Level 3 header -> **Open in GitHub...** -> **Pull Requests**.
 2. Merge each PR on GitHub (all three carry feature work plus the deps alignment commit from **Push Updated**).
 
-Refresh the grid (**Sync** or reload). GrayMoon paints **purple merged** on Api, TapeTools, and Agent. All three rows still show branch **`tape-density`** locally until you run **Level 3** header rewind.
+Refresh the grid - hover PR badges, **F5**, header **Sync**, or **Level 3** header **Sync to default branch...** (`<<`). See [Refreshing PR status](../../repositories.md#refreshing-pr-status). GrayMoon paints **purple merged** on Api, TapeTools, and Agent. All three rows still show branch **`tape-density`** locally until you run **Level 3** header rewind.
 
 ![Level 3 after GitHub merge - still on tape-density locally](../../screenshots/workspace2-tape-density-level3-merged-before-sync.png)
 

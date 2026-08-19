@@ -264,7 +264,21 @@ Commits behind | ahead of the default branch. Blank when on a tag. `-` when unkn
 | `upgrade` (yellow) | Repo is on a tag and a newer tag exists on origin | Opens branch dialog on **Tags** tab. Full walkthrough: [tag-upgrade.md](tag-upgrade.md) |
 | blank | On a tag without a newer tag | PRs need a branch |
 
-Hovering an open-PR badge refreshes mergeability from GitHub.
+### Refreshing PR status
+
+GrayMoon runs locally and **cannot receive GitHub webhooks**, so PR badges do not flip to **merged** or **closed** when you merge on GitHub. Something in the app must call the GitHub API (or re-read a row already saved).
+
+| Trigger | Scope | Calls GitHub PR API? |
+| --- | --- | --- |
+| **Hover open-PR badge** | One repo | Yes - status and mergeability tint. Throttled 10 s per repo. |
+| **Level N `<<` Sync to default** | Repos in that level | Yes - **first step** before fetch and dialog. No separate refresh needed before clicking. |
+| **Branch -> Sync To Default** | All eligible repos | Yes - during fetch prep before dialog. |
+| **Header Sync** (Sync menu) | All or selected repos | Yes - via persist after full git sync. Slower than hover or per-level rewind. |
+| **F5 (reload page)** | Whole page | No - re-reads persisted SQLite rows only. |
+| **Header Fetch** | All repos | No - `git fetch` only; PR badges unchanged unless already persisted. |
+| **After Create PRs** | Created repos | Yes - automatic when bulk create finishes. |
+
+Walkthrough examples: [library-update phase 5](library-update-feature-walkthrough/phase-5-merging-prs.md#refreshing-pr-status-after-github-merge), [Sync To Default](sync-to-default.md#refreshing-pr-status).
 
 ### Dependencies badge
 

@@ -45,6 +45,8 @@ After [Switch Branch](switch-branch.md) the workspace sat on `new-branch-demo` e
 
 **Branch** caret, **Sync To Default**. GrayMoon does **not** show the confirm dialog on that click. It first refreshes live git / GitHub state so the list you are about to approve is current.
 
+That prep includes **pull-request refresh from GitHub** for every eligible repo (same API path as hover and per-level rewind). See [Refreshing PR status](#refreshing-pr-status) under per dependency level and [repositories.md](repositories.md#refreshing-pr-status).
+
 ### Fetch before the dialog
 
 A workspace job starts immediately: overlay **Fetching latest branch state for N repositories...**, then **Fetched N of M...**, **Abort**. In parallel (up to 8 at a time) it:
@@ -117,6 +119,14 @@ Every **Branch** cell is `main`. Version strings are `*-main.*` again. Divergenc
 Each **Level N** header has a rewind control (title **Sync to default branch...**). It runs the same Sync To Default job, but only for repositories in that level. Fetch still happens first; the dialog still lists only those repos; **Delete remote branches** / **Delete local branches** still default on.
 
 Use this when you want default to come back **in graph order**, not all 11 clones at once.
+
+### Refreshing PR status
+
+Clicking **Level N** header **Sync to default branch...** (`<<`) **refreshes PR records from GitHub for every repo in that level before anything else** - synchronously, before the fetch overlay and before the confirm dialog. Badges can change from green `#NNN` to purple **merged** (or red **closed**) as soon as you click, even if you merged on GitHub seconds ago.
+
+You do **not** need to hover PR badges or press F5 first. Hover is optional when you only want to check one repo without opening the sync dialog. Full header **Sync** (Sync menu) also refreshes PRs but runs a heavier git sync across the workspace. **Fetch** alone does not call the GitHub PR API.
+
+See [Pull request badge - refreshing status](repositories.md#refreshing-pr-status) for every trigger.
 
 ### Roll back Level 1 first
 
