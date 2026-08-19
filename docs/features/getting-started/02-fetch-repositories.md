@@ -2,6 +2,8 @@
 
 Route: `/repositories`
 
+Requires step 2 from [getting started](README.md): at least one **Active** GitHub connector with **OK** status. Fetch is blocked if connectors are missing, inactive, or in **Error**.
+
 This is the **global catalog** of GitHub repositories. It is not a workspace and it does not clone anything. Until you fetch, the page is empty even if connectors already test **OK**.
 
 ![Empty catalog](../screenshots/setup-repositories-empty.png)

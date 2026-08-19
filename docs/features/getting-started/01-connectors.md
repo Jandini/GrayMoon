@@ -2,6 +2,8 @@
 
 Route: `/connectors`
 
+**Working connectors are required.** GrayMoon cannot fetch the repository catalog, clone from GitHub, check package availability during push, or load GitHub Actions until every connector you need is **Active** with status **OK**. Inactive switches or red **Error** badges block those operations until you fix the token or URL and re-test. See [Connectors](../04-connectors.md#inactive-connectors-and-error-status) for activation and testing.
+
 GrayMoon talks to GitHub (catalog, clone URLs, Actions) and to NuGet feeds (package availability during synchronized push) through **connectors**. A clean install starts empty.
 
 ![Empty connectors](../screenshots/setup-connectors-empty.png)
@@ -61,6 +63,8 @@ Save. Status goes **Testing** then **OK**. Click row **Test** (or **Test Connect
 
 ![Both connectors OK](../screenshots/setup-connectors-both-ok.png)
 
-Active switches stay on. A used connector in **Error** is what turns Home **Manage Connectors** red.
+Active switches stay on after a successful test. Keep both rows **OK** before moving on - if either connector is inactive or in **Error**, fetch and workspace steps will fail.
+
+A used connector in **Error** is what turns Home **Manage Connectors** red.
 
 Next: [fetch the repository catalog](02-fetch-repositories.md).
