@@ -69,8 +69,6 @@ Documented in [Phase 3 - Commit, push, and GitHub Actions](phase-3-commit-push-g
 
 **Done:** Commit All (one message, five repos), notification card, **Push Updated**, synchronized push overlay, Actions before/after push, **none** filter, **Run Deploy MezzoRecovery to VPS** on **`tape-density`**, sidebar navigation between Repositories and Actions.
 
-When you are ready, ask for Step 4 (Create PRs).
-
 ### Step 4 - Explain and create coordinated PRs
 
 Goal: Create pull requests for the set of repositories affected by the feature.
@@ -81,7 +79,13 @@ What we will demonstrate:
 - How dependency ordering and â€œonly PR what is neededâ€ reduces noise compared to a traditional approach.
 - How PR labels and statuses help you keep the team aligned.
 
-Pause point: You will confirm PR titles, base branch, and reviewers (you control those inputs).
+**Done:** Created coordinated PRs (same title/body) across dependency-level batches, then completed any remaining repos via the per-repository `create` badge. See [Phase 4 - Create coordinated PRs](phase-4-create-prs.md).
+
+### Step 5 - Merge Level 1 PRs and Sync to Default (Level 1)
+
+Goal: After Level 1 PRs merge on GitHub, rewind Level 1 so those clones leave `tape-density`, pick up latest `main`, and drop the merged feature branch locally.
+
+**Done:** Full Repositories page before sync, Level 1 rewind dialog (two merged repos still on `tape-density`), grid after all Level 1 rows are on `main`, then **Level 2 Only** (menu, update modal, after grid). Level 3 PRs unchanged; Level 3 red badges reflect Level 2 package moves only. See [Phase 4 - Merge PRs and Sync to Default (Level 1)](phase-4-merging-prs.md).
 
 ## Benefits vs a traditional multi-repo workflow
 
@@ -98,12 +102,8 @@ In this scenario, the walkthrough highlights these â€œday to dayâ€ bene
 - **Phase 2 (New Feature):** [phase-2-new-feature.md](phase-2-new-feature.md) - create `tape-density` branch, dependency update, synchronized push
 - **Phase 2 (Baseline - AI coding):** [phase-2-baseline-implementation.md](phase-2-baseline-implementation.md) - multi-repo workspace for AI, empty Changes baseline, **start coding here**
 - **Phase 3 (Commit + push + Actions):** [phase-3-commit-push-gha.md](phase-3-commit-push-gha.md) - Commit All, Push Updated, GHA live feed
-- **Phase 4 (PRs):** coordinated PR creation (on your signal)
-
-## Remaining PR clarifications (we will pause until you tell me to start Step 4 / PRs)
-
-- PR base branch target (example: `main`).
-- Which repositories to open PRs for (all impacted repos vs only a smaller subset you pre-select).
+- **Phase 4 (PRs):** [phase-4-create-prs.md](phase-4-create-prs.md) - coordinated PR creation across repos
+- **Phase 4 (Merge + Level 1 sync):** [phase-4-merging-prs.md](phase-4-merging-prs.md) - merge Level 1 PRs, per-level Sync to Default
 
 Also: no additional plan/code details will be shown beyond user-relevant outcomes.
 

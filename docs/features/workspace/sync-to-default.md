@@ -28,6 +28,15 @@ On MezzoRecovery (`/workspaces/2`, 11 repos) the **Branch** caret opens:
 
 The Agent must be online. **Branch** stays disabled while a Repositories job is running or the Agent has pending tasks, and when the workspace has zero repos. Repos already on default are skipped. If every repo is already on default, a toast says **All repositories are already on the default branch.** and nothing else runs. Repos on tags are skipped.
 
+## What not to do (hard abort vs merge workflow)
+Use **Branch menu -> Sync To Default** only as a hard abort/discard: it checks out default across *every* eligible repo and deletes the current feature branch refs locally (and optionally on origin).
+
+If any listed repo is **ahead of default** and does **not** have a merged or closed PR, GrayMoon shows a red warning like **N commits will be lost** (and the dialog supports rollback countdown / Proceed flow for discard).
+
+![Sync To Default dialog warning (workspace-wide)](../screenshots/workspace2-sync-to-default-dialog.png)
+
+In this walkthrough, we are not abandoning merged work. So for anything where you still intend to merge PRs, **do not proceed with the workspace-wide Sync To Default dialog**. Click **Cancel** and use per-level rewind instead.
+
 ## Roll back the feature work
 
 After [Switch Branch](switch-branch.md) the workspace sat on `new-branch-demo` everywhere. Level 2 / 3 were ahead of `main` (`0 | 3` or `0 | 2`) with yellow **create** (no PR). Commits badges were green `↑0 ↓0` (that feature branch had been pushed). The work on that branch is what we are throwing away.
@@ -127,6 +136,45 @@ Afterward Level 1 is on `main` (`*-main.*`, `0 | 0`, **none**). Level 2 / 3 stay
 
 ![Level 1 on main, higher levels still on the feature branch](../screenshots/workspace2-level1-sync-to-default-after.png)
 
+### Level 1 PRs are still open (what to do next)
+If PRs are still open on **Level 1**, you must not start the rollback from the workspace-wide **Branch menu -> Sync To Default** flow.
+
+The safe workflow is:
+- **Merge (or close) Level 1 PRs first**.
+- Then rewind **Level 1** using the Level header's rewind icon (single-level cleanup).
+
+On this run, the Level 1 header still shows two open PRs:
+
+![Level 1 with open PRs](../screenshots/workspace2-level1-sync-to-default-prs-open-before.png)
+
+On the **Level 1** header, click the rewind icon (**Sync to default branch...**). The dialog it opens is scoped to Level 1 and skips repos with open PRs.
+
+![Level 1 rewind dialog skips open PR repos](../screenshots/workspace2-level1-sync-to-default-prs-open-dialog.png)
+
+In this dialog, the two open-PR repos are intentionally absent:
+- `MezzoRecovery` (PR `#53`)
+- `MezzoRecovery.TapeDrive` (PR `#16`)
+
+The repos that are listed (safe to rewind while PRs are still unmerged) are:
+- `MezzoRecovery.TapeImage`
+- `MezzoRecovery.Website`
+- `MezzoRecovery.DockerBase`
+- `MezzoRecovery.Solution`
+
+In this scenario, the first three effectively have no divergence vs `main` (so GrayMoon can safely do the branch cleanup for them), and `Solution` is also eligible because there is no unmerged PR work tied to it.
+
+Click **Proceed** in this dialog to sync the eligible Level 1 repos to `main`.
+
+![Level 1 Sync To Default running (PRs still open)](../screenshots/workspace2-level1-sync-to-default-prs-open-running.png)
+
+Afterward, GrayMoon leaves the two open PR repos on the feature branch and rewinds only the repos listed in the dialog:
+- Stayed on `tape-density` (still blocked by PRs): `MezzoRecovery` (PR `#53`), `MezzoRecovery.TapeDrive` (PR `#16`)
+- Moved to `main`: `MezzoRecovery.TapeImage`, `MezzoRecovery.Website`, `MezzoRecovery.DockerBase`, `MezzoRecovery.Solution`
+
+![Level 1 Sync To Default after proceed (PRs still open)](../screenshots/workspace2-level1-sync-to-default-prs-open-after-proceed.png)
+
+Next: merge the two remaining PRs at Level 1. Then rerun **Level 1 rewind** so those two repos are finally included in the dialog and can be checked out onto `main`.
+
 ### What the red badges are tracking
 
 [New Feature](new-feature.md) rewrote Level 2 / 3 `.csproj` files so `<PackageReference>` versions matched GitVersion on the feature branch (`0.1.1-new-feature-demo.14`, and so on). Level 1 rewind put those package repos back on `main`, so GitVersion there is `*-main.*` again. The consuming `.csproj` files on `new-feature-demo` still pin the feature versions. GrayMoon compares every workspace package reference to the live GitVersion of that package and paints the mismatch.
@@ -147,9 +195,9 @@ Rewind on **Level 2** (or 3) does **not** open the dialog while those repos are 
 
 That guard is the point of the per-level control. Unique work on a consuming repo is not discarded just because Level 1 already went back to `main`. A full no-PR discard of those ahead commits is the workspace **Branch** menu **Sync To Default** (the walkthrough above), which shows the red alert and countdown instead of skipping.
 
-### How per-level rewind fits closing PRs (not demoed)
+### How per-level rewind fits merging PRs
 
-The usual happy path is not this rollback. It is: merge the PRs **by level**, then rewind that level so clones drop the merged feature branch and pick up latest default.
+The usual happy path is: merge the PRs **by dependency level**, then rewind that level so clones drop the merged feature branch and pick up latest default.
 
 1. Open PRs (**Create PRs...**). Merge **Level 1** first so the base packages exist on default (and on the feed).
 2. Rewind **Level 1**. Those six clones leave `new-feature-demo`, delete the merged branch locally and on origin, and pull `main`. Level 2 / 3 stay on the feature branch until *their* PRs merge - they can keep building against the feature while Level 1 is already clean.
@@ -163,7 +211,7 @@ Benefits of doing it per level instead of waiting to rewind the whole workspace:
 - Higher levels can keep using the feature branch while lower levels are already on default. Switch Branch stays readable: fewer leftover names in the repos you have already closed out.
 - The skip on unmerged ahead commits is the same safety net during the PR process: rewind is a cleanup step after merge (or a branch-name cleanup when a level has no unique commits), not an accidental discard of open work.
 
-This demo never opened PRs, so only Level 1 rewind ran. Level 2 / 3 still sit on `new-feature-demo` with unmatched deps until you either merge those PRs and rewind, or use workspace-wide Sync To Default to roll them back too.
+This demo used an open-PR state on Level 1, so the Level 1 rewind dialog intentionally excluded the two open-PR repos until you merge them. Level 2 / 3 still sit on `new-feature-demo` with unmatched deps until you merge their PRs and rewind those levels (or, as an explicit rollback/discard action, use workspace-wide Sync To Default).
 
 ## Other entry points
 

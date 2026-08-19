@@ -216,8 +216,9 @@ No full page reload is required; enhanced navigation keeps the circuit (and any 
 
 ## Next (on your signal)
 
-- **Create PRs...** across the impacted repos
-- Confirm PR titles, base branch (`main`), and reviewers
-- Optional: capture Actions **success** screenshot when all **`tape-density`** workflows are green again
+Now that PRs are created, the next focus is the PR check pipeline:
 
-See [walkthrough README](README.md) Step 4.
+- Monitor PR checks until CI is green
+- Merge (or open them in GitHub for review) when everything passes
+
+See [Phase 4 - Create coordinated PRs](phase-4-create-prs.md).
