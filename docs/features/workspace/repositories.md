@@ -140,7 +140,7 @@ When this push finished, every commits badge was green `↑0 ↓0` (upstream exi
 
 ### Pull / Push
 
-- Incoming commits on any repo: red **Pull**.
+- Incoming commits on any repo: red **Pull**. Full walkthrough: [incoming-commits.md](incoming-commits.md) (per-repo red badge, or header **Pull** for every repo that has incoming).
 - Outgoing commits / push recommended (including a branch with no upstream): yellow **Push** with split **Undo Push Commits**.
 - Otherwise outline **Push**.
 
@@ -199,7 +199,7 @@ For repos pinned to a tag, Fetch also refreshes the tag list and may show a yell
 
 That is the daily team-collaboration action: see whether teammates moved **your branch** (incoming `↓N` / commits badge) or the **default branch** (divergence `behind | ahead`, for example `2 | 0` when `main` gained commits you do not have). It does not merge those commits.
 
-On this MezzoRecovery run Fetch brought **no incoming** - every row stayed `↑0 ↓0` and `0 | 0`. Incoming will be simulated separately later.
+On this MezzoRecovery run Fetch brought **no incoming** - every row stayed `↑0 ↓0` and `0 | 0`. Incoming (red badge / header **Pull**) is walked through in [incoming-commits.md](incoming-commits.md).
 
 After Fetch the primary button itself becomes **Fetch**:
 
@@ -302,7 +302,7 @@ When an upstream repo checks out a newer **tag**, consumers on branches often fl
 | --- | --- | --- |
 | green `↑0 ↓0` | Clean vs upstream | Push (no-op-ish / still wired to push) |
 | yellow `↑N ↓0` | Outgoing commits | Push this repo (may open push-with-dependencies modal) |
-| red `↑N ↓M` (M>0) | Incoming (and maybe outgoing) | Pull this repo |
+| red `↑N ↓M` (M>0) | Incoming (and maybe outgoing) | Pull this repo. Walkthrough: [incoming-commits.md](incoming-commits.md) |
 | yellow cloud-up icon | Branch has no upstream | Push to set upstream |
 | blank / `-` | On a tag, or unknown | None |
 

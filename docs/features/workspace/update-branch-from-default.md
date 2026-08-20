@@ -2,9 +2,9 @@
 
 Route: Repositories (`/workspaces/{id}`), divergence badge - yellow **behind** count on a feature branch.
 
-When your feature branch falls behind the workspace default (`main` here), GrayMoon shows a yellow number in the **behind | ahead** pair. One click opens **Update Branch**, which fetches `origin/<default>` and merges it into your current branch. No push - you stay in control of when the merge result leaves your machine.
+When any feature branch falls behind the workspace default (`main` here), GrayMoon shows a yellow number in the **behind | ahead** pair. One click opens **Update Branch**, which fetches `origin/<default>` and merges it into your **current** branch. The flow is the same for every feature branch name and every workspace that clones the repo - not only the walkthrough below. No push - you stay in control of when the merge result leaves your machine.
 
-Walkthrough workspace: **GrayMoon** (`/workspaces/1`). Branch `functionality-documentation` was **1** commit behind `main` and **13** ahead.
+Primary walkthrough: **GrayMoon** (`/workspaces/1`). Branch `functionality-documentation` was **1** commit behind `main` and **13** ahead. Complementary clone of the same repos: **workspace** (`/workspaces/9`) - see [Same feature branch in another workspace](#same-feature-branch-in-another-workspace).
 
 ## Where it is
 
@@ -78,6 +78,20 @@ After this run:
 
 You now have the latest from `main` on your feature branch. Push when ready (header **Push**, or the commits badge) so origin and any open PR pick up the merge.
 
+## Same feature branch in another workspace
+
+Update Branch is per clone, not per GitHub branch name. A second workspace that points at the same repositories can sit on the **same** feature branch and still show yellow behind until **that** working copy merges `origin/<default>`.
+
+Complementary example: **workspace** (`/workspaces/9`) - also GrayMoon + GrayMoon.Desktop. GrayMoon is on `functionality-documentation` with yellow **`1`** | **`13`** (Desktop stays on `main` at `0 | 0`). Same actionable behind badge as `/workspaces/1`; this clone simply has not run Update Branch yet.
+
+![Yellow 1 behind on functionality-documentation in workspace 9](../screenshots/workspace9-update-branch-behind-badge.png)
+
+Click the yellow **1**. The dialog is the same flow - it names this workspace's current branch and repo:
+
+![Update Branch dialog in workspace 9](../screenshots/workspace9-update-branch-dialog.png)
+
+Lead copy: *Update **functionality-documentation** in **GrayMoon** with the latest changes from **main** (1 commit behind).* Steps, **No automatic push**, and **Update Branch** / **Cancel** match the primary walkthrough above. Confirming runs the same Agent `UpdateBranchFromDefault` merge into the current feature branch on this clone only.
+
 ## When there are merge conflicts
 
 If git cannot merge cleanly, the Agent leaves the repo in a **merge-in-progress** state (`MERGE_HEAD` present) and returns the conflict file list.
@@ -102,7 +116,7 @@ Conflict detection uses git's merge exit status and porcelain status (`UU`, `AA`
 | --- | --- |
 | Bring feature branch up to date with latest default | **Yellow behind** -> **Update Branch** (this page) |
 | Discard feature work and return every clone to default | [Sync To Default](sync-to-default.md) |
-| Pull teammate commits on the **same** branch | Commits badge incoming / sync commits |
+| Pull teammate commits on the **same** branch | Red commits badge / header **Pull** - [incoming-commits.md](incoming-commits.md) |
 | Only refresh remote tips without merging | Header **Fetch** |
 
 ## Prerequisites
