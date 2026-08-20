@@ -6,9 +6,18 @@ When `origin/<your-branch>` has commits your local clone does not, GrayMoon turn
 
 Walkthrough workspace: **workspace** (`/workspaces/9`). **GrayMoon** is on **`main`** with red **`↑0 ↓1`** (one commit on `origin/main` not pulled yet). **GrayMoon.Desktop** stays green **`↑0 ↓0`**. Header **Push** has become red **Pull**.
 
-![Red Pull header and red ↑0 ↓1 commits badge](../screenshots/workspace9-incoming-commits-red-pull.png)
+## Starting state - before Pull
 
-On this row, divergence also shows **`1 | 0`** behind default - on **`main`**, behind vs default and incoming vs upstream are the same remote tip. Pull is still driven by the **commits** badge / **Pull** button, not by clicking divergence behind (that Update Branch flow only applies on a **feature** branch).
+![Before Pull - red Pull header and red ↑0 ↓1](../screenshots/workspace9-incoming-commits-before-pull.png)
+
+| Column | GrayMoon | Desktop |
+| --- | --- | --- |
+| Branch | `main` | `main` |
+| Divergence | `1 \| 0` | `0 \| 0` |
+| Commits | red `↑0 ↓1` | green `↑0 ↓0` |
+| Header | red **Pull** | (same workspace header) |
+
+On **`main`**, divergence behind and incoming vs upstream are the same remote tip. Pull is still driven by the **commits** badge / **Pull** button, not by clicking divergence behind (that Update Branch flow only applies on a **feature** branch).
 
 ## How you see incoming
 
@@ -24,8 +33,6 @@ On this row, divergence also shows **`1 | 0`** behind default - on **`main`**, b
 
 Click the red commits badge on that row (here **`↑0 ↓1`** on GrayMoon). GrayMoon runs commit-sync for **that repository only**.
 
-Overlay: **Synchronizing commits...** with streamed git output.
-
 Use this when only one clone needs the pull, or when you want to pull repos one at a time.
 
 ## Pull every repo that has incoming - header Pull
@@ -40,6 +47,10 @@ Click the red header **Pull**. GrayMoon collects every workspace repository with
 So if several rows show red `↓M`, one header **Pull** brings them all up to date. You do not have to click each badge.
 
 Repos without incoming stay untouched. Tag-pinned rows are skipped.
+
+This walkthrough used header **Pull** (only GrayMoon had incoming). Overlay:
+
+![Synchronizing commits overlay](../screenshots/workspace9-incoming-commits-synchronizing.png)
 
 ## Level Sync commits (optional)
 
@@ -58,15 +69,26 @@ GrayMoon does **not** open a confirm dialog for header **Pull** or the red badge
 
 ## After a successful pull
 
-| Column | Before (this walkthrough) | After |
+![After Pull - green ↑0 ↓0 and outline Push](../screenshots/workspace9-incoming-commits-after-pull.png)
+
+| Column | Before | After |
 | --- | --- | --- |
-| Commits badge | red `↑0 ↓1` | green `↑0 ↓0` |
-| Header | red **Pull** | outline **Push** (or yellow **Push** if something else still has outgoing) |
-| Divergence on `main` | `1 \| 0` | `0 \| 0` when the pulled tip matches default |
+| Commits badge (GrayMoon) | red `↑0 ↓1` | green `↑0 ↓0` |
+| Divergence (GrayMoon on `main`) | `1 \| 0` | `0 \| 0` |
+| Header | red **Pull** | outline **Push** |
+| Desktop | green `↑0 ↓0` | unchanged |
 
-## When there are merge conflicts
+## When Pull fails (untracked files or merge conflict)
 
-Unlike [Update branch from default](update-branch-from-default.md) (which leaves `MERGE_HEAD` for you to finish in an IDE), **Pull** **aborts** the merge on conflict and restores a clean tree. The row gets a dismissible red **Error:** banner (for example *Merge conflict detected. Merge aborted.*). Incoming counts stay until you resolve the conflict outside GrayMoon (merge/rebase in your IDE, then commit) and Fetch / Pull again.
+If git cannot complete the pull, GrayMoon shows a dismissible red **Error:** banner under the toolbar (and keeps red **Pull** / incoming counts).
+
+Example from this workspace: an untracked local `docs/features/TODO.md` would be overwritten by the incoming commit, so git aborted:
+
+![Pull aborted - untracked file would be overwritten](../screenshots/workspace9-incoming-commits-pull-error.png)
+
+Fix: move or remove the untracked file(s), then **Pull** again.
+
+Unlike [Update branch from default](update-branch-from-default.md) (which leaves `MERGE_HEAD` for you to finish in an IDE), a **merge conflict** during Pull is also **aborted** - clean tree restored, row error such as *Merge conflict detected. Merge aborted.* Resolve outside GrayMoon, then Fetch / Pull again.
 
 ## When to use this vs other actions
 
@@ -82,6 +104,7 @@ Unlike [Update branch from default](update-branch-from-default.md) (which leaves
 - Agent connected
 - Repo on a **branch** (not a tag)
 - Branch has an upstream and incoming **> 0**
+- Working tree must allow the pull (no conflicting untracked files; no unresolved merge)
 
 ## Related docs
 
