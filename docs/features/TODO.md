@@ -9,7 +9,7 @@ Compared `docs/features/` against `src/GrayMoon.App`, `GrayMoon.Agent`, `GrayMoo
 | Doc | Covers |
 |-----|--------|
 | [`workspace/update-branch-from-default.md`](workspace/update-branch-from-default.md) | Yellow divergence **behind** on a feature branch → **Update Branch** (fetch + merge `origin/<default>`); complementary second-workspace clone example (`/workspaces/9`) |
-| [`workspace/incoming-commits.md`](workspace/incoming-commits.md) | Red commits badge `↑N ↓M` / header **Pull**; per-repo badge click vs header Pull for every repo with incoming; conflict abort behavior |
+| [`workspace/incoming-commits.md`](workspace/incoming-commits.md) | Red commits badge `↑N ↓M` / header **Pull**; per-repo badge vs header Pull for all incoming; before / synchronizing / after screenshots on `/workspaces/9`; untracked-file abort error banner (merge-conflict abort behavior described) |
 
 Also linked from `features/README.md`, `workspace/README.md`, and the Pull / Push + commits-badge sections of `repositories.md` (removed the old *"Incoming will be simulated separately later"* deferral).
 
@@ -51,7 +51,7 @@ These are still called out in the docs themselves as not yet written:
 | Proposed doc | Code | Notes |
 |--------------|------|-------|
 | **`workspace/errors-and-recovery.md`** | `OperationErrorModal`, per-row **Error:** banner, `repositoryErrors` map | No user-facing doc for what happens when sync/push/pull/update fails mid-job |
-| **`workspace/git-conflicts.md`** | Commit sync merge abort, Changes `status:conflict` filter, Update Branch leaves `MERGE_HEAD` | Conflict resolution is always "go to IDE" - worth a short scenario comparing Pull (abort) vs Update Branch (leave merge in progress) |
+| **`workspace/git-conflicts.md`** | Commit sync merge abort, Changes `status:conflict` filter, Update Branch leaves `MERGE_HEAD` | Pull untracked-file abort is in `incoming-commits.md`; still missing a dedicated merge-conflict screenshot and Changes `status:conflict` walkthrough vs Update Branch leaving `MERGE_HEAD` |
 | **`workspace/protected-branch-and-push-failure.md`** | Push errors, `undo-push-commits.md` motivation | NuGet timeout covered in library-update phase 3; git push rejected by branch protection is not |
 
 ---
@@ -108,7 +108,7 @@ Also missing from any index as a **first-level product**:
 | Undo unpushed commits | undo-push-commits | Good |
 | Git Changes multi-repo commit | changes.md | Good |
 | GHA run / logs / deploy | actions.md, tape-density | Good |
-| **Pull incoming** | [`incoming-commits.md`](workspace/incoming-commits.md) | Good (merge-conflict screenshot still optional) |
+| **Pull incoming** | [`incoming-commits.md`](workspace/incoming-commits.md) | Good (before/after + untracked abort; true merge-conflict screenshot still optional) |
 | **Update branch from default** | [`update-branch-from-default.md`](workspace/update-branch-from-default.md) | Good |
 | **Pull + Update same workspace** | No | **Missing** |
 | **Desktop tray workflow** | No | **Missing** |
