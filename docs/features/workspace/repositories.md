@@ -249,9 +249,9 @@ If a per-repo operation fails, a dismissible red **Error:** banner appears under
 
 Commits behind | ahead of the default branch. Blank when on a tag. `-` when unknown.
 
-- Behind number is red-ish / actionable: click starts **update branch from default** (merge/rebase prompt) unless you are already on the default branch (then pull handles incoming).
+- Behind number is yellow / actionable when **> 0** on a feature branch: click opens **Update Branch** (fetch + merge `origin/<default>` into the current branch). Full walkthrough: [update-branch-from-default.md](update-branch-from-default.md).
 - Ahead number links to GitHub compare `default...branch`.
-- Behind number links to GitHub compare `branch...default` when it is not an actionable update.
+- Behind number links to GitHub compare `branch...default` when it is not actionable (for example already on the default branch).
 
 ### Pull request badge
 
@@ -324,7 +324,7 @@ Disabled while a job runs or the row is on a tag.
 - New Feature
 - New Branch (workspace-wide) / Switch Branch (workspace-wide [switch-branch.md](switch-branch.md), or per-row branch dialog - [repository-branch-management.md](repository-branch-management.md))
 - New Pull Request (one repo, one level, or all)
-- Update branch from default
+- Update branch from default - [update-branch-from-default.md](update-branch-from-default.md)
 - Update dependencies (workspace, level-only, or single repo)
 - Custom dependencies (which workspace repos this repo should wait on)
 - Push with dependencies

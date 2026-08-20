@@ -8,6 +8,7 @@ Opening a workspace from [Workspaces](../02-workspaces.md) replaces the first-le
 | Restore (NuGet) | [restore.md](restore.md) |
 | New Branch | [new-branch.md](new-branch.md) |
 | Switch Branch | [switch-branch.md](switch-branch.md) |
+| Update branch from default | [update-branch-from-default.md](update-branch-from-default.md) |
 | Checkout from tags to main | [checkout-from-tags-to-main.md](checkout-from-tags-to-main.md) |
 | Repository branch management | [repository-branch-management.md](repository-branch-management.md) |
 | Tag upgrade (Fetch -> upgrade badge -> checkout) | [tag-upgrade.md](tag-upgrade.md) |
