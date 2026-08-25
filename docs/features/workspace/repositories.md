@@ -160,7 +160,7 @@ One **Push** sends every repo that has outgoing commits or no upstream. Overlay:
 
 ![Repositories after Push](../screenshots/workspace-repositories-after-push.png)
 
-**Undo Push Commits** opens a modal listing each repo with outgoing commits and a **Keep changes** checkbox (mixed vs hard reset). It resets local branches to `origin` only - nothing is pushed. Use when you committed on the default branch by mistake or cannot push to a protected branch. MezzoRecovery example: [undo-push-commits.md](undo-push-commits.md).
+**Undo Push Commits** opens a modal listing each repo with outgoing commits and a **Keep changes** checkbox (mixed vs hard reset). It resets local branches to `origin` only - nothing is pushed. Use when you committed on the default branch by mistake or cannot push to a protected branch. MezzoRecovery example: [undo-push-commits.md](undo-push-commits.md). Full protected-branch failure then recovery (feature branch + PR): [protected-branch-and-push-failure.md](protected-branch-and-push-failure.md).
 
 ### Sync (split)
 

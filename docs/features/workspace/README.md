@@ -15,6 +15,7 @@ Opening a workspace from [Workspaces](../02-workspaces.md) replaces the first-le
 | Feature walkthrough: `library-update` (deps only, frozen tags) | [library-update-feature-walkthrough/README.md](library-update-feature-walkthrough/README.md) |
 | Feature walkthrough: `tape-density` (full lifecycle) | [tape-density-feature-walkthrough/README.md](tape-density-feature-walkthrough/README.md) |
 | Undo Push Commits (local reset before push) | [undo-push-commits.md](undo-push-commits.md) |
+| Protected branch and push failure (commit on main, undo, feature branch, PR) | [protected-branch-and-push-failure.md](protected-branch-and-push-failure.md) |
 | Incoming commits (Pull) | [incoming-commits.md](incoming-commits.md) |
 | Custom dependencies | [custom-dependencies.md](custom-dependencies.md) |
 | New Feature | [new-feature.md](new-feature.md) |

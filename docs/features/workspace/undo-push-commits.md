@@ -4,6 +4,8 @@ Route: Repositories (`/workspaces/{id}`)
 
 **Undo Push Commits** rolls back local commits that have **not been pushed to origin yet**. The branch pointer resets to `origin/<branch>`; remote history is unchanged. Use this when you committed on the wrong branch (for example **main**), do not want those commits on origin, or **cannot push** because the default branch is protected.
 
+Full protected-branch scenario (commit on main -> failed Push -> undo keep changes -> single-repo feature branch -> PR): [protected-branch-and-push-failure.md](protected-branch-and-push-failure.md).
+
 This walkthrough uses **MezzoRecovery** (`/workspaces/2`). **MezzoRecovery.Agent** is on **main** with one outgoing commit: a dependency update that rewrote `MezzoRecovery.Agent.csproj` to pin `MezzoRecovery.TapeDrive` at tag **0.2.0**.
 
 ## When the menu item appears

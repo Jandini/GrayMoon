@@ -8,13 +8,16 @@ Compared `docs/features/` against `src/GrayMoon.App`, `GrayMoon.Agent`, `GrayMoo
 
 | Doc | Covers |
 |-----|--------|
+| [`workspace/protected-branch-and-push-failure.md`](workspace/protected-branch-and-push-failure.md) | Two-part MezzoRecovery walkthrough: commit on `main` despite Default Branch Warning → Push GH013 / rule-violation overlay + **Push failed.** toast → Undo Push Commits (keep changes, workspace-scoped) → per-repo `update-env` branch → push → Create PR only for repos ahead (**#54**); Sync To Default after merge pending |
 | [`workspace/update-branch-from-default.md`](workspace/update-branch-from-default.md) | Yellow divergence **behind** on a feature branch → **Update Branch** (fetch + merge `origin/<default>`); complementary second-workspace clone example (`/workspaces/9`) |
 | [`workspace/incoming-commits.md`](workspace/incoming-commits.md) | Red commits badge `↑N ↓M` / header **Pull**; per-repo badge vs header Pull for all incoming; before / synchronizing / after screenshots on `/workspaces/9`; untracked-file abort error banner (merge-conflict abort behavior described) |
 | [`workspace/custom-dependencies.md`](workspace/custom-dependencies.md) | MezzoRecovery grid with/without deps; TapeTools dialog with locked **`project`** checkboxes; Solution → Api custom edge bubbles Solution to Level 4 for last PR close; why custom edges exist |
 
-Also linked from `features/README.md`, `workspace/README.md`, and related `repositories.md` sections.
+Also linked from `features/README.md`, `workspace/README.md`, and related `repositories.md` / `undo-push-commits.md` sections.
 
 **Come back when version files are documented:** extend `custom-dependencies.md` (and/or `files.md`) with a live **`file`** locked badge in the dialog - version-file token edges are already supported in code but not walked through yet.
+
+**Come back after PR merge:** finish Sync To Default screenshots on [`protected-branch-and-push-failure.md`](workspace/protected-branch-and-push-failure.md) (and optionally Sync To Default reason 2 in `sync-to-default.md`).
 
 ---
 
@@ -54,8 +57,10 @@ These are still called out in the docs themselves as not yet written:
 |--------------|------|-------|
 | **`workspace/errors-and-recovery.md`** | `OperationErrorModal`, per-row **Error:** banner, `repositoryErrors` map | No user-facing doc for what happens when sync/push/pull/update fails mid-job |
 | **`workspace/git-conflicts.md`** | Commit sync merge abort, Changes `status:conflict` filter, Update Branch leaves `MERGE_HEAD` | Pull untracked-file abort is in `incoming-commits.md`; still missing a dedicated merge-conflict screenshot and Changes `status:conflict` walkthrough vs Update Branch leaving `MERGE_HEAD` |
-| **`workspace/protected-branch-and-push-failure.md`** | Push errors, `undo-push-commits.md` motivation | NuGet timeout covered in library-update phase 3; git push rejected by branch protection is not |
 
+Done (moved out of this list):
+
+- Push rejected by branch protection → [`protected-branch-and-push-failure.md`](workspace/protected-branch-and-push-failure.md)
 ---
 
 ## 3. Scenarios worth adding (from design / obsolete docs)
@@ -88,7 +93,7 @@ Done (moved out of this list):
 - `undo-push-commits.md`
 - Both feature walkthroughs (`library-update`, `tape-density`)
 
-Recently added to both indexes: `update-branch-from-default.md`, `incoming-commits.md`, `checkout-from-tags-to-main.md`, `custom-dependencies.md`.
+Recently added to both indexes: `update-branch-from-default.md`, `incoming-commits.md`, `checkout-from-tags-to-main.md`, `custom-dependencies.md`, `protected-branch-and-push-failure.md`.
 
 Also missing from any index as a **first-level product**:
 
@@ -108,6 +113,7 @@ Also missing from any index as a **first-level product**:
 | Create PRs bulk | library-update phase 4 | Reviewers/draft not shown |
 | Merge PRs + Sync To Default per level | phase 5, sync-to-default | Merged-PR reason 2 not demoed |
 | Undo unpushed commits | undo-push-commits | Good |
+| **Protected default push failure + recovery** | [`protected-branch-and-push-failure.md`](workspace/protected-branch-and-push-failure.md) | Good (Parts 1-2; Sync To Default after merge still pending) |
 | Git Changes multi-repo commit | changes.md | Good |
 | GHA run / logs / deploy | actions.md, tape-density | Good |
 | **Pull incoming** | [`incoming-commits.md`](workspace/incoming-commits.md) | Good (before/after + untracked abort; true merge-conflict screenshot still optional) |
@@ -123,9 +129,9 @@ Also missing from any index as a **first-level product**:
 
 1. **Incoming + unmatched deps** (extend `incoming-commits.md` or short addendum) - red header **Update**, Pull-first vs Update-first.
 2. **`07-graymoon-desktop.md`** - Install, tray, close-to-tray, show/hide top bar, native notifications, bundled App startup.
-3. **`workspace/create-pull-request.md`** - Standalone reference (eligibility, draft, reviewers, templates, single/bulk/level).
+3. **`workspace/create-pull-request.md`** - Standalone reference (eligibility, draft, reviewers, templates, single/bulk/level). Single-repo eligibility is also shown in [`protected-branch-and-push-failure.md`](workspace/protected-branch-and-push-failure.md).
 4. **`workspace/level-actions.md`** - All five level-header icons with screenshots.
-5. **`sync-to-default.md` addendum** - Reason 2 merged-PR cleanup scenario.
+5. **`sync-to-default.md` addendum** - Reason 2 merged-PR cleanup scenario (can reuse MezzoRecovery **#54** / `update-env` after merge).
 6. **Extend `files.md` / version-files** - Version config editor + commit modal + Add Files; then add **`file`** locked-badge example to [`custom-dependencies.md`](workspace/custom-dependencies.md).
 7. **Update `features/README.md`** - Add remaining workspace-only pages (`repository-branch-management`, `tag-upgrade`, `undo-push-commits`, walkthroughs) + Desktop entry.
 
@@ -135,7 +141,7 @@ Also missing from any index as a **first-level product**:
 
 - First-level pages: Home, Workspaces, Repositories catalog, Connectors, Agent, Settings, Layout, Shared chrome
 - Workspace grids: Projects, Packages, Dependencies graph, Actions (including logs download/collapse)
-- Branch workflows: new-branch, switch-branch, new-feature, sync-to-default (discard path), per-repo branch dialog, **update-branch-from-default**, **incoming-commits (Pull)**, **custom-dependencies**
+- Branch workflows: new-branch, switch-branch, new-feature, sync-to-default (discard path), per-repo branch dialog, **update-branch-from-default**, **incoming-commits (Pull)**, **custom-dependencies**, **protected-branch-and-push-failure** (default-branch warning + GH013 recovery)
 - Restore, tag-upgrade, undo-push-commits
 - Two end-to-end walkthroughs (library-update deps-only, tape-density full lifecycle)
 - Git Changes (stage/unstage/commit across repos, Monaco diff, default-branch commit warning)
@@ -144,4 +150,4 @@ Also missing from any index as a **first-level product**:
 
 ## Summary
 
-The documentation set still reads like a **feature-branch shipping manual** (branch → deps → push → CI → PR → cleanup), with **Pull**, **Update branch from default**, and **Custom dependencies** covered for day-to-day collaboration and level ordering. It remains thinner on **combined states** (incoming + unmatched deps), **version files** (revisit custom-deps **`file`** badge then), **PR creation details**, and **GrayMoon Desktop**. Clearest next steps: Pull+Update together, Desktop, create-PR reference, Sync To Default reason 2, then version files.
+The documentation set still reads like a **feature-branch shipping manual** (branch → deps → push → CI → PR → cleanup), with **Pull**, **Update branch from default**, **Custom dependencies**, and **protected-branch push failure / recovery** covered for day-to-day collaboration and level ordering. It remains thinner on **combined states** (incoming + unmatched deps), **version files** (revisit custom-deps **`file`** badge then), **PR creation details**, and **GrayMoon Desktop**. Clearest next steps: Pull+Update together, Desktop, create-PR reference, Sync To Default reason 2 (including finish of the protected-branch walkthrough after merge), then version files.
