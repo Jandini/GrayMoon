@@ -44,6 +44,14 @@ Unchecked rows (Api, Agent, Solution, Website, ...) are available as **custom** 
 
 GrayMoon also hides or blocks candidates that would create a **cycle** in the combined graph.
 
+### Example - file badge from a version file
+
+After configuring `MezzoRecovery/docker/.env` with `API_VERSION={MezzoRecovery.Api}` (see [Files / version files](files.md)), open Custom dependencies on **MezzoRecovery**. **MezzoRecovery.Api** is checked and tagged **`file`** - locked the same way as **`project`**. Change it by editing the version pattern on Files, not by toggling here.
+
+A self-token like `APP_VERSION={MezzoRecovery}` does **not** appear as a row (no self-loop in the graph), even though it still counts toward out-of-date file lines on the Repositories badge.
+
+![Custom dependencies for MezzoRecovery - locked file badge on Api](../screenshots/workspace2-files-custom-deps-file-badge.png)
+
 ## Why add a custom edge
 
 GrayMoon orders multi-repo work by dependency level:
@@ -92,7 +100,9 @@ With this edge, synchronized push and level Sync To Default treat Solution as wa
 
 ## Related docs
 
+- [Files / version files](files.md) - pin files, `{repo}` patterns, **Update**, **`file`** edges
 - [Dependencies graph](dependencies.md) - visual graph of the same merged edges
 - [Repositories - Dependencies badge](repositories.md#dependencies-badge) - badge click opens this dialog
 - [Sync To Default](sync-to-default.md) - level order when discarding feature branches
 - [Update / Push Updated](repositories.md#update-vs-push-updated) - level-by-level package publish wait
+- [TOFIX - file self-ref badge "2 of 1"](../TOFIX.md)
