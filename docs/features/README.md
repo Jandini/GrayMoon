@@ -36,6 +36,7 @@ Clean database, Agent not installed yet: [getting-started/](getting-started/) - 
 | Switch Branch | (from Repositories **Branch**) | [workspace/switch-branch.md](workspace/switch-branch.md) |
 | Update branch from default | (yellow divergence **behind** on a feature branch) | [workspace/update-branch-from-default.md](workspace/update-branch-from-default.md) |
 | Incoming commits (Pull) | (red commits badge / header **Pull**) | [workspace/incoming-commits.md](workspace/incoming-commits.md) |
+| Custom dependencies | (deps badge on Repositories row) | [workspace/custom-dependencies.md](workspace/custom-dependencies.md) |
 | Checkout from tags to main | (from Repositories **Branch** or row tag click) | [workspace/checkout-from-tags-to-main.md](workspace/checkout-from-tags-to-main.md) |
 | New Feature | (from Repositories **Branch**) | [workspace/new-feature.md](workspace/new-feature.md) |
 | Sync To Default | (from Repositories **Branch**) | [workspace/sync-to-default.md](workspace/sync-to-default.md) |

@@ -286,8 +286,8 @@ Walkthrough examples: [library-update phase 5](library-update-feature-walkthroug
 
 | Appearance | Meaning | Click / hover |
 | --- | --- | --- |
-| `0` | No package/file deps | Opens **custom dependencies** modal |
-| green count (e.g. `4`) | All matched | Hover: list of packages/versions, file tokens, custom deps, copy, **Show dependencies**. Click: custom deps modal |
+| `0` | No package/file deps | Opens **custom dependencies** modal. Walkthrough: [custom-dependencies.md](custom-dependencies.md) |
+| green count (e.g. `4`) | All matched | Hover: list of packages/versions, file tokens, custom deps, copy, **Show dependencies**. Click: custom deps modal ([custom-dependencies.md](custom-dependencies.md)) |
 | yellow/red `N of M` | Unmatched package deps and/or out-of-date file tokens | Hover: `current -> new` lines, copy, hint "Click to update this repository only" (or files / both). Click: update **this repo only** (unless on a tag) |
 
 On a tag the mismatch badge is read-only ("checkout a branch first").

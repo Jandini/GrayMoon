@@ -1,6 +1,6 @@
 # GrayMoon Feature Documentation Gap Analysis
 
-Compared `docs/features/` against `src/GrayMoon.App`, `GrayMoon.Agent`, `GrayMoon.Desktop`, and design docs under `docs/`. Coverage is strong for the happy-path feature lifecycle (branch → update → synchronized push → PR → merge cleanup) and now includes the two core **team collaboration** flows (Pull incoming, Update branch from default). Remaining holes are **combined Pull + Update**, **modal-level detail**, **Desktop shell**, and some **index completeness**.
+Compared `docs/features/` against `src/GrayMoon.App`, `GrayMoon.Agent`, `GrayMoon.Desktop`, and design docs under `docs/`. Coverage is strong for the happy-path feature lifecycle (branch → update → synchronized push → PR → merge cleanup) and includes **Pull**, **Update branch from default**, and **Custom dependencies**. Remaining holes are **combined Pull + Update**, **version-file depth**, **Desktop shell**, and some **index completeness**.
 
 ---
 
@@ -10,8 +10,11 @@ Compared `docs/features/` against `src/GrayMoon.App`, `GrayMoon.Agent`, `GrayMoo
 |-----|--------|
 | [`workspace/update-branch-from-default.md`](workspace/update-branch-from-default.md) | Yellow divergence **behind** on a feature branch → **Update Branch** (fetch + merge `origin/<default>`); complementary second-workspace clone example (`/workspaces/9`) |
 | [`workspace/incoming-commits.md`](workspace/incoming-commits.md) | Red commits badge `↑N ↓M` / header **Pull**; per-repo badge vs header Pull for all incoming; before / synchronizing / after screenshots on `/workspaces/9`; untracked-file abort error banner (merge-conflict abort behavior described) |
+| [`workspace/custom-dependencies.md`](workspace/custom-dependencies.md) | MezzoRecovery grid with/without deps; TapeTools dialog with locked **`project`** checkboxes; Solution → Api custom edge bubbles Solution to Level 4 for last PR close; why custom edges exist |
 
-Also linked from `features/README.md`, `workspace/README.md`, and the Pull / Push + commits-badge sections of `repositories.md` (removed the old *"Incoming will be simulated separately later"* deferral).
+Also linked from `features/README.md`, `workspace/README.md`, and related `repositories.md` sections.
+
+**Come back when version files are documented:** extend `custom-dependencies.md` (and/or `files.md`) with a live **`file`** locked badge in the dialog - version-file token edges are already supported in code but not walked through yet.
 
 ---
 
@@ -40,8 +43,7 @@ These are still called out in the docs themselves as not yet written:
 
 | Proposed doc | Code | Current coverage |
 |--------------|------|------------------|
-| **`workspace/custom-dependencies.md`** | `CustomDependenciesModal.razor` | Mentioned via deps badge click only; locked vs user-selected repos, effect on synchronized push wait list |
-| **`workspace/version-files.md`** (extend `files.md` or split) | `VersionConfigModal`, `VersionFilesCommitModal`, `WorkspaceFileVersionService` | `files.md` is short; missing `@` autocomplete, unknown-token warnings, "not found in file", commit checkbox on update |
+| **`workspace/version-files.md`** (extend `files.md` or split) | `VersionConfigModal`, `VersionFilesCommitModal`, `WorkspaceFileVersionService` | `files.md` is short; missing `@` autocomplete, unknown-token warnings, "not found in file", commit checkbox on update. **Also revisit [`custom-dependencies.md`](workspace/custom-dependencies.md)** for a **`file`** locked-badge screenshot once version-file edges exist in a demo workspace. |
 | **`workspace/add-files.md`** (section or page) | `AddFilesModal.razor` | Wildcard `*`/`?`, repo filter dropdown, 20-result cap, agent file search |
 | **`workspace/push-with-dependencies.md`** | `PushWithDependenciesModal.razor` | Synchronized push dialog is documented; non-default unchecked push and per-repo push paths deserve a failure/recovery page |
 | **`workspace/update-and-push.md`** | `WorkspaceRepositories.Update.cs` `OnUpdateAndPushClickAsync`, level-only variant | Menu item **Update & Push...** listed in `repositories.md` but never demonstrated (distinct from one-click **Push Updated**) |
@@ -86,7 +88,7 @@ Done (moved out of this list):
 - `undo-push-commits.md`
 - Both feature walkthroughs (`library-update`, `tape-density`)
 
-Recently added to both indexes: `update-branch-from-default.md`, `incoming-commits.md`, `checkout-from-tags-to-main.md`.
+Recently added to both indexes: `update-branch-from-default.md`, `incoming-commits.md`, `checkout-from-tags-to-main.md`, `custom-dependencies.md`.
 
 Also missing from any index as a **first-level product**:
 
@@ -112,8 +114,8 @@ Also missing from any index as a **first-level product**:
 | **Update branch from default** | [`update-branch-from-default.md`](workspace/update-branch-from-default.md) | Good |
 | **Pull + Update same workspace** | No | **Missing** |
 | **Desktop tray workflow** | No | **Missing** |
-| **Custom deps for push ordering** | No | **Missing** |
-| **Version file configure + commit modal** | Shallow | **Needs depth** |
+| **Custom deps for push ordering** | [`custom-dependencies.md`](workspace/custom-dependencies.md) | Good (project locks + Solution→Api bubble; **`file`** badge deferred until version-files doc) |
+| **Version file configure + commit modal** | Shallow | **Needs depth** (then revisit custom-deps **`file`** badge) |
 
 ---
 
@@ -124,9 +126,8 @@ Also missing from any index as a **first-level product**:
 3. **`workspace/create-pull-request.md`** - Standalone reference (eligibility, draft, reviewers, templates, single/bulk/level).
 4. **`workspace/level-actions.md`** - All five level-header icons with screenshots.
 5. **`sync-to-default.md` addendum** - Reason 2 merged-PR cleanup scenario.
-6. **Extend `files.md`** - Version config editor + version-files commit modal + Add Files modal.
-7. **`workspace/custom-dependencies.md`** - Push wait graph customization.
-8. **Update `features/README.md`** - Add remaining workspace-only pages (`repository-branch-management`, `tag-upgrade`, `undo-push-commits`, walkthroughs) + Desktop entry.
+6. **Extend `files.md` / version-files** - Version config editor + commit modal + Add Files; then add **`file`** locked-badge example to [`custom-dependencies.md`](workspace/custom-dependencies.md).
+7. **Update `features/README.md`** - Add remaining workspace-only pages (`repository-branch-management`, `tag-upgrade`, `undo-push-commits`, walkthroughs) + Desktop entry.
 
 ---
 
@@ -134,7 +135,7 @@ Also missing from any index as a **first-level product**:
 
 - First-level pages: Home, Workspaces, Repositories catalog, Connectors, Agent, Settings, Layout, Shared chrome
 - Workspace grids: Projects, Packages, Dependencies graph, Actions (including logs download/collapse)
-- Branch workflows: new-branch, switch-branch, new-feature, sync-to-default (discard path), per-repo branch dialog, **update-branch-from-default**, **incoming-commits (Pull)**
+- Branch workflows: new-branch, switch-branch, new-feature, sync-to-default (discard path), per-repo branch dialog, **update-branch-from-default**, **incoming-commits (Pull)**, **custom-dependencies**
 - Restore, tag-upgrade, undo-push-commits
 - Two end-to-end walkthroughs (library-update deps-only, tape-density full lifecycle)
 - Git Changes (stage/unstage/commit across repos, Monaco diff, default-branch commit warning)
@@ -143,4 +144,4 @@ Also missing from any index as a **first-level product**:
 
 ## Summary
 
-The documentation set still reads like a **feature-branch shipping manual** (branch → deps → push → CI → PR → cleanup), with **Pull** and **Update branch from default** now covered for day-to-day collaboration. It remains thinner on **combined states** (incoming + unmatched deps), **supporting modals** (custom deps, version files, PR creation details), and **GrayMoon Desktop**. Clearest next steps: Pull+Update together, Desktop, create-PR reference, and Sync To Default reason 2.
+The documentation set still reads like a **feature-branch shipping manual** (branch → deps → push → CI → PR → cleanup), with **Pull**, **Update branch from default**, and **Custom dependencies** covered for day-to-day collaboration and level ordering. It remains thinner on **combined states** (incoming + unmatched deps), **version files** (revisit custom-deps **`file`** badge then), **PR creation details**, and **GrayMoon Desktop**. Clearest next steps: Pull+Update together, Desktop, create-PR reference, Sync To Default reason 2, then version files.

@@ -34,7 +34,7 @@ Search keeps each matching node **and its dependency tree** (the packages it con
 
 Use one term at a time when you want a single consumer's tree. On Repositories, combine names with `or` instead (see [repositories.md](repositories.md#search-fields)).
 
-Interactive Cytoscape graph of workspace repositories and the edges between them (csproj PackageReference, file-config tokens, and user-declared custom dependencies).
+Interactive Cytoscape graph of workspace repositories and the edges between them (csproj PackageReference, file-config tokens, and user-declared [custom dependencies](custom-dependencies.md)).
 
 ## Header
 
