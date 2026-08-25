@@ -35,7 +35,7 @@ What you see:
 | Trash icon | Delete this **local** branch (inline confirmation) |
 | **Fetch** | `git fetch` for this repo only; refreshes local, remote, and tag lists |
 | **Check out** | Check out the selected local branch. Disabled when **Current** is selected. |
-| **Sync to {default}** | Appears when the current local branch has no matching remote ref - shortcut to per-repo [Sync to Default](sync-to-default.md) flow |
+| **Sync to {default}** | Yellow footer button when the **Current** local branch has no matching remote (**Local Only**). Shortcut to per-repo Sync To Default - common after GitHub deletes the head branch on PR merge. Walkthrough: [protected-branch-and-push-failure.md](protected-branch-and-push-failure.md#part-3---after-merge-fetch-then-sync-to-main) |
 
 Local list in this run: `main` (**Current**), `agent-limit`, `read-error`.
 
@@ -138,6 +138,7 @@ Use **Fetch** when:
 
 - **Tags** tab shows *No tags found.* but you know tags exist on GitHub (have not fetched yet)
 - A new remote branch or tag was pushed and the dialog list is stale
+- A PR was merged and GitHub deleted the head branch - Remotes may still show the deleted ref until Fetch; Locals then get **Local Only** and yellow **Sync to {default}** ([protected-branch Part 3](protected-branch-and-push-failure.md#part-3---after-merge-fetch-then-sync-to-main))
 - You just created a tag on origin and want GrayMoon to see it (next step in this walkthrough)
 
 While **Fetch** runs, the button shows a spinner and tabs are disabled. It does not checkout, merge, or rewrite `.csproj` files.

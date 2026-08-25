@@ -10,10 +10,9 @@ Workspace: **MezzoRecovery** (`/workspaces/2`). Only **MezzoRecovery** has the e
 | --- | --- |
 | **1 - Force path on default** | Commit on `main` despite the warning, **Push**, read GH013 / rule-violation errors in the overlay, see the **Push failed.** toast |
 | **2 - Go around with a feature branch** | Undo (keep changes), create `update-env` on MezzoRecovery only, commit, push, create PR |
+| **3 - After merge** | GitHub deletes the remote feature branch; purple **merged**; per-repo **Fetch** discovers **Local Only**; yellow **Sync to main** cleans up |
 
-After the PR is merged on GitHub, continue with [Sync To Default](sync-to-default.md) (cleanup of the feature branch). That step is documented once the merge is done.
-
-Related: [Changes](changes.md) (default-branch commit warning), [Undo Push Commits](undo-push-commits.md), [Repository branch management](repository-branch-management.md) (per-repo **New Branch**).
+Related: [Changes](changes.md) (default-branch commit warning), [Undo Push Commits](undo-push-commits.md), [Repository branch management](repository-branch-management.md) (per-repo **New Branch** / **Sync to main**), [Sync To Default](sync-to-default.md) (merged-PR cleanup).
 
 ---
 
@@ -150,12 +149,63 @@ Example PR: https://github.com/Jandini/MezzoRecovery/pull/54
 
 ---
 
-## Next - merge on GitHub, then Sync To Default
+## Part 3 - After merge: Fetch, then Sync to main
 
-1. Merge **#54** on GitHub (squash / merge / rebase - whatever the repo allows).
-2. In GrayMoon, use **Sync To Default** (workspace Branch menu, or Level 1 rewind) so MezzoRecovery checks out `main`, deletes `update-env` locally (and on origin when **Delete remote branches** is on), and pulls latest default.
+### GitHub deletes the remote branch on merge
 
-That cleanup is the same flow as [sync-to-default.md](sync-to-default.md) (merged-PR path). Screenshots for this walkthrough's sync step are added after the merge.
+**MezzoRecovery** is configured on GitHub to **delete the head branch after the pull request is merged**. That is a repository setting on GitHub (not a GrayMoon setting). When **#54** merges, GitHub removes `origin/update-env` automatically. GrayMoon still has a local `update-env` checkout until you sync.
+
+### Merged badge on the grid
+
+Back on Repositories, MezzoRecovery stays on **update-env** with a purple **merged** PR badge (and divergence still **0 | 1** until you leave the feature branch). Other repos remain on **main**.
+
+![MezzoRecovery on update-env with purple merged badge](../screenshots/workspace2-protected-after-merge-before-refresh.png)
+
+### Branch dialog before Fetch - GrayMoon does not know yet
+
+Click the MezzoRecovery **Branch** cell. The per-repo dialog still reflects the last known refs:
+
+**Locals:** `update-env` (**Current**), `main`. No yellow **Sync to main** yet - the local branch still looks like it has a remote.
+
+![Locals before Fetch: update-env Current](../screenshots/workspace2-protected-branch-dialog-before-fetch.png)
+
+**Remotes:** still lists **origin/update-env** alongside **origin/main**. The UI has not pruned deleted remotes until you fetch.
+
+![Remotes before Fetch: origin/update-env still listed](../screenshots/workspace2-protected-remotes-before-fetch.png)
+
+### Fetch in the dialog
+
+Click **Fetch** in the dialog footer (per-repo fetch - not the workspace header **Fetch**). That runs `git fetch` for MezzoRecovery and refreshes Locals / Remotes / Tags.
+
+After Fetch:
+
+- **Remotes** drops to **origin/main** only (Default). `origin/update-env` is gone.
+- **Locals** keeps `update-env` (**Current**) with a yellow **Local Only** badge - local branch with no matching remote ref.
+- Footer shows yellow **Sync to main** (shortcut to per-repo Sync To Default).
+
+![Remotes after Fetch: only origin/main](../screenshots/workspace2-protected-remotes-after-fetch.png)
+
+![Locals: Local Only + Sync to main](../screenshots/workspace2-protected-locals-sync-to-main.png)
+
+### Sync to main
+
+Click **Sync to main**. Confirm dialog (single repo, merged path - no red "commits will be lost", **Proceed** stays calm):
+
+- Lead copy: checkout default, remove current branch locally, pull latest
+- Row: **MezzoRecovery** / `update-env` with purple **merged**
+- **Delete local branches** (default on)
+
+**Proceed** runs the overlay (**Synchronizing to main...**): checkout `main`, delete local `update-env`, pull.
+
+![Overlay: Synchronizing to main](../screenshots/workspace2-protected-sync-overlay.png)
+
+### Done - all repos on main
+
+MezzoRecovery is back on **main** (`0.1.0-main.55`), divergence **0 | 0**, PR **none**, **↑0 ↓0**, **in sync**. The whole workspace is on default again.
+
+![After Sync to main: MezzoRecovery on main](../screenshots/workspace2-protected-after-sync-to-main.png)
+
+Same cleanup can also use workspace **Branch** → **Sync To Default** or Level 1 rewind when many repos need it. This walkthrough used the per-repo button because only MezzoRecovery left the default branch. Full menu / level flows: [sync-to-default.md](sync-to-default.md#reason-2-merged-prs-per-repo-after-github-deletes-the-remote).
 
 ---
 
@@ -168,3 +218,5 @@ That cleanup is the same flow as [sync-to-default.md](sync-to-default.md) (merge
 | Undo Push Commits | Workspace-scoped; resets all repos with outgoing commits (one repo here is fine); **Keep changes** preserves the working tree |
 | Single-repo branch | Per-row Branch dialog **New Branch** - not workspace New Feature |
 | Create PRs | Only repositories with commits ahead of default (and no open PR) |
+| Delete branch on merge | GitHub setting removes `origin/<feature>`; GrayMoon learns via per-repo **Fetch** |
+| **Local Only** + **Sync to main** | After Fetch, yellow **Sync to main** is the calm merged-PR cleanup for that one repo |

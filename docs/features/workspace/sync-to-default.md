@@ -10,7 +10,9 @@ This page covers both the workspace-wide action from the **Branch** menu and the
 
 **1. Roll back (this walkthrough).** The feature-branch work across the repositories is wrong and will never land on default via PR. You want every repo back on `main`, those feature commits gone, and the feature branch deleted locally and on origin. Treat this as discard, not merge.
 
-**2. PRs already merged (not demoed here).** The feature is in default on GitHub. You still want the workspace off the feature branch and on the latest default: checkout `main`, drop the now-merged feature branch, pull so GitVersion and working trees match `origin/main`. Same menu item, same dialog shell. The difference is the dialog stays calm: merged / closed PRs do not show **N commits will be lost**, **Proceed** stays blue, and there is no countdown.
+**2. PRs already merged.** The feature is in default on GitHub. You still want the workspace off the feature branch and on the latest default: checkout `main`, drop the now-merged feature branch, pull so GitVersion and working trees match `origin/main`. Same menu item / dialog shell as rollback. The difference is the dialog stays calm: merged / closed PRs do not show **N commits will be lost**, **Proceed** stays blue, and there is no countdown.
+
+Single-repo demo (MezzoRecovery `update-env` after GitHub deleted the remote on merge): [Reason 2 - merged PRs (per-repo after GitHub deletes the remote)](#reason-2-merged-prs-per-repo-after-github-deletes-the-remote) and the full story in [protected-branch-and-push-failure.md](protected-branch-and-push-failure.md#part-3---after-merge-fetch-then-sync-to-main).
 
 Both cases share the same housekeeping benefit. Sync To Default removes the feature branch from every workspace clone once that work is either merged or discarded, so local repositories stay on default with a short branch list. Without it, each finished feature would remain as an unused local ref (and often a remote) after you had already moved on. Over time that clutter makes [Switch Branch](switch-branch.md) harder to read and makes it easy to check out yesterday's branch by mistake.
 
@@ -223,9 +225,31 @@ Benefits of doing it per level instead of waiting to rewind the whole workspace:
 
 This demo used an open-PR state on Level 1, so the Level 1 rewind dialog intentionally excluded the two open-PR repos until you merge them. Level 2 / 3 still sit on `new-feature-demo` with unmatched deps until you merge their PRs and rewind those levels (or, as an explicit rollback/discard action, use workspace-wide Sync To Default).
 
+## Reason 2 - merged PRs (per-repo after GitHub deletes the remote)
+
+Many GitHub repos enable **Automatically delete head branches** after merge. GrayMoon does not control that setting. After merge:
+
+1. The PR badge turns purple **merged** (grid may already know from GitHub refresh / hooks).
+2. `origin/<feature>` is gone on GitHub, but the clone can still sit on that local branch.
+3. Opening the per-repo **Branch** dialog **before** Fetch still lists the stale remote (GrayMoon has not pruned yet).
+4. Dialog **Fetch** discovers the deletion: Remotes drop the feature ref; Locals mark **Current** as **Local Only**; yellow **Sync to main** appears.
+5. **Sync to main** opens the same Sync To Default confirm for **that one repo** (merged path - no lost-commits alert). **Proceed** checks out default, deletes the local feature branch, pulls.
+
+Screenshots and the MezzoRecovery `update-env` / **#54** run: [protected-branch-and-push-failure.md Part 3](protected-branch-and-push-failure.md#part-3---after-merge-fetch-then-sync-to-main).
+
+![After merge: purple merged, still on feature branch](../screenshots/workspace2-protected-after-merge-before-refresh.png)
+
+![Remotes still list origin/update-env before Fetch](../screenshots/workspace2-protected-remotes-before-fetch.png)
+
+![Locals: Local Only + Sync to main after Fetch](../screenshots/workspace2-protected-locals-sync-to-main.png)
+
+![After Sync to main: back on main](../screenshots/workspace2-protected-after-sync-to-main.png)
+
+For many repos at once after a multi-repo merge wave, prefer Level rewind or workspace **Sync To Default** (same calm dialog when every listed PR is merged / closed).
+
 ## Other entry points
 
-- **Per-repo branch dialog** (click a row **Branch** cell) - can sync **one** repo to default from that dialog. Same git steps for that repo only.
+- **Per-repo branch dialog** (click a row **Branch** cell) - **Sync to {default}** when Current is **Local Only** (see [Reason 2](#reason-2-merged-prs-per-repo-after-github-deletes-the-remote)). Same git steps for that repo only.
 
 ## What Sync To Default does not do
 
