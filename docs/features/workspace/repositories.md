@@ -230,9 +230,41 @@ Each level header:
 - Up/down arrows - sync commits for the level.
 - Git icon - open PRs for the level.
 - Repeat arrows - synchronize every repo in the level.
-- Count: "N repositories" - hover/focus can open GitHub links for those repos.
+- Count: **N repositories** - hover opens the **Open in GitHub...** menu (see below). Click the count to open every repo home page for that level in new tabs.
 
 Level actions are disabled when a job is running or repos in the group are on tags.
+
+### Open in GitHub... (level header)
+
+Hover the **N repositories** label on a level header. A menu titled **Open in GitHub...** appears, anchored to the count. Each option opens the matching GitHub page for **every repository in that level**, one browser tab per repo. GrayMoon does not perform the GitHub work for you - merge, tag, or settings edits stay manual - but one click gets you onto the right page for the whole level instead of hunting each repo by hand.
+
+![Open in GitHub dropdown on Level 3](../screenshots/workspace2-open-in-github-dropdown.png)
+
+On MezzoRecovery, hovering **3 repositories** on **Level 3** shows the menu above the Api / TapeTools / Agent group.
+
+| Menu item | GitHub path per repo | Typical use |
+| --- | --- | --- |
+| **Branches** | `/branches` | Compare branch lists or clean up remote feature branches after a level is done |
+| **Pull Requests** | open PR URL when GrayMoon knows it; otherwise `/pulls` | Jump straight to open PRs for the level (see below) |
+| **Actions** | `/actions` | Check CI for every repo at that level after a push |
+| **Releases** | `/releases` | Review or cut releases for a level together |
+| **Tags** | `/tags` | Inspect existing tags or create a new tag on each repo in the level |
+| **Issues** | `/issues` | Scan open issues across the level |
+| **Settings** | `/settings` | Apply the same repo setting change across the level (branch protection, secrets, pages, and so on) |
+
+Click the **N repositories** label itself (not a menu row) to open each repository's GitHub home page with no path suffix.
+
+#### Why open a whole level at once
+
+Workspace work often proceeds **level by level**: push Level 1 packages, wait for NuGet, push Level 2, create PRs, then merge and rewind from the bottom of the graph upward. The header menu matches that cadence - you stay on one level's GitHub tabs until that level is finished, then move to the next.
+
+**Pull Requests** is the main shortcut while closing PRs level by level. When GrayMoon has an open PR recorded for a repo, that option opens the **exact PR page** (for example `.../pull/43`) instead of the repo's PR list. Repos without a known open PR still open `/pulls`. Walkthroughs that merge then rewind by level: [library-update phase 5](library-update-feature-walkthrough/phase-5-merging-prs.md), [tape-density phase 4](tape-density-feature-walkthrough/phase-4-merging-prs.md).
+
+**Tags** is useful when you want every repo in a level on the same release tag view - to confirm what exists, or to create matching tags manually after a release train.
+
+**Settings** is for repeated manual GitHub configuration (the same toggle or secret on every repo in the level). Still one settings page per tab, but you are not opening each repo from search first.
+
+Allow pop-ups for `localhost` / the GrayMoon origin if the browser blocks the multi-tab open.
 
 ## Row columns
 

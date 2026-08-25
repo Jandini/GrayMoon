@@ -206,7 +206,7 @@ Wait for GHA on the Level 3 PRs to turn green, then merge in GitHub.
 
 GrayMoon does not merge for you. When checks are green:
 
-1. Open each Level 3 PR via the row badge (**#43**, **#67**, **#38**) or hover **3 repositories** on the Level 3 header -> **Open in GitHub...** -> **Pull Requests**.
+1. Open each Level 3 PR via the row badge (**#43**, **#67**, **#38**) or hover **3 repositories** on the Level 3 header -> **Open in GitHub...** -> **Pull Requests** ([level header menu](../repositories.md#open-in-github-level-header)).
 2. Merge each PR on GitHub (all three carry dependency work plus the deps alignment commit from **Level 3 Only**).
 
 Refresh the grid - hover PR badges, **F5**, header **Sync**, or **Level 3** header **Sync to default branch...** (`<<`). See [Refreshing PR status](#refreshing-pr-status-after-github-merge). GrayMoon paints **purple merged** on Api, TapeTools, and Agent. All three rows still show branch **`library-update`** locally until you run **Level 3** header rewind.

@@ -193,7 +193,7 @@ In this version of GrayMoon, **merging is done by you in GitHub**. GrayMoon trac
 Two shortcuts from the Repositories page:
 
 1. **Per-repo PR badge** - click the green `#39` / `#52` link on a row. GrayMoon opens that pull request on GitHub in a new tab.
-2. **Level header dropdown** - hover the **`N repositories`** label on a **Level N** header (e.g. **2 repositories** on Level 2). A menu titled **Open in GitHub...** lists **Branches**, **Pull Requests**, **Actions**, and other GitHub tabs. Choose **Pull Requests** to open the PR list for every repo in that level (open PRs resolve to the exact PR URL when GrayMoon knows the number).
+2. **Level header dropdown** - hover the **`N repositories`** label on a **Level N** header (e.g. **2 repositories** on Level 2). A menu titled **Open in GitHub...** lists **Branches**, **Pull Requests**, **Actions**, **Tags**, **Settings**, and more. Choose **Pull Requests** to open every open PR for that level (exact PR URL when GrayMoon knows the number). Full option list and why level-scoped open is useful: [Open in GitHub... (level header)](../repositories.md#open-in-github-level-header).
 
 ![Level 2 header - Open in GitHub dropdown on hover](../../screenshots/workspace2-tape-density-level2-github-dropdown.png)
 
