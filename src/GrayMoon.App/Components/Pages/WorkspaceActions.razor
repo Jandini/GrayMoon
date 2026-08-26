@@ -28,9 +28,9 @@
                         <span>&nbsp;</span>
                     }
                 </p>
-                <span class="workspace-repos-title-spacer"></span>
                 @if (!isLoading && rows.Count > 0 && (ErrorCount > 0 || FailedCount > 0 || AbortedCount > 0 || RunningCount > 0 || SuccessCount > 0 || NoneCount > 0))
                 {
+                    <span class="workspace-actions__filter-sep text-muted" aria-hidden="true">|</span>
                     <span class="workspace-actions__filters d-inline-flex align-items-center flex-wrap" role="toolbar" aria-label="Filter workflows by status">
                         @if (ErrorCount > 0)
                         {
@@ -100,6 +100,7 @@
                         }
                     </span>
                 }
+                <span class="workspace-repos-title-spacer"></span>
             </div>
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
                 <div class="workspace-grid-search-wrapper">
@@ -330,10 +331,6 @@
                                                     {
                                                         <ActionBadge Status="@(line.Action?.Status)"
                                                                      HtmlUrl="@line.Action?.HtmlUrl" />
-                                                    }
-                                                    else
-                                                    {
-                                                        <span class="text-muted">-</span>
                                                     }
                                                 </td>
                                                 <td class="col-actions ps-3">

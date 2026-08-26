@@ -91,12 +91,19 @@
     min-width: 0;
 }
 
-.workspace-actions-header .workspace-actions__filters {
+.workspace-actions-header .workspace-actions__filters,
+.workspace-actions-header .workspace-actions__filter-sep {
     flex: 0 0 auto;
     align-self: baseline;
-    /* Sits after .workspace-repos-title-spacer in the markup, so the spacer's flex-grow pushes this
-       flush to the title row's right edge - aligning the last chip with the Refresh button below. */
-    margin-left: 0;
+}
+
+/* Separator between the workflow count and the status filter chips. */
+.workspace-actions__filter-sep {
+    opacity: 0.45;
+    user-select: none;
+}
+
+.workspace-actions-header .workspace-actions__filters {
     /* Horizontal gap between chips matches the vertical gap between the title row and the actions row
        below it (app.css .workspace-repos-header-actions margin-top: 0.5rem). The markup no longer
        carries bootstrap's gap-1 utility, since it is !important and would win over this value. */
