@@ -462,6 +462,7 @@ public sealed class WorkspaceFileVersionService(
         CancellationToken cancellationToken)
     {
         var totalConfigRepos = BuildTotalFileConfigReposByDependentRepo(configs, nameToRepoId);
+        var selfReferencingRepoIds = BuildSelfReferencingRepoIds(configs, nameToRepoId);
 
         var allLinks = await dbContext.WorkspaceRepositories
             .Where(wr => wr.WorkspaceId == workspaceId)
@@ -477,6 +478,7 @@ public sealed class WorkspaceFileVersionService(
             link.TotalFileConfigRepos = totalConfigRepos.TryGetValue(link.RepositoryId, out var total) && total.Count > 0
                 ? total.Count
                 : null;
+            link.HasSelfFileVersionToken = selfReferencingRepoIds.Contains(link.RepositoryId) ? true : null;
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -502,6 +504,26 @@ public sealed class WorkspaceFileVersionService(
             }
         }
 
+        return result;
+    }
+
+    /// <summary>Returns the set of RepositoryIds whose own file-config version pattern(s) include a token referencing that same repo (self-stamping).</summary>
+    private static HashSet<int> BuildSelfReferencingRepoIds(
+        IEnumerable<WorkspaceFileVersionConfig> configs,
+        IReadOnlyDictionary<string, int> nameToRepoId)
+    {
+        var result = new HashSet<int>();
+        foreach (var cfg in configs)
+        {
+            if (cfg.File?.IsMissingOnDisk == true) continue;
+            var dependentRepoId = cfg.File!.RepositoryId;
+            foreach (var token in ExtractTokens(cfg.VersionPattern))
+            {
+                if (string.IsNullOrWhiteSpace(token)) continue;
+                if (nameToRepoId.TryGetValue(token.Trim(), out var referencedRepoId) && referencedRepoId == dependentRepoId)
+                    result.Add(dependentRepoId);
+            }
+        }
         return result;
     }
 

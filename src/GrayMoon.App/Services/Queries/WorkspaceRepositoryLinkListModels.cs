@@ -36,6 +36,7 @@ public sealed record WorkspaceRepositoryLinkListItemDto(
     int? OutOfDateFileRepos,
     ProjectType? RepositoryType,
     bool? HasNewerTag,
+    bool? HasSelfFileVersionToken,
     string? PullRequestState,
     int? PullRequestNumber,
     string? PullRequestHtmlUrl,

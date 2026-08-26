@@ -27,6 +27,7 @@ internal static class WorkspaceRepositoryLinkListMapper
             OutOfDateFileRepos = dto.OutOfDateFileRepos,
             RepositoryType = dto.RepositoryType,
             HasNewerTag = dto.HasNewerTag,
+            HasSelfFileVersionToken = dto.HasSelfFileVersionToken,
             Repository = new Repository
             {
                 RepositoryId = dto.RepositoryId,

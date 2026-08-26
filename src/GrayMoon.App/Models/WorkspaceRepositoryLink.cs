@@ -81,6 +81,9 @@ public class WorkspaceRepositoryLink
     /// <summary>Total count of distinct workspace repositories referenced by file-config tokens for this dependent repo. Badge diagnostics; main Y uses <see cref="Dependencies"/>.</summary>
     public int? TotalFileConfigRepos { get; set; }
 
+    /// <summary>True when this repo's own file-config version pattern(s) include a token referencing this same repo (self-stamping). Self-reference edges are excluded from the dependency graph (<see cref="Dependencies"/>) since a self-loop would break the topological sort, but the token still needs to count towards the file-dependency badge total; the UI adds +1 to <see cref="Dependencies"/> when this is true.</summary>
+    public bool? HasSelfFileVersionToken { get; set; }
+
     /// <summary>Legacy line-count field; no longer used for badge display.</summary>
     public int? TotalFileLines { get; set; }
 

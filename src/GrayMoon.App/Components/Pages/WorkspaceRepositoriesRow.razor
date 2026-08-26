@@ -14,7 +14,7 @@
     var depCount = Link.Dependencies ?? 0;
     var unmatchedDeps = Link.UnmatchedDeps ?? 0;
     var fileMismatchRepos = Link.OutOfDateFileRepos ?? 0;
-    var totalWithFiles = depCount;
+    var totalWithFiles = depCount + (Link.HasSelfFileVersionToken == true ? 1 : 0);
     var unmatchedWithFiles = unmatchedDeps + fileMismatchRepos;
     var hasOutOfDateFiles = fileMismatchRepos > 0;
     var hasDependencyTooltipContent = AllDependencyLines.Count > 0
