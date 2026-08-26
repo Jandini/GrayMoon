@@ -91,21 +91,16 @@
     min-width: 0;
 }
 
-.workspace-actions-header .workspace-actions__filters,
-.workspace-actions-header .workspace-actions__filter-sep {
+.workspace-actions-header .workspace-actions__filters {
     flex: 0 0 auto;
     align-self: baseline;
-}
-
-/* More breathing room between status chips than bootstrap's gap-1 (0.25rem) utility on the markup */
-.workspace-actions-header .workspace-actions__filters {
+    /* Sits after .workspace-repos-title-spacer in the markup, so the spacer's flex-grow pushes this
+       flush to the title row's right edge - aligning the last chip with the Refresh button below. */
+    margin-left: 0;
+    /* Horizontal gap between chips matches the vertical gap between the title row and the actions row
+       below it (app.css .workspace-repos-header-actions margin-top: 0.5rem). The markup no longer
+       carries bootstrap's gap-1 utility, since it is !important and would win over this value. */
     gap: 0.5rem;
-}
-
-/* Status filter chips (subtitle toolbar) */
-.workspace-actions__filter-sep {
-    opacity: 0.45;
-    user-select: none;
 }
 
 .gha-status-chip {

@@ -81,10 +81,13 @@
 
     // Top-border progress bar: creeps toward the current step's target percentage rather than
     // jumping straight to it, then stops and waits until the step (or the target) advances.
+    // Movement speeds up when it's far behind the target (catching up after a step completed)
+    // and eases back into the slow constant crawl as it closes the gap.
     private double _progressTargetPct;
     private double _progressDisplayPct;
     private const int ProgressTickMs = 150;
-    private const double ProgressSpeedPctPerSec = 6.0;
+    private const double ProgressSpeedPctPerSec = 1.5;   // slow crawl floor
+    private const double ProgressCatchUpFraction = 0.12; // fraction of remaining gap closed per tick when catching up
 
     protected override void OnInitialized()
     {
@@ -197,10 +200,12 @@
                 await Task.Delay(ProgressTickMs, cancellationToken);
                 await InvokeAsync(() =>
                 {
-                    if (_progressDisplayPct >= _progressTargetPct)
+                    var gap = _progressTargetPct - _progressDisplayPct;
+                    if (gap <= 0)
                         return;
 
-                    var step = ProgressSpeedPctPerSec * (ProgressTickMs / 1000.0);
+                    var floorStep = ProgressSpeedPctPerSec * (ProgressTickMs / 1000.0);
+                    var step = Math.Max(floorStep, gap * ProgressCatchUpFraction);
                     _progressDisplayPct = Math.Min(_progressTargetPct, _progressDisplayPct + step);
                     StateHasChanged();
                 });
