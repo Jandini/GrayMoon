@@ -103,27 +103,28 @@
     user-select: none;
 }
 
-.gha-status-filter {
-    --gha-status-filter-radius: 0.75rem;
+.gha-status-chip {
+    /* Same corner radius as the grid's .badge/.action-badge (bootstrap .badge border-radius: .25rem), not a fully rounded pill */
+    --gha-status-chip-radius: 0.25rem;
     display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: calc(0.2rem + 1px) 0.55rem;
-    font-size: 0.8125rem;
-    line-height: 1.2;
-    border-radius: var(--gha-status-filter-radius);
-    border: 1px solid transparent;
+    align-items: stretch;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: none;
+    border-radius: var(--gha-status-chip-radius);
+    overflow: hidden;
     cursor: pointer;
-    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+    transition: opacity 0.15s ease;
 }
 
 /* Focus ring: same as app.css .btn / .form-control (Workspace Repositories header) */
-.gha-status-filter:focus,
-.gha-status-filter:active:focus {
+.gha-status-chip:focus,
+.gha-status-chip:active:focus {
     outline: none;
 }
 
-.gha-status-filter:focus-visible {
+.gha-status-chip:focus-visible {
     outline: none;
     box-shadow: 0 0 0 1px var(--focus-ring-outer);
 }
@@ -141,76 +142,56 @@
     border-radius: 0.25rem;
 }
 
-.gha-status-filter__label {
+/* Left segment: status label - rounded only on the left so it visually joins the count segment.
+   Padding/font-size/line-height mirror bootstrap's .badge box model (app.css grid badges) so the
+   chip's height matches the grid's action-badge height exactly. */
+.gha-status-chip__label {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35em 0.65em;
+    font-size: 0.75rem;
     font-weight: 500;
+    line-height: 1;
     letter-spacing: 0.01em;
+    border-radius: var(--gha-status-chip-radius) 0 0 var(--gha-status-chip-radius);
 }
 
-.gha-status-filter__count {
+/* Right segment: count - rounded only on the right, with a divider so it still reads as its own badge.
+   Same box model as the label segment so the number sits at the same level/height as the status text. */
+.gha-status-chip__count {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 1.25rem;
-    min-height: 1.25rem;
-    padding: 0.1rem 0.28rem;
-    font-size: 0.72rem;
+    min-width: 1.5rem;
+    padding: 0.35em 0.65em;
+    font-size: 0.75rem;
     font-weight: 600;
     line-height: 1;
     font-variant-numeric: tabular-nums;
     text-align: center;
     box-sizing: border-box;
-    border-radius: var(--gha-status-filter-radius);
+    border-radius: 0 var(--gha-status-chip-radius) var(--gha-status-chip-radius) 0;
+    border-left: 1px solid rgba(0, 0, 0, 0.18);
 }
 
-.gha-status-filter--on {
-    background-color: var(--bg-tertiary, #2d2d30);
-    color: rgba(255, 255, 255, 0.92);
-    /* Darker frame than off-state / hover so enabled chips read more grounded */
-    border-color: var(--border-color, #3e3e42);
+/* Off state: gray out the label segment only - the count segment keeps its status color always,
+   matching wwwroot/app.css .action-badge-none (higher specificity than .action-badge.action-badge-*
+   so it wins the !important vs !important tie). */
+.gha-status-chip--off .gha-status-chip__label.action-badge-failed,
+.gha-status-chip--off .gha-status-chip__label.action-badge-aborted,
+.gha-status-chip--off .gha-status-chip__label.action-badge-running,
+.gha-status-chip--off .gha-status-chip__label.action-badge-success,
+.gha-status-chip--off .gha-status-chip__label.action-badge-none {
+    background-color: #495057 !important;
+    color: rgba(255, 255, 255, 0.85) !important;
 }
 
-/* Count pill colors when filter is on - match wwwroot/app.css .action-badge-* */
-.gha-status-filter--on .gha-status-filter__count--errors,
-.gha-status-filter--on .gha-status-filter__count--failed {
-    background-color: #da3633;
-    color: #fff;
+.gha-status-chip--off:hover .gha-status-chip__label {
+    opacity: 0.85;
 }
 
-.gha-status-filter--on .gha-status-filter__count--aborted {
-    background-color: #8957e5;
-    color: #fff;
-}
-
-.gha-status-filter--on .gha-status-filter__count--running {
-    background-color: #d29922;
-    color: #000;
-}
-
-.gha-status-filter--on .gha-status-filter__count--success {
-    background-color: #238636;
-    color: #fff;
-}
-
-.gha-status-filter--on .gha-status-filter__count--none {
-    background-color: #495057;
-    color: #fff;
-}
-
-.gha-status-filter--off {
-    background-color: rgba(0, 0, 0, 0.04);
-    color: var(--bs-secondary-color, #6c757d);
-    border-color: rgba(0, 0, 0, 0.12);
-    opacity: 0.92;
-}
-
-.gha-status-filter--off .gha-status-filter__count {
-    background-color: rgba(0, 0, 0, 0.06);
-    color: var(--bs-secondary-color, #6c757d);
-}
-
-.gha-status-filter--off:hover {
+.gha-status-chip--on {
     opacity: 1;
-    border-color: rgba(0, 0, 0, 0.18);
 }
 
 /* Actions grid: workflow name → GitHub Actions workflow tab (not default blue link) */

@@ -35,67 +35,67 @@
                         @if (ErrorCount > 0)
                         {
                             <button type="button"
-                                    class="gha-status-filter @(_showErrors ? "gha-status-filter--on" : "gha-status-filter--off")"
+                                    class="gha-status-chip @(_showErrors ? "gha-status-chip--on" : "gha-status-chip--off")"
                                     aria-pressed="@_showErrors"
                                     aria-label="Filter repository load errors"
                                     @onclick="ToggleShowErrors">
-                                <span class="gha-status-filter__label">errors</span>
-                                <span class="gha-status-filter__count gha-status-filter__count--errors">@ErrorCount</span>
+                                <span class="gha-status-chip__label action-badge action-badge-failed">errors</span>
+                                <span class="gha-status-chip__count action-badge action-badge-failed">@ErrorCount</span>
                             </button>
                         }
                         @if (FailedCount > 0)
                         {
                             <button type="button"
-                                    class="gha-status-filter @(_showFailed ? "gha-status-filter--on" : "gha-status-filter--off")"
+                                    class="gha-status-chip @(_showFailed ? "gha-status-chip--on" : "gha-status-chip--off")"
                                     aria-pressed="@_showFailed"
                                     aria-label="Filter failed workflows"
                                     @onclick="ToggleShowFailed">
-                                <span class="gha-status-filter__label">failed</span>
-                                <span class="gha-status-filter__count gha-status-filter__count--failed">@FailedCount</span>
+                                <span class="gha-status-chip__label action-badge action-badge-failed">failed</span>
+                                <span class="gha-status-chip__count action-badge action-badge-failed">@FailedCount</span>
                             </button>
                         }
                         @if (AbortedCount > 0)
                         {
                             <button type="button"
-                                    class="gha-status-filter @(_showAborted ? "gha-status-filter--on" : "gha-status-filter--off")"
+                                    class="gha-status-chip @(_showAborted ? "gha-status-chip--on" : "gha-status-chip--off")"
                                     aria-pressed="@_showAborted"
                                     aria-label="Filter aborted workflows"
                                     @onclick="ToggleShowAborted">
-                                <span class="gha-status-filter__label">aborted</span>
-                                <span class="gha-status-filter__count gha-status-filter__count--aborted">@AbortedCount</span>
+                                <span class="gha-status-chip__label action-badge action-badge-aborted">aborted</span>
+                                <span class="gha-status-chip__count action-badge action-badge-aborted">@AbortedCount</span>
                             </button>
                         }
                         @if (RunningCount > 0)
                         {
                             <button type="button"
-                                    class="gha-status-filter @(_showRunning ? "gha-status-filter--on" : "gha-status-filter--off")"
+                                    class="gha-status-chip @(_showRunning ? "gha-status-chip--on" : "gha-status-chip--off")"
                                     aria-pressed="@_showRunning"
                                     aria-label="Filter running workflows"
                                     @onclick="ToggleShowRunning">
-                                <span class="gha-status-filter__label">running</span>
-                                <span class="gha-status-filter__count gha-status-filter__count--running">@RunningCount</span>
+                                <span class="gha-status-chip__label action-badge action-badge-running">running</span>
+                                <span class="gha-status-chip__count action-badge action-badge-running">@RunningCount</span>
                             </button>
                         }
                         @if (SuccessCount > 0)
                         {
                             <button type="button"
-                                    class="gha-status-filter @(_showSuccess ? "gha-status-filter--on" : "gha-status-filter--off")"
+                                    class="gha-status-chip @(_showSuccess ? "gha-status-chip--on" : "gha-status-chip--off")"
                                     aria-pressed="@_showSuccess"
                                     aria-label="Filter successful workflows"
                                     @onclick="ToggleShowSuccess">
-                                <span class="gha-status-filter__label">success</span>
-                                <span class="gha-status-filter__count gha-status-filter__count--success">@SuccessCount</span>
+                                <span class="gha-status-chip__label action-badge action-badge-success">success</span>
+                                <span class="gha-status-chip__count action-badge action-badge-success">@SuccessCount</span>
                             </button>
                         }
                         @if (NoneCount > 0)
                         {
                             <button type="button"
-                                    class="gha-status-filter @(_showNone ? "gha-status-filter--on" : "gha-status-filter--off")"
+                                    class="gha-status-chip @(_showNone ? "gha-status-chip--on" : "gha-status-chip--off")"
                                     aria-pressed="@_showNone"
                                     aria-label="Filter workflows with no status"
                                     @onclick="ToggleShowNone">
-                                <span class="gha-status-filter__label">none</span>
-                                <span class="gha-status-filter__count gha-status-filter__count--none">@NoneCount</span>
+                                <span class="gha-status-chip__label action-badge action-badge-none">none</span>
+                                <span class="gha-status-chip__count action-badge action-badge-none">@NoneCount</span>
                             </button>
                         }
                     </span>
