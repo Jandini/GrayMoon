@@ -32,6 +32,8 @@ public sealed class GhaWorkflowLiveFeedService(
             return new GhaWorkflowLiveFeedUpdate(
                 Caption: state.LastCaption,
                 StepProgress: state.LastStepProgress,
+                StepIndex: state.LastStepIndex,
+                StepCount: state.LastStepCount,
                 NewLines: [],
                 DelayMs: Math.Min(Math.Max(remaining, 0) + jitter, 60_000));
         }
@@ -44,6 +46,8 @@ public sealed class GhaWorkflowLiveFeedService(
                 return new GhaWorkflowLiveFeedUpdate(
                     Caption: state.LastCaption,
                     StepProgress: state.LastStepProgress,
+                    StepIndex: state.LastStepIndex,
+                    StepCount: state.LastStepCount,
                     NewLines: ["Connector not found - cannot load job status."],
                     DelayMs: PollIntervalWaitingJobsMs);
             }
@@ -52,9 +56,12 @@ public sealed class GhaWorkflowLiveFeedService(
             var jobs = response?.Jobs ?? [];
 
             var caption = BuildCaption(jobs, state.WorkflowDisplayName);
-            var stepProgress = BuildStepProgressForCaptionJob(jobs);
+            var stepProgressInfo = GetStepProgressForCaptionJob(jobs);
+            var stepProgress = FormatStepProgress(stepProgressInfo);
             state.LastCaption = caption;
             state.LastStepProgress = stepProgress;
+            state.LastStepIndex = stepProgressInfo?.Index;
+            state.LastStepCount = stepProgressInfo?.Count;
             state.ActiveJob = GetCaptionJob(jobs);
             state.CurrentInProgressJobId = state.ActiveJob?.Id;
 
@@ -63,6 +70,8 @@ public sealed class GhaWorkflowLiveFeedService(
                 return new GhaWorkflowLiveFeedUpdate(
                     Caption: caption,
                     StepProgress: null,
+                    StepIndex: null,
+                    StepCount: null,
                     NewLines: ["Waiting for GitHub to assign jobs to this run..."],
                     DelayMs: PollIntervalWaitingJobsMs);
             }
@@ -102,6 +111,8 @@ public sealed class GhaWorkflowLiveFeedService(
             return new GhaWorkflowLiveFeedUpdate(
                 Caption: caption,
                 StepProgress: stepProgress,
+                StepIndex: stepProgressInfo?.Index,
+                StepCount: stepProgressInfo?.Count,
                 NewLines: newLines,
                 DelayMs: DeterminePollDelayMs(jobs));
         }
@@ -125,6 +136,8 @@ public sealed class GhaWorkflowLiveFeedService(
                 return new GhaWorkflowLiveFeedUpdate(
                     Caption: state.LastCaption,
                     StepProgress: state.LastStepProgress,
+                    StepIndex: state.LastStepIndex,
+                    StepCount: state.LastStepCount,
                     NewLines: [$"Rate limited — pausing until {label}"],
                     DelayMs: Math.Min(waitMs + jitter, 600_000));
             }
@@ -135,6 +148,8 @@ public sealed class GhaWorkflowLiveFeedService(
             return new GhaWorkflowLiveFeedUpdate(
                 Caption: state.LastCaption,
                 StepProgress: state.LastStepProgress,
+                StepIndex: state.LastStepIndex,
+                StepCount: state.LastStepCount,
                 NewLines: [$"Update failed: {failureText}"],
                 DelayMs: PollIntervalWaitingJobsMs);
         }
@@ -221,7 +236,7 @@ public sealed class GhaWorkflowLiveFeedService(
                ?? jobs[0];
     }
 
-    private static string? BuildStepProgressForCaptionJob(IReadOnlyList<GitHubWorkflowJobDto> jobs)
+    private static StepProgressInfo? GetStepProgressForCaptionJob(IReadOnlyList<GitHubWorkflowJobDto> jobs)
     {
         var job = GetCaptionJob(jobs);
         if (job == null) return null;
@@ -233,16 +248,21 @@ public sealed class GhaWorkflowLiveFeedService(
 
         var inProgressIdx = ordered.FindIndex(s => string.Equals(s.Status, "in_progress", StringComparison.OrdinalIgnoreCase));
         if (inProgressIdx >= 0)
-            return $"Step {inProgressIdx + 1} of {y}";
+            return new StepProgressInfo(inProgressIdx + 1, y);
 
         for (var i = 0; i < ordered.Count; i++)
         {
             if (!string.Equals(ordered[i].Status, "completed", StringComparison.OrdinalIgnoreCase))
-                return $"Step {i + 1} of {y}";
+                return new StepProgressInfo(i + 1, y);
         }
 
-        return $"Step {y} of {y}";
+        return new StepProgressInfo(y, y);
     }
+
+    private static string? FormatStepProgress(StepProgressInfo? info) =>
+        info == null ? null : $"Step {info.Index} of {info.Count}";
+
+    private sealed record StepProgressInfo(int Index, int Count);
 
     private static string FormatStepTransition(string jobName, GitHubWorkflowJobStepDto step, int totalSteps)
     {
@@ -295,6 +315,8 @@ public sealed class GhaWorkflowLiveFeedState
     internal Dictionary<string, string> StepSignatures { get; } = new(StringComparer.Ordinal);
     internal string LastCaption { get; set; } = "Workflow - Connecting to GitHub Actions...";
     internal string? LastStepProgress { get; set; }
+    internal int? LastStepIndex { get; set; }
+    internal int? LastStepCount { get; set; }
     internal long? CurrentInProgressJobId { get; set; }
     internal GitHubWorkflowJobDto? ActiveJob { get; set; }
 }
@@ -302,5 +324,7 @@ public sealed class GhaWorkflowLiveFeedState
 public sealed record GhaWorkflowLiveFeedUpdate(
     string Caption,
     string? StepProgress,
+    int? StepIndex,
+    int? StepCount,
     IReadOnlyList<string> NewLines,
     int DelayMs);

@@ -30,6 +30,7 @@
 }
 
 .actions-gha-terminal__caption {
+    position: relative;
     font-family: "GrayMoon Terminus", "Terminus", "Terminus (TTF)", "xos4 Terminus", "Ubuntu Mono",
         "Noto Sans Mono", "DejaVu Sans Mono", "Liberation Mono", ui-monospace, "Cascadia Mono",
         "Cascadia Code", "Segoe UI Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
@@ -45,6 +46,24 @@
     align-items: baseline;
     justify-content: space-between;
     gap: 0.65rem;
+}
+
+/*
+ * Progress bar overlays the caption's own bottom divider line (the gray 1px rule under
+ * "▶ Docker Build - build > ..."). Same 1px height as that divider; width tracks
+ * current-step/total-steps and creeps toward the target (see ProgressLoopAsync in the
+ * code-behind) instead of jumping straight there. Color matches the "running" status badge.
+ */
+.actions-gha-terminal__progress {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 1px;
+    width: 0%;
+    background-color: #d29922;
+    transition: width 0.15s linear;
+    pointer-events: none;
+    z-index: 2;
 }
 
 .actions-gha-terminal__caption-main {
