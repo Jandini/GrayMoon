@@ -16,6 +16,37 @@ public static class Migrations
     public static async Task RunAllAsync(AppDbContext dbContext)
     {
         await SeedDefaultWorkspaceRootPathAsync(dbContext);
+        await MigrateWorkspaceRepositoriesHasSelfFileVersionTokenAsync(dbContext);
+    }
+
+    /// <summary>
+    /// Adds the WorkspaceRepositories.HasSelfFileVersionToken column for local dev databases created before this
+    /// column existed. EnsureCreated() only creates missing tables, not missing columns on tables that already
+    /// exist, so an existing db/graymoon.db from an earlier build would otherwise throw "no such column" on any
+    /// query against WorkspaceRepositories. Safe to keep even pre-release since it only ever adds a nullable
+    /// column and is a no-op once the column exists.
+    /// </summary>
+    public static async Task MigrateWorkspaceRepositoriesHasSelfFileVersionTokenAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using var checkCmd = conn.CreateCommand();
+            checkCmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceRepositories') WHERE name = 'HasSelfFileVersionToken'";
+            if (Convert.ToInt32(await checkCmd.ExecuteScalarAsync()) > 0)
+                return;
+
+            await using var alterCmd = conn.CreateCommand();
+            alterCmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN HasSelfFileVersionToken INTEGER NULL";
+            await alterCmd.ExecuteNonQueryAsync();
+        }
+        catch
+        {
+            // Table doesn't exist yet (fresh db, EnsureCreated will create it with the column already present).
+        }
     }
 
     /// <summary>

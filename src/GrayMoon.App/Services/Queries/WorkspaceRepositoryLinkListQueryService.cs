@@ -279,6 +279,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             wr.OutOfDateFileRepos,
             wr.RepositoryType,
             wr.HasNewerTag,
+            wr.HasSelfFileVersionToken,
             wr.PullRequest != null ? wr.PullRequest.State : null,
             wr.PullRequest != null ? wr.PullRequest.PullRequestNumber : null,
             wr.PullRequest != null ? wr.PullRequest.HtmlUrl : null,
