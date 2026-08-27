@@ -139,13 +139,11 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     /// <summary>
     /// The Refresh button: a real, user-triggered rescan of every repository in the workspace (not just
-    /// the ones currently showing changes). When previously changed files are already persisted (the
-    /// tree/splitter is showing), this runs behind the standard LoadingOverlay/terminal job so it's
-    /// visibly a real operation - unchanged from before. When the page is showing the empty "No changes"
-    /// state, the overlay would otherwise cover that same message/button, so it instead runs via the
-    /// non-overlay EmptyScanJobKey job (inline spinner + Abort). Both survive navigation via
-    /// BackgroundJobService and rely on the same GitChangesUpdated -> LoadAsync pipeline for
-    /// incremental per-repository updates as results stream in.
+    /// the ones currently showing changes). Always runs via the non-overlay ScanJobKey job, whether the
+    /// page is showing the empty "No changes" state (inline center spinner + Abort) or an already
+    /// populated tree/splitter (header scan indicator) - the panel is never covered by the full
+    /// LoadingOverlay. Survives navigation via BackgroundJobService and relies on the same
+    /// GitChangesUpdated -> LoadAsync pipeline for incremental per-repository updates as results stream in.
     /// </summary>
     private void ManualRefreshAsync()
     {
@@ -161,15 +159,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             return;
         }
 
-        if (ChangedRepositoryCount == 0)
-        {
-            StartEmptyScanJob("Refreshing repositories...");
-            return;
-        }
-
-        StartPageJob("Refreshing repositories...", (job, ct) =>
-            Scanner.ScanWorkspaceAsync(WorkspaceId, ct, progress =>
-                job.ReportProgress($"Refreshed {progress.Completed} of {progress.Total} repositories")));
+        StartScanJob("Refreshing repositories...");
     }
 
     private string MostRecentPersistedLabel()

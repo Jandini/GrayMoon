@@ -704,7 +704,15 @@ public sealed partial class WorkspaceActions : IDisposable
         {
             row.IsRefreshing = true;
 
-            var list = await ActionService.FetchAndPersistAsync(
+            // Uses its own DI scope (not the circuit-scoped ActionService field) because this method is
+            // invoked from fire-and-forget background refresh loops (StartBackgroundRefresh, AutoPollLoopAsync,
+            // visibility-retry loops) that can still be mid-flight when the page is disposed (e.g. browser
+            // refresh tears down the circuit). Using the injected ActionService there would persist through an
+            // AppDbContext already disposed with the old circuit.
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var actionService = scope.ServiceProvider.GetRequiredService<WorkspaceActionService>();
+
+            var list = await actionService.FetchAndPersistAsync(
                 row.Link.WorkspaceRepositoryId,
                 row.Repo,
                 row.Link.BranchName!,

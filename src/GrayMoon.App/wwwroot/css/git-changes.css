@@ -40,6 +40,42 @@
     opacity: 0.95;
 }
 
+/* "Refreshing X of Y repositories..." indicator shown at the right edge of the header title row once
+   the tree is already visible and a background rescan (warm-up or manual Refresh) is still running -
+   keeps the panel from ever being fully covered by a loading state once it has content. Sits after
+   .workspace-repos-title-spacer (flex: 1 1 auto) so it is pushed to the right of the page instead of
+   crowding the staged/changed/branch summary items on the left. */
+.git-changes-header__scan-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    flex-shrink: 0;
+    white-space: nowrap;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.git-changes-header__scan-indicator .spinner-border {
+    width: 0.85rem;
+    height: 0.85rem;
+    border-width: 0.15em;
+}
+
+.git-changes-header__scan-abort {
+    display: inline-flex;
+    align-items: center;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    line-height: 1;
+    color: var(--text-muted);
+    text-decoration: none;
+}
+
+.git-changes-header__scan-abort:hover {
+    color: var(--text-primary);
+}
+
 /* Match other workspace grids: body height matches shared max-height so the
    splitter frame ends above the viewport bottom like the repositories card. */
 .git-changes-page.page-container.grid-page {
