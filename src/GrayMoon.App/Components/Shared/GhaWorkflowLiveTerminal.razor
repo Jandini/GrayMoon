@@ -85,6 +85,7 @@
     // and eases back into the slow constant crawl as it closes the gap.
     private double _progressTargetPct;
     private double _progressDisplayPct;
+    private bool _progressInitialized;
     private const int ProgressTickMs = 150;
     private const double ProgressSpeedPctPerSec = 1.5;   // slow crawl floor
     private const double ProgressCatchUpFraction = 0.12; // fraction of remaining gap closed per tick when catching up
@@ -179,14 +180,24 @@
     // Recomputes the top-border progress bar's target percentage from the current step / total steps.
     // A drop below the current display (new job's steps replacing the previous job's) snaps immediately
     // instead of animating backwards; forward movement is left to ProgressLoopAsync's slow crawl.
+    // The very first update after this component instance is created snaps the display straight to the
+    // current percentage instead of crawling up from zero, so a page refresh or grid re-render never
+    // shows the bar "restarting from the beginning" - it always resumes from the true current position.
     private void UpdateProgressTarget(int? stepIndex, int? stepCount)
     {
         var target = (stepCount is > 0 && stepIndex is int idx)
             ? Math.Clamp(100.0 * idx / stepCount.Value, 0, 100)
             : 0.0;
 
-        if (target < _progressDisplayPct)
+        if (!_progressInitialized)
+        {
             _progressDisplayPct = target;
+            _progressInitialized = true;
+        }
+        else if (target < _progressDisplayPct)
+        {
+            _progressDisplayPct = target;
+        }
 
         _progressTargetPct = target;
     }
