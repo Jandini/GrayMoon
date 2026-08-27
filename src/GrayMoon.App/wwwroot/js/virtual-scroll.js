@@ -15,6 +15,17 @@ window.grayMoonVirtualScroll = (function () {
             });
     }
 
+    function persistScrollTop(state, scrollTop) {
+        if (!state.storageKey) {
+            return;
+        }
+        try {
+            sessionStorage.setItem(state.storageKey, String(scrollTop));
+        } catch (e) {
+            /* storage unavailable (e.g. private mode quota) - scroll restore is best-effort */
+        }
+    }
+
     function onScroll(ev) {
         var el = ev.currentTarget;
         var state = stateByEl.get(el);
@@ -28,6 +39,7 @@ window.grayMoonVirtualScroll = (function () {
             state.raf = 0;
             var scrollTop = el.scrollTop;
             var clientHeight = el.clientHeight;
+            persistScrollTop(state, scrollTop);
             if (state.inflight) {
                 state.pending = { scrollTop: scrollTop, clientHeight: clientHeight };
                 return;
@@ -37,7 +49,7 @@ window.grayMoonVirtualScroll = (function () {
     }
 
     return {
-        attach: function (tbody, dotNetRef, totalHeight) {
+        attach: function (tbody, dotNetRef, totalHeight, initialScrollTop, storageKey) {
             if (!tbody) {
                 return;
             }
@@ -47,12 +59,17 @@ window.grayMoonVirtualScroll = (function () {
                 raf: 0,
                 totalHeight: totalHeight || 0,
                 inflight: false,
-                pending: null
+                pending: null,
+                storageKey: storageKey || null
             };
             stateByEl.set(tbody, state);
             tbody.addEventListener('scroll', onScroll, { passive: true });
-            tbody.scrollTop = 0;
-            invokeScroll(tbody, state, 0, tbody.clientHeight);
+            var restoreTop = (typeof initialScrollTop === 'number' && isFinite(initialScrollTop) && initialScrollTop > 0)
+                ? initialScrollTop
+                : 0;
+            tbody.scrollTop = restoreTop;
+            var actualTop = tbody.scrollTop;
+            invokeScroll(tbody, state, actualTop, tbody.clientHeight);
         },
         setTotalHeight: function (tbody, totalHeight) {
             var state = tbody ? stateByEl.get(tbody) : null;

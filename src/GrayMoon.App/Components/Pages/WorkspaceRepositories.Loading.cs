@@ -40,7 +40,7 @@ public sealed partial class WorkspaceRepositories
     {
         _headerState = await LinkListQueryService.GetHeaderStateAsync(WorkspaceId, cancellationToken);
     }
-    private async Task ResetAndLoadFromTopAsync()
+    private async Task ResetAndLoadFromTopAsync(bool restoreScroll = true)
     {
         if (workspace == null && errorMessage == null)
         {
@@ -50,6 +50,13 @@ public sealed partial class WorkspaceRepositories
         {
             isInitialLoading = false;
             return;
+        }
+
+        var restoreScrollTop = restoreScroll ? _pendingRestoreScrollTop : null;
+        _pendingRestoreScrollTop = null;
+        if (!restoreScroll)
+        {
+            await WriteScrollTopAsync(0);
         }
 
         await _reloadGate.WaitAsync();
@@ -64,6 +71,7 @@ public sealed partial class WorkspaceRepositories
             ClearGridState();
             isInitialLoading = true;
             _virtualScrollAttached = false;
+            _attachInitialScrollTop = 0;
             try
             {
                 var filter = new WorkspaceRepositoryLinkListFilter(WorkspaceId, _effectiveSearch);
@@ -77,13 +85,14 @@ public sealed partial class WorkspaceRepositories
                 BuildSlots(index);
                 hasLoadedOnce = true;
                 _loadedWorkspaceId = WorkspaceId;
-                var initialEnd = Math.Min(_slots.Count - 1, VirtualInitialViewportSlots - 1);
-                UpdateVisibleRange(0, Math.Max(-1, initialEnd));
-                await EnsureSlotsHydratedAsync(0, initialEnd, token);
+                var (initialStart, initialEnd) = ComputeInitialRange(restoreScrollTop);
+                UpdateVisibleRange(initialStart, Math.Max(-1, initialEnd));
+                await EnsureSlotsHydratedAsync(initialStart, initialEnd, token);
                 if (generation != _queryLoader.Generation || _disposed)
                 {
                     return;
                 }
+                _attachInitialScrollTop = restoreScrollTop is > 0 ? restoreScrollTop.Value : 0;
                 ApplySyncStateFromLoadedItems();
             }
             catch (OperationCanceledException)
@@ -144,19 +153,13 @@ public sealed partial class WorkspaceRepositories
         ApplyItemsFromDtos(dtos, replace: false);
         return dtos.Count > 0;
     }
-    [JSInvokable]
-    public async Task OnVirtualScroll(double scrollTop, double clientHeight)
+    /// <summary>Walks slot heights to find the slot-index range whose pixel bounds overlap [rangeStart, rangeEnd). Shared by live scrolling (OnVirtualScroll) and initial-load scroll restore (ComputeInitialRange) so both use identical slot-height math.</summary>
+    private (int Start, int End) ComputeRangeForPixelWindow(double rangeStart, double rangeEnd)
     {
-        if (_disposed || _slots.Count == 0)
+        if (_slots.Count == 0)
         {
-            return;
+            return (0, -1);
         }
-
-        var scrollGeneration = Interlocked.Increment(ref _scrollGeneration);
-        var queryGeneration = _queryLoader.Generation;
-        var token = _queryLoader.GetQueryToken();
-        var rangeStart = scrollTop - (VirtualOverscanSlots * VirtualRowHeightPx);
-        var rangeEnd = scrollTop + clientHeight + (VirtualOverscanSlots * VirtualRowHeightPx);
         if (rangeStart < 0)
         {
             rangeStart = 0;
@@ -189,6 +192,54 @@ public sealed partial class WorkspaceRepositories
             start = 0;
             end = Math.Min(_slots.Count - 1, VirtualInitialViewportSlots - 1);
         }
+        return (start, end);
+    }
+    /// <summary>Computes the slot range to pre-hydrate before the first render: the default top window, or - when a saved scroll offset is being restored - the window around that offset. The offset is clamped against the *current* total height first so a workspace that shrank since the value was saved (repos removed) still resolves to a valid, bottom-most range instead of falling back to the top.</summary>
+    private (int Start, int End) ComputeInitialRange(double? restoreScrollTop)
+    {
+        var defaultEnd = Math.Min(_slots.Count - 1, VirtualInitialViewportSlots - 1);
+        if (_slots.Count == 0 || restoreScrollTop is not > 0)
+        {
+            return (0, defaultEnd);
+        }
+        var estimatedViewportPx = VirtualInitialViewportSlots * VirtualRowHeightPx;
+        var maxScrollTop = Math.Max(0, TotalScrollHeightPx() - estimatedViewportPx);
+        var clampedScrollTop = Math.Clamp(restoreScrollTop.Value, 0, maxScrollTop);
+        var rangeStart = clampedScrollTop - (VirtualOverscanSlots * VirtualRowHeightPx);
+        var rangeEnd = clampedScrollTop + estimatedViewportPx + (VirtualOverscanSlots * VirtualRowHeightPx);
+        return ComputeRangeForPixelWindow(rangeStart, rangeEnd);
+    }
+    /// <summary>Best-effort write of the tbody scroll offset to sessionStorage from C# (used when a reset must explicitly clear a stale offset, e.g. search). Live scroll persistence during normal scrolling happens in JS (virtual-scroll.js) without a round-trip.</summary>
+    private async Task WriteScrollTopAsync(double value)
+    {
+        try
+        {
+            await JSRuntime.InvokeVoidAsync(
+                "graymoonSessionStorageSet",
+                ScrollStorageKey,
+                value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+    [JSInvokable]
+    public async Task OnVirtualScroll(double scrollTop, double clientHeight)
+    {
+        if (_disposed || _slots.Count == 0)
+        {
+            return;
+        }
+
+        var scrollGeneration = Interlocked.Increment(ref _scrollGeneration);
+        var queryGeneration = _queryLoader.Generation;
+        var token = _queryLoader.GetQueryToken();
+        var rangeStart = scrollTop - (VirtualOverscanSlots * VirtualRowHeightPx);
+        var rangeEnd = scrollTop + clientHeight + (VirtualOverscanSlots * VirtualRowHeightPx);
+        var (start, end) = ComputeRangeForPixelWindow(rangeStart, rangeEnd);
 
         var rangeChanged = UpdateVisibleRange(start, end);
         if (rangeChanged && scrollGeneration == _scrollGeneration && !_disposed)
@@ -222,7 +273,9 @@ public sealed partial class WorkspaceRepositories
                 "grayMoonVirtualScroll.attach",
                 _tbodyRef,
                 _virtualScrollDotNetRef,
-                TotalScrollHeightPx());
+                TotalScrollHeightPx(),
+                _attachInitialScrollTop,
+                ScrollStorageKey);
             _virtualScrollAttached = true;
         }
         catch (JSDisconnectedException)
@@ -357,7 +410,9 @@ public sealed partial class WorkspaceRepositories
                 return;
             }
             workspace = w;
-            await ResetAndLoadFromTopAsync();
+            // Keep scroll position: rebuild the index/visible range in place instead of resetting to the top
+            // (RefreshFromSync already preserves _visibleStart/_visibleEnd and leaves virtual scroll attached).
+            await RefreshFromSync();
         }
         catch (ObjectDisposedException ex)
         {
