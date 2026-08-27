@@ -70,6 +70,7 @@ public sealed partial class WorkspaceActions : IDisposable
     private CancellationTokenSource? _repositorySyncDebounceCts;
     private readonly HashSet<int> _pendingRepositorySyncIds = [];
     private bool _autoPollRunning;
+    private volatile bool _disposed;
     private const int SyncDebounceMs = 500;
     private const int AutoPollIntervalMs = 5000;
 
@@ -667,6 +668,16 @@ public sealed partial class WorkspaceActions : IDisposable
         _ = AutoPollLoopAsync(_cts.Token);
     }
 
+    /// <summary>
+    /// Keeps polling every <see cref="AutoPollIntervalMs"/> while any row shows "running", so a GHA row's badge
+    /// (and its embedded live terminal) reflect GitHub's actual run status until it settles. Each iteration's
+    /// work is isolated in its own try/catch: a single unexpected failure (e.g. a transient network blip
+    /// surfacing as a stream/TLS error that <see cref="RefreshRowAsync"/> doesn't fully absorb, or a disposed
+    /// circuit mid-navigation) must never silently kill this loop - if it did, the row stays stuck showing
+    /// "running" indefinitely because nothing else re-polls it until an unrelated event (workspace sync, manual
+    /// refresh) happens to trigger a fresh <see cref="EnsureAutoPollRunning"/> call. Only cancellation (page
+    /// disposed / RefreshAllAsync superseding this loop) is allowed to actually end the loop.
+    /// </summary>
     private async Task AutoPollLoopAsync(CancellationToken cancellationToken)
     {
         try
@@ -685,8 +696,22 @@ public sealed partial class WorkspaceActions : IDisposable
 
                 if (runningRows.Count == 0) break;
 
-                var tasks = runningRows.Select(row => RefreshRowAsync(row, cancellationToken)).ToList();
-                await Task.WhenAll(tasks);
+                try
+                {
+                    var tasks = runningRows.Select(row => RefreshRowAsync(row, cancellationToken)).ToList();
+                    await Task.WhenAll(tasks);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // Swallow and keep looping - see summary above. RefreshRowAsync already logs its own
+                    // per-row failures; this only catches something escaping that isolation (e.g. a disposed
+                    // circuit during StateHasChanged), which must not stop future polling attempts.
+                    Logger.LogWarning(ex, "GHA auto-poll iteration failed unexpectedly for workspace {WorkspaceId}; continuing to poll", WorkspaceId);
+                }
             }
         }
         catch (OperationCanceledException) { /* page disposed */ }
@@ -745,10 +770,24 @@ public sealed partial class WorkspaceActions : IDisposable
         }
         finally
         {
-            if (!cancellationToken.IsCancellationRequested)
+            if (!cancellationToken.IsCancellationRequested && !_disposed)
             {
                 row.IsRefreshing = false;
-                await InvokeAsync(StateHasChanged);
+                try
+                {
+                    await InvokeAsync(StateHasChanged);
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Circuit/renderer torn down between the check above and this call (e.g. browser
+                    // navigated away or disconnected past the retention window). Not a real failure -
+                    // must not propagate, or it kills the caller's poll loop (AutoPollLoopAsync) and
+                    // leaves the row stuck showing its last-known status indefinitely.
+                }
+                catch (InvalidOperationException)
+                {
+                    // Same rationale as above - InvokeAsync can throw this once the renderer is gone.
+                }
             }
         }
     }
@@ -1658,6 +1697,7 @@ public sealed partial class WorkspaceActions : IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         _cts.Cancel();
         _cts.Dispose();
         _syncDebounceCts?.Cancel();
