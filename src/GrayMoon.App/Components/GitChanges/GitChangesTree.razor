@@ -18,7 +18,7 @@
     {
         @foreach (var row in Rows)
         {
-            <div class="git-changes-tree__row git-changes-tree__row--@(row.Kind.ToString().ToLowerInvariant()) @(IsSelected(row) ? "git-changes-tree__row--selected" : "")"
+            <div class="git-changes-tree__row git-changes-tree__row--@(row.Kind.ToString().ToLowerInvariant()) @(IsSelected(row) ? "git-changes-tree__row--selected" : "") @(row.Kind == GitChangesTreeRowKind.File && IsMultiSelected(row) ? "git-changes-tree__row--multi-selected" : "")"
                  style="padding-left: @(row.Depth * 1.1)rem"
                  @key="row.Key">
 
@@ -33,7 +33,7 @@
                     <i class="bi @IconFor(row)" aria-hidden="true"></i>
                 </span>
 
-                <span class="git-changes-tree__label" @onclick="() => OnLabelClick(row)">
+                <span class="git-changes-tree__label" @onclick="e => OnLabelClick(row, e)">
                     @if (row.Kind == GitChangesTreeRowKind.Repository)
                     {
                         <span class="git-changes-tree__repo-name">@row.Label</span>
@@ -83,9 +83,11 @@
     [Parameter] public bool HasChanges { get; set; }
     [Parameter] public GitChangesTreeRow? SelectedRow { get; set; }
     [Parameter] public EventCallback<GitChangesTreeRow> OnToggleExpand { get; set; }
-    [Parameter] public EventCallback<GitChangesTreeRow> OnSelectFile { get; set; }
+    [Parameter] public EventCallback<GitChangesFileSelectEventArgs> OnSelectFile { get; set; }
     [Parameter] public EventCallback<GitChangesStageEventArgs> OnStage { get; set; }
     [Parameter] public EventCallback<GitChangesStageEventArgs> OnUnstage { get; set; }
+    [Parameter] public EventCallback OnStageSelected { get; set; }
+    [Parameter] public EventCallback OnUnstageSelected { get; set; }
     [Parameter] public EventCallback OnStageAllChanged { get; set; }
     [Parameter] public EventCallback OnUnstageAllStaged { get; set; }
     [Parameter, EditorRequired] public Func<int, bool> IsMutating { get; set; } = _ => false;
@@ -93,12 +95,19 @@
     /// that single row's +/- icon for a spinner without affecting any other row (descendant, sibling,
     /// or otherwise) in the same repository.</summary>
     [Parameter, EditorRequired] public Func<GitChangesTreeRow, bool> IsRowMutating { get; set; } = _ => false;
+    /// <summary>True when the given File row is part of the page's active multi-selection set.</summary>
+    [Parameter, EditorRequired] public Func<GitChangesTreeRow, bool> IsMultiSelected { get; set; } = _ => false;
+    /// <summary>Count of currently multi-selected File rows. Stage/Unstage on a multi-selected row only
+    /// fans out to the whole selection when this is greater than 1.</summary>
+    [Parameter] public int MultiSelectionCount { get; set; }
 
     private bool IsSelected(GitChangesTreeRow row) =>
         SelectedRow != null && SelectedRow.Kind == GitChangesTreeRowKind.File && SelectedRow.Key == row.Key;
 
-    private Task OnLabelClick(GitChangesTreeRow row) =>
-        row.Kind == GitChangesTreeRowKind.File ? OnSelectFile.InvokeAsync(row) : OnToggleExpand.InvokeAsync(row);
+    private Task OnLabelClick(GitChangesTreeRow row, MouseEventArgs e) =>
+        row.Kind == GitChangesTreeRowKind.File
+            ? OnSelectFile.InvokeAsync(new GitChangesFileSelectEventArgs(row, e.CtrlKey || e.MetaKey, e.ShiftKey))
+            : OnToggleExpand.InvokeAsync(row);
 
     private static string IconFor(GitChangesTreeRow row) => row.Kind switch
     {
@@ -210,15 +219,21 @@
         var seq = 0;
         var paths = new[] { row.FilePath! };
         var disabled = IsMutating(row.WorkspaceRepositoryId);
+        // A multi-selected row (selection size > 1) fans its Stage/Unstage click out to every selected
+        // File row in that action's section instead of just this one row - see StageSelectedAsync /
+        // UnstageSelectedAsync on the page.
+        var useSelection = IsMultiSelected(row) && MultiSelectionCount > 1;
 
         builder.OpenElement(seq++, "button");
         builder.AddAttribute(seq++, "type", "button");
         builder.AddAttribute(seq++, "class", "git-changes-tree__action-btn");
         builder.AddAttribute(seq++, "disabled", disabled);
-        builder.AddAttribute(seq++, "title", row.IsStagedSection ? "Unstage" : "Stage");
+        builder.AddAttribute(seq++, "title", row.IsStagedSection
+            ? (useSelection ? "Unstage selected" : "Unstage")
+            : (useSelection ? "Stage selected" : "Stage"));
         builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => row.IsStagedSection
-            ? OnUnstage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, GitChangeOperationScope.ExplicitPaths, paths, row.Key))
-            : OnStage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, GitChangeOperationScope.ExplicitPaths, paths, row.Key))));
+            ? (useSelection ? OnUnstageSelected.InvokeAsync() : OnUnstage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, GitChangeOperationScope.ExplicitPaths, paths, row.Key)))
+            : (useSelection ? OnStageSelected.InvokeAsync() : OnStage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, GitChangeOperationScope.ExplicitPaths, paths, row.Key)))));
         RenderActionIcon(builder, ref seq, row, IsRowMutating(row));
         builder.CloseElement();
     }

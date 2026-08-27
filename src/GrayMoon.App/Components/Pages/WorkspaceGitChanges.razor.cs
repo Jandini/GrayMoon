@@ -1,3 +1,4 @@
+using GrayMoon.App.Components.GitChanges;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
@@ -187,6 +188,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     /// </summary>
     private async Task ClearSelectionIfStaleAsync()
     {
+        PruneStaleMultiSelection();
+
         if (_selectedRow is not { Kind: GitChangesTreeRowKind.File } row)
         {
             return;
@@ -198,6 +201,24 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         await ClearSelectionQuietlyAsync(clearMemory: true);
+    }
+
+    /// <summary>Drops any multi-selected row keys that no longer exist in the freshly-rebuilt _rows -
+    /// e.g. after a stage/unstage/commit moves or removes those entries from the tree.</summary>
+    private void PruneStaleMultiSelection()
+    {
+        if (_multiSelectedKeys.Count == 0)
+        {
+            return;
+        }
+
+        var currentKeys = _rows.Select(r => r.Key).ToHashSet();
+        _multiSelectedKeys.RemoveWhere(key => !currentKeys.Contains(key));
+
+        if (_multiSelectAnchorKey != null && !currentKeys.Contains(_multiSelectAnchorKey))
+        {
+            _multiSelectAnchorKey = null;
+        }
     }
 
     /// <summary>
@@ -365,17 +386,92 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         RebuildRows();
     }
 
-    private void SelectFile(GitChangesTreeRow row)
+    private void SelectFile(GitChangesFileSelectEventArgs args)
     {
+        var row = args.Row;
         if (row.Kind != GitChangesTreeRowKind.File)
         {
             return;
+        }
+
+        if (args.ShiftKey && _multiSelectAnchorKey != null)
+        {
+            ApplyShiftRangeSelection(row);
+        }
+        else if (args.CtrlKey)
+        {
+            ApplyCtrlToggleSelection(row);
+        }
+        else
+        {
+            _multiSelectedKeys.Clear();
+            _multiSelectAnchorKey = row.Key;
         }
 
         _selectedRow = row;
         SelectionMemory.Set(WorkspaceId, new WorkspaceGitChangesSelectionMemory.Selection(
             row.WorkspaceRepositoryId, row.FilePath!, row.IsStagedSection));
         _ = LoadDiffAsync(row);
+    }
+
+    /// <summary>Ctrl+click toggles a File row in/out of the multi-selection. If nothing was selected yet,
+    /// the previously-focused row (if any) is seeded into the set first so a single ctrl+click after a
+    /// plain click starts a proper 2-item selection.</summary>
+    private void ApplyCtrlToggleSelection(GitChangesTreeRow row)
+    {
+        if (_multiSelectedKeys.Count == 0 && _selectedRow is { Kind: GitChangesTreeRowKind.File } previous)
+        {
+            _multiSelectedKeys.Add(previous.Key);
+        }
+
+        if (!_multiSelectedKeys.Add(row.Key))
+        {
+            _multiSelectedKeys.Remove(row.Key);
+        }
+
+        _multiSelectAnchorKey = row.Key;
+    }
+
+    /// <summary>Shift+click selects the contiguous range of File rows (in current tree order) between the
+    /// last anchor and the clicked row, replacing any previous selection. The anchor itself is left
+    /// unchanged so repeated shift-clicks keep adjusting the range from the same starting point.</summary>
+    private void ApplyShiftRangeSelection(GitChangesTreeRow row)
+    {
+        var rows = _rows;
+        var anchorIndex = -1;
+        var targetIndex = -1;
+        for (var i = 0; i < rows.Count; i++)
+        {
+            if (rows[i].Key == _multiSelectAnchorKey)
+            {
+                anchorIndex = i;
+            }
+
+            if (rows[i].Key == row.Key)
+            {
+                targetIndex = i;
+            }
+        }
+
+        if (anchorIndex < 0 || targetIndex < 0)
+        {
+            _multiSelectedKeys.Clear();
+            _multiSelectedKeys.Add(row.Key);
+            _multiSelectAnchorKey = row.Key;
+            return;
+        }
+
+        var start = Math.Min(anchorIndex, targetIndex);
+        var end = Math.Max(anchorIndex, targetIndex);
+
+        _multiSelectedKeys.Clear();
+        for (var i = start; i <= end; i++)
+        {
+            if (rows[i].Kind == GitChangesTreeRowKind.File)
+            {
+                _multiSelectedKeys.Add(rows[i].Key);
+            }
+        }
     }
 
     // While a page job (bulk stage/unstage, commit, manual refresh) is running, disable every action

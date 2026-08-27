@@ -399,6 +399,18 @@
     background: var(--bg-active);
 }
 
+/* Ctrl/Shift multi-selected File rows - a lighter highlight than the single focused/diff row above,
+   so both states remain visually distinguishable when a multi-selected row is also the focused one. */
+.git-changes-tree__row--multi-selected {
+    background: color-mix(in srgb, var(--bg-active) 45%, transparent);
+    outline: 1px solid color-mix(in srgb, var(--bg-active) 70%, transparent);
+    outline-offset: -1px;
+}
+
+.git-changes-tree__row--multi-selected.git-changes-tree__row--selected {
+    background: var(--bg-active);
+}
+
 .git-changes-tree__row--section {
     font-weight: 600;
     color: var(--text-primary);
