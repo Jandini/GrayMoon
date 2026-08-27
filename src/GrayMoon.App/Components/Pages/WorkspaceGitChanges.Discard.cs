@@ -92,7 +92,7 @@ public sealed partial class WorkspaceGitChanges
 
         ShowConfirm(message, () => scope == GitChangeOperationScope.Repository
             ? RunRepositoryScopedDiscardJobAsync(workspaceRepositoryId)
-            : RunMutationAsync(workspaceRepositoryId, rowKey, async (root, wsName, repoName, repositoryId) =>
+            : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: true, async (root, wsName, repoName, repositoryId) =>
             {
                 var result = await AgentClient.DiscardAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);

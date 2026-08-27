@@ -101,10 +101,11 @@
     /// <summary>Undo (discard) every unstaged change across every repository in the Changed section.</summary>
     [Parameter] public EventCallback OnDiscardAllChanged { get; set; }
     [Parameter, EditorRequired] public Func<int, bool> IsMutating { get; set; } = _ => false;
-    /// <summary>True only when this exact row has a File/Folder-scope mutation in flight - used to swap
-    /// that single row's +/- icon for a spinner without affecting any other row (descendant, sibling,
-    /// or otherwise) in the same repository.</summary>
-    [Parameter, EditorRequired] public Func<GitChangesTreeRow, bool> IsRowMutating { get; set; } = _ => false;
+    /// <summary>True only when this exact row has a File/Folder-scope mutation of the given kind
+    /// (isDiscard: true for the Undo button, false for the Stage/Unstage button) in flight - used to swap
+    /// that single button's icon for a spinner without affecting the row's other action button or any
+    /// other row (descendant, sibling, or otherwise) in the same repository.</summary>
+    [Parameter, EditorRequired] public Func<GitChangesTreeRow, bool, bool> IsRowMutating { get; set; } = (_, _) => false;
     /// <summary>True when the given File row is part of the page's active multi-selection set.</summary>
     [Parameter, EditorRequired] public Func<GitChangesTreeRow, bool> IsMultiSelected { get; set; } = _ => false;
     /// <summary>Count of currently multi-selected File rows. Stage/Unstage on a multi-selected row only
@@ -261,7 +262,7 @@
             builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => useSelection
                 ? OnDiscardSelected.InvokeAsync()
                 : OnDiscard.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, GitChangeOperationScope.ExplicitPaths, paths, row.Key))));
-            RenderActionIcon(builder, ref seq, "bi-arrow-counterclockwise", IsRowMutating(row));
+            RenderActionIcon(builder, ref seq, "bi-arrow-counterclockwise", IsRowMutating(row, true));
             builder.CloseElement();
         }
 
@@ -275,7 +276,7 @@
         builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => row.IsStagedSection
             ? (useSelection ? OnUnstageSelected.InvokeAsync() : OnUnstage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, GitChangeOperationScope.ExplicitPaths, paths, row.Key)))
             : (useSelection ? OnStageSelected.InvokeAsync() : OnStage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, GitChangeOperationScope.ExplicitPaths, paths, row.Key)))));
-        RenderActionIcon(builder, ref seq, row, IsRowMutating(row));
+        RenderActionIcon(builder, ref seq, row, IsRowMutating(row, false));
         builder.CloseElement();
     }
 
@@ -296,7 +297,7 @@
             builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => OnDiscard.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, scope, paths, row.Key))));
             // Repository scope runs as a full background job (LoadingOverlay), not the lightweight inline
             // indicator, so it never has a row-scoped spinner - only the Folder discard button does.
-            RenderActionIcon(builder, ref seq, "bi-arrow-counterclockwise", row.Kind != GitChangesTreeRowKind.Repository && IsRowMutating(row));
+            RenderActionIcon(builder, ref seq, "bi-arrow-counterclockwise", row.Kind != GitChangesTreeRowKind.Repository && IsRowMutating(row, true));
             builder.CloseElement();
         }
 
@@ -312,7 +313,7 @@
             : OnStage.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, scope, paths, row.Key))));
         // Repository scope runs as a full background job (LoadingOverlay), not the lightweight inline
         // indicator, so it never has a row-scoped spinner - only File/Folder actions do.
-        RenderActionIcon(builder, ref seq, row, row.Kind != GitChangesTreeRowKind.Repository && IsRowMutating(row));
+        RenderActionIcon(builder, ref seq, row, row.Kind != GitChangesTreeRowKind.Repository && IsRowMutating(row, false));
         builder.CloseElement();
     }
 
