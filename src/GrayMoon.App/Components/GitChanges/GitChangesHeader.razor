@@ -29,23 +29,23 @@
                     <i class="bi bi-git git-changes-header__summary-icon" aria-hidden="true"></i>
                     @BranchLabel
                 </span>
-                @if (IsScanRunning)
-                {
-                    <span class="git-changes-header__summary-item git-changes-header__summary-item--scanning">
-                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                        <span>@(ScanStatusText ?? "Refreshing repositories...")</span>
-                        <button type="button"
-                                class="btn btn-link btn-sm git-changes-header__scan-abort"
-                                title="Abort refresh"
-                                aria-label="Abort refresh"
-                                @onclick="() => OnAbortScan.InvokeAsync()">
-                            <i class="bi bi-x-circle" aria-hidden="true"></i>
-                        </button>
-                    </span>
-                }
             }
         </div>
         <span class="workspace-repos-title-spacer"></span>
+        @if (IsScanRunning)
+        {
+            <div class="git-changes-header__scan-indicator">
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                <span>@(ScanStatusText ?? "Refreshing repositories...")</span>
+                <button type="button"
+                        class="btn btn-link btn-sm git-changes-header__scan-abort"
+                        title="Abort refresh"
+                        aria-label="Abort refresh"
+                        @onclick="() => OnAbortScan.InvokeAsync()">
+                    <i class="bi bi-x-circle" aria-hidden="true"></i>
+                </button>
+            </div>
+        }
     </div>
     @if (HasChanges)
     {
