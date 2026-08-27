@@ -2,7 +2,12 @@
  * Draggable vertical splitter for two-panel layouts (Git Changes). A container with class
  * "graymoon-splitter" holds two children ("graymoon-splitter__left" / "graymoon-splitter__right")
  * and a drag handle ("graymoon-splitter__handle") between them. Left panel width is persisted in
- * localStorage per container id, mirroring resizable-columns.js's storage convention.
+ * localStorage per container id (and, when present, per "data-workspace-id"), mirroring
+ * resizable-columns.js's storage convention.
+ *
+ * The saved width is a percentage, so it naturally stays proportional as the window/container is
+ * resized (the "keep responsive until the user picks their own position" requirement) while a
+ * user-set width always wins over the CSS default once one has been saved.
  */
 (function () {
     const STORAGE_PREFIX = 'graymoon-splitter-width-';
@@ -10,32 +15,60 @@
     const MAX_WIDTH_PERCENT = 70;
 
     function getStorageKey(container) {
-        return STORAGE_PREFIX + (container.id || 'default');
+        const workspaceId = container.dataset.workspaceId;
+        const baseId = container.id || 'default';
+        return STORAGE_PREFIX + baseId + (workspaceId ? '-workspace-' + workspaceId : '');
+    }
+
+    function readSavedPercent(key) {
+        try {
+            const raw = localStorage.getItem(key);
+            if (!raw) return null;
+            const parsed = parseFloat(raw);
+            if (!Number.isFinite(parsed)) return null;
+            return Math.max(MIN_WIDTH_PERCENT, Math.min(MAX_WIDTH_PERCENT, parsed));
+        } catch (_) {
+            return null;
+        }
     }
 
     function applyWidth(left, percent) {
-        left.style.flexBasis = percent + '%';
-        left.style.width = percent + '%';
+        left.style.setProperty('flex-basis', percent + '%', 'important');
+        left.style.setProperty('width', percent + '%', 'important');
+    }
+
+    function applySavedOrDefaultWidth(container, left) {
+        const key = getStorageKey(container);
+        const savedPercent = readSavedPercent(key);
+        if (savedPercent !== null) {
+            applyWidth(left, savedPercent);
+        } else {
+            left.style.removeProperty('flex-basis');
+            left.style.removeProperty('width');
+        }
     }
 
     function initSplitter(container) {
-        if (container.dataset.splitterInit === '1') return;
         const left = container.querySelector('.graymoon-splitter__left');
         const handle = container.querySelector('.graymoon-splitter__handle');
         if (!left || !handle) return;
 
-        container.dataset.splitterInit = '1';
-
-        const key = getStorageKey(container);
-        let savedPercent = null;
-        try {
-            const raw = localStorage.getItem(key);
-            if (raw) savedPercent = parseFloat(raw);
-        } catch (_) { /* ignore */ }
-
-        if (savedPercent && savedPercent >= MIN_WIDTH_PERCENT && savedPercent <= MAX_WIDTH_PERCENT) {
-            applyWidth(left, savedPercent);
+        // Re-apply whenever this is a brand-new container OR the same container was reused for a
+        // different workspace (e.g. Blazor keeps the DOM node in place across SPA navigation
+        // between workspaces since the markup is structurally identical). Skipping this check
+        // whenever the workspace id is unchanged keeps drag-in-progress reflows from re-reading
+        // localStorage on every mutation.
+        const workspaceKey = container.dataset.workspaceId || '';
+        if (container.dataset.splitterInit === '1' && container.dataset.splitterAppliedWorkspace === workspaceKey) {
+            return;
         }
+        container.dataset.splitterInit = '1';
+        container.dataset.splitterAppliedWorkspace = workspaceKey;
+
+        applySavedOrDefaultWidth(container, left);
+
+        if (container.dataset.splitterDragBound === '1') return;
+        container.dataset.splitterDragBound = '1';
 
         let dragging = false;
 
@@ -60,7 +93,7 @@
             try {
                 const rect = container.getBoundingClientRect();
                 const percent = (left.getBoundingClientRect().width / rect.width) * 100;
-                localStorage.setItem(key, String(percent));
+                localStorage.setItem(getStorageKey(container), String(percent));
             } catch (_) { /* ignore */ }
         });
     }
