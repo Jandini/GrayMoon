@@ -49,6 +49,12 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     // descendants, for a folder) rather than every row in the affected repository.
     private readonly Dictionary<int, string> _mutatingRowKeyByRepository = new();
 
+    // Tracks whether the in-flight mutation for a repository is a discard (Undo) vs a stage/unstage, so
+    // that a single row's two separate action buttons (Undo and Stage/Unstage) each only show their own
+    // spinner - without this, both buttons on the same row would spin together since they share the same
+    // row key.
+    private readonly Dictionary<int, bool> _mutatingIsDiscardByRepository = new();
+
     protected override Task OnInitializedAsync()
     {
         JobService.Changed += OnJobServiceChanged;
@@ -478,12 +484,14 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     // button - not just the affected repository - since only one page job can run at a time anyway.
     private bool IsMutating(int workspaceRepositoryId) => _mutatingRepositoryIds.Contains(workspaceRepositoryId) || IsJobRunning;
 
-    // True only for the exact row that was clicked - never its descendants, siblings, or any other row
-    // in the repository. GitChangesTree calls this to decide whether a File/Folder action button shows
-    // a spinner instead of its +/- icon.
-    private bool IsRowMutating(GitChangesTreeRow row) =>
+    // True only for the exact row (and exact action - Undo vs Stage/Unstage) that was clicked - never its
+    // descendants, siblings, the row's other action button, or any other row in the repository.
+    // GitChangesTree calls this to decide whether a File/Folder action button shows a spinner instead of
+    // its icon.
+    private bool IsRowMutating(GitChangesTreeRow row, bool isDiscard) =>
         _mutatingRowKeyByRepository.TryGetValue(row.WorkspaceRepositoryId, out var mutatingKey)
-        && row.Key == mutatingKey;
+        && row.Key == mutatingKey
+        && _mutatingIsDiscardByRepository.GetValueOrDefault(row.WorkspaceRepositoryId) == isDiscard;
 
     // File and folder scopes are fast, frequent clicks during diff review - keep them on the lightweight
     // inline indicator (_mutatingRepositoryIds) rather than the full LoadingOverlay. Whole-repository
@@ -492,7 +500,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private Task StageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey) =>
         scope == GitChangeOperationScope.Repository
             ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: true)
-            : RunMutationAsync(workspaceRepositoryId, rowKey, async (root, wsName, repoName, repositoryId) =>
+            : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (root, wsName, repoName, repositoryId) =>
             {
                 var result = await AgentClient.StageAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
@@ -501,7 +509,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private Task UnstageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey) =>
         scope == GitChangeOperationScope.Repository
             ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: false)
-            : RunMutationAsync(workspaceRepositoryId, rowKey, async (root, wsName, repoName, repositoryId) =>
+            : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (root, wsName, repoName, repositoryId) =>
             {
                 var result = await AgentClient.UnstageAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
@@ -547,7 +555,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    private async Task RunMutationAsync(int workspaceRepositoryId, string rowKey, Func<string, string, string, int, Task> action)
+    private async Task RunMutationAsync(int workspaceRepositoryId, string rowKey, bool isDiscard, Func<string, string, string, int, Task> action)
     {
         if (!AgentBridge.IsAgentConnected)
         {
@@ -561,6 +569,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         }
 
         _mutatingRowKeyByRepository[workspaceRepositoryId] = rowKey;
+        _mutatingIsDiscardByRepository[workspaceRepositoryId] = isDiscard;
         StateHasChanged();
 
         try
@@ -583,6 +592,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         {
             _mutatingRepositoryIds.Remove(workspaceRepositoryId);
             _mutatingRowKeyByRepository.Remove(workspaceRepositoryId);
+            _mutatingIsDiscardByRepository.Remove(workspaceRepositoryId);
             StateHasChanged();
         }
     }

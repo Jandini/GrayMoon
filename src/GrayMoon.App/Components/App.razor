@@ -285,6 +285,12 @@
 
         window.graymoonStorageGet = (key) => localStorage.getItem(key);
         window.graymoonStorageSet = (key, value) => { localStorage.setItem(key, value); };
+        window.graymoonSessionStorageGet = (key) => {
+            try { return sessionStorage.getItem(key); } catch (e) { return null; }
+        };
+        window.graymoonSessionStorageSet = (key, value) => {
+            try { sessionStorage.setItem(key, value); } catch (e) { /* storage unavailable - best-effort */ }
+        };
         window.graymoonToggleClass = (selector, cls, add) => {
             const el = document.querySelector(selector);
             if (el) el.classList.toggle(cls, !!add);

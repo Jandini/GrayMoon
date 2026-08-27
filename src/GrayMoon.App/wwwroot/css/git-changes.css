@@ -94,14 +94,17 @@
 
 /* Height is derived from --topbar-height (see app.css / MainLayout.razor.css) instead of a
    hardcoded viewport offset, so the splitter/Monaco panel expands to fill the reclaimed space
-   when the desktop top bar is hidden (.page--topbar-hidden sets --topbar-height: 0px). The
-   168px/192px offsets below assume the default 3.5rem (56px) top bar; subtracting the variable
-   keeps that same remainder while letting it shrink to 112px/136px when the bar is hidden. */
+   when the desktop top bar is hidden (.page--topbar-hidden sets --topbar-height: 0px). height and
+   max-height share the same offset so the panel's bottom edge lands exactly where the
+   page's padding-block would put it - matching the left/right margins, like the shared
+   .grid-page-body rule in app.css.
+   IMPORTANT: the 120px offset is a must and must NOT be changed - it matches the tuned
+   .grid-page-body offset in app.css so both pages leave the same amount of space below the grid. */
 .git-changes-page .grid-page-body {
     flex: 1 1 auto;
     min-height: 0;
-    height: calc(100vh - var(--topbar-height) - 112px);
-    max-height: calc(100vh - var(--topbar-height) - 136px);
+    height: calc(100vh - var(--topbar-height) - 120px);
+    max-height: calc(100vh - var(--topbar-height) - 120px);
     overflow: hidden;
     display: flex;
     flex-direction: column;

@@ -35,6 +35,11 @@ public sealed partial class WorkspaceRepositories
     private DotNetObjectReference<WorkspaceRepositories>? _virtualScrollDotNetRef;
     private bool _virtualScrollAttached;
     private int _loadedWorkspaceId;
+    /// <summary>Scroll position read from sessionStorage for the current WorkspaceId, consumed by the next ResetAndLoadFromTopAsync(restoreScroll: true) call.</summary>
+    private double? _pendingRestoreScrollTop;
+    /// <summary>Scroll offset to hand to grayMoonVirtualScroll.attach on the next attach, set by ResetAndLoadFromTopAsync. 0 means "start at top" (default / search reset).</summary>
+    private double _attachInitialScrollTop;
+    private string ScrollStorageKey => $"graymoon:ws-repos-scroll:{WorkspaceId}";
     private bool HasRepositories => (_headerState?.TotalCount ?? 0) > 0;
     private bool hasUnmatchedDependencies => _headerState?.HasUnmatchedDependencies ?? false;
     private bool isPushRecommended => _headerState?.IsPushRecommended ?? false;

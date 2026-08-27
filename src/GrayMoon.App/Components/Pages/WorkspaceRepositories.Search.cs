@@ -11,7 +11,7 @@ public sealed partial class WorkspaceRepositories
         // once the user pauses typing, so no additional delay is needed here.
         searchTerm = value;
         _effectiveSearch = value;
-        await ResetAndLoadFromTopAsync();
+        await ResetAndLoadFromTopAsync(restoreScroll: false);
         if (!_disposed)
         {
             await InvokeAsync(StateHasChanged);

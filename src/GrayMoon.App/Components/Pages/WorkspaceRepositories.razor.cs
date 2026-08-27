@@ -39,8 +39,27 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         _loadedWorkspaceId = WorkspaceId;
         var storedMode = await JSRuntime.InvokeAsync<string?>("graymoonStorageGet", SyncModeStorageKey);
         _quickFetchIsPrimary = storedMode == "quick-fetch";
+        await LoadPendingRestoreScrollTopAsync();
         await LoadWorkspaceAsync();
         ApplySyncStateFromLoadedItems();
+    }
+
+    /// <summary>Reads the saved tbody scroll offset for the current WorkspaceId from sessionStorage, consumed by the next ResetAndLoadFromTopAsync(restoreScroll: true) call. Best-effort: malformed or missing storage falls back to no restore (top of grid), matching current behavior.</summary>
+    private async Task LoadPendingRestoreScrollTopAsync()
+    {
+        try
+        {
+            var raw = await JSRuntime.InvokeAsync<string?>("graymoonSessionStorageGet", ScrollStorageKey);
+            _pendingRestoreScrollTop = double.TryParse(raw, out var value) && value > 0 ? value : null;
+        }
+        catch (JSDisconnectedException)
+        {
+            _pendingRestoreScrollTop = null;
+        }
+        catch (InvalidOperationException)
+        {
+            _pendingRestoreScrollTop = null;
+        }
     }
 
     private async Task SetSyncModeAsync(bool quickFetch)
@@ -60,6 +79,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         errorMessage = null;
         hasLoadedOnce = false;
         ClearGridState();
+        await LoadPendingRestoreScrollTopAsync();
         await LoadWorkspaceAsync();
         ApplySyncStateFromLoadedItems();
     }
