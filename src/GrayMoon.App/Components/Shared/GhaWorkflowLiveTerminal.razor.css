@@ -50,15 +50,20 @@
 
 /*
  * Progress bar overlays the caption's own bottom divider line (the gray 1px rule under
- * "▶ Docker Build - build > ..."). Same 1px height as that divider; width tracks
- * current-step/total-steps and creeps toward the target (see ProgressLoopAsync in the
- * code-behind) instead of jumping straight there. Color matches the "running" status badge.
+ * "▶ Docker Build - build > ..."). Width tracks current-step/total-steps and creeps toward
+ * the target (see ProgressLoopAsync in the code-behind) instead of jumping straight there.
+ * Color matches the "running" status badge.
+ *
+ * Height is fixed at 2px (not 1px) so it renders consistently across rows: a 1px
+ * position:absolute overlay is prone to sub-pixel rounding that varies with each row's
+ * cumulative vertical offset, making some rows look thinner than others at non-integer
+ * display scale factors. 2px rounds the same way regardless of row position.
  */
 .actions-gha-terminal__progress {
     position: absolute;
     left: 0;
     bottom: 0;
-    height: 1px;
+    height: 2px;
     width: 0%;
     background-color: #d29922;
     transition: width 0.15s linear;
