@@ -513,12 +513,15 @@ h1:focus {
 /* max-height is derived from --topbar-height (see :root / .page--topbar-hidden in
    MainLayout.razor.css) instead of a hardcoded viewport offset, so grid pages (Repositories,
    Connectors, Agent, etc.) expand to fill the reclaimed space when the desktop top bar is
-   hidden. 168px assumes the default 3.5rem (56px) top bar; subtracting the variable keeps
-   that same remainder (112px) while letting it shrink when the bar is hidden. */
+   hidden, while shrinking to leave the correct amount of space below the grid.
+   IMPORTANT: the 120px offset is a must and must NOT be changed - it was tuned against the
+   live app so the grid's bottom edge lines up with the left/right padding-block gap. Match
+   any change here in .git-changes-page .grid-page-body (git-changes.css), which uses the
+   same offset for the same reason. */
 .grid-page-body {
     flex: 1 1 auto;
     min-height: 0;
-    max-height: calc(100vh - var(--topbar-height) - 112px);
+    max-height: calc(100vh - var(--topbar-height) - 120px);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -533,10 +536,15 @@ h1:focus {
     flex-direction: column;
 }
 
-/* Match bottom spacing to left/right: remove extra card margin so padding-block provides equal gap */
+/* Match bottom spacing to left/right: remove extra card margin so padding-block provides equal gap.
+   !important is required here because Bootstrap's own .mb-4 utility class ships with
+   `margin-bottom: 1.5rem !important`, which otherwise wins regardless of selector specificity or
+   stylesheet order - without this, every grid page (Repositories, Connectors, Agent, etc.) keeps a
+   hidden 24px gap below the card that makes the bottom margin visibly larger than the left/right
+   padding. */
 .grid-page-body .page-card.mb-4,
 .grid-page-body .card.mb-4 {
-    margin-bottom: 0;
+    margin-bottom: 0 !important;
 }
 
 .grid-page-body .card-body {
