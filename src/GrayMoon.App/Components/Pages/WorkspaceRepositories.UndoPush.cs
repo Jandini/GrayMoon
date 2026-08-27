@@ -44,7 +44,7 @@ public sealed partial class WorkspaceRepositories
         CloseUndoPushModal();
         errorMessage = null;
 
-        JobService.StartJob(PageJobKey, "Resetting outgoing commits...", async (job, ct) =>
+        JobService.StartJob(PageJobKey, "Reverting outgoing commits...", async (job, ct) =>
         {
             try
             {
