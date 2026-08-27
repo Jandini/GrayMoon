@@ -114,6 +114,11 @@
             </div>
         </div>
     </div>
+
+<LoadingOverlay IsVisible="@_isUpdating" PageScoped="true" ShowCommandTerminal="false"
+                Message="@(_waitingForReconnect ? "Waiting for agent..." : "Updating agent...")"
+                OnAbort="@(_waitingForReconnect ? EventCallback.Factory.Create(this, AbortAgentUpdateWait) : default)" />
+
 @code {
     private const string AgentDotnet10RuntimeUrl = "https://aka.ms/dotnet-core-applaunch?framework=Microsoft.NETCore.App&framework_version=10.0.0&arch=x64&rid=win-x64&os=win10";
 
@@ -125,6 +130,7 @@
     private HostInfoDto? hostInfo;
     private string? hostInfoLoadError;
     private bool _isUpdating;
+    private bool _waitingForReconnect;
 
     protected override void OnInitialized()
     {
@@ -176,6 +182,14 @@
             var json = response.Data is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(response.Data);
             var dto = JsonSerializer.Deserialize<HostInfoDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             hostInfo = dto ?? new HostInfoDto(null, null, null);
+
+            // Confirms the reconnected agent is actually responsive (not just SignalR-connected)
+            // and reports the matching version, so the overlay never closes prematurely.
+            if (_waitingForReconnect && AgentConnectionTracker.State == AgentConnectionState.Online)
+            {
+                _isUpdating = false;
+                _waitingForReconnect = false;
+            }
         }
         catch
         {
@@ -302,14 +316,26 @@
     private async Task UpdateAgentNowAsync()
     {
         _isUpdating = true;
+        _waitingForReconnect = false;
         StateHasChanged();
         var installUrl = NavigationManager.BaseUri.TrimEnd('/') + "/api/agent/install";
         var response = await AgentBridge.SendCommandAsync(AgentHubMethods.SelfUpdate, new { installUrl }, CancellationToken.None);
-        _isUpdating = false;
         if (!response.Success)
         {
+            _isUpdating = false;
             ToastService.ShowError("Agent update failed.");
         }
+        else
+        {
+            _waitingForReconnect = true;
+        }
+        StateHasChanged();
+    }
+
+    private void AbortAgentUpdateWait()
+    {
+        _isUpdating = false;
+        _waitingForReconnect = false;
         StateHasChanged();
     }
 

@@ -60,7 +60,7 @@ else
         }
     }
 
-    private string BadgeClass => _isUpdating ? "bg-primary" : State switch
+    private string BadgeClass => State switch
     {
         AgentConnectionState.Online => "bg-success",
         AgentConnectionState.Offline => "bg-danger",
@@ -69,19 +69,17 @@ else
         _ => "bg-secondary"
     };
 
-    private string BadgeStyle => _isUpdating
-        ? "background-color: #0d6efd !important; color: #fff !important;"
-        : State switch
-        {
-            AgentConnectionState.Online => "background-color: #198754 !important;",
-            AgentConnectionState.Offline => "background-color: #dc3545 !important; color: #fff !important;",
-            AgentConnectionState.VersionMismatch => "background-color: #dc3545 !important; color: #fff !important;",
-            _ => ""
-        };
+    private string BadgeStyle => State switch
+    {
+        AgentConnectionState.Online => "background-color: #198754 !important;",
+        AgentConnectionState.Offline => "background-color: #dc3545 !important; color: #fff !important;",
+        AgentConnectionState.VersionMismatch => "background-color: #dc3545 !important; color: #fff !important;",
+        _ => ""
+    };
 
     private string BadgeClassFull => $"badge {BadgeClass} text-decoration-none ms-2";
 
-    private string StateLabel => _isUpdating ? "updating" : State switch
+    private string StateLabel => State switch
     {
         AgentConnectionState.Online => AgentQueueStateService.GetTotalPendingCount() > 0 ? "running" : "online",
         AgentConnectionState.Offline => "offline",
@@ -90,7 +88,7 @@ else
         _ => "offline"
     };
 
-    private string TitleText => _isUpdating ? "Updating agent..." : State switch
+    private string TitleText => State switch
     {
         AgentConnectionState.VersionMismatch => $"Agent version mismatch. Agent version: {AgentSemVer ?? "unknown"}. Click to update.",
         AgentConnectionState.Online => AgentQueueStateService.GetTotalPendingCount() > 0 ? "Agent is running tasks" : "Agent connection status: online",
