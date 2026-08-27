@@ -33,7 +33,9 @@
                     <i class="bi @IconFor(row)" aria-hidden="true"></i>
                 </span>
 
-                <span class="git-changes-tree__label" @onclick="e => OnLabelClick(row, e)">
+                <span class="git-changes-tree__label"
+                      @onclick="e => OnLabelClick(row, e)"
+                      @onmousedown:preventDefault="@(row.Kind == GitChangesTreeRowKind.File)">
                     @if (row.Kind == GitChangesTreeRowKind.Repository)
                     {
                         <span class="git-changes-tree__repo-name">@row.Label</span>

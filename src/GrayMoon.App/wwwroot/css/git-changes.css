@@ -353,6 +353,10 @@
     font-size: 0.85rem;
     scrollbar-width: auto;
     scrollbar-color: #5a5a5a var(--bg-card, #252526);
+    /* Tree rows are click/select targets - disable browser text selection so Shift/Ctrl
+       multi-select does not highlight labels between clicks. */
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 .git-changes-tree::-webkit-scrollbar {
