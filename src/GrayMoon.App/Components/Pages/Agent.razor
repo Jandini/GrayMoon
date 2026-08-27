@@ -185,7 +185,9 @@
 
             // Confirms the reconnected agent is actually responsive (not just SignalR-connected)
             // and reports the matching version, so the overlay never closes prematurely.
-            if (_waitingForReconnect && AgentConnectionTracker.State == AgentConnectionState.Online)
+            if (_waitingForReconnect
+                && AgentConnectionTracker.State == AgentConnectionState.Online
+                && !AgentConnectionTracker.IsSelfUpdateInProgress)
             {
                 _isUpdating = false;
                 _waitingForReconnect = false;
@@ -317,6 +319,7 @@
     {
         _isUpdating = true;
         _waitingForReconnect = false;
+        AgentConnectionTracker.BeginSelfUpdate();
         StateHasChanged();
         var installUrl = NavigationManager.BaseUri.TrimEnd('/') + "/api/agent/install";
         var response = await AgentBridge.SendCommandAsync(AgentHubMethods.SelfUpdate, new { installUrl }, CancellationToken.None);
@@ -336,6 +339,7 @@
     {
         _isUpdating = false;
         _waitingForReconnect = false;
+        AgentConnectionTracker.EndSelfUpdate();
         StateHasChanged();
     }
 

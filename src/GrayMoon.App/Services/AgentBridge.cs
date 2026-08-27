@@ -24,11 +24,24 @@ public sealed class AgentBridge(
 
     public bool IsAgentConnected => connectionTracker.GetAgentConnectionId() != null;
 
+    private void EndSelfUpdateIfStillConnected()
+    {
+        // A failed SelfUpdate while the agent is already offline is the install stopping the
+        // service (or FailAll on disconnect) - keep the in-progress flag so the disconnect is
+        // treated as installing, not as an unexpected offline.
+        if (connectionTracker.State != AgentConnectionState.Offline)
+            connectionTracker.EndSelfUpdate();
+    }
+
     public async Task<AgentCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default)
     {
         var connectionId = connectionTracker.GetAgentConnectionId();
         if (string.IsNullOrEmpty(connectionId))
             return new AgentCommandResponse(false, null, "Agent not connected. Start GrayMoon.Agent to sync repositories.");
+
+        var isSelfUpdate = command == AgentHubMethods.SelfUpdate;
+        if (isSelfUpdate)
+            connectionTracker.BeginSelfUpdate();
 
         var requestId = Guid.NewGuid().ToString("N");
         var argsJson = args != null ? JsonSerializer.SerializeToElement(args) : (JsonElement?)null;
@@ -44,7 +57,10 @@ public sealed class AgentBridge(
         {
             await hubContext.Clients.Client(connectionId).SendAsync(AgentHubMethods.RequestCommand, requestId, command, argsJson, cancellationToken);
             logger.LogDebug("Sent RequestCommand: {RequestId}, {Command}", requestId, command);
-            return await task;
+            var response = await task;
+            if (isSelfUpdate && !response.Success)
+                EndSelfUpdateIfStillConnected();
+            return response;
         }
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
@@ -56,6 +72,8 @@ public sealed class AgentBridge(
             logger.LogWarning(
                 "Agent command {Command} ({RequestId}) timed out after {TimeoutSeconds}s waiting for a response",
                 command, requestId, _commandTimeout.TotalSeconds);
+            if (isSelfUpdate)
+                EndSelfUpdateIfStillConnected();
             return new AgentCommandResponse(false, null, $"Agent command timed out after {_commandTimeout.TotalSeconds:0}s.");
         }
         catch (OperationCanceledException)
@@ -63,12 +81,16 @@ public sealed class AgentBridge(
             // WaitAsync cancel registration also notifies the agent; send here too in case
             // RequestCommand was delivered before SendAsync observed cancellation.
             cancelSender.NotifyCancel(requestId);
+            if (isSelfUpdate)
+                EndSelfUpdateIfStillConnected();
             throw;
         }
         catch (Exception ex)
         {
             AgentResponseDelivery.Fail(requestId, ex);
             logger.LogError(ex, "Failed to send command {Command} to agent", command);
+            if (isSelfUpdate)
+                EndSelfUpdateIfStillConnected();
             return new AgentCommandResponse(false, null, ex.Message);
         }
     }

@@ -7,7 +7,7 @@
 @inject IToastService ToastService
 @rendermode @(new InteractiveServerRenderMode(prerender: true))
 
-@if (State == AgentConnectionState.VersionMismatch && !_isUpdating)
+@if (State == AgentConnectionState.VersionMismatch && !IsUpdating)
 {
     <a class="@BadgeClassFull"
        title="@TitleText"
@@ -30,16 +30,11 @@ else
 @code {
     private AgentConnectionState State => AgentConnectionTracker.State;
     private string? AgentSemVer => AgentConnectionTracker.AgentSemVer;
-    private bool _isUpdating;
+    private bool IsUpdating => AgentConnectionTracker.IsSelfUpdateInProgress;
 
     protected override void OnInitialized()
     {
-        AgentConnectionTracker.OnStateChanged(state =>
-        {
-            if (state == AgentConnectionState.Online)
-                _isUpdating = false;
-            _ = InvokeAsync(StateHasChanged);
-        });
+        AgentConnectionTracker.OnStateChanged(state => { _ = InvokeAsync(StateHasChanged); });
         AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
     }
 
@@ -47,13 +42,12 @@ else
 
     private async Task StartUpdateAsync()
     {
-        _isUpdating = true;
+        AgentConnectionTracker.BeginSelfUpdate();
         StateHasChanged();
         var installUrl = NavigationManager.BaseUri.TrimEnd('/') + "/api/agent/install";
         var response = await AgentBridge.SendCommandAsync(AgentHubMethods.SelfUpdate, new { installUrl }, CancellationToken.None);
         if (!response.Success)
         {
-            _isUpdating = false;
             StateHasChanged();
             ToastService.ShowError("Agent update failed.");
             NavigationManager.NavigateTo("/agent");
@@ -79,23 +73,27 @@ else
 
     private string BadgeClassFull => $"badge {BadgeClass} text-decoration-none ms-2";
 
-    private string StateLabel => State switch
-    {
-        AgentConnectionState.Online => AgentQueueStateService.GetTotalPendingCount() > 0 ? "running" : "online",
-        AgentConnectionState.Offline => "offline",
-        AgentConnectionState.Connecting => "connecting",
-        AgentConnectionState.VersionMismatch => "update",
-        _ => "offline"
-    };
+    private string StateLabel => IsUpdating
+        ? "installing"
+        : State switch
+        {
+            AgentConnectionState.Online => AgentQueueStateService.GetTotalPendingCount() > 0 ? "running" : "online",
+            AgentConnectionState.Offline => "offline",
+            AgentConnectionState.Connecting => "connecting",
+            AgentConnectionState.VersionMismatch => "update",
+            _ => "offline"
+        };
 
-    private string TitleText => State switch
-    {
-        AgentConnectionState.VersionMismatch => $"Agent version mismatch. Agent version: {AgentSemVer ?? "unknown"}. Click to update.",
-        AgentConnectionState.Online => AgentQueueStateService.GetTotalPendingCount() > 0 ? "Agent is running tasks" : "Agent connection status: online",
-        AgentConnectionState.Offline => "Agent connection status: offline",
-        AgentConnectionState.Connecting => "Agent connection status: connecting",
-        _ => "Agent connection status: unknown"
-    };
+    private string TitleText => IsUpdating
+        ? "Agent is installing an update."
+        : State switch
+        {
+            AgentConnectionState.VersionMismatch => $"Agent version mismatch. Agent version: {AgentSemVer ?? "unknown"}. Click to update.",
+            AgentConnectionState.Online => AgentQueueStateService.GetTotalPendingCount() > 0 ? "Agent is running tasks" : "Agent connection status: online",
+            AgentConnectionState.Offline => "Agent connection status: offline",
+            AgentConnectionState.Connecting => "Agent connection status: connecting",
+            _ => "Agent connection status: unknown"
+        };
 
     public void Dispose() => AgentQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
 }
