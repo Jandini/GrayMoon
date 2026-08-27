@@ -17,7 +17,10 @@
                            OnRefresh="ManualRefreshAsync"
                            OnPreviousChange="() => _diffViewerRef!.GoToPreviousChangeAsync()"
                            OnNextChange="() => _diffViewerRef!.GoToNextChangeAsync()"
-                           IsChangeNavDisabled="@(_selectedDiff == null || !RendersInMonaco(_selectedDiff.State))" />
+                           IsChangeNavDisabled="@(_selectedDiff == null || !RendersInMonaco(_selectedDiff.State))"
+                           IsScanRunning="@(IsScanRunning && ChangedRepositoryCount > 0)"
+                           ScanStatusText="@ScanStatus"
+                           OnAbortScan="AbortScan" />
     </div>
 
     <div class="grid-page-body">
@@ -33,15 +36,15 @@
     {
         <div class="git-changes-empty text-muted">
             <i class="bi bi-git git-changes-empty__bg-icon" aria-hidden="true"></i>
-            @if (IsEmptyScanRunning)
+            @if (IsScanRunning)
             {
                 <div class="spinner-border" role="status">
                     <span class="visually-hidden">Loading...</span>
                 </div>
-                <div class="git-changes-empty__label">@(EmptyScanStatus ?? "Refreshing repositories...")</div>
+                <div class="git-changes-empty__label">@(ScanStatus ?? "Refreshing repositories...")</div>
                 <button type="button"
                         class="btn btn-outline-secondary btn-sm git-changes-empty__refresh"
-                        @onclick="AbortEmptyStateRefresh">
+                        @onclick="AbortScan">
                     Abort
                 </button>
             }

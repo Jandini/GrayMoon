@@ -40,6 +40,34 @@
     opacity: 0.95;
 }
 
+/* Inline "Refreshing X of Y repositories..." indicator shown in the header once the tree is already
+   visible and a background rescan (warm-up or manual Refresh) is still running - keeps the panel from
+   ever being fully covered by a loading state once it has content. */
+.git-changes-header__summary-item--scanning {
+    color: var(--text-muted);
+}
+
+.git-changes-header__summary-item--scanning .spinner-border {
+    width: 0.85rem;
+    height: 0.85rem;
+    border-width: 0.15em;
+}
+
+.git-changes-header__scan-abort {
+    display: inline-flex;
+    align-items: center;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    line-height: 1;
+    color: var(--text-muted);
+    text-decoration: none;
+}
+
+.git-changes-header__scan-abort:hover {
+    color: var(--text-primary);
+}
+
 /* Match other workspace grids: body height matches shared max-height so the
    splitter frame ends above the viewport bottom like the repositories card. */
 .git-changes-page.page-container.grid-page {
