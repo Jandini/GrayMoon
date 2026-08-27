@@ -81,7 +81,7 @@ public sealed class WorkspaceUndoPushHandler(
                 semaphore.Release();
                 var c = Interlocked.Increment(ref completedCount);
                 if (total > 1)
-                    reportProgress($"Reset commits in {c} of {total} repositories");
+                    reportProgress($"Reverting {c} of {total} repositories...");
             }
         });
 

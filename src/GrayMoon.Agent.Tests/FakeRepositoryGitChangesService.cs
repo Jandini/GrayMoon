@@ -63,6 +63,9 @@ public sealed class FakeRepositoryGitChangesService : IRepositoryGitChangesServi
     public Task<GitMutationResult> UnstageAsync(string repoPath, GitStageOperationRequest request, long nextSnapshotVersion, CancellationToken cancellationToken) =>
         throw new NotSupportedException("Not used by these tests.");
 
+    public Task<GitMutationResult> DiscardAsync(string repoPath, GitStageOperationRequest request, long nextSnapshotVersion, CancellationToken cancellationToken) =>
+        throw new NotSupportedException("Not used by these tests.");
+
     public Task<GitCommitResult> CommitAsync(string repoPath, GitCommitOperationRequest request, long nextSnapshotVersion, CancellationToken cancellationToken) =>
         throw new NotSupportedException("Not used by these tests.");
 

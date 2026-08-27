@@ -41,6 +41,7 @@ public sealed class CommandDispatcher(
     ICommandHandler<GetGitFileDiffRequest, GetGitFileDiffResponse> getGitFileDiffCommand,
     ICommandHandler<StageGitChangesRequest, GitMutationResponse> stageGitChangesCommand,
     ICommandHandler<UnstageGitChangesRequest, GitMutationResponse> unstageGitChangesCommand,
+    ICommandHandler<DiscardGitChangesRequest, GitMutationResponse> discardGitChangesCommand,
     ICommandHandler<CommitGitChangesRequest, CommitGitChangesResponse> commitGitChangesCommand) : ICommandDispatcher
 {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
@@ -80,6 +81,7 @@ public sealed class CommandDispatcher(
         ["GetGitFileDiff"] = async (req, ct) => await getGitFileDiffCommand.ExecuteAsync((GetGitFileDiffRequest)req, ct),
         ["StageGitChanges"] = async (req, ct) => await stageGitChangesCommand.ExecuteAsync((StageGitChangesRequest)req, ct),
         ["UnstageGitChanges"] = async (req, ct) => await unstageGitChangesCommand.ExecuteAsync((UnstageGitChangesRequest)req, ct),
+        ["DiscardGitChanges"] = async (req, ct) => await discardGitChangesCommand.ExecuteAsync((DiscardGitChangesRequest)req, ct),
         ["CommitGitChanges"] = async (req, ct) => await commitGitChangesCommand.ExecuteAsync((CommitGitChangesRequest)req, ct),
     };
 

@@ -244,6 +244,158 @@ public sealed class GitCliRepositoryGitChangesServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Discard_explicit_path_reverts_modified_tracked_file_from_index()
+    {
+        _repo.CommitInitial("file.txt", "original\n");
+        _repo.WriteFile("file.txt", "changed\n");
+
+        var discardResult = await _service.DiscardAsync(
+            _repo.RepositoryPath,
+            new GitStageOperationRequest(GitChangeOperationScope.ExplicitPaths, ["file.txt"]),
+            2,
+            CancellationToken.None);
+
+        Assert.True(discardResult.Success);
+        Assert.Empty(discardResult.Snapshot!.Changes);
+        Assert.Equal("original\n", _repo.ReadFile("file.txt"));
+    }
+
+    [Fact]
+    public async Task Discard_explicit_path_deletes_untracked_file()
+    {
+        _repo.CommitInitial();
+        var fullPath = _repo.WriteFile("new.txt", "hello\n");
+
+        var discardResult = await _service.DiscardAsync(
+            _repo.RepositoryPath,
+            new GitStageOperationRequest(GitChangeOperationScope.ExplicitPaths, ["new.txt"]),
+            2,
+            CancellationToken.None);
+
+        Assert.True(discardResult.Success);
+        Assert.Empty(discardResult.Snapshot!.Changes);
+        Assert.False(File.Exists(fullPath));
+    }
+
+    [Fact]
+    public async Task Discard_leaves_staged_content_untouched_for_partially_staged_file()
+    {
+        _repo.CommitInitial("file.txt", "original\n");
+        _repo.WriteFile("file.txt", "staged change\n");
+        _repo.RunGit("add", "file.txt");
+        _repo.WriteFile("file.txt", "staged change\nplus unstaged\n");
+
+        var discardResult = await _service.DiscardAsync(
+            _repo.RepositoryPath,
+            new GitStageOperationRequest(GitChangeOperationScope.ExplicitPaths, ["file.txt"]),
+            2,
+            CancellationToken.None);
+
+        Assert.True(discardResult.Success);
+        var change = Assert.Single(discardResult.Snapshot!.Changes);
+        Assert.Equal(GitChangeKind.Modified, change.IndexChange);
+        Assert.Equal(GitChangeKind.None, change.WorktreeChange);
+        Assert.Equal("staged change\n", _repo.ReadFile("file.txt"));
+    }
+
+    [Fact]
+    public async Task Discard_folder_reverts_and_deletes_all_descendants()
+    {
+        _repo.CommitInitial("src/tracked.txt", "original\n");
+        _repo.WriteFile("src/tracked.txt", "changed\n");
+        _repo.WriteFile("src/untracked.txt", "new\n");
+
+        var discardResult = await _service.DiscardAsync(
+            _repo.RepositoryPath,
+            new GitStageOperationRequest(GitChangeOperationScope.Folder, ["src"]),
+            2,
+            CancellationToken.None);
+
+        Assert.True(discardResult.Success);
+        Assert.Empty(discardResult.Snapshot!.Changes);
+        Assert.Equal("original\n", _repo.ReadFile("src/tracked.txt"));
+        Assert.False(File.Exists(Path.Combine(_repo.RepositoryPath, "src/untracked.txt")));
+    }
+
+    [Fact]
+    public async Task Discard_repository_reverts_and_deletes_every_unstaged_change()
+    {
+        _repo.CommitInitial("tracked.txt", "original\n");
+        _repo.WriteFile("tracked.txt", "changed\n");
+        _repo.WriteFile("untracked.txt", "new\n");
+
+        var discardResult = await _service.DiscardAsync(
+            _repo.RepositoryPath,
+            new GitStageOperationRequest(GitChangeOperationScope.Repository, []),
+            2,
+            CancellationToken.None);
+
+        Assert.True(discardResult.Success);
+        Assert.Empty(discardResult.Snapshot!.Changes);
+        Assert.Equal("original\n", _repo.ReadFile("tracked.txt"));
+        Assert.False(File.Exists(Path.Combine(_repo.RepositoryPath, "untracked.txt")));
+    }
+
+    [Fact]
+    public async Task Discard_repository_leaves_staged_changes_untouched()
+    {
+        _repo.CommitInitial("staged.txt", "original\n");
+        _repo.WriteFile("staged.txt", "staged change\n");
+        _repo.RunGit("add", "staged.txt");
+        _repo.WriteFile("unstaged.txt", "unstaged\n");
+        _repo.RunGit("add", "--all");
+        _repo.WriteFile("unstaged.txt", "unstaged\nplus more\n");
+
+        var discardResult = await _service.DiscardAsync(
+            _repo.RepositoryPath,
+            new GitStageOperationRequest(GitChangeOperationScope.Repository, []),
+            2,
+            CancellationToken.None);
+
+        Assert.True(discardResult.Success);
+        Assert.All(discardResult.Snapshot!.Changes, c => Assert.Equal(GitChangeKind.None, c.WorktreeChange));
+        Assert.Equal("staged change\n", _repo.ReadFile("staged.txt"));
+    }
+
+    [Fact]
+    public async Task Discard_ignores_conflicted_entries()
+    {
+        _repo.CommitInitial("file.txt", "base\n");
+        _repo.RunGit("checkout", "-b", "feature");
+        _repo.WriteFile("file.txt", "feature change\n");
+        _repo.RunGit("commit", "-am", "feature change");
+        _repo.RunGit("checkout", "main");
+        _repo.WriteFile("file.txt", "main change\n");
+        _repo.RunGit("commit", "-am", "main change");
+        _repo.RunGit("merge", "feature");
+
+        var discardResult = await _service.DiscardAsync(
+            _repo.RepositoryPath,
+            new GitStageOperationRequest(GitChangeOperationScope.ExplicitPaths, ["file.txt"]),
+            2,
+            CancellationToken.None);
+
+        Assert.True(discardResult.Success);
+        var change = Assert.Single(discardResult.Snapshot!.Changes);
+        Assert.True(change.IsConflicted);
+    }
+
+    [Fact]
+    public async Task Discard_rejects_path_traversal()
+    {
+        _repo.CommitInitial();
+
+        var discardResult = await _service.DiscardAsync(
+            _repo.RepositoryPath,
+            new GitStageOperationRequest(GitChangeOperationScope.ExplicitPaths, ["../outside.txt"]),
+            2,
+            CancellationToken.None);
+
+        Assert.False(discardResult.Success);
+        Assert.Equal("InvalidPath", discardResult.ErrorCode);
+    }
+
+    [Fact]
     public async Task Commit_staged_creates_a_commit_and_clears_staged_changes()
     {
         _repo.CommitInitial("file.txt", "original\n");

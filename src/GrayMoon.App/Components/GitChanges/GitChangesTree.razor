@@ -92,6 +92,14 @@
     [Parameter] public EventCallback OnUnstageSelected { get; set; }
     [Parameter] public EventCallback OnStageAllChanged { get; set; }
     [Parameter] public EventCallback OnUnstageAllStaged { get; set; }
+    /// <summary>Undo (discard) a single File/Folder/Repository row's unstaged changes. Never raised for
+    /// Staged-section rows - discard is only ever offered on unstaged (Changed) items, matching VS Code.</summary>
+    [Parameter] public EventCallback<GitChangesStageEventArgs> OnDiscard { get; set; }
+    /// <summary>Undo (discard) every currently multi-selected unstaged File row in one batch - the discard
+    /// equivalent of <see cref="OnUnstageSelected"/>/<see cref="OnStageSelected"/>.</summary>
+    [Parameter] public EventCallback OnDiscardSelected { get; set; }
+    /// <summary>Undo (discard) every unstaged change across every repository in the Changed section.</summary>
+    [Parameter] public EventCallback OnDiscardAllChanged { get; set; }
     [Parameter, EditorRequired] public Func<int, bool> IsMutating { get; set; } = _ => false;
     /// <summary>True only when this exact row has a File/Folder-scope mutation in flight - used to swap
     /// that single row's +/- icon for a spinner without affecting any other row (descendant, sibling,
@@ -203,6 +211,21 @@
     {
         var seq = 0;
 
+        // Discard has no meaning for the Staged section - it only ever targets unstaged content - so the
+        // undo icon is rendered before the +/- button solely for the Changed section header.
+        if (!row.IsStagedSection)
+        {
+            builder.OpenElement(seq++, "button");
+            builder.AddAttribute(seq++, "type", "button");
+            builder.AddAttribute(seq++, "class", "git-changes-tree__action-btn");
+            builder.AddAttribute(seq++, "title", "Undo all changes in Changed");
+            builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => OnDiscardAllChanged.InvokeAsync()));
+            builder.OpenElement(seq++, "i");
+            builder.AddAttribute(seq++, "class", "bi bi-arrow-counterclockwise");
+            builder.CloseElement();
+            builder.CloseElement();
+        }
+
         builder.OpenElement(seq++, "button");
         builder.AddAttribute(seq++, "type", "button");
         builder.AddAttribute(seq++, "class", "git-changes-tree__action-btn");
@@ -226,6 +249,22 @@
         // UnstageSelectedAsync on the page.
         var useSelection = IsMultiSelected(row) && MultiSelectionCount > 1;
 
+        // Discard is only ever offered on unstaged (Changed) rows, mirroring VS Code - Staged rows must be
+        // unstaged first. Reuses the same useSelection fan-out as Stage/Unstage above.
+        if (!row.IsStagedSection)
+        {
+            builder.OpenElement(seq++, "button");
+            builder.AddAttribute(seq++, "type", "button");
+            builder.AddAttribute(seq++, "class", "git-changes-tree__action-btn");
+            builder.AddAttribute(seq++, "disabled", disabled);
+            builder.AddAttribute(seq++, "title", useSelection ? "Undo selected" : "Undo changes");
+            builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => useSelection
+                ? OnDiscardSelected.InvokeAsync()
+                : OnDiscard.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, GitChangeOperationScope.ExplicitPaths, paths, row.Key))));
+            RenderActionIcon(builder, ref seq, "bi-arrow-counterclockwise", IsRowMutating(row));
+            builder.CloseElement();
+        }
+
         builder.OpenElement(seq++, "button");
         builder.AddAttribute(seq++, "type", "button");
         builder.AddAttribute(seq++, "class", "git-changes-tree__action-btn");
@@ -244,6 +283,22 @@
     {
         var seq = 0;
         var disabled = IsMutating(row.WorkspaceRepositoryId);
+
+        // Discard is only ever offered on unstaged (Changed) Folder/Repository rows - Staged rows must be
+        // unstaged first, mirroring VS Code and the File-row behavior above.
+        if (!row.IsStagedSection)
+        {
+            builder.OpenElement(seq++, "button");
+            builder.AddAttribute(seq++, "type", "button");
+            builder.AddAttribute(seq++, "class", "git-changes-tree__action-btn");
+            builder.AddAttribute(seq++, "disabled", disabled);
+            builder.AddAttribute(seq++, "title", row.Kind == GitChangesTreeRowKind.Repository ? "Undo all changes in repository" : "Undo all changes in folder");
+            builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => OnDiscard.InvokeAsync(new GitChangesStageEventArgs(row.WorkspaceRepositoryId, scope, paths, row.Key))));
+            // Repository scope runs as a full background job (LoadingOverlay), not the lightweight inline
+            // indicator, so it never has a row-scoped spinner - only the Folder discard button does.
+            RenderActionIcon(builder, ref seq, "bi-arrow-counterclockwise", row.Kind != GitChangesTreeRowKind.Repository && IsRowMutating(row));
+            builder.CloseElement();
+        }
 
         builder.OpenElement(seq++, "button");
         builder.AddAttribute(seq++, "type", "button");
@@ -265,7 +320,15 @@
     /// a small inline spinner when <paramref name="showSpinner"/> is true - used for File/Folder rows (below
     /// repo level) while their repository's mutation is in flight, so the affected sub-items visibly show
     /// work happening instead of just going gray like the repository-level button does.</summary>
-    private static void RenderActionIcon(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder, ref int seq, GitChangesTreeRow row, bool showSpinner)
+    private static void RenderActionIcon(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder, ref int seq, GitChangesTreeRow row, bool showSpinner) =>
+        RenderActionIcon(builder, ref seq, row.IsStagedSection ? "bi-dash-lg" : "bi-plus-lg", showSpinner);
+
+    /// <summary>Renders a glyph (identified by its bootstrap-icons class) inside an already-open action
+    /// button, or a small inline spinner in its place when <paramref name="showSpinner"/> is true - used for
+    /// File/Folder rows (below repo level) while their repository's mutation is in flight, so the affected
+    /// sub-items visibly show work happening instead of just going gray like the repository-level button
+    /// does.</summary>
+    private static void RenderActionIcon(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder, ref int seq, string iconClass, bool showSpinner)
     {
         if (showSpinner)
         {
@@ -276,7 +339,7 @@
         }
 
         builder.OpenElement(seq++, "i");
-        builder.AddAttribute(seq++, "class", row.IsStagedSection ? "bi bi-dash-lg" : "bi bi-plus-lg");
+        builder.AddAttribute(seq++, "class", $"bi {iconClass}");
         builder.CloseElement();
     }
 

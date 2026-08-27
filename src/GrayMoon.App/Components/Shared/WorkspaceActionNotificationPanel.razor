@@ -439,7 +439,7 @@
         var workspaceId = notification.WorkspaceId;
         if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
         PendingActionsService.Dismiss(workspaceId);
-        JobService.StartJob(WorkspaceJobKey(workspaceId), "Resetting outgoing commits...", async (job, ct) =>
+        JobService.StartJob(WorkspaceJobKey(workspaceId), "Reverting outgoing commits...", async (job, ct) =>
         {
             try
             {

@@ -227,6 +227,68 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
         return await MutationSuccessAsync(repoPath, nextSnapshotVersion, cancellationToken);
     }
 
+    public async Task<GitMutationResult> DiscardAsync(string repoPath, GitStageOperationRequest request, long nextSnapshotVersion, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+        {
+            return new GitMutationResult { Success = false, ErrorCode = "RepositoryNotFound", ErrorMessage = "Repository not found." };
+        }
+
+        if (IsWholeRepositoryScope(request.Scope))
+        {
+            var (cleanExit, cleanOut, cleanErr) = await runner.RunAsync("git", ["clean", "-f", "-d"], repoPath, null, cancellationToken);
+            if (cleanExit != 0)
+            {
+                return await MutationFailureAsync(repoPath, "DiscardFailed", (cleanErr ?? cleanOut ?? "git clean failed").Trim(), nextSnapshotVersion, cancellationToken);
+            }
+
+            var (restoreExit, restoreOut, restoreErr) = await runner.RunAsync("git", ["restore", ":/"], repoPath, null, cancellationToken);
+            if (restoreExit != 0)
+            {
+                return await MutationFailureAsync(repoPath, "DiscardFailed", (restoreErr ?? restoreOut ?? "git restore failed").Trim(), nextSnapshotVersion, cancellationToken);
+            }
+        }
+        else
+        {
+            var normalized = ValidateAndNormalizePaths(repoPath, request.Paths, out var pathError);
+            if (pathError != null)
+            {
+                return new GitMutationResult { Success = false, ErrorCode = "InvalidPath", ErrorMessage = pathError };
+            }
+
+            if (normalized.Count == 0)
+            {
+                return new GitMutationResult { Success = false, ErrorCode = "NoPaths", ErrorMessage = "No paths to discard." };
+            }
+
+            var (trackedPaths, untrackedPaths, classifyError) = await ClassifyUnstagedPathsAsync(repoPath, normalized, cancellationToken);
+            if (classifyError != null)
+            {
+                return await MutationFailureAsync(repoPath, "DiscardFailed", classifyError, nextSnapshotVersion, cancellationToken);
+            }
+
+            if (untrackedPaths.Count > 0)
+            {
+                var (cleanExit, cleanOut, cleanErr) = await RunBoundedBatchesAsync(repoPath, ["clean", "-f", "-d"], untrackedPaths, cancellationToken);
+                if (cleanExit != 0)
+                {
+                    return await MutationFailureAsync(repoPath, "DiscardFailed", (cleanErr ?? cleanOut ?? "git clean failed").Trim(), nextSnapshotVersion, cancellationToken);
+                }
+            }
+
+            if (trackedPaths.Count > 0)
+            {
+                var (restoreExit, restoreOut, restoreErr) = await RunPathspecOperationAsync(repoPath, ["restore"], trackedPaths, cancellationToken);
+                if (restoreExit != 0)
+                {
+                    return await MutationFailureAsync(repoPath, "DiscardFailed", (restoreErr ?? restoreOut ?? "git restore failed").Trim(), nextSnapshotVersion, cancellationToken);
+                }
+            }
+        }
+
+        return await MutationSuccessAsync(repoPath, nextSnapshotVersion, cancellationToken);
+    }
+
     public async Task<GitCommitResult> CommitAsync(string repoPath, GitCommitOperationRequest request, long nextSnapshotVersion, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
@@ -416,6 +478,47 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
         }
 
         return normalized;
+    }
+
+    /// <summary>
+    /// Scopes a git status query to the given (already-validated) paths and splits the resulting unstaged
+    /// changes into tracked (worktree edits/deletes to restore from the index) vs untracked (new files to
+    /// delete). Conflicted entries are skipped entirely - they must be resolved manually, never discarded.
+    /// </summary>
+    private async Task<(List<string> Tracked, List<string> Untracked, string? Error)> ClassifyUnstagedPathsAsync(
+        string repoPath, IReadOnlyList<string> paths, CancellationToken cancellationToken)
+    {
+        var args = new List<string> { "--no-optional-locks", "status", "--porcelain=v2", "-z", "--untracked-files=all", "--" };
+        args.AddRange(paths);
+
+        var (exitCode, stdout, stderr) = await runner.RunAsync("git", [.. args], repoPath, null, cancellationToken, GitLockIntent.Read);
+        if (exitCode != 0)
+        {
+            return ([], [], (stderr ?? stdout ?? "git status failed").Trim());
+        }
+
+        var parsed = GitPorcelainV2Parser.Parse(stdout);
+        var tracked = new List<string>();
+        var untracked = new List<string>();
+
+        foreach (var change in parsed.Changes)
+        {
+            if (change.IsConflicted || change.WorktreeChange == GitChangeKind.None)
+            {
+                continue;
+            }
+
+            if (change.WorktreeChange == GitChangeKind.Untracked)
+            {
+                untracked.Add(change.Path);
+            }
+            else
+            {
+                tracked.Add(change.Path);
+            }
+        }
+
+        return (tracked, untracked, null);
     }
 
     private async Task<(bool IsMerging, bool IsRebasing, bool IsCherryPicking)> GetOperationStateAsync(string repoPath, CancellationToken cancellationToken)
