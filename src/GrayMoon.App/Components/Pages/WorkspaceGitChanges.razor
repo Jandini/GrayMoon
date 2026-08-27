@@ -1,6 +1,7 @@
 @page "/workspaces/{WorkspaceId:int}/changes"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using GrayMoon.App.Components.GitChanges
+@using GrayMoon.App.Components.Modals
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Services.GitChanges
 @using GrayMoon.Common.Git
@@ -120,7 +121,10 @@
                                  IsMultiSelected="IsMultiSelected"
                                  MultiSelectionCount="_multiSelectedKeys.Count"
                                  OnStageAllChanged="StageAllChangedAsync"
-                                 OnUnstageAllStaged="UnstageAllStagedAsync" />
+                                 OnUnstageAllStaged="UnstageAllStagedAsync"
+                                 OnDiscard="args => ConfirmDiscardFileOrFolder(args.WorkspaceRepositoryId, args.Scope, args.Paths, args.RowKey)"
+                                 OnDiscardSelected="ConfirmDiscardSelected"
+                                 OnDiscardAllChanged="ConfirmDiscardAllChanged" />
             </div>
 
             <div class="graymoon-splitter__handle git-changes-splitter__handle" aria-hidden="true"></div>
@@ -187,3 +191,9 @@
                            RepoItems="@_defaultBranchWarningModal.RepoItems"
                            OnProceed="@OnDefaultBranchWarningProceedAsync"
                            OnCancel="@CloseDefaultBranchWarningModal" />
+
+<ConfirmModal IsVisible="@_confirmModal.IsVisible"
+              Message="@_confirmModal.Message"
+              ConfirmButtonText="@_confirmModal.ButtonText"
+              OnConfirm="@OnConfirmModalYesAsync"
+              OnCancel="@CloseConfirmModal" />

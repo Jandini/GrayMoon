@@ -17,6 +17,13 @@ public interface IRepositoryGitChangesService
 
     Task<GitMutationResult> UnstageAsync(string repoPath, GitStageOperationRequest request, long nextSnapshotVersion, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Discards unstaged changes only: restores tracked working-tree edits from the index (leaving any
+    /// staged content untouched) and deletes untracked files/directories. Never touches the index/staged
+    /// state - callers must unstage first if they also want to discard staged content.
+    /// </summary>
+    Task<GitMutationResult> DiscardAsync(string repoPath, GitStageOperationRequest request, long nextSnapshotVersion, CancellationToken cancellationToken);
+
     Task<GitCommitResult> CommitAsync(string repoPath, GitCommitOperationRequest request, long nextSnapshotVersion, CancellationToken cancellationToken);
 }
 

@@ -1,6 +1,7 @@
 @page "/agent"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Text.Json
+@using GrayMoon.Abstractions.Agent
 @using GrayMoon.App.Services
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JSRuntime
@@ -99,7 +100,15 @@
                 {
                     <div class="card-footer card-footer-agent d-flex justify-content-between align-items-center">
                         <small class="text-muted">You can download and run the agent executable manually.</small>
-                        <button type="button" class="btn btn-outline-secondary" @onclick="DownloadAgent">Download</button>
+                        <div class="d-flex align-items-center gap-2">
+                            @if (ShowUpdateNowButton)
+                            {
+                                <button type="button" class="btn btn-danger" disabled="@_isUpdating" @onclick="UpdateAgentNowAsync">
+                                    @(_isUpdating ? "Updating…" : "Update Now")
+                                </button>
+                            }
+                            <button type="button" class="btn btn-outline-secondary" @onclick="DownloadAgent">Download</button>
+                        </div>
                     </div>
                 }
             </div>
@@ -115,6 +124,7 @@
     private string ActiveTab = "install";
     private HostInfoDto? hostInfo;
     private string? hostInfoLoadError;
+    private bool _isUpdating;
 
     protected override void OnInitialized()
     {
@@ -282,9 +292,25 @@
         ActiveTab = tab;
     }
 
+    private bool ShowUpdateNowButton => AgentConnectionTracker.State == AgentConnectionState.VersionMismatch;
+
     private async Task DownloadAgent()
     {
         await JSRuntime.InvokeVoidAsync("graymoonDownloadAgent");
+    }
+
+    private async Task UpdateAgentNowAsync()
+    {
+        _isUpdating = true;
+        StateHasChanged();
+        var installUrl = NavigationManager.BaseUri.TrimEnd('/') + "/api/agent/install";
+        var response = await AgentBridge.SendCommandAsync(AgentHubMethods.SelfUpdate, new { installUrl }, CancellationToken.None);
+        _isUpdating = false;
+        if (!response.Success)
+        {
+            ToastService.ShowError("Agent update failed.");
+        }
+        StateHasChanged();
     }
 
     private async Task CopyInstallCommand()

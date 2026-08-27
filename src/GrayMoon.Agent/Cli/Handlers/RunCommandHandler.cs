@@ -157,6 +157,7 @@ internal static class RunCommandHandler
         builder.Services.AddSingleton<ICommandHandler<GetGitFileDiffRequest, GetGitFileDiffResponse>, GetGitFileDiffCommand>();
         builder.Services.AddSingleton<ICommandHandler<StageGitChangesRequest, GitMutationResponse>, StageGitChangesCommand>();
         builder.Services.AddSingleton<ICommandHandler<UnstageGitChangesRequest, GitMutationResponse>, UnstageGitChangesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<DiscardGitChangesRequest, GitMutationResponse>, DiscardGitChangesCommand>();
         builder.Services.AddSingleton<ICommandHandler<CommitGitChangesRequest, CommitGitChangesResponse>, CommitGitChangesCommand>();
         builder.Services.AddSingleton<CheckoutHookSyncCommand>();
         builder.Services.AddSingleton<CommitHookSyncCommand>();

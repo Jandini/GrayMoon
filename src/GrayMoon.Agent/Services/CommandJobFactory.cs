@@ -102,6 +102,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid StageGitChanges args"),
             "UnstageGitChanges" => JsonSerializer.Deserialize<UnstageGitChangesRequest>(json, options)
                 ?? throw new ArgumentException("Invalid UnstageGitChanges args"),
+            "DiscardGitChanges" => JsonSerializer.Deserialize<DiscardGitChangesRequest>(json, options)
+                ?? throw new ArgumentException("Invalid DiscardGitChanges args"),
             "CommitGitChanges" => JsonSerializer.Deserialize<CommitGitChangesRequest>(json, options)
                 ?? throw new ArgumentException("Invalid CommitGitChanges args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")

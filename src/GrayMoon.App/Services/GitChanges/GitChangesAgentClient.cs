@@ -58,6 +58,12 @@ public interface IGitChangesAgentClient
         string workspaceRoot, string workspaceName, string repositoryName,
         GitChangeOperationScope scope, IReadOnlyList<string> paths, CancellationToken cancellationToken);
 
+    /// <summary>Discards unstaged changes only: restores tracked working-tree edits from the index and
+    /// deletes untracked files - never touches staged/index content.</summary>
+    Task<GitChangesMutationResult> DiscardAsync(
+        string workspaceRoot, string workspaceName, string repositoryName,
+        GitChangeOperationScope scope, IReadOnlyList<string> paths, CancellationToken cancellationToken);
+
     Task<GitChangesCommitResult> CommitAsync(
         string workspaceRoot, string workspaceName, string repositoryName,
         string commitMessage, bool stageAllFirst, CancellationToken cancellationToken);
@@ -101,6 +107,16 @@ public sealed class GitChangesAgentClient(IAgentBridge agentBridge) : IGitChange
     {
         var args = new { workspaceRoot, workspaceName, repositoryName, scope = (int)scope, paths };
         var response = await agentBridge.SendCommandAsync("UnstageGitChanges", args, cancellationToken);
+        return AgentResponseJson.DeserializeAgentResponse<GitChangesMutationResult>(response.Data)
+            ?? new GitChangesMutationResult { Success = false, ErrorMessage = response.Error ?? "No response from agent." };
+    }
+
+    public async Task<GitChangesMutationResult> DiscardAsync(
+        string workspaceRoot, string workspaceName, string repositoryName,
+        GitChangeOperationScope scope, IReadOnlyList<string> paths, CancellationToken cancellationToken)
+    {
+        var args = new { workspaceRoot, workspaceName, repositoryName, scope = (int)scope, paths };
+        var response = await agentBridge.SendCommandAsync("DiscardGitChanges", args, cancellationToken);
         return AgentResponseJson.DeserializeAgentResponse<GitChangesMutationResult>(response.Data)
             ?? new GitChangesMutationResult { Success = false, ErrorMessage = response.Error ?? "No response from agent." };
     }
