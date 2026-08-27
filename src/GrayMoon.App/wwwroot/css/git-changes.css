@@ -353,6 +353,10 @@
     font-size: 0.85rem;
     scrollbar-width: auto;
     scrollbar-color: #5a5a5a var(--bg-card, #252526);
+    /* Tree rows are click/select targets - disable browser text selection so Shift/Ctrl
+       multi-select does not highlight labels between clicks. */
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 .git-changes-tree::-webkit-scrollbar {
@@ -396,6 +400,18 @@
 }
 
 .git-changes-tree__row--selected {
+    background: var(--bg-active);
+}
+
+/* Ctrl/Shift multi-selected File rows - a lighter highlight than the single focused/diff row above,
+   so both states remain visually distinguishable when a multi-selected row is also the focused one. */
+.git-changes-tree__row--multi-selected {
+    background: color-mix(in srgb, var(--bg-active) 45%, transparent);
+    outline: 1px solid color-mix(in srgb, var(--bg-active) 70%, transparent);
+    outline-offset: -1px;
+}
+
+.git-changes-tree__row--multi-selected.git-changes-tree__row--selected {
     background: var(--bg-active);
 }
 
