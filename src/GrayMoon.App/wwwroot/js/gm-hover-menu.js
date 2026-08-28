@@ -4,7 +4,7 @@
  * CSS (":hover"/":focus-within" on the owning ".gm-menu-trigger"); this script only computes
  * top/left/right so each panel appears next to its trigger instead of at its static (off-screen)
  * position. Works for any nesting depth: the level-actions menu is a ".gm-menu-trigger" whose
- * panel contains further ".gm-menu-trigger" rows (the "Copy to Clipboard" / "Open in GitHub"
+ * panel contains further ".gm-menu-trigger" rows (the "Share..." / "Open in GitHub"
  * flyouts), each with its own direct-child ".gm-menu-panel" positioned independently.
  */
 (function () {

@@ -146,6 +146,8 @@
                                                                            OnRestorePackagesLevel="async () => await RestorePackagesLevelAsync(slot.LevelKey)"
                                                                            OpenPrUrls="@GetOpenPrUrlsForGroup(levelGroup)"
                                                                            OpenPrPullMap="@GetOpenPrPullMapForGroup(levelGroup)"
+                                                                           HasCreatablePr="@GroupHasCreatablePr(levelGroup)"
+                                                                           HasMergedPr="@GroupHasMergedPr(levelGroup)"
                                                                            />
                                     }
                                     else if (_linkByWrlId.TryGetValue(slot.WorkspaceRepositoryId, out var wr))

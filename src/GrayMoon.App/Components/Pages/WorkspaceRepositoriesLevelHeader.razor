@@ -16,7 +16,7 @@
             }
         </div>
         <div class="dependency-level-header-end">
-            <span class="dependency-level-count gm-menu-trigger"
+            <span class="dependency-level-count gm-menu-trigger @(HasActionablePr ? "dependency-level-count--pr-pending" : "")"
                   tabindex="0"
                   aria-haspopup="true"
                   aria-label="Level actions">
@@ -24,8 +24,8 @@
                 <div class="gm-menu-panel level-actions-menu">
                     <div class="gm-menu-title">@(LevelKey == null ? "No dependencies" : $"Level {LevelKey}")</div>
                     <div class="gm-menu-items @(ActionsDisabled ? "gm-menu-items--disabled" : "")">
-                        <div class="gm-menu-item" role="button" tabindex="0" title="Sync to default branch" @onclick="HandleSyncToDefault" @onclick:stopPropagation>
-                            <i class="bi bi-rewind" aria-hidden="true"></i><span>Sync to Default</span>
+                        <div class="gm-menu-item @(HasMergedPr ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Sync to default branch" @onclick="HandleSyncToDefault" @onclick:stopPropagation>
+                            <i class="bi bi-rewind" aria-hidden="true"></i><span>Sync To Default</span>
                         </div>
                         <div class="gm-menu-item" role="button" tabindex="0" title="Sync commits" @onclick="HandleSyncCommits" @onclick:stopPropagation>
                             <i class="bi bi-arrow-down-up" aria-hidden="true"></i><span>Sync Commits</span>
@@ -39,12 +39,12 @@
                         <div class="gm-menu-item" role="button" tabindex="0" title="Restore NuGet packages" @onclick="HandleRestorePackagesLevel" @onclick:stopPropagation>
                             <i class="bi bi-box-seam" aria-hidden="true"></i><span>Restore Packages</span>
                         </div>
-                        <div class="gm-menu-item" role="button" tabindex="0" title="Create pull requests" @onclick="HandleOpenPr" @onclick:stopPropagation>
+                        <div class="gm-menu-item @(HasCreatablePr ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Create pull requests" @onclick="HandleOpenPr" @onclick:stopPropagation>
                             <i class="bi bi-git" aria-hidden="true"></i><span>Create PRs...</span>
                         </div>
                     </div>
                     <div class="gm-menu-item gm-menu-trigger gm-menu-item--flyout" role="button" tabindex="0" aria-haspopup="true" title="Copy to clipboard">
-                        <i class="bi bi-share" aria-hidden="true"></i><span>Copy to Clipboard</span>
+                        <i class="bi bi-share" aria-hidden="true"></i><span>Share...</span>
                         <i class="bi bi-chevron-right gm-menu-caret" aria-hidden="true"></i>
                         <div class="gm-menu-panel gm-menu-panel--submenu">
                             <div class="gm-menu-item" role="button" tabindex="0" title="Copy PR links" @onclick="HandleCopyPrLinks" @onclick:stopPropagation>
@@ -87,6 +87,12 @@
     [Parameter] public EventCallback OnRestorePackagesLevel { get; set; }
     [Parameter] public IReadOnlyList<string>? OpenPrUrls { get; set; }
     [Parameter] public IReadOnlyDictionary<string, string>? OpenPrPullMap { get; set; }
+    /// <summary>True when at least one repository in this level has commits ahead of default with no open PR - "Create PRs..." is highlighted.</summary>
+    [Parameter] public bool HasCreatablePr { get; set; }
+    /// <summary>True when at least one repository in this level has a merged pull request - "Sync to Default" is highlighted since the default branch has moved on.</summary>
+    [Parameter] public bool HasMergedPr { get; set; }
+
+    private bool HasActionablePr => HasCreatablePr || HasMergedPr;
 
     private int DisplayRepositoryCount => RepositoryCount > 0 ? RepositoryCount : (Group?.Count() ?? 0);
 

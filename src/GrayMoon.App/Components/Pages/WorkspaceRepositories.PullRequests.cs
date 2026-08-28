@@ -269,6 +269,31 @@ public sealed partial class WorkspaceRepositories
         return urls;
     }
 
+    /// <summary>True when at least one repository in the group would show the yellow "create" PR badge (mirrors PRBadge's own condition).</summary>
+    private bool GroupHasCreatablePr(IEnumerable<WorkspaceRepositoryLink> group)
+    {
+        foreach (var wr in group)
+        {
+            if (wr.IsOnTag) continue;
+            if (!prByRepositoryId.TryGetValue(wr.RepositoryId, out var pr)) continue;
+            var hasOpenPr = pr != null && string.Equals(pr.State, "open", StringComparison.OrdinalIgnoreCase);
+            if (hasOpenPr) continue;
+            if ((wr.DefaultBranchAheadCommits ?? 0) > 0) return true;
+        }
+        return false;
+    }
+
+    /// <summary>True when at least one repository in the group has a merged pull request, meaning the default branch has moved on and "Sync to Default" is worth highlighting.</summary>
+    private bool GroupHasMergedPr(IEnumerable<WorkspaceRepositoryLink> group)
+    {
+        foreach (var wr in group)
+        {
+            if (prByRepositoryId.TryGetValue(wr.RepositoryId, out var pr) && pr is { IsMerged: true })
+                return true;
+        }
+        return false;
+    }
+
     private IReadOnlyDictionary<string, string> GetOpenPrPullMapForGroup(IEnumerable<WorkspaceRepositoryLink> group)
     {
         var map = new Dictionary<string, string>();

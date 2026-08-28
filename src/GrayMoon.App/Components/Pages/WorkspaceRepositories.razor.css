@@ -168,6 +168,13 @@
     color: var(--text-muted);
 }
 
+/* Level actions trigger: yellow (same as the PR "create" badge) when this level has a pull request
+   to create or a merged pull request making "Sync to Default" worth doing - draws the eye to the menu
+   instead of requiring the user to open it to discover there's something actionable inside. */
+::deep .repositories-table .dependency-level-header .gm-menu-trigger.dependency-level-count--pr-pending {
+    color: #ffc107 !important;
+}
+
 ::deep .repositories-table .repo-name-cell.gm-menu-trigger {
     display: inline-flex;
     align-items: center;
@@ -212,11 +219,11 @@
     transition-delay: 0s;
 }
 
-/* Repository name hover menu: wait before showing so it doesn't pop up while the cursor is just
+/* Repository name hover menu: wait 1s before showing so it doesn't pop up while the cursor is just
    passing over the name (e.g. scanning the list); other hover menus in this table still open instantly. */
 ::deep .repositories-table .repo-name-cell.gm-menu-trigger:hover > .gm-menu-panel,
 ::deep .repositories-table .repo-name-cell.gm-menu-trigger:focus-within > .gm-menu-panel {
-    transition-delay: 0.5s;
+    transition-delay: 1s;
 }
 
 /* After clicking a menu action (e.g. "Sync Repositories"), gm-hover-menu.js adds this class to force
@@ -269,6 +276,21 @@
 
 ::deep .repositories-table .gm-menu-item:hover i {
     color: #aaa;
+}
+
+/* Same yellow as the PR "create" badge / actionable divergence count: highlights "Create PRs..." when
+   this level has a repository with commits ahead of default and no open PR, and "Sync to Default" when
+   a pull request in this level has been merged (the default branch has moved on). */
+::deep .repositories-table .gm-menu-item.gm-menu-item--highlight,
+::deep .repositories-table .gm-menu-item.gm-menu-item--highlight i,
+::deep .repositories-table .gm-menu-item.gm-menu-item--highlight span {
+    color: #ffc107 !important;
+}
+
+::deep .repositories-table .gm-menu-item.gm-menu-item--highlight:hover,
+::deep .repositories-table .gm-menu-item.gm-menu-item--highlight:hover i,
+::deep .repositories-table .gm-menu-item.gm-menu-item--highlight:hover span {
+    color: #ffda6a !important;
 }
 
 ::deep .repositories-table .gm-menu-caret {
