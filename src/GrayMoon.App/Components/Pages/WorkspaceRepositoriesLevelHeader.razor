@@ -87,11 +87,11 @@
     [Parameter] public EventCallback OnRestorePackagesLevel { get; set; }
     [Parameter] public IReadOnlyList<string>? OpenPrUrls { get; set; }
     [Parameter] public IReadOnlyDictionary<string, string>? OpenPrPullMap { get; set; }
-    /// <summary>True when at least one repository in this level has commits ahead of default with no open PR - "Create PRs..." is highlighted.</summary>
+    /// <summary>True when at least one repository in this level would show the yellow "create" PR badge - "Create PRs..." is highlighted.</summary>
     [Parameter] public bool HasCreatablePr { get; set; }
     /// <summary>True when at least one repository in this level has a merged pull request - "Sync to Default" is highlighted since the default branch has moved on.</summary>
     [Parameter] public bool HasMergedPr { get; set; }
-    /// <summary>True when at least one repository in this level has incoming or outgoing commits - "Sync Commits" is highlighted.</summary>
+    /// <summary>True when at least one repository in this level has incoming or outgoing commits - "Sync Commits" is highlighted. No-upstream does not count.</summary>
     [Parameter] public bool HasSyncCommits { get; set; }
 
     private bool HasActionablePr => HasCreatablePr || HasMergedPr || HasSyncCommits;

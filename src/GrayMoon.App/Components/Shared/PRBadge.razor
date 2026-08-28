@@ -73,7 +73,7 @@ else if (PullRequest != null && string.Equals(PullRequest.State, "open", StringC
         </a>
     }
 }
-else if (IsPrVerified && (PullRequest == null || !string.Equals(PullRequest.State, "open", StringComparison.OrdinalIgnoreCase)) && (DefaultBranchAheadCommits ?? 0) > 0)
+else if (ShowsCreateBadge(IsOnTag, IsPrVerified, PullRequest, DefaultBranchAheadCommits))
 {
     <span class="badge pr-badge pr-badge-create"
           role="button"
@@ -104,6 +104,25 @@ else
     [Parameter] public bool HasNewerTag { get; set; }
     /// <summary>Raised when the user clicks the yellow "upgrade" badge.</summary>
     [Parameter] public EventCallback OnUpgradeClick { get; set; }
+
+    /// <summary>
+    /// True when the yellow "create" badge is shown: PR state is verified, no PR already exists
+    /// (open, merged, or closed), and the branch is ahead of default.
+    /// </summary>
+    internal static bool ShowsCreateBadge(bool isOnTag, bool isPrVerified, PullRequestInfo? pullRequest, int? defaultBranchAheadCommits)
+    {
+        if (isOnTag)
+            return false;
+        if (!isPrVerified)
+            return false;
+        if (pullRequest is { IsMerged: true })
+            return false;
+        if (pullRequest is { IsClosed: true })
+            return false;
+        if (pullRequest != null && string.Equals(pullRequest.State, "open", StringComparison.OrdinalIgnoreCase))
+            return false;
+        return (defaultBranchAheadCommits ?? 0) > 0;
+    }
 
     private async Task HandleCreateClick()
     {
