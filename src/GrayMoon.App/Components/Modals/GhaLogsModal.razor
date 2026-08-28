@@ -42,10 +42,11 @@
                                 {
                                     var isSelected = navJob.Meta.Id == _selectedJobId;
                                     <button type="button"
-                                            class="@PillClass(navJob.Meta, isSelected)"
+                                            class="gha-log-job__chip @(isSelected ? "gha-log-job__chip--on" : "gha-log-job__chip--off")"
                                             title="@navJob.Meta.Name"
+                                            aria-pressed="@isSelected"
                                             @onclick="() => SelectJob(navJob.Meta.Id)">
-                                        <span class="gha-log-job__name">@navJob.Meta.Name</span>
+                                        <span class="badge action-badge gha-log-job__chip-label @JobActionBadgeClass(navJob.Meta)">@navJob.Meta.Name</span>
                                     </button>
                                 }
                             </div>
@@ -347,22 +348,16 @@
         _scrollToTopAfterRender = true;
     }
 
-    private string PillClass(GitHubWorkflowJobDto job, bool isSelected)
-    {
-        var status = JobStatusClass(job);
-        return isSelected
-            ? $"gha-log-job__pill gha-log-job__pill--{status} gha-log-job__pill--selected"
-            : $"gha-log-job__pill gha-log-job__pill--{status}";
-    }
-
-    private static string JobStatusClass(GitHubWorkflowJobDto job) =>
+    private static string JobActionBadgeClass(GitHubWorkflowJobDto job) =>
         job.Conclusion?.ToLowerInvariant() switch
         {
-            "success"   => "success",
-            "failure"   => "failure",
-            "cancelled" => "aborted",
-            "skipped"   => "skipped",
-            _ => string.Equals(job.Status, "in_progress", StringComparison.OrdinalIgnoreCase) ? "running" : "none",
+            "success"   => "action-badge-success",
+            "failure"   => "action-badge-failed",
+            "cancelled" => "action-badge-aborted",
+            "skipped"   => "action-badge-none",
+            _ => string.Equals(job.Status, "in_progress", StringComparison.OrdinalIgnoreCase)
+                ? "action-badge-running"
+                : "action-badge-none",
         };
 
 }
