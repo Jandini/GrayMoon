@@ -446,6 +446,11 @@
     align-items: center;
     justify-content: center;
     color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.git-changes-tree__icon:hover {
+    color: var(--text-primary);
 }
 
 .git-changes-tree__label {

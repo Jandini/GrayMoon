@@ -29,7 +29,10 @@
                     }
                 </span>
 
-                <span class="git-changes-tree__icon">
+                <span class="git-changes-tree__icon"
+                      title="@(row.Kind == GitChangesTreeRowKind.File ? "Copy path" : "Copy all paths")"
+                      @onclick="() => OnCopyPath.InvokeAsync(row)"
+                      @onclick:stopPropagation>
                     <i class="bi @IconFor(row)" aria-hidden="true"></i>
                 </span>
 
@@ -86,6 +89,9 @@
     [Parameter] public GitChangesTreeRow? SelectedRow { get; set; }
     [Parameter] public EventCallback<GitChangesTreeRow> OnToggleExpand { get; set; }
     [Parameter] public EventCallback<GitChangesFileSelectEventArgs> OnSelectFile { get; set; }
+    /// <summary>Raised when a row's icon is clicked. For File rows, copies that file's full path; for
+    /// Folder/Repository/Section rows, copies every contained file's full path as multiline text.</summary>
+    [Parameter] public EventCallback<GitChangesTreeRow> OnCopyPath { get; set; }
     [Parameter] public EventCallback<GitChangesStageEventArgs> OnStage { get; set; }
     [Parameter] public EventCallback<GitChangesStageEventArgs> OnUnstage { get; set; }
     [Parameter] public EventCallback OnStageSelected { get; set; }
@@ -345,8 +351,6 @@
     }
 
     private static string[] FolderPathsOf(GitChangesTreeRow row) =>
-        // Folder scope operations pass the folder's own repo-relative path as a directory pathspec;
-        // the Key encodes "<section>/<workspaceRepositoryId>/<segment>/<segment>/..." - strip the
-        // section/repo prefix to recover the folder's repo-relative path.
-        [string.Join('/', row.Key.Split('/').Skip(2))];
+        // Folder scope operations pass the folder's own repo-relative path as a directory pathspec.
+        [GitChangesTreeBuilder.FolderRelativePathOf(row)];
 }

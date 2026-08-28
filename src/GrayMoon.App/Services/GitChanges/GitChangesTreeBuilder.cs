@@ -54,6 +54,12 @@ public sealed record GitChangesTreeRow
 /// </summary>
 public static class GitChangesTreeBuilder
 {
+    /// <summary>Recovers a Folder row's repo-relative path from its Key, which encodes
+    /// "&lt;section&gt;/&lt;workspaceRepositoryId&gt;/&lt;segment&gt;/&lt;segment&gt;/..." - stripping the
+    /// section/repo prefix leaves the folder's own repo-relative path.</summary>
+    public static string FolderRelativePathOf(GitChangesTreeRow row) =>
+        string.Join('/', row.Key.Split('/').Skip(2));
+
     public static IReadOnlyList<GitChangesTreeRow> Build(
         WorkspaceGitChangesView view,
         string? filterQuery,
