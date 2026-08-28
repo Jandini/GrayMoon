@@ -27,7 +27,7 @@
                         <div class="gm-menu-item @(HasMergedPr ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Sync to default branch" @onclick="HandleSyncToDefault" @onclick:stopPropagation>
                             <i class="bi bi-rewind" aria-hidden="true"></i><span>Sync To Default</span>
                         </div>
-                        <div class="gm-menu-item" role="button" tabindex="0" title="Sync commits" @onclick="HandleSyncCommits" @onclick:stopPropagation>
+                        <div class="gm-menu-item @(HasSyncCommits ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Sync commits" @onclick="HandleSyncCommits" @onclick:stopPropagation>
                             <i class="bi bi-arrow-down-up" aria-hidden="true"></i><span>Sync Commits</span>
                         </div>
                         <div class="gm-menu-item" role="button" tabindex="0" title="Sync repositories" @onclick="HandleSyncLevel" @onclick:stopPropagation>
@@ -91,8 +91,10 @@
     [Parameter] public bool HasCreatablePr { get; set; }
     /// <summary>True when at least one repository in this level has a merged pull request - "Sync to Default" is highlighted since the default branch has moved on.</summary>
     [Parameter] public bool HasMergedPr { get; set; }
+    /// <summary>True when at least one repository in this level has incoming or outgoing commits - "Sync Commits" is highlighted.</summary>
+    [Parameter] public bool HasSyncCommits { get; set; }
 
-    private bool HasActionablePr => HasCreatablePr || HasMergedPr;
+    private bool HasActionablePr => HasCreatablePr || HasMergedPr || HasSyncCommits;
 
     private int DisplayRepositoryCount => RepositoryCount > 0 ? RepositoryCount : (Group?.Count() ?? 0);
 

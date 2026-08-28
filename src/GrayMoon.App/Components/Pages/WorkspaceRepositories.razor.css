@@ -169,8 +169,9 @@
 }
 
 /* Level actions caret: gray by default (like the other level-header icons), same yellow as the PR
-   "create" badge when this level has a pull request to create or a merged pull request making
-   "Sync to Default" worth doing - draws the eye to the menu without recoloring the count text itself. */
+   "create" badge when this level has a pull request to create, a merged pull request making
+   "Sync to Default" worth doing, or repos with incoming/outgoing commits making
+   "Sync Commits" worth doing - draws the eye to the menu without recoloring the count text itself. */
 ::deep .repositories-table .dependency-level-header .dependency-level-count-caret {
     color: #505050 !important;
     font-size: 0.7rem;
@@ -285,8 +286,9 @@
 }
 
 /* Same yellow as the PR "create" badge / actionable divergence count: highlights "Create PRs..." when
-   this level has a repository with commits ahead of default and no open PR, and "Sync to Default" when
-   a pull request in this level has been merged (the default branch has moved on). */
+   this level has a repository with commits ahead of default and no open PR, "Sync to Default" when
+   a pull request in this level has been merged (the default branch has moved on), and "Sync Commits"
+   when a repository has incoming or outgoing commits. */
 ::deep .repositories-table .gm-menu-item.gm-menu-item--highlight,
 ::deep .repositories-table .gm-menu-item.gm-menu-item--highlight i,
 ::deep .repositories-table .gm-menu-item.gm-menu-item--highlight span,

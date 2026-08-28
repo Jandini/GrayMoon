@@ -148,6 +148,7 @@
                                                                            OpenPrPullMap="@GetOpenPrPullMapForGroup(levelGroup)"
                                                                            HasCreatablePr="@GroupHasCreatablePr(levelGroup)"
                                                                            HasMergedPr="@GroupHasMergedPr(levelGroup)"
+                                                                           HasSyncCommits="@GroupHasSyncCommits(levelGroup)"
                                                                            />
                                     }
                                     else if (_linkByWrlId.TryGetValue(slot.WorkspaceRepositoryId, out var wr))
