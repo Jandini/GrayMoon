@@ -29,6 +29,7 @@
     <script src="js/resizable-columns.js"></script>
     <script src="js/dependency-badge-tooltip.js"></script>
     <script src="js/workspace-repos-header-menus.js"></script>
+    <script src="js/gm-hover-menu.js"></script>
     <script src="js/matrixOverlay.js"></script>
     <script src="js/loadingOverlayTerminal.js"></script>
     <script src="js/versionPatternEditor.js"></script>
@@ -89,116 +90,6 @@
             if (Array.isArray(urls))
                 urls.forEach(url => window.open(url, '_blank', 'noopener,noreferrer'));
         };
-        // GitHub dropdown: body-appended, fixed-position overlay driven by mouse delegation.
-        // Avoids table-responsive overflow clipping. Reads data-urls JSON from the trigger.
-        (function () {
-            const ITEMS = [
-                { label: 'Branches',      icon: 'bi-signpost-2',         suffix: '/branches' },
-                { label: 'Pull Requests', icon: 'bi-git',                suffix: '/pulls'    },
-                { label: 'Actions',       icon: 'bi-play-circle',        suffix: '/actions'  },
-                { label: 'Releases',      icon: 'bi-box-seam',           suffix: '/releases' },
-                { label: 'Tags',          icon: 'bi-tag',                suffix: '/tags'     },
-                { label: 'Issues',        icon: 'bi-exclamation-circle', suffix: '/issues'   },
-                { label: 'Settings',      icon: 'bi-gear',               suffix: '/settings' },
-            ];
-            let panel = null, hideTimer = null, activeTrigger = null;
-
-            function build() {
-                panel = document.createElement('div');
-                panel.className = 'gm-gh-dropdown';
-                const title = document.createElement('div');
-                title.className = 'gm-gh-dropdown-title';
-                title.textContent = 'Open in GitHub\u2026';
-                panel.appendChild(title);
-                ITEMS.forEach(({ label, icon, suffix }) => {
-                    const row = document.createElement('div');
-                    row.className = 'gm-gh-dropdown-item';
-                    row.dataset.suffix = suffix;
-                    row.innerHTML = `<i class="bi ${icon}" aria-hidden="true"></i><span>${label}</span>`;
-                    panel.appendChild(row);
-                });
-                panel.addEventListener('mouseenter', cancelHide);
-                panel.addEventListener('mouseleave', scheduleHide);
-                panel.addEventListener('click', onItemClick);
-                document.body.appendChild(panel);
-            }
-
-            function show(trigger) {
-                if (!panel) build();
-                cancelHide();
-                activeTrigger = trigger;
-                const r = trigger.getBoundingClientRect();
-                panel.style.top  = (r.bottom + 4) + 'px';
-                panel.style.right = (window.innerWidth - r.right) + 'px';
-                panel.style.left = 'auto';
-                panel.classList.add('gm-gh-dropdown--visible');
-            }
-
-            function hide() {
-                panel?.classList.remove('gm-gh-dropdown--visible');
-                activeTrigger = null;
-            }
-
-            function scheduleHide() { hideTimer = setTimeout(hide, 150); }
-            function cancelHide()   { clearTimeout(hideTimer); }
-
-            function openUrls(urls) {
-                urls.filter(u => u).forEach(u => window.open(u, '_blank', 'noopener,noreferrer'));
-            }
-
-            function appendSuffix(url, suffix) {
-                const base = (url || '').replace(/\/+$/, '');
-                return base ? (base + suffix) : '';
-            }
-
-            // Clicking the trigger itself opens all repos directly (no suffix).
-            document.addEventListener('click', e => {
-                const wrap = e.target.closest('.github-dropdown-wrap');
-                if (!wrap) return;
-                try {
-                    const urls = JSON.parse(wrap.dataset.urls || '[]');
-                    openUrls(urls);
-                } catch (_) { }
-                hide();
-            });
-
-            function onItemClick(e) {
-                const item = e.target.closest('.gm-gh-dropdown-item');
-                if (!item || !activeTrigger) return;
-                const suffix = item.dataset.suffix;
-                try {
-                    const baseUrls = JSON.parse(activeTrigger.dataset.urls || '[]');
-                    let urls;
-                    if (suffix === '/pulls') {
-                        const prMap = JSON.parse(activeTrigger.dataset.prPullMap || '{}');
-                        urls = baseUrls
-                            .filter(u => u)
-                            .map(u => prMap[u] || appendSuffix(u, suffix));
-                    } else {
-                        urls = baseUrls.filter(u => u).map(u => appendSuffix(u, suffix));
-                    }
-                    if (urls.length) urls.forEach(u => window.open(u, '_blank', 'noopener,noreferrer'));
-                } catch (_) { }
-                hide();
-            }
-
-            document.addEventListener('mouseover', e => {
-                const wrap = e.target.closest('.github-dropdown-wrap');
-                if (wrap) { show(wrap); return; }
-                if (panel && panel.contains(e.target)) cancelHide();
-            });
-
-            document.addEventListener('mouseout', e => {
-                const inWrap  = !!e.target.closest('.github-dropdown-wrap');
-                const inPanel = !!(panel && panel.contains(e.target));
-                if (!inWrap && !inPanel) return;
-                const to = e.relatedTarget;
-                if (!to) { scheduleHide(); return; }
-                if (to.closest('.github-dropdown-wrap') || (panel && panel.contains(to))) return;
-                scheduleHide();
-            });
-        })();
-
         window.graymoonShowToast = function (message) {
             const el = document.createElement('div');
             const topbarHeight = getComputedStyle(document.documentElement).getPropertyValue('--topbar-height').trim() || '3.5rem';
@@ -210,78 +101,6 @@
             document.body.appendChild(el);
             setTimeout(() => el.remove(), 2500);
         };
-
-        // PR copy dropdown: body-appended fixed-position overlay for .pr-copy-dropdown-wrap elements.
-        (function () {
-            let prPanel = null, prHideTimer = null, activePrTrigger = null;
-
-            function buildPrPanel() {
-                prPanel = document.createElement('div');
-                prPanel.className = 'gm-gh-dropdown';
-                const title = document.createElement('div');
-                title.className = 'gm-gh-dropdown-title';
-                title.textContent = 'Pull Requests\u2026';
-                prPanel.appendChild(title);
-                const row = document.createElement('div');
-                row.className = 'gm-gh-dropdown-item';
-                row.innerHTML = '<i class="bi bi-clipboard" aria-hidden="true"></i><span>Copy Links to Clipboard</span>';
-                row.addEventListener('click', async () => {
-                    if (!activePrTrigger) return;
-                    try {
-                        const urls = JSON.parse(activePrTrigger.dataset.prUrls || '[]');
-                        if (urls.length === 0) {
-                            window.graymoonShowToast('No open pull requests in this level.');
-                        } else {
-                            await navigator.clipboard.writeText(urls.join('\n'));
-                            const n = urls.length;
-                            window.graymoonShowToast(n === 1 ? '1 PR link copied to clipboard.' : `${n} PR links copied to clipboard.`);
-                        }
-                    } catch (_) {
-                        window.graymoonShowToast('Could not copy to clipboard.');
-                    }
-                    hidePr();
-                });
-                prPanel.appendChild(row);
-                prPanel.addEventListener('mouseenter', cancelPrHide);
-                prPanel.addEventListener('mouseleave', schedulePrHide);
-                document.body.appendChild(prPanel);
-            }
-
-            function showPr(trigger) {
-                if (!prPanel) buildPrPanel();
-                cancelPrHide();
-                activePrTrigger = trigger;
-                const r = trigger.getBoundingClientRect();
-                prPanel.style.top = (r.bottom + 4) + 'px';
-                prPanel.style.right = (window.innerWidth - r.right) + 'px';
-                prPanel.style.left = 'auto';
-                prPanel.classList.add('gm-gh-dropdown--visible');
-            }
-
-            function hidePr() {
-                prPanel?.classList.remove('gm-gh-dropdown--visible');
-                activePrTrigger = null;
-            }
-
-            function schedulePrHide() { prHideTimer = setTimeout(hidePr, 150); }
-            function cancelPrHide() { clearTimeout(prHideTimer); }
-
-            document.addEventListener('mouseover', e => {
-                const wrap = e.target.closest('.pr-copy-dropdown-wrap');
-                if (wrap) { showPr(wrap); return; }
-                if (prPanel && prPanel.contains(e.target)) cancelPrHide();
-            });
-
-            document.addEventListener('mouseout', e => {
-                const inWrap = !!e.target.closest('.pr-copy-dropdown-wrap');
-                const inPanel = !!(prPanel && prPanel.contains(e.target));
-                if (!inWrap && !inPanel) return;
-                const to = e.relatedTarget;
-                if (!to) { schedulePrHide(); return; }
-                if (to.closest('.pr-copy-dropdown-wrap') || (prPanel && prPanel.contains(to))) return;
-                schedulePrHide();
-            });
-        })();
 
         window.graymoonStorageGet = (key) => localStorage.getItem(key);
         window.graymoonStorageSet = (key, value) => { localStorage.setItem(key, value); };

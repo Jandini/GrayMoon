@@ -22,14 +22,24 @@
         || MismatchedFileVersionLines.Count > 0
         || CustomDependencyLines.Count > 0;
     var depOkBadgeInactive = ActionsDisabled || Link.IsOnTag;
+    var singleRepoPrPullMap = (!string.IsNullOrEmpty(repoUrl) && PrInfo != null
+        && string.Equals(PrInfo.State, "open", StringComparison.OrdinalIgnoreCase)
+        && !string.IsNullOrEmpty(PrInfo.HtmlUrl))
+        ? new Dictionary<string, string> { [repoUrl] = PrInfo.HtmlUrl }
+        : null;
 
     <tr class="@RowCssClass">
         <td class="col-repo">
             @if (!string.IsNullOrEmpty(repoUrl))
             {
-                <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link" title="@RepositoryTypeTitle">
-                    <strong>@repo.RepositoryName</strong>
-                </a>
+                <span class="repo-name-cell gm-menu-trigger">
+                    <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link" title="@RepositoryTypeTitle">
+                        <strong>@repo.RepositoryName</strong>
+                    </a>
+                    <div class="gm-menu-panel">
+                        <GitHubSectionsMenu BaseUrls="@(new List<string> { repoUrl })" PrPullMap="@singleRepoPrPullMap" />
+                    </div>
+                </span>
             }
             else
             {
