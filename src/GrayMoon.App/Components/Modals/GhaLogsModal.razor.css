@@ -86,59 +86,65 @@
     overflow: hidden;
 }
 
-/* ── Job badge headers ──────────────────────────────────────── */
+/* ── Job status chips (same box model as WorkspaceActions gha-status-chip, no count) ── */
 
 .gha-log-job {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.35rem;
-    padding: 0.45rem 0.75rem;
+    flex-shrink: 0;
+    gap: 0.4rem;
+    padding: 0.4rem;
     border-bottom: 1px solid #2d2d2d;
     background: #1a1a1a;
-    position: sticky;
-    top: 0;
-    z-index: 1;
+    font-family: var(--bs-body-font-family);
 }
 
-/* Pill-shaped badge — reuses action-badge colour palette */
-.gha-log-job__pill {
+.gha-log-job__chip {
+    display: inline-flex;
+    align-items: stretch;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: none;
+    border-radius: 0.25rem;
+    overflow: hidden;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+}
+
+.gha-log-job__chip:focus,
+.gha-log-job__chip:active:focus {
+    outline: none;
+}
+
+.gha-log-job__chip:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
+}
+
+.gha-log-job__chip-label {
     display: inline-flex;
     align-items: center;
-    padding: 0.18rem 0.75rem;
-    border-radius: 999px;
-    font-size: 0.78rem;
+    padding: 0.35em 0.65em;
+    font-size: 0.75rem;
     font-weight: 500;
-    border: none;
+    line-height: 1;
     letter-spacing: 0.01em;
-    cursor: pointer;
-    transition: filter 0.12s;
+    border-radius: 0.25rem;
 }
 
-.gha-log-job__pill:hover {
-    filter: brightness(1.2);
-}
-
-/* Non-current job pills: dimmed */
-.gha-log-job__pill:not(.gha-log-job__pill--selected) {
+.gha-log-job__chip--off {
     opacity: 0.5;
 }
 
-/* Selected pill: full brightness + subtle ring */
-.gha-log-job__pill--selected {
-    opacity: 1;
-    outline: 2px solid rgba(255, 255, 255, 0.35);
-    outline-offset: 1px;
+.gha-log-job__chip--off:hover {
+    opacity: 0.85;
 }
 
-/* Status-colored pills */
-.gha-log-job__pill--other   { background: #383838; color: rgba(255, 255, 255, 0.5); }
-.gha-log-job__pill--success { background: #238636; color: #fff; }
-.gha-log-job__pill--failure { background: #da3633; color: #fff; }
-.gha-log-job__pill--aborted { background: #8957e5; color: #fff; }
-.gha-log-job__pill--running { background: #d29922; color: #000; }
-.gha-log-job__pill--skipped { background: #495057; color: rgba(255, 255, 255, 0.7); }
-.gha-log-job__pill--none    { background: #495057; color: rgba(255, 255, 255, 0.7); }
+.gha-log-job__chip--on {
+    opacity: 1;
+}
 
 /* ── Collapsible step groups ────────────────────────────────── */
 
@@ -148,6 +154,10 @@
 }
 
 .gha-log-group__header {
+    display: block;
+    position: sticky;
+    top: 0;
+    z-index: 1;
     background: #252526;
     color: #9cdcfe;
     cursor: pointer;
@@ -156,6 +166,7 @@
     list-style: none;
     padding: 0.25rem 0.85rem;
     user-select: none;
+    box-shadow: 0 1px 0 #2d2d2d;
 }
 
 .gha-log-group__header::-webkit-details-marker {
@@ -209,6 +220,22 @@
 
 .gha-log-line--warning {
     color: #fbbf24;
+}
+
+.gha-log-line--current.gha-log-line--error {
+    background: rgba(248, 113, 113, 0.22);
+    box-shadow: inset 3px 0 0 #f87171;
+    color: #fff;
+}
+
+.gha-log-line--current.gha-log-line--error .ansi-31,
+.gha-log-line--current.gha-log-line--error .ansi-91 {
+    color: #fff;
+}
+
+.gha-log-line--current.gha-log-line--warning {
+    background: rgba(251, 191, 36, 0.22);
+    box-shadow: inset 3px 0 0 #fbbf24;
 }
 
 .gha-log-line--command {
