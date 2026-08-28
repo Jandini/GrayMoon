@@ -1,4 +1,5 @@
 using GrayMoon.App.Models;
+using GrayMoon.App.Repositories;
 namespace GrayMoon.App.Services;
 public sealed record NotificationRepo(
     int RepositoryId,
@@ -41,6 +42,27 @@ public sealed class WorkspacePendingActionsService
     {
         _notifications.RemoveAll(n => n.WorkspaceId == workspaceId);
         Changed?.Invoke();
+    }
+    /// <summary>Reloads the workspace's current repository links and recomputes the notification for it immediately, so callers that just changed repository membership (e.g. removing a repository from a workspace) don't have to wait for the next Agent-driven WorkspaceSynced hub event.</summary>
+    public async Task RefreshAsync(int workspaceId, WorkspaceRepository workspaceRepository, WorkspaceProjectRepository workspaceProjectRepository)
+    {
+        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+        {
+            OnWorkspaceSynced(null, workspaceId);
+            return;
+        }
+        var links = workspace.Repositories.ToList();
+        var mismatchPayloads = await workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId);
+        var mismatchedDeps = mismatchPayloads.ToDictionary(
+            p => p.RepoId,
+            p => (IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>)p.ProjectUpdates
+                .SelectMany(u => u.PackageUpdates)
+                .GroupBy(x => x.PackageId)
+                .Select(g => g.First())
+                .ToList());
+        var notification = ComputeNotification(workspaceId, workspace.Name, links, mismatchedDeps);
+        OnWorkspaceSynced(notification, workspaceId);
     }
     public static WorkspaceNotification? ComputeNotification(
         int workspaceId,
