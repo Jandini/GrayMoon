@@ -142,6 +142,8 @@
                                                                            OnSyncCommits="async () => await SyncCommitsForLevelAsync(slot.LevelKey)"
                                                                            OnOpenPr="async () => await OpenPullRequestDialogForLevelAsync(slot.LevelKey)"
                                                                            OnSyncLevel="async () => await SyncLevelForLevelAsync(slot.LevelKey)"
+                                                                           OnFetchLevel="async () => await FetchLevelAsync(slot.LevelKey)"
+                                                                           OnRestorePackagesLevel="async () => await RestorePackagesLevelAsync(slot.LevelKey)"
                                                                            OpenPrUrls="@GetOpenPrUrlsForGroup(levelGroup)"
                                                                            OpenPrPullMap="@GetOpenPrPullMapForGroup(levelGroup)"
                                                                            />

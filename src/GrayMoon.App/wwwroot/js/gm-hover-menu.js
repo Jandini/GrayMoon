@@ -44,11 +44,10 @@
             return;
         }
 
-        // Top-level panel: directly below the trigger (no gap), right-aligned to it (mirrors the
-        // previous count-hover dropdown placement). Contiguous with the trigger, rather than leaving
-        // a screen-space gap, so a slow mouse move down into the panel never crosses dead space.
-        // Flip above the trigger (still contiguous) when there isn't room below to show it in full;
-        // if it doesn't fit either way, clamp so it's at least fully on-screen and scrollable.
+        // Top-level panel: directly below the trigger (no gap). Contiguous with the trigger, rather
+        // than leaving a screen-space gap, so a slow mouse move down into the panel never crosses dead
+        // space. Flip above the trigger (still contiguous) when there isn't room below to show it in
+        // full; if it doesn't fit either way, clamp so it's at least fully on-screen and scrollable.
         const panelHeight = panel.offsetHeight || 0;
         let top = anchor.bottom;
         if (top + panelHeight > window.innerHeight - MARGIN) {
@@ -56,9 +55,26 @@
             top = above >= MARGIN ? above : Math.max(MARGIN, window.innerHeight - panelHeight - MARGIN);
         }
 
+        // Horizontal anchor: the repo-name trigger's width tracks its (variable-length) text, so
+        // right-aligning it would make the panel's left edge drift with the repository name's length -
+        // and run off the left edge of the screen entirely for short names, since that column sits at
+        // the left of the table. Left-align to the trigger instead, falling back to right-aligned only
+        // if there isn't room on the right. The level-actions count trigger sits at the right edge of
+        // the row, so it keeps the original right-alignment.
+        const panelWidth = panel.offsetWidth || 0;
+        let left;
+        if (trigger.classList.contains('repo-name-cell')) {
+            left = anchor.left;
+            if (left + panelWidth > window.innerWidth - MARGIN) {
+                left = Math.max(MARGIN, window.innerWidth - panelWidth - MARGIN);
+            }
+        } else {
+            left = Math.max(MARGIN, anchor.right - panelWidth);
+        }
+
         panel.style.top = top + 'px';
-        panel.style.right = (window.innerWidth - anchor.right) + 'px';
-        panel.style.left = 'auto';
+        panel.style.left = left + 'px';
+        panel.style.right = 'auto';
     }
 
     function repositionOpenPanels() {

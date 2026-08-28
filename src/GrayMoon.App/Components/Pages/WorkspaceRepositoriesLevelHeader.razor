@@ -10,7 +10,7 @@
             <span class="dependency-level-title @(LevelKey == null ? "dependency-level-no-projects" : "")">@(LevelKey == null ? "No dependencies" : $"Level {LevelKey}")</span>
             @if (LevelKey.HasValue)
             {
-                <a href="@WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, level: LevelKey!.Value)" class="dependency-level-graph-link" title="View dependency graph for this level" aria-label="Dependency graph">
+                <a href="@WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, level: LevelKey!.Value)" class="dependency-level-graph-link" title="View dependency graph" aria-label="Dependency graph">
                     <i class="bi bi-diagram-3" aria-hidden="true"></i>
                 </a>
             }
@@ -24,24 +24,30 @@
                 <div class="gm-menu-panel level-actions-menu">
                     <div class="gm-menu-title">@(LevelKey == null ? "No dependencies" : $"Level {LevelKey}")</div>
                     <div class="gm-menu-items @(ActionsDisabled ? "gm-menu-items--disabled" : "")">
-                        <div class="gm-menu-item" role="button" tabindex="0" title="Sync to default branch..." @onclick="HandleSyncToDefault" @onclick:stopPropagation>
+                        <div class="gm-menu-item" role="button" tabindex="0" title="Sync to default branch" @onclick="HandleSyncToDefault" @onclick:stopPropagation>
                             <i class="bi bi-rewind" aria-hidden="true"></i><span>Sync to Default</span>
                         </div>
-                        <div class="gm-menu-item" role="button" tabindex="0" title="Sync commits for all repositories in this level" @onclick="HandleSyncCommits" @onclick:stopPropagation>
+                        <div class="gm-menu-item" role="button" tabindex="0" title="Sync commits" @onclick="HandleSyncCommits" @onclick:stopPropagation>
                             <i class="bi bi-arrow-down-up" aria-hidden="true"></i><span>Sync Commits</span>
                         </div>
-                        <div class="gm-menu-item" role="button" tabindex="0" title="Synchronize all repositories in this level..." @onclick="HandleSyncLevel" @onclick:stopPropagation>
+                        <div class="gm-menu-item" role="button" tabindex="0" title="Sync repositories" @onclick="HandleSyncLevel" @onclick:stopPropagation>
                             <i class="bi bi-arrow-repeat" aria-hidden="true"></i><span>Sync Repositories</span>
                         </div>
-                        <div class="gm-menu-item" role="button" tabindex="0" title="Open Pull Request in GitHub..." @onclick="HandleOpenPr" @onclick:stopPropagation>
+                        <div class="gm-menu-item" role="button" tabindex="0" title="Fetch commits" @onclick="HandleFetchLevel" @onclick:stopPropagation>
+                            <i class="bi bi-cloud-download" aria-hidden="true"></i><span>Fetch Repositories</span>
+                        </div>
+                        <div class="gm-menu-item" role="button" tabindex="0" title="Restore NuGet packages" @onclick="HandleRestorePackagesLevel" @onclick:stopPropagation>
+                            <i class="bi bi-box-seam" aria-hidden="true"></i><span>Restore Packages</span>
+                        </div>
+                        <div class="gm-menu-item" role="button" tabindex="0" title="Create pull requests" @onclick="HandleOpenPr" @onclick:stopPropagation>
                             <i class="bi bi-git" aria-hidden="true"></i><span>Create PRs...</span>
                         </div>
                     </div>
-                    <div class="gm-menu-item gm-menu-trigger gm-menu-item--flyout" role="button" tabindex="0" aria-haspopup="true">
+                    <div class="gm-menu-item gm-menu-trigger gm-menu-item--flyout" role="button" tabindex="0" aria-haspopup="true" title="Copy to clipboard">
                         <i class="bi bi-share" aria-hidden="true"></i><span>Copy to Clipboard</span>
                         <i class="bi bi-chevron-right gm-menu-caret" aria-hidden="true"></i>
                         <div class="gm-menu-panel gm-menu-panel--submenu">
-                            <div class="gm-menu-item" role="button" tabindex="0" @onclick="HandleCopyPrLinks" @onclick:stopPropagation>
+                            <div class="gm-menu-item" role="button" tabindex="0" title="Copy PR links" @onclick="HandleCopyPrLinks" @onclick:stopPropagation>
                                 <i class="bi bi-clipboard" aria-hidden="true"></i><span>Pull Requests Links</span>
                             </div>
                         </div>
@@ -50,7 +56,7 @@
                          role="button"
                          tabindex="0"
                          aria-haspopup="true"
-                         title="Open all repositories in this level in GitHub"
+                         title="Open in GitHub"
                          @onclick="HandleOpenAllInGitHub"
                          @onclick:stopPropagation>
                         <i class="bi bi-github" aria-hidden="true"></i><span>Open in GitHub</span>
@@ -77,6 +83,8 @@
     [Parameter] public EventCallback OnSyncCommits { get; set; }
     [Parameter] public EventCallback OnOpenPr { get; set; }
     [Parameter] public EventCallback OnSyncLevel { get; set; }
+    [Parameter] public EventCallback OnFetchLevel { get; set; }
+    [Parameter] public EventCallback OnRestorePackagesLevel { get; set; }
     [Parameter] public IReadOnlyList<string>? OpenPrUrls { get; set; }
     [Parameter] public IReadOnlyDictionary<string, string>? OpenPrPullMap { get; set; }
 
@@ -108,6 +116,16 @@
     private async Task HandleSyncLevel()
     {
         if (!ActionsDisabled) await OnSyncLevel.InvokeAsync();
+    }
+
+    private async Task HandleFetchLevel()
+    {
+        if (!ActionsDisabled) await OnFetchLevel.InvokeAsync();
+    }
+
+    private async Task HandleRestorePackagesLevel()
+    {
+        if (!ActionsDisabled) await OnRestorePackagesLevel.InvokeAsync();
     }
 
     private async Task HandleOpenAllInGitHub()
