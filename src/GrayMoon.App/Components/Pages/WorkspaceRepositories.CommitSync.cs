@@ -1,3 +1,4 @@
+using GrayMoon.App.Components.Shared;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
 
@@ -47,14 +48,13 @@ public sealed partial class WorkspaceRepositories
         ShowConfirm("Do you want to sync commits for this repository?", () => CommitSyncAsync(repositoryId));
     }
 
-    /// <summary>True when at least one repository in the group has incoming or outgoing commits - "Sync Commits" is highlighted. Upstream-only (push-to-origin) is excluded because commit sync does not set upstream.</summary>
+    /// <summary>True when at least one repository in the group has incoming or outgoing commits - "Sync Commits" is highlighted. The no-upstream badge is excluded because commit sync does not set upstream.</summary>
     private bool GroupHasSyncCommits(IEnumerable<WorkspaceRepositoryLink> group)
     {
         foreach (var wr in group)
         {
-            if (wr.IsOnTag) continue;
-            if ((wr.IncomingCommits ?? 0) > 0) return true;
-            if ((wr.OutgoingCommits ?? 0) > 0) return true;
+            if (CommitsBadge.HasIncomingOrOutgoingCommits(wr.IsOnTag, wr.BranchHasUpstream, wr.OutgoingCommits, wr.IncomingCommits))
+                return true;
         }
         return false;
     }

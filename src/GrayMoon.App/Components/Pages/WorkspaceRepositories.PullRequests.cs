@@ -1,4 +1,5 @@
 using GrayMoon.App.Components.Modals;
+using GrayMoon.App.Components.Shared;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Services;
@@ -269,16 +270,14 @@ public sealed partial class WorkspaceRepositories
         return urls;
     }
 
-    /// <summary>True when at least one repository in the group would show the yellow "create" PR badge (mirrors PRBadge's own condition).</summary>
+    /// <summary>True when at least one repository in the group would show the yellow "create" PR badge.</summary>
     private bool GroupHasCreatablePr(IEnumerable<WorkspaceRepositoryLink> group)
     {
         foreach (var wr in group)
         {
-            if (wr.IsOnTag) continue;
-            if (!prByRepositoryId.TryGetValue(wr.RepositoryId, out var pr)) continue;
-            var hasOpenPr = pr != null && string.Equals(pr.State, "open", StringComparison.OrdinalIgnoreCase);
-            if (hasOpenPr) continue;
-            if ((wr.DefaultBranchAheadCommits ?? 0) > 0) return true;
+            var verified = prByRepositoryId.TryGetValue(wr.RepositoryId, out var pr);
+            if (PRBadge.ShowsCreateBadge(wr.IsOnTag, verified, pr, wr.DefaultBranchAheadCommits))
+                return true;
         }
         return false;
     }

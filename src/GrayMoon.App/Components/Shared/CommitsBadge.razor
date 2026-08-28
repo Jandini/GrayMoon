@@ -47,6 +47,20 @@ else
     private int Y => BranchHasUpstream == false ? 0 : (Incoming ?? 0);
     private bool NotUpstreamed => !IsOnTag && BranchHasUpstream == false;
     private bool HasCommits => Y > 0 || X > 0;
+
+    /// <summary>
+    /// True when incoming or outgoing commit counts are present and commit-sync can act on them.
+    /// The no-upstream ("Push to set upstream") state is excluded - that is not commit sync.
+    /// </summary>
+    internal static bool HasIncomingOrOutgoingCommits(bool isOnTag, bool? branchHasUpstream, int? outgoing, int? incoming)
+    {
+        if (isOnTag)
+            return false;
+        if (branchHasUpstream == false)
+            return false;
+        return (outgoing ?? 0) > 0 || (incoming ?? 0) > 0;
+    }
+
     private bool Clickable => !Disabled && !IsOnTag && (HasCommits || NotUpstreamed);
     private string BgColor => Y > 0 ? "#dc3545" : (X > 0 || NotUpstreamed ? "#ffc107" : "#198754");
     private string TextColor => (X > 0 || NotUpstreamed) && Y == 0 ? "#000" : "#fff";
