@@ -135,9 +135,9 @@ internal static class GitResiliencePipelines
             .AddFallback(CreateTimeoutFallbackOptions(attemptTimeout))
             .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
             {
-                // Retry any non-zero exit code from git push (e.g., transient network failures).
+                // Retry transient failures (non-zero exit) but not protected-branch rejections which are deterministic.
                 ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-                    .HandleResult(r => r.ExitCode != 0)
+                    .HandleResult(r => r.ExitCode != 0 && !IsProtectedBranchRejection(r.Stdout, r.Stderr))
                     .Handle<TimeoutRejectedException>(),
                 MaxRetryAttempts = 3,
                 Delay = TimeSpan.FromMilliseconds(200),
@@ -219,5 +219,20 @@ internal static class GitResiliencePipelines
         return combined.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase)
             || combined.Contains("merge conflict", StringComparison.OrdinalIgnoreCase)
             || combined.Contains("Automatic merge failed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsProtectedBranchRejection(string? stdout, string? stderr)
+    {
+        var combined = string.Concat(stdout ?? string.Empty, stderr ?? string.Empty);
+        return combined.Contains("protected branch", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("GH006", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("GH013", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("repository rule violations", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("pre-receive hook declined", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("hook declined", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("not allowed to push code to a protected branch", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("changes must be made through a pull request", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("TF401027", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("TF402455", StringComparison.OrdinalIgnoreCase);
     }
 }

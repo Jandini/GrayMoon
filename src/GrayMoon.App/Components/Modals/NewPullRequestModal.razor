@@ -11,14 +11,8 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">
-                        @if (Targets.Count == 1)
-                        {
-                            <text>New Pull Request - @Targets[0].RepositoryName</text>
-                        }
-                        else
-                        {
-                            <text>New Pull Request - @Targets.Count repositories</text>
-                        }
+                        New Pull Request <span class="text-muted">·</span>
+                        @(Targets.Count == 1 ? Targets[0].RepositoryName : $"{Targets.Count} repositories")
                     </h5>
                     <button type="button" class="btn-close" aria-label="Close" @onclick="HandleCancelClick" disabled="@IsBusy"></button>
                 </div>

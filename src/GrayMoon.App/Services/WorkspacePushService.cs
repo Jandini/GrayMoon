@@ -807,9 +807,24 @@ public sealed class WorkspacePushService(
     private static bool IsPullFailureError(string? err) =>
         err != null && err.Contains("pull failed", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsProtectedBranchRejection(string? err) =>
+        err != null &&
+        (err.Contains("protected branch", StringComparison.OrdinalIgnoreCase) ||
+         err.Contains("GH006", StringComparison.OrdinalIgnoreCase) ||
+         err.Contains("GH013", StringComparison.OrdinalIgnoreCase) ||
+         err.Contains("repository rule violations", StringComparison.OrdinalIgnoreCase) ||
+         err.Contains("pre-receive hook declined", StringComparison.OrdinalIgnoreCase) ||
+         err.Contains("hook declined", StringComparison.OrdinalIgnoreCase) ||
+         err.Contains("not allowed to push code to a protected branch", StringComparison.OrdinalIgnoreCase) ||
+         err.Contains("changes must be made through a pull request", StringComparison.OrdinalIgnoreCase) ||
+         err.Contains("TF401027", StringComparison.OrdinalIgnoreCase) ||
+         err.Contains("TF402455", StringComparison.OrdinalIgnoreCase));
+
     private static string FormatPushError(string? rawError)
     {
         var err = rawError ?? "Push failed";
+        if (IsProtectedBranchRejection(err))
+            return "Push rejected: the remote branch is protected. Use a pull request or update branch protection rules to push directly.";
         if (IsMergeConflictError(err))
             return "Push skipped: merge conflict while pulling remote changes. Resolve conflicts and retry.";
         if (IsPullFailureError(err))
