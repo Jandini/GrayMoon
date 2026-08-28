@@ -168,10 +168,16 @@
     color: var(--text-muted);
 }
 
-/* Level actions trigger: yellow (same as the PR "create" badge) when this level has a pull request
-   to create or a merged pull request making "Sync to Default" worth doing - draws the eye to the menu
-   instead of requiring the user to open it to discover there's something actionable inside. */
-::deep .repositories-table .dependency-level-header .gm-menu-trigger.dependency-level-count--pr-pending {
+/* Level actions caret: gray by default (like the other level-header icons), same yellow as the PR
+   "create" badge when this level has a pull request to create or a merged pull request making
+   "Sync to Default" worth doing - draws the eye to the menu without recoloring the count text itself. */
+::deep .repositories-table .dependency-level-header .dependency-level-count-caret {
+    color: #505050 !important;
+    font-size: 0.7rem;
+    margin-left: 0.3rem;
+}
+
+::deep .repositories-table .dependency-level-header .dependency-level-count-caret--pr-pending {
     color: #ffc107 !important;
 }
 
@@ -283,14 +289,11 @@
    a pull request in this level has been merged (the default branch has moved on). */
 ::deep .repositories-table .gm-menu-item.gm-menu-item--highlight,
 ::deep .repositories-table .gm-menu-item.gm-menu-item--highlight i,
-::deep .repositories-table .gm-menu-item.gm-menu-item--highlight span {
-    color: #ffc107 !important;
-}
-
+::deep .repositories-table .gm-menu-item.gm-menu-item--highlight span,
 ::deep .repositories-table .gm-menu-item.gm-menu-item--highlight:hover,
 ::deep .repositories-table .gm-menu-item.gm-menu-item--highlight:hover i,
 ::deep .repositories-table .gm-menu-item.gm-menu-item--highlight:hover span {
-    color: #ffda6a !important;
+    color: #ffc107 !important;
 }
 
 ::deep .repositories-table .gm-menu-caret {

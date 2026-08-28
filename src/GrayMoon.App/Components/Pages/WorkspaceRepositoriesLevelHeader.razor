@@ -16,11 +16,11 @@
             }
         </div>
         <div class="dependency-level-header-end">
-            <span class="dependency-level-count gm-menu-trigger @(HasActionablePr ? "dependency-level-count--pr-pending" : "")"
+            <span class="dependency-level-count gm-menu-trigger"
                   tabindex="0"
                   aria-haspopup="true"
                   aria-label="Level actions">
-                <span class="dependency-level-count-num">@DisplayRepositoryCount</span> @(DisplayRepositoryCount == 1 ? "repository" : "repositories")
+                <span class="dependency-level-count-num">@DisplayRepositoryCount</span> @(DisplayRepositoryCount == 1 ? "repository" : "repositories")<i class="bi bi-chevron-down dependency-level-count-caret @(HasActionablePr ? "dependency-level-count-caret--pr-pending" : "")" aria-hidden="true"></i>
                 <div class="gm-menu-panel level-actions-menu">
                     <div class="gm-menu-title">@(LevelKey == null ? "No dependencies" : $"Level {LevelKey}")</div>
                     <div class="gm-menu-items @(ActionsDisabled ? "gm-menu-items--disabled" : "")">
