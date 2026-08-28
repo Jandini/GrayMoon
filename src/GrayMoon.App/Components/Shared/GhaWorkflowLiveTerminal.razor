@@ -170,24 +170,36 @@
                 _stepProgress = update.StepProgress;
             }
             UpdateBoard();
-            UpdateProgressTarget(update.StepIndex, update.StepCount);
+            UpdateProgressTarget();
             StateHasChanged();
         });
 
         return update.DelayMs;
     }
 
-    // Recomputes the top-border progress bar's target percentage from the current step / total steps.
+    // Recomputes the top-border progress bar from completed steps / total steps so 100% is reached
+    // only when the last step has finished, not while it is still in_progress (StepIndex/StepCount
+    // both equal the last step in either case, so they cannot tell those two states apart).
     // A drop below the current display (new job's steps replacing the previous job's) snaps immediately
     // instead of animating backwards; forward movement is left to ProgressLoopAsync's slow crawl.
     // The very first update after this component instance is created snaps the display straight to the
     // current percentage instead of crawling up from zero, so a page refresh or grid re-render never
     // shows the bar "restarting from the beginning" - it always resumes from the true current position.
-    private void UpdateProgressTarget(int? stepIndex, int? stepCount)
+    private void UpdateProgressTarget()
     {
-        var target = (stepCount is > 0 && stepIndex is int idx)
-            ? Math.Clamp(100.0 * idx / stepCount.Value, 0, 100)
-            : 0.0;
+        var steps = _feedState?.ActiveJob?.Steps;
+        var target = 0.0;
+        if (steps is { Count: > 0 })
+        {
+            var completed = 0;
+            foreach (var step in steps)
+            {
+                if (string.Equals(step.Status, "completed", StringComparison.OrdinalIgnoreCase))
+                    completed++;
+            }
+
+            target = Math.Clamp(100.0 * completed / steps.Count, 0, 100);
+        }
 
         if (!_progressInitialized)
         {
