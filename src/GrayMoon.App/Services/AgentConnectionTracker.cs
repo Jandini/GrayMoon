@@ -10,29 +10,47 @@ public enum AgentConnectionState
     VersionMismatch
 }
 
-/// <summary>Tracks agent SignalR connection for the UI badge.</summary>
+/// <summary>Tracks agent SignalR connection for the UI badge and desktop notifications.</summary>
 public sealed class AgentConnectionTracker
 {
     private readonly object _lock = new();
     private readonly List<string> _connectionIds = [];
     private readonly Dictionary<string, string> _agentVersions = new();
+    private readonly string? _appSemVer;
     private AgentConnectionState _state = AgentConnectionState.Offline;
-    private string? _appSemVer;
+    private bool _selfUpdateInProgress;
     private event Action<AgentConnectionState>? _onStateChanged;
 
     public AgentConnectionTracker()
+        : this(Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion)
     {
-        _appSemVer = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+    }
+
+    internal AgentConnectionTracker(string? appSemVer)
+    {
+        _appSemVer = appSemVer;
     }
 
     public AgentConnectionState State
     {
-        get => _state;
-        private set
+        get
         {
-            if (_state == value) return;
-            _state = value;
-            _onStateChanged?.Invoke(value);
+            lock (_lock)
+                return _state;
+        }
+    }
+
+    /// <summary>
+    /// True from the moment a SelfUpdate command is issued until the replacement agent
+    /// reconnects with a matching version (or the update is explicitly ended). Disconnects
+    /// in this window are the install, not an unexpected offline.
+    /// </summary>
+    public bool IsSelfUpdateInProgress
+    {
+        get
+        {
+            lock (_lock)
+                return _selfUpdateInProgress;
         }
     }
 
@@ -47,59 +65,64 @@ public sealed class AgentConnectionTracker
 
     public void OnStateChanged(Action<AgentConnectionState> handler)
     {
+        AgentConnectionState current;
         lock (_lock)
         {
             _onStateChanged += handler;
-            handler(State);
+            current = _state;
         }
+        handler(current);
+    }
+
+    public void BeginSelfUpdate()
+    {
+        RaiseIfChanged(() =>
+        {
+            if (_selfUpdateInProgress)
+                return false;
+            _selfUpdateInProgress = true;
+            return true;
+        });
+    }
+
+    public void EndSelfUpdate()
+    {
+        RaiseIfChanged(() =>
+        {
+            if (!_selfUpdateInProgress)
+                return false;
+            _selfUpdateInProgress = false;
+            return true;
+        });
     }
 
     public void OnAgentConnected(string connectionId)
     {
-        lock (_lock)
+        RaiseIfChanged(() =>
         {
             if (!_connectionIds.Contains(connectionId))
                 _connectionIds.Add(connectionId);
-            UpdateState();
-        }
+            return ApplyConnectionState();
+        });
     }
 
     public void OnAgentDisconnected(string connectionId)
     {
-        lock (_lock)
+        RaiseIfChanged(() =>
         {
             _connectionIds.Remove(connectionId);
             _agentVersions.Remove(connectionId);
-            UpdateState();
-        }
+            return ApplyConnectionState();
+        });
     }
 
     public void ReportAgentSemVer(string connectionId, string agentSemVer)
     {
-        lock (_lock)
+        RaiseIfChanged(() =>
         {
             _agentVersions[connectionId] = agentSemVer;
-            UpdateState();
-        }
-    }
-
-    private void UpdateState()
-    {
-        if (_connectionIds.Count == 0)
-        {
-            State = AgentConnectionState.Offline;
-            return;
-        }
-
-        var agentVersion = _agentVersions.Values.FirstOrDefault();
-        if (agentVersion != null && !string.IsNullOrEmpty(_appSemVer) && agentVersion != _appSemVer)
-        {
-            State = AgentConnectionState.VersionMismatch;
-        }
-        else
-        {
-            State = AgentConnectionState.Online;
-        }
+            return ApplyConnectionState();
+        });
     }
 
     /// <summary>Returns the first agent connection ID for sending commands. Null if no agent connected.</summary>
@@ -107,5 +130,53 @@ public sealed class AgentConnectionTracker
     {
         lock (_lock)
             return _connectionIds.FirstOrDefault();
+    }
+
+    /// <summary>Must run while holding the instance lock. Returns true if listeners should be notified.</summary>
+    private bool ApplyConnectionState()
+    {
+        var next = ComputeState();
+        var endedUpdate = false;
+        if (_selfUpdateInProgress && next == AgentConnectionState.Online)
+        {
+            var agentVersion = _agentVersions.Values.FirstOrDefault();
+            if (agentVersion != null && !string.IsNullOrEmpty(_appSemVer) && agentVersion == _appSemVer)
+            {
+                _selfUpdateInProgress = false;
+                endedUpdate = true;
+            }
+        }
+
+        if (_state == next)
+            return endedUpdate;
+
+        _state = next;
+        return true;
+    }
+
+    private AgentConnectionState ComputeState()
+    {
+        if (_connectionIds.Count == 0)
+            return AgentConnectionState.Offline;
+
+        var agentVersion = _agentVersions.Values.FirstOrDefault();
+        if (agentVersion != null && !string.IsNullOrEmpty(_appSemVer) && agentVersion != _appSemVer)
+            return AgentConnectionState.VersionMismatch;
+
+        return AgentConnectionState.Online;
+    }
+
+    private void RaiseIfChanged(Func<bool> mutateUnderLock)
+    {
+        Action<AgentConnectionState>? handler;
+        AgentConnectionState state;
+        lock (_lock)
+        {
+            if (!mutateUnderLock())
+                return;
+            handler = _onStateChanged;
+            state = _state;
+        }
+        handler?.Invoke(state);
     }
 }

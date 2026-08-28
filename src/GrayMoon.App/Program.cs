@@ -97,6 +97,7 @@ try
     builder.Services.AddScoped<NavbarCollapseService>();
     builder.Services.AddSingleton<DesktopTopBarState>();
     builder.Services.AddSingleton<AgentConnectionTracker>();
+    builder.Services.AddHostedService<AgentUpdateDesktopNotifier>();
     builder.Services.AddSingleton<AgentQueueStateService>();
     builder.Services.AddSingleton<AgentCommandCancelSender>();
     builder.Services.AddSingleton<OverlayCommandTerminalService>();
