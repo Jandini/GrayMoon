@@ -370,29 +370,12 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (string.IsNullOrWhiteSpace(upstreamRef))
         {
             var defaultBranch = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
-            if (defaultBranch == null)
-            {
-                logger.LogDebug("No configured upstream for branch {Branch} and no default branch found for {RepoPath}, skipping commit counts", branchName, repoPath);
-                return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
-            }
-
-            var (exitDefault, stdoutDefault, stderrDefault) = await runner.RunAsync("git", $"rev-list --count {defaultBranch}..HEAD", repoPath, ct);
-            if (exitDefault != 0)
-            {
-                logger.LogWarning("Git rev-list (outgoing vs default branch) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitDefault, stdoutDefault, stderrDefault);
-                return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
-            }
-
-            var aheadCount = int.TryParse((stdoutDefault ?? "").Trim(), out var ahead) ? ahead : (int?)null;
-            sw.Stop();
-            logger.LogDebug("GetCommitCounts (vs default branch, no upstream) completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
-            return new CommitCountsProbeResult(aheadCount, null, false, CountsProbed: true, UpstreamProbed: upstreamProbed);
+            return await CountAheadOfDefaultAsync(repoPath, branchName, defaultBranch, upstreamProbed, sw, "no upstream", ct);
         }
 
         var originBranch = upstreamRef!;
 
-        var (exitCheck, _, _) = await runner.RunAsync("git", $"rev-parse --verify {originBranch}", repoPath, ct);
-        if (exitCheck != 0)
+        if (!await RefExistsAsync(repoPath, originBranch, ct))
         {
             var defaultBranch = defaultBranchOriginRef ?? await GetDefaultBranchAsync(repoPath, ct);
             if (defaultBranch == null)
@@ -401,17 +384,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
             }
 
-            var (exitDefault, stdoutDefault, stderrDefault) = await runner.RunAsync("git", $"rev-list --count {defaultBranch}..HEAD", repoPath, ct);
-            if (exitDefault != 0)
-            {
-                logger.LogWarning("Git rev-list (outgoing vs default branch) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitDefault, stdoutDefault, stderrDefault);
-                return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
-            }
-
-            var aheadCount = int.TryParse((stdoutDefault ?? "").Trim(), out var ahead) ? ahead : (int?)null;
-            sw.Stop();
-            logger.LogDebug("GetCommitCounts (vs default branch, missing remote upstream) completed in {ElapsedMs}ms for {RepoPath}", sw.ElapsedMilliseconds, repoPath);
-            return new CommitCountsProbeResult(aheadCount, null, false, CountsProbed: true, UpstreamProbed: upstreamProbed);
+            return await CountAheadOfDefaultAsync(repoPath, branchName, defaultBranch, upstreamProbed, sw, "missing remote upstream", ct);
         }
 
         // Single atomic call: left=incoming (in originBranch not HEAD), right=outgoing (in HEAD not originBranch).
@@ -445,7 +418,16 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var sw = Stopwatch.StartNew();
 
         // Single call: --left-right gives both counts atomically; left=behind (in defaultBranch not HEAD), right=ahead (in HEAD not defaultBranch).
-        var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"rev-list --left-right --count {defaultBranch}...HEAD", repoPath, ct);
+        // defaultBranch may be stale (resolved earlier, or not yet fetched) and simply not exist locally -
+        // that is an expected, already-handled miss here, not a real command failure, so it must not be
+        // mirrored to the overlay as a red stderr line (see RefExistsAsync for the same policy).
+        var (exitCode, stdout, stderr) = await runner.RunAsync(
+            "git",
+            $"rev-list --left-right --count {defaultBranch}...HEAD",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
         if (exitCode != 0)
         {
             logger.LogDebug("GetCommitCountsVsDefault failed for {RepoPath}. ExitCode={ExitCode}", repoPath, exitCode);
@@ -689,8 +671,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         var hooksPrefix = GetHooksConfigPrefix(skipHooks);
 
-        var (exitCheckLocal, _, _) = await runner.RunAsync("git", $"rev-parse --verify refs/heads/{branchName}", repoPath, ct);
-        if (exitCheckLocal == 0)
+        if (await RefExistsAsync(repoPath, $"refs/heads/{branchName}", ct))
         {
             var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"{hooksPrefix}checkout {branchName}", repoPath, ct);
             if (exitCode != 0)
@@ -701,8 +682,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
         else
         {
-            var (exitCheckRemote, _, _) = await runner.RunAsync("git", $"rev-parse --verify origin/{branchName}", repoPath, ct);
-            if (exitCheckRemote == 0)
+            if (await RefExistsAsync(repoPath, $"origin/{branchName}", ct))
             {
                 var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"{hooksPrefix}checkout -b {branchName} origin/{branchName}", repoPath, ct);
                 if (exitCode != 0)
@@ -737,8 +717,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             ? trimmedBase
             : "origin/" + trimmedBase;
 
-        var (exitRemote, _, _) = await runner.RunAsync("git", $"rev-parse --verify {remoteCandidate}", repoPath, ct);
-        if (exitRemote == 0)
+        if (await RefExistsAsync(repoPath, remoteCandidate, ct))
             startPoint = remoteCandidate;
 
         var hooksPrefix = GetHooksConfigPrefix(skipHooks);
@@ -746,8 +725,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"{hooksPrefix}checkout -b {newBranchName} --no-track {startPoint}", repoPath, ct);
         if (exitCode != 0)
         {
-            var (verifyExit, _, _) = await runner.RunAsync("git", $"rev-parse --verify refs/heads/{newBranchName}", repoPath, ct);
-            if (verifyExit == 0)
+            if (await RefExistsAsync(repoPath, $"refs/heads/{newBranchName}", ct))
             {
                 logger.LogWarning("Branch {Branch} already exists in {RepoPath}; checking out existing branch.", newBranchName, repoPath);
                 var (coExit, coOut, coErr) = await runner.RunAsync("git", $"{hooksPrefix}checkout {newBranchName}", repoPath, ct);
@@ -803,8 +781,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (string.IsNullOrWhiteSpace(localName))
             return (false, "Invalid branch name");
 
-        var (exitCheck, _, _) = await runner.RunAsync("git", $"rev-parse --verify refs/heads/{localName}", repoPath, ct);
-        if (exitCheck != 0)
+        if (!await RefExistsAsync(repoPath, $"refs/heads/{localName}", ct))
         {
             logger.LogWarning("Branch {Branch} does not exist in {RepoPath}", localName, repoPath);
             return (false, "Branch does not exist.");
@@ -900,8 +877,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return (false, "Invalid repository path or tag name");
 
         var name = tagName.Trim();
-        var (verifyExit, _, _) = await runner.RunAsync("git", $"rev-parse --verify refs/tags/{name}", repoPath, ct);
-        if (verifyExit != 0)
+        if (!await RefExistsAsync(repoPath, $"refs/tags/{name}", ct))
             return (false, $"Tag '{name}' does not exist.");
 
         var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"-c advice.detachedHead=false checkout refs/tags/{name}", repoPath, ct);
@@ -937,7 +913,13 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
     private async Task<string?> GetDefaultBranchAsync(string repoPath, CancellationToken ct)
     {
-        var (exitHead, stdoutHead, _) = await runner.RunAsync("git", "symbolic-ref refs/remotes/origin/HEAD", repoPath, ct);
+        var (exitHead, stdoutHead, _) = await runner.RunAsync(
+            "git",
+            "symbolic-ref -q refs/remotes/origin/HEAD",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
         if (exitHead == 0 && !string.IsNullOrWhiteSpace(stdoutHead))
         {
             var refName = stdoutHead.Trim();
@@ -946,19 +928,17 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
                 var branch = refName.Substring("refs/remotes/origin/".Length);
                 if (!string.IsNullOrEmpty(branch) && branch != "HEAD")
                 {
-                    var (exitVerify, _, _) = await runner.RunAsync("git", $"rev-parse --verify origin/{branch}", repoPath, ct);
-                    if (exitVerify == 0)
-                        return $"origin/{branch}";
+                    var originRef = $"origin/{branch}";
+                    if (await RefExistsAsync(repoPath, originRef, ct))
+                        return originRef;
                 }
             }
         }
 
-        var (exitMain, _, _) = await runner.RunAsync("git", "rev-parse --verify origin/main", repoPath, ct);
-        if (exitMain == 0)
+        if (await RefExistsAsync(repoPath, "origin/main", ct))
             return "origin/main";
 
-        var (exitMaster, _, _) = await runner.RunAsync("git", "rev-parse --verify origin/master", repoPath, ct);
-        if (exitMaster == 0)
+        if (await RefExistsAsync(repoPath, "origin/master", ct))
             return "origin/master";
 
         return null;
@@ -977,6 +957,64 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         var name = (stdout ?? "").Trim();
         return string.IsNullOrWhiteSpace(name) ? null : name;
+    }
+
+    /// <summary>
+    /// Existence probe for a revision. Uses <c>rev-parse --verify --quiet</c> so a missing ref is a silent
+    /// non-zero exit instead of <c>fatal: Needed a single revision</c> on the overlay (red). Overlay
+    /// remirroring on failure is also off: these checks are expected to miss (try local, then remote;
+    /// try origin/main, then origin/master).
+    /// </summary>
+    private async Task<bool> RefExistsAsync(string repoPath, string revision, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(revision))
+            return false;
+
+        var (exit, _, _) = await runner.RunAsync(
+            "git",
+            $"rev-parse --verify --quiet {revision}",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
+        return exit == 0;
+    }
+
+    private async Task<CommitCountsProbeResult> CountAheadOfDefaultAsync(
+        string repoPath,
+        string branchName,
+        string? defaultBranch,
+        bool upstreamProbed,
+        Stopwatch sw,
+        string reason,
+        CancellationToken ct)
+    {
+        if (defaultBranch == null)
+        {
+            logger.LogDebug("No default branch found for {RepoPath} ({Reason}), skipping commit counts for {Branch}", repoPath, reason, branchName);
+            return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
+        }
+
+        // defaultBranch may be stale (resolved earlier, or not yet fetched) and simply not exist locally -
+        // that is an expected, already-handled miss here, not a real command failure, so it must not be
+        // mirrored to the overlay as a red stderr line (see RefExistsAsync for the same policy).
+        var (exitDefault, stdoutDefault, stderrDefault) = await runner.RunAsync(
+            "git",
+            $"rev-list --count {defaultBranch}..HEAD",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
+        if (exitDefault != 0)
+        {
+            logger.LogWarning("Git rev-list (outgoing vs default branch) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitDefault, stdoutDefault, stderrDefault);
+            return new CommitCountsProbeResult(null, null, false, CountsProbed: false, UpstreamProbed: upstreamProbed);
+        }
+
+        var aheadCount = int.TryParse((stdoutDefault ?? "").Trim(), out var ahead) ? ahead : (int?)null;
+        sw.Stop();
+        logger.LogDebug("GetCommitCounts (vs default branch, {Reason}) completed in {ElapsedMs}ms for {RepoPath}", reason, sw.ElapsedMilliseconds, repoPath);
+        return new CommitCountsProbeResult(aheadCount, null, false, CountsProbed: true, UpstreamProbed: upstreamProbed);
     }
 
     public async Task<(bool Success, bool Committed, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct)
@@ -1032,8 +1070,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (false, "Invalid repository path or branch name");
 
-        var (exitVerify, _, _) = await runner.RunAsync("git", $"rev-parse --verify origin/{branchName}", repoPath, ct);
-        if (exitVerify != 0)
+        if (!await RefExistsAsync(repoPath, $"origin/{branchName}", ct))
         {
             logger.LogInformation("Remote ref origin/{BranchName} not found in {RepoPath} - pushing branch upstream first", branchName, repoPath);
             var (pushOk, pushErr) = await PushAsync(repoPath, branchName, bearerToken, setTracking: true, ct: ct);
