@@ -1,0 +1,68 @@
+@* Reused standalone (single-repository hover, in WorkspaceRepositoriesRow) and nested as the
+   "Open in GitHub" flyout submenu (level header, in WorkspaceRepositoriesLevelHeader). *@
+@inject IJSRuntime JS
+
+@if (ShowTitle)
+{
+    <div class="gm-menu-title">@Title</div>
+}
+@foreach (var item in Items)
+{
+    <div class="gm-menu-item"
+         role="button"
+         tabindex="0"
+         @onclick="() => OnItemClickAsync(item.Suffix)"
+         @onclick:stopPropagation>
+        <i class="bi @item.Icon" aria-hidden="true"></i><span>@item.Label</span>
+    </div>
+}
+
+@code {
+    /// <summary>Base GitHub repository URLs (no trailing slash requirement) to open, one per repository.</summary>
+    [Parameter] public IReadOnlyList<string>? BaseUrls { get; set; }
+    /// <summary>Optional map of base repository URL to a specific open pull request URL, used for the "Pull Requests" item instead of the generic /pulls list.</summary>
+    [Parameter] public IReadOnlyDictionary<string, string>? PrPullMap { get; set; }
+    [Parameter] public bool ShowTitle { get; set; } = true;
+    [Parameter] public string Title { get; set; } = "Open in GitHub...";
+
+    private static readonly (string Label, string Icon, string Suffix)[] Items =
+    [
+        ("Branches", "bi-signpost-2", "/branches"),
+        ("Pull Requests", "bi-git", "/pulls"),
+        ("Actions", "bi-play-circle", "/actions"),
+        ("Releases", "bi-box-seam", "/releases"),
+        ("Tags", "bi-tag", "/tags"),
+        ("Issues", "bi-exclamation-circle", "/issues"),
+        ("Settings", "bi-gear", "/settings"),
+    ];
+
+    private async Task OnItemClickAsync(string suffix)
+    {
+        var baseUrls = BaseUrls ?? [];
+        List<string> urls;
+        if (suffix == "/pulls" && PrPullMap is { Count: > 0 })
+        {
+            urls = baseUrls
+                .Where(u => !string.IsNullOrEmpty(u))
+                .Select(u => PrPullMap.TryGetValue(u, out var prUrl) ? prUrl : AppendSuffix(u, suffix))
+                .ToList();
+        }
+        else
+        {
+            urls = baseUrls
+                .Where(u => !string.IsNullOrEmpty(u))
+                .Select(u => AppendSuffix(u, suffix))
+                .Where(u => u.Length > 0)
+                .ToList();
+        }
+
+        if (urls.Count > 0)
+            await JS.InvokeVoidAsync("graymoonOpenUrls", urls);
+    }
+
+    private static string AppendSuffix(string url, string suffix)
+    {
+        var trimmed = (url ?? string.Empty).TrimEnd('/');
+        return trimmed.Length == 0 ? string.Empty : trimmed + suffix;
+    }
+}

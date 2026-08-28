@@ -1,6 +1,8 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services
 @using Microsoft.AspNetCore.Components.Web
+@inject IJSRuntime JS
+@inject IToastService ToastService
 
 <tr class="dependency-level-header">
     <td colspan="@ColSpan" class="dependency-level-header-cell">
@@ -8,72 +10,62 @@
             <span class="dependency-level-title @(LevelKey == null ? "dependency-level-no-projects" : "")">@(LevelKey == null ? "No dependencies" : $"Level {LevelKey}")</span>
             @if (LevelKey.HasValue)
             {
-                <a href="@WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, level: LevelKey!.Value)" class="dependency-level-graph-link" title="View dependency graph for this level" aria-label="Dependency graph">
+                <a href="@WorkspaceUrlHelper.GetDependencyGraphUrl(WorkspaceId, level: LevelKey!.Value)" class="dependency-level-graph-link" title="View dependency graph" aria-label="Dependency graph">
                     <i class="bi bi-diagram-3" aria-hidden="true"></i>
                 </a>
             }
         </div>
         <div class="dependency-level-header-end">
-            <span class="dependency-level-icons @(ActionsDisabled ? "dependency-level-icons--disabled" : "")">
-                <span class="dependency-level-copy-pr-link pr-copy-dropdown-wrap"
-                      data-pr-urls="@OpenPrUrlsJson"
-                      tabindex="0"
-                      aria-haspopup="true"
-                      aria-label="Copy open PR links to clipboard">
-                    <i class="bi bi-share" aria-hidden="true"></i>
-                </span>
-                <span class="dependency-level-sync-to-default-link"
-                      role="button"
-                      tabindex="@(ActionsDisabled ? -1 : 0)"
-                      title="Sync to default branch..."
-                      style="cursor: @(ActionsDisabled ? "not-allowed" : "pointer");"
-                      @onclick="HandleSyncToDefault"
-                      @onclick:preventDefault
-                      aria-label="Sync to default branch"
-                      aria-disabled="@ActionsDisabled">
-                    <i class="bi bi-rewind" aria-hidden="true"></i>
-                </span>
-                <span class="dependency-level-sync-commits-link"
-                      role="button"
-                      tabindex="@(ActionsDisabled ? -1 : 0)"
-                      title="Sync commits for all repositories in this level"
-                      style="cursor: @(ActionsDisabled ? "not-allowed" : "pointer");"
-                      @onclick="HandleSyncCommits"
-                      @onclick:preventDefault
-                      aria-label="Sync commits"
-                      aria-disabled="@ActionsDisabled">
-                    <i class="bi bi-arrow-down-up" aria-hidden="true"></i>
-                </span>
-                <span class="dependency-level-pr-link"
-                      role="button"
-                      tabindex="@(ActionsDisabled ? -1 : 0)"
-                      title="Open Pull Request in GitHub..."
-                      style="cursor: @(ActionsDisabled ? "not-allowed" : "pointer");"
-                      @onclick="HandleOpenPr"
-                      @onclick:preventDefault
-                      @onclick:stopPropagation
-                      aria-label="Open Pull Request"
-                      aria-disabled="@ActionsDisabled">
-                    <i class="bi bi-git" aria-hidden="true"></i>
-                </span>
-                <span class="dependency-level-sync-link"
-                      role="button"
-                      tabindex="@(ActionsDisabled ? -1 : 0)"
-                      title="Synchronize all repositories in this level..."
-                      style="cursor: @(ActionsDisabled ? "not-allowed" : "pointer");"
-                      @onclick="HandleSyncLevel"
-                      @onclick:preventDefault
-                      aria-label="Sync level"
-                      aria-disabled="@ActionsDisabled">
-                    <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
-                </span>
-            </span>
-            <span class="dependency-level-count github-dropdown-wrap"
-                  data-urls="@BaseUrlsJson"
-                  data-pr-pull-map="@OpenPrPullMapJson"
+            <span class="dependency-level-count gm-menu-trigger"
                   tabindex="0"
-                  aria-haspopup="true">
-                <span class="dependency-level-count-num">@DisplayRepositoryCount</span> @(DisplayRepositoryCount == 1 ? "repository" : "repositories")
+                  aria-haspopup="true"
+                  aria-label="Level actions">
+                <span class="dependency-level-count-num">@DisplayRepositoryCount</span> @(DisplayRepositoryCount == 1 ? "repository" : "repositories")<i class="bi bi-chevron-down dependency-level-count-caret @(HasActionablePr ? "dependency-level-count-caret--pr-pending" : "")" aria-hidden="true"></i>
+                <div class="gm-menu-panel level-actions-menu">
+                    <div class="gm-menu-title">@(LevelKey == null ? "No dependencies" : $"Level {LevelKey}")</div>
+                    <div class="gm-menu-items @(ActionsDisabled ? "gm-menu-items--disabled" : "")">
+                        <div class="gm-menu-item @(HasMergedPr ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Sync to default branch" @onclick="HandleSyncToDefault" @onclick:stopPropagation>
+                            <i class="bi bi-rewind" aria-hidden="true"></i><span>Sync To Default</span>
+                        </div>
+                        <div class="gm-menu-item @(HasSyncCommits ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Sync commits" @onclick="HandleSyncCommits" @onclick:stopPropagation>
+                            <i class="bi bi-arrow-down-up" aria-hidden="true"></i><span>Sync Commits</span>
+                        </div>
+                        <div class="gm-menu-item" role="button" tabindex="0" title="Sync repositories" @onclick="HandleSyncLevel" @onclick:stopPropagation>
+                            <i class="bi bi-arrow-repeat" aria-hidden="true"></i><span>Sync Repositories</span>
+                        </div>
+                        <div class="gm-menu-item" role="button" tabindex="0" title="Fetch commits" @onclick="HandleFetchLevel" @onclick:stopPropagation>
+                            <i class="bi bi-cloud-download" aria-hidden="true"></i><span>Fetch Repositories</span>
+                        </div>
+                        <div class="gm-menu-item" role="button" tabindex="0" title="Restore NuGet packages" @onclick="HandleRestorePackagesLevel" @onclick:stopPropagation>
+                            <i class="bi bi-box-seam" aria-hidden="true"></i><span>Restore Packages</span>
+                        </div>
+                        <div class="gm-menu-item @(HasCreatablePr ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Create pull requests" @onclick="HandleOpenPr" @onclick:stopPropagation>
+                            <i class="bi bi-git" aria-hidden="true"></i><span>Create PRs...</span>
+                        </div>
+                    </div>
+                    <div class="gm-menu-item gm-menu-trigger gm-menu-item--flyout" role="button" tabindex="0" aria-haspopup="true" title="Copy to clipboard">
+                        <i class="bi bi-share" aria-hidden="true"></i><span>Share...</span>
+                        <i class="bi bi-chevron-right gm-menu-caret" aria-hidden="true"></i>
+                        <div class="gm-menu-panel gm-menu-panel--submenu">
+                            <div class="gm-menu-item" role="button" tabindex="0" title="Copy PR links" @onclick="HandleCopyPrLinks" @onclick:stopPropagation>
+                                <i class="bi bi-clipboard" aria-hidden="true"></i><span>Pull Requests Links</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="gm-menu-item gm-menu-trigger gm-menu-item--flyout"
+                         role="button"
+                         tabindex="0"
+                         aria-haspopup="true"
+                         title="Open in GitHub"
+                         @onclick="HandleOpenAllInGitHub"
+                         @onclick:stopPropagation>
+                        <i class="bi bi-github" aria-hidden="true"></i><span>Open in GitHub</span>
+                        <i class="bi bi-chevron-right gm-menu-caret" aria-hidden="true"></i>
+                        <div class="gm-menu-panel gm-menu-panel--submenu">
+                            <GitHubSectionsMenu BaseUrls="@LevelBaseUrls" PrPullMap="@OpenPrPullMap" ShowTitle="false" />
+                        </div>
+                    </div>
+                </div>
             </span>
         </div>
     </td>
@@ -91,21 +83,28 @@
     [Parameter] public EventCallback OnSyncCommits { get; set; }
     [Parameter] public EventCallback OnOpenPr { get; set; }
     [Parameter] public EventCallback OnSyncLevel { get; set; }
+    [Parameter] public EventCallback OnFetchLevel { get; set; }
+    [Parameter] public EventCallback OnRestorePackagesLevel { get; set; }
     [Parameter] public IReadOnlyList<string>? OpenPrUrls { get; set; }
     [Parameter] public IReadOnlyDictionary<string, string>? OpenPrPullMap { get; set; }
+    /// <summary>True when at least one repository in this level has commits ahead of default with no open PR - "Create PRs..." is highlighted.</summary>
+    [Parameter] public bool HasCreatablePr { get; set; }
+    /// <summary>True when at least one repository in this level has a merged pull request - "Sync to Default" is highlighted since the default branch has moved on.</summary>
+    [Parameter] public bool HasMergedPr { get; set; }
+    /// <summary>True when at least one repository in this level has incoming or outgoing commits - "Sync Commits" is highlighted.</summary>
+    [Parameter] public bool HasSyncCommits { get; set; }
+
+    private bool HasActionablePr => HasCreatablePr || HasMergedPr || HasSyncCommits;
 
     private int DisplayRepositoryCount => RepositoryCount > 0 ? RepositoryCount : (Group?.Count() ?? 0);
 
-    private string OpenPrUrlsJson => System.Text.Json.JsonSerializer.Serialize(OpenPrUrls ?? (IReadOnlyList<string>)[]);
-
-    private string OpenPrPullMapJson => System.Text.Json.JsonSerializer.Serialize(OpenPrPullMap ?? (IReadOnlyDictionary<string, string>)new Dictionary<string, string>());
-
-    private string BaseUrlsJson => System.Text.Json.JsonSerializer.Serialize(
+    private List<string> LevelBaseUrls =>
         Group?.Select(wr => wr.Repository)
               .Where(r => r != null)
               .Select(r => RepositoryUrlHelper.GetRepositoryUrl(r!.CloneUrl))
               .Where(u => !string.IsNullOrEmpty(u))
-              .ToList() ?? []);
+              .Select(u => u!)
+              .ToList() ?? [];
 
     private async Task HandleSyncToDefault()
     {
@@ -125,5 +124,42 @@
     private async Task HandleSyncLevel()
     {
         if (!ActionsDisabled) await OnSyncLevel.InvokeAsync();
+    }
+
+    private async Task HandleFetchLevel()
+    {
+        if (!ActionsDisabled) await OnFetchLevel.InvokeAsync();
+    }
+
+    private async Task HandleRestorePackagesLevel()
+    {
+        if (!ActionsDisabled) await OnRestorePackagesLevel.InvokeAsync();
+    }
+
+    private async Task HandleOpenAllInGitHub()
+    {
+        var urls = LevelBaseUrls;
+        if (urls.Count > 0)
+            await JS.InvokeVoidAsync("graymoonOpenUrls", urls);
+    }
+
+    private async Task HandleCopyPrLinks()
+    {
+        var urls = OpenPrUrls ?? [];
+        if (urls.Count == 0)
+        {
+            ToastService.Show("No open pull requests in this level.");
+            return;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", string.Join("\n", urls));
+            ToastService.Show(urls.Count == 1 ? "1 PR link copied to clipboard." : $"{urls.Count} PR links copied to clipboard.");
+        }
+        catch
+        {
+            ToastService.ShowError("Could not copy to clipboard.");
+        }
     }
 }

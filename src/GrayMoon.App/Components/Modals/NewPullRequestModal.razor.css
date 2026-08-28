@@ -48,6 +48,7 @@
 }
 
 .new-pr-reviewer-list {
+    min-height: 2.1rem;
     max-height: calc(3 * 2.1rem);
     overflow-y: auto;
     background-color: color-mix(in srgb, var(--bg-input) 85%, #000 15%);
@@ -71,6 +72,19 @@
 
 .new-pr-reviewer-list::-webkit-scrollbar-thumb:hover {
     background-color: #8a8a8a;
+}
+
+.new-pr-reviewer-item,
+.new-pr-reviewer-status {
+    min-height: 2.1rem;
+    box-sizing: border-box;
+}
+
+.new-pr-reviewer-spinner {
+    width: 0.875rem;
+    height: 0.875rem;
+    border-width: 0.15em;
+    flex-shrink: 0;
 }
 
 .new-pr-reviewer-item {

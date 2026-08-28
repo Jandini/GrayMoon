@@ -142,8 +142,13 @@
                                                                            OnSyncCommits="async () => await SyncCommitsForLevelAsync(slot.LevelKey)"
                                                                            OnOpenPr="async () => await OpenPullRequestDialogForLevelAsync(slot.LevelKey)"
                                                                            OnSyncLevel="async () => await SyncLevelForLevelAsync(slot.LevelKey)"
+                                                                           OnFetchLevel="async () => await FetchLevelAsync(slot.LevelKey)"
+                                                                           OnRestorePackagesLevel="async () => await RestorePackagesLevelAsync(slot.LevelKey)"
                                                                            OpenPrUrls="@GetOpenPrUrlsForGroup(levelGroup)"
                                                                            OpenPrPullMap="@GetOpenPrPullMapForGroup(levelGroup)"
+                                                                           HasCreatablePr="@GroupHasCreatablePr(levelGroup)"
+                                                                           HasMergedPr="@GroupHasMergedPr(levelGroup)"
+                                                                           HasSyncCommits="@GroupHasSyncCommits(levelGroup)"
                                                                            />
                                     }
                                     else if (_linkByWrlId.TryGetValue(slot.WorkspaceRepositoryId, out var wr))

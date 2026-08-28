@@ -39,6 +39,9 @@ public sealed partial class WorkspaceRepositories
     private double? _pendingRestoreScrollTop;
     /// <summary>Scroll offset to hand to grayMoonVirtualScroll.attach on the next attach, set by ResetAndLoadFromTopAsync. 0 means "start at top" (default / search reset).</summary>
     private double _attachInitialScrollTop;
+    /// <summary>Last real browser scroll position reported via OnVirtualScroll. Used by RefreshFromSync to recompute the visible slot range against a freshly rebuilt _slots list instead of reusing stale slot indices, which can point at the wrong row once a level split/merge shifts slot positions.</summary>
+    private double _lastKnownScrollTopPx;
+    private double _lastKnownClientHeightPx = VirtualInitialViewportSlots * VirtualRowHeightPx;
     private string ScrollStorageKey => $"graymoon:ws-repos-scroll:{WorkspaceId}";
     private bool HasRepositories => (_headerState?.TotalCount ?? 0) > 0;
     private bool hasUnmatchedDependencies => _headerState?.HasUnmatchedDependencies ?? false;

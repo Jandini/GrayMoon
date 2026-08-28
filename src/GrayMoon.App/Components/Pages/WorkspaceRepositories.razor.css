@@ -129,123 +129,10 @@
     color: var(--text-muted);
 }
 
-/* github-dropdown-wrap: signals the JS to show the dropdown on hover */
-::deep .repositories-table .dependency-level-header .github-dropdown-wrap {
-    cursor: pointer;
-    user-select: none;
-}
-
-::deep .repositories-table .dependency-level-header .dependency-level-icons {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-shrink: 0;
-}
-
-::deep .repositories-table .dependency-level-header .dependency-level-icons--disabled {
-    pointer-events: none;
-    opacity: 0.7;
-}
-
 /* No dependencies: gray, not bold */
 ::deep .repositories-table .dependency-level-header td.dependency-level-header-cell .dependency-level-title.dependency-level-no-projects {
     color: #6a6a6a !important;
     font-weight: 400;
-}
-
-/* Pull Request icon: dark gray */
-::deep .repositories-table .dependency-level-header .dependency-level-pr-link,
-::deep .repositories-table .dependency-level-header .dependency-level-pr-link i {
-    color: #505050 !important;
-    cursor: pointer;
-    font-weight: 400;
-    display: inline-flex;
-    align-items: center;
-}
-
-::deep .repositories-table .dependency-level-header .dependency-level-pr-link i {
-    font-size: 1.1rem;
-}
-
-::deep .repositories-table .dependency-level-header .dependency-level-pr-link:hover,
-::deep .repositories-table .dependency-level-header .dependency-level-pr-link:hover i {
-    color: #707070 !important;
-}
-
-/* Sync Commits icon: dark gray */
-::deep .repositories-table .dependency-level-header .dependency-level-sync-to-default-link,
-::deep .repositories-table .dependency-level-header .dependency-level-sync-to-default-link i {
-    color: #505050 !important;
-    cursor: pointer;
-    font-weight: 400;
-    display: inline-flex;
-    align-items: center;
-}
-
-::deep .repositories-table .dependency-level-header .dependency-level-sync-to-default-link i {
-    font-size: 1.1rem;
-}
-
-::deep .repositories-table .dependency-level-header .dependency-level-sync-to-default-link:hover,
-::deep .repositories-table .dependency-level-header .dependency-level-sync-to-default-link:hover i {
-    color: #707070 !important;
-}
-
-/* Sync Commits icon: dark gray */
-::deep .repositories-table .dependency-level-header .dependency-level-sync-commits-link,
-::deep .repositories-table .dependency-level-header .dependency-level-sync-commits-link i {
-    color: #505050 !important;
-    cursor: pointer;
-    font-weight: 400;
-    display: inline-flex;
-    align-items: center;
-}
-
-::deep .repositories-table .dependency-level-header .dependency-level-sync-commits-link i {
-    font-size: 1.1rem;
-}
-
-::deep .repositories-table .dependency-level-header .dependency-level-sync-commits-link:hover,
-::deep .repositories-table .dependency-level-header .dependency-level-sync-commits-link:hover i {
-    color: #707070 !important;
-}
-
-/* Sync (level) icon: same style as PR/sync-commits */
-::deep .repositories-table .dependency-level-header .dependency-level-sync-link,
-::deep .repositories-table .dependency-level-header .dependency-level-sync-link i {
-    color: #505050 !important;
-    cursor: pointer;
-    font-weight: 400;
-    display: inline-flex;
-    align-items: center;
-}
-
-::deep .repositories-table .dependency-level-header .dependency-level-sync-link i {
-    font-size: 1.1rem;
-}
-
-::deep .repositories-table .dependency-level-header .dependency-level-sync-link:hover,
-::deep .repositories-table .dependency-level-header .dependency-level-sync-link:hover i {
-    color: #707070 !important;
-}
-
-/* Copy PR links icon: same style as other level header icons */
-::deep .repositories-table .dependency-level-header .dependency-level-copy-pr-link,
-::deep .repositories-table .dependency-level-header .dependency-level-copy-pr-link i {
-    color: #505050 !important;
-    cursor: pointer;
-    font-weight: 400;
-    display: inline-flex;
-    align-items: center;
-}
-
-::deep .repositories-table .dependency-level-header .dependency-level-copy-pr-link i {
-    font-size: 1.1rem;
-}
-
-::deep .repositories-table .dependency-level-header .dependency-level-copy-pr-link:hover,
-::deep .repositories-table .dependency-level-header .dependency-level-copy-pr-link:hover i {
-    color: #707070 !important;
 }
 
 /* Graph icon link: same style as PR/sync icons */
@@ -266,6 +153,154 @@
 ::deep .repositories-table .dependency-level-header .dependency-level-graph-link:hover,
 ::deep .repositories-table .dependency-level-header .dependency-level-graph-link:hover i {
     color: #707070 !important;
+}
+
+/* Hover menu trigger: the count text (level header) and the repository name (row) both reveal
+   their own direct-child .gm-menu-panel on hover/focus. Positioning (top/left/right) is computed
+   by gm-hover-menu.js; visibility itself is pure CSS so nested flyouts stay open while the cursor
+   moves from a trigger into its own panel (a DOM descendant, regardless of position:fixed). */
+::deep .repositories-table .gm-menu-trigger {
+    cursor: pointer;
+    user-select: none;
+}
+
+::deep .repositories-table .dependency-level-header .gm-menu-trigger {
+    color: var(--text-muted);
+}
+
+/* Level actions caret: gray by default (like the other level-header icons), same yellow as the PR
+   "create" badge when this level has a pull request to create, a merged pull request making
+   "Sync to Default" worth doing, or repos with incoming/outgoing commits making
+   "Sync Commits" worth doing - draws the eye to the menu without recoloring the count text itself. */
+::deep .repositories-table .dependency-level-header .dependency-level-count-caret {
+    color: #505050 !important;
+    font-size: 0.7rem;
+    margin-left: 0.3rem;
+}
+
+::deep .repositories-table .dependency-level-header .dependency-level-count-caret--pr-pending {
+    color: #ffc107 !important;
+}
+
+::deep .repositories-table .repo-name-cell.gm-menu-trigger {
+    display: inline-flex;
+    align-items: center;
+    cursor: default;
+}
+
+::deep .repositories-table .gm-menu-panel {
+    position: fixed;
+    top: -9999px;
+    left: -9999px;
+    right: auto;
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 0.35rem;
+    padding: 0.2rem 0;
+    font-size: 0.82rem;
+    font-family: var(--bs-body-font-family);
+    color: #e0e0e0;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.65);
+    z-index: 9999;
+    min-width: 11rem;
+    white-space: nowrap;
+    /* gm-hover-menu.js repositions/clamps the panel to stay on-screen (flips above the trigger, or
+       clamps to the viewport, when there isn't room below); this is a fallback so an unusually tall
+       menu still scrolls into view instead of being cropped by its own box. */
+    max-height: calc(100vh - 1rem);
+    overflow-y: auto;
+    opacity: 0;
+    pointer-events: none;
+    /* Keep the panel hit-testable for a short grace period after the trigger stops matching :hover, so a
+       slow diagonal move across the small screen-space gap between trigger and panel (gm-hover-menu.js
+       positions the panel a few px away from its trigger) doesn't get treated as "left the menu" before
+       the cursor actually arrives over the panel. Without this, pointer-events flips to none the instant
+       :hover ends, so the panel can no longer re-trigger the ancestor's :hover once the cursor reaches it. */
+    transition: opacity 0.12s ease, pointer-events 0s linear 0.3s;
+}
+
+::deep .repositories-table .gm-menu-trigger:hover > .gm-menu-panel,
+::deep .repositories-table .gm-menu-trigger:focus-within > .gm-menu-panel {
+    opacity: 1;
+    pointer-events: auto;
+    transition-delay: 0s;
+}
+
+/* Repository name hover menu: wait 1s before showing so it doesn't pop up while the cursor is just
+   passing over the name (e.g. scanning the list); other hover menus in this table still open instantly. */
+::deep .repositories-table .repo-name-cell.gm-menu-trigger:hover > .gm-menu-panel,
+::deep .repositories-table .repo-name-cell.gm-menu-trigger:focus-within > .gm-menu-panel {
+    transition-delay: 1s;
+}
+
+/* After clicking a menu action (e.g. "Sync Repositories"), gm-hover-menu.js adds this class to force
+   the menu closed immediately instead of leaving it visible (still :hover-matched) until the cursor
+   physically moves away. Removed again on mouseleave so the next hover opens normally. */
+::deep .repositories-table .gm-menu-trigger.gm-menu-force-closed > .gm-menu-panel {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transition: none !important;
+}
+
+::deep .repositories-table .gm-menu-title {
+    color: #888;
+    font-size: 0.72rem;
+    padding: 0.3rem 0.8rem 0.3rem;
+    border-bottom: 1px solid #383838;
+    margin-bottom: 0.15rem;
+    cursor: default;
+    letter-spacing: 0.02em;
+}
+
+::deep .repositories-table .gm-menu-items--disabled {
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+::deep .repositories-table .gm-menu-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.32rem 0.8rem;
+    cursor: pointer;
+    color: #d0d0d0;
+    text-decoration: none;
+    transition: background 0.08s, color 0.08s;
+}
+
+::deep .repositories-table .gm-menu-item:hover {
+    background: #2d2d2d;
+    color: #fff;
+}
+
+::deep .repositories-table .gm-menu-item i {
+    font-size: 0.78rem;
+    color: #777;
+    flex-shrink: 0;
+    transition: color 0.08s;
+}
+
+::deep .repositories-table .gm-menu-item:hover i {
+    color: #aaa;
+}
+
+/* Same yellow as the PR "create" badge / actionable divergence count: highlights "Create PRs..." when
+   this level has a repository with commits ahead of default and no open PR, "Sync to Default" when
+   a pull request in this level has been merged (the default branch has moved on), and "Sync Commits"
+   when a repository has incoming or outgoing commits. */
+::deep .repositories-table .gm-menu-item.gm-menu-item--highlight,
+::deep .repositories-table .gm-menu-item.gm-menu-item--highlight i,
+::deep .repositories-table .gm-menu-item.gm-menu-item--highlight span,
+::deep .repositories-table .gm-menu-item.gm-menu-item--highlight:hover,
+::deep .repositories-table .gm-menu-item.gm-menu-item--highlight:hover i,
+::deep .repositories-table .gm-menu-item.gm-menu-item--highlight:hover span {
+    color: #ffc107 !important;
+}
+
+::deep .repositories-table .gm-menu-caret {
+    margin-left: auto;
+    padding-left: 0.5rem;
 }
 
 .repositories-table thead,

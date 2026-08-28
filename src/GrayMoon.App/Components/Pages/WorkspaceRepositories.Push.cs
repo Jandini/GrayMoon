@@ -308,6 +308,33 @@ public sealed partial class WorkspaceRepositories
         }
     }
 
+    private async Task RestorePackagesLevelAsync(int? levelKey)
+    {
+        if (workspace == null || IsJobRunning) return;
+        var repoIds = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToHashSet();
+        if (repoIds.Count == 0) return;
+
+        var label = $"Restoring packages in {repoIds.Count} {(repoIds.Count == 1 ? "repository" : "repositories")}...";
+        StartPageJob(label, async (job, ct) =>
+        {
+            job.ReportProgress("Restoring packages...");
+            var count = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, int>(
+                svc => svc.RestoreSyncedWorkspacePackagesAsync(WorkspaceId, repoIds, job.ReportProgress, ct));
+
+            if (count > 0)
+                SafeInvoke(() => ToastService.Show($"Restored packages in {count} {(count == 1 ? "project" : "projects")}"));
+        }, new PageJobOptions
+        {
+            RefreshOnSuccess = false,
+            CancelToast = "Restore cancelled.",
+            OnError = ex =>
+            {
+                Logger.LogError(ex, "Restore packages failed for a dependency level in workspace {WorkspaceId}", WorkspaceId);
+                SafeInvoke(() => ToastService.ShowError($"Restore failed: {ex.Message}"));
+            }
+        });
+    }
+
     private async Task RestoreSyncedPackagesCoreAsync(IReadOnlySet<int> syncedRepoIds, BackgroundJobHandle job, CancellationToken ct)
     {
         if (syncedRepoIds.Count == 0) return;

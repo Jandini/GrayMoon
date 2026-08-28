@@ -785,10 +785,12 @@ public class WorkspaceGitService(
     /// <summary>
     /// Runs git fetch + tag list + commit counts for every repo in the workspace (no GitVersion, no csproj scan,
     /// no branch listing). Updates only commit-count fields and RepositoryBranch tag rows in the DB.
-    /// Significantly faster than a full Sync.
+    /// Significantly faster than a full Sync. Pass <paramref name="repositoryIds"/> to restrict the fetch to
+    /// a specific subset (e.g. one dependency level); null fetches every repository in the workspace.
     /// </summary>
     public async Task QuickFetchAsync(
         int workspaceId,
+        IReadOnlyCollection<int>? repositoryIds = null,
         Action<int, int>? onProgress = null,
         CancellationToken cancellationToken = default)
     {
@@ -802,7 +804,7 @@ public class WorkspaceGitService(
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
 
         var links = workspace.Repositories
-            .Where(l => l.Repository != null)
+            .Where(l => l.Repository != null && (repositoryIds == null || repositoryIds.Contains(l.RepositoryId)))
             .ToList();
 
         if (links.Count == 0) return;

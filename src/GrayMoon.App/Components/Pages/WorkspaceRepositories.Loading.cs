@@ -234,6 +234,9 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
+        _lastKnownScrollTopPx = scrollTop;
+        _lastKnownClientHeightPx = clientHeight;
+
         var scrollGeneration = Interlocked.Increment(ref _scrollGeneration);
         var queryGeneration = _queryLoader.Generation;
         var token = _queryLoader.GetQueryToken();
@@ -411,7 +414,7 @@ public sealed partial class WorkspaceRepositories
             }
             workspace = w;
             // Keep scroll position: rebuild the index/visible range in place instead of resetting to the top
-            // (RefreshFromSync already preserves _visibleStart/_visibleEnd and leaves virtual scroll attached).
+            // (RefreshFromSync recomputes the visible range from the live scroll pixel position and leaves virtual scroll attached).
             await RefreshFromSync();
         }
         catch (ObjectDisposedException ex)
@@ -444,7 +447,9 @@ public sealed partial class WorkspaceRepositories
                     return;
                 }
                 workspace = w;
-                // Rebuild index when levels/order may have changed; keep scroll position via virtual scroll.
+                // Rebuild index when levels/order may have changed. The visible slot range is recomputed below
+                // from the live scroll pixel position rather than reusing old slot indices, since a level
+                // split/merge shifts slot positions in the rebuilt list.
                 var filter = new WorkspaceRepositoryLinkListFilter(WorkspaceId, _effectiveSearch);
                 var index = await LinkListQueryService.GetIndexAsync(filter, token);
                 if (_disposed) return;
@@ -457,15 +462,10 @@ public sealed partial class WorkspaceRepositories
                 repoSyncStatus = new();
                 _tooltipLoadedRepoIds.Clear();
                 _tooltipLoadInFlight.Clear();
-                if (_visibleEnd < 0 || _visibleStart >= _slots.Count)
-                {
-                    var initialEnd = Math.Min(_slots.Count - 1, VirtualInitialViewportSlots - 1);
-                    UpdateVisibleRange(0, Math.Max(-1, initialEnd));
-                }
-                else
-                {
-                    UpdateVisibleRange(_visibleStart, Math.Min(_visibleEnd, _slots.Count - 1));
-                }
+                var rangeStart = _lastKnownScrollTopPx - (VirtualOverscanSlots * VirtualRowHeightPx);
+                var rangeEnd = _lastKnownScrollTopPx + _lastKnownClientHeightPx + (VirtualOverscanSlots * VirtualRowHeightPx);
+                var (rebuiltStart, rebuiltEnd) = ComputeRangeForPixelWindow(rangeStart, rangeEnd);
+                UpdateVisibleRange(rebuiltStart, Math.Max(-1, rebuiltEnd));
                 await EnsureSlotsHydratedAsync(_visibleStart, _visibleEnd, token);
                 if (_virtualScrollAttached)
                 {

@@ -44,6 +44,33 @@ public sealed partial class WorkspaceRepositories
             ShowConfirm($"Do you want to sync {filtered.Count} repositories in this level?", () => SyncLevelAsync(filtered));
     }
 
+    private async Task FetchLevelAsync(int? levelKey)
+    {
+        if (workspace == null || IsJobRunning) return;
+        var repoIds = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToList();
+        if (repoIds.Count == 0) return;
+        errorMessage = null;
+        var label = $"Fetching {repoIds.Count} {(repoIds.Count == 1 ? "repository" : "repositories")}...";
+        StartPageJob(label, async (job, ct) =>
+        {
+            await ScopedExecutor.ExecuteAsync<WorkspaceGitService>(
+                svc => svc.QuickFetchAsync(
+                    WorkspaceId,
+                    repositoryIds: repoIds,
+                    onProgress: (done, total) => job.ReportProgress($"Fetched {done} of {total}"),
+                    cancellationToken: ct),
+                ct);
+        }, new PageJobOptions
+        {
+            CancelToast = "Fetch cancelled.",
+            OnError = ex =>
+            {
+                Logger.LogError(ex, "Fetch failed for a dependency level in workspace {WorkspaceId}", WorkspaceId);
+                SafeInvoke(() => errorMessage = "Fetch failed. Check the logs for details.");
+            }
+        });
+    }
+
     private Task QuickFetchAsync()
     {
         if (workspace == null || !HasRepositories || IsJobRunning) return Task.CompletedTask;

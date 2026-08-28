@@ -72,8 +72,8 @@
                             <div class="new-pr-reviewer-list">
                                 @if (_isLoadingReviewers)
                                 {
-                                    <div class="d-flex align-items-center gap-2 px-2 py-2 text-muted">
-                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                    <div class="new-pr-reviewer-status d-flex align-items-center gap-2 px-2 py-1 text-muted">
+                                        <span class="spinner-border new-pr-reviewer-spinner" role="status" aria-hidden="true"></span>
                                         Loading reviewers...
                                     </div>
                                 }
@@ -82,7 +82,7 @@
                                     var filtered = GetFilteredReviewers();
                                     @if (filtered.Count == 0)
                                     {
-                                        <div class="text-muted px-2 py-2">
+                                        <div class="new-pr-reviewer-status text-muted px-2 py-1">
                                             @(_allReviewers.Count == 0
                                                 ? "No reviewers were returned by GitHub."
                                                 : "No users or teams match the filter.")
