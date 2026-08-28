@@ -219,6 +219,22 @@
     color: #fbbf24;
 }
 
+.gha-log-line--current.gha-log-line--error {
+    background: rgba(248, 113, 113, 0.22);
+    box-shadow: inset 3px 0 0 #f87171;
+    color: #fff;
+}
+
+.gha-log-line--current.gha-log-line--error .ansi-31,
+.gha-log-line--current.gha-log-line--error .ansi-91 {
+    color: #fff;
+}
+
+.gha-log-line--current.gha-log-line--warning {
+    background: rgba(251, 191, 36, 0.22);
+    box-shadow: inset 3px 0 0 #fbbf24;
+}
+
 .gha-log-line--command {
     color: #94a3b8;
 }
