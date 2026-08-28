@@ -10,6 +10,8 @@
 @using Microsoft.AspNetCore.Components.Web
 @using GrayMoon.App.Services
 @inject WorkspaceRepository WorkspaceRepository
+@inject WorkspaceProjectRepository WorkspaceProjectRepository
+@inject WorkspacePendingActionsService PendingActionsService
 @inject ConnectorRepository ConnectorRepository
 @inject IRepositoryListQueryService RepositoryListQueryService
 @inject GitHubRepositoryService RepositoryService
@@ -506,6 +508,7 @@
             {
                 Logger.LogInformation("User edited workspace {WorkspaceName}", workspaceName);
                 await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, workspaceName, editingWorkspaceRepositoryIds, editingWorkspaceRootPath);
+                await PendingActionsService.RefreshAsync(editingWorkspaceId.Value, WorkspaceRepository, WorkspaceProjectRepository);
 
                 if (existingRepositoryCount > 0)
                     await TrySuggestImportsAsync(editingWorkspaceId.Value, workspaceName);
@@ -555,6 +558,7 @@
         {
             Logger.LogInformation("User added {Count} repositories to workspace {WorkspaceName}", selectedRepositoryIds.Count, repositoriesModalWorkspaceName);
             await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, repositoriesModalWorkspaceName, selectedRepositoryIds, editingWorkspaceRootPath);
+            await PendingActionsService.RefreshAsync(editingWorkspaceId.Value, WorkspaceRepository, WorkspaceProjectRepository);
 
             CloseRepositoriesModal();
             await LoadWorkspacesAsync();

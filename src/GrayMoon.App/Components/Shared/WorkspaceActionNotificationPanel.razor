@@ -494,26 +494,8 @@
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
                 var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
-                var workspace = await workspaceRepo.GetByIdAsync(workspaceId);
-                if (workspace == null)
-                {
-                    PendingActionsService.OnWorkspaceSynced(null, workspaceId);
-                    return;
-                }
-                var links = workspace.Repositories.ToList();
-
                 var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
-                var mismatchPayloads = await projectRepo.GetSyncDependenciesPayloadAsync(workspaceId);
-                var mismatchedDeps = mismatchPayloads.ToDictionary(
-                    p => p.RepoId,
-                    p => (IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)>)p.ProjectUpdates
-                        .SelectMany(u => u.PackageUpdates)
-                        .GroupBy(x => x.PackageId)
-                        .Select(g => g.First())
-                        .ToList());
-
-                var notification = WorkspacePendingActionsService.ComputeNotification(workspaceId, workspace.Name, links, mismatchedDeps);
-                PendingActionsService.OnWorkspaceSynced(notification, workspaceId);
+                await PendingActionsService.RefreshAsync(workspaceId, workspaceRepo, projectRepo);
             }
             catch (Exception ex)
             {

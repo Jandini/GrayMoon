@@ -62,6 +62,10 @@ public sealed partial class WorkspaceRepositories
                 workspace?.Name ?? string.Empty,
                 ids,
                 workspace?.RootPath);
+            await PendingActionsService.RefreshAsync(
+                WorkspaceId,
+                WorkspacePageService.WorkspaceRepository,
+                WorkspacePageService.WorkspaceProjectRepository);
             await ReloadWorkspaceDataFromFreshScopeAsync();
             CloseRepositoriesModal();
             ToastService.Show("Workspace repositories updated.");
