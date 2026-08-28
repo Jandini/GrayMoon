@@ -52,12 +52,14 @@ public class GitHubService : IConnectorService
         }
     }
 
+    // 429 (rate limit) is intentionally NOT retried here: retrying just burns more quota against a limit
+    // that is already exhausted. The rate-limit pause gate (IGitHubRateLimitTracker) handles backoff instead.
     private static readonly ResiliencePipeline<HttpResponseMessage> GitHubGetRetryPipeline =
         new ResiliencePipelineBuilder<HttpResponseMessage>()
             .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
             {
                 ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-                    .HandleResult(r => r.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable)
+                    .HandleResult(r => r.StatusCode is HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable)
                     .Handle<HttpRequestException>()
                     .Handle<TaskCanceledException>(),
                 // 3 quick retries with short backoff, then fail
@@ -74,13 +76,16 @@ public class GitHubService : IConnectorService
             })
             .Build();
 
-    /// <summary>Retries transient failures for GitHub REST <strong>mutations</strong> (POST). Read-only calls use <see cref="GitHubGetRetryPipeline"/>.</summary>
+    /// <summary>
+    /// Retries transient failures for GitHub REST <strong>mutations</strong> (POST). Read-only calls use <see cref="GitHubGetRetryPipeline"/>.
+    /// 429 is intentionally NOT retried; see the comment on <see cref="GitHubGetRetryPipeline"/>.
+    /// </summary>
     private static readonly ResiliencePipeline<HttpResponseMessage> GitHubMutationRetryPipeline =
         new ResiliencePipelineBuilder<HttpResponseMessage>()
             .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
             {
                 ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-                    .HandleResult(r => r.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable)
+                    .HandleResult(r => r.StatusCode is HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable)
                     .Handle<HttpRequestException>()
                     .Handle<TaskCanceledException>(),
                 MaxRetryAttempts = 3,
@@ -434,15 +439,17 @@ public class GitHubService : IConnectorService
         await PostAsync(connector, $"repos/{owner}/{repo}/actions/workflows/{workflowId}/dispatches", payload, cancellationToken);
     }
 
+    /// <summary>
+    /// Verifies the token is valid with a single, cheap call instead of listing every visible org and repo
+    /// (which could be hundreds of API calls for a large account/organization).
+    /// </summary>
     public async Task<ConnectorTestResult> TestConnectionAsync(Connector connector)
     {
         EnsureConnectorConfigured(connector);
 
         try
         {
-            var organizations = await GetAsync<List<GitHubOrganizationDto>>(connector, "user/orgs")
-                ?? new List<GitHubOrganizationDto>();
-            var repositories = await GetRepositoriesAsync(connector);
+            await GetAsync<GitHubUserDto>(connector, "user");
             return ConnectorTestResult.Ok();
         }
         catch (HttpRequestException ex)
@@ -457,17 +464,6 @@ public class GitHubService : IConnectorService
             _logger.LogError(ex, "Failed to test GitHub connector connection.");
             return ConnectorTestResult.Fail($"Connection error: {ex.Message}");
         }
-    }
-
-    public async Task<(int OrganizationCount, int RepositoryCount)> TestConnectionDetailedAsync(Connector connector)
-    {
-        EnsureConnectorConfigured(connector);
-
-        var organizations = await GetAsync<List<GitHubOrganizationDto>>(connector, "user/orgs")
-            ?? new List<GitHubOrganizationDto>();
-        var repositories = await GetRepositoriesAsync(connector);
-
-        return (organizations.Count, repositories.Count);
     }
 
     /// <summary>Gets the pull request for the given branch in the repo, if any. Fetches up to 5 and returns the first one opened by a human (user.type != "Bot"), falling back to the first match when all are bots. Returns null when no PR or API error.</summary>
@@ -888,7 +884,7 @@ public class GitHubService : IConnectorService
     private async Task<List<GitHubRepositoryDto>> GetRepositoriesPagedAsync(string requestUri)
     {
         var results = new List<GitHubRepositoryDto>();
-        const int pageSize = 20;
+        const int pageSize = 100;
         var page = 1;
 
         while (true)
@@ -912,7 +908,7 @@ public class GitHubService : IConnectorService
     private async Task<List<GitHubRepositoryDto>> GetRepositoriesPagedAsync(Connector connector, string requestUri, IProgress<int>? progress = null, IProgress<IReadOnlyList<GitHubRepositoryDto>>? batchProgress = null, CancellationToken cancellationToken = default)
     {
         var results = new List<GitHubRepositoryDto>();
-        const int pageSize = 20;
+        const int pageSize = 100;
         var page = 1;
 
         while (true)

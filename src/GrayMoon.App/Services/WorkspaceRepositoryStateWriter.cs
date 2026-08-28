@@ -223,7 +223,8 @@ public sealed class WorkspaceRepositoryStateWriter(
     {
         // The cache is keyed by (repo, branch); leaving the old branch's entry behind would let a later
         // checkout back onto it serve a PR state captured before the branch was merged or closed.
-        if (!string.Equals(previousBranch, wr.BranchName, StringComparison.Ordinal))
+        var branchChanged = !string.Equals(previousBranch, wr.BranchName, StringComparison.Ordinal);
+        if (branchChanged)
             pullRequestService.EvictCacheForRepository(repositoryId);
 
         var branch = wr.BranchName;
@@ -239,7 +240,10 @@ public sealed class WorkspaceRepositoryStateWriter(
             return;
         }
 
-        await pullRequestService.RefreshPullRequestsAsync(workspaceId, [repositoryId], force: true, cancellationToken);
+        // Only force a fresh GitHub call when the branch actually changed (cache was just evicted for it).
+        // Otherwise every hook sync (e.g. a plain commit on the same branch) would bypass the 60s cache and
+        // hit the API even though the PR state for this branch could not have changed.
+        await pullRequestService.RefreshPullRequestsAsync(workspaceId, [repositoryId], force: branchChanged, cancellationToken);
     }
 
     /// <summary>Dominant project type for the repository: Service &gt; Package &gt; Executable &gt; Library &gt; Test.</summary>

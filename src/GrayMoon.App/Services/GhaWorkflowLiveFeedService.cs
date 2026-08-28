@@ -12,8 +12,8 @@ public sealed class GhaWorkflowLiveFeedService(
     IGitHubRateLimitTracker rateLimitTracker,
     ILogger<GhaWorkflowLiveFeedService> logger)
 {
-    public const int PollIntervalActiveMs = 2_000;
-    public const int PollIntervalWaitingJobsMs = 3_000;
+    public const int PollIntervalActiveMs = 8_000;
+    public const int PollIntervalWaitingJobsMs = 10_000;
     public const int PollIntervalIdleMs = 15_000;
 
     public async Task<GhaWorkflowLiveFeedUpdate> PollOnceAsync(
