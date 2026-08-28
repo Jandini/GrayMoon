@@ -92,13 +92,11 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
+    flex-shrink: 0;
     gap: 0.4rem;
     padding: 0.4rem;
     border-bottom: 1px solid #2d2d2d;
     background: #1a1a1a;
-    position: sticky;
-    top: 0;
-    z-index: 1;
     font-family: var(--bs-body-font-family);
 }
 
@@ -156,6 +154,10 @@
 }
 
 .gha-log-group__header {
+    display: block;
+    position: sticky;
+    top: 0;
+    z-index: 1;
     background: #252526;
     color: #9cdcfe;
     cursor: pointer;
@@ -164,6 +166,7 @@
     list-style: none;
     padding: 0.25rem 0.85rem;
     user-select: none;
+    box-shadow: 0 1px 0 #2d2d2d;
 }
 
 .gha-log-group__header::-webkit-details-marker {

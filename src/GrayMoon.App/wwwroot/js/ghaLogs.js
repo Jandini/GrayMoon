@@ -51,7 +51,8 @@ window.ghaLogs = {
         }
 
         requestAnimationFrame(function () {
-            const sticky = el.querySelector('.gha-log-job');
+            const group = target.closest('.gha-log-group');
+            const sticky = group ? group.querySelector('.gha-log-group__header') : null;
             const stickyH = sticky ? sticky.getBoundingClientRect().height : 0;
             const cRect = el.getBoundingClientRect();
             const tRect = target.getBoundingClientRect();

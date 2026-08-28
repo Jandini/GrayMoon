@@ -36,20 +36,20 @@
                     }
                     else
                     {
+                        <div class="gha-log-job">
+                            @foreach (var navJob in _jobs)
+                            {
+                                var isSelected = navJob.Meta.Id == _selectedJobId;
+                                <button type="button"
+                                        class="gha-log-job__chip @(isSelected ? "gha-log-job__chip--on" : "gha-log-job__chip--off")"
+                                        title="@navJob.Meta.Name"
+                                        aria-pressed="@isSelected"
+                                        @onclick="() => SelectJob(navJob.Meta.Id)">
+                                    <span class="badge action-badge gha-log-job__chip-label @JobActionBadgeClass(navJob.Meta)">@navJob.Meta.Name</span>
+                                </button>
+                            }
+                        </div>
                         <div class="gha-logs-content" @ref="_contentRef" tabindex="-1">
-                            <div class="gha-log-job">
-                                @foreach (var navJob in _jobs)
-                                {
-                                    var isSelected = navJob.Meta.Id == _selectedJobId;
-                                    <button type="button"
-                                            class="gha-log-job__chip @(isSelected ? "gha-log-job__chip--on" : "gha-log-job__chip--off")"
-                                            title="@navJob.Meta.Name"
-                                            aria-pressed="@isSelected"
-                                            @onclick="() => SelectJob(navJob.Meta.Id)">
-                                        <span class="badge action-badge gha-log-job__chip-label @JobActionBadgeClass(navJob.Meta)">@navJob.Meta.Name</span>
-                                    </button>
-                                }
-                            </div>
                             @{ var selectedJob = SelectedJob; }
                             @if (selectedJob != null)
                             {
