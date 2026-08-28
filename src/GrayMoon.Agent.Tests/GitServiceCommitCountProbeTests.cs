@@ -64,6 +64,29 @@ public sealed class GitServiceCommitCountProbeTests : IDisposable
     }
 
     [Fact]
+    public async Task Probe_does_not_stream_fatal_when_upstream_exists_but_HEAD_is_unresolvable()
+    {
+        // Reproduces the exact three-dot form reported against the overlay: the configured upstream
+        // (origin/main) resolves fine, but HEAD itself is unborn/broken at the moment of the probe
+        // (e.g. mid-checkout race) - "fatal: ambiguous argument 'HEAD'" from the left-right rev-list,
+        // not from a missing upstream.
+        _repo.CommitInitial();
+        var head = _repo.RunGit("rev-parse", "HEAD").Stdout.Trim();
+        _repo.RunGit("update-ref", "refs/remotes/origin/main", head);
+        _repo.RunGit("config", "branch.main.remote", "origin");
+        _repo.RunGit("config", "branch.main.merge", "refs/heads/main");
+        File.WriteAllText(Path.Combine(_repo.RepositoryPath, ".git", "HEAD"), "ref: refs/heads/does-not-exist\n");
+        var events = new List<CommandLineStreamEvent>();
+        using var _ = new CommandLineStreamScope(events.Add);
+
+        var probe = await _git.ProbeCommitCountsAsync(_repo.RepositoryPath, "main", "origin/main", CancellationToken.None);
+
+        Assert.False(probe.CountsProbed);
+        Assert.Contains(events, e => e.Text.Contains("rev-list", StringComparison.Ordinal));
+        AssertNoSingleRevisionFatal(events);
+    }
+
+    [Fact]
     public async Task Vs_default_returns_ahead_count_when_origin_main_exists()
     {
         _repo.CommitInitial();

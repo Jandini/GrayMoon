@@ -388,7 +388,16 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
 
         // Single atomic call: left=incoming (in originBranch not HEAD), right=outgoing (in HEAD not originBranch).
-        var (exitLR, stdoutLR, stderrLR) = await runner.RunAsync("git", $"rev-list --left-right --count {originBranch}...HEAD", repoPath, ct);
+        // originBranch was just confirmed to exist, but HEAD can still be unborn (no commits yet) right
+        // after a checkout - an expected, already-handled miss here (falls back to unknown counts below),
+        // not a real command failure, so it must not be mirrored to the overlay as a red stderr line.
+        var (exitLR, stdoutLR, stderrLR) = await runner.RunAsync(
+            "git",
+            $"rev-list --left-right --count {originBranch}...HEAD",
+            repoPath,
+            ct,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
         if (exitLR != 0)
         {
             logger.LogWarning("Git rev-list --left-right (commit counts) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitLR, stdoutLR, stderrLR);
