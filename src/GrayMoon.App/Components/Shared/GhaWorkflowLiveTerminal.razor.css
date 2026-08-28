@@ -41,7 +41,9 @@
     padding: calc(0.35rem + 2px) 0.65rem 0.35rem 0.65rem;
     border-bottom: 1px solid rgba(148, 152, 158, 0.18);
     white-space: nowrap;
-    overflow: hidden;
+    /* clip text horizontally without clipping the progress bar, which sits on the 1px border below */
+    overflow-x: clip;
+    overflow-y: visible;
     display: flex;
     align-items: baseline;
     justify-content: space-between;
@@ -49,23 +51,26 @@
 }
 
 /*
- * Progress bar overlays the caption's own bottom divider line (the gray 1px rule under
- * "▶ Docker Build - build > ..."). Width tracks current-step/total-steps and creeps toward
- * the target (see ProgressLoopAsync in the code-behind) instead of jumping straight there.
- * Color matches the "running" status badge.
- *
- * Height is fixed at 2px (not 1px) so it renders consistently across rows: a 1px
- * position:absolute overlay is prone to sub-pixel rounding that varies with each row's
- * cumulative vertical offset, making some rows look thinner than others at non-integer
- * display scale factors. 2px rounds the same way regardless of row position.
+ * Paint the fill with a 1px border-bottom at top:100% so it occupies the caption's own
+ * gray divider (also a 1px border-bottom, just below the padding box). A height:1px
+ * overlay at bottom:0 sat in the padding instead, stacking with the gray rule so some
+ * rows looked 2px thick depending on sub-pixel rounding.
+ * Width tracks current-step/total-steps and creeps toward the target
+ * (see ProgressLoopAsync in the code-behind). Slightly darker than the "running"
+ * status badge (#d29922) so the line does not flash against the terminal background.
  */
 .actions-gha-terminal__progress {
     position: absolute;
     left: 0;
-    bottom: 0;
-    height: 2px;
+    top: 100%;
+    height: 0;
     width: 0%;
-    background-color: #d29922;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid #b07d18;
+    background: none;
+    box-sizing: content-box;
     transition: width 0.15s linear;
     pointer-events: none;
     z-index: 2;
