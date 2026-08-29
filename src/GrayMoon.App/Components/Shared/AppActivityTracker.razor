@@ -1,0 +1,55 @@
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+@inject AppActivityStateService ActivityStateService
+@* No markup - mounted once per circuit (MainLayout.razor) to wire up wwwroot/js/idleActivity.js exactly
+   once instead of duplicating the interop setup on every page. *@
+
+@code {
+    private const int IdleTimeoutMs = 20_000;
+    private DotNetObjectReference<AppActivityTracker>? _dotNetRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await Js.InvokeVoidAsync("grayMoonIdleActivity.init", _dotNetRef, IdleTimeoutMs);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    [JSInvokable]
+    public void OnActivityStateChanged(string state)
+    {
+        if (Enum.TryParse<AppActivityState>(state, ignoreCase: true, out var parsed))
+        {
+            ActivityStateService.SetState(parsed);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("grayMoonIdleActivity.dispose");
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        _dotNetRef?.Dispose();
+    }
+}

@@ -32,11 +32,11 @@ public sealed class WorkspacePullRequestService(
     IGitHubRateLimitTracker rateLimitTracker,
     ILogger<WorkspacePullRequestService> logger)
 {
-    // Kept just under the 15s background poll interval (WorkspaceRepositories.PrPolling.cs) so every poll tick
+    // Kept just under the 5s background poll interval (WorkspaceRepositories.PrPolling.cs) so every poll tick
     // reaches the ETag-backed GitHub call (usually a free 304) instead of being served entirely from this
     // app-level cache. The cache still absorbs near-simultaneous duplicate calls (multiple tabs, poll racing a
     // forced action) within that short window.
-    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(3);
     private readonly ConcurrentDictionary<(int RepoId, string Branch), (PullRequestInfo? Result, DateTime FetchedAt)> _cache = new();
 
     private int MaxConcurrency => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
