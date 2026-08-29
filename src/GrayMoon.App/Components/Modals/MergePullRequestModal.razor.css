@@ -17,10 +17,38 @@
     min-height: 26rem;
     display: flex;
     flex-direction: column;
+    /* Bootstrap's default 1rem bottom padding left an overly large gap above the now-always-visible
+       footer - trimmed by a quarter (1rem -> 0.75rem). Top/left/right padding are untouched. */
+    padding-bottom: 0.75rem;
 }
 
 ::deep .merge-pr-loading {
     flex: 1 1 auto;
+}
+
+/* Pulsing skeleton bar for the title/branches during the fast snapshot phase - this vendored Bootstrap
+   build predates the .placeholder/.placeholder-glow utility, so it's a small local equivalent instead. */
+@keyframes merge-pr-placeholder-pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.35; }
+    100% { opacity: 1; }
+}
+
+::deep .merge-pr-placeholder {
+    display: inline-block;
+    border-radius: 0.25rem;
+    background-color: rgba(255, 255, 255, 0.18);
+    animation: merge-pr-placeholder-pulse 1.4s ease-in-out infinite;
+}
+
+::deep .merge-pr-placeholder--title {
+    width: 55%;
+    height: 1rem;
+}
+
+::deep .merge-pr-placeholder--branches {
+    width: 32%;
+    height: 0.8rem;
 }
 
 /* PR number link in the header: gray by default (not bootstrap's link blue), lightens on hover. */
@@ -47,6 +75,9 @@
     display: flex;
     flex-direction: column;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
+    /* Replaces the mb-2 utility that used to sit here - reduced by a quarter (0.5rem -> 0.375rem) as
+       part of shrinking the overall gap to the now-always-visible footer. */
+    margin-bottom: 0.375rem;
 }
 
 ::deep .merge-pr-status-item {
@@ -137,6 +168,9 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
+    /* Bootstrap's default 0.75rem top padding, trimmed by a quarter (-> 0.5625rem) to match the
+       tighter gap above (see .merge-pr-modal-body / .merge-pr-status-list). */
+    padding-top: 0.5625rem;
 }
 
 ::deep .merge-pr-sync-default-check {

@@ -667,7 +667,7 @@ public class GitHubService : IConnectorService
         }
     }
 
-    /// <summary>Gets the repository's permitted merge methods via GET /repos/{owner}/{repo}. Returns null on API error - callers must not assume any method is allowed when this fails.</summary>
+    /// <summary>Gets the repository's permitted merge methods via GET /repos/{owner}/{repo}, ETag-conditional so repeat calls (dialog re-open, in-dialog poll refresh) come back as a cheap 304 when settings haven't changed. Returns null on API error - callers must not assume any method is allowed when this fails.</summary>
     public async Task<GitHubRepositoryMergeSettingsDto?> GetRepositoryMergeSettingsAsync(
         Connector connector,
         string owner,
@@ -685,7 +685,7 @@ public class GitHubService : IConnectorService
 
         try
         {
-            return await GetAsync<GitHubRepositoryMergeSettingsDto>(connector, requestUri, cancellationToken, skipRateLimitRetry: true);
+            return await GetETaggedAsync<GitHubRepositoryMergeSettingsDto>(connector, requestUri, cancellationToken, skipRateLimitRetry: true);
         }
         catch (Exception ex)
         {
@@ -694,7 +694,7 @@ public class GitHubService : IConnectorService
         }
     }
 
-    /// <summary>Lists reviews via GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews. Returns empty list on API error.</summary>
+    /// <summary>Lists reviews via GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews, ETag-conditional so repeat calls (dialog re-open, in-dialog poll refresh) come back as a cheap 304 when reviews haven't changed. Returns empty list on API error.</summary>
     public async Task<List<GitHubPullRequestReviewDto>> GetPullRequestReviewsAsync(
         Connector connector,
         string owner,
@@ -715,7 +715,7 @@ public class GitHubService : IConnectorService
 
         try
         {
-            return await GetAsync<List<GitHubPullRequestReviewDto>>(connector, requestUri, cancellationToken, skipRateLimitRetry: true)
+            return await GetETaggedAsync<List<GitHubPullRequestReviewDto>>(connector, requestUri, cancellationToken, skipRateLimitRetry: true)
                 ?? new List<GitHubPullRequestReviewDto>();
         }
         catch (Exception ex)
@@ -725,7 +725,7 @@ public class GitHubService : IConnectorService
         }
     }
 
-    /// <summary>Gets check-run summary via GET /repos/{owner}/{repo}/commits/{ref}/check-runs. Returns null on API error - callers must treat checks as unknown, not as passing.</summary>
+    /// <summary>Gets check-run summary via GET /repos/{owner}/{repo}/commits/{ref}/check-runs, ETag-conditional so repeat calls (dialog re-open, in-dialog poll refresh) come back as a cheap 304 when checks haven't changed. Returns null on API error - callers must treat checks as unknown, not as passing.</summary>
     public async Task<GitHubCheckRunsResponse?> GetCheckRunsForRefAsync(
         Connector connector,
         string owner,
@@ -746,7 +746,7 @@ public class GitHubService : IConnectorService
 
         try
         {
-            return await GetAsync<GitHubCheckRunsResponse>(connector, requestUri, cancellationToken, skipRateLimitRetry: true);
+            return await GetETaggedAsync<GitHubCheckRunsResponse>(connector, requestUri, cancellationToken, skipRateLimitRetry: true);
         }
         catch (Exception ex)
         {

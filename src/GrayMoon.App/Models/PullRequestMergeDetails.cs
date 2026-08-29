@@ -22,9 +22,12 @@ public sealed class ChecksSummary
 /// <summary>
 /// Fresh, on-demand snapshot of a pull request's mergeability assembled from live GitHub data (PR, reviews, check-runs,
 /// repository merge settings) when the merge dialog opens. Never derived from the polled/cached <see cref="PullRequestInfo"/>
-/// used for the grid badge - GitHub is the sole source of truth for whether/how a merge can proceed.
+/// used for the grid badge - GitHub is the sole source of truth for whether/how a merge can proceed. A record (not a class)
+/// so the dialog's two-phase fetch can progressively fill it in via `with` expressions: the snapshot phase (title/branches/
+/// conflicts) constructs it, and the background review-details phase (reviews/checks/allowed methods/local-state) layers
+/// its fields on afterward without discarding what the snapshot already resolved.
 /// </summary>
-public sealed class PullRequestMergeDetails
+public sealed record PullRequestMergeDetails
 {
     public int Number { get; init; }
     public string Title { get; init; } = string.Empty;

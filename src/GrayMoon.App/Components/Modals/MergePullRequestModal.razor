@@ -8,9 +8,10 @@
         IsSyncingLocalState so that overlay visually covers the dialog for a push/pull triggered from within it -
         without unmounting the dialog itself, which would look like it closed and reopened.
     *@
-    <div class="modal show d-block merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @(IsSyncingLocalState ? 50 : 1075);"
+    @* z-index one below ConfirmModal's 1075 so the "merge anyway?" warning confirmation (nested on top of this dialog) always wins the stacking tie. *@
+    <div class="modal show d-block merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @(IsSyncingLocalState ? 50 : 1074);"
          @onkeydown="HandleKeyDown">
-        <div class="modal-dialog merge-pr-modal-dialog">
+        <div class="modal-dialog modal-dialog-centered merge-pr-modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">
@@ -32,27 +33,40 @@
                     <button type="button" class="btn-close flex-shrink-0" aria-label="Close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body merge-pr-modal-body">
-                    @if (IsLoading)
+                    @if (Details == null)
                     {
-                        <div class="merge-pr-loading d-flex align-items-center justify-content-center gap-2 text-muted">
-                            <span class="spinner-border spinner-border-sm"></span>
-                            <span>Loading pull request details from GitHub…</span>
-                        </div>
-                    }
-                    else if (Details == null)
-                    {
-                        <div class="alert alert-danger mb-0">Could not load pull request details from GitHub.</div>
+                        @if (IsLoading)
+                        {
+                            <div class="merge-pr-loading d-flex align-items-center justify-content-center gap-2 text-muted">
+                                <span class="spinner-border spinner-border-sm"></span>
+                                <span>Loading pull request details from GitHub…</span>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="alert alert-danger mb-0">Could not load pull request details from GitHub.</div>
+                        }
                     }
                     else
                     {
-                        <div class="merge-pr-title mb-1">@Details.Title</div>
-                        <div class="merge-pr-branches text-muted mb-3">
-                            <code>@Details.HeadRef</code>
-                            <span class="mx-1">&#8594;</span>
-                            <code>@Details.BaseRef</code>
-                        </div>
+                        @* Title/branches come from the fast snapshot phase - show a pulsing placeholder only until that
+                           (ETag-cheap) call resolves, rather than hiding the already-known Conflicts row below too. *@
+                        @if (IsLoading)
+                        {
+                            <div class="merge-pr-title mb-1"><span class="merge-pr-placeholder merge-pr-placeholder--title"></span></div>
+                            <div class="merge-pr-branches mb-3"><span class="merge-pr-placeholder merge-pr-placeholder--branches"></span></div>
+                        }
+                        else
+                        {
+                            <div class="merge-pr-title mb-1">@Details.Title</div>
+                            <div class="merge-pr-branches text-muted mb-3">
+                                <code>@Details.HeadRef</code>
+                                <span class="mx-1">&#8594;</span>
+                                <code>@Details.BaseRef</code>
+                            </div>
+                        }
 
-                        <div class="merge-pr-status-list mb-2">
+                        <div class="merge-pr-status-list">
                             <div class="merge-pr-status-item">
                                 <span class="merge-pr-status-icon @GetReviewIconClass()">
                                     <i class="bi @GetReviewIconGlyph()"></i>
@@ -105,7 +119,11 @@
                                 <div class="merge-pr-status-text">
                                     <div class="merge-pr-status-title">@GetLocalStateTitle()</div>
                                     <div class="merge-pr-status-subtitle">
-                                        @if (!Details.HasLocalWarning)
+                                        @if (IsLoadingReviewDetails)
+                                        {
+                                            <text>Checking uncommitted changes and unpushed commits…</text>
+                                        }
+                                        else if (!Details.HasLocalWarning)
                                         {
                                             @GetLocalStateSubtitle()
                                         }
@@ -143,49 +161,47 @@
                         }
                     }
                 </div>
-                @if (!IsLoading && Details != null)
-                {
-                    <div class="modal-footer merge-pr-modal-footer">
-                        <div class="form-check mb-0 merge-pr-sync-default-check">
-                            <input class="form-check-input" type="checkbox" id="merge-pr-sync-default"
-                                   @bind="_syncToDefault"
-                                   disabled="@IsMerging" />
-                            <label class="form-check-label" for="merge-pr-sync-default">Sync to default branch</label>
-                        </div>
-                        <div class="btn-group merge-pr-split-btn">
-                            <button type="button"
-                                    class="btn merge-pr-btn-github @(Details.CanMergeNow && Details.HasMergeWarning ? "merge-pr-btn-github--warning" : null) merge-pr-split-btn__main"
-                                    disabled="@(!Details.CanMergeNow || IsMerging)"
-                                    @onclick="HandleMergeClick">
-                                @if (IsMerging)
-                                {
-                                    <span class="spinner-border spinner-border-sm me-2"></span>
-                                }
-                                @_selectedMethod.ToDisplayLabel()
-                            </button>
-                            @if (Details.AllowedMergeMethods.Count > 1)
-                            {
-                                <button type="button"
-                                        class="btn merge-pr-btn-github @(Details.CanMergeNow && Details.HasMergeWarning ? "merge-pr-btn-github--warning" : null) dropdown-toggle dropdown-toggle-split merge-pr-split-btn__toggle"
-                                        disabled="@(!Details.CanMergeNow || IsMerging)"
-                                        @onclick="ToggleMethodDropdown">
-                                    <span class="visually-hidden">Choose merge method</span>
-                                </button>
-                                @if (_showMethodDropdown)
-                                {
-                                    <div class="merge-pr-method-menu">
-                                        @foreach (var method in Details.AllowedMergeMethods)
-                                        {
-                                            <button type="button" class="dropdown-item" @onclick="() => SelectMethod(method)">
-                                                @method.ToDisplayLabel()
-                                            </button>
-                                        }
-                                    </div>
-                                }
-                            }
-                        </div>
+                @* Always visible (even mid-load) so the dialog's footprint doesn't jump once the button becomes enabled - it just reads "Loading…" until the merge is actually possible to evaluate. *@
+                <div class="modal-footer merge-pr-modal-footer">
+                    <div class="form-check mb-0 merge-pr-sync-default-check">
+                        <input class="form-check-input" type="checkbox" id="merge-pr-sync-default"
+                               @bind="_syncToDefault"
+                               disabled="@(IsLoading || IsLoadingReviewDetails || IsMerging)" />
+                        <label class="form-check-label" for="merge-pr-sync-default">Sync to default branch</label>
                     </div>
-                }
+                    <div class="btn-group merge-pr-split-btn">
+                        <button type="button"
+                                class="btn merge-pr-btn-github @(Details is { CanMergeNow: true, HasMergeWarning: true } ? "merge-pr-btn-github--warning" : null) merge-pr-split-btn__main"
+                                disabled="@(IsLoading || IsLoadingReviewDetails || IsMerging || Details is not { CanMergeNow: true })"
+                                @onclick="HandleMergeClick">
+                            @if (IsLoading || IsLoadingReviewDetails || IsMerging)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                            }
+                            @(Details == null ? "Unavailable" : (IsLoading || IsLoadingReviewDetails) ? "Loading…" : _selectedMethod.ToDisplayLabel())
+                        </button>
+                        @if (Details?.AllowedMergeMethods.Count > 1)
+                        {
+                            <button type="button"
+                                    class="btn merge-pr-btn-github @(Details is { CanMergeNow: true, HasMergeWarning: true } ? "merge-pr-btn-github--warning" : null) dropdown-toggle dropdown-toggle-split merge-pr-split-btn__toggle"
+                                    disabled="@(IsLoading || IsLoadingReviewDetails || IsMerging || Details is not { CanMergeNow: true })"
+                                    @onclick="ToggleMethodDropdown">
+                                <span class="visually-hidden">Choose merge method</span>
+                            </button>
+                            @if (_showMethodDropdown)
+                            {
+                                <div class="merge-pr-method-menu">
+                                    @foreach (var method in Details.AllowedMergeMethods)
+                                    {
+                                        <button type="button" class="dropdown-item" @onclick="() => SelectMethod(method)">
+                                            @method.ToDisplayLabel()
+                                        </button>
+                                    }
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -199,6 +215,8 @@
     [Parameter] public string? PrHtmlUrl { get; set; }
     [Parameter] public PullRequestMergeDetails? Details { get; set; }
     [Parameter] public bool IsLoading { get; set; }
+    /// <summary>True while the background review-details phase (reviews/checks/allowed methods/local-state) is in flight. The snapshot phase (title/branches/conflicts) has already completed by then, so the dialog stays visible - only the Review/Checks/local-state rows and the merge button show a loading state.</summary>
+    [Parameter] public bool IsLoadingReviewDetails { get; set; }
     [Parameter] public bool IsMerging { get; set; }
     [Parameter] public string? ErrorMessage { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
@@ -219,6 +237,14 @@
     private bool _wasVisible;
     private int? _lastDetailsNumber;
     private bool _syncToDefault;
+    /// <summary>
+    /// True once the default merge method has been preselected for the current PR. Tracked separately from
+    /// <see cref="_lastDetailsNumber"/> because <see cref="Details"/> is now set progressively (snapshot phase first,
+    /// with <see cref="PullRequestMergeDetails.AllowedMergeMethods"/>/<see cref="PullRequestMergeDetails.DefaultMergeMethod"/>
+    /// only known once the review-details phase resolves) - without this, the method would only ever be applied from
+    /// the still-empty snapshot-phase defaults and never updated once the real default became known.
+    /// </summary>
+    private bool _defaultMethodApplied;
 
     protected override void OnParametersSet()
     {
@@ -234,12 +260,22 @@
             _lastDetailsNumber = null;
         }
 
-        // Reset the selected method whenever a new PR's details arrive (default method preselected).
-        if (Details != null && Details.Number != _lastDetailsNumber)
+        if (Details == null)
+            return;
+
+        if (Details.Number != _lastDetailsNumber)
         {
             _lastDetailsNumber = Details.Number;
             _selectedMethod = Details.DefaultMergeMethod ?? MergeMethod.Merge;
             _showMethodDropdown = false;
+            _defaultMethodApplied = Details.AllowedMergeMethods.Count > 0;
+        }
+        else if (!_defaultMethodApplied && Details.AllowedMergeMethods.Count > 0)
+        {
+            // The review-details phase just resolved for the PR we already showed a snapshot for - apply its
+            // real default method now instead of leaving the placeholder selection from before it was known.
+            _selectedMethod = Details.DefaultMergeMethod ?? MergeMethod.Merge;
+            _defaultMethodApplied = true;
         }
     }
 
@@ -272,24 +308,36 @@
     // GitHub-style status rows: a colored icon circle + bold title + muted subtitle per row,
     // mirroring the "All checks have passed / No conflicts with base branch" rows on github.com.
 
-    private string GetChecksIconClass() => Details?.Checks.State switch
+    private string GetChecksIconClass()
     {
-        ChecksState.Passed => "merge-pr-status-icon--success",
-        ChecksState.Failed => "merge-pr-status-icon--danger",
-        ChecksState.Pending => "merge-pr-status-icon--pending",
-        _ => "merge-pr-status-icon--neutral"
-    };
+        if (IsLoadingReviewDetails)
+            return "merge-pr-status-icon--pending";
+        return Details?.Checks.State switch
+        {
+            ChecksState.Passed => "merge-pr-status-icon--success",
+            ChecksState.Failed => "merge-pr-status-icon--danger",
+            ChecksState.Pending => "merge-pr-status-icon--pending",
+            _ => "merge-pr-status-icon--neutral"
+        };
+    }
 
-    private string GetChecksIconGlyph() => Details?.Checks.State switch
+    private string GetChecksIconGlyph()
     {
-        ChecksState.Passed => "bi-check-lg",
-        ChecksState.Failed => "bi-x-lg",
-        ChecksState.Pending => "bi-three-dots",
-        _ => "bi-dash-lg"
-    };
+        if (IsLoadingReviewDetails)
+            return "bi-three-dots";
+        return Details?.Checks.State switch
+        {
+            ChecksState.Passed => "bi-check-lg",
+            ChecksState.Failed => "bi-x-lg",
+            ChecksState.Pending => "bi-three-dots",
+            _ => "bi-dash-lg"
+        };
+    }
 
     private string GetChecksTitle()
     {
+        if (IsLoadingReviewDetails)
+            return "Loading checks…";
         var checks = Details?.Checks;
         if (checks == null || checks.State == ChecksState.None)
             return "No checks reported";
@@ -304,6 +352,8 @@
 
     private string GetChecksSubtitle()
     {
+        if (IsLoadingReviewDetails)
+            return "Checking with GitHub…";
         var checks = Details?.Checks;
         if (checks == null || checks.State == ChecksState.None)
             return "This repository has no status checks configured.";
@@ -350,7 +400,8 @@
     /// requested, nobody currently requested as a reviewer). That combination means branch protection requires
     /// an approving review that nobody has even been asked for yet, which must read as blocked (red), not "not required" (green).
     /// </summary>
-    private bool RequiresReviewButNoneRequested() => Details != null
+    private bool RequiresReviewButNoneRequested() => !IsLoadingReviewDetails
+        && Details != null
         && Details.ApprovedCount == 0
         && Details.ChangesRequestedCount == 0
         && Details.OutstandingReviewers.Count == 0
@@ -358,6 +409,8 @@
 
     private string GetReviewIconClass()
     {
+        if (IsLoadingReviewDetails)
+            return "merge-pr-status-icon--pending";
         if (Details == null)
             return "merge-pr-status-icon--neutral";
         if (Details.ChangesRequestedCount > 0 || RequiresReviewButNoneRequested())
@@ -369,6 +422,8 @@
 
     private string GetReviewIconGlyph()
     {
+        if (IsLoadingReviewDetails)
+            return "bi-three-dots";
         if (Details == null)
             return "bi-dash-lg";
         if (Details.ChangesRequestedCount > 0 || RequiresReviewButNoneRequested())
@@ -380,6 +435,8 @@
 
     private string GetReviewTitle()
     {
+        if (IsLoadingReviewDetails)
+            return "Loading review status…";
         if (Details == null)
             return string.Empty;
         if (Details.ChangesRequestedCount > 0)
@@ -393,6 +450,8 @@
 
     private string GetReviewSubtitle()
     {
+        if (IsLoadingReviewDetails)
+            return "Checking with GitHub…";
         if (Details == null)
             return string.Empty;
         if (Details.ChangesRequestedCount > 0)
@@ -419,14 +478,26 @@
     // (never a deal-breaker for merging on GitHub), so it's an amber warning rather than a red blocker - the
     // merge button itself picks up the same amber color as a heads-up, not a disabled state.
 
-    private string GetLocalStateIconClass() =>
-        Details?.HasLocalWarning == true ? "merge-pr-status-icon--pending" : "merge-pr-status-icon--success";
+    private string GetLocalStateIconClass()
+    {
+        if (IsLoadingReviewDetails)
+            return "merge-pr-status-icon--pending";
+        return Details?.HasLocalWarning == true ? "merge-pr-status-icon--pending" : "merge-pr-status-icon--success";
+    }
 
-    private string GetLocalStateIconGlyph() =>
-        Details?.HasLocalWarning == true ? "bi-exclamation-lg" : "bi-check-lg";
+    private string GetLocalStateIconGlyph()
+    {
+        if (IsLoadingReviewDetails)
+            return "bi-three-dots";
+        return Details?.HasLocalWarning == true ? "bi-exclamation-lg" : "bi-check-lg";
+    }
 
-    private string GetLocalStateTitle() =>
-        Details?.HasLocalWarning == true ? "Local branch is not in sync" : "Local working copy is up to date";
+    private string GetLocalStateTitle()
+    {
+        if (IsLoadingReviewDetails)
+            return "Checking local status…";
+        return Details?.HasLocalWarning == true ? "Local branch is not in sync" : "Local working copy is up to date";
+    }
 
     /// <summary>Only used when there's no local warning - the warning case is built inline in markup so the uncommitted-changes portion can be a link.</summary>
     private string GetLocalStateSubtitle() => "No uncommitted changes or unpushed commits.";

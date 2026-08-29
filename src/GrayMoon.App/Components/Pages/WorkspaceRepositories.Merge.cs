@@ -8,7 +8,9 @@ namespace GrayMoon.App.Components.Pages;
 /// Merge confirmation dialog opened from the "merge" segment of the open-PR chip. Every piece of mergeability
 /// data shown here (and the merge action itself) is fetched fresh from GitHub via WorkspacePullRequestService -
 /// never derived from the polled/cached PR badge state - so GitHub remains the sole authority on whether and how
-/// the merge can proceed.
+/// the merge can proceed. The initial open is split into a fast snapshot phase (title/branches/conflicts, seeded
+/// from the polled PR badge state and then confirmed by an ETag-cheap GitHub call) and a background review-details
+/// phase (reviews/checks/allowed methods), so the dialog renders progressively instead of behind one blocking spinner.
 /// </summary>
 public sealed partial class WorkspaceRepositories
 {
@@ -26,22 +28,31 @@ public sealed partial class WorkspaceRepositories
             IsVisible = true,
             RepositoryId = link.RepositoryId,
             PrNumber = prNumber.Value,
-            // Already known from the polled PR badge state - link the header immediately instead of waiting
-            // for the fresh GitHub fetch below to populate Details.HtmlUrl.
+            // Already known from the polled PR badge state - link the header immediately and seed the Conflicts
+            // row so it doesn't render blank while the (now ETag-cheap) snapshot call below confirms it.
             PrHtmlUrl = string.IsNullOrWhiteSpace(prInfo?.HtmlUrl) ? null : prInfo.HtmlUrl,
-            IsLoading = true
+            Details = new PullRequestMergeDetails
+            {
+                Number = prNumber.Value,
+                HtmlUrl = prInfo?.HtmlUrl ?? string.Empty,
+                ChangedFiles = prInfo?.ChangedFiles,
+                Mergeable = prInfo?.Mergeable,
+                MergeableState = prInfo?.MergeableState
+            },
+            IsLoading = true,
+            IsLoadingReviewDetails = true
         };
         StateHasChanged();
 
-        PullRequestMergeDetails? details = null;
+        PullRequestMergeSnapshot? snapshot = null;
         try
         {
-            details = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, PullRequestMergeDetails?>(
-                svc => svc.GetMergeDetailsAsync(WorkspaceId, link.RepositoryId, prNumber.Value));
+            snapshot = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, PullRequestMergeSnapshot?>(
+                svc => svc.GetMergeSnapshotAsync(WorkspaceId, link.RepositoryId, prNumber.Value));
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Failed to load merge details for repo {RepositoryId}, PR #{PrNumber}", link.RepositoryId, prNumber.Value);
+            Logger.LogWarning(ex, "Failed to load merge snapshot for repo {RepositoryId}, PR #{PrNumber}", link.RepositoryId, prNumber.Value);
         }
 
         if (_disposed || !_mergePrModal.IsVisible || _mergePrModal.RepositoryId != link.RepositoryId)
@@ -50,8 +61,65 @@ public sealed partial class WorkspaceRepositories
         _mergePrModal = _mergePrModal with
         {
             IsLoading = false,
-            Details = details,
-            ErrorMessage = details == null ? "Could not load pull request details from GitHub." : null
+            Details = snapshot == null
+                ? _mergePrModal.Details
+                : _mergePrModal.Details! with
+                {
+                    Number = snapshot.Number,
+                    Title = snapshot.Title,
+                    HeadRef = snapshot.HeadRef,
+                    BaseRef = snapshot.BaseRef,
+                    HeadSha = snapshot.HeadSha,
+                    HtmlUrl = snapshot.HtmlUrl,
+                    ChangedFiles = snapshot.ChangedFiles,
+                    Mergeable = snapshot.Mergeable,
+                    MergeableState = snapshot.MergeableState
+                },
+            ErrorMessage = snapshot == null ? "Could not load pull request details from GitHub." : null
+        };
+        StateHasChanged();
+
+        if (snapshot == null)
+        {
+            _mergePrModal = _mergePrModal with { IsLoadingReviewDetails = false };
+            StateHasChanged();
+            return;
+        }
+
+        PullRequestMergeReviewDetails? review = null;
+        try
+        {
+            review = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, PullRequestMergeReviewDetails?>(
+                svc => svc.GetMergeReviewDetailsAsync(WorkspaceId, link.RepositoryId, prNumber.Value, snapshot.HeadSha));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to load merge review details for repo {RepositoryId}, PR #{PrNumber}", link.RepositoryId, prNumber.Value);
+        }
+
+        if (_disposed || !_mergePrModal.IsVisible || _mergePrModal.RepositoryId != link.RepositoryId)
+            return;
+
+        _mergePrModal = _mergePrModal with
+        {
+            IsLoadingReviewDetails = false,
+            Details = review == null || _mergePrModal.Details == null
+                ? _mergePrModal.Details
+                : _mergePrModal.Details with
+                {
+                    ApprovedCount = review.ApprovedCount,
+                    ChangesRequestedCount = review.ChangesRequestedCount,
+                    OutstandingReviewers = review.OutstandingReviewers,
+                    ApprovedByUsers = review.ApprovedByUsers,
+                    Checks = review.Checks,
+                    AllowedMergeMethods = review.AllowedMergeMethods,
+                    DefaultMergeMethod = review.DefaultMergeMethod,
+                    HasUncommittedChanges = review.HasUncommittedChanges,
+                    UncommittedChangesCount = review.UncommittedChangesCount,
+                    UnpushedCommitsCount = review.UnpushedCommitsCount,
+                    IncomingCommitsCount = review.IncomingCommitsCount
+                },
+            ErrorMessage = review == null ? "Could not load review/check status from GitHub." : null
         };
         StateHasChanged();
     }
@@ -153,7 +221,7 @@ public sealed partial class WorkspaceRepositories
     /// </summary>
     private Task RefreshOpenMergeDialogIfDueAsync()
     {
-        if (_disposed || !_mergePrModal.IsVisible || _mergePrModal.IsLoading || _mergePrModal.IsMerging || _mergePrModal.IsSyncingLocalState)
+        if (_disposed || !_mergePrModal.IsVisible || _mergePrModal.IsLoading || _mergePrModal.IsLoadingReviewDetails || _mergePrModal.IsMerging || _mergePrModal.IsSyncingLocalState)
             return Task.CompletedTask;
 
         return RefreshMergeDialogDetailsAsync(_mergePrModal.RepositoryId, _mergePrModal.PrNumber);
@@ -185,6 +253,48 @@ public sealed partial class WorkspaceRepositories
             ErrorMessage = details == null ? _mergePrModal.ErrorMessage : null
         };
         StateHasChanged();
+    }
+
+    /// <summary>
+    /// Entry point for the modal's merge button. When the button is rendering as the orange "proceed with caution"
+    /// warning (<see cref="PullRequestMergeDetails.HasMergeWarning"/> - uncommitted changes and/or unpushed/incoming
+    /// commits in the local clone), interrupts with a confirm dialog that names the specific reason(s) before
+    /// continuing on to <see cref="HandleMergeRequestedAsync"/> (which may itself confirm sync-to-default), since
+    /// that local state would otherwise silently not be reflected in the merge. Proceeds straight through when
+    /// there's no warning.
+    /// </summary>
+    private Task HandleMergeButtonClickedAsync(MergePullRequestChoice choice)
+    {
+        var details = _mergePrModal.Details;
+        if (details == null || _mergePrModal.IsMerging)
+            return Task.CompletedTask;
+
+        if (!details.HasMergeWarning)
+            return HandleMergeRequestedAsync(choice);
+
+        ShowConfirm(
+            $"This branch has {BuildMergeWarningReason(details)}, which will not be reflected in the merge.\nMerge anyway?",
+            () => HandleMergeRequestedAsync(choice),
+            "Merge anyway");
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Human-readable list of why the local-state row is flagged, e.g. "2 uncommitted changes and 1 unpushed commit".</summary>
+    private static string BuildMergeWarningReason(PullRequestMergeDetails details)
+    {
+        var parts = new List<string>();
+        if (details.UncommittedChangesCount > 0)
+            parts.Add($"{details.UncommittedChangesCount} uncommitted change{(details.UncommittedChangesCount == 1 ? "" : "s")}");
+        if (details.UnpushedCommitsCount > 0)
+            parts.Add($"{details.UnpushedCommitsCount} unpushed commit{(details.UnpushedCommitsCount == 1 ? "" : "s")}");
+        if (details.IncomingCommitsCount > 0)
+            parts.Add($"{details.IncomingCommitsCount} incoming commit{(details.IncomingCommitsCount == 1 ? "" : "s")}");
+
+        if (parts.Count == 0)
+            return "unsynced local work";
+        if (parts.Count == 1)
+            return parts[0];
+        return string.Join(", ", parts.Take(parts.Count - 1)) + " and " + parts[^1];
     }
 
     private Task HandleMergeRequestedAsync(MergePullRequestChoice choice)
@@ -281,6 +391,8 @@ public sealed partial class WorkspaceRepositories
         /// <summary>PR HTML URL known immediately from the polled PR badge state, before Details.HtmlUrl loads.</summary>
         public string? PrHtmlUrl { get; init; }
         public bool IsLoading { get; init; }
+        /// <summary>True while the background review-details phase (reviews/checks/allowed methods/local-state) is in flight. The snapshot phase (title/branches/conflicts) has already completed by then, so the dialog stays visible - only the Review/Checks/local-state rows and the merge button show a loading state.</summary>
+        public bool IsLoadingReviewDetails { get; init; }
         public bool IsMerging { get; init; }
         /// <summary>True while a push/pull triggered from the local-state row's commits text is running.</summary>
         public bool IsSyncingLocalState { get; init; }

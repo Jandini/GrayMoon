@@ -23,6 +23,20 @@ public enum PullRequestRefreshOutcome
     Failed,
 }
 
+/// <summary>Review-details phase result (<see cref="GitHubPullRequestMergeService.GetMergeReviewDetailsAsync"/>) plus the workspace's own persisted Git Changes projection (uncommitted changes / unpushed / incoming commits) - a GrayMoon-local, informational-only signal that never blocks the merge itself.</summary>
+public sealed record PullRequestMergeReviewDetails(
+    int ApprovedCount,
+    int ChangesRequestedCount,
+    IReadOnlyList<string> OutstandingReviewers,
+    IReadOnlyList<string> ApprovedByUsers,
+    ChecksSummary Checks,
+    IReadOnlyList<MergeMethod> AllowedMergeMethods,
+    MergeMethod? DefaultMergeMethod,
+    bool HasUncommittedChanges,
+    int UncommittedChangesCount,
+    int UnpushedCommitsCount,
+    int IncomingCommitsCount);
+
 /// <summary>Single service for PR persistence and refresh. Fetches via GitHub API and persists via WorkspacePullRequestRepository.</summary>
 public sealed class WorkspacePullRequestService(
     WorkspacePullRequestRepository pullRequestRepository,
@@ -179,32 +193,86 @@ public sealed class WorkspacePullRequestService(
         await RefreshPullRequestsAsync(workspaceId, repoIds, cancellationToken: cancellationToken);
     }
 
-    /// <summary>Fetches a fresh, on-demand mergeability snapshot (PR, reviews, checks, repo merge settings) for the merge confirmation dialog. Always hits GitHub live - never served from the polled PR cache. Also folds in the workspace's own persisted Git Changes projection (uncommitted changes / unpushed commits), a GrayMoon-local, informational-only signal that never blocks the merge itself.</summary>
+    /// <summary>Fetches a fresh, on-demand mergeability snapshot (PR, reviews, checks, repo merge settings) for the merge confirmation dialog's periodic silent refresh (no spinner to split around, so one combined call is simplest). Always hits GitHub live (ETag-conditional) - never served from the polled PR cache. Also folds in the workspace's own persisted Git Changes projection (uncommitted changes / unpushed commits), a GrayMoon-local, informational-only signal that never blocks the merge itself.</summary>
     public async Task<PullRequestMergeDetails?> GetMergeDetailsAsync(int workspaceId, int repositoryId, int prNumber, CancellationToken cancellationToken = default)
     {
-        var link = await dbContext.WorkspaceRepositories
-            .AsNoTracking()
-            .Include(wr => wr.Repository)
-            .ThenInclude(r => r!.Connector)
-            .Include(wr => wr.GitStatus)
-            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
+        var link = await GetLinkWithConnectorAndGitStatusAsync(workspaceId, repositoryId, cancellationToken);
         if (link?.Repository == null)
             return null;
 
-        var uncommittedChangesCount = (link.GitStatus?.StagedCount ?? 0) + (link.GitStatus?.ChangedCount ?? 0);
-        var unpushedCommitsCount = link.OutgoingCommits ?? 0;
-        var incomingCommitsCount = link.BranchHasUpstream == false ? 0 : link.IncomingCommits ?? 0;
+        var (hasUncommitted, uncommittedCount, unpushedCount, incomingCount) = ComputeLocalGitState(link);
 
         return await gitHubPullRequestMergeService.GetMergeDetailsAsync(
             link.Repository,
             link.Repository.Connector,
             prNumber,
-            hasUncommittedChanges: uncommittedChangesCount > 0,
-            uncommittedChangesCount: uncommittedChangesCount,
-            unpushedCommitsCount: unpushedCommitsCount,
-            incomingCommitsCount: incomingCommitsCount,
+            hasUncommittedChanges: hasUncommitted,
+            uncommittedChangesCount: uncommittedCount,
+            unpushedCommitsCount: unpushedCount,
+            incomingCommitsCount: incomingCount,
             cancellationToken: cancellationToken);
     }
+
+    /// <summary>
+    /// Fast phase for opening the merge dialog: just the (ETag-conditional) PR-by-number call, returning title/
+    /// branches/conflicts so the dialog can render its header and Conflicts row before the heavier review-details
+    /// phase below even starts.
+    /// </summary>
+    public async Task<PullRequestMergeSnapshot?> GetMergeSnapshotAsync(int workspaceId, int repositoryId, int prNumber, CancellationToken cancellationToken = default)
+    {
+        var link = await GetLinkWithConnectorAsync(workspaceId, repositoryId, cancellationToken);
+        if (link?.Repository == null)
+            return null;
+
+        return await gitHubPullRequestMergeService.GetPullRequestSnapshotAsync(link.Repository, link.Repository.Connector, prNumber, cancellationToken);
+    }
+
+    /// <summary>
+    /// Background phase for opening the merge dialog: reviews/checks/allowed-methods (all now ETag-conditional),
+    /// plus the workspace's own persisted local git state for the local-state row. Runs after
+    /// <see cref="GetMergeSnapshotAsync"/> has already let the dialog render its title/branches/conflicts.
+    /// </summary>
+    public async Task<PullRequestMergeReviewDetails?> GetMergeReviewDetailsAsync(int workspaceId, int repositoryId, int prNumber, string? headSha, CancellationToken cancellationToken = default)
+    {
+        var link = await GetLinkWithConnectorAndGitStatusAsync(workspaceId, repositoryId, cancellationToken);
+        if (link?.Repository == null)
+            return null;
+
+        var review = await gitHubPullRequestMergeService.GetMergeReviewDetailsAsync(link.Repository, link.Repository.Connector, prNumber, headSha, cancellationToken);
+        if (review == null)
+            return null;
+
+        var (hasUncommitted, uncommittedCount, unpushedCount, incomingCount) = ComputeLocalGitState(link);
+
+        return new PullRequestMergeReviewDetails(
+            review.ApprovedCount,
+            review.ChangesRequestedCount,
+            review.OutstandingReviewers,
+            review.ApprovedByUsers,
+            review.Checks,
+            review.AllowedMergeMethods,
+            review.DefaultMergeMethod,
+            hasUncommitted,
+            uncommittedCount,
+            unpushedCount,
+            incomingCount);
+    }
+
+    private static (bool HasUncommittedChanges, int UncommittedChangesCount, int UnpushedCommitsCount, int IncomingCommitsCount) ComputeLocalGitState(WorkspaceRepositoryLink link)
+    {
+        var uncommittedChangesCount = (link.GitStatus?.StagedCount ?? 0) + (link.GitStatus?.ChangedCount ?? 0);
+        var unpushedCommitsCount = link.OutgoingCommits ?? 0;
+        var incomingCommitsCount = link.BranchHasUpstream == false ? 0 : link.IncomingCommits ?? 0;
+        return (uncommittedChangesCount > 0, uncommittedChangesCount, unpushedCommitsCount, incomingCommitsCount);
+    }
+
+    private Task<WorkspaceRepositoryLink?> GetLinkWithConnectorAndGitStatusAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken) =>
+        dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .ThenInclude(r => r!.Connector)
+            .Include(wr => wr.GitStatus)
+            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
 
     /// <summary>Merges the pull request via GitHub and, on success, forces an immediate PR refresh so the grid badge flips to "merged" without waiting for the next poll.</summary>
     public async Task<MergeResult> MergePullRequestAsync(int workspaceId, int repositoryId, int prNumber, MergeMethod method, string? expectedHeadSha, CancellationToken cancellationToken = default)
