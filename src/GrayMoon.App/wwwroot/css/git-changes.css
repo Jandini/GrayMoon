@@ -267,6 +267,24 @@
     margin-top: 0.4rem;
 }
 
+.branch-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    background: transparent;
+    z-index: 1050;
+}
+
+/* Manually toggled (no Bootstrap JS/Popper attached), so unlike a Bootstrap-initialized dropdown this
+   never gets the `[data-bs-popper]` attribute that ships the top/left placement rule - without an
+   explicit top/left here it would render flush over the toggle button instead of below it. */
+.git-changes-commit-menu {
+    top: 100%;
+    left: 0;
+    margin-top: 0.25rem;
+    z-index: 1051;
+    min-width: 100%;
+}
+
 .git-changes-diff-placeholder {
     display: flex;
     align-items: center;

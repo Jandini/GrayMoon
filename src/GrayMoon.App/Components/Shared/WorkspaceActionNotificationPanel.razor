@@ -309,6 +309,11 @@
 
     private static string WorkspaceJobKey(int workspaceId) => $"/workspaces/{workspaceId}";
 
+    // Git Changes runs commit (and chained push) under its own page job key. Recognizing it here too
+    // means the popup stays suppressed for the whole commit(+push) job, not just while a Repositories-page
+    // job is running - avoiding a mid-push flicker/resurrection of the "required actions" card.
+    private static string WorkspaceGitChangesJobKey(int workspaceId) => $"/workspaces/{workspaceId}/changes";
+
     private NotificationRepo? GetHoveredRepo(WorkspaceNotification n)
     {
         if (_hoveredDepBadge is not { } h || h.WorkspaceId != n.WorkspaceId) return null;
@@ -336,7 +341,8 @@
         }
         catch (OperationCanceledException) { }
     }
-    private bool IsWorkspaceJobRunning(int workspaceId) => JobService.IsRunning(WorkspaceJobKey(workspaceId));
+    private bool IsWorkspaceJobRunning(int workspaceId) =>
+        JobService.IsRunning(WorkspaceJobKey(workspaceId)) || JobService.IsRunning(WorkspaceGitChangesJobKey(workspaceId));
 
     private static int GetSuppressedWorkspaceId(string lowerPath)
     {

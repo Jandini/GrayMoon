@@ -27,6 +27,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Inject] private IBackgroundJobService JobService { get; set; } = default!;
     [Inject] private WorkspaceGitChangesSelectionMemory SelectionMemory { get; set; } = default!;
     [Inject] private WorkspaceGitChangesCommitMessageMemory CommitMessageMemory { get; set; } = default!;
+    [Inject] private WorkspaceGitChangesCommitModeMemory CommitModeMemory { get; set; } = default!;
+    [Inject] private IScopedServiceExecutor ScopedExecutor { get; set; } = default!;
     [Inject] private IJSRuntime Js { get; set; } = default!;
 
     private Workspace? _workspace;

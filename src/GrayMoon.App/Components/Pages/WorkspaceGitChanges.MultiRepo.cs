@@ -47,19 +47,20 @@ public sealed partial class WorkspaceGitChanges
     private static readonly IReadOnlySet<string> EmptyPushPackageIds = new HashSet<string>();
 
     /// <summary>
-    /// The commit split-button's current selection. An explicit user pick (from the dropdown) always
-    /// wins and is remembered per-workspace via <see cref="CommitModeMemory"/>; otherwise it auto-derives
-    /// from whether any repository has staged changes (StagedOnly) with PushAfterCommit false - exactly
-    /// the plain Commit All/Commit Staged behavior that existed before the split button.
+    /// The commit split-button's current selection. StagedOnly is never user-chosen - it always
+    /// auto-derives from whether any repository has staged changes, exactly like before the split
+    /// button existed. PushAfterCommit is the user's remembered "+ Push" preference for whichever
+    /// bucket (All vs Staged) is currently active, via <see cref="CommitModeMemory"/> - so toggling
+    /// "+Push" while Commit All is showing doesn't affect what Commit Staged does, and vice versa.
     /// </summary>
     private (bool StagedOnly, bool PushAfterCommit) CurrentCommitMode
     {
         get
         {
+            var stagedOnly = StagedRepositoryCount > 0;
             var remembered = CommitModeMemory.Get(WorkspaceId);
-            return remembered != null
-                ? (remembered.StagedOnly, remembered.PushAfterCommit)
-                : (StagedRepositoryCount > 0, false);
+            var pushAfterCommit = stagedOnly ? remembered?.PushWhenStaged : remembered?.PushWhenAll;
+            return (stagedOnly, pushAfterCommit ?? false);
         }
     }
 
@@ -73,20 +74,24 @@ public sealed partial class WorkspaceGitChanges
         }
     }
 
-    private bool IsCommitButtonDisabled =>
-        IsJobRunning
-        || string.IsNullOrWhiteSpace(_workspaceCommitMessage)
-        || (CurrentCommitMode.StagedOnly && StagedRepositoryCount == 0);
+    private bool IsCommitButtonDisabled => IsJobRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage);
 
     private void ToggleCommitMenu() => _commitMenuOpen = !_commitMenuOpen;
 
     private void CloseCommitMenu() => _commitMenuOpen = false;
 
     /// <summary>Changes what the main commit button will do next time it's clicked (or Ctrl+Enter is
-    /// pressed) - does not run anything itself.</summary>
-    private void SelectCommitMode(bool stagedOnly, bool pushAfterCommit)
+    /// pressed) - does not run anything itself. Only updates the remembered push preference for
+    /// whichever bucket (All vs Staged) is currently active; the other bucket's remembered preference
+    /// is untouched.</summary>
+    private void SelectCommitMode(bool pushAfterCommit)
     {
-        CommitModeMemory.Set(WorkspaceId, new WorkspaceGitChangesCommitModeSelection(stagedOnly, pushAfterCommit));
+        var stagedOnly = CurrentCommitMode.StagedOnly;
+        var existing = CommitModeMemory.Get(WorkspaceId) ?? new WorkspaceGitChangesCommitModeSelection(PushWhenAll: false, PushWhenStaged: false);
+        var updated = stagedOnly
+            ? existing with { PushWhenStaged = pushAfterCommit }
+            : existing with { PushWhenAll = pushAfterCommit };
+        CommitModeMemory.Set(WorkspaceId, updated);
         _commitMenuOpen = false;
     }
 

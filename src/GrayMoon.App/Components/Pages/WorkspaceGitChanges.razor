@@ -82,28 +82,44 @@
                                   @oninput="OnWorkspaceCommitMessageInput"></textarea>
                         </form>
                         <div class="git-changes-workspace-commit__actions">
-                            @if (StagedRepositoryCount > 0)
-                            {
-                                <button type="button"
-                                        class="btn btn-sm btn-primary"
-                                        disabled="@(IsJobRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
-                                        title="Creates one commit in each staged repository using the same message. Ctrl+Enter from the message box."
-                                        aria-keyshortcuts="Control+Enter"
-                                        @onclick="() => CommitWorkspaceAsync(stagedOnly: true)">
-                                    Commit Staged
-                                </button>
-                            }
-                            else
-                            {
+                            <div class="btn-group position-relative">
                                 <button type="button"
                                         class="@(string.IsNullOrWhiteSpace(_workspaceCommitMessage) ? "btn btn-sm btn-outline-primary" : "btn btn-sm btn-primary")"
-                                        disabled="@(IsJobRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
-                                        title="Stages all changes then creates one commit in each repository using the same message. Ctrl+Enter from the message box."
+                                        disabled="@IsCommitButtonDisabled"
+                                        title="@(CurrentCommitMode.PushAfterCommit
+                                                    ? "Commits, then pushes exactly the repositories that committed successfully. Ctrl+Enter from the message box."
+                                                    : "Creates one commit in each applicable repository using the same message. Ctrl+Enter from the message box.")"
                                         aria-keyshortcuts="Control+Enter"
-                                        @onclick="() => CommitWorkspaceAsync(stagedOnly: false)">
-                                    Commit All
+                                        @onclick="() => CommitWorkspaceAsync(CurrentCommitMode.StagedOnly, CurrentCommitMode.PushAfterCommit)">
+                                    @CommitButtonTitle
                                 </button>
-                            }
+                                <button type="button"
+                                        class="btn btn-sm btn-outline-primary dropdown-toggle dropdown-toggle-split"
+                                        disabled="@IsJobRunning"
+                                        aria-label="Toggle commit menu"
+                                        aria-expanded="@(_commitMenuOpen ? "true" : "false")"
+                                        @onclick="ToggleCommitMenu"
+                                        @onclick:stopPropagation>
+                                </button>
+                                @if (_commitMenuOpen)
+                                {
+                                    <div class="branch-menu-backdrop" @onclick="CloseCommitMenu"></div>
+                                    <ul class="dropdown-menu show shadow git-changes-commit-menu" role="menu">
+                                        <li>
+                                            <button class="@("dropdown-item" + (CurrentCommitMode.PushAfterCommit ? "" : " active"))" type="button" role="menuitem"
+                                                    @onclick="() => SelectCommitMode(pushAfterCommit: false)">
+                                                @(CurrentCommitMode.StagedOnly ? "Commit Staged" : "Commit All")
+                                            </button>
+                                        </li>
+                                        <li>
+                                            <button class="@("dropdown-item" + (CurrentCommitMode.PushAfterCommit ? " active" : ""))" type="button" role="menuitem"
+                                                    @onclick="() => SelectCommitMode(pushAfterCommit: true)">
+                                                @((CurrentCommitMode.StagedOnly ? "Commit Staged" : "Commit All") + " + Push")
+                                            </button>
+                                        </li>
+                                    </ul>
+                                }
+                            </div>
                         </div>
                     </div>
                 }
