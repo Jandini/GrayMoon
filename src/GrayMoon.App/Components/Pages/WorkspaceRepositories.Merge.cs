@@ -312,75 +312,95 @@ public sealed partial class WorkspaceRepositories
         return ExecuteMergeAsync(choice.Method, syncToDefault: false);
     }
 
-    private async Task ExecuteMergeAsync(MergeMethod method, bool syncToDefault)
+    /// <summary>
+    /// Runs the merge (and optional sync-to-default) as a single page job so the standard full-page LoadingOverlay
+    /// covers both steps back-to-back without ever hiding and reappearing in between - the modal itself stays
+    /// mounted throughout (see IsMerging's z-index handling in MergePullRequestModal) rather than closing the
+    /// instant the merge call returns. "Merged 1 of 1 pull requests…" is written for a single PR today but keeps
+    /// the same completed/total shape a future multi-PR merge would report incrementally through job.ReportProgress.
+    /// </summary>
+    private Task ExecuteMergeAsync(MergeMethod method, bool syncToDefault)
     {
         var repositoryId = _mergePrModal.RepositoryId;
         var prNumber = _mergePrModal.PrNumber;
         var headSha = _mergePrModal.Details?.HeadSha;
-        if (repositoryId <= 0 || prNumber <= 0 || _mergePrModal.IsMerging)
-            return;
+        if (repositoryId <= 0 || prNumber <= 0 || _mergePrModal.IsMerging || IsJobRunning)
+            return Task.CompletedTask;
 
         _mergePrModal = _mergePrModal with { IsMerging = true, ErrorMessage = null };
         StateHasChanged();
 
-        MergeResult result;
-        try
+        StartPageJob("Merging pull requests…", async (job, ct) =>
         {
-            result = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, MergeResult>(
-                svc => svc.MergePullRequestAsync(WorkspaceId, repositoryId, prNumber, method, headSha));
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Merge PR failed for repo {RepositoryId}, PR #{PrNumber}", repositoryId, prNumber);
-            result = new MergeResult(false, ex.Message);
-        }
+            try
+            {
+                MergeResult result;
+                try
+                {
+                    result = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, MergeResult>(
+                        svc => svc.MergePullRequestAsync(WorkspaceId, repositoryId, prNumber, method, headSha, ct));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Logger.LogError(ex, "Merge PR failed for repo {RepositoryId}, PR #{PrNumber}", repositoryId, prNumber);
+                    result = new MergeResult(false, ex.Message);
+                }
 
-        if (_disposed)
-            return;
+                if (_disposed)
+                    return;
 
-        if (result.Success)
-        {
-            _mergePrModal = new MergePullRequestModalState();
-            ToastService.Show($"Merged pull request #{prNumber}.");
-            StateHasChanged();
+                if (!result.Success)
+                {
+                    SafeInvoke(() =>
+                    {
+                        _mergePrModal = _mergePrModal with { IsMerging = false, ErrorMessage = result.Message ?? "The merge could not be completed." };
+                        StateHasChanged();
+                    });
+                    return;
+                }
 
-            if (syncToDefault)
-                StartUnattendedSyncToDefaultAfterMerge(repositoryId);
-            else
-                await RefreshFromSync();
-        }
-        else
-        {
-            _mergePrModal = _mergePrModal with { IsMerging = false, ErrorMessage = result.Message ?? "The merge could not be completed." };
-            StateHasChanged();
-        }
-    }
+                job.ReportProgress("Merged 1 of 1 pull requests…");
+                SafeInvoke(() =>
+                {
+                    _mergePrModal = new MergePullRequestModalState();
+                    ToastService.Show($"Merged pull request #{prNumber}.");
+                    StateHasChanged();
+                });
 
-    private void StartUnattendedSyncToDefaultAfterMerge(int repositoryId)
-    {
-        if (workspace == null || IsJobRunning)
-            return;
+                if (syncToDefault)
+                {
+                    var syncResult = await ScopedExecutor.ExecuteAsync<WorkspaceSyncHandler, UnattendedSyncToDefaultResult>(
+                        svc => svc.SyncToDefaultUnattendedAsync(WorkspaceId, [repositoryId], job.ReportProgress, ct));
 
-        StartPageJob("Fetching latest branch state...", async (job, ct) =>
-        {
-            var result = await ScopedExecutor.ExecuteAsync<WorkspaceSyncHandler, UnattendedSyncToDefaultResult>(
-                svc => svc.SyncToDefaultUnattendedAsync(
-                    WorkspaceId,
-                    [repositoryId],
-                    job.ReportProgress,
-                    ct));
+                    if (!syncResult.Completed && syncResult.AbortReason != null)
+                        SafeInvoke(() => ToastService.ShowError(syncResult.AbortReason));
+                }
 
-            if (!result.Completed && result.AbortReason != null)
-                SafeInvoke(() => ToastService.ShowError(result.AbortReason));
+                await InvokeAsync(async () =>
+                {
+                    if (_disposed) return;
+                    await RefreshFromSync();
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                // The merge call itself has no cancellation checkpoint until it completes - cancelling here only
+                // ever interrupts the optional sync-to-default step, never a half-completed merge.
+                SafeInvoke(() =>
+                {
+                    _mergePrModal = _mergePrModal with { IsMerging = false };
+                    StateHasChanged();
+                });
+                throw;
+            }
         }, new PageJobOptions
         {
-            CancelToast = "Sync to default cancelled.",
-            OnError = ex =>
-            {
-                Logger.LogError(ex, "Unattended sync to default failed after merge for repository {RepositoryId}", repositoryId);
-                SafeInvoke(() => ToastService.ShowError("Sync to default failed. Sync to default was aborted."));
-            }
+            RefreshOnSuccess = false,
+            CancelToast = "Merge cancelled.",
+            OnError = ex => Logger.LogError(ex, "Merge pull request job failed for repo {RepositoryId}, PR #{PrNumber}", repositoryId, prNumber)
         });
+
+        return Task.CompletedTask;
     }
 
     private sealed record MergePullRequestModalState
