@@ -7,13 +7,18 @@ public sealed class GitHubHttpRequestException : HttpRequestException
 {
     public GitHubRateLimitSnapshot? RateLimit { get; }
 
+    /// <summary>Raw JSON error body from GitHub, if any, for callers that need to inspect the <c>errors</c> array.</summary>
+    public string? RawErrorContent { get; }
+
     public GitHubHttpRequestException(
         string message,
         HttpStatusCode statusCode,
-        GitHubRateLimitSnapshot? rateLimit)
+        GitHubRateLimitSnapshot? rateLimit,
+        string? rawErrorContent = null)
         : base(message, inner: null, statusCode: statusCode)
     {
         RateLimit = rateLimit;
+        RawErrorContent = rawErrorContent;
     }
 }
 

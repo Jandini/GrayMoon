@@ -698,7 +698,10 @@ public sealed partial class WorkspaceActions : IDisposable
 
                 try
                 {
-                    var tasks = runningRows.Select(row => RefreshRowAsync(row, cancellationToken)).ToList();
+                    // Bounded to MaxConcurrency, same as RefreshRowThrottledAsync, so a workspace with many
+                    // repos "running" at once doesn't fan out an unbounded burst of GitHub calls every tick.
+                    using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
+                    var tasks = runningRows.Select(row => RefreshRowThrottledAsync(row, semaphore, cancellationToken)).ToList();
                     await Task.WhenAll(tasks);
                 }
                 catch (OperationCanceledException)

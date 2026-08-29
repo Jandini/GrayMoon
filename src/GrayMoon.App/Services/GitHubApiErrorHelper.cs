@@ -38,6 +38,40 @@ public static class GitHubApiErrorHelper
     }
 
     /// <summary>
+    /// Detects GitHub's "create pull request" validation errors caused by a head branch that does not exist on
+    /// the remote yet (typically because local commits have not been pushed).
+    /// </summary>
+    public static bool LooksLikeUnpushedHeadBranch(string? jsonBody)
+    {
+        if (string.IsNullOrWhiteSpace(jsonBody))
+            return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonBody);
+            if (!doc.RootElement.TryGetProperty("errors", out var errors) || errors.ValueKind != JsonValueKind.Array)
+                return false;
+
+            foreach (var error in errors.EnumerateArray())
+            {
+                var field = error.TryGetProperty("field", out var f) && f.ValueKind == JsonValueKind.String ? f.GetString() : null;
+                var code = error.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
+                var message = error.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString() : null;
+
+                if (string.Equals(field, "head", StringComparison.OrdinalIgnoreCase) && string.Equals(code, "invalid", StringComparison.OrdinalIgnoreCase))
+                    return true;
+                if (!string.IsNullOrWhiteSpace(message) && message.Contains("No commits between", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+        catch (JsonException)
+        {
+            /* not JSON */
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Parses <c>x-ratelimit-limit</c>, <c>x-ratelimit-remaining</c>, <c>x-ratelimit-used</c>, and
     /// <c>x-ratelimit-reset</c> (UTC epoch seconds) from a GitHub REST response.
     /// </summary>
@@ -53,6 +87,14 @@ public static class GitHubApiErrorHelper
             return true;
         return !string.IsNullOrWhiteSpace(githubMessage) && RateLimitIndicatorsRegex.IsMatch(githubMessage);
     }
+
+    /// <summary>
+    /// GitHub sends X-RateLimit-* headers on every response, success or failure, so their mere presence is not
+    /// evidence of a rate-limit failure. Only append rate-limit-reset guidance when the status/message actually
+    /// indicates rate limiting, or for 403 which GitHub also uses ambiguously for secondary/abuse limits.
+    /// </summary>
+    private static bool IsPlausibleRateLimitCondition(HttpStatusCode? statusCode, string? githubMessage)
+        => LooksLikeRateLimit(statusCode, githubMessage) || statusCode == HttpStatusCode.Forbidden;
 
     public static bool IsRateLimitExhausted(HttpResponseMessage response)
     {
@@ -72,18 +114,22 @@ public static class GitHubApiErrorHelper
         var core = !string.IsNullOrWhiteSpace(detail)
             ? detail.Trim()
             : $"GitHub returned {(int)statusCode} ({statusCode}).";
-        var message = AppendRateLimitReset(core, rateLimit);
-        return new GitHubHttpRequestException(message, statusCode, rateLimit);
+        var message = IsPlausibleRateLimitCondition(statusCode, detail)
+            ? AppendRateLimitReset(core, rateLimit)
+            : core;
+        return new GitHubHttpRequestException(message, statusCode, rateLimit, errorContent);
     }
 
     /// <summary>User-facing text for Actions error badges and connector tests.</summary>
     public static string FormatFriendlyGitHubHttpError(HttpRequestException ex)
     {
         var rateLimit = ex is GitHubHttpRequestException githubEx ? githubEx.RateLimit : null;
+        var rawErrorContent = ex is GitHubHttpRequestException githubEx2 ? githubEx2.RawErrorContent : null;
         var status = ex.StatusCode;
         var detail = GetActionableDetail(ex.Message);
+        var looksLikeRateLimit = LooksLikeRateLimit(status, detail);
 
-        var core = LooksLikeRateLimit(status, detail)
+        var core = looksLikeRateLimit
             ? BuildRateLimitUserMessage(status, detail)
             : status switch
             {
@@ -100,10 +146,7 @@ public static class GitHubApiErrorHelper
                     string.IsNullOrWhiteSpace(detail)
                         ? "Conflict (409). The workflow run may already be finished."
                         : detail,
-                HttpStatusCode.UnprocessableEntity =>
-                    string.IsNullOrWhiteSpace(detail)
-                        ? "GitHub rejected the workflow request (422). It may not support manual runs on this branch, or required workflow inputs are missing."
-                        : detail,
+                HttpStatusCode.UnprocessableEntity => BuildUnprocessableEntityUserMessage(detail, rawErrorContent),
                 HttpStatusCode.TooManyRequests => BuildRateLimitUserMessage(status, detail),
                 HttpStatusCode.ServiceUnavailable =>
                     string.IsNullOrWhiteSpace(detail)
@@ -115,7 +158,12 @@ public static class GitHubApiErrorHelper
                         : detail
             };
 
-        return AppendRateLimitReset(core, rateLimit);
+        // X-RateLimit-* headers are present on every GitHub response, success or failure, so only append
+        // reset guidance when the failure actually looks rate-limit related (or 403, which GitHub also uses
+        // ambiguously for secondary/abuse limits) - not for unrelated errors like 422 validation failures.
+        return IsPlausibleRateLimitCondition(status, detail)
+            ? AppendRateLimitReset(core, rateLimit)
+            : core;
     }
 
     /// <summary>
@@ -194,6 +242,19 @@ public static class GitHubApiErrorHelper
             trimmed = trimmed[..resetIdx];
 
         return trimmed;
+    }
+
+    private static string BuildUnprocessableEntityUserMessage(string? detail, string? rawErrorContent)
+    {
+        if (LooksLikeUnpushedHeadBranch(rawErrorContent))
+        {
+            return "GitHub could not find the head branch on the remote (422). "
+                   + "Push your local commits first, then create the pull request.";
+        }
+
+        return string.IsNullOrWhiteSpace(detail)
+            ? "GitHub rejected the workflow request (422). It may not support manual runs on this branch, or required workflow inputs are missing."
+            : detail;
     }
 
     private static string BuildForbiddenUserMessage(string? githubDetail)

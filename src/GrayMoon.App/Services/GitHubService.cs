@@ -15,6 +15,8 @@ public class GitHubService : IConnectorService
     private readonly ILogger<GitHubService> _logger;
     private readonly GitHubOptions _options;
     private readonly IGitHubRateLimitTracker _rateLimitTracker;
+    private readonly IGitHubETagCache _eTagCache;
+    private readonly IGitHubApiUsageRecorder _usageRecorder;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -22,11 +24,13 @@ public class GitHubService : IConnectorService
 
     public ConnectorType ConnectorType => ConnectorType.GitHub;
 
-    public GitHubService(HttpClient httpClient, IConfiguration configuration, IGitHubRateLimitTracker rateLimitTracker, ILogger<GitHubService> logger)
+    public GitHubService(HttpClient httpClient, IConfiguration configuration, IGitHubRateLimitTracker rateLimitTracker, IGitHubETagCache eTagCache, IGitHubApiUsageRecorder usageRecorder, ILogger<GitHubService> logger)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _rateLimitTracker = rateLimitTracker ?? throw new ArgumentNullException(nameof(rateLimitTracker));
+        _eTagCache = eTagCache ?? throw new ArgumentNullException(nameof(eTagCache));
+        _usageRecorder = usageRecorder ?? throw new ArgumentNullException(nameof(usageRecorder));
         _options = configuration.GetSection("GitHub").Get<GitHubOptions>() ?? new GitHubOptions();
 
         var baseUrl = string.IsNullOrWhiteSpace(_options.ApiBaseUrl)
@@ -52,12 +56,14 @@ public class GitHubService : IConnectorService
         }
     }
 
+    // 429 (rate limit) is intentionally NOT retried here: retrying just burns more quota against a limit
+    // that is already exhausted. The rate-limit pause gate (IGitHubRateLimitTracker) handles backoff instead.
     private static readonly ResiliencePipeline<HttpResponseMessage> GitHubGetRetryPipeline =
         new ResiliencePipelineBuilder<HttpResponseMessage>()
             .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
             {
                 ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-                    .HandleResult(r => r.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable)
+                    .HandleResult(r => r.StatusCode is HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable)
                     .Handle<HttpRequestException>()
                     .Handle<TaskCanceledException>(),
                 // 3 quick retries with short backoff, then fail
@@ -74,13 +80,16 @@ public class GitHubService : IConnectorService
             })
             .Build();
 
-    /// <summary>Retries transient failures for GitHub REST <strong>mutations</strong> (POST). Read-only calls use <see cref="GitHubGetRetryPipeline"/>.</summary>
+    /// <summary>
+    /// Retries transient failures for GitHub REST <strong>mutations</strong> (POST). Read-only calls use <see cref="GitHubGetRetryPipeline"/>.
+    /// 429 is intentionally NOT retried; see the comment on <see cref="GitHubGetRetryPipeline"/>.
+    /// </summary>
     private static readonly ResiliencePipeline<HttpResponseMessage> GitHubMutationRetryPipeline =
         new ResiliencePipelineBuilder<HttpResponseMessage>()
             .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
             {
                 ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-                    .HandleResult(r => r.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable)
+                    .HandleResult(r => r.StatusCode is HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable)
                     .Handle<HttpRequestException>()
                     .Handle<TaskCanceledException>(),
                 MaxRetryAttempts = 3,
@@ -272,9 +281,10 @@ public class GitHubService : IConnectorService
             throw new ArgumentException("Branch is required.", nameof(branch));
 
         var encodedBranch = Uri.EscapeDataString(branch);
-        var response = await GetAsync<GitHubWorkflowRunsResponse>(
+        var response = await GetETaggedAsync<GitHubWorkflowRunsResponse>(
             connector,
-            $"repos/{owner}/{repo}/actions/runs?branch={encodedBranch}&per_page={perPage}");
+            $"repos/{owner}/{repo}/actions/runs?branch={encodedBranch}&per_page={perPage}",
+            default);
 
         return response?.WorkflowRuns ?? new List<GitHubWorkflowRunDto>();
     }
@@ -290,7 +300,7 @@ public class GitHubService : IConnectorService
         if (runId <= 0)
             throw new ArgumentException("Run id is required.", nameof(runId));
 
-        return await GetAsync<GitHubWorkflowJobsResponse>(
+        return await GetETaggedAsync<GitHubWorkflowJobsResponse>(
             connector,
             $"repos/{owner}/{repo}/actions/runs/{runId}/jobs?per_page=100",
             cancellationToken,
@@ -434,15 +444,17 @@ public class GitHubService : IConnectorService
         await PostAsync(connector, $"repos/{owner}/{repo}/actions/workflows/{workflowId}/dispatches", payload, cancellationToken);
     }
 
+    /// <summary>
+    /// Verifies the token is valid with a single, cheap call instead of listing every visible org and repo
+    /// (which could be hundreds of API calls for a large account/organization).
+    /// </summary>
     public async Task<ConnectorTestResult> TestConnectionAsync(Connector connector)
     {
         EnsureConnectorConfigured(connector);
 
         try
         {
-            var organizations = await GetAsync<List<GitHubOrganizationDto>>(connector, "user/orgs")
-                ?? new List<GitHubOrganizationDto>();
-            var repositories = await GetRepositoriesAsync(connector);
+            await GetAsync<GitHubUserDto>(connector, "user");
             return ConnectorTestResult.Ok();
         }
         catch (HttpRequestException ex)
@@ -457,17 +469,6 @@ public class GitHubService : IConnectorService
             _logger.LogError(ex, "Failed to test GitHub connector connection.");
             return ConnectorTestResult.Fail($"Connection error: {ex.Message}");
         }
-    }
-
-    public async Task<(int OrganizationCount, int RepositoryCount)> TestConnectionDetailedAsync(Connector connector)
-    {
-        EnsureConnectorConfigured(connector);
-
-        var organizations = await GetAsync<List<GitHubOrganizationDto>>(connector, "user/orgs")
-            ?? new List<GitHubOrganizationDto>();
-        var repositories = await GetRepositoriesAsync(connector);
-
-        return (organizations.Count, repositories.Count);
     }
 
     /// <summary>Gets the pull request for the given branch in the repo, if any. Fetches up to 5 and returns the first one opened by a human (user.type != "Bot"), falling back to the first match when all are bots. Returns null when no PR or API error.</summary>
@@ -735,10 +736,12 @@ public class GitHubService : IConnectorService
         var response = await pipeline.ExecuteAsync(async (ct) =>
         {
             using var request = CreateGetRequest(connector, requestUri);
-            return await _httpClient.SendAsync(request, ct);
+            var result = await _httpClient.SendAsync(request, ct);
+            RecordRateLimit(connector, result);
+            _usageRecorder.Record(connector.ConnectorId, requestUri, isNotModified: false, isError: !result.IsSuccessStatusCode);
+            return result;
         }, cancellationToken);
 
-        RecordRateLimit(connector, response);
         return response;
     }
 
@@ -780,6 +783,57 @@ public class GitHubService : IConnectorService
         }
 
         return await response.Content.ReadFromJsonAsync<T>(_jsonOptions, cancellationToken);
+    }
+
+    /// <summary>
+    /// Like <see cref="GetAsync{T}(Connector, string, CancellationToken, bool)"/> but sends the last known
+    /// ETag as <c>If-None-Match</c>. A 304 response (unchanged since last poll) is answered from the cached
+    /// body instead of a fresh download - free against the primary limit and only 1 point against the
+    /// secondary/abuse limit, which matters for the frequently-repolled jobs/branch-runs endpoints.
+    /// </summary>
+    private async Task<T?> GetETaggedAsync<T>(Connector connector, string requestUri, CancellationToken cancellationToken = default, bool skipRateLimitRetry = false)
+    {
+        var cacheKey = $"{connector.ConnectorId}|{requestUri}";
+        var cached = _eTagCache.TryGet(cacheKey);
+
+        var pipeline = skipRateLimitRetry ? GitHubLiveFeedRetryPipeline : GitHubGetRetryPipeline;
+        using var response = await pipeline.ExecuteAsync(async ct =>
+        {
+            using var request = CreateGetRequest(connector, requestUri);
+            if (cached is { } entry)
+                request.Headers.TryAddWithoutValidation("If-None-Match", entry.ETag);
+            var result = await _httpClient.SendAsync(request, ct);
+            RecordRateLimit(connector, result);
+            _usageRecorder.Record(
+                connector.ConnectorId,
+                requestUri,
+                isNotModified: result.StatusCode == HttpStatusCode.NotModified,
+                isError: !result.IsSuccessStatusCode && result.StatusCode != HttpStatusCode.NotModified);
+            return result;
+        }, cancellationToken);
+
+        if (response.StatusCode == HttpStatusCode.NotModified && cached is { } cachedEntry)
+        {
+            _logger.LogTrace("GitHub ETag cache hit (304) for {Url}", requestUri);
+            return JsonSerializer.Deserialize<T>(cachedEntry.Body, _jsonOptions);
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError("GitHub API call failed. Status: {StatusCode}, URL: {Url}, Response: {Response}",
+                response.StatusCode,
+                response.RequestMessage?.RequestUri,
+                errorContent);
+            ThrowGitHubApiFailure(response, errorContent);
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        var etag = response.Headers.ETag?.Tag;
+        if (!string.IsNullOrWhiteSpace(etag))
+            _eTagCache.Set(cacheKey, etag, body);
+
+        return string.IsNullOrEmpty(body) ? default : JsonSerializer.Deserialize<T>(body, _jsonOptions);
     }
 
     private HttpRequestMessage CreatePostRequest(Connector connector, string requestUri, string? payload)
@@ -888,7 +942,7 @@ public class GitHubService : IConnectorService
     private async Task<List<GitHubRepositoryDto>> GetRepositoriesPagedAsync(string requestUri)
     {
         var results = new List<GitHubRepositoryDto>();
-        const int pageSize = 20;
+        const int pageSize = 100;
         var page = 1;
 
         while (true)
@@ -912,7 +966,7 @@ public class GitHubService : IConnectorService
     private async Task<List<GitHubRepositoryDto>> GetRepositoriesPagedAsync(Connector connector, string requestUri, IProgress<int>? progress = null, IProgress<IReadOnlyList<GitHubRepositoryDto>>? batchProgress = null, CancellationToken cancellationToken = default)
     {
         var results = new List<GitHubRepositoryDto>();
-        const int pageSize = 20;
+        const int pageSize = 100;
         var page = 1;
 
         while (true)

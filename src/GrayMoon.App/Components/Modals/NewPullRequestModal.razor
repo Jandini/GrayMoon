@@ -1,5 +1,8 @@
+@using GrayMoon.App.Models
 @using GrayMoon.App.Services
+@using Microsoft.Extensions.Options
 @inject IPullRequestService PullRequestService
+@inject IOptions<WorkspaceOptions> WorkspaceOptions
 @inject ILogger<NewPullRequestModal> Logger
 
 @if (IsVisible)
@@ -164,6 +167,8 @@
 
     private bool IsValid => !string.IsNullOrWhiteSpace(_title) && Targets.Count > 0;
 
+    private int MaxConcurrency => Math.Max(1, WorkspaceOptions.Value.MaxParallelOperations);
+
     protected override void OnParametersSet()
     {
         if (IsVisible && !_wasVisible)
@@ -229,10 +234,13 @@
             var users = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var teams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            // Bounded to MaxConcurrency so opening the dialog for many target repos at once doesn't fire an
+            // unbounded burst of GitHub GETs (2 per target) that can trip a secondary/abuse rate limit.
+            using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
             var tasks = Targets.SelectMany(t => new Task[]
             {
-                FetchUsersAsync(t.RepositoryId, users, ct),
-                FetchTeamsAsync(t.RepositoryId, teams, ct)
+                FetchThrottledAsync(() => FetchUsersAsync(t.RepositoryId, users, ct), semaphore, ct),
+                FetchThrottledAsync(() => FetchTeamsAsync(t.RepositoryId, teams, ct), semaphore, ct)
             }).ToList();
 
             await Task.WhenAll(tasks);
@@ -259,6 +267,27 @@
         {
             _isLoadingReviewers = false;
             StateHasChanged();
+        }
+    }
+
+    private static async Task FetchThrottledAsync(Func<Task> action, SemaphoreSlim semaphore, CancellationToken ct)
+    {
+        try
+        {
+            await semaphore.WaitAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            semaphore.Release();
         }
     }
 
