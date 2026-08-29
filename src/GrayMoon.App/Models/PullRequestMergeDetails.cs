@@ -55,9 +55,12 @@ public sealed class PullRequestMergeDetails
     /// </summary>
     public bool HasUncommittedChanges { get; init; }
     public int UncommittedChangesCount { get; init; }
+    /// <summary>Commits ahead of the remote (not yet pushed).</summary>
     public int UnpushedCommitsCount { get; init; }
-    /// <summary>True when either local signal above is set - drives the warning icon on the local-state row.</summary>
-    public bool HasLocalWarning => HasUncommittedChanges || UnpushedCommitsCount > 0;
+    /// <summary>Commits behind the remote (not yet pulled locally).</summary>
+    public int IncomingCommitsCount { get; init; }
+    /// <summary>True when any local signal above is set - drives the warning icon on the local-state row.</summary>
+    public bool HasLocalWarning => HasUncommittedChanges || UnpushedCommitsCount > 0 || IncomingCommitsCount > 0;
 
     /// <summary>True when the merge button itself should render as an orange "proceed with caution" warning: either the local clone has unsynced work, or checks are still running (mergeable_state can flip to "unstable"/blocked once they finish).</summary>
     public bool HasMergeWarning => HasLocalWarning || Checks.State == ChecksState.Pending;
