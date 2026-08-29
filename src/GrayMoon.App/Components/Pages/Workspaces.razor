@@ -203,7 +203,8 @@
 @if (showDeleteModal)
 {
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
-         @onkeydown="HandleDeleteModalKeyDown">
+         @onkeydown="HandleDeleteModalKeyDown"
+         @ref="_deleteModalElement">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
@@ -282,6 +283,7 @@
 
     private bool showEditorModal;
     private bool showRepositoriesModal;
+    private ElementReference _deleteModalElement;
     private bool showDeleteModal;
     private bool isSaving;
     private bool isSavingRepositories;
@@ -572,6 +574,12 @@
         {
             isSavingRepositories = false;
         }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (showDeleteModal)
+            await _deleteModalElement.FocusAsync();
     }
 
     private void ShowDeleteModal(WorkspaceModel workspace)

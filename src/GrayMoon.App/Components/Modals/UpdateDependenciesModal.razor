@@ -61,6 +61,7 @@
     private string _commitMessage = "";
     private bool _includeDepsInMessage = true;
     private bool _prevIsVisible;
+    private bool _focusOnNextRender;
 
     protected override void OnParametersSet()
     {
@@ -68,8 +69,17 @@
         {
             _commitMessage = InitialCommitMessage ?? "";
             _includeDepsInMessage = InitialIncludeDeps;
+            _focusOnNextRender = true;
         }
         _prevIsVisible = IsVisible;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusOnNextRender || !IsVisible)
+            return;
+        _focusOnNextRender = false;
+        await modalElement.FocusAsync();
     }
 
     private async Task OnProceedClick()

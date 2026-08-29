@@ -49,6 +49,23 @@
     [Parameter] public EventCallback OnCancel { get; set; }
 
     private ElementReference _modalElement;
+    private bool _focusOnNextRender;
+    private bool _wasVisible;
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !_wasVisible)
+            _focusOnNextRender = true;
+        _wasVisible = IsVisible;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusOnNextRender || !IsVisible)
+            return;
+        _focusOnNextRender = false;
+        await _modalElement.FocusAsync();
+    }
 
     private IReadOnlyList<(string PackageId, string CurrentVersion, string NewVersion)> PackageLines =>
         Payload?.ProjectUpdates

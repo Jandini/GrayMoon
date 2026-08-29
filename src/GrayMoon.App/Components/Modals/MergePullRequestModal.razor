@@ -13,7 +13,8 @@
     *@
     @* z-index one below ConfirmModal's 1075 so the "merge anyway?" warning confirmation (nested on top of this dialog) always wins the stacking tie. *@
     <div class="modal show d-block merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @((IsSyncingLocalState || IsMerging) ? 50 : 1074);"
-         @onkeydown="HandleKeyDown">
+         @onkeydown="HandleKeyDown"
+         @ref="_modalElement">
         <div class="modal-dialog modal-dialog-centered merge-pr-modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
@@ -278,7 +279,9 @@
     private MergeMethod _selectedMethod;
     private bool _showMethodDropdown;
     private bool _wasVisible;
+    private bool _focusOnNextRender;
     private int? _lastDetailsNumber;
+    private ElementReference _modalElement;
 
     /// <summary>Backed by <see cref="SyncToDefaultPreference"/> (a singleton) so the checkbox remembers the user's
     /// last choice across dialog opens and page navigation, instead of resetting to unchecked every time.</summary>
@@ -302,6 +305,7 @@
         {
             _wasVisible = true;
             _showMethodDropdown = false;
+            _focusOnNextRender = true;
         }
         else if (!IsVisible)
         {
@@ -326,6 +330,14 @@
             _selectedMethod = Details.DefaultMergeMethod ?? MergeMethod.Merge;
             _defaultMethodApplied = true;
         }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusOnNextRender || !IsVisible)
+            return;
+        _focusOnNextRender = false;
+        await _modalElement.FocusAsync();
     }
 
     private async Task HandleKeyDown(KeyboardEventArgs e)

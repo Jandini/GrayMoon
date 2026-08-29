@@ -29,6 +29,12 @@
 
     private ElementReference modalElement;
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible)
+            await modalElement.FocusAsync();
+    }
+
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Escape" || e.Code == "Escape")

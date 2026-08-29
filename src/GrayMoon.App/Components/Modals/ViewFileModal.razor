@@ -7,7 +7,7 @@
 
 @if (IsVisible)
 {
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onkeydown="HandleKeyDown">
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onkeydown="HandleKeyDown" @ref="_modalElement">
         <div class="modal-dialog modal-xl view-file-dialog">
             <div class="modal-content">
                 <div class="modal-header">
@@ -81,12 +81,15 @@
     private string? _errorMessage;
     private bool _hasSelection;
     private ElementReference _textareaRef;
+    private ElementReference _modalElement;
+    private bool _focusOnNextRender;
 
     protected override void OnParametersSet()
     {
         if (IsVisible && !_wasVisible)
         {
             _wasVisible = true;
+            _focusOnNextRender = true;
             _content = null;
             _errorMessage = null;
             _hasSelection = false;
@@ -102,6 +105,12 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (_focusOnNextRender && IsVisible)
+        {
+            _focusOnNextRender = false;
+            await _modalElement.FocusAsync();
+        }
+
         if (_isLoading && IsVisible && File != null && !_loadTriggered)
         {
             _loadTriggered = true;
