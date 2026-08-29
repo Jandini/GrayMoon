@@ -56,8 +56,11 @@ public sealed class PullRequestMergeDetails
     public bool HasUncommittedChanges { get; init; }
     public int UncommittedChangesCount { get; init; }
     public int UnpushedCommitsCount { get; init; }
-    /// <summary>True when either local signal above is set - drives the warning icon/orange merge button.</summary>
+    /// <summary>True when either local signal above is set - drives the warning icon on the local-state row.</summary>
     public bool HasLocalWarning => HasUncommittedChanges || UnpushedCommitsCount > 0;
+
+    /// <summary>True when the merge button itself should render as an orange "proceed with caution" warning: either the local clone has unsynced work, or checks are still running (mergeable_state can flip to "unstable"/blocked once they finish).</summary>
+    public bool HasMergeWarning => HasLocalWarning || Checks.State == ChecksState.Pending;
 
     /// <summary>Merge methods GitHub currently permits for this repository. Only these may ever be offered to the user.</summary>
     public IReadOnlyList<MergeMethod> AllowedMergeMethods { get; init; } = Array.Empty<MergeMethod>();

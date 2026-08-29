@@ -14,6 +14,13 @@
                         {
                             <a href="@Details.HtmlUrl" target="_blank" rel="noopener noreferrer" class="merge-pr-header-link fw-normal fs-6 ms-1">#@Details.Number</a>
                         }
+                        else if (PrNumber is > 0)
+                        {
+                            @* Number is known as soon as the dialog opens (it's what we asked GitHub for) - no need to
+                               wait for the full details fetch just to show it. Plain text until Details supplies a
+                               real link target, so this never becomes a dead/misleading link while loading. *@
+                            <span class="merge-pr-header-link fw-normal fs-6 ms-1">#@PrNumber</span>
+                        }
                     </h5>
                     <button type="button" class="btn-close flex-shrink-0" aria-label="Close" @onclick="OnCancel"></button>
                 </div>
@@ -54,7 +61,16 @@
                                 </span>
                                 <div class="merge-pr-status-text">
                                     <div class="merge-pr-status-title">@GetChecksTitle()</div>
-                                    <div class="merge-pr-status-subtitle">@GetChecksSubtitle()</div>
+                                    <div class="merge-pr-status-subtitle">
+                                        @if (Details.Checks.State == ChecksState.Pending && !string.IsNullOrEmpty(ActionsUrl))
+                                        {
+                                            <a href="@ActionsUrl" class="merge-pr-changed-files-link">@GetChecksSubtitle()</a>
+                                        }
+                                        else
+                                        {
+                                            @GetChecksSubtitle()
+                                        }
+                                    </div>
                                 </div>
                             </div>
                             <div class="merge-pr-status-item">
@@ -138,7 +154,7 @@
                     <div class="modal-footer merge-pr-modal-footer">
                         <div class="btn-group merge-pr-split-btn">
                             <button type="button"
-                                    class="btn merge-pr-btn-github @(Details.HasLocalWarning ? "merge-pr-btn-github--warning" : null) merge-pr-split-btn__main"
+                                    class="btn merge-pr-btn-github @(Details.HasMergeWarning ? "merge-pr-btn-github--warning" : null) merge-pr-split-btn__main"
                                     disabled="@(!Details.CanMergeNow || IsMerging)"
                                     @onclick="HandleMergeClick">
                                 @if (IsMerging)
@@ -150,7 +166,7 @@
                             @if (Details.AllowedMergeMethods.Count > 1)
                             {
                                 <button type="button"
-                                        class="btn merge-pr-btn-github @(Details.HasLocalWarning ? "merge-pr-btn-github--warning" : null) dropdown-toggle dropdown-toggle-split merge-pr-split-btn__toggle"
+                                        class="btn merge-pr-btn-github @(Details.HasMergeWarning ? "merge-pr-btn-github--warning" : null) dropdown-toggle dropdown-toggle-split merge-pr-split-btn__toggle"
                                         disabled="@(!Details.CanMergeNow || IsMerging)"
                                         @onclick="ToggleMethodDropdown">
                                     <span class="visually-hidden">Choose merge method</span>
@@ -177,6 +193,8 @@
 
 @code {
     [Parameter] public bool IsVisible { get; set; }
+    /// <summary>PR number known immediately when the dialog opens, before the full <see cref="Details"/> fetch completes.</summary>
+    [Parameter] public int? PrNumber { get; set; }
     [Parameter] public PullRequestMergeDetails? Details { get; set; }
     [Parameter] public bool IsLoading { get; set; }
     [Parameter] public bool IsMerging { get; set; }
@@ -185,6 +203,8 @@
     [Parameter] public EventCallback<MergeMethod> OnMerge { get; set; }
     /// <summary>Workspace's Git Changes page URL, used to link the "N uncommitted changes" text in the local-state row. Null/empty hides the link.</summary>
     [Parameter] public string? ChangesUrl { get; set; }
+    /// <summary>Workspace's Actions page URL, used to link the "N checks still running" text in the checks row. Null/empty hides the link.</summary>
+    [Parameter] public string? ActionsUrl { get; set; }
 
     private MergeMethod _selectedMethod;
     private bool _showMethodDropdown;
