@@ -1,6 +1,9 @@
 /**
  * Makes table columns resizable. Add class "resizable-columns" to any table.
- * Column widths are persisted in localStorage per table (key: graymoon-col-widths-{tableClass}).
+ * Column widths are persisted in localStorage per table (key: graymoon-col-widths-{tableClass}),
+ * and per workspace when the table carries a "data-workspace-id" attribute
+ * (key: graymoon-col-widths-{tableClass}-workspace-{id}), mirroring git-changes-splitter.js's
+ * storage convention.
  */
 (function () {
     const STORAGE_PREFIX = 'graymoon-col-widths-';
@@ -10,7 +13,8 @@
     function getTableStorageKey(table) {
         const classes = Array.from(table.classList).filter(c =>
             c && c !== 'table' && c !== 'table-striped' && c !== 'table-hover' && c !== 'mb-0' && c !== 'resizable-columns');
-        return STORAGE_PREFIX + (classes[0] || 'table');
+        const workspaceId = table.dataset.workspaceId;
+        return STORAGE_PREFIX + (classes[0] || 'table') + (workspaceId ? '-workspace-' + workspaceId : '');
     }
 
     function getColumnWidths(table) {
@@ -32,18 +36,7 @@
         } catch (_) { /* ignore */ }
     }
 
-    function initTable(table) {
-        if (table.dataset.resizableColumnsInit === '1') return;
-        const thead = table.querySelector('thead');
-        const headerRow = thead && thead.querySelector('tr');
-        const ths = headerRow ? Array.from(headerRow.querySelectorAll('th')) : [];
-        if (ths.length === 0) return;
-
-        table.dataset.resizableColumnsInit = '1';
-        table.dataset.resizableColumnsCount = String(ths.length);
-        table.style.tableLayout = 'fixed';
-        table.style.width = '100%';
-
+    function applyWidths(table, ths) {
         const savedWidths = getColumnWidths(table);
         if (savedWidths && savedWidths.length === ths.length) {
             ths.forEach((th, i) => {
@@ -61,7 +54,7 @@
                 }
             });
         } else {
-            // On first load (no saved widths): capture the current header widths
+            // No saved widths for this table/workspace: capture the current header widths
             // and freeze them as explicit percentages so thead and tbody stay aligned.
             const tableRect = table.getBoundingClientRect();
             const tableWidth = tableRect.width;
@@ -84,6 +77,34 @@
                 });
             }
         }
+    }
+
+    function initTable(table) {
+        const thead = table.querySelector('thead');
+        const headerRow = thead && thead.querySelector('tr');
+        const ths = headerRow ? Array.from(headerRow.querySelectorAll('th')) : [];
+        if (ths.length === 0) return;
+
+        const workspaceKey = table.dataset.workspaceId || '';
+        if (table.dataset.resizableColumnsInit === '1') {
+            if (table.dataset.resizableColumnsWorkspace === workspaceKey) return;
+
+            // Same DOM node reused for a different workspace (Blazor keeps the table element in
+            // place across SPA navigation between workspaces since the markup is structurally
+            // identical) - reapply that workspace's saved widths without recreating resize handles.
+            table.dataset.resizableColumnsWorkspace = workspaceKey;
+            applyWidths(table, ths);
+            syncBodyColumnWidths(table, ths);
+            return;
+        }
+
+        table.dataset.resizableColumnsInit = '1';
+        table.dataset.resizableColumnsWorkspace = workspaceKey;
+        table.dataset.resizableColumnsCount = String(ths.length);
+        table.style.tableLayout = 'fixed';
+        table.style.width = '100%';
+
+        applyWidths(table, ths);
 
         ths.forEach((th, index) => {
             if (th.classList.contains('no-resize')) return;
@@ -247,6 +268,8 @@
         // when a grid's rows are reloaded (e.g. statuses updated), the new rows
         // inherit the existing header widths instead of drifting.
         // If the column count changed (e.g. checkbox column toggled), re-initialize.
+        // If the workspace id changed (reused DOM node navigated to another workspace),
+        // initTable() re-applies that workspace's saved widths itself.
         document.querySelectorAll('table.resizable-columns').forEach(tbl => {
             const thead = tbl.querySelector('thead');
             const headerRow = thead && thead.querySelector('tr');
@@ -257,6 +280,13 @@
             if (tbl.dataset.resizableColumnsInit === '1' && expectedCount !== ths.length) {
                 delete tbl.dataset.resizableColumnsInit;
                 delete tbl.dataset.resizableColumnsCount;
+                delete tbl.dataset.resizableColumnsWorkspace;
+                initTable(tbl);
+                return;
+            }
+
+            const workspaceKey = tbl.dataset.workspaceId || '';
+            if (tbl.dataset.resizableColumnsInit === '1' && tbl.dataset.resizableColumnsWorkspace !== workspaceKey) {
                 initTable(tbl);
                 return;
             }
@@ -268,7 +298,12 @@
         document.querySelectorAll('.grid-page-body .table').forEach(alignHeaderScrollbar);
     });
 
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['data-workspace-id']
+    });
 
     window.graymoonResizableColumns = { init: runInit };
 })();

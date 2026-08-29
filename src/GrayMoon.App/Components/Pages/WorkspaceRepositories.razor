@@ -66,7 +66,7 @@
             <div class="card page-card mb-4">
                     <div class="card-body p-0">
                         <div class="table-responsive">
-                            <table class="table table-hover mb-0 repositories-table resizable-columns virtual-scroll-table">
+                            <table class="table table-hover mb-0 repositories-table resizable-columns virtual-scroll-table" data-workspace-id="@WorkspaceId">
                         <thead class="table-dark">
                             <tr>
                                 <th class="col-repo">Repository</th>
@@ -223,6 +223,7 @@
                             ErrorMessage="@_repositoriesModal.ErrorMessage"
                             RenameWarnings="@_repositoriesModal.RenameWarnings"
                             RefreshGeneration="@_repositoriesModal.RefreshGeneration"
+                            WorkspaceId="@WorkspaceId"
                             OnSave="@SaveRepositoriesAsync"
                             OnCancel="@CloseRepositoriesModal"
                             OnFetchRepositories="@FetchRepositoriesAsync" />
