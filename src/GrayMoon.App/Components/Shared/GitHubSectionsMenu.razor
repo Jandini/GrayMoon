@@ -13,7 +13,15 @@
          tabindex="0"
          @onclick="() => OnItemClickAsync(item.Suffix)"
          @onclick:stopPropagation>
-        <i class="bi @item.Icon" aria-hidden="true"></i><span>@item.Label</span>
+        @if (item.Icon == "bi-git")
+        {
+            <PullRequestIcon AdditionalClass="pull-request-icon--menu" />
+        }
+        else
+        {
+            <i class="bi @item.Icon" aria-hidden="true"></i>
+        }
+        <span>@item.Label</span>
     </div>
 }
 

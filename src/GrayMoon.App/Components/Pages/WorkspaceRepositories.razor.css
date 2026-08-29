@@ -55,7 +55,12 @@
 
 /* Header icons: block so they align consistently in centered columns */
 ::deep .repositories-table thead th .header-icon {
-    display: block;    
+    display: block;
+}
+
+::deep .repositories-table thead th .pull-request-icon.header-icon {
+    width: 1em;
+    height: 1em;
 }
 
 /* Dependency level header: left [level + graph] … right [icons + count]
@@ -274,14 +279,16 @@
     color: #fff;
 }
 
-::deep .repositories-table .gm-menu-item i {
+::deep .repositories-table .gm-menu-item i,
+::deep .repositories-table .gm-menu-item .pull-request-icon {
     font-size: 0.78rem;
     color: #777;
     flex-shrink: 0;
     transition: color 0.08s;
 }
 
-::deep .repositories-table .gm-menu-item:hover i {
+::deep .repositories-table .gm-menu-item:hover i,
+::deep .repositories-table .gm-menu-item:hover .pull-request-icon {
     color: #aaa;
 }
 
@@ -291,9 +298,11 @@
    when a repository has incoming or outgoing commits. */
 ::deep .repositories-table .gm-menu-item.gm-menu-item--highlight,
 ::deep .repositories-table .gm-menu-item.gm-menu-item--highlight i,
+::deep .repositories-table .gm-menu-item.gm-menu-item--highlight .pull-request-icon,
 ::deep .repositories-table .gm-menu-item.gm-menu-item--highlight span,
 ::deep .repositories-table .gm-menu-item.gm-menu-item--highlight:hover,
 ::deep .repositories-table .gm-menu-item.gm-menu-item--highlight:hover i,
+::deep .repositories-table .gm-menu-item.gm-menu-item--highlight:hover .pull-request-icon,
 ::deep .repositories-table .gm-menu-item.gm-menu-item--highlight:hover span {
     color: #ffc107 !important;
 }
