@@ -1,0 +1,13 @@
+.pull-request-icon {
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    vertical-align: -0.125em;
+    flex-shrink: 0;
+}
+
+.pull-request-icon--menu {
+    width: 0.78rem;
+    height: 0.78rem;
+    vertical-align: middle;
+}
