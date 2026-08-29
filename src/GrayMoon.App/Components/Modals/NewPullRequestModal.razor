@@ -1,9 +1,11 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services
 @using Microsoft.Extensions.Options
+@implements IDisposable
 @inject IPullRequestService PullRequestService
 @inject IOptions<WorkspaceOptions> WorkspaceOptions
 @inject ILogger<NewPullRequestModal> Logger
+@inject IJSRuntime JS
 
 @if (IsVisible)
 {
@@ -161,6 +163,7 @@
     private bool _wasVisible;
     private bool _focusTitleOnNextRender;
     private CancellationTokenSource? _reviewersCts;
+    private DotNetObjectReference<NewPullRequestModal>? _dotNetRef;
 
     private bool HasUnifiedHeadBranch => Targets.Count > 0
         && Targets.Select(t => t.HeadBranch).Distinct(StringComparer.Ordinal).Count() == 1;
@@ -195,6 +198,13 @@
                 await titleInput.FocusAsync();
             }
             catch { }
+
+            try
+            {
+                _dotNetRef ??= DotNetObjectReference.Create(this);
+                await JS.InvokeVoidAsync("newPullRequestModal.initTitlePasteHandler", titleInput, _dotNetRef);
+            }
+            catch { }
         }
 
         if (!IsVisible && _wasVisible)
@@ -208,6 +218,27 @@
         {
             _wasVisible = true;
         }
+    }
+
+    [JSInvokable]
+    public void OnTitlePasteMultiline(string pastedText)
+    {
+        var normalized = pastedText.Replace("\r\n", "\n").Replace("\r", "\n");
+        var lines = normalized.Split('\n');
+        var firstLine = lines[0];
+        var rest = string.Join("\n", lines.Skip(1)).Trim('\n');
+
+        _title = firstLine;
+        _body = string.IsNullOrWhiteSpace(rest)
+            ? _body
+            : (string.IsNullOrWhiteSpace(_body) ? rest : $"{_body}\n{rest}");
+
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        _dotNetRef?.Dispose();
     }
 
     private string ComputeDefaultTitle()
