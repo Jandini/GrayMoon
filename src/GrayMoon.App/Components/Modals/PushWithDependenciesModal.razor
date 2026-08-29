@@ -79,6 +79,8 @@
 
     private bool SynchronizedPush { get; set; } = true;
     private ElementReference _modalElement;
+    private bool _focusOnNextRender;
+    private bool _wasVisible;
 
     private bool HasRequiredPackages => Info?.PayloadForRepo.RequiredPackages?.Count > 0;
     private bool IsMultipleRepos => (Info?.PayloadForRepo.RepoName?.Contains("repositories") == true) && (Info?.PayloadForRepo.RepoName != "1 repository");
@@ -118,8 +120,19 @@
 
     protected override void OnParametersSet()
     {
+        if (IsVisible && !_wasVisible)
+            _focusOnNextRender = true;
         if (IsVisible)
             SynchronizedPush = true;
+        _wasVisible = IsVisible;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusOnNextRender || !IsVisible)
+            return;
+        _focusOnNextRender = false;
+        await _modalElement.FocusAsync();
     }
 
     private async Task Proceed()

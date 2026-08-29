@@ -41,14 +41,51 @@
     animation: merge-pr-placeholder-pulse 1.4s ease-in-out infinite;
 }
 
+/* Fixed rem, not a percentage: .merge-pr-modal-dialog is width:auto (shrink-to-fit), so a
+   percentage on an empty inline-block resolves against an indefinite containing block and
+   computes to 0 - the bar would pulse but take no space. rem matches the intended share of
+   the 640px dialog cap (title ~55%, branches ~32%) without depending on parent width. */
 ::deep .merge-pr-placeholder--title {
-    width: 55%;
+    width: 20rem;
     height: 1rem;
 }
 
 ::deep .merge-pr-placeholder--branches {
-    width: 32%;
+    width: 11.5rem;
     height: 0.8rem;
+}
+
+/* Status-row title/subtitle placeholders, shown only while IsLoadingReviewDetails. Same
+   shrink-to-fit trap as --title/--branches, plus these sit in .merge-pr-status-text (a flex
+   item with min-width:0 and no flex-grow), so a percentage would collapse even harder. */
+::deep .merge-pr-placeholder--review-title {
+    width: 7.5rem;
+    height: 0.85rem;
+}
+
+::deep .merge-pr-placeholder--review-subtitle {
+    width: 11rem;
+    height: 0.75rem;
+}
+
+::deep .merge-pr-placeholder--checks-title {
+    width: 9rem;
+    height: 0.85rem;
+}
+
+::deep .merge-pr-placeholder--checks-subtitle {
+    width: 6.5rem;
+    height: 0.75rem;
+}
+
+::deep .merge-pr-placeholder--local-title {
+    width: 10.5rem;
+    height: 0.85rem;
+}
+
+::deep .merge-pr-placeholder--local-subtitle {
+    width: 13rem;
+    height: 0.75rem;
 }
 
 /* PR number link in the header: gray by default (not bootstrap's link blue), lightens on hover. */

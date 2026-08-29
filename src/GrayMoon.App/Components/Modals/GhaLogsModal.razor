@@ -5,7 +5,7 @@
 
 @if (IsVisible)
 {
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onkeydown="HandleKeyDown">
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onkeydown="HandleKeyDown" @ref="_modalElement">
         <div class="modal-dialog modal-xl gha-logs-dialog">
             <div class="modal-content">
                 <div class="modal-header">
@@ -165,6 +165,8 @@
     private long? _selectedJobId;
     private List<JobLogEntry> _jobs = [];
     private ElementReference _contentRef;
+    private ElementReference _modalElement;
+    private bool _focusOnNextRender;
 
     private JobLogEntry? SelectedJob => _jobs.FirstOrDefault(j => j.Meta.Id == _selectedJobId);
 
@@ -196,6 +198,7 @@
         if (IsVisible && !_wasVisible)
         {
             _wasVisible = true;
+            _focusOnNextRender = true;
             _isLoading = true;
             _isLoadingMore = false;
             _isRerunning = false;
@@ -215,6 +218,12 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (_focusOnNextRender && IsVisible)
+        {
+            _focusOnNextRender = false;
+            await _modalElement.FocusAsync();
+        }
+
         if (_isLoading && IsVisible && RunId > 0 && !_loadTriggered)
         {
             _loadTriggered = true;

@@ -1,5 +1,7 @@
 @using GrayMoon.App.Models
+@using GrayMoon.App.Services
 @using Microsoft.AspNetCore.Components.Web
+@inject MergePullRequestSyncToDefaultPreferenceService SyncToDefaultPreference
 
 @if (IsVisible)
 {
@@ -11,7 +13,8 @@
     *@
     @* z-index one below ConfirmModal's 1075 so the "merge anyway?" warning confirmation (nested on top of this dialog) always wins the stacking tie. *@
     <div class="modal show d-block merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @((IsSyncingLocalState || IsMerging) ? 50 : 1074);"
-         @onkeydown="HandleKeyDown">
+         @onkeydown="HandleKeyDown"
+         @ref="_modalElement">
         <div class="modal-dialog modal-dialog-centered merge-pr-modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
@@ -73,8 +76,26 @@
                                     <i class="bi @GetReviewIconGlyph()"></i>
                                 </span>
                                 <div class="merge-pr-status-text">
-                                    <div class="merge-pr-status-title">@GetReviewTitle()</div>
-                                    <div class="merge-pr-status-subtitle">@GetReviewSubtitle()</div>
+                                    <div class="merge-pr-status-title">
+                                        @if (IsLoadingReviewDetails)
+                                        {
+                                            <span class="merge-pr-placeholder merge-pr-placeholder--review-title"></span>
+                                        }
+                                        else
+                                        {
+                                            @GetReviewTitle()
+                                        }
+                                    </div>
+                                    <div class="merge-pr-status-subtitle">
+                                        @if (IsLoadingReviewDetails)
+                                        {
+                                            <span class="merge-pr-placeholder merge-pr-placeholder--review-subtitle"></span>
+                                        }
+                                        else
+                                        {
+                                            @GetReviewSubtitle()
+                                        }
+                                    </div>
                                 </div>
                             </div>
                             <div class="merge-pr-status-item">
@@ -82,9 +103,22 @@
                                     <i class="bi @GetChecksIconGlyph()"></i>
                                 </span>
                                 <div class="merge-pr-status-text">
-                                    <div class="merge-pr-status-title">@GetChecksTitle()</div>
+                                    <div class="merge-pr-status-title">
+                                        @if (IsLoadingReviewDetails)
+                                        {
+                                            <span class="merge-pr-placeholder merge-pr-placeholder--checks-title"></span>
+                                        }
+                                        else
+                                        {
+                                            @GetChecksTitle()
+                                        }
+                                    </div>
                                     <div class="merge-pr-status-subtitle">
-                                        @if (Details.Checks.State == ChecksState.Pending && !string.IsNullOrEmpty(ActionsUrl))
+                                        @if (IsLoadingReviewDetails)
+                                        {
+                                            <span class="merge-pr-placeholder merge-pr-placeholder--checks-subtitle"></span>
+                                        }
+                                        else if (Details.Checks.State == ChecksState.Pending && !string.IsNullOrEmpty(ActionsUrl))
                                         {
                                             <a href="@ActionsUrl" class="merge-pr-changed-files-link">@GetChecksSubtitle()</a>
                                         }
@@ -118,11 +152,20 @@
                                     <i class="bi @GetLocalStateIconGlyph()"></i>
                                 </span>
                                 <div class="merge-pr-status-text">
-                                    <div class="merge-pr-status-title">@GetLocalStateTitle()</div>
+                                    <div class="merge-pr-status-title">
+                                        @if (IsLoadingReviewDetails)
+                                        {
+                                            <span class="merge-pr-placeholder merge-pr-placeholder--local-title"></span>
+                                        }
+                                        else
+                                        {
+                                            @GetLocalStateTitle()
+                                        }
+                                    </div>
                                     <div class="merge-pr-status-subtitle">
                                         @if (IsLoadingReviewDetails)
                                         {
-                                            <text>Checking uncommitted changes and unpushed commits…</text>
+                                            <span class="merge-pr-placeholder merge-pr-placeholder--local-subtitle"></span>
                                         }
                                         else if (!Details.HasLocalWarning)
                                         {
@@ -236,8 +279,17 @@
     private MergeMethod _selectedMethod;
     private bool _showMethodDropdown;
     private bool _wasVisible;
+    private bool _focusOnNextRender;
     private int? _lastDetailsNumber;
-    private bool _syncToDefault;
+    private ElementReference _modalElement;
+
+    /// <summary>Backed by <see cref="SyncToDefaultPreference"/> (a singleton) so the checkbox remembers the user's
+    /// last choice across dialog opens and page navigation, instead of resetting to unchecked every time.</summary>
+    private bool _syncToDefault
+    {
+        get => SyncToDefaultPreference.SyncToDefault;
+        set => SyncToDefaultPreference.SyncToDefault = value;
+    }
     /// <summary>
     /// True once the default merge method has been preselected for the current PR. Tracked separately from
     /// <see cref="_lastDetailsNumber"/> because <see cref="Details"/> is now set progressively (snapshot phase first,
@@ -253,7 +305,7 @@
         {
             _wasVisible = true;
             _showMethodDropdown = false;
-            _syncToDefault = false;
+            _focusOnNextRender = true;
         }
         else if (!IsVisible)
         {
@@ -278,6 +330,14 @@
             _selectedMethod = Details.DefaultMergeMethod ?? MergeMethod.Merge;
             _defaultMethodApplied = true;
         }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusOnNextRender || !IsVisible)
+            return;
+        _focusOnNextRender = false;
+        await _modalElement.FocusAsync();
     }
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
@@ -337,8 +397,6 @@
 
     private string GetChecksTitle()
     {
-        if (IsLoadingReviewDetails)
-            return "Loading checks…";
         var checks = Details?.Checks;
         if (checks == null || checks.State == ChecksState.None)
             return "No checks reported";
@@ -353,8 +411,6 @@
 
     private string GetChecksSubtitle()
     {
-        if (IsLoadingReviewDetails)
-            return "Checking with GitHub…";
         var checks = Details?.Checks;
         if (checks == null || checks.State == ChecksState.None)
             return "This repository has no status checks configured.";
@@ -436,8 +492,6 @@
 
     private string GetReviewTitle()
     {
-        if (IsLoadingReviewDetails)
-            return "Loading review status…";
         if (Details == null)
             return string.Empty;
         if (Details.ChangesRequestedCount > 0)
@@ -451,8 +505,6 @@
 
     private string GetReviewSubtitle()
     {
-        if (IsLoadingReviewDetails)
-            return "Checking with GitHub…";
         if (Details == null)
             return string.Empty;
         if (Details.ChangesRequestedCount > 0)
@@ -493,12 +545,8 @@
         return Details?.HasLocalWarning == true ? "bi-exclamation-lg" : "bi-check-lg";
     }
 
-    private string GetLocalStateTitle()
-    {
-        if (IsLoadingReviewDetails)
-            return "Checking local status…";
-        return Details?.HasLocalWarning == true ? "Local branch is not in sync" : "Local working copy is up to date";
-    }
+    private string GetLocalStateTitle() =>
+        Details?.HasLocalWarning == true ? "Local branch is not in sync" : "Local working copy is up to date";
 
     /// <summary>Only used when there's no local warning - the warning case is built inline in markup so the uncommitted-changes portion can be a link.</summary>
     private string GetLocalStateSubtitle() => "No uncommitted changes or unpushed commits.";

@@ -292,6 +292,14 @@
     border-color: var(--border-input);
 }
 
+/* Cosmetic only - the checkbox stays fully clickable while the Commit button is disabled (e.g. no
+   message typed yet). It just shows gray instead of Bootstrap's default blue checked color, so its
+   color visually tracks "will this actually do anything on commit" without blocking interaction. */
+.git-changes-workspace-commit__push-check--inactive .form-check-input:checked {
+    background-color: #4a4a4a;
+    border-color: #4a4a4a;
+}
+
 .git-changes-workspace-commit__push-check .form-check-label {
     font-size: 0.82rem;
     line-height: 1;

@@ -4,7 +4,8 @@
 @if (IsVisible)
 {
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
-         @onkeydown="HandleKeyDown">
+         @onkeydown="HandleKeyDown"
+         @ref="_modalElement">
         <div class="modal-dialog @(Mode == ConnectorModalMode.Delete ? "" : "modal-lg")">
             <div class="modal-content">
                 <div class="modal-header">
@@ -179,6 +180,7 @@
     private string SubmitButtonText => Mode == ConnectorModalMode.Edit ? "Update" : "Add";
     private bool _wasVisible;
     private bool _typeDropdownOpen;
+    private ElementReference _modalElement;
 
     private string ConnectorTypeLabel => Model?.ConnectorType switch
     {
@@ -240,14 +242,24 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (IsVisible && !_wasVisible && (Mode == ConnectorModalMode.Create || Mode == ConnectorModalMode.Edit))
+        if (IsVisible && !_wasVisible)
         {
             _wasVisible = true;
-            try
+            if (Mode == ConnectorModalMode.Create || Mode == ConnectorModalMode.Edit)
             {
-                await JSRuntime.InvokeVoidAsync("focusFirstModalInput", "connector-modal-body");
+                try
+                {
+                    await JSRuntime.InvokeVoidAsync("focusFirstModalInput", "connector-modal-body");
+                }
+                catch
+                {
+                    await _modalElement.FocusAsync();
+                }
             }
-            catch { /* JS not yet loaded or DOM not ready */ }
+            else
+            {
+                await _modalElement.FocusAsync();
+            }
         }
         else if (!IsVisible)
         {

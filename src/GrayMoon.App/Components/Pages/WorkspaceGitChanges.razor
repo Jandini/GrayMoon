@@ -92,7 +92,7 @@
                                     @onclick="() => CommitWorkspaceAsync(StagedRepositoryCount > 0, PushAfterCommit)">
                                 @CommitButtonTitle
                             </button>
-                            <div class="form-check git-changes-workspace-commit__push-check">
+                            <div class="form-check git-changes-workspace-commit__push-check @(IsCommitButtonDisabled ? "git-changes-workspace-commit__push-check--inactive" : "")">
                                 <label class="form-check-label" for="git-changes-push-after-commit">
                                     Push committed
                                 </label>

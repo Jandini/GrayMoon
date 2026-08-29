@@ -104,6 +104,7 @@ try
     builder.Services.AddSingleton<IToastService, ToastService>();
     builder.Services.AddSingleton<MatrixOverlayPreferenceService>();
     builder.Services.AddSingleton<CommandTerminalOverlayPreferenceService>();
+    builder.Services.AddSingleton<MergePullRequestSyncToDefaultPreferenceService>();
     builder.Services.AddSingleton<LoadingOverlayUiSettingsService>();
     builder.Services.AddSingleton<IGitHubRateLimitTracker, GitHubRateLimitTracker>();
     builder.Services.AddSingleton<IGitHubETagCache, GitHubETagCache>();

@@ -1,8 +1,11 @@
 @using GrayMoon.App.Models
+@using Microsoft.AspNetCore.Components.Web
 
 @if (IsVisible)
 {
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDown"
+         @ref="_modalElement">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
@@ -31,5 +34,20 @@
     [Parameter] public int MatchingCount { get; set; }
     [Parameter] public EventCallback OnConfirm { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
-}
 
+    private ElementReference _modalElement;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible)
+            await _modalElement.FocusAsync();
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            await OnCancel.InvokeAsync();
+        else if (e.Key == "Enter")
+            await OnConfirm.InvokeAsync();
+    }
+}

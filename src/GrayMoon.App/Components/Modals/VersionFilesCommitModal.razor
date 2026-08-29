@@ -3,7 +3,8 @@
 @if (IsVisible)
 {
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
-         @onkeydown="HandleKeyDown">
+         @onkeydown="HandleKeyDown"
+         @ref="_modalElement">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
@@ -59,11 +60,25 @@
     [Parameter] public EventCallback OnCancel { get; set; }
 
     private bool _commitChanges = true;
+    private ElementReference _modalElement;
+    private bool _focusOnNextRender;
+    private bool _wasVisible;
 
     protected override void OnParametersSet()
     {
+        if (IsVisible && !_wasVisible)
+            _focusOnNextRender = true;
         if (!IsVisible)
             _commitChanges = true;
+        _wasVisible = IsVisible;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusOnNextRender || !IsVisible)
+            return;
+        _focusOnNextRender = false;
+        await _modalElement.FocusAsync();
     }
 
     private async Task HandleProceed() => await OnProceed.InvokeAsync(_commitChanges);
