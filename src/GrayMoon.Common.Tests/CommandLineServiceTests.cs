@@ -14,8 +14,9 @@ public sealed class CommandLineServiceTests
     public async Task RunAsync_CompletesNormally_WhenProcessFinishesBeforeTimeout()
     {
         var service = CreateService();
+        var (fileName, arguments) = TestProcess.EchoHello();
 
-        var result = await service.RunAsync("cmd.exe", "/c echo hello", timeout: TimeSpan.FromSeconds(30));
+        var result = await service.RunAsync(fileName, arguments, timeout: TimeSpan.FromSeconds(30));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("hello", result.Stdout);
@@ -29,10 +30,8 @@ public sealed class CommandLineServiceTests
 
         // Sleeps far longer than the 1s timeout below - the test only passes if the process is
         // actually killed rather than the call hanging until the sleep finishes.
-        var result = await service.RunAsync(
-            "powershell.exe",
-            "-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 30\"",
-            timeout: TimeSpan.FromSeconds(1));
+        var (fileName, arguments) = TestProcess.SleepSeconds(30);
+        var result = await service.RunAsync(fileName, arguments, timeout: TimeSpan.FromSeconds(1));
 
         sw.Stop();
 
@@ -47,10 +46,9 @@ public sealed class CommandLineServiceTests
     {
         var service = CreateService(defaultTimeoutSeconds: 1);
         var sw = Stopwatch.StartNew();
+        var (fileName, arguments) = TestProcess.SleepSeconds(30);
 
-        var result = await service.RunAsync(
-            "powershell.exe",
-            "-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 30\"");
+        var result = await service.RunAsync(fileName, arguments);
 
         sw.Stop();
 
@@ -63,11 +61,9 @@ public sealed class CommandLineServiceTests
     {
         var service = CreateService();
         var sw = Stopwatch.StartNew();
+        var (fileName, arguments) = TestProcess.SleepSecondsAsArgumentList(30);
 
-        var result = await service.RunAsync(
-            "powershell.exe",
-            ["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"],
-            timeout: TimeSpan.FromSeconds(1));
+        var result = await service.RunAsync(fileName, arguments, timeout: TimeSpan.FromSeconds(1));
 
         sw.Stop();
 
@@ -84,11 +80,9 @@ public sealed class CommandLineServiceTests
         // GitProcessOptions.CloneTimeoutSeconds is 0 (the default) - CancellationTokenSource(TimeSpan)
         // never schedules cancellation for it, so a long-running command completes normally.
         var service = CreateService();
+        var (fileName, arguments) = TestProcess.SleepMilliseconds(500);
 
-        var result = await service.RunAsync(
-            "powershell.exe",
-            "-NoProfile -NonInteractive -Command \"Start-Sleep -Milliseconds 500; exit 0\"",
-            timeout: Timeout.InfiniteTimeSpan);
+        var result = await service.RunAsync(fileName, arguments, timeout: Timeout.InfiniteTimeSpan);
 
         Assert.Equal(0, result.ExitCode);
     }
@@ -99,11 +93,38 @@ public sealed class CommandLineServiceTests
         var service = CreateService();
         using var cts = new CancellationTokenSource();
         cts.CancelAfter(TimeSpan.FromMilliseconds(200));
+        var (fileName, arguments) = TestProcess.SleepSeconds(30);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.RunAsync(
-            "powershell.exe",
-            "-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 30\"",
+            fileName,
+            arguments,
             cancellationToken: cts.Token,
             timeout: TimeSpan.FromSeconds(30)));
+    }
+
+    /// <summary>
+    /// Cross-platform shell commands for process-lifecycle tests (Windows CI and Linux GitHub Actions).
+    /// </summary>
+    private static class TestProcess
+    {
+        public static (string FileName, string Arguments) EchoHello()
+            => OperatingSystem.IsWindows()
+                ? ("cmd.exe", "/c echo hello")
+                : ("/bin/sh", "-c echo hello");
+
+        public static (string FileName, string Arguments) SleepSeconds(int seconds)
+            => OperatingSystem.IsWindows()
+                ? ("powershell.exe", $"-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds {seconds}\"")
+                : ("/bin/sh", $"-c sleep {seconds}");
+
+        public static (string FileName, IReadOnlyList<string> Arguments) SleepSecondsAsArgumentList(int seconds)
+            => OperatingSystem.IsWindows()
+                ? ("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", $"Start-Sleep -Seconds {seconds}"])
+                : ("/bin/sh", ["-c", $"sleep {seconds}"]);
+
+        public static (string FileName, string Arguments) SleepMilliseconds(int milliseconds)
+            => OperatingSystem.IsWindows()
+                ? ("powershell.exe", $"-NoProfile -NonInteractive -Command \"Start-Sleep -Milliseconds {milliseconds}; exit 0\"")
+                : ("/bin/sh", $"-c sleep {milliseconds / 1000.0}");
     }
 }
