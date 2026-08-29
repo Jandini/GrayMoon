@@ -29,9 +29,14 @@ public sealed class WorkspacePullRequestService(
     GitHubPullRequestService gitHubPullRequestService,
     AppDbContext dbContext,
     IOptions<WorkspaceOptions> workspaceOptions,
+    IGitHubRateLimitTracker rateLimitTracker,
     ILogger<WorkspacePullRequestService> logger)
 {
-    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
+    // Kept just under the 15s background poll interval (WorkspaceRepositories.PrPolling.cs) so every poll tick
+    // reaches the ETag-backed GitHub call (usually a free 304) instead of being served entirely from this
+    // app-level cache. The cache still absorbs near-simultaneous duplicate calls (multiple tabs, poll racing a
+    // forced action) within that short window.
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(10);
     private readonly ConcurrentDictionary<(int RepoId, string Branch), (PullRequestInfo? Result, DateTime FetchedAt)> _cache = new();
 
     private int MaxConcurrency => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
@@ -86,6 +91,16 @@ public sealed class WorkspacePullRequestService(
                 {
                     logger.LogTrace("PR cache hit for repo {RepositoryId}, branch {Branch}", wr.RepositoryId, branch);
                     return (Wr: wr, Pr: (PullRequestInfo?)null, Outcome: PullRequestRefreshOutcome.CacheHit);
+                }
+
+                // Skip the call entirely while the connector is paused for rate-limit backoff (shared across
+                // every poller for that connector via IGitHubRateLimitTracker), so background polling and
+                // bursts of forced refreshes cannot pile on top of an already-exhausted connector.
+                var connectorName = wr.Repository!.Connector?.ConnectorName;
+                if (!string.IsNullOrWhiteSpace(connectorName) && rateLimitTracker.GetPausedUntil(connectorName) is { } pausedUntil)
+                {
+                    logger.LogTrace("PR refresh skipped (rate-limited until {PausedUntil}) for repo {RepositoryId}", pausedUntil, wr.RepositoryId);
+                    return (Wr: wr, Pr: (PullRequestInfo?)null, Outcome: PullRequestRefreshOutcome.Failed);
                 }
 
                 var pr = await gitHubPullRequestService.GetPullRequestForBranchAsync(wr.Repository!, wr.Repository!.Connector, branch, cancellationToken);

@@ -96,8 +96,7 @@
                                     IsOnTag="@Link.IsOnTag"
                                     OnUpdateBranchClick="@OnUpdateBranchClick" />
                 </span>
-                <span class="metrics-block metrics-pr text-nowrap"
-                      @onmouseenter="HandlePrBadgeMouseEnter">
+                <span class="metrics-block metrics-pr text-nowrap">
                     <PRBadge PullRequest="@PrInfo"
                             DefaultBranchAheadCommits="@Link.DefaultBranchAheadCommits"
                             IsPrVerified="@IsPrVerified"
@@ -446,7 +445,6 @@
     [Parameter] public EventCallback OnUpdateBranchClick { get; set; }
     [Parameter] public EventCallback OnSyncClick { get; set; }
     [Parameter] public EventCallback OnDismissError { get; set; }
-    [Parameter] public EventCallback OnPrBadgeMouseEnter { get; set; }
     [Parameter] public EventCallback<WorkspaceRepositoryLink> OnCreatePr { get; set; }
     [Parameter] public EventCallback<WorkspaceRepositoryLink> OnUpgradeClick { get; set; }
     /// <summary>Fired when the user clicks the Copy button on the dependency-mismatch tooltip. Payload is the formatted text to copy to the clipboard.</summary>
@@ -461,12 +459,6 @@
         ProjectType.Library    => "Library",
         _                      => "Unknown"
     };
-
-    private async Task HandlePrBadgeMouseEnter()
-    {
-        if (PrInfo?.IsMerged == true) return;
-        await OnPrBadgeMouseEnter.InvokeAsync();
-    }
 
     private async Task HandleBranchClick()
     {
