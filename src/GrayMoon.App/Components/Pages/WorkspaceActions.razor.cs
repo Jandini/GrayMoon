@@ -21,6 +21,7 @@ public sealed partial class WorkspaceActions : IDisposable
     [Inject] private IServiceScopeFactory ServiceScopeFactory { get; set; } = null!;
     [Inject] private NavigationManager NavigationManager { get; set; } = null!;
     [Inject] private ILogger<WorkspaceActions> Logger { get; set; } = null!;
+    [Inject] private AppActivityStateService ActivityStateService { get; set; } = null!;
 
     private int MaxConcurrency => Math.Max(1, WorkspaceOptions.Value.MaxParallelOperations);
 
@@ -70,9 +71,17 @@ public sealed partial class WorkspaceActions : IDisposable
     private CancellationTokenSource? _repositorySyncDebounceCts;
     private readonly HashSet<int> _pendingRepositorySyncIds = [];
     private bool _autoPollRunning;
+    private CancellationTokenSource? _autoPollWakeCts;
     private volatile bool _disposed;
     private const int SyncDebounceMs = 500;
-    private const int AutoPollIntervalMs = 5000;
+
+    /// <summary>Poll cadence scales with AppActivityStateService: fast while the user is actively looking at
+    /// the page, back to today's rate while idle, way down while the tab is backgrounded - and resuming
+    /// activity always wakes the loop immediately (see OnActivityBecameActive) rather than waiting out
+    /// whatever slower delay was in flight.</summary>
+    private const int AutoPollIntervalActiveMs = 2000;
+    private const int AutoPollIntervalIdleMs = 5000;
+    private const int AutoPollIntervalHiddenMs = 30000;
 
     /// <summary>After dispatch/rerun, GitHub may not list the new run immediately; refresh until we see running or exhaust attempts.</summary>
     private const int RunWorkflowVisibilityMaxAttempts = 10;
@@ -334,8 +343,21 @@ public sealed partial class WorkspaceActions : IDisposable
 
     protected override async Task OnInitializedAsync()
     {
+        ActivityStateService.BecameActive += OnActivityBecameActive;
         await LoadWorkspaceAsync();
     }
+
+    /// <summary>Wakes the auto-poll loop immediately when the user resumes activity (from Idle or Hidden),
+    /// instead of leaving a running-workflow row stuck showing stale status for up to 30s.</summary>
+    private void OnActivityBecameActive() => _autoPollWakeCts?.Cancel();
+
+    private static int CurrentAutoPollDelayMs(AppActivityState state) => state switch
+    {
+        AppActivityState.Active => AutoPollIntervalActiveMs,
+        AppActivityState.Idle => AutoPollIntervalIdleMs,
+        AppActivityState.Hidden => AutoPollIntervalHiddenMs,
+        _ => AutoPollIntervalIdleMs,
+    };
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -684,7 +706,22 @@ public sealed partial class WorkspaceActions : IDisposable
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                await Task.Delay(AutoPollIntervalMs, cancellationToken);
+                var delayMs = CurrentAutoPollDelayMs(ActivityStateService.State);
+                _autoPollWakeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                try
+                {
+                    await Task.Delay(delayMs, _autoPollWakeCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    if (cancellationToken.IsCancellationRequested) throw;
+                    // Otherwise this was a wake-up from OnActivityBecameActive - fall through and poll now.
+                }
+                finally
+                {
+                    _autoPollWakeCts.Dispose();
+                    _autoPollWakeCts = null;
+                }
 
                 if (cancellationToken.IsCancellationRequested) break;
 
@@ -1701,6 +1738,7 @@ public sealed partial class WorkspaceActions : IDisposable
     public void Dispose()
     {
         _disposed = true;
+        ActivityStateService.BecameActive -= OnActivityBecameActive;
         _cts.Cancel();
         _cts.Dispose();
         _syncDebounceCts?.Cancel();
