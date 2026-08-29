@@ -58,28 +58,113 @@ public sealed partial class WorkspaceRepositories
     }
 
     /// <summary>
-    /// Local-state row's commits text, "unpushed only" case: closes the dialog and runs the same push flow as the
-    /// grid's CommitsBadge (dependency-aware push, default-branch warning included) for this one repository.
+    /// Local-state row's commits text, "unpushed only" case: keeps the dialog open, runs the same push flow as the
+    /// grid's CommitsBadge (dependency-aware push, default-branch warning included) for this one repository, then
+    /// refreshes the dialog's own details once the underlying page job finishes.
     /// </summary>
     private Task HandleMergeDialogPushRequestedAsync()
     {
         var repositoryId = _mergePrModal.RepositoryId;
         var branchName = _mergePrModal.Details?.HeadRef;
-        CloseMergeModal();
-        return repositoryId > 0 ? OnPushBadgeClickAsync(repositoryId, branchName) : Task.CompletedTask;
+        if (repositoryId <= 0)
+            return Task.CompletedTask;
+        return RunMergeDialogLocalActionAsync(() => OnPushBadgeClickAsync(repositoryId, branchName));
     }
 
     /// <summary>
-    /// Local-state row's commits text when incoming commits exist (pull-only or pull+push sync): closes the dialog
-    /// and runs the same commit-sync flow as the grid's CommitsBadge for this one repository.
+    /// Local-state row's commits text when incoming commits exist (pull-only or pull+push sync): keeps the dialog
+    /// open, runs the same commit-sync flow as the grid's CommitsBadge for this one repository, then refreshes the
+    /// dialog's own details once the underlying page job finishes.
     /// </summary>
     private Task HandleMergeDialogPullRequestedAsync()
     {
         var repositoryId = _mergePrModal.RepositoryId;
-        CloseMergeModal();
-        if (repositoryId > 0)
+        if (repositoryId <= 0)
+            return Task.CompletedTask;
+        return RunMergeDialogLocalActionAsync(() =>
+        {
             OnPullBadgeClickAsync(repositoryId);
-        return Task.CompletedTask;
+            return Task.CompletedTask;
+        });
+    }
+
+    /// <summary>
+    /// Runs a push/pull action that is itself implemented as a page-level background job (StartPageJob/JobService).
+    /// The dialog stays mounted and visible the whole time - MergePullRequestModal drops its own z-index below
+    /// BackgroundJobOverlay's LoadingOverlay while IsSyncingLocalState, so that overlay visually covers the dialog
+    /// instead of the dialog itself disappearing and reappearing. Details refresh in place once the job finishes.
+    /// </summary>
+    private async Task RunMergeDialogLocalActionAsync(Func<Task> action)
+    {
+        if (_mergePrModal.IsSyncingLocalState)
+            return;
+
+        var repositoryId = _mergePrModal.RepositoryId;
+        var prNumber = _mergePrModal.PrNumber;
+
+        _mergePrModal = _mergePrModal with { IsSyncingLocalState = true };
+        StateHasChanged();
+
+        try
+        {
+            await action();
+            await WaitForPageJobToFinishAsync();
+        }
+        finally
+        {
+            if (!_disposed && _mergePrModal.IsVisible && _mergePrModal.RepositoryId == repositoryId)
+                await RefreshMergeDialogDetailsAsync(repositoryId, prNumber);
+        }
+    }
+
+    /// <summary>
+    /// Waits for the page job (StartPageJob/JobService, keyed by PageJobKey) to reach a terminal state. The push/
+    /// commit-sync handlers this feeds from start their job synchronously before their triggering method returns,
+    /// so by the time this is called the job (if any) already exists and is Running.
+    /// </summary>
+    private Task WaitForPageJobToFinishAsync()
+    {
+        var tcs = new TaskCompletionSource();
+
+        void OnChanged()
+        {
+            var job = JobService.GetJob(PageJobKey);
+            if (job == null || job.State != BackgroundJobState.Running)
+                tcs.TrySetResult();
+        }
+
+        JobService.Changed += OnChanged;
+        OnChanged();
+
+        return tcs.Task.ContinueWith(_ => JobService.Changed -= OnChanged, TaskScheduler.Default);
+    }
+
+    /// <summary>Re-fetches merge details in place after a push/pull triggered from within the (still-open) dialog completes.</summary>
+    private async Task RefreshMergeDialogDetailsAsync(int repositoryId, int prNumber)
+    {
+        PullRequestMergeDetails? details = null;
+        try
+        {
+            details = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, PullRequestMergeDetails?>(
+                svc => svc.GetMergeDetailsAsync(WorkspaceId, repositoryId, prNumber));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to refresh merge details after local sync action for repo {RepositoryId}, PR #{PrNumber}", repositoryId, prNumber);
+        }
+
+        // If the user closed the dialog mid-sync, IsVisible is already false - leave it closed rather than
+        // reopening it once the background job finishes.
+        if (_disposed || !_mergePrModal.IsVisible || _mergePrModal.RepositoryId != repositoryId)
+            return;
+
+        _mergePrModal = _mergePrModal with
+        {
+            IsSyncingLocalState = false,
+            Details = details ?? _mergePrModal.Details,
+            ErrorMessage = details == null ? _mergePrModal.ErrorMessage : null
+        };
+        StateHasChanged();
     }
 
     private async Task HandleMergeConfirmedAsync(MergeMethod method)
@@ -128,6 +213,8 @@ public sealed partial class WorkspaceRepositories
         public int PrNumber { get; init; }
         public bool IsLoading { get; init; }
         public bool IsMerging { get; init; }
+        /// <summary>True while a push/pull triggered from the local-state row's commits text is running.</summary>
+        public bool IsSyncingLocalState { get; init; }
         public PullRequestMergeDetails? Details { get; init; }
         public string? ErrorMessage { get; init; }
     }
