@@ -263,26 +263,46 @@
 
 .git-changes-workspace-commit__actions {
     display: flex;
-    justify-content: flex-start;
+    align-items: center;
+    justify-content: space-between;
     margin-top: 0.4rem;
 }
 
-.branch-menu-backdrop {
-    position: fixed;
-    inset: 0;
-    background: transparent;
-    z-index: 1050;
+/* Bootstrap's .form-check pairs padding-left:1.5em on this element with margin-left:-1.5em on the
+   input so the checkbox lines up under floated text - the two cancel out once float is overridden
+   by display:flex here, leaving zero gap before the label. Reset both and use an explicit gap instead. */
+.git-changes-workspace-commit__push-check {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0;
+    padding-left: 0;
 }
 
-/* Manually toggled (no Bootstrap JS/Popper attached), so unlike a Bootstrap-initialized dropdown this
-   never gets the `[data-bs-popper]` attribute that ships the top/left placement rule - without an
-   explicit top/left here it would render flush over the toggle button instead of below it. */
-.git-changes-commit-menu {
-    top: 100%;
-    left: 0;
-    margin-top: 0.25rem;
-    z-index: 1051;
-    min-width: 100%;
+.git-changes-workspace-commit__push-check .form-check-input {
+    margin-top: 0;
+    margin-left: 0;
+    flex-shrink: 0;
+}
+
+/* Bootstrap's default unchecked checkbox is white - match the commit message textarea's background
+   instead of the medium-gray unchecked style used elsewhere, so it blends into this panel. */
+.git-changes-workspace-commit__push-check .form-check-input:not(:checked) {
+    background-color: var(--bg-input);
+    border-color: var(--border-input);
+}
+
+.git-changes-workspace-commit__push-check .form-check-label {
+    font-size: 0.82rem;
+    line-height: 1;
+    margin: 0;
+    color: var(--text-secondary);
+    user-select: none;
+    /* Optical nudge - a text line box's visual center sits slightly above its geometric center
+       (font ascent/descent is asymmetric), so align-items:center alone reads as "a bit high"
+       next to the checkbox's symmetric box. */
+    position: relative;
+    top: 1px;
 }
 
 .git-changes-diff-placeholder {
