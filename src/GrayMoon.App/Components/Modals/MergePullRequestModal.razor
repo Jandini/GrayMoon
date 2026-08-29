@@ -115,13 +115,13 @@
                                                     @GetUncommittedChangesText()
                                                 }
                                             }
-                                            @if (Details.UncommittedChangesCount > 0 && Details.UnpushedCommitsCount > 0)
+                                            @if (Details.UncommittedChangesCount > 0 && HasCommitsToSync())
                                             {
                                                 @(", ")
                                             }
-                                            @if (Details.UnpushedCommitsCount > 0)
+                                            @if (HasCommitsToSync())
                                             {
-                                                @GetUnpushedCommitsText()
+                                                <button type="button" class="merge-pr-changed-files-link merge-pr-inline-link-btn" @onclick="HandleCommitsClick">@GetCommitsText()</button>
                                             }
                                             @(". This will not block the merge.")
                                         }
@@ -205,6 +205,10 @@
     [Parameter] public string? ChangesUrl { get; set; }
     /// <summary>Workspace's Actions page URL, used to link the "N checks still running" text in the checks row. Null/empty hides the link.</summary>
     [Parameter] public string? ActionsUrl { get; set; }
+    /// <summary>Raised when the user clicks the commits text in the local-state row while only unpushed (outgoing) commits exist.</summary>
+    [Parameter] public EventCallback OnPushRequested { get; set; }
+    /// <summary>Raised when the user clicks the commits text in the local-state row while incoming commits exist (pull-only or pull+push sync) - mirrors CommitsBadge's own "incoming wins" click behavior.</summary>
+    [Parameter] public EventCallback OnPullRequested { get; set; }
 
     private MergeMethod _selectedMethod;
     private bool _showMethodDropdown;
@@ -424,6 +428,38 @@
     private string GetUncommittedChangesText() =>
         $"{Details!.UncommittedChangesCount} uncommitted change{(Details.UncommittedChangesCount == 1 ? "" : "s")}";
 
-    private string GetUnpushedCommitsText() =>
-        $"{Details!.UnpushedCommitsCount} unpushed commit{(Details.UnpushedCommitsCount == 1 ? "" : "s")}";
+    private bool HasCommitsToSync() => Details != null && (Details.UnpushedCommitsCount > 0 || Details.IncomingCommitsCount > 0);
+
+    /// <summary>
+    /// Mirrors CommitsBadge's own text: incoming commits mean the click will run a full commit-sync (pull, merging
+    /// in any outgoing commits too), so both counts are shown together rather than choosing one.
+    /// </summary>
+    private string GetCommitsText()
+    {
+        if (Details == null)
+            return string.Empty;
+        var parts = new List<string>();
+        if (Details.UnpushedCommitsCount > 0)
+            parts.Add($"{Details.UnpushedCommitsCount} unpushed");
+        if (Details.IncomingCommitsCount > 0)
+            parts.Add($"{Details.IncomingCommitsCount} incoming");
+        var count = Details.UnpushedCommitsCount + Details.IncomingCommitsCount;
+        return $"{string.Join(", ", parts)} commit{(count == 1 ? "" : "s")}";
+    }
+
+    /// <summary>Same precedence as CommitsBadge.HandleClick: incoming commits always win (sync/pull handles both directions), push only fires when nothing is incoming.</summary>
+    private async Task HandleCommitsClick()
+    {
+        if (Details == null)
+            return;
+        if (Details.IncomingCommitsCount > 0)
+        {
+            if (OnPullRequested.HasDelegate)
+                await OnPullRequested.InvokeAsync();
+        }
+        else if (Details.UnpushedCommitsCount > 0 && OnPushRequested.HasDelegate)
+        {
+            await OnPushRequested.InvokeAsync();
+        }
+    }
 }

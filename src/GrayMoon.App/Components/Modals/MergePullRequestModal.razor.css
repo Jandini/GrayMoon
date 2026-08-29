@@ -108,6 +108,17 @@
     white-space: nowrap;
 }
 
+/* Lets a <button> read as inline text (same visual treatment as the <a> version of this class),
+   used where the click triggers an in-dialog action (push/pull) instead of navigation. */
+::deep button.merge-pr-inline-link-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    cursor: pointer;
+}
+
 ::deep .merge-pr-changed-files-link:hover,
 ::deep .merge-pr-changed-files-link:focus-visible {
     color: #fff;

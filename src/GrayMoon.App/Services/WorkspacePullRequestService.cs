@@ -193,6 +193,7 @@ public sealed class WorkspacePullRequestService(
 
         var uncommittedChangesCount = (link.GitStatus?.StagedCount ?? 0) + (link.GitStatus?.ChangedCount ?? 0);
         var unpushedCommitsCount = link.OutgoingCommits ?? 0;
+        var incomingCommitsCount = link.BranchHasUpstream == false ? 0 : link.IncomingCommits ?? 0;
 
         return await gitHubPullRequestMergeService.GetMergeDetailsAsync(
             link.Repository,
@@ -201,6 +202,7 @@ public sealed class WorkspacePullRequestService(
             hasUncommittedChanges: uncommittedChangesCount > 0,
             uncommittedChangesCount: uncommittedChangesCount,
             unpushedCommitsCount: unpushedCommitsCount,
+            incomingCommitsCount: incomingCommitsCount,
             cancellationToken: cancellationToken);
     }
 

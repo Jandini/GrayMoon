@@ -22,6 +22,7 @@ public sealed class GitHubPullRequestMergeService(
         bool hasUncommittedChanges = false,
         int uncommittedChangesCount = 0,
         int unpushedCommitsCount = 0,
+        int incomingCommitsCount = 0,
         CancellationToken cancellationToken = default)
     {
         if (repository == null || prNumber <= 0)
@@ -76,7 +77,8 @@ public sealed class GitHubPullRequestMergeService(
             BlockingReasons = blockingReasons,
             HasUncommittedChanges = hasUncommittedChanges,
             UncommittedChangesCount = uncommittedChangesCount,
-            UnpushedCommitsCount = unpushedCommitsCount
+            UnpushedCommitsCount = unpushedCommitsCount,
+            IncomingCommitsCount = incomingCommitsCount
         };
     }
 

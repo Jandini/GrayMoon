@@ -57,6 +57,31 @@ public sealed partial class WorkspaceRepositories
         StateHasChanged();
     }
 
+    /// <summary>
+    /// Local-state row's commits text, "unpushed only" case: closes the dialog and runs the same push flow as the
+    /// grid's CommitsBadge (dependency-aware push, default-branch warning included) for this one repository.
+    /// </summary>
+    private Task HandleMergeDialogPushRequestedAsync()
+    {
+        var repositoryId = _mergePrModal.RepositoryId;
+        var branchName = _mergePrModal.Details?.HeadRef;
+        CloseMergeModal();
+        return repositoryId > 0 ? OnPushBadgeClickAsync(repositoryId, branchName) : Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Local-state row's commits text when incoming commits exist (pull-only or pull+push sync): closes the dialog
+    /// and runs the same commit-sync flow as the grid's CommitsBadge for this one repository.
+    /// </summary>
+    private Task HandleMergeDialogPullRequestedAsync()
+    {
+        var repositoryId = _mergePrModal.RepositoryId;
+        CloseMergeModal();
+        if (repositoryId > 0)
+            OnPullBadgeClickAsync(repositoryId);
+        return Task.CompletedTask;
+    }
+
     private async Task HandleMergeConfirmedAsync(MergeMethod method)
     {
         var repositoryId = _mergePrModal.RepositoryId;

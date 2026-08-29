@@ -356,7 +356,9 @@
                        ChangesUrl="@($"/workspaces/{WorkspaceId}/changes")"
                        ActionsUrl="@($"/workspaces/{WorkspaceId}/actions")"
                        OnMerge="HandleMergeConfirmedAsync"
-                       OnCancel="CloseMergeModal" />
+                       OnCancel="CloseMergeModal"
+                       OnPushRequested="HandleMergeDialogPushRequestedAsync"
+                       OnPullRequested="HandleMergeDialogPullRequestedAsync" />
 
 <NewFeatureModal IsVisible="@_newFeatureModal.IsVisible"
                  WorkspaceName="@_newFeatureModal.WorkspaceName"
