@@ -48,8 +48,7 @@
 }
 
 .new-pr-reviewer-list {
-    min-height: 2.1rem;
-    max-height: calc(3 * 2.1rem);
+    height: calc(3 * 2.1rem);
     overflow-y: auto;
     background-color: color-mix(in srgb, var(--bg-input) 85%, #000 15%);
     color: var(--text-primary);
