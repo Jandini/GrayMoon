@@ -488,7 +488,7 @@ public class GitHubService : IConnectorService
 
         try
         {
-            var list = await GetAsync<List<GitHubPullRequestDto>>(connector, requestUri, cancellationToken);
+            var list = await GetETaggedAsync<List<GitHubPullRequestDto>>(connector, requestUri, cancellationToken);
             if (list == null || list.Count == 0)
                 return null;
 
@@ -523,7 +523,7 @@ public class GitHubService : IConnectorService
 
         try
         {
-            return await GetAsync<GitHubPullRequestDto>(connector, requestUri, cancellationToken);
+            return await GetETaggedAsync<GitHubPullRequestDto>(connector, requestUri, cancellationToken);
         }
         catch (Exception ex)
         {

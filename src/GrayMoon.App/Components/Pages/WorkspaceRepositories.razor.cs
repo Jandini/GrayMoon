@@ -43,6 +43,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         await LoadPendingRestoreScrollTopAsync();
         await LoadWorkspaceAsync();
         ApplySyncStateFromLoadedItems();
+        StartPrPollingLoop();
     }
 
     /// <summary>Reads the saved tbody scroll offset for the current WorkspaceId from sessionStorage, consumed by the next ResetAndLoadFromTopAsync(restoreScroll: true) call. Best-effort: malformed or missing storage falls back to no restore (top of grid), matching current behavior.</summary>
@@ -100,6 +101,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         }
 
         _disposed = true;
+        StopPrPollingLoop();
         CancelBackgroundWork();
         AgentQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
         JobService.Changed -= OnJobServiceChanged;

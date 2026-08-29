@@ -20,8 +20,6 @@ public sealed partial class WorkspaceRepositories
     private Workspace? workspace;
     private WorkspaceRepositoryHeaderStateDto? _headerState;
     private IReadOnlyDictionary<int, PullRequestInfo?> prByRepositoryId = new Dictionary<int, PullRequestInfo?>();
-    private readonly Dictionary<int, DateTime> _lastPrRefreshByRepoId = new();
-    private static readonly TimeSpan PrRefreshThrottle = TimeSpan.FromSeconds(10);
     private string? errorMessage;
     private bool isInitialLoading = true;
     private bool hasLoadedOnce;

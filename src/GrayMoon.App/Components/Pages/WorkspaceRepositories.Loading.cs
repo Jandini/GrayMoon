@@ -306,38 +306,6 @@ public sealed partial class WorkspaceRepositories
         }
         _virtualScrollAttached = false;
     }
-    /// <summary>Refreshes PR for one repository when user enters the PR badge. Only runs if PR is not merged and throttle allows.</summary>
-    private async Task RefreshPrOnBadgeEnterAsync(int repositoryId)
-    {
-        if (prByRepositoryId.TryGetValue(repositoryId, out var pr) && pr?.IsMerged == true)
-            return;
-        if (_lastPrRefreshByRepoId.TryGetValue(repositoryId, out var last) && DateTime.UtcNow - last < PrRefreshThrottle)
-            return;
-        try
-        {
-            await WorkspacePageService.WorkspacePullRequestService.RefreshPullRequestsAsync(WorkspaceId, new[] { repositoryId });
-            _lastPrRefreshByRepoId[repositoryId] = DateTime.UtcNow;
-            await PatchRepositoryRowAsync(repositoryId);
-            await InvokeAsync(StateHasChanged);
-        }
-        catch (ObjectDisposedException) { }
-        catch (InvalidOperationException) { }
-        catch (Exception ex)
-        {
-            Logger.LogDebug(ex, "PR refresh on badge enter failed for RepositoryId={RepositoryId}", repositoryId);
-        }
-    }
-    private async Task PatchRepositoryRowAsync(int repositoryId)
-    {
-        var dto = await LinkListQueryService.GetSnapshotAsync(WorkspaceId, repositoryId);
-        if (dto is null)
-        {
-            return;
-        }
-        CacheLink(
-            WorkspaceRepositoryLinkListMapper.ToLink(dto),
-            WorkspaceRepositoryLinkListMapper.ToPullRequestInfo(dto));
-    }
     private async Task RefreshVisibleRowsAsync(CancellationToken cancellationToken = default)
     {
         await LoadHeaderStateAsync(cancellationToken);
