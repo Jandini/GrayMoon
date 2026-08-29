@@ -106,6 +106,11 @@ try
     builder.Services.AddSingleton<CommandTerminalOverlayPreferenceService>();
     builder.Services.AddSingleton<LoadingOverlayUiSettingsService>();
     builder.Services.AddSingleton<IGitHubRateLimitTracker, GitHubRateLimitTracker>();
+    builder.Services.AddSingleton<IGitHubETagCache, GitHubETagCache>();
+    builder.Services.AddSingleton<IGhaLiveFeedJobsCache, GhaLiveFeedJobsCache>();
+    builder.Services.AddSingleton<IGitHubApiUsageRecorder, GitHubApiUsageRecorder>();
+    builder.Services.AddHostedService<GitHubApiUsageFlushBackgroundService>();
+    builder.Services.AddHostedService<GitHubApiUsageLoggerBackgroundService>();
     builder.Services.AddScoped<SyncCommandHandler>();
     builder.Services.AddScoped<IAgentBridge, AgentBridge>();
     builder.Services.AddScoped<WorkspaceService>();

@@ -15,6 +15,8 @@ public class GitHubService : IConnectorService
     private readonly ILogger<GitHubService> _logger;
     private readonly GitHubOptions _options;
     private readonly IGitHubRateLimitTracker _rateLimitTracker;
+    private readonly IGitHubETagCache _eTagCache;
+    private readonly IGitHubApiUsageRecorder _usageRecorder;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -22,11 +24,13 @@ public class GitHubService : IConnectorService
 
     public ConnectorType ConnectorType => ConnectorType.GitHub;
 
-    public GitHubService(HttpClient httpClient, IConfiguration configuration, IGitHubRateLimitTracker rateLimitTracker, ILogger<GitHubService> logger)
+    public GitHubService(HttpClient httpClient, IConfiguration configuration, IGitHubRateLimitTracker rateLimitTracker, IGitHubETagCache eTagCache, IGitHubApiUsageRecorder usageRecorder, ILogger<GitHubService> logger)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _rateLimitTracker = rateLimitTracker ?? throw new ArgumentNullException(nameof(rateLimitTracker));
+        _eTagCache = eTagCache ?? throw new ArgumentNullException(nameof(eTagCache));
+        _usageRecorder = usageRecorder ?? throw new ArgumentNullException(nameof(usageRecorder));
         _options = configuration.GetSection("GitHub").Get<GitHubOptions>() ?? new GitHubOptions();
 
         var baseUrl = string.IsNullOrWhiteSpace(_options.ApiBaseUrl)
@@ -277,9 +281,10 @@ public class GitHubService : IConnectorService
             throw new ArgumentException("Branch is required.", nameof(branch));
 
         var encodedBranch = Uri.EscapeDataString(branch);
-        var response = await GetAsync<GitHubWorkflowRunsResponse>(
+        var response = await GetETaggedAsync<GitHubWorkflowRunsResponse>(
             connector,
-            $"repos/{owner}/{repo}/actions/runs?branch={encodedBranch}&per_page={perPage}");
+            $"repos/{owner}/{repo}/actions/runs?branch={encodedBranch}&per_page={perPage}",
+            default);
 
         return response?.WorkflowRuns ?? new List<GitHubWorkflowRunDto>();
     }
@@ -295,7 +300,7 @@ public class GitHubService : IConnectorService
         if (runId <= 0)
             throw new ArgumentException("Run id is required.", nameof(runId));
 
-        return await GetAsync<GitHubWorkflowJobsResponse>(
+        return await GetETaggedAsync<GitHubWorkflowJobsResponse>(
             connector,
             $"repos/{owner}/{repo}/actions/runs/{runId}/jobs?per_page=100",
             cancellationToken,
@@ -731,10 +736,12 @@ public class GitHubService : IConnectorService
         var response = await pipeline.ExecuteAsync(async (ct) =>
         {
             using var request = CreateGetRequest(connector, requestUri);
-            return await _httpClient.SendAsync(request, ct);
+            var result = await _httpClient.SendAsync(request, ct);
+            RecordRateLimit(connector, result);
+            _usageRecorder.Record(connector.ConnectorId, requestUri, isNotModified: false, isError: !result.IsSuccessStatusCode);
+            return result;
         }, cancellationToken);
 
-        RecordRateLimit(connector, response);
         return response;
     }
 
@@ -776,6 +783,57 @@ public class GitHubService : IConnectorService
         }
 
         return await response.Content.ReadFromJsonAsync<T>(_jsonOptions, cancellationToken);
+    }
+
+    /// <summary>
+    /// Like <see cref="GetAsync{T}(Connector, string, CancellationToken, bool)"/> but sends the last known
+    /// ETag as <c>If-None-Match</c>. A 304 response (unchanged since last poll) is answered from the cached
+    /// body instead of a fresh download - free against the primary limit and only 1 point against the
+    /// secondary/abuse limit, which matters for the frequently-repolled jobs/branch-runs endpoints.
+    /// </summary>
+    private async Task<T?> GetETaggedAsync<T>(Connector connector, string requestUri, CancellationToken cancellationToken = default, bool skipRateLimitRetry = false)
+    {
+        var cacheKey = $"{connector.ConnectorId}|{requestUri}";
+        var cached = _eTagCache.TryGet(cacheKey);
+
+        var pipeline = skipRateLimitRetry ? GitHubLiveFeedRetryPipeline : GitHubGetRetryPipeline;
+        using var response = await pipeline.ExecuteAsync(async ct =>
+        {
+            using var request = CreateGetRequest(connector, requestUri);
+            if (cached is { } entry)
+                request.Headers.TryAddWithoutValidation("If-None-Match", entry.ETag);
+            var result = await _httpClient.SendAsync(request, ct);
+            RecordRateLimit(connector, result);
+            _usageRecorder.Record(
+                connector.ConnectorId,
+                requestUri,
+                isNotModified: result.StatusCode == HttpStatusCode.NotModified,
+                isError: !result.IsSuccessStatusCode && result.StatusCode != HttpStatusCode.NotModified);
+            return result;
+        }, cancellationToken);
+
+        if (response.StatusCode == HttpStatusCode.NotModified && cached is { } cachedEntry)
+        {
+            _logger.LogTrace("GitHub ETag cache hit (304) for {Url}", requestUri);
+            return JsonSerializer.Deserialize<T>(cachedEntry.Body, _jsonOptions);
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError("GitHub API call failed. Status: {StatusCode}, URL: {Url}, Response: {Response}",
+                response.StatusCode,
+                response.RequestMessage?.RequestUri,
+                errorContent);
+            ThrowGitHubApiFailure(response, errorContent);
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        var etag = response.Headers.ETag?.Tag;
+        if (!string.IsNullOrWhiteSpace(etag))
+            _eTagCache.Set(cacheKey, etag, body);
+
+        return string.IsNullOrEmpty(body) ? default : JsonSerializer.Deserialize<T>(body, _jsonOptions);
     }
 
     private HttpRequestMessage CreatePostRequest(Connector connector, string requestUri, string? payload)

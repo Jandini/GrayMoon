@@ -10,10 +10,11 @@ public sealed class GhaWorkflowLiveFeedService(
     GitHubService gitHubService,
     ConnectorRepository connectorRepository,
     IGitHubRateLimitTracker rateLimitTracker,
+    IGhaLiveFeedJobsCache jobsCache,
     ILogger<GhaWorkflowLiveFeedService> logger)
 {
-    public const int PollIntervalActiveMs = 8_000;
-    public const int PollIntervalWaitingJobsMs = 10_000;
+    public const int PollIntervalActiveMs = 4_000;
+    public const int PollIntervalWaitingJobsMs = 8_000;
     public const int PollIntervalIdleMs = 15_000;
 
     public async Task<GhaWorkflowLiveFeedUpdate> PollOnceAsync(
@@ -52,7 +53,16 @@ public sealed class GhaWorkflowLiveFeedService(
                     DelayMs: PollIntervalWaitingJobsMs);
             }
 
-            var response = await gitHubService.GetWorkflowRunJobsAsync(connector, state.Owner, state.RepositoryName, state.RunId, cancellationToken, skipRateLimitRetry: true);
+            // Coalesce with any other poller (another terminal, the Actions grid, push-wait discovery)
+            // already asking about this exact run within the last couple seconds, so N consumers watching
+            // the same run collapse to a single real GitHub call.
+            var runKey = $"{state.ConnectorName}|{state.Owner}|{state.RepositoryName}|{state.RunId}";
+            if (!jobsCache.TryGet(runKey, out var response))
+            {
+                response = await gitHubService.GetWorkflowRunJobsAsync(connector, state.Owner, state.RepositoryName, state.RunId, cancellationToken, skipRateLimitRetry: true);
+                jobsCache.Set(runKey, response);
+            }
+
             var jobs = response?.Jobs ?? [];
 
             var caption = BuildCaption(jobs, state.WorkflowDisplayName);

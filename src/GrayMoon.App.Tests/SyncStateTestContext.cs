@@ -52,6 +52,8 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.Configure<WorkspaceOptions>(o => o.MaxParallelOperations = 4);
         services.AddSingleton<IGitHubRateLimitTracker, GitHubRateLimitTracker>();
+        services.AddSingleton<IGitHubETagCache, GitHubETagCache>();
+        services.AddSingleton<IGitHubApiUsageRecorder, FakeGitHubApiUsageRecorder>();
         services.AddSingleton(new HttpClient());
         services.AddSingleton<IAgentBridge>(agentBridge);
         services.AddSingleton<IHubContext<WorkspaceSyncHub>>(hubContext);
