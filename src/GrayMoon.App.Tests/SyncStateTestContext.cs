@@ -73,6 +73,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<WorkspaceService>();
         services.AddScoped<GitHubService>();
         services.AddScoped<GitHubPullRequestService>();
+        services.AddScoped<GitHubPullRequestMergeService>();
         services.AddScoped<WorkspacePullRequestService>();
         services.AddScoped<RepositoryBranchWriter>();
         services.AddScoped<WorkspaceRepositoryStateWriter>();

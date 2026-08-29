@@ -1,0 +1,463 @@
+@using GrayMoon.App.Models
+@using Microsoft.AspNetCore.Components.Web
+
+@if (IsVisible)
+{
+    @*
+        z-index drops below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while
+        IsSyncingLocalState so that overlay visually covers the dialog for a push/pull triggered from within it -
+        without unmounting the dialog itself, which would look like it closed and reopened.
+    *@
+    <div class="modal show d-block merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @(IsSyncingLocalState ? 50 : 1075);"
+         @onkeydown="HandleKeyDown">
+        <div class="modal-dialog merge-pr-modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        Merge pull request
+                        @{
+                            var headerHtmlUrl = Details?.HtmlUrl ?? PrHtmlUrl;
+                        }
+                        @if (PrNumber is > 0 && !string.IsNullOrWhiteSpace(headerHtmlUrl))
+                        {
+                            @* PrHtmlUrl is known as soon as the dialog opens (from the already-polled PR badge state) -
+                               no need to wait for the full Details fetch just to make this a real link. *@
+                            <a href="@headerHtmlUrl" target="_blank" rel="noopener noreferrer" class="merge-pr-header-link fw-normal fs-6 ms-1">#@(Details?.Number ?? PrNumber)</a>
+                        }
+                        else if (PrNumber is > 0)
+                        {
+                            <span class="merge-pr-header-link fw-normal fs-6 ms-1">#@PrNumber</span>
+                        }
+                    </h5>
+                    <button type="button" class="btn-close flex-shrink-0" aria-label="Close" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body merge-pr-modal-body">
+                    @if (IsLoading)
+                    {
+                        <div class="merge-pr-loading d-flex align-items-center justify-content-center gap-2 text-muted">
+                            <span class="spinner-border spinner-border-sm"></span>
+                            <span>Loading pull request details from GitHub…</span>
+                        </div>
+                    }
+                    else if (Details == null)
+                    {
+                        <div class="alert alert-danger mb-0">Could not load pull request details from GitHub.</div>
+                    }
+                    else
+                    {
+                        <div class="merge-pr-title mb-1">@Details.Title</div>
+                        <div class="merge-pr-branches text-muted mb-3">
+                            <code>@Details.HeadRef</code>
+                            <span class="mx-1">&#8594;</span>
+                            <code>@Details.BaseRef</code>
+                        </div>
+
+                        <div class="merge-pr-status-list mb-2">
+                            <div class="merge-pr-status-item">
+                                <span class="merge-pr-status-icon @GetReviewIconClass()">
+                                    <i class="bi @GetReviewIconGlyph()"></i>
+                                </span>
+                                <div class="merge-pr-status-text">
+                                    <div class="merge-pr-status-title">@GetReviewTitle()</div>
+                                    <div class="merge-pr-status-subtitle">@GetReviewSubtitle()</div>
+                                </div>
+                            </div>
+                            <div class="merge-pr-status-item">
+                                <span class="merge-pr-status-icon @GetChecksIconClass()">
+                                    <i class="bi @GetChecksIconGlyph()"></i>
+                                </span>
+                                <div class="merge-pr-status-text">
+                                    <div class="merge-pr-status-title">@GetChecksTitle()</div>
+                                    <div class="merge-pr-status-subtitle">
+                                        @if (Details.Checks.State == ChecksState.Pending && !string.IsNullOrEmpty(ActionsUrl))
+                                        {
+                                            <a href="@ActionsUrl" class="merge-pr-changed-files-link">@GetChecksSubtitle()</a>
+                                        }
+                                        else
+                                        {
+                                            @GetChecksSubtitle()
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="merge-pr-status-item">
+                                <span class="merge-pr-status-icon @GetConflictsIconClass()">
+                                    <i class="bi @GetConflictsIconGlyph()"></i>
+                                </span>
+                                <div class="merge-pr-status-text">
+                                    <div class="merge-pr-status-title">@GetConflictsTitle()</div>
+                                    <div class="merge-pr-status-subtitle">
+                                        @GetConflictsSubtitle()
+                                        @if (Details.ChangedFiles is > 0)
+                                        {
+                                            @(" ")<a href="@($"{Details.HtmlUrl}/files")"
+                                               target="_blank"
+                                               rel="noopener noreferrer"
+                                               class="merge-pr-changed-files-link">@Details.ChangedFiles file@(Details.ChangedFiles == 1 ? "" : "s") changed</a>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="merge-pr-status-item">
+                                <span class="merge-pr-status-icon @GetLocalStateIconClass()">
+                                    <i class="bi @GetLocalStateIconGlyph()"></i>
+                                </span>
+                                <div class="merge-pr-status-text">
+                                    <div class="merge-pr-status-title">@GetLocalStateTitle()</div>
+                                    <div class="merge-pr-status-subtitle">
+                                        @if (!Details.HasLocalWarning)
+                                        {
+                                            @GetLocalStateSubtitle()
+                                        }
+                                        else
+                                        {
+                                            @if (Details.UncommittedChangesCount > 0)
+                                            {
+                                                @if (!string.IsNullOrEmpty(ChangesUrl))
+                                                {
+                                                    <a href="@ChangesUrl" class="merge-pr-changed-files-link">@GetUncommittedChangesText()</a>
+                                                }
+                                                else
+                                                {
+                                                    @GetUncommittedChangesText()
+                                                }
+                                            }
+                                            @if (Details.UncommittedChangesCount > 0 && HasCommitsToSync())
+                                            {
+                                                @(", ")
+                                            }
+                                            @if (HasCommitsToSync())
+                                            {
+                                                <button type="button" class="merge-pr-changed-files-link merge-pr-inline-link-btn" @onclick="HandleCommitsClick">@GetCommitsText()</button>
+                                            }
+                                            @(". This will not block the merge.")
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        @if (ErrorMessage != null)
+                        {
+                            <div class="alert alert-danger mb-0">@ErrorMessage</div>
+                        }
+                    }
+                </div>
+                @if (!IsLoading && Details != null)
+                {
+                    <div class="modal-footer merge-pr-modal-footer">
+                        <div class="btn-group merge-pr-split-btn">
+                            <button type="button"
+                                    class="btn merge-pr-btn-github @(Details.CanMergeNow && Details.HasMergeWarning ? "merge-pr-btn-github--warning" : null) merge-pr-split-btn__main"
+                                    disabled="@(!Details.CanMergeNow || IsMerging)"
+                                    @onclick="HandleMergeClick">
+                                @if (IsMerging)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2"></span>
+                                }
+                                @_selectedMethod.ToDisplayLabel()
+                            </button>
+                            @if (Details.AllowedMergeMethods.Count > 1)
+                            {
+                                <button type="button"
+                                        class="btn merge-pr-btn-github @(Details.CanMergeNow && Details.HasMergeWarning ? "merge-pr-btn-github--warning" : null) dropdown-toggle dropdown-toggle-split merge-pr-split-btn__toggle"
+                                        disabled="@(!Details.CanMergeNow || IsMerging)"
+                                        @onclick="ToggleMethodDropdown">
+                                    <span class="visually-hidden">Choose merge method</span>
+                                </button>
+                                @if (_showMethodDropdown)
+                                {
+                                    <div class="merge-pr-method-menu">
+                                        @foreach (var method in Details.AllowedMergeMethods)
+                                        {
+                                            <button type="button" class="dropdown-item" @onclick="() => SelectMethod(method)">
+                                                @method.ToDisplayLabel()
+                                            </button>
+                                        }
+                                    </div>
+                                }
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    /// <summary>PR number known immediately when the dialog opens, before the full <see cref="Details"/> fetch completes.</summary>
+    [Parameter] public int? PrNumber { get; set; }
+    /// <summary>PR HTML URL known immediately when the dialog opens (from the already-polled PR badge state), before <see cref="Details"/> supplies its own.</summary>
+    [Parameter] public string? PrHtmlUrl { get; set; }
+    [Parameter] public PullRequestMergeDetails? Details { get; set; }
+    [Parameter] public bool IsLoading { get; set; }
+    [Parameter] public bool IsMerging { get; set; }
+    [Parameter] public string? ErrorMessage { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback<MergeMethod> OnMerge { get; set; }
+    /// <summary>Workspace's Git Changes page URL, used to link the "N uncommitted changes" text in the local-state row. Null/empty hides the link.</summary>
+    [Parameter] public string? ChangesUrl { get; set; }
+    /// <summary>Workspace's Actions page URL, used to link the "N checks still running" text in the checks row. Null/empty hides the link.</summary>
+    [Parameter] public string? ActionsUrl { get; set; }
+    /// <summary>Raised when the user clicks the commits text in the local-state row while only unpushed (outgoing) commits exist.</summary>
+    [Parameter] public EventCallback OnPushRequested { get; set; }
+    /// <summary>Raised when the user clicks the commits text in the local-state row while incoming commits exist (pull-only or pull+push sync) - mirrors CommitsBadge's own "incoming wins" click behavior.</summary>
+    [Parameter] public EventCallback OnPullRequested { get; set; }
+    /// <summary>True while a push/pull triggered from the local-state row is running. Drops the dialog's z-index below the page's LoadingOverlay so it visually covers the (still-mounted) dialog instead of the dialog disappearing.</summary>
+    [Parameter] public bool IsSyncingLocalState { get; set; }
+
+    private MergeMethod _selectedMethod;
+    private bool _showMethodDropdown;
+    private bool _wasVisible;
+    private int? _lastDetailsNumber;
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !_wasVisible)
+        {
+            _wasVisible = true;
+            _showMethodDropdown = false;
+        }
+        else if (!IsVisible)
+        {
+            _wasVisible = false;
+            _lastDetailsNumber = null;
+        }
+
+        // Reset the selected method whenever a new PR's details arrive (default method preselected).
+        if (Details != null && Details.Number != _lastDetailsNumber)
+        {
+            _lastDetailsNumber = Details.Number;
+            _selectedMethod = Details.DefaultMergeMethod ?? MergeMethod.Merge;
+            _showMethodDropdown = false;
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            if (_showMethodDropdown)
+                _showMethodDropdown = false;
+            else
+                await OnCancel.InvokeAsync();
+        }
+    }
+
+    private void ToggleMethodDropdown() => _showMethodDropdown = !_showMethodDropdown;
+
+    private void SelectMethod(MergeMethod method)
+    {
+        _selectedMethod = method;
+        _showMethodDropdown = false;
+    }
+
+    private async Task HandleMergeClick()
+    {
+        _showMethodDropdown = false;
+        if (Details != null && OnMerge.HasDelegate)
+            await OnMerge.InvokeAsync(_selectedMethod);
+    }
+
+    // GitHub-style status rows: a colored icon circle + bold title + muted subtitle per row,
+    // mirroring the "All checks have passed / No conflicts with base branch" rows on github.com.
+
+    private string GetChecksIconClass() => Details?.Checks.State switch
+    {
+        ChecksState.Passed => "merge-pr-status-icon--success",
+        ChecksState.Failed => "merge-pr-status-icon--danger",
+        ChecksState.Pending => "merge-pr-status-icon--pending",
+        _ => "merge-pr-status-icon--neutral"
+    };
+
+    private string GetChecksIconGlyph() => Details?.Checks.State switch
+    {
+        ChecksState.Passed => "bi-check-lg",
+        ChecksState.Failed => "bi-x-lg",
+        ChecksState.Pending => "bi-three-dots",
+        _ => "bi-dash-lg"
+    };
+
+    private string GetChecksTitle()
+    {
+        var checks = Details?.Checks;
+        if (checks == null || checks.State == ChecksState.None)
+            return "No checks reported";
+        return checks.State switch
+        {
+            ChecksState.Passed => "All checks have passed",
+            ChecksState.Failed => $"{checks.Failed} check{(checks.Failed == 1 ? "" : "s")} failing",
+            ChecksState.Pending => "Checks are running",
+            _ => "Checks status unknown"
+        };
+    }
+
+    private string GetChecksSubtitle()
+    {
+        var checks = Details?.Checks;
+        if (checks == null || checks.State == ChecksState.None)
+            return "This repository has no status checks configured.";
+        return checks.State switch
+        {
+            ChecksState.Passed => $"{checks.Passed} successful check{(checks.Passed == 1 ? "" : "s")}",
+            ChecksState.Failed => $"{checks.Failed} failing, {checks.Passed} successful check{(checks.Passed == 1 ? "" : "s")}",
+            ChecksState.Pending => $"{checks.Pending} check{(checks.Pending == 1 ? "" : "s")} still running",
+            _ => string.Empty
+        };
+    }
+
+    private string GetConflictsIconClass() => Details?.Mergeable switch
+    {
+        true => "merge-pr-status-icon--success",
+        false => "merge-pr-status-icon--danger",
+        _ => "merge-pr-status-icon--neutral"
+    };
+
+    private string GetConflictsIconGlyph() => Details?.Mergeable switch
+    {
+        true => "bi-check-lg",
+        false => "bi-x-lg",
+        _ => "bi-three-dots"
+    };
+
+    private string GetConflictsTitle() => Details?.Mergeable switch
+    {
+        true => "No conflicts with base branch",
+        false => "This branch has conflicts that must be resolved",
+        _ => "Checking for conflicts…"
+    };
+
+    private string GetConflictsSubtitle() => Details?.Mergeable switch
+    {
+        true => "Merging can be performed automatically.",
+        false => "Resolve the conflicts before merging can proceed.",
+        _ => "GitHub is still computing mergeability."
+    };
+
+    /// <summary>
+    /// GitHub's PR API never reports "N approving reviews required" directly - the closest signal available is
+    /// mergeable_state == "blocked" with no other explainable cause (no failing/pending checks, no changes
+    /// requested, nobody currently requested as a reviewer). That combination means branch protection requires
+    /// an approving review that nobody has even been asked for yet, which must read as blocked (red), not "not required" (green).
+    /// </summary>
+    private bool RequiresReviewButNoneRequested() => Details != null
+        && Details.ApprovedCount == 0
+        && Details.ChangesRequestedCount == 0
+        && Details.OutstandingReviewers.Count == 0
+        && string.Equals(Details.MergeableState, "blocked", StringComparison.OrdinalIgnoreCase);
+
+    private string GetReviewIconClass()
+    {
+        if (Details == null)
+            return "merge-pr-status-icon--neutral";
+        if (Details.ChangesRequestedCount > 0 || RequiresReviewButNoneRequested())
+            return "merge-pr-status-icon--danger";
+        if (Details.OutstandingReviewers.Count > 0)
+            return "merge-pr-status-icon--pending";
+        return "merge-pr-status-icon--success";
+    }
+
+    private string GetReviewIconGlyph()
+    {
+        if (Details == null)
+            return "bi-dash-lg";
+        if (Details.ChangesRequestedCount > 0 || RequiresReviewButNoneRequested())
+            return "bi-x-lg";
+        if (Details.OutstandingReviewers.Count > 0)
+            return "bi-three-dots";
+        return "bi-check-lg";
+    }
+
+    private string GetReviewTitle()
+    {
+        if (Details == null)
+            return string.Empty;
+        if (Details.ChangesRequestedCount > 0)
+            return "Changes requested";
+        if (Details.OutstandingReviewers.Count > 0 || RequiresReviewButNoneRequested())
+            return "Review required";
+        if (Details.ApprovedCount > 0)
+            return "Review approved";
+        return "Review not required";
+    }
+
+    private string GetReviewSubtitle()
+    {
+        if (Details == null)
+            return string.Empty;
+        if (Details.ChangesRequestedCount > 0)
+            return $"{Details.ChangesRequestedCount} review{(Details.ChangesRequestedCount == 1 ? "" : "s")} requested changes.";
+        if (Details.OutstandingReviewers.Count > 0)
+            return $"Waiting on {FormatNames(Details.OutstandingReviewers)}.";
+        if (Details.ApprovedCount > 0)
+            return $"Approved by {FormatNames(Details.ApprovedByUsers)}.";
+        if (RequiresReviewButNoneRequested())
+            return "This repository requires an approving review, but none has been requested.";
+        return "No reviewers were requested for this pull request.";
+    }
+
+    /// <summary>Keeps review-name subtitles short: shows up to 2 names, then a "+N more" suffix.</summary>
+    private static string FormatNames(IReadOnlyList<string> names)
+    {
+        const int maxShown = 2;
+        if (names.Count <= maxShown)
+            return string.Join(", ", names);
+        return $"{string.Join(", ", names.Take(maxShown))} +{names.Count - maxShown} more";
+    }
+
+    // GrayMoon-local 4th row: uncommitted changes / unpushed commits in the local clone. Purely informational
+    // (never a deal-breaker for merging on GitHub), so it's an amber warning rather than a red blocker - the
+    // merge button itself picks up the same amber color as a heads-up, not a disabled state.
+
+    private string GetLocalStateIconClass() =>
+        Details?.HasLocalWarning == true ? "merge-pr-status-icon--pending" : "merge-pr-status-icon--success";
+
+    private string GetLocalStateIconGlyph() =>
+        Details?.HasLocalWarning == true ? "bi-exclamation-lg" : "bi-check-lg";
+
+    private string GetLocalStateTitle() =>
+        Details?.HasLocalWarning == true ? "Local branch is not in sync" : "Local working copy is up to date";
+
+    /// <summary>Only used when there's no local warning - the warning case is built inline in markup so the uncommitted-changes portion can be a link.</summary>
+    private string GetLocalStateSubtitle() => "No uncommitted changes or unpushed commits.";
+
+    private string GetUncommittedChangesText() =>
+        $"{Details!.UncommittedChangesCount} uncommitted change{(Details.UncommittedChangesCount == 1 ? "" : "s")}";
+
+    private bool HasCommitsToSync() => Details != null && (Details.UnpushedCommitsCount > 0 || Details.IncomingCommitsCount > 0);
+
+    /// <summary>
+    /// Mirrors CommitsBadge's own text: incoming commits mean the click will run a full commit-sync (pull, merging
+    /// in any outgoing commits too), so both counts are shown together rather than choosing one.
+    /// </summary>
+    private string GetCommitsText()
+    {
+        if (Details == null)
+            return string.Empty;
+        var parts = new List<string>();
+        if (Details.UnpushedCommitsCount > 0)
+            parts.Add($"{Details.UnpushedCommitsCount} unpushed");
+        if (Details.IncomingCommitsCount > 0)
+            parts.Add($"{Details.IncomingCommitsCount} incoming");
+        var count = Details.UnpushedCommitsCount + Details.IncomingCommitsCount;
+        return $"{string.Join(", ", parts)} commit{(count == 1 ? "" : "s")}";
+    }
+
+    /// <summary>Same precedence as CommitsBadge.HandleClick: incoming commits always win (sync/pull handles both directions), push only fires when nothing is incoming.</summary>
+    private async Task HandleCommitsClick()
+    {
+        if (Details == null)
+            return;
+        if (Details.IncomingCommitsCount > 0)
+        {
+            if (OnPullRequested.HasDelegate)
+                await OnPullRequested.InvokeAsync();
+        }
+        else if (Details.UnpushedCommitsCount > 0 && OnPushRequested.HasDelegate)
+        {
+            await OnPushRequested.InvokeAsync();
+        }
+    }
+}

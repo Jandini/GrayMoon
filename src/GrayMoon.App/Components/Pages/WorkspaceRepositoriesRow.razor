@@ -103,7 +103,8 @@
                             IsOnTag="@Link.IsOnTag"
                             HasNewerTag="@(Link.HasNewerTag == true)"
                             OnCreateClick="@(() => OnCreatePr.InvokeAsync(Link))"
-                            OnUpgradeClick="@(() => OnUpgradeClick.InvokeAsync(Link))" />
+                            OnUpgradeClick="@(() => OnUpgradeClick.InvokeAsync(Link))"
+                            OnMergeClick="@((int prNumber) => OnMergeClick.InvokeAsync(Link))" />
                 </span>
                 <span class="metrics-block metrics-deps">
                     @if (totalWithFiles == 0)
@@ -447,6 +448,8 @@
     [Parameter] public EventCallback OnDismissError { get; set; }
     [Parameter] public EventCallback<WorkspaceRepositoryLink> OnCreatePr { get; set; }
     [Parameter] public EventCallback<WorkspaceRepositoryLink> OnUpgradeClick { get; set; }
+    /// <summary>Fired with the row's link when the user clicks the "merge" segment of the PR chip. The row doesn't know the PR number - the handler reads it from PrInfo.</summary>
+    [Parameter] public EventCallback<WorkspaceRepositoryLink> OnMergeClick { get; set; }
     /// <summary>Fired when the user clicks the Copy button on the dependency-mismatch tooltip. Payload is the formatted text to copy to the clipboard.</summary>
     [Parameter] public EventCallback<string> OnCopyDependencies { get; set; }
 

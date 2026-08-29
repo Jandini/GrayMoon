@@ -1163,18 +1163,18 @@ table.resizable-columns th:hover .resize-handle::after {
     background-color: #ffc107;
     color: #000 !important;
 }
-.repositories-table td.col-pr .pr-badge-open {
-    /* base; color overridden by mergeability variant */
-    color: #fff !important;
-}
+/* Mergeability colors: white text on green/red, black text on orange/yellow (better contrast on lighter hues). */
 .repositories-table td.col-pr .pr-badge-open-unknown {
     background-color: #495057;
+    color: #fff !important;
 }
 .repositories-table td.col-pr .pr-badge-open-mergeable {
     background-color: #238636;
+    color: #fff !important;
 }
 .repositories-table td.col-pr .pr-badge-open-conflict {
     background-color: #dc3545;
+    color: #fff !important;
 }
 .repositories-table td.col-pr .pr-badge-open-checks {
     background-color: #d29922;
@@ -1182,7 +1182,7 @@ table.resizable-columns th:hover .resize-handle::after {
 }
 .repositories-table td.col-pr .pr-badge-open-blocked {
     background-color: #e67700;
-    color: #fff !important;
+    color: #000 !important;
 }
 .repositories-table td.col-pr .pr-badge-merged {
     background-color: #8957e5;
@@ -1194,6 +1194,61 @@ table.resizable-columns th:hover .resize-handle::after {
 }
 .repositories-table td.col-pr .pr-badge-files-changed {
     margin-left: 0.25rem;
+}
+
+/*
+ * Composite merge chip for open PRs: [#123 | 12] rendered as one visually connected pill, mirroring
+ * the .gha-status-chip pattern in WorkspaceActions.razor.css (segments joined by a 1px border-left
+ * "separator"). The wrapper's 0.25rem radius + overflow:hidden matches bootstrap's own .badge
+ * border-radius (see .badge rule above), clipping BOTH the left corner of the #123 segment and the
+ * right corner of the files segment to that same radius - so every corner of the chip reads exactly
+ * like every other badge in this grid, not a custom radius. #123 opens the merge confirmation dialog;
+ * the file count links straight to the PR's changed files on GitHub.
+ */
+.repositories-table td.col-pr .pr-merge-chip {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 0.25rem;
+    overflow: hidden;
+    vertical-align: middle;
+    line-height: 1;
+}
+.repositories-table td.col-pr .pr-merge-chip__merge {
+    /*
+     * Reset button defaults so it reads as a badge segment, not a native button. Bootstrap's own .badge
+     * sizing (font-size: .75em, line-height: 1, padding: .35em .65em) must be kept explicit here rather
+     * than "inherit" - inheriting from the table cell (whose font-size/line-height are much larger) is
+     * what previously made this segment balloon in height and stretch the entire row. Text color is
+     * intentionally NOT set here - it comes from the mergeability class (pr-badge-open-*) alongside it,
+     * so green/red segments get white and orange/yellow segments get black, matching every other badge.
+     */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    margin: 0;
+    font-weight: 400;
+    font-size: 0.75em;
+    font-family: inherit;
+    line-height: 1;
+    /* Less padding on the right (touching the separator) than the left, to trim overall chip width. */
+    padding: 0.35em 0.4em 0.35em 0.65em;
+    cursor: pointer;
+    border-radius: 0;
+}
+.repositories-table td.col-pr .pr-merge-chip__files {
+    /* Background/text color comes from the shared mergeability class (pr-badge-open-*) applied
+       alongside this class, same as the pre-chip badge - only the layout (radius reset, separator) is new. */
+    display: inline-flex;
+    align-items: center;
+    font-weight: 400;
+    line-height: 1;
+    border-radius: 0;
+    border-left: 1px solid rgba(0, 0, 0, 0.25);
+    margin-left: 0;
+    text-decoration: none;
+    /* Less padding on the left (touching the separator) than the right, to trim overall chip width. */
+    padding: 0.35em 0.65em 0.35em 0.4em;
 }
 
 /* Actions page run/re-run button - fixed size so spinner swap never causes resize */
