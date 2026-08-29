@@ -143,6 +143,21 @@ public sealed partial class WorkspaceRepositories
         return tcs.Task.ContinueWith(_ => JobService.Changed -= OnChanged, TaskScheduler.Default);
     }
 
+    /// <summary>
+    /// Called from the background PR polling loop (WorkspaceRepositories.PrPolling.cs) on every tick so an open
+    /// merge dialog's checks/reviews/mergeability - e.g. "2 checks still running" - stay in step with the same
+    /// GitHub state that just updated the row's PR badge, instead of going stale the moment the dialog opens.
+    /// Skipped while the dialog is closed, loading its first fetch, mid-merge, or mid local sync so this never
+    /// races those other in-flight updates to the same state.
+    /// </summary>
+    private Task RefreshOpenMergeDialogIfDueAsync()
+    {
+        if (_disposed || !_mergePrModal.IsVisible || _mergePrModal.IsLoading || _mergePrModal.IsMerging || _mergePrModal.IsSyncingLocalState)
+            return Task.CompletedTask;
+
+        return RefreshMergeDialogDetailsAsync(_mergePrModal.RepositoryId, _mergePrModal.PrNumber);
+    }
+
     /// <summary>Re-fetches merge details in place after a push/pull triggered from within the (still-open) dialog completes.</summary>
     private async Task RefreshMergeDialogDetailsAsync(int repositoryId, int prNumber)
     {
