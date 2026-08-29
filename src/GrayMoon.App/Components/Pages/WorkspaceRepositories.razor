@@ -357,7 +357,7 @@
                        ErrorMessage="@_mergePrModal.ErrorMessage"
                        ChangesUrl="@($"/workspaces/{WorkspaceId}/changes")"
                        ActionsUrl="@($"/workspaces/{WorkspaceId}/actions")"
-                       OnMerge="HandleMergeConfirmedAsync"
+                       OnMerge="HandleMergeRequestedAsync"
                        OnCancel="CloseMergeModal"
                        OnPushRequested="HandleMergeDialogPushRequestedAsync"
                        OnPullRequested="HandleMergeDialogPullRequestedAsync" />
