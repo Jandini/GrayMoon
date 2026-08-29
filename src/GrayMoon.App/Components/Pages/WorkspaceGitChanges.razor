@@ -82,28 +82,25 @@
                                   @oninput="OnWorkspaceCommitMessageInput"></textarea>
                         </form>
                         <div class="git-changes-workspace-commit__actions">
-                            @if (StagedRepositoryCount > 0)
-                            {
-                                <button type="button"
-                                        class="btn btn-sm btn-primary"
-                                        disabled="@(IsJobRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
-                                        title="Creates one commit in each staged repository using the same message. Ctrl+Enter from the message box."
-                                        aria-keyshortcuts="Control+Enter"
-                                        @onclick="() => CommitWorkspaceAsync(stagedOnly: true)">
-                                    Commit Staged
-                                </button>
-                            }
-                            else
-                            {
-                                <button type="button"
-                                        class="@(string.IsNullOrWhiteSpace(_workspaceCommitMessage) ? "btn btn-sm btn-outline-primary" : "btn btn-sm btn-primary")"
-                                        disabled="@(IsJobRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
-                                        title="Stages all changes then creates one commit in each repository using the same message. Ctrl+Enter from the message box."
-                                        aria-keyshortcuts="Control+Enter"
-                                        @onclick="() => CommitWorkspaceAsync(stagedOnly: false)">
-                                    Commit All
-                                </button>
-                            }
+                            <button type="button"
+                                    class="@(string.IsNullOrWhiteSpace(_workspaceCommitMessage) ? "btn btn-sm btn-outline-primary" : "btn btn-sm btn-primary")"
+                                    disabled="@IsCommitButtonDisabled"
+                                    title="@(PushAfterCommit
+                                                ? "Commits, then pushes exactly the repositories that committed successfully. Ctrl+Enter from the message box."
+                                                : "Creates one commit in each applicable repository using the same message. Ctrl+Enter from the message box.")"
+                                    aria-keyshortcuts="Control+Enter"
+                                    @onclick="() => CommitWorkspaceAsync(StagedRepositoryCount > 0, PushAfterCommit)">
+                                @CommitButtonTitle
+                            </button>
+                            <div class="form-check git-changes-workspace-commit__push-check">
+                                <label class="form-check-label" for="git-changes-push-after-commit">
+                                    Push committed
+                                </label>
+                                <input class="form-check-input" type="checkbox" id="git-changes-push-after-commit"
+                                       disabled="@IsJobRunning"
+                                       checked="@PushAfterCommit"
+                                       @onchange="OnPushAfterCommitChanged" />
+                            </div>
                         </div>
                     </div>
                 }
