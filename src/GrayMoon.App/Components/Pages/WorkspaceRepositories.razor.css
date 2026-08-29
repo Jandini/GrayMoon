@@ -59,8 +59,8 @@
 }
 
 ::deep .repositories-table thead th .pull-request-icon.header-icon {
-    width: 1em;
-    height: 1em;
+    width: 1.15em;
+    height: 1.15em;
 }
 
 /* Dependency level header: left [level + graph] … right [icons + count]
