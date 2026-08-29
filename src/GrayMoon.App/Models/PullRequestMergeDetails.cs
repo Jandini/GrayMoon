@@ -62,16 +62,18 @@ public sealed class PullRequestMergeDetails
     /// <summary>True when any local signal above is set - drives the warning icon on the local-state row.</summary>
     public bool HasLocalWarning => HasUncommittedChanges || UnpushedCommitsCount > 0 || IncomingCommitsCount > 0;
 
-    /// <summary>True when the merge button itself should render as an orange "proceed with caution" warning: either the local clone has unsynced work, or checks are still running (mergeable_state can flip to "unstable"/blocked once they finish).</summary>
-    public bool HasMergeWarning => HasLocalWarning || Checks.State == ChecksState.Pending;
+    /// <summary>
+    /// True when the merge button itself should render as an orange "proceed with caution" warning: the local
+    /// clone has unsynced work. Deliberately does NOT factor in pending/failing checks - GitHub's own Mergeable/
+    /// CanMergeNow already reflects whether checks actually block the merge per this repository's branch
+    /// protection rules, so a check that GitHub doesn't require running is not a real reason to warn.
+    /// </summary>
+    public bool HasMergeWarning => HasLocalWarning;
 
     /// <summary>Merge methods GitHub currently permits for this repository. Only these may ever be offered to the user.</summary>
     public IReadOnlyList<MergeMethod> AllowedMergeMethods { get; init; } = Array.Empty<MergeMethod>();
     /// <summary>Best-effort preselected method (GitHub's REST API exposes no explicit "preferred method" flag) - Squash, then Merge, then Rebase, filtered to <see cref="AllowedMergeMethods"/>.</summary>
     public MergeMethod? DefaultMergeMethod { get; init; }
-
-    /// <summary>Human-readable reasons the merge is currently blocked, derived only from GitHub's own reported state. Empty when mergeable.</summary>
-    public IReadOnlyList<string> BlockingReasons { get; init; } = Array.Empty<string>();
 
     /// <summary>True when GitHub reports the PR as currently mergeable via any allowed method.</summary>
     public bool CanMergeNow => Mergeable == true && AllowedMergeMethods.Count > 0;

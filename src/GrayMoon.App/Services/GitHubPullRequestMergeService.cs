@@ -54,7 +54,6 @@ public sealed class GitHubPullRequestMergeService(
         var checksSummary = SummarizeChecks(checkRuns);
         var allowedMethods = GetAllowedMergeMethods(settings);
         var defaultMethod = DefaultMethodPriority.FirstOrDefault(m => allowedMethods.Contains(m), allowedMethods.FirstOrDefault());
-        var blockingReasons = BuildBlockingReasons(pr, checksSummary, changesRequestedCount, outstandingReviewers, allowedMethods);
 
         return new PullRequestMergeDetails
         {
@@ -74,7 +73,6 @@ public sealed class GitHubPullRequestMergeService(
             Checks = checksSummary,
             AllowedMergeMethods = allowedMethods,
             DefaultMergeMethod = allowedMethods.Count > 0 ? defaultMethod : null,
-            BlockingReasons = blockingReasons,
             HasUncommittedChanges = hasUncommittedChanges,
             UncommittedChangesCount = uncommittedChangesCount,
             UnpushedCommitsCount = unpushedCommitsCount,
@@ -169,41 +167,5 @@ public sealed class GitHubPullRequestMergeService(
         if (settings.AllowRebaseMerge != false)
             allowed.Add(MergeMethod.Rebase);
         return allowed;
-    }
-
-    private static IReadOnlyList<string> BuildBlockingReasons(
-        GitHubPullRequestDto pr,
-        ChecksSummary checks,
-        int changesRequestedCount,
-        IReadOnlyList<string> outstandingReviewers,
-        IReadOnlyList<MergeMethod> allowedMethods)
-    {
-        if (pr.Mergeable == true && !string.Equals(pr.MergeableState, "blocked", StringComparison.OrdinalIgnoreCase))
-            return Array.Empty<string>();
-
-        var reasons = new List<string>();
-
-        if (pr.Draft)
-            reasons.Add("Pull request is a draft.");
-        if (pr.Mergeable == false || string.Equals(pr.MergeableState, "dirty", StringComparison.OrdinalIgnoreCase))
-            reasons.Add("Merge conflicts must be resolved.");
-        if (string.Equals(pr.MergeableState, "behind", StringComparison.OrdinalIgnoreCase))
-            reasons.Add("Branch is out of date with the base branch.");
-        if (checks.State == ChecksState.Failed)
-            reasons.Add($"{checks.Failed} check{(checks.Failed == 1 ? "" : "s")} failing.");
-        if (checks.State == ChecksState.Pending)
-            reasons.Add("Checks are still running.");
-        if (changesRequestedCount > 0)
-            reasons.Add($"{changesRequestedCount} review{(changesRequestedCount == 1 ? "" : "s")} requested changes.");
-        if (outstandingReviewers.Count > 0)
-            reasons.Add($"Waiting on review from {string.Join(", ", outstandingReviewers)}.");
-        if (string.Equals(pr.MergeableState, "blocked", StringComparison.OrdinalIgnoreCase) && reasons.Count == 0)
-            reasons.Add("Blocked by branch protection rules on GitHub.");
-        if (allowedMethods.Count == 0)
-            reasons.Add("No merge method is currently permitted by GitHub for this repository.");
-        if (pr.Mergeable == null && reasons.Count == 0)
-            reasons.Add("GitHub is still computing mergeability - try again shortly.");
-
-        return reasons;
     }
 }

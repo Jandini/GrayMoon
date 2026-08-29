@@ -349,9 +349,11 @@
 
 <MergePullRequestModal IsVisible="@_mergePrModal.IsVisible"
                        PrNumber="@_mergePrModal.PrNumber"
+                       PrHtmlUrl="@_mergePrModal.PrHtmlUrl"
                        Details="@_mergePrModal.Details"
                        IsLoading="@_mergePrModal.IsLoading"
                        IsMerging="@_mergePrModal.IsMerging"
+                       IsSyncingLocalState="@_mergePrModal.IsSyncingLocalState"
                        ErrorMessage="@_mergePrModal.ErrorMessage"
                        ChangesUrl="@($"/workspaces/{WorkspaceId}/changes")"
                        ActionsUrl="@($"/workspaces/{WorkspaceId}/actions")"

@@ -15,7 +15,8 @@ public sealed partial class WorkspaceRepositories
 
     private async Task OpenMergeDialogAsync(WorkspaceRepositoryLink link)
     {
-        var prNumber = GetPrInfoForRepository(link.RepositoryId)?.Number;
+        var prInfo = GetPrInfoForRepository(link.RepositoryId);
+        var prNumber = prInfo?.Number;
         if (prNumber is not > 0)
             return;
 
@@ -24,6 +25,9 @@ public sealed partial class WorkspaceRepositories
             IsVisible = true,
             RepositoryId = link.RepositoryId,
             PrNumber = prNumber.Value,
+            // Already known from the polled PR badge state - link the header immediately instead of waiting
+            // for the fresh GitHub fetch below to populate Details.HtmlUrl.
+            PrHtmlUrl = string.IsNullOrWhiteSpace(prInfo?.HtmlUrl) ? null : prInfo.HtmlUrl,
             IsLoading = true
         };
         StateHasChanged();
@@ -211,6 +215,8 @@ public sealed partial class WorkspaceRepositories
         public bool IsVisible { get; init; }
         public int RepositoryId { get; init; }
         public int PrNumber { get; init; }
+        /// <summary>PR HTML URL known immediately from the polled PR badge state, before Details.HtmlUrl loads.</summary>
+        public string? PrHtmlUrl { get; init; }
         public bool IsLoading { get; init; }
         public bool IsMerging { get; init; }
         /// <summary>True while a push/pull triggered from the local-state row's commits text is running.</summary>

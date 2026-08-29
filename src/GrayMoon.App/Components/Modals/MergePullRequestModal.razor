@@ -15,15 +15,17 @@
                 <div class="modal-header">
                     <h5 class="modal-title">
                         Merge pull request
-                        @if (Details != null)
+                        @{
+                            var headerHtmlUrl = Details?.HtmlUrl ?? PrHtmlUrl;
+                        }
+                        @if (PrNumber is > 0 && !string.IsNullOrWhiteSpace(headerHtmlUrl))
                         {
-                            <a href="@Details.HtmlUrl" target="_blank" rel="noopener noreferrer" class="merge-pr-header-link fw-normal fs-6 ms-1">#@Details.Number</a>
+                            @* PrHtmlUrl is known as soon as the dialog opens (from the already-polled PR badge state) -
+                               no need to wait for the full Details fetch just to make this a real link. *@
+                            <a href="@headerHtmlUrl" target="_blank" rel="noopener noreferrer" class="merge-pr-header-link fw-normal fs-6 ms-1">#@(Details?.Number ?? PrNumber)</a>
                         }
                         else if (PrNumber is > 0)
                         {
-                            @* Number is known as soon as the dialog opens (it's what we asked GitHub for) - no need to
-                               wait for the full details fetch just to show it. Plain text until Details supplies a
-                               real link target, so this never becomes a dead/misleading link while loading. *@
                             <span class="merge-pr-header-link fw-normal fs-6 ms-1">#@PrNumber</span>
                         }
                     </h5>
@@ -135,19 +137,6 @@
                             </div>
                         </div>
 
-                        @if (Details.BlockingReasons.Count > 0)
-                        {
-                            <details class="merge-pr-why-blocked mb-2">
-                                <summary>Why blocked?</summary>
-                                <ul class="mb-0 mt-2">
-                                    @foreach (var reason in Details.BlockingReasons)
-                                    {
-                                        <li>@reason</li>
-                                    }
-                                </ul>
-                            </details>
-                        }
-
                         @if (ErrorMessage != null)
                         {
                             <div class="alert alert-danger mb-0">@ErrorMessage</div>
@@ -159,7 +148,7 @@
                     <div class="modal-footer merge-pr-modal-footer">
                         <div class="btn-group merge-pr-split-btn">
                             <button type="button"
-                                    class="btn merge-pr-btn-github @(Details.HasMergeWarning ? "merge-pr-btn-github--warning" : null) merge-pr-split-btn__main"
+                                    class="btn merge-pr-btn-github @(Details.CanMergeNow && Details.HasMergeWarning ? "merge-pr-btn-github--warning" : null) merge-pr-split-btn__main"
                                     disabled="@(!Details.CanMergeNow || IsMerging)"
                                     @onclick="HandleMergeClick">
                                 @if (IsMerging)
@@ -171,7 +160,7 @@
                             @if (Details.AllowedMergeMethods.Count > 1)
                             {
                                 <button type="button"
-                                        class="btn merge-pr-btn-github @(Details.HasMergeWarning ? "merge-pr-btn-github--warning" : null) dropdown-toggle dropdown-toggle-split merge-pr-split-btn__toggle"
+                                        class="btn merge-pr-btn-github @(Details.CanMergeNow && Details.HasMergeWarning ? "merge-pr-btn-github--warning" : null) dropdown-toggle dropdown-toggle-split merge-pr-split-btn__toggle"
                                         disabled="@(!Details.CanMergeNow || IsMerging)"
                                         @onclick="ToggleMethodDropdown">
                                     <span class="visually-hidden">Choose merge method</span>
@@ -200,6 +189,8 @@
     [Parameter] public bool IsVisible { get; set; }
     /// <summary>PR number known immediately when the dialog opens, before the full <see cref="Details"/> fetch completes.</summary>
     [Parameter] public int? PrNumber { get; set; }
+    /// <summary>PR HTML URL known immediately when the dialog opens (from the already-polled PR badge state), before <see cref="Details"/> supplies its own.</summary>
+    [Parameter] public string? PrHtmlUrl { get; set; }
     [Parameter] public PullRequestMergeDetails? Details { get; set; }
     [Parameter] public bool IsLoading { get; set; }
     [Parameter] public bool IsMerging { get; set; }

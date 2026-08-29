@@ -119,21 +119,11 @@
     cursor: pointer;
 }
 
+
 ::deep .merge-pr-changed-files-link:hover,
 ::deep .merge-pr-changed-files-link:focus-visible {
     color: #fff;
     text-decoration: none;
-}
-
-::deep .merge-pr-why-blocked summary {
-    cursor: pointer;
-    color: var(--bs-secondary-color, #6c757d);
-    font-size: 0.85rem;
-}
-
-::deep .merge-pr-why-blocked ul {
-    font-size: 0.85rem;
-    padding-left: 1.25rem;
 }
 
 /*
@@ -167,10 +157,15 @@
     color: #fff;
 }
 
+/*
+ * Disabled means GitHub itself won't allow the merge right now (conflicts, required reviews/checks
+ * not satisfied, branch protection, etc.). Rendered as a plain neutral gray - not a tinted-down green/
+ * amber - so it reads as "unavailable" rather than "available but styled differently".
+ */
 ::deep .merge-pr-btn-github:disabled {
-    background-color: #23863680;
-    border-color: transparent;
-    color: rgba(255, 255, 255, 0.8);
+    background-color: #30363d;
+    border-color: rgba(240, 246, 252, 0.1);
+    color: rgba(255, 255, 255, 0.5);
 }
 
 /*
@@ -194,12 +189,6 @@
 ::deep .merge-pr-btn-github--warning:active:not(:disabled) {
     background-color: #9a6700;
     color: #fff;
-}
-
-::deep .merge-pr-btn-github--warning:disabled {
-    background-color: #9a670080;
-    border-color: transparent;
-    color: rgba(255, 255, 255, 0.85);
 }
 
 ::deep .merge-pr-split-btn__main {
