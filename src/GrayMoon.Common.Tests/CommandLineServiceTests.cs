@@ -103,28 +103,30 @@ public sealed class CommandLineServiceTests
     }
 
     /// <summary>
-    /// Cross-platform shell commands for process-lifecycle tests (Windows CI and Linux GitHub Actions).
+    /// Cross-platform process invocations for lifecycle tests (Windows dev/CI and Linux GitHub Actions).
+    /// On Unix, invoke <c>/bin/echo</c> and <c>/bin/sleep</c> directly - shell <c>-c</c> requires the
+    /// script as a single argv token, which is easy to get wrong when building an Arguments string.
     /// </summary>
     private static class TestProcess
     {
         public static (string FileName, string Arguments) EchoHello()
             => OperatingSystem.IsWindows()
                 ? ("cmd.exe", "/c echo hello")
-                : ("/bin/sh", "-c echo hello");
+                : ("/bin/echo", "hello");
 
         public static (string FileName, string Arguments) SleepSeconds(int seconds)
             => OperatingSystem.IsWindows()
                 ? ("powershell.exe", $"-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds {seconds}\"")
-                : ("/bin/sh", $"-c sleep {seconds}");
+                : ("/bin/sleep", seconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
         public static (string FileName, IReadOnlyList<string> Arguments) SleepSecondsAsArgumentList(int seconds)
             => OperatingSystem.IsWindows()
                 ? ("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", $"Start-Sleep -Seconds {seconds}"])
-                : ("/bin/sh", ["-c", $"sleep {seconds}"]);
+                : ("/bin/sleep", [seconds.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
 
         public static (string FileName, string Arguments) SleepMilliseconds(int milliseconds)
             => OperatingSystem.IsWindows()
                 ? ("powershell.exe", $"-NoProfile -NonInteractive -Command \"Start-Sleep -Milliseconds {milliseconds}; exit 0\"")
-                : ("/bin/sh", $"-c sleep {milliseconds / 1000.0}");
+                : ("/bin/sleep", (milliseconds / 1000.0).ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 }
