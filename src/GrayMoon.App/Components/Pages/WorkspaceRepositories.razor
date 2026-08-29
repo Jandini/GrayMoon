@@ -188,6 +188,7 @@
                                                                   OnCopyDependencies="CopyDependenciesToClipboard"
                                                                   OnCreatePr="OpenPullRequestDialogForRepositoryAsync"
                                                                   OnUpgradeClick="ShowSwitchBranchModalOnTagsTab"
+                                                                  OnMergeClick="OpenMergeDialogAsync"
                                                                   OnDismissError="() => DismissRepositoryError(wr.RepositoryId)" />
                                     }
                                     else
@@ -345,6 +346,14 @@
                      OnCreate="HandleCreatePullRequestsAsync"
                      OnCancel="CloseNewPullRequestModal"
                      OnOpenInGitHub="HandleNewPrOpenInGitHubAsync" />
+
+<MergePullRequestModal IsVisible="@_mergePrModal.IsVisible"
+                       Details="@_mergePrModal.Details"
+                       IsLoading="@_mergePrModal.IsLoading"
+                       IsMerging="@_mergePrModal.IsMerging"
+                       ErrorMessage="@_mergePrModal.ErrorMessage"
+                       OnMerge="HandleMergeConfirmedAsync"
+                       OnCancel="CloseMergeModal" />
 
 <NewFeatureModal IsVisible="@_newFeatureModal.IsVisible"
                  WorkspaceName="@_newFeatureModal.WorkspaceName"

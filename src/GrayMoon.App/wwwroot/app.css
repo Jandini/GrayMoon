@@ -1196,6 +1196,41 @@ table.resizable-columns th:hover .resize-handle::after {
     margin-left: 0.25rem;
 }
 
+/*
+ * Composite merge chip for open PRs: [merge | #132 | 12] rendered as one visually connected pill,
+ * mirroring the .gha-status-chip pattern in WorkspaceActions.razor.css (segments joined by a 1px
+ * border-left "separator", shared border-radius + overflow:hidden on the wrapper so the whole group
+ * reads as a single badge instead of three separate ones).
+ */
+.repositories-table td.col-pr .pr-merge-chip {
+    display: inline-flex;
+    align-items: stretch;
+    border-radius: 0.25rem;
+    overflow: hidden;
+    vertical-align: middle;
+}
+.repositories-table td.col-pr .pr-merge-chip__merge {
+    /* Reset button defaults so it reads as a badge segment, not a native button */
+    border: none;
+    margin: 0;
+    font-weight: 400;
+    font-size: inherit;
+    font-family: inherit;
+    line-height: inherit;
+    cursor: pointer;
+    border-radius: 0;
+    color: #fff !important;
+}
+.repositories-table td.col-pr .pr-merge-chip__number,
+.repositories-table td.col-pr .pr-merge-chip__files {
+    /* Background/text color comes from the shared mergeability class (pr-badge-open-*) applied
+       alongside this class, same as the pre-chip badge - only the layout (radius reset, separator) is new. */
+    font-weight: 400;
+    border-radius: 0;
+    border-left: 1px solid rgba(0, 0, 0, 0.25);
+    margin-left: 0;
+}
+
 /* Actions page run/re-run button - fixed size so spinner swap never causes resize */
 .action-run-btn {
     display: inline-flex;

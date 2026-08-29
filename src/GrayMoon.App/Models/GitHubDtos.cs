@@ -220,12 +220,24 @@ public class GitHubPullRequestDto
 
     [JsonPropertyName("user")]
     public GitHubUserDto? User { get; set; }
+
+    [JsonPropertyName("base")]
+    public GitHubPullRequestHeadDto? Base { get; set; }
+
+    [JsonPropertyName("requested_reviewers")]
+    public List<GitHubUserDto>? RequestedReviewers { get; set; }
+
+    [JsonPropertyName("draft")]
+    public bool Draft { get; set; }
 }
 
 public class GitHubPullRequestHeadDto
 {
     [JsonPropertyName("ref")]
     public string Ref { get; set; } = string.Empty;
+
+    [JsonPropertyName("sha")]
+    public string? Sha { get; set; }
 }
 
 /// <summary>Body for POST /repos/{owner}/{repo}/pulls.</summary>
@@ -276,4 +288,81 @@ public sealed class GitHubTeamDto
 
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
+}
+
+/// <summary>Subset of GET /repos/{owner}/{repo} used to determine which merge methods GitHub currently permits for this repository.</summary>
+public sealed class GitHubRepositoryMergeSettingsDto
+{
+    [JsonPropertyName("allow_merge_commit")]
+    public bool? AllowMergeCommit { get; set; }
+
+    [JsonPropertyName("allow_squash_merge")]
+    public bool? AllowSquashMerge { get; set; }
+
+    [JsonPropertyName("allow_rebase_merge")]
+    public bool? AllowRebaseMerge { get; set; }
+}
+
+/// <summary>Item from GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews.</summary>
+public sealed class GitHubPullRequestReviewDto
+{
+    [JsonPropertyName("user")]
+    public GitHubUserDto? User { get; set; }
+
+    /// <summary>APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, or PENDING.</summary>
+    [JsonPropertyName("state")]
+    public string State { get; set; } = string.Empty;
+
+    [JsonPropertyName("submitted_at")]
+    public DateTimeOffset? SubmittedAt { get; set; }
+}
+
+/// <summary>GET /repos/{owner}/{repo}/commits/{ref}/check-runs</summary>
+public sealed class GitHubCheckRunsResponse
+{
+    [JsonPropertyName("total_count")]
+    public int TotalCount { get; set; }
+
+    [JsonPropertyName("check_runs")]
+    public List<GitHubCheckRunDto> CheckRuns { get; set; } = new();
+}
+
+public sealed class GitHubCheckRunDto
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>queued, in_progress, completed.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+
+    /// <summary>success, failure, neutral, cancelled, skipped, timed_out, action_required, or null while not completed.</summary>
+    [JsonPropertyName("conclusion")]
+    public string? Conclusion { get; set; }
+}
+
+/// <summary>Body for PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge.</summary>
+public sealed class GitHubMergePullRequestRequestDto
+{
+    /// <summary>merge, squash, or rebase.</summary>
+    [JsonPropertyName("merge_method")]
+    public string MergeMethod { get; set; } = string.Empty;
+
+    /// <summary>Expected head SHA. GitHub returns 409 if the branch has moved since this value was read, preventing an unintended merge of newer commits.</summary>
+    [JsonPropertyName("sha")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Sha { get; set; }
+}
+
+/// <summary>Response from PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge.</summary>
+public sealed class GitHubMergePullRequestResponseDto
+{
+    [JsonPropertyName("sha")]
+    public string? Sha { get; set; }
+
+    [JsonPropertyName("merged")]
+    public bool Merged { get; set; }
+
+    [JsonPropertyName("message")]
+    public string? Message { get; set; }
 }

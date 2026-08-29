@@ -27,6 +27,7 @@ public enum PullRequestRefreshOutcome
 public sealed class WorkspacePullRequestService(
     WorkspacePullRequestRepository pullRequestRepository,
     GitHubPullRequestService gitHubPullRequestService,
+    GitHubPullRequestMergeService gitHubPullRequestMergeService,
     AppDbContext dbContext,
     IOptions<WorkspaceOptions> workspaceOptions,
     IGitHubRateLimitTracker rateLimitTracker,
@@ -177,4 +178,37 @@ public sealed class WorkspacePullRequestService(
             .ToListAsync(cancellationToken);
         await RefreshPullRequestsAsync(workspaceId, repoIds, cancellationToken: cancellationToken);
     }
+
+    /// <summary>Fetches a fresh, on-demand mergeability snapshot (PR, reviews, checks, repo merge settings) for the merge confirmation dialog. Always hits GitHub live - never served from the polled PR cache.</summary>
+    public async Task<PullRequestMergeDetails?> GetMergeDetailsAsync(int workspaceId, int repositoryId, int prNumber, CancellationToken cancellationToken = default)
+    {
+        var link = await GetLinkWithConnectorAsync(workspaceId, repositoryId, cancellationToken);
+        if (link?.Repository == null)
+            return null;
+
+        return await gitHubPullRequestMergeService.GetMergeDetailsAsync(link.Repository, link.Repository.Connector, prNumber, cancellationToken);
+    }
+
+    /// <summary>Merges the pull request via GitHub and, on success, forces an immediate PR refresh so the grid badge flips to "merged" without waiting for the next poll.</summary>
+    public async Task<MergeResult> MergePullRequestAsync(int workspaceId, int repositoryId, int prNumber, MergeMethod method, string? expectedHeadSha, CancellationToken cancellationToken = default)
+    {
+        var link = await GetLinkWithConnectorAsync(workspaceId, repositoryId, cancellationToken);
+        if (link?.Repository == null)
+            return new MergeResult(false, "Repository not found in this workspace.");
+
+        var result = await gitHubPullRequestMergeService.MergePullRequestAsync(link.Repository, link.Repository.Connector, prNumber, method, expectedHeadSha, cancellationToken);
+        if (result.Success)
+        {
+            _cache.TryRemove((repositoryId, link.BranchName ?? string.Empty), out _);
+            await RefreshPullRequestsAsync(workspaceId, [repositoryId], force: true, cancellationToken: cancellationToken);
+        }
+        return result;
+    }
+
+    private Task<WorkspaceRepositoryLink?> GetLinkWithConnectorAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken) =>
+        dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .ThenInclude(r => r!.Connector)
+            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
 }

@@ -124,6 +124,7 @@ try
     builder.Services.AddScoped<GitHubActionsService>();
     builder.Services.AddScoped<GhaWorkflowLiveFeedService>();
     builder.Services.AddScoped<GitHubPullRequestService>();
+    builder.Services.AddScoped<GitHubPullRequestMergeService>();
     builder.Services.AddScoped<WorkspacePullRequestRepository>();
     builder.Services.AddScoped<WorkspacePullRequestService>();
     builder.Services.AddScoped<RepositoryBranchWriter>();

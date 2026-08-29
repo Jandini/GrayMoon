@@ -667,6 +667,134 @@ public class GitHubService : IConnectorService
         }
     }
 
+    /// <summary>Gets the repository's permitted merge methods via GET /repos/{owner}/{repo}. Returns null on API error - callers must not assume any method is allowed when this fails.</summary>
+    public async Task<GitHubRepositoryMergeSettingsDto?> GetRepositoryMergeSettingsAsync(
+        Connector connector,
+        string owner,
+        string repo,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+
+        EnsureConnectorConfigured(connector);
+
+        var requestUri = $"repos/{owner}/{repo}";
+
+        try
+        {
+            return await GetAsync<GitHubRepositoryMergeSettingsDto>(connector, requestUri, cancellationToken, skipRateLimitRetry: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "GitHub API get repository merge settings failed. Owner={Owner}, Repo={Repo}", owner, repo);
+            return null;
+        }
+    }
+
+    /// <summary>Lists reviews via GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews. Returns empty list on API error.</summary>
+    public async Task<List<GitHubPullRequestReviewDto>> GetPullRequestReviewsAsync(
+        Connector connector,
+        string owner,
+        string repo,
+        int pullNumber,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+        if (pullNumber <= 0)
+            return new List<GitHubPullRequestReviewDto>();
+
+        EnsureConnectorConfigured(connector);
+
+        var requestUri = $"repos/{owner}/{repo}/pulls/{pullNumber}/reviews?per_page=100";
+
+        try
+        {
+            return await GetAsync<List<GitHubPullRequestReviewDto>>(connector, requestUri, cancellationToken, skipRateLimitRetry: true)
+                ?? new List<GitHubPullRequestReviewDto>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "GitHub API list PR reviews failed. Owner={Owner}, Repo={Repo}, PullNumber={PullNumber}", owner, repo, pullNumber);
+            return new List<GitHubPullRequestReviewDto>();
+        }
+    }
+
+    /// <summary>Gets check-run summary via GET /repos/{owner}/{repo}/commits/{ref}/check-runs. Returns null on API error - callers must treat checks as unknown, not as passing.</summary>
+    public async Task<GitHubCheckRunsResponse?> GetCheckRunsForRefAsync(
+        Connector connector,
+        string owner,
+        string repo,
+        string sha,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+        if (string.IsNullOrWhiteSpace(sha))
+            return null;
+
+        EnsureConnectorConfigured(connector);
+
+        var requestUri = $"repos/{owner}/{repo}/commits/{sha}/check-runs?per_page=100";
+
+        try
+        {
+            return await GetAsync<GitHubCheckRunsResponse>(connector, requestUri, cancellationToken, skipRateLimitRetry: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "GitHub API get check-runs failed. Owner={Owner}, Repo={Repo}, Sha={Sha}", owner, repo, sha);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Merges a pull request via PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge. GitHub is the sole authority on whether
+    /// the merge succeeds - this call performs no local mergeability check and passes the expected head <paramref name="expectedHeadSha"/>
+    /// (when known) so GitHub rejects (409) if the branch changed since it was last read. Throws <see cref="GitHubHttpRequestException"/>
+    /// with GitHub's own message on failure (e.g. 405 not mergeable, 409 sha mismatch/conflict, 404 unknown PR).
+    /// </summary>
+    public async Task<GitHubMergePullRequestResponseDto> MergePullRequestAsync(
+        Connector connector,
+        string owner,
+        string repo,
+        int pullNumber,
+        string mergeMethod,
+        string? expectedHeadSha,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+        if (pullNumber <= 0)
+            throw new ArgumentOutOfRangeException(nameof(pullNumber));
+        if (string.IsNullOrWhiteSpace(mergeMethod))
+            throw new ArgumentException("Merge method is required.", nameof(mergeMethod));
+
+        EnsureConnectorConfigured(connector);
+
+        var body = new GitHubMergePullRequestRequestDto
+        {
+            MergeMethod = mergeMethod,
+            Sha = string.IsNullOrWhiteSpace(expectedHeadSha) ? null : expectedHeadSha
+        };
+        var requestUri = $"repos/{owner}/{repo}/pulls/{pullNumber}/merge";
+        var payload = JsonSerializer.Serialize(body);
+
+        var dto = await PutAsync<GitHubMergePullRequestResponseDto>(connector, requestUri, payload, cancellationToken);
+        if (dto == null)
+            throw new InvalidOperationException("GitHub returned an empty response when merging the pull request.");
+        return dto;
+    }
+
     private async Task<T?> PostAsync<T>(Connector connector, string requestUri, string? payload, CancellationToken cancellationToken = default)
     {
         var baseUrl = string.IsNullOrWhiteSpace(connector.ApiBaseUrl)
@@ -690,6 +818,50 @@ public class GitHubService : IConnectorService
         }
 
         return await response.Content.ReadFromJsonAsync<T>(_jsonOptions, cancellationToken);
+    }
+
+    /// <summary>PUT with a JSON body and a deserialized response - used for the merge endpoint. Mirrors <see cref="PostAsync{T}"/> but with HttpMethod.Put.</summary>
+    private async Task<T?> PutAsync<T>(Connector connector, string requestUri, string? payload, CancellationToken cancellationToken = default)
+    {
+        var baseUrl = string.IsNullOrWhiteSpace(connector.ApiBaseUrl)
+            ? "https://api.github.com/"
+            : connector.ApiBaseUrl.TrimEnd('/') + "/";
+
+        using var response = await GitHubMutationRetryPipeline.ExecuteAsync(async ct =>
+        {
+            using var request = CreatePutRequest(connector, requestUri, payload);
+            return await _httpClient.SendAsync(request, ct);
+        }, cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError("GitHub API PUT failed. Status: {StatusCode}, URL: {Url}, Response: {Response}",
+                response.StatusCode,
+                new Uri(new Uri(baseUrl), requestUri),
+                errorContent);
+            throw GitHubApiErrorHelper.CreateHttpRequestException(response.StatusCode, errorContent, response);
+        }
+
+        return await response.Content.ReadFromJsonAsync<T>(_jsonOptions, cancellationToken);
+    }
+
+    private HttpRequestMessage CreatePutRequest(Connector connector, string requestUri, string? payload)
+    {
+        var baseUrl = string.IsNullOrWhiteSpace(connector.ApiBaseUrl)
+            ? "https://api.github.com/"
+            : connector.ApiBaseUrl.TrimEnd('/') + "/";
+
+        var request = new HttpRequestMessage(HttpMethod.Put, new Uri(new Uri(baseUrl), requestUri));
+        request.Content = new StringContent(payload ?? "{}", Encoding.UTF8, "application/json");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        request.Headers.UserAgent.ParseAdd("GrayMoon");
+        request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
+        var token = ConnectorHelpers.UnprotectToken(connector.UserToken);
+        if (string.IsNullOrWhiteSpace(token))
+            throw new InvalidOperationException("Connector token is not configured.");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return request;
     }
 
     private void EnsureConfigured()

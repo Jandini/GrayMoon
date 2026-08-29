@@ -57,21 +57,34 @@ else if (PullRequest != null && string.Equals(PullRequest.State, "open", StringC
 {
     var openClass = GetOpenPrMergeabilityClass(PullRequest);
     var openTitle = GetOpenPrMergeabilityTitle(PullRequest);
-    <a href="@PullRequest.HtmlUrl"
-       target="_blank"
-       rel="noopener noreferrer"
-       class="badge pr-badge pr-badge-open @openClass"
-       title="@openTitle">#@PullRequest.Number</a>
-    @if (PullRequest.ChangedFiles is > 0)
-    {
-        <a href="@($"{PullRequest.HtmlUrl}/changes")"
+    <span class="pr-merge-chip">
+        <button type="button"
+                class="badge pr-merge-chip__merge @openClass"
+                title="@openTitle"
+                @onclick="HandleMergeClick"
+                @onclick:preventDefault
+                @onclick:stopPropagation>
+            @* TODO: replace this "merge" text with an icon-only Bezier2 glyph (tooltip "Merge pull request",
+               colored green when mergeable / red when blocked) once the shorter [Bezier2 | #132 | 12] layout
+               is confirmed - segment markup, click handling, and coloring above are already final. *@
+            merge
+        </button>
+        <a href="@PullRequest.HtmlUrl"
            target="_blank"
            rel="noopener noreferrer"
-           class="badge pr-badge pr-badge-open @openClass pr-badge-files-changed"
-           title="@($"{PullRequest.ChangedFiles} file{(PullRequest.ChangedFiles == 1 ? "" : "s")} changed")">
-            @PullRequest.ChangedFiles
-        </a>
-    }
+           class="badge pr-merge-chip__number @openClass"
+           title="PR #@PullRequest.Number - open in GitHub">#@PullRequest.Number</a>
+        @if (PullRequest.ChangedFiles is > 0)
+        {
+            <a href="@($"{PullRequest.HtmlUrl}/changes")"
+               target="_blank"
+               rel="noopener noreferrer"
+               class="badge pr-merge-chip__files @openClass"
+               title="@($"{PullRequest.ChangedFiles} file{(PullRequest.ChangedFiles == 1 ? "" : "s")} changed")">
+                @PullRequest.ChangedFiles
+            </a>
+        }
+    </span>
 }
 else if (ShowsCreateBadge(IsOnTag, IsPrVerified, PullRequest, DefaultBranchAheadCommits))
 {
@@ -104,6 +117,8 @@ else
     [Parameter] public bool HasNewerTag { get; set; }
     /// <summary>Raised when the user clicks the yellow "upgrade" badge.</summary>
     [Parameter] public EventCallback OnUpgradeClick { get; set; }
+    /// <summary>Raised with the PR number when the user clicks the "merge" segment of an open PR's chip.</summary>
+    [Parameter] public EventCallback<int> OnMergeClick { get; set; }
 
     /// <summary>
     /// True when the yellow "create" badge is shown: PR state is verified, no PR already exists
@@ -134,6 +149,12 @@ else
     {
         if (OnUpgradeClick.HasDelegate)
             await OnUpgradeClick.InvokeAsync();
+    }
+
+    private async Task HandleMergeClick()
+    {
+        if (PullRequest != null && OnMergeClick.HasDelegate)
+            await OnMergeClick.InvokeAsync(PullRequest.Number);
     }
 
     private static string GetOpenPrMergeabilityClass(PullRequestInfo pr)
