@@ -3,7 +3,7 @@ namespace GrayMoon.App.Services.GitChanges;
 /// <summary>
 /// Circuit-scoped memory of the "Push committed" checkbox state per workspace, so SPA navigation away
 /// and back restores the checkbox without localStorage or DB persistence. Mirrors
-/// <see cref="WorkspaceGitChangesCommitMessageMemory"/>. Missing entries default to unchecked.
+/// <see cref="WorkspaceGitChangesCommitMessageMemory"/>. Missing entries default to checked.
 /// </summary>
 public sealed class WorkspaceGitChangesPushAfterCommitMemory
 {
@@ -11,5 +11,5 @@ public sealed class WorkspaceGitChangesPushAfterCommitMemory
 
     public void Set(int workspaceId, bool pushAfterCommit) => _byWorkspace[workspaceId] = pushAfterCommit;
 
-    public bool Get(int workspaceId) => _byWorkspace.GetValueOrDefault(workspaceId);
+    public bool Get(int workspaceId) => _byWorkspace.GetValueOrDefault(workspaceId, true);
 }
