@@ -352,6 +352,7 @@
                        IsLoading="@_mergePrModal.IsLoading"
                        IsMerging="@_mergePrModal.IsMerging"
                        ErrorMessage="@_mergePrModal.ErrorMessage"
+                       ChangesUrl="@($"/workspaces/{WorkspaceId}/changes")"
                        OnMerge="HandleMergeConfirmedAsync"
                        OnCancel="CloseMergeModal" />
 

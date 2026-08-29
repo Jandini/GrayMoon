@@ -15,7 +15,14 @@ public sealed class GitHubPullRequestMergeService(
     private static readonly MergeMethod[] DefaultMethodPriority = [MergeMethod.Squash, MergeMethod.Merge, MergeMethod.Rebase];
 
     /// <summary>Fetches everything the merge dialog needs. Returns null when the repository/connector is not GitHub-backed or the PR cannot be found.</summary>
-    public async Task<PullRequestMergeDetails?> GetMergeDetailsAsync(Repository repository, Connector? connector, int prNumber, CancellationToken cancellationToken = default)
+    public async Task<PullRequestMergeDetails?> GetMergeDetailsAsync(
+        Repository repository,
+        Connector? connector,
+        int prNumber,
+        bool hasUncommittedChanges = false,
+        int uncommittedChangesCount = 0,
+        int unpushedCommitsCount = 0,
+        CancellationToken cancellationToken = default)
     {
         if (repository == null || prNumber <= 0)
             return null;
@@ -42,7 +49,7 @@ public sealed class GitHubPullRequestMergeService(
         var settings = settingsTask.Result;
         var checkRuns = checksTask.Result;
 
-        var (approvedCount, changesRequestedCount, outstandingReviewers) = SummarizeReviews(reviews, pr.RequestedReviewers);
+        var (approvedCount, changesRequestedCount, outstandingReviewers, approvedByUsers) = SummarizeReviews(reviews, pr.RequestedReviewers);
         var checksSummary = SummarizeChecks(checkRuns);
         var allowedMethods = GetAllowedMergeMethods(settings);
         var defaultMethod = DefaultMethodPriority.FirstOrDefault(m => allowedMethods.Contains(m), allowedMethods.FirstOrDefault());
@@ -56,15 +63,20 @@ public sealed class GitHubPullRequestMergeService(
             BaseRef = pr.Base?.Ref ?? string.Empty,
             HeadSha = headSha,
             HtmlUrl = pr.HtmlUrl ?? string.Empty,
+            ChangedFiles = pr.ChangedFiles,
             Mergeable = pr.Mergeable,
             MergeableState = pr.MergeableState,
             ApprovedCount = approvedCount,
             ChangesRequestedCount = changesRequestedCount,
             OutstandingReviewers = outstandingReviewers,
+            ApprovedByUsers = approvedByUsers,
             Checks = checksSummary,
             AllowedMergeMethods = allowedMethods,
             DefaultMergeMethod = allowedMethods.Count > 0 ? defaultMethod : null,
-            BlockingReasons = blockingReasons
+            BlockingReasons = blockingReasons,
+            HasUncommittedChanges = hasUncommittedChanges,
+            UncommittedChangesCount = uncommittedChangesCount,
+            UnpushedCommitsCount = unpushedCommitsCount
         };
     }
 
@@ -96,7 +108,7 @@ public sealed class GitHubPullRequestMergeService(
         }
     }
 
-    private static (int Approved, int ChangesRequested, IReadOnlyList<string> Outstanding) SummarizeReviews(
+    private static (int Approved, int ChangesRequested, IReadOnlyList<string> Outstanding, IReadOnlyList<string> ApprovedBy) SummarizeReviews(
         List<GitHubPullRequestReviewDto> reviews,
         List<GitHubUserDto>? requestedReviewers)
     {
@@ -107,20 +119,20 @@ public sealed class GitHubPullRequestMergeService(
             .Select(g => g.OrderBy(r => r.SubmittedAt ?? DateTimeOffset.MinValue).Last())
             .ToList();
 
-        var approved = latestByUser.Count(r => string.Equals(r.State, "APPROVED", StringComparison.OrdinalIgnoreCase));
-        var changesRequested = latestByUser.Count(r => string.Equals(r.State, "CHANGES_REQUESTED", StringComparison.OrdinalIgnoreCase));
-
-        var approvedLogins = latestByUser
+        var approvedByUsers = latestByUser
             .Where(r => string.Equals(r.State, "APPROVED", StringComparison.OrdinalIgnoreCase))
             .Select(r => r.User!.Login!)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .ToList();
+        var changesRequested = latestByUser.Count(r => string.Equals(r.State, "CHANGES_REQUESTED", StringComparison.OrdinalIgnoreCase));
+
+        var approvedLogins = approvedByUsers.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var outstanding = (requestedReviewers ?? [])
             .Where(u => !string.IsNullOrWhiteSpace(u.Login) && !approvedLogins.Contains(u.Login!))
             .Select(u => u.Login!)
             .ToList();
 
-        return (approved, changesRequested, outstanding);
+        return (approvedByUsers.Count, changesRequested, outstanding, approvedByUsers);
     }
 
     private static ChecksSummary SummarizeChecks(GitHubCheckRunsResponse? response)

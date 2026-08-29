@@ -32,6 +32,7 @@ public sealed class PullRequestMergeDetails
     public string BaseRef { get; init; } = string.Empty;
     public string? HeadSha { get; init; }
     public string HtmlUrl { get; init; } = string.Empty;
+    public int? ChangedFiles { get; init; }
 
     /// <summary>True = mergeable, false = conflict, null = unknown (GitHub is still computing mergeability).</summary>
     public bool? Mergeable { get; init; }
@@ -41,8 +42,22 @@ public sealed class PullRequestMergeDetails
     public int ApprovedCount { get; init; }
     public int ChangesRequestedCount { get; init; }
     public IReadOnlyList<string> OutstandingReviewers { get; init; } = Array.Empty<string>();
+    /// <summary>Logins of reviewers whose latest review is an approval, for the dialog's "Approved by ..." subtitle.</summary>
+    public IReadOnlyList<string> ApprovedByUsers { get; init; } = Array.Empty<string>();
 
     public ChecksSummary Checks { get; init; } = new();
+
+    /// <summary>
+    /// GrayMoon-local check (not from GitHub): true when the workspace's local clone has uncommitted changes
+    /// and/or commits that have not been pushed to the remote yet. Purely informational - unlike the GitHub
+    /// checks above, this never blocks the merge button, since merging on GitHub does not require the local
+    /// clone to be clean or in sync.
+    /// </summary>
+    public bool HasUncommittedChanges { get; init; }
+    public int UncommittedChangesCount { get; init; }
+    public int UnpushedCommitsCount { get; init; }
+    /// <summary>True when either local signal above is set - drives the warning icon/orange merge button.</summary>
+    public bool HasLocalWarning => HasUncommittedChanges || UnpushedCommitsCount > 0;
 
     /// <summary>Merge methods GitHub currently permits for this repository. Only these may ever be offered to the user.</summary>
     public IReadOnlyList<MergeMethod> AllowedMergeMethods { get; init; } = Array.Empty<MergeMethod>();

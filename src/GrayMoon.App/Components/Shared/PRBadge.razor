@@ -60,27 +60,19 @@ else if (PullRequest != null && string.Equals(PullRequest.State, "open", StringC
     <span class="pr-merge-chip">
         <button type="button"
                 class="badge pr-merge-chip__merge @openClass"
-                title="@openTitle"
+                title="@(PullRequest.Mergeable == true ? $"Merge pull request #{PullRequest.Number}" : openTitle)"
                 @onclick="HandleMergeClick"
                 @onclick:preventDefault
                 @onclick:stopPropagation>
-            @* TODO: replace this "merge" text with an icon-only Bezier2 glyph (tooltip "Merge pull request",
-               colored green when mergeable / red when blocked) once the shorter [Bezier2 | #132 | 12] layout
-               is confirmed - segment markup, click handling, and coloring above are already final. *@
-            merge
+            #@PullRequest.Number
         </button>
-        <a href="@PullRequest.HtmlUrl"
-           target="_blank"
-           rel="noopener noreferrer"
-           class="badge pr-merge-chip__number @openClass"
-           title="PR #@PullRequest.Number - open in GitHub">#@PullRequest.Number</a>
         @if (PullRequest.ChangedFiles is > 0)
         {
             <a href="@($"{PullRequest.HtmlUrl}/changes")"
                target="_blank"
                rel="noopener noreferrer"
                class="badge pr-merge-chip__files @openClass"
-               title="@($"{PullRequest.ChangedFiles} file{(PullRequest.ChangedFiles == 1 ? "" : "s")} changed")">
+               title="@($"PR #{PullRequest.Number} - {PullRequest.ChangedFiles} file{(PullRequest.ChangedFiles == 1 ? "" : "s")} changed")">
                 @PullRequest.ChangedFiles
             </a>
         }

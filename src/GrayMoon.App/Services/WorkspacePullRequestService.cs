@@ -179,14 +179,29 @@ public sealed class WorkspacePullRequestService(
         await RefreshPullRequestsAsync(workspaceId, repoIds, cancellationToken: cancellationToken);
     }
 
-    /// <summary>Fetches a fresh, on-demand mergeability snapshot (PR, reviews, checks, repo merge settings) for the merge confirmation dialog. Always hits GitHub live - never served from the polled PR cache.</summary>
+    /// <summary>Fetches a fresh, on-demand mergeability snapshot (PR, reviews, checks, repo merge settings) for the merge confirmation dialog. Always hits GitHub live - never served from the polled PR cache. Also folds in the workspace's own persisted Git Changes projection (uncommitted changes / unpushed commits), a GrayMoon-local, informational-only signal that never blocks the merge itself.</summary>
     public async Task<PullRequestMergeDetails?> GetMergeDetailsAsync(int workspaceId, int repositoryId, int prNumber, CancellationToken cancellationToken = default)
     {
-        var link = await GetLinkWithConnectorAsync(workspaceId, repositoryId, cancellationToken);
+        var link = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .ThenInclude(r => r!.Connector)
+            .Include(wr => wr.GitStatus)
+            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
         if (link?.Repository == null)
             return null;
 
-        return await gitHubPullRequestMergeService.GetMergeDetailsAsync(link.Repository, link.Repository.Connector, prNumber, cancellationToken);
+        var uncommittedChangesCount = (link.GitStatus?.StagedCount ?? 0) + (link.GitStatus?.ChangedCount ?? 0);
+        var unpushedCommitsCount = link.OutgoingCommits ?? 0;
+
+        return await gitHubPullRequestMergeService.GetMergeDetailsAsync(
+            link.Repository,
+            link.Repository.Connector,
+            prNumber,
+            hasUncommittedChanges: uncommittedChangesCount > 0,
+            uncommittedChangesCount: uncommittedChangesCount,
+            unpushedCommitsCount: unpushedCommitsCount,
+            cancellationToken: cancellationToken);
     }
 
     /// <summary>Merges the pull request via GitHub and, on success, forces an immediate PR refresh so the grid badge flips to "merged" without waiting for the next poll.</summary>
