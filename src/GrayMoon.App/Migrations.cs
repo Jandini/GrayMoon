@@ -17,6 +17,7 @@ public static class Migrations
     {
         await SeedDefaultWorkspaceRootPathAsync(dbContext);
         await MigrateWorkspaceRepositoriesHasSelfFileVersionTokenAsync(dbContext);
+        await MigrateWorkspaceProjectsIsGeneratedAsync(dbContext);
     }
 
     /// <summary>
@@ -41,6 +42,37 @@ public static class Migrations
 
             await using var alterCmd = conn.CreateCommand();
             alterCmd.CommandText = "ALTER TABLE WorkspaceRepositories ADD COLUMN HasSelfFileVersionToken INTEGER NULL";
+            await alterCmd.ExecuteNonQueryAsync();
+        }
+        catch
+        {
+            // Table doesn't exist yet (fresh db, EnsureCreated will create it with the column already present).
+        }
+    }
+
+    /// <summary>
+    /// Adds the WorkspaceProjects.IsGenerated column (virtual/generated NuGet package rows) for local dev databases
+    /// created before this column existed. EnsureCreated() only creates missing tables, not missing columns on
+    /// tables that already exist, so an existing db/graymoon.db from an earlier build would otherwise throw
+    /// "no such column: w.IsGenerated" on any query that reads WorkspaceProjects (including workspace sync).
+    /// Safe to keep even pre-release since it only ever adds a column with a default value and is a no-op once
+    /// the column exists.
+    /// </summary>
+    public static async Task MigrateWorkspaceProjectsIsGeneratedAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using var checkCmd = conn.CreateCommand();
+            checkCmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('WorkspaceProjects') WHERE name = 'IsGenerated'";
+            if (Convert.ToInt32(await checkCmd.ExecuteScalarAsync()) > 0)
+                return;
+
+            await using var alterCmd = conn.CreateCommand();
+            alterCmd.CommandText = "ALTER TABLE WorkspaceProjects ADD COLUMN IsGenerated INTEGER NOT NULL DEFAULT 0";
             await alterCmd.ExecuteNonQueryAsync();
         }
         catch

@@ -84,6 +84,10 @@
                                                             {
                                                                 <span class="badge custom-deps-source-badge bg-secondary" title="Referenced from version file">file</span>
                                                             }
+                                                            @if (LockedFromPackageRepoIds.Contains(repository.RepositoryId))
+                                                            {
+                                                                <span class="badge custom-deps-source-badge bg-secondary" title="Referenced from generated NuGet package">package</span>
+                                                            }
                                                         </span>
                                                     }
                                                 </div>
@@ -124,6 +128,7 @@
     [Parameter] public IReadOnlySet<int> LockedReferencedRepoIds { get; set; } = new HashSet<int>();
     [Parameter] public IReadOnlySet<int> LockedFromProjectRepoIds { get; set; } = new HashSet<int>();
     [Parameter] public IReadOnlySet<int> LockedFromFileRepoIds { get; set; } = new HashSet<int>();
+    [Parameter] public IReadOnlySet<int> LockedFromPackageRepoIds { get; set; } = new HashSet<int>();
     [Parameter] public HashSet<int> SelectedCustomRepoIds { get; set; } = new();
     [Parameter] public bool IsSaving { get; set; }
     [Parameter] public string? ErrorMessage { get; set; }

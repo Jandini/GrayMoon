@@ -15,7 +15,8 @@ public sealed record WorkspaceProjectListItemDto(
     string ProjectName,
     ProjectType ProjectType,
     string TargetFramework,
-    string ProjectFilePath);
+    string ProjectFilePath,
+    bool IsGenerated);
 
 public sealed record WorkspaceProjectListPageResult(
     IReadOnlyList<WorkspaceProjectListItemDto> Items,

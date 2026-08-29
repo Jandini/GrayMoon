@@ -32,6 +32,9 @@ public static class AgentHubMethods
     /// <summary>App → Agent: check configured version files and return per-line staleness (read-only, no file writes).</summary>
     public const string CheckFileVersions = "CheckFileVersions";
 
+    /// <summary>App → Agent: for configured .csproj version files, resolve which PackageReference Include name each version-pattern line refers to (read-only, no file writes).</summary>
+    public const string ResolveGeneratedPackageReferences = "ResolveGeneratedPackageReferences";
+
     /// <summary>Agent → App: an unsolicited Git Changes status snapshot for one repository (watcher-driven or post-mutation refresh).</summary>
     public const string GitChangesSnapshotUpdated = "GitChangesSnapshotUpdated";
 }

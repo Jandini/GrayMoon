@@ -28,7 +28,8 @@ public sealed class WorkspaceProjectListQueryService(AppDbContext dbContext) : I
                 p.ProjectName,
                 p.ProjectType,
                 p.TargetFramework,
-                p.ProjectFilePath))
+                p.ProjectFilePath,
+                p.IsGenerated))
             .Take(take)
             .ToListAsync(cancellationToken);
 
@@ -79,7 +80,8 @@ public sealed class WorkspaceProjectListQueryService(AppDbContext dbContext) : I
                 p.ProjectName,
                 p.ProjectType,
                 p.TargetFramework,
-                p.ProjectFilePath))
+                p.ProjectFilePath,
+                p.IsGenerated))
             .ToListAsync(cancellationToken);
 
         var order = projectIds

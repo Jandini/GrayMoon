@@ -38,6 +38,14 @@ public class WorkspaceProject
     [MaxLength(200)]
     public string? PackageId { get; set; }
 
+    /// <summary>
+    /// True when this row represents a virtual/generated NuGet package inferred from a configured .csproj version
+    /// file (no physical package-producing .csproj exists in <see cref="RepositoryId"/>). Generated rows have no
+    /// real <see cref="ProjectFilePath"/> and are never touched by <c>MergeWorkspaceProjectsAsync</c>'s per-repo
+    /// sync reconciliation.
+    /// </summary>
+    public bool IsGenerated { get; set; }
+
     /// <summary>NuGet connector (registry) where this package was found, if any.</summary>
     public int? MatchedConnectorId { get; set; }
 

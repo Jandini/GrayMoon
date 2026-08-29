@@ -1,0 +1,44 @@
+name: Test
+
+on:
+  push:
+    branches: ["*"]
+    tags: ["*"]
+  workflow_dispatch:
+
+env:
+  DOTNET_NOLOGO: 1
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore dotnet tools
+        run: dotnet tool restore
+
+      - name: Restore
+        run: dotnet restore GrayMoon.slnx
+
+      - name: Build
+        run: dotnet build GrayMoon.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test GrayMoon.slnx --configuration Release --no-build --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ github.run_number }}
+          path: "**/*.trx"
+          retention-days: 7
