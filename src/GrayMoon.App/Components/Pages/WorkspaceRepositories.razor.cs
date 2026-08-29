@@ -29,6 +29,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     [Inject] private IScopedServiceExecutor ScopedExecutor { get; set; } = default!;
     [Inject] private IWorkspaceRepositoryLinkListQueryService LinkListQueryService { get; set; } = default!;
     [Inject] private WorkspacePendingActionsService PendingActionsService { get; set; } = default!;
+    [Inject] private AppActivityStateService ActivityStateService { get; set; } = default!;
 
     private const string SyncModeStorageKey = "graymoon:sync-mode";
     private bool _quickFetchIsPrimary;

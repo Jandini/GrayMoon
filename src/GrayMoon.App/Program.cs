@@ -145,6 +145,7 @@ try
     builder.Services.AddScoped<WorkspaceUndoPushHandler>();
     builder.Services.AddScoped<WorkspaceDependencyService>();
     builder.Services.AddScoped<WorkspacePendingActionsService>();
+    builder.Services.AddScoped<AppActivityStateService>();
     builder.Services.AddScoped<WorkspaceBranchHandler>();
     builder.Services.AddScoped<NewFeatureOrchestrator>();
     builder.Services.AddScoped<IBackgroundJobService, BackgroundJobService>();
