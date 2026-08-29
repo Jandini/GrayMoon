@@ -19,7 +19,7 @@ It is also built for how teams work today: fast, parallel, AI-assisted developme
 - **Branch across every repo in one click.** Create or switch a feature branch on every workspace repository together - no more hunting for which repo you forgot to check out.
 - **Safe, synchronized package rollouts.** When a shared package changes, GrayMoon bumps `PackageReference` versions, forces a clean `dotnet restore`, commits, and pushes level by level - waiting for NuGet to catch up so downstream builds never race a package that isn't published yet.
 - **GitHub Actions status across the whole workspace.** One grid shows every workflow, on the current branch, for every repository - filter by status, re-run a failed job, or tail live logs without opening GitHub.
-- **Pull requests at scale.** Open PRs for one repository, a whole dependency level, or the entire workspace from a single dialog - reviewers and draft mode included.
+- **Pull requests at scale.** Open PRs for one repository, a whole dependency level, or the entire workspace from a single dialog - reviewers and draft mode included. Merge approved pull requests from the repository grid with live GitHub checks, approvals, and conflict status - no round trip to github.com.
 
 ## How it looks
 
