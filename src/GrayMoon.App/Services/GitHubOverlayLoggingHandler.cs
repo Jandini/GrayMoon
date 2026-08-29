@@ -43,7 +43,8 @@ internal sealed partial class GitHubOverlayLoggingHandler : DelegatingHandler
             var response = await base.SendAsync(request, cancellationToken);
             sw.Stop();
 
-            var responseKind = response.IsSuccessStatusCode
+            // 304 is a cache hit, not an error; IsSuccessStatusCode is 2xx-only.
+            var responseKind = (int)response.StatusCode < 400
                 ? AgentCommandStreamKind.CommandLine
                 : AgentCommandStreamKind.Stderr;
 
