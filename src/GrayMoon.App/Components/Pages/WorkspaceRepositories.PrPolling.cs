@@ -89,6 +89,7 @@ public sealed partial class WorkspaceRepositories
 
                 await RefreshVisibleRowsAsync(cancellationToken);
                 await InvokeAsync(StateHasChanged);
+                await RefreshOpenMergeDialogIfDueAsync();
             }
             catch (OperationCanceledException)
             {
