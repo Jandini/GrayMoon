@@ -133,6 +133,14 @@
  */
 ::deep .merge-pr-modal-footer {
     position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+::deep .merge-pr-sync-default-check {
+    flex: 1 1 auto;
 }
 
 ::deep .merge-pr-split-btn {

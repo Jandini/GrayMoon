@@ -146,6 +146,12 @@
                 @if (!IsLoading && Details != null)
                 {
                     <div class="modal-footer merge-pr-modal-footer">
+                        <div class="form-check mb-0 merge-pr-sync-default-check">
+                            <input class="form-check-input" type="checkbox" id="merge-pr-sync-default"
+                                   @bind="_syncToDefault"
+                                   disabled="@IsMerging" />
+                            <label class="form-check-label" for="merge-pr-sync-default">Sync to default branch</label>
+                        </div>
                         <div class="btn-group merge-pr-split-btn">
                             <button type="button"
                                     class="btn merge-pr-btn-github @(Details.CanMergeNow && Details.HasMergeWarning ? "merge-pr-btn-github--warning" : null) merge-pr-split-btn__main"
@@ -196,7 +202,7 @@
     [Parameter] public bool IsMerging { get; set; }
     [Parameter] public string? ErrorMessage { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
-    [Parameter] public EventCallback<MergeMethod> OnMerge { get; set; }
+    [Parameter] public EventCallback<MergePullRequestChoice> OnMerge { get; set; }
     /// <summary>Workspace's Git Changes page URL, used to link the "N uncommitted changes" text in the local-state row. Null/empty hides the link.</summary>
     [Parameter] public string? ChangesUrl { get; set; }
     /// <summary>Workspace's Actions page URL, used to link the "N checks still running" text in the checks row. Null/empty hides the link.</summary>
@@ -212,6 +218,7 @@
     private bool _showMethodDropdown;
     private bool _wasVisible;
     private int? _lastDetailsNumber;
+    private bool _syncToDefault;
 
     protected override void OnParametersSet()
     {
@@ -219,6 +226,7 @@
         {
             _wasVisible = true;
             _showMethodDropdown = false;
+            _syncToDefault = false;
         }
         else if (!IsVisible)
         {
@@ -258,7 +266,7 @@
     {
         _showMethodDropdown = false;
         if (Details != null && OnMerge.HasDelegate)
-            await OnMerge.InvokeAsync(_selectedMethod);
+            await OnMerge.InvokeAsync(new MergePullRequestChoice(_selectedMethod, _syncToDefault));
     }
 
     // GitHub-style status rows: a colored icon circle + bold title + muted subtitle per row,

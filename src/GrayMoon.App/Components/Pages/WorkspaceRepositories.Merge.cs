@@ -1,3 +1,4 @@
+using GrayMoon.App.Components.Modals;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
 
@@ -186,7 +187,22 @@ public sealed partial class WorkspaceRepositories
         StateHasChanged();
     }
 
-    private async Task HandleMergeConfirmedAsync(MergeMethod method)
+    private Task HandleMergeRequestedAsync(MergePullRequestChoice choice)
+    {
+        if (choice.SyncToDefault)
+        {
+            var prNumber = _mergePrModal.PrNumber;
+            ShowConfirm(
+                $"Merge pull request #{prNumber} and then sync to the default branch?\n\nThis will checkout the default branch, remove the current branch locally, and pull the latest.",
+                () => ExecuteMergeAsync(choice.Method, syncToDefault: true),
+                "Merge");
+            return Task.CompletedTask;
+        }
+
+        return ExecuteMergeAsync(choice.Method, syncToDefault: false);
+    }
+
+    private async Task ExecuteMergeAsync(MergeMethod method, bool syncToDefault)
     {
         var repositoryId = _mergePrModal.RepositoryId;
         var prNumber = _mergePrModal.PrNumber;
@@ -216,13 +232,45 @@ public sealed partial class WorkspaceRepositories
         {
             _mergePrModal = new MergePullRequestModalState();
             ToastService.Show($"Merged pull request #{prNumber}.");
-            await RefreshFromSync();
+            StateHasChanged();
+
+            if (syncToDefault)
+                StartUnattendedSyncToDefaultAfterMerge(repositoryId);
+            else
+                await RefreshFromSync();
         }
         else
         {
             _mergePrModal = _mergePrModal with { IsMerging = false, ErrorMessage = result.Message ?? "The merge could not be completed." };
+            StateHasChanged();
         }
-        StateHasChanged();
+    }
+
+    private void StartUnattendedSyncToDefaultAfterMerge(int repositoryId)
+    {
+        if (workspace == null || IsJobRunning)
+            return;
+
+        StartPageJob("Fetching latest branch state...", async (job, ct) =>
+        {
+            var result = await ScopedExecutor.ExecuteAsync<WorkspaceSyncHandler, UnattendedSyncToDefaultResult>(
+                svc => svc.SyncToDefaultUnattendedAsync(
+                    WorkspaceId,
+                    [repositoryId],
+                    job.ReportProgress,
+                    ct));
+
+            if (!result.Completed && result.AbortReason != null)
+                SafeInvoke(() => ToastService.ShowError(result.AbortReason));
+        }, new PageJobOptions
+        {
+            CancelToast = "Sync to default cancelled.",
+            OnError = ex =>
+            {
+                Logger.LogError(ex, "Unattended sync to default failed after merge for repository {RepositoryId}", repositoryId);
+                SafeInvoke(() => ToastService.ShowError("Sync to default failed. Sync to default was aborted."));
+            }
+        });
     }
 
     private sealed record MergePullRequestModalState
