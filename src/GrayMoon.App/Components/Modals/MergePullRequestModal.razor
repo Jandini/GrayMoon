@@ -5,11 +5,12 @@
 {
     @*
         z-index drops below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while
-        IsSyncingLocalState so that overlay visually covers the dialog for a push/pull triggered from within it -
-        without unmounting the dialog itself, which would look like it closed and reopened.
+        IsSyncingLocalState or IsMerging so that overlay visually covers the dialog for a push/pull triggered from
+        within it, or for the merge (and optional sync-to-default) itself - without unmounting the dialog, which
+        would look like it closed and reopened.
     *@
     @* z-index one below ConfirmModal's 1075 so the "merge anyway?" warning confirmation (nested on top of this dialog) always wins the stacking tie. *@
-    <div class="modal show d-block merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @(IsSyncingLocalState ? 50 : 1074);"
+    <div class="modal show d-block merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @((IsSyncingLocalState || IsMerging) ? 50 : 1074);"
          @onkeydown="HandleKeyDown">
         <div class="modal-dialog modal-dialog-centered merge-pr-modal-dialog">
             <div class="modal-content">
@@ -174,7 +175,7 @@
                                 class="btn merge-pr-btn-github @(Details is { CanMergeNow: true, HasMergeWarning: true } ? "merge-pr-btn-github--warning" : null) merge-pr-split-btn__main"
                                 disabled="@(IsLoading || IsLoadingReviewDetails || IsMerging || Details is not { CanMergeNow: true })"
                                 @onclick="HandleMergeClick">
-                            @if (IsLoading || IsLoadingReviewDetails || IsMerging)
+                            @if (IsLoading || IsLoadingReviewDetails)
                             {
                                 <span class="spinner-border spinner-border-sm me-2"></span>
                             }
