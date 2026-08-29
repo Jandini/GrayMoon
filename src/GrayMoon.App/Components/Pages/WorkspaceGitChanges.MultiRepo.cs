@@ -1,4 +1,5 @@
 using GrayMoon.App.Models;
+using GrayMoon.App.Services;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.Components;
@@ -42,6 +43,53 @@ public sealed partial class WorkspaceGitChanges
     private int StagedRepositoryCount => _view?.Repositories.Count(r => r.StagedCount > 0) ?? 0;
     private int ChangedRepositoryCount => _view?.Repositories.Count(r => r.StagedCount > 0 || r.ChangedCount > 0) ?? 0;
 
+    private bool _commitMenuOpen;
+    private static readonly IReadOnlySet<string> EmptyPushPackageIds = new HashSet<string>();
+
+    /// <summary>
+    /// The commit split-button's current selection. An explicit user pick (from the dropdown) always
+    /// wins and is remembered per-workspace via <see cref="CommitModeMemory"/>; otherwise it auto-derives
+    /// from whether any repository has staged changes (StagedOnly) with PushAfterCommit false - exactly
+    /// the plain Commit All/Commit Staged behavior that existed before the split button.
+    /// </summary>
+    private (bool StagedOnly, bool PushAfterCommit) CurrentCommitMode
+    {
+        get
+        {
+            var remembered = CommitModeMemory.Get(WorkspaceId);
+            return remembered != null
+                ? (remembered.StagedOnly, remembered.PushAfterCommit)
+                : (StagedRepositoryCount > 0, false);
+        }
+    }
+
+    private string CommitButtonTitle
+    {
+        get
+        {
+            var (stagedOnly, pushAfterCommit) = CurrentCommitMode;
+            var label = stagedOnly ? "Commit Staged" : "Commit All";
+            return pushAfterCommit ? $"{label} + Push" : label;
+        }
+    }
+
+    private bool IsCommitButtonDisabled =>
+        IsJobRunning
+        || string.IsNullOrWhiteSpace(_workspaceCommitMessage)
+        || (CurrentCommitMode.StagedOnly && StagedRepositoryCount == 0);
+
+    private void ToggleCommitMenu() => _commitMenuOpen = !_commitMenuOpen;
+
+    private void CloseCommitMenu() => _commitMenuOpen = false;
+
+    /// <summary>Changes what the main commit button will do next time it's clicked (or Ctrl+Enter is
+    /// pressed) - does not run anything itself.</summary>
+    private void SelectCommitMode(bool stagedOnly, bool pushAfterCommit)
+    {
+        CommitModeMemory.Set(WorkspaceId, new WorkspaceGitChangesCommitModeSelection(stagedOnly, pushAfterCommit));
+        _commitMenuOpen = false;
+    }
+
     /// <summary>
     /// Commits with one shared message across every applicable repository. Not atomic: each repository
     /// commits independently through the bounded fan-out below, one repository's failure never blocks
@@ -51,8 +99,10 @@ public sealed partial class WorkspaceGitChanges
     /// limit used by the workspace status scan - rather than a separately hard-coded value.
     /// Runs behind the page's LoadingOverlay/terminal job - this can touch many files across many
     /// repositories and run commit hooks, unlike the fast single-file/folder stage/unstage actions.
+    /// When <paramref name="pushAfterCommit"/> is true, a push of exactly the repositories that
+    /// committed successfully runs immediately afterward, inside the same job/terminal.
     /// </summary>
-    private void CommitWorkspaceAsync(bool stagedOnly)
+    private void CommitWorkspaceAsync(bool stagedOnly, bool pushAfterCommit)
     {
         if (string.IsNullOrWhiteSpace(_workspaceCommitMessage))
         {
@@ -95,16 +145,16 @@ public sealed partial class WorkspaceGitChanges
                 repoItems,
                 () =>
                 {
-                    CommitWorkspaceCoreAsync(stagedOnly, targets);
+                    CommitWorkspaceCoreAsync(stagedOnly, pushAfterCommit, targets);
                     return Task.CompletedTask;
                 });
             return;
         }
 
-        CommitWorkspaceCoreAsync(stagedOnly, targets);
+        CommitWorkspaceCoreAsync(stagedOnly, pushAfterCommit, targets);
     }
 
-    private void CommitWorkspaceCoreAsync(bool stagedOnly, List<WorkspaceGitChangesRepositoryView> targets)
+    private void CommitWorkspaceCoreAsync(bool stagedOnly, bool pushAfterCommit, List<WorkspaceGitChangesRepositoryView> targets)
     {
         if (IsJobRunning)
         {
@@ -118,7 +168,7 @@ public sealed partial class WorkspaceGitChanges
 
         StartPageJob(label, async (job, ct) =>
         {
-            var succeeded = new List<string>();
+            var succeeded = new List<(string RepositoryName, int RepositoryId)>();
             var failed = new List<(string Repository, string Error)>();
             var completed = 0;
 
@@ -150,7 +200,7 @@ public sealed partial class WorkspaceGitChanges
                     {
                         if (result.Success)
                         {
-                            succeeded.Add(repo.RepositoryName);
+                            succeeded.Add((repo.RepositoryName, resolved.Value.RepositoryId));
                         }
                         else
                         {
@@ -201,6 +251,26 @@ public sealed partial class WorkspaceGitChanges
             // The write queue processes on a background worker; give it a moment before the job's
             // final reload so the page reflects the just-persisted state rather than racing the write.
             await Task.Delay(150, ct);
+
+            // Runs inside the same job/terminal as the commit above - the overlay is never hidden and
+            // re-shown between the two phases. Only repositories that committed successfully are pushed;
+            // a simple parallel push (no dependency-level ordering, no NuGet registry wait) since this
+            // repo set doesn't necessarily line up with the workspace's dependency levels.
+            if (pushAfterCommit && succeeded.Count > 0)
+            {
+                var pushRepoIds = succeeded.Select(s => s.RepositoryId).ToHashSet();
+                job.ReportProgress("Preparing push...");
+
+                await ScopedExecutor.ExecuteAsync<WorkspacePushHandler>(svc =>
+                    svc.RunPushWithDependenciesAsync(
+                        WorkspaceId,
+                        pushRepoIds,
+                        synchronizedPush: false,
+                        requiredPackageIds: EmptyPushPackageIds,
+                        job.ReportProgress,
+                        msg => SafeInvoke(() => ToastService.ShowError(msg)),
+                        cancellationToken: ct));
+            }
         });
     }
 
