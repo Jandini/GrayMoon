@@ -44,6 +44,7 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
     [Parameter] public EventCallback OnFetchRepositories { get; set; }
     [Parameter] public bool DefaultSelectedOnly { get; set; }
     [Parameter] public int RefreshGeneration { get; set; }
+    [Parameter] public int? WorkspaceId { get; set; }
 
     protected override void OnParametersSet()
     {
