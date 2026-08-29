@@ -2,11 +2,34 @@ using GrayMoon.App.Models;
 
 namespace GrayMoon.App.Services;
 
+/// <summary>Title/branches/conflicts fields resolved by the fast snapshot phase - just one (now ETag-conditional) GitHub call, everything the dialog's header and Conflicts row need.</summary>
+public sealed record PullRequestMergeSnapshot(
+    int Number,
+    string Title,
+    string HeadRef,
+    string BaseRef,
+    string? HeadSha,
+    string HtmlUrl,
+    int? ChangedFiles,
+    bool? Mergeable,
+    string? MergeableState);
+
+/// <summary>Reviews/checks/allowed-methods fields resolved by the background review-details phase (the 3-call `Task.WhenAll` fan-out).</summary>
+public sealed record PullRequestMergeReviewData(
+    int ApprovedCount,
+    int ChangesRequestedCount,
+    IReadOnlyList<string> OutstandingReviewers,
+    IReadOnlyList<string> ApprovedByUsers,
+    ChecksSummary Checks,
+    IReadOnlyList<MergeMethod> AllowedMergeMethods,
+    MergeMethod? DefaultMergeMethod);
+
 /// <summary>
 /// Assembles a fresh, on-demand mergeability snapshot for the merge confirmation dialog and performs the merge itself.
-/// Every call in this service hits GitHub live (no ETag/read cache) so the dialog and the merge action always reflect
-/// GitHub's current authoritative state - branch protection, required reviews, checks, conflicts, and merge queues are
-/// never re-derived locally.
+/// Every call in this service hits GitHub live (ETag-conditional, never served from an app-level read cache) so the
+/// dialog and the merge action always reflect GitHub's current authoritative state - branch protection, required
+/// reviews, checks, conflicts, and merge queues are never re-derived locally; a cheap 304 is still a live answer,
+/// just one that costs almost nothing when nothing changed.
 /// </summary>
 public sealed class GitHubPullRequestMergeService(
     GitHubService gitHubService,
@@ -14,7 +37,7 @@ public sealed class GitHubPullRequestMergeService(
 {
     private static readonly MergeMethod[] DefaultMethodPriority = [MergeMethod.Squash, MergeMethod.Merge, MergeMethod.Rebase];
 
-    /// <summary>Fetches everything the merge dialog needs. Returns null when the repository/connector is not GitHub-backed or the PR cannot be found.</summary>
+    /// <summary>Fetches everything the merge dialog needs in one call (used by the periodic silent in-dialog refresh, which has no spinner to split around). Returns null when the repository/connector is not GitHub-backed or the PR cannot be found.</summary>
     public async Task<PullRequestMergeDetails?> GetMergeDetailsAsync(
         Repository repository,
         Connector? connector,
@@ -23,6 +46,50 @@ public sealed class GitHubPullRequestMergeService(
         int uncommittedChangesCount = 0,
         int unpushedCommitsCount = 0,
         int incomingCommitsCount = 0,
+        CancellationToken cancellationToken = default)
+    {
+        var snapshot = await GetPullRequestSnapshotAsync(repository, connector, prNumber, cancellationToken);
+        if (snapshot == null)
+            return null;
+
+        var review = await GetMergeReviewDetailsInternalAsync(repository, connector, prNumber, snapshot.HeadSha, cancellationToken);
+        if (review == null)
+            return null;
+
+        return new PullRequestMergeDetails
+        {
+            Number = snapshot.Number,
+            Title = snapshot.Title,
+            HeadRef = snapshot.HeadRef,
+            BaseRef = snapshot.BaseRef,
+            HeadSha = snapshot.HeadSha,
+            HtmlUrl = snapshot.HtmlUrl,
+            ChangedFiles = snapshot.ChangedFiles,
+            Mergeable = snapshot.Mergeable,
+            MergeableState = snapshot.MergeableState,
+            ApprovedCount = review.ApprovedCount,
+            ChangesRequestedCount = review.ChangesRequestedCount,
+            OutstandingReviewers = review.OutstandingReviewers,
+            ApprovedByUsers = review.ApprovedByUsers,
+            Checks = review.Checks,
+            AllowedMergeMethods = review.AllowedMergeMethods,
+            DefaultMergeMethod = review.DefaultMergeMethod,
+            HasUncommittedChanges = hasUncommittedChanges,
+            UncommittedChangesCount = uncommittedChangesCount,
+            UnpushedCommitsCount = unpushedCommitsCount,
+            IncomingCommitsCount = incomingCommitsCount
+        };
+    }
+
+    /// <summary>
+    /// Fast phase: just the (ETag-conditional) PR-by-number call, returning title/branches/conflicts - everything
+    /// the dialog's header, title/branches row, and Conflicts row need. Returns null when the repository/connector
+    /// is not GitHub-backed or the PR cannot be found.
+    /// </summary>
+    public async Task<PullRequestMergeSnapshot?> GetPullRequestSnapshotAsync(
+        Repository repository,
+        Connector? connector,
+        int prNumber,
         CancellationToken cancellationToken = default)
     {
         if (repository == null || prNumber <= 0)
@@ -36,48 +103,76 @@ public sealed class GitHubPullRequestMergeService(
         if (pr == null)
             return null;
 
-        var headSha = pr.Head?.Sha;
+        return new PullRequestMergeSnapshot(
+            pr.Number,
+            pr.Title ?? string.Empty,
+            pr.Head?.Ref ?? string.Empty,
+            pr.Base?.Ref ?? string.Empty,
+            pr.Head?.Sha,
+            pr.HtmlUrl ?? string.Empty,
+            pr.ChangedFiles,
+            pr.Mergeable,
+            pr.MergeableState);
+    }
 
+    /// <summary>
+    /// Background phase: the reviews/repo-settings/checks fan-out (all now ETag-conditional), returning approvals/
+    /// outstanding reviewers/checks summary/allowed merge methods. Requires <paramref name="headSha"/> from a prior
+    /// <see cref="GetPullRequestSnapshotAsync"/> call for the checks lookup. Returns null only when the repository/
+    /// connector is not GitHub-backed (mirrors the snapshot phase's own guard).
+    /// </summary>
+    public async Task<PullRequestMergeReviewData?> GetMergeReviewDetailsAsync(
+        Repository repository,
+        Connector? connector,
+        int prNumber,
+        string? headSha,
+        CancellationToken cancellationToken = default) =>
+        await GetMergeReviewDetailsInternalAsync(repository, connector, prNumber, headSha, cancellationToken);
+
+    private async Task<PullRequestMergeReviewData?> GetMergeReviewDetailsInternalAsync(
+        Repository? repository,
+        Connector? connector,
+        int prNumber,
+        string? headSha,
+        CancellationToken cancellationToken)
+    {
+        if (repository == null || prNumber <= 0)
+            return null;
+        if (connector == null || connector.ConnectorType != ConnectorType.GitHub || string.IsNullOrWhiteSpace(connector.UserToken))
+            return null;
+        if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(repository.CloneUrl, out var owner, out var repo) || owner == null || repo == null)
+            return null;
+
+        // RequestedReviewers isn't returned by the reviews endpoint, only by the PR-by-number payload - re-fetched
+        // here (ETag-cheap, usually a 304 right after the snapshot phase already pulled the same PR) rather than
+        // threading it through as an extra parameter.
+        var prTask = gitHubService.GetPullRequestByNumberAsync(connector, owner, repo, prNumber, cancellationToken);
         var reviewsTask = gitHubService.GetPullRequestReviewsAsync(connector, owner, repo, prNumber, cancellationToken);
         var settingsTask = gitHubService.GetRepositoryMergeSettingsAsync(connector, owner, repo, cancellationToken);
         var checksTask = string.IsNullOrWhiteSpace(headSha)
             ? Task.FromResult<GitHubCheckRunsResponse?>(null)
             : gitHubService.GetCheckRunsForRefAsync(connector, owner, repo, headSha, cancellationToken);
 
-        await Task.WhenAll(reviewsTask, settingsTask, checksTask);
+        await Task.WhenAll(prTask, reviewsTask, settingsTask, checksTask);
 
+        var pr = prTask.Result;
         var reviews = reviewsTask.Result;
         var settings = settingsTask.Result;
         var checkRuns = checksTask.Result;
 
-        var (approvedCount, changesRequestedCount, outstandingReviewers, approvedByUsers) = SummarizeReviews(reviews, pr.RequestedReviewers);
+        var (approvedCount, changesRequestedCount, outstandingReviewers, approvedByUsers) = SummarizeReviews(reviews, pr?.RequestedReviewers);
         var checksSummary = SummarizeChecks(checkRuns);
         var allowedMethods = GetAllowedMergeMethods(settings);
         var defaultMethod = DefaultMethodPriority.FirstOrDefault(m => allowedMethods.Contains(m), allowedMethods.FirstOrDefault());
 
-        return new PullRequestMergeDetails
-        {
-            Number = pr.Number,
-            Title = pr.Title ?? string.Empty,
-            HeadRef = pr.Head?.Ref ?? string.Empty,
-            BaseRef = pr.Base?.Ref ?? string.Empty,
-            HeadSha = headSha,
-            HtmlUrl = pr.HtmlUrl ?? string.Empty,
-            ChangedFiles = pr.ChangedFiles,
-            Mergeable = pr.Mergeable,
-            MergeableState = pr.MergeableState,
-            ApprovedCount = approvedCount,
-            ChangesRequestedCount = changesRequestedCount,
-            OutstandingReviewers = outstandingReviewers,
-            ApprovedByUsers = approvedByUsers,
-            Checks = checksSummary,
-            AllowedMergeMethods = allowedMethods,
-            DefaultMergeMethod = allowedMethods.Count > 0 ? defaultMethod : null,
-            HasUncommittedChanges = hasUncommittedChanges,
-            UncommittedChangesCount = uncommittedChangesCount,
-            UnpushedCommitsCount = unpushedCommitsCount,
-            IncomingCommitsCount = incomingCommitsCount
-        };
+        return new PullRequestMergeReviewData(
+            approvedCount,
+            changesRequestedCount,
+            outstandingReviewers,
+            approvedByUsers,
+            checksSummary,
+            allowedMethods,
+            allowedMethods.Count > 0 ? defaultMethod : null);
     }
 
     /// <summary>Merges the pull request via GitHub's merge endpoint. GitHub alone decides success/failure - this never pre-validates mergeability locally.</summary>
