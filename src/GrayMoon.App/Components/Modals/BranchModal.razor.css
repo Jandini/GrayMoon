@@ -3,6 +3,11 @@
     max-width: 600px;
 }
 
+/* Let the Based-on list paint over the footer instead of being clipped. */
+.modal-dialog > .modal-content {
+    overflow: visible;
+}
+
 .branch-modal-tabs {
     border-bottom-color: var(--border-color);
 }
@@ -61,25 +66,32 @@
     color: var(--text-primary);
     border: 1px solid var(--border-input) !important;
     box-shadow: none !important;
+    /* Show up to 3 items (py-2 + 1.5em line-height) plus list py-1 and 1px borders. */
+    max-height: calc(3 * (1.5em + 1rem) + 0.5rem + 2px);
+    overflow-y: hidden;
+}
+
+.new-branch-based-on-list.new-branch-based-on-list--scroll {
+    overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: auto;
     scrollbar-color: #5a5a5a var(--bg-input, #252526);
 }
 
-.new-branch-based-on-list::-webkit-scrollbar {
+.new-branch-based-on-list--scroll::-webkit-scrollbar {
     width: 8px;
 }
 
-.new-branch-based-on-list::-webkit-scrollbar-track {
+.new-branch-based-on-list--scroll::-webkit-scrollbar-track {
     background: var(--bg-input, #252526);
 }
 
-.new-branch-based-on-list::-webkit-scrollbar-thumb {
+.new-branch-based-on-list--scroll::-webkit-scrollbar-thumb {
     background: #5a5a5a;
     border-radius: 4px;
 }
 
-.new-branch-based-on-list::-webkit-scrollbar-thumb:hover {
+.new-branch-based-on-list--scroll::-webkit-scrollbar-thumb:hover {
     background: #6a6a6a;
 }
 

@@ -75,8 +75,8 @@
                             </button>
                             @if (showBasedOnDropdown)
                             {
-                                <ul class="list-unstyled border rounded mt-1 mb-0 py-1 new-branch-based-on-list position-absolute start-0 end-0 shadow"
-                                    style="z-index: 1050; max-height: 280px; overflow-y: auto; font-size: 1rem;">
+                                <ul class="list-unstyled border rounded mt-1 mb-0 py-1 new-branch-based-on-list position-absolute start-0 end-0 shadow @(BasedOnListNeedsScroll ? "new-branch-based-on-list--scroll" : null)"
+                                    style="z-index: 1050; font-size: 1rem;">
                                     <li class="new-branch-based-on-item px-3 py-2 @(selectedBaseBranch == "__default__" ? "selected" : "")"
                                         style="cursor: pointer;"
                                         @onclick='() => SelectBaseBranch("__default__")'>
@@ -164,6 +164,8 @@
     private ElementReference modalElement;
     private ElementReference branchNameInput;
     private bool _wasVisible;
+
+    private bool BasedOnListNeedsScroll => 1 + CommonBranchNames.Count > 3;
 
     private string GetSelectedBaseDisplayText()
     {

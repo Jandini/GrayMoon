@@ -339,7 +339,7 @@
                                     </button>
                                     @if (showBasedOnDropdown)
                                     {
-                                        <ul class="list-unstyled border rounded mt-1 mb-0 py-1 new-branch-based-on-list position-absolute start-0 end-0 shadow"
+                                        <ul class="list-unstyled border rounded mt-1 mb-0 py-1 new-branch-based-on-list position-absolute start-0 end-0 shadow @(GetBasedOnItemCount() > 3 ? "new-branch-based-on-list--scroll" : null)"
                                             style="z-index: 1050; font-size: 1rem;">
                                             <li class="new-branch-based-on-item px-3 py-2 @(selectedBaseBranch == "__default__" ? "selected" : "")"
                                                 style="cursor: pointer;"
@@ -914,6 +914,9 @@
             yield return b;
         }
     }
+
+    private int GetBasedOnItemCount() =>
+        1 + GetLocalBranchesForBasedOn().Count() + GetRemoteBranchesForBasedOn().Count();
 
     private void SelectClosestMatchingBranch()
     {
