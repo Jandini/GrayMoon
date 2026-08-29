@@ -43,57 +43,21 @@ public sealed partial class WorkspaceGitChanges
     private int StagedRepositoryCount => _view?.Repositories.Count(r => r.StagedCount > 0) ?? 0;
     private int ChangedRepositoryCount => _view?.Repositories.Count(r => r.StagedCount > 0 || r.ChangedCount > 0) ?? 0;
 
-    private bool _commitMenuOpen;
     private static readonly IReadOnlySet<string> EmptyPushPackageIds = new HashSet<string>();
 
-    /// <summary>
-    /// The commit split-button's current selection. StagedOnly is never user-chosen - it always
-    /// auto-derives from whether any repository has staged changes, exactly like before the split
-    /// button existed. PushAfterCommit is the user's remembered "+ Push" preference for whichever
-    /// bucket (All vs Staged) is currently active, via <see cref="CommitModeMemory"/> - so toggling
-    /// "+Push" while Commit All is showing doesn't affect what Commit Staged does, and vice versa.
-    /// </summary>
-    private (bool StagedOnly, bool PushAfterCommit) CurrentCommitMode
-    {
-        get
-        {
-            var stagedOnly = StagedRepositoryCount > 0;
-            var remembered = CommitModeMemory.Get(WorkspaceId);
-            var pushAfterCommit = stagedOnly ? remembered?.PushWhenStaged : remembered?.PushWhenAll;
-            return (stagedOnly, pushAfterCommit ?? false);
-        }
-    }
-
-    private string CommitButtonTitle
-    {
-        get
-        {
-            var (stagedOnly, pushAfterCommit) = CurrentCommitMode;
-            var label = stagedOnly ? "Commit Staged" : "Commit All";
-            return pushAfterCommit ? $"{label} + Push" : label;
-        }
-    }
+    private string CommitButtonTitle => StagedRepositoryCount > 0 ? "Commit Staged" : "Commit All";
 
     private bool IsCommitButtonDisabled => IsJobRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage);
 
-    private void ToggleCommitMenu() => _commitMenuOpen = !_commitMenuOpen;
-
-    private void CloseCommitMenu() => _commitMenuOpen = false;
-
-    /// <summary>Changes what the main commit button will do next time it's clicked (or Ctrl+Enter is
-    /// pressed) - does not run anything itself. Only updates the remembered push preference for
-    /// whichever bucket (All vs Staged) is currently active; the other bucket's remembered preference
-    /// is untouched.</summary>
-    private void SelectCommitMode(bool pushAfterCommit)
+    /// <summary>"Push committed" checkbox state, remembered per-workspace via <see cref="PushAfterCommitMemory"/>
+    /// so it survives navigating away and back within the same browser session.</summary>
+    private bool PushAfterCommit
     {
-        var stagedOnly = CurrentCommitMode.StagedOnly;
-        var existing = CommitModeMemory.Get(WorkspaceId) ?? new WorkspaceGitChangesCommitModeSelection(PushWhenAll: false, PushWhenStaged: false);
-        var updated = stagedOnly
-            ? existing with { PushWhenStaged = pushAfterCommit }
-            : existing with { PushWhenAll = pushAfterCommit };
-        CommitModeMemory.Set(WorkspaceId, updated);
-        _commitMenuOpen = false;
+        get => PushAfterCommitMemory.Get(WorkspaceId);
+        set => PushAfterCommitMemory.Set(WorkspaceId, value);
     }
+
+    private void OnPushAfterCommitChanged(ChangeEventArgs e) => PushAfterCommit = e.Value is bool value && value;
 
     /// <summary>
     /// Commits with one shared message across every applicable repository. Not atomic: each repository
