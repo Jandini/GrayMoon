@@ -105,9 +105,25 @@
         });
     }
 
+    // Ctrl/Cmd+Enter in the commit textarea clicks the visible Commit button (Commit Staged or
+    // Commit All). Capture-phase preventDefault stops the newline before Blazor Server can see the
+    // key; a C# @onkeydown handler would be too late and would also round-trip every keystroke.
+    function initCommitMessageShortcut(el) {
+        if (el.dataset.commitShortcutInit === '1') return;
+        el.dataset.commitShortcutInit = '1';
+        el.addEventListener('keydown', function (e) {
+            if (e.repeat || !((e.ctrlKey || e.metaKey) && e.key === 'Enter')) return;
+            e.preventDefault();
+            const button = el.closest('.git-changes-workspace-commit')
+                ?.querySelector('.git-changes-workspace-commit__actions button:not([disabled])');
+            button?.click();
+        }, true);
+    }
+
     function initAll() {
         document.querySelectorAll('.graymoon-splitter').forEach(initSplitter);
         clearCommitMessageInlineSizing();
+        document.querySelectorAll('.git-changes-workspace-commit__message').forEach(initCommitMessageShortcut);
     }
 
     document.addEventListener('DOMContentLoaded', initAll);
