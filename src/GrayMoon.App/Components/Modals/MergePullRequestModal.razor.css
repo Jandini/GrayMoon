@@ -177,6 +177,11 @@
     flex: 1 1 auto;
 }
 
+::deep .merge-pr-sync-default-check .form-check-input:not(:checked) {
+    background-color: #6c757d;
+    border-color: #6c757d;
+}
+
 ::deep .merge-pr-split-btn {
     position: relative;
 }
