@@ -73,6 +73,7 @@
                                   rows="3"
                                   maxlength="10000"
                                   placeholder="Commit message (applies to all repositories below)"
+                                  title="Ctrl+Enter commits with the visible Commit button"
                                   autocomplete="off"
                                   autocorrect="off"
                                   autocapitalize="off"
@@ -86,7 +87,8 @@
                                 <button type="button"
                                         class="btn btn-sm btn-primary"
                                         disabled="@(IsJobRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
-                                        title="Creates one commit in each staged repository using the same message."
+                                        title="Creates one commit in each staged repository using the same message. Ctrl+Enter from the message box."
+                                        aria-keyshortcuts="Control+Enter"
                                         @onclick="() => CommitWorkspaceAsync(stagedOnly: true)">
                                     Commit Staged
                                 </button>
@@ -96,7 +98,8 @@
                                 <button type="button"
                                         class="@(string.IsNullOrWhiteSpace(_workspaceCommitMessage) ? "btn btn-sm btn-outline-primary" : "btn btn-sm btn-primary")"
                                         disabled="@(IsJobRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage))"
-                                        title="Stages all changes then creates one commit in each repository using the same message."
+                                        title="Stages all changes then creates one commit in each repository using the same message. Ctrl+Enter from the message box."
+                                        aria-keyshortcuts="Control+Enter"
                                         @onclick="() => CommitWorkspaceAsync(stagedOnly: false)">
                                     Commit All
                                 </button>
