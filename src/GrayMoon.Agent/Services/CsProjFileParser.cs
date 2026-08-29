@@ -110,6 +110,39 @@ public sealed class CsProjFileParser : ICsProjFileParser
         return modified;
     }
 
+    public async Task<string?> FindPackageReferenceForVersionPatternAsync(string csprojPath, string prefix, string suffix, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(csprojPath) || !File.Exists(csprojPath) || string.IsNullOrEmpty(prefix))
+            return null;
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        string content;
+        try
+        {
+            content = await File.ReadAllTextAsync(csprojPath, cancellationToken);
+        }
+        catch
+        {
+            return null;
+        }
+
+        var patternRegex = new Regex(Regex.Escape(prefix) + ".*?" + Regex.Escape(suffix ?? ""), RegexOptions.Singleline);
+
+        foreach (Match elementMatch in PackageReferenceElementRegex.Matches(content))
+        {
+            var elementText = elementMatch.Value;
+            if (!patternRegex.IsMatch(elementText))
+                continue;
+
+            var includeMatch = IncludeAttributeRegex.Match(elementText);
+            if (includeMatch.Success)
+                return includeMatch.Groups[1].Value.Trim();
+        }
+
+        return null;
+    }
+
     private static CsProjFileInfo? ParseCsProjDocument(XDocument doc, string csprojPath)
     {
         var root = doc.Root;

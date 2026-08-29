@@ -226,6 +226,7 @@ public sealed partial class WorkspaceRepositories
             var implicitBySource = await projectRepo.GetImplicitReferencedRepoIdsBySourceAsync(WorkspaceId, repositoryId);
             var lockedIds = new HashSet<int>(implicitBySource.FromProject);
             lockedIds.UnionWith(implicitBySource.FromFile);
+            lockedIds.UnionWith(implicitBySource.FromPackage);
             var circularRepoIds = await projectRepo.GetCircularCustomDependencyRepoIdsAsync(WorkspaceId, repositoryId);
             var savedCustomIds = await customDepRepo.GetCustomReferencedRepositoryIdsAsync(WorkspaceId, repositoryId);
 
@@ -238,6 +239,7 @@ public sealed partial class WorkspaceRepositories
                 LockedReferencedRepoIds = lockedIds,
                 LockedFromProjectRepoIds = implicitBySource.FromProject,
                 LockedFromFileRepoIds = implicitBySource.FromFile,
+                LockedFromPackageRepoIds = implicitBySource.FromPackage,
                 CircularCustomDependencyRepoIds = circularRepoIds,
                 SelectedCustomRepoIds = new HashSet<int>(savedCustomIds),
                 Repositories = allLinks
@@ -321,6 +323,7 @@ public sealed partial class WorkspaceRepositories
         public IReadOnlySet<int> LockedReferencedRepoIds { get; set; } = new HashSet<int>();
         public IReadOnlySet<int> LockedFromProjectRepoIds { get; set; } = new HashSet<int>();
         public IReadOnlySet<int> LockedFromFileRepoIds { get; set; } = new HashSet<int>();
+        public IReadOnlySet<int> LockedFromPackageRepoIds { get; set; } = new HashSet<int>();
         public IReadOnlySet<int> CircularCustomDependencyRepoIds { get; set; } = new HashSet<int>();
         public HashSet<int> SelectedCustomRepoIds { get; set; } = new();
         public IReadOnlyList<CustomDependenciesModal.CustomDependencyRepoEntry> Repositories { get; set; } = Array.Empty<CustomDependenciesModal.CustomDependencyRepoEntry>();

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using GrayMoon.Abstractions.Agent;
 using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
@@ -278,6 +279,8 @@ public sealed class WorkspaceFileVersionService(
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return;
 
+        await SyncGeneratedPackageDependenciesAsync(workspaceId, cancellationToken);
+
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         var trackedFiles = await dbContext.WorkspaceFiles
             .Where(f => f.WorkspaceId == workspaceId)
@@ -452,6 +455,130 @@ public sealed class WorkspaceFileVersionService(
         {
             logger.LogError(ex, "Unexpected error checking file version status for workspace {WorkspaceId}", workspaceId);
         }
+    }
+
+    /// <summary>
+    /// Detects virtual/generated NuGet package dependencies from configured .csproj version files: for every
+    /// configured file whose path is a .csproj, asks the agent to resolve which PackageReference (Include name)
+    /// each version-pattern line refers to (via the real .csproj's XML-based PackageReference parsing, not
+    /// line-based text matching), resolves the producer repository from the pattern's repo-name token, and syncs
+    /// the resulting generated <see cref="WorkspaceProject"/>/<see cref="ProjectDependency"/> rows.
+    /// Returns true if the agent call succeeded (regardless of whether any generated dependency changed).
+    /// </summary>
+    public async Task<bool> SyncGeneratedPackageDependenciesAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        if (!agentBridge.IsAgentConnected) return false;
+
+        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null) return false;
+
+        var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        var csprojConfigs = configs
+            .Where(c => c.File?.Repository != null
+                && c.File.IsMissingOnDisk != true
+                && c.File.FilePath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(c.VersionPattern))
+            .ToList();
+
+        if (csprojConfigs.Count == 0)
+        {
+            await workspaceProjectRepository.SyncGeneratedPackageDependenciesAsync(workspaceId, [], cancellationToken);
+            return true;
+        }
+
+        var nameToRepoId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var link in workspace.Repositories)
+        {
+            if (link.Repository != null && !string.IsNullOrEmpty(link.Repository.RepositoryName))
+            {
+                var name = link.Repository.RepositoryName.Trim();
+                if (!nameToRepoId.ContainsKey(name))
+                    nameToRepoId[name] = link.RepositoryId;
+            }
+        }
+
+        var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+
+        var requestItems = csprojConfigs
+            .Select(cfg => new
+            {
+                repositoryName = cfg.File!.Repository!.RepositoryName,
+                filePath = cfg.File.FilePath,
+                pattern = cfg.VersionPattern
+            })
+            .ToList();
+
+        try
+        {
+            var resp = await agentBridge.SendCommandAsync(AgentHubMethods.ResolveGeneratedPackageReferences, new
+            {
+                workspaceName = workspace.Name,
+                workspaceRoot,
+                files = requestItems
+            }, cancellationToken);
+
+            if (!resp.Success || resp.Data == null)
+            {
+                logger.LogWarning("ResolveGeneratedPackageReferences failed for workspace {WorkspaceId}: {Error}", workspaceId, resp.Error);
+                return false;
+            }
+
+            var result = AgentResponseJson.DeserializeAgentResponse<ResolveGeneratedPackageReferencesAgentResponse>(resp.Data);
+            if (result?.Files == null)
+                return false;
+
+            var resolved = new List<GeneratedPackageDependencyInfo>();
+            foreach (var fileResult in result.Files)
+            {
+                if (fileResult.Packages is not { Count: > 0 }) continue;
+
+                var matchingCfg = csprojConfigs.FirstOrDefault(cfg =>
+                    string.Equals(cfg.File!.Repository!.RepositoryName, fileResult.RepositoryName, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(cfg.File.FilePath, fileResult.FilePath, StringComparison.OrdinalIgnoreCase));
+                if (matchingCfg == null) continue;
+
+                var consumerRepositoryId = matchingCfg.File!.RepositoryId;
+                foreach (var pkg in fileResult.Packages)
+                {
+                    if (string.IsNullOrWhiteSpace(pkg.RepoNameToken) || string.IsNullOrWhiteSpace(pkg.PackageName)) continue;
+                    if (!nameToRepoId.TryGetValue(pkg.RepoNameToken.Trim(), out var producerRepositoryId)) continue;
+
+                    resolved.Add(new GeneratedPackageDependencyInfo(
+                        consumerRepositoryId,
+                        matchingCfg.File.FilePath,
+                        producerRepositoryId,
+                        pkg.PackageName));
+                }
+            }
+
+            await workspaceProjectRepository.SyncGeneratedPackageDependenciesAsync(workspaceId, resolved, cancellationToken);
+            return true;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Unexpected error syncing generated package dependencies for workspace {WorkspaceId}", workspaceId);
+            return false;
+        }
+    }
+
+    private sealed class ResolveGeneratedPackageReferencesAgentResponse
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("files")]
+        public List<ResolveGeneratedPackageReferencesAgentFileResult>? Files { get; set; }
+    }
+
+    private sealed class ResolveGeneratedPackageReferencesAgentFileResult
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("repositoryName")] public string? RepositoryName { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("filePath")] public string? FilePath { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("packages")] public List<ResolveGeneratedPackageReferencesAgentPackageEntry>? Packages { get; set; }
+    }
+
+    private sealed class ResolveGeneratedPackageReferencesAgentPackageEntry
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("repoNameToken")] public string? RepoNameToken { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("packageName")] public string? PackageName { get; set; }
     }
 
     private async Task ApplyFileConfigLinkCountersAsync(
