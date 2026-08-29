@@ -1,5 +1,7 @@
 @using GrayMoon.App.Models
+@using GrayMoon.App.Services
 @using Microsoft.AspNetCore.Components.Web
+@inject MergePullRequestSyncToDefaultPreferenceService SyncToDefaultPreference
 
 @if (IsVisible)
 {
@@ -237,7 +239,14 @@
     private bool _showMethodDropdown;
     private bool _wasVisible;
     private int? _lastDetailsNumber;
-    private bool _syncToDefault;
+
+    /// <summary>Backed by <see cref="SyncToDefaultPreference"/> (a singleton) so the checkbox remembers the user's
+    /// last choice across dialog opens and page navigation, instead of resetting to unchecked every time.</summary>
+    private bool _syncToDefault
+    {
+        get => SyncToDefaultPreference.SyncToDefault;
+        set => SyncToDefaultPreference.SyncToDefault = value;
+    }
     /// <summary>
     /// True once the default merge method has been preselected for the current PR. Tracked separately from
     /// <see cref="_lastDetailsNumber"/> because <see cref="Details"/> is now set progressively (snapshot phase first,
@@ -253,7 +262,6 @@
         {
             _wasVisible = true;
             _showMethodDropdown = false;
-            _syncToDefault = false;
         }
         else if (!IsVisible)
         {
