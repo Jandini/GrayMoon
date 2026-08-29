@@ -3,7 +3,12 @@
 
 @if (IsVisible)
 {
-    <div class="modal show d-block merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1075;"
+    @*
+        z-index drops below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while
+        IsSyncingLocalState so that overlay visually covers the dialog for a push/pull triggered from within it -
+        without unmounting the dialog itself, which would look like it closed and reopened.
+    *@
+    <div class="modal show d-block merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @(IsSyncingLocalState ? 50 : 1075);"
          @onkeydown="HandleKeyDown">
         <div class="modal-dialog merge-pr-modal-dialog">
             <div class="modal-content">
@@ -209,6 +214,8 @@
     [Parameter] public EventCallback OnPushRequested { get; set; }
     /// <summary>Raised when the user clicks the commits text in the local-state row while incoming commits exist (pull-only or pull+push sync) - mirrors CommitsBadge's own "incoming wins" click behavior.</summary>
     [Parameter] public EventCallback OnPullRequested { get; set; }
+    /// <summary>True while a push/pull triggered from the local-state row is running. Drops the dialog's z-index below the page's LoadingOverlay so it visually covers the (still-mounted) dialog instead of the dialog disappearing.</summary>
+    [Parameter] public bool IsSyncingLocalState { get; set; }
 
     private MergeMethod _selectedMethod;
     private bool _showMethodDropdown;
