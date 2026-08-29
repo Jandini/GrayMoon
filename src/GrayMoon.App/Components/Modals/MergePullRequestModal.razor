@@ -121,20 +121,7 @@
                                             }
                                             @if (HasCommitsToSync())
                                             {
-                                                <button type="button"
-                                                        class="merge-pr-changed-files-link merge-pr-inline-link-btn"
-                                                        disabled="@IsSyncingLocalState"
-                                                        @onclick="HandleCommitsClick">
-                                                    @if (IsSyncingLocalState)
-                                                    {
-                                                        <span class="spinner-border spinner-border-sm merge-pr-inline-spinner"></span>
-                                                        @("Syncing...")
-                                                    }
-                                                    else
-                                                    {
-                                                        @GetCommitsText()
-                                                    }
-                                                </button>
+                                                <button type="button" class="merge-pr-changed-files-link merge-pr-inline-link-btn" @onclick="HandleCommitsClick">@GetCommitsText()</button>
                                             }
                                             @(". This will not block the merge.")
                                         }
@@ -222,8 +209,6 @@
     [Parameter] public EventCallback OnPushRequested { get; set; }
     /// <summary>Raised when the user clicks the commits text in the local-state row while incoming commits exist (pull-only or pull+push sync) - mirrors CommitsBadge's own "incoming wins" click behavior.</summary>
     [Parameter] public EventCallback OnPullRequested { get; set; }
-    /// <summary>True while a push/pull triggered from the local-state row is running - disables its button and shows a spinner instead of navigating away or closing the dialog.</summary>
-    [Parameter] public bool IsSyncingLocalState { get; set; }
 
     private MergeMethod _selectedMethod;
     private bool _showMethodDropdown;
@@ -465,7 +450,7 @@
     /// <summary>Same precedence as CommitsBadge.HandleClick: incoming commits always win (sync/pull handles both directions), push only fires when nothing is incoming.</summary>
     private async Task HandleCommitsClick()
     {
-        if (Details == null || IsSyncingLocalState)
+        if (Details == null)
             return;
         if (Details.IncomingCommitsCount > 0)
         {
