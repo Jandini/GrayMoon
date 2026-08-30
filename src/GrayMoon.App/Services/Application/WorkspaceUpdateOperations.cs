@@ -1,9 +1,17 @@
+using GrayMoon.App.Models;
+
 namespace GrayMoon.App.Services.Application;
 
 public sealed class WorkspaceUpdateOperations(
     WorkspaceUpdateHandler updateHandler,
     WorkspaceGitService workspaceGitService) : IWorkspaceUpdateOperations
 {
+    public Task<(IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)> GetUpdatePlanAsync(
+        int workspaceId,
+        IReadOnlySet<int>? repositoryIds = null,
+        CancellationToken cancellationToken = default)
+        => workspaceGitService.GetUpdatePlanAsync(workspaceId, repositoryIds, cancellationToken);
+
     public Task<IReadOnlySet<int>> UpdateAsync(
         int workspaceId,
         CancellationToken cancellationToken,
@@ -27,7 +35,18 @@ public sealed class WorkspaceUpdateOperations(
 
     public Task<int> RestorePackagesAsync(
         int workspaceId,
-        Action<string> reportProgress,
+        IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
-        => workspaceGitService.RestoreAllWorkspacePackagesAsync(workspaceId, reportProgress, cancellationToken);
+        => workspaceGitService.RestoreAllWorkspacePackagesAsync(workspaceId, progress.ToMessageAction(), cancellationToken);
+
+    public Task<int> RestoreSyncedPackagesAsync(
+        int workspaceId,
+        IReadOnlySet<int> syncedRepoIds,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+        => workspaceGitService.RestoreSyncedWorkspacePackagesAsync(
+            workspaceId,
+            syncedRepoIds,
+            progress.ToMessageAction(),
+            cancellationToken);
 }

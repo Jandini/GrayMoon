@@ -284,7 +284,7 @@ public sealed partial class WorkspaceRepositories
         try
         {
             var count = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, int>(
-                svc => svc.RestorePackagesAsync(WorkspaceId, job.ReportProgress, ct));
+                svc => svc.RestorePackagesAsync(WorkspaceId, job.ToOperationProgress(), ct));
 
             if (count > 0)
                 SafeInvoke(() => ToastService.Show($"Restored packages in {count} {(count == 1 ? "project" : "projects")}"));
@@ -318,8 +318,8 @@ public sealed partial class WorkspaceRepositories
         StartPageJob(label, async (job, ct) =>
         {
             job.ReportProgress("Restoring packages...");
-            var count = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, int>(
-                svc => svc.RestoreSyncedWorkspacePackagesAsync(WorkspaceId, repoIds, job.ReportProgress, ct));
+            var count = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, int>(
+                svc => svc.RestoreSyncedPackagesAsync(WorkspaceId, repoIds, job.ToOperationProgress(), ct));
 
             if (count > 0)
                 SafeInvoke(() => ToastService.Show($"Restored packages in {count} {(count == 1 ? "project" : "projects")}"));
@@ -341,8 +341,8 @@ public sealed partial class WorkspaceRepositories
         job.ReportProgress("Restoring packages...");
         try
         {
-            var count = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, int>(
-                svc => svc.RestoreSyncedWorkspacePackagesAsync(WorkspaceId, syncedRepoIds, job.ReportProgress, ct));
+            var count = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, int>(
+                svc => svc.RestoreSyncedPackagesAsync(WorkspaceId, syncedRepoIds, job.ToOperationProgress(), ct));
 
             if (count > 0)
                 SafeInvoke(() => ToastService.Show($"Restored packages in {count} {(count == 1 ? "project" : "projects")}"));

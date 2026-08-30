@@ -1,0 +1,18 @@
+---
+description: Pages and API endpoints call IWorkspace*Operations, not domain git services
+globs: "**/Components/**/*.cs,**/Components/**/*.razor,**/Api/**/*.cs"
+alwaysApply: false
+---
+
+# UI and API use application facades
+
+Pages, modals, and API endpoints gather arguments, start a job or return `IResult`, and show the result. They call `IWorkspace*Operations` or Queries / `IWorkspaceGitChangesReadService`. They must not resolve `WorkspaceGitService`, orchestrators, or `IGitChangesAgentClient`.
+
+Allowed leftovers until a later pass:
+
+- `IWorkspacePageService` bag properties already injected on the page
+- `WorkspaceBranchHandler` bulk helpers (`FetchBranchesForWorkspaceAsync`, checkout/create helpers)
+- Interactive Sync-to-default dialogs on the Repositories page
+- `IGitChangesAgentClient` for discard and diff only (commit, stage, and unstage go through `IWorkspaceGitChangesOperations`)
+
+New user-initiated mutations belong on the matching facade (`IWorkspaceUpdateOperations`, `IWorkspaceSyncOperations`, `IWorkspaceFileOperations`, `IWorkspaceGitChangesOperations`, `IWorkspaceBranchOperations`, and so on). Do not add a page or endpoint call to `WorkspaceGitService` or `IGitChangesAgentClient` to bypass that.

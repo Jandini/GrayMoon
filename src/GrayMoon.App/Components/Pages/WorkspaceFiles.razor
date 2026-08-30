@@ -12,6 +12,7 @@
 @inject WorkspaceFileRepository WorkspaceFileRepository
 @inject WorkspaceFileVersionConfigRepository VersionConfigRepository
 @inject WorkspaceFileVersionService FileVersionService
+@inject IWorkspaceFileOperations FileOperations
 @inject IServiceScopeFactory ServiceScopeFactory
 @inject WorkspaceService WorkspaceService
 @inject IToastService ToastService
@@ -372,18 +373,13 @@
         StateHasChanged();
         try
         {
-            var (updated, failed, error, _) = await FileVersionService.UpdateAllVersionsAsync(WorkspaceId, selectedRepositoryIds: null, cancellationToken: _updateCts.Token);
-            if (error == null)
-            {
-                updateMessage = "Checking file versions...";
-                StateHasChanged();
-                await FileVersionService.CheckAndPersistFileVersionStatusAsync(WorkspaceId, _updateCts.Token, forceFresh: true);
+            var result = await FileOperations.UpdateVersionsAsync(WorkspaceId, _updateCts.Token, checkAfter: true);
+            if (result.Error == null)
                 await LoadAsync();
-            }
-            if (error != null)
-                errorMessage = error;
-            else if (failed > 0)
-                errorMessage = $"Updated {updated} line(s). {failed} file(s) could not be updated - check logs.";
+            if (result.Error != null)
+                errorMessage = result.Error;
+            else if (result.Failed > 0)
+                errorMessage = $"Updated {result.Updated} line(s). {result.Failed} file(s) could not be updated - check logs.";
             else
                 ToastService.Show("Versions updated in configured files.");
         }

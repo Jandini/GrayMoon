@@ -159,9 +159,8 @@ public sealed partial class WorkspaceGitChanges
                         return;
                     }
 
-                    var result = await AgentClient.CommitAsync(
-                        resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName,
-                        message, stageAllFirst: !stagedOnly, ct);
+                    var result = await GitChangesOperations.CommitAsync(
+                        WorkspaceId, resolved.Value.RepositoryId, message, stageAllFirst: !stagedOnly, ct);
 
                     await PersistMutationResultAsync(repo.WorkspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);
 
@@ -289,8 +288,8 @@ public sealed partial class WorkspaceGitChanges
                     }
 
                     var result = unstageStagedSection
-                        ? await AgentClient.UnstageAsync(resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, GitChangeOperationScope.Repository, [], ct)
-                        : await AgentClient.StageAsync(resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, GitChangeOperationScope.Repository, [], ct);
+                        ? await GitChangesOperations.UnstageAsync(WorkspaceId, resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct)
+                        : await GitChangesOperations.StageAsync(WorkspaceId, resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct);
 
                     await PersistMutationResultAsync(repo.WorkspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);
                 }

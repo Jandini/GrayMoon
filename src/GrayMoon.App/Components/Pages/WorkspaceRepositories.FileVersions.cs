@@ -1,5 +1,4 @@
 using GrayMoon.App.Models;
-using GrayMoon.App.Services;
 
 namespace GrayMoon.App.Components.Pages;
 
@@ -16,30 +15,25 @@ public sealed partial class WorkspaceRepositories
 
         StartPageJob("Updating file versions...", async (job, ct) =>
         {
-            await ScopedExecutor.ExecuteAsync<WorkspaceFileVersionService>(async svc =>
+            var result = await ScopedExecutor.ExecuteAsync<IWorkspaceFileOperations, WorkspaceFileVersionUpdateResult>(
+                svc => svc.UpdateVersionsAsync(
+                    WorkspaceId,
+                    ct,
+                    checkAfter: true,
+                    progress: job.ToOperationProgress()));
+
+            await InvokeAsync(async () =>
             {
-                var (updated, failed, error, _) = await svc.UpdateAllVersionsAsync(
-                    WorkspaceId, selectedRepositoryIds: null, cancellationToken: ct);
-
-                if (error == null)
-                {
-                    job.ReportProgress("Checking file versions...");
-                    await svc.CheckAndPersistFileVersionStatusAsync(WorkspaceId, ct, forceFresh: true);
-                }
-
-                await InvokeAsync(async () =>
-                {
-                    if (_disposed) return;
-                    if (error == null)
-                        await RefreshFromSync();
-                    StateHasChanged();
-                    if (error != null)
-                        errorMessage = error;
-                    else if (failed > 0)
-                        errorMessage = $"Updated {updated} line(s). {failed} file(s) could not be updated - check logs.";
-                    else
-                        ToastService.Show(updated > 0 ? "Versions updated in configured files." : "File versions are already up to date.");
-                });
+                if (_disposed) return;
+                if (result.Error == null)
+                    await RefreshFromSync();
+                StateHasChanged();
+                if (result.Error != null)
+                    errorMessage = result.Error;
+                else if (result.Failed > 0)
+                    errorMessage = $"Updated {result.Updated} line(s). {result.Failed} file(s) could not be updated - check logs.";
+                else
+                    ToastService.Show(result.Updated > 0 ? "Versions updated in configured files." : "File versions are already up to date.");
             });
         }, new PageJobOptions
         {
@@ -68,36 +62,33 @@ public sealed partial class WorkspaceRepositories
 
         StartPageJob("Updating file versions...", async (job, ct) =>
         {
-            await ScopedExecutor.ExecuteAsync<WorkspaceFileVersionService>(async svc =>
-            {
-                var repoIds = new HashSet<int> { repositoryId };
-                var (updated, failed, error, _) = await svc.UpdateAllVersionsAsync(
+            var repoIds = new HashSet<int> { repositoryId };
+            var result = await ScopedExecutor.ExecuteAsync<IWorkspaceFileOperations, WorkspaceFileVersionUpdateResult>(
+                svc => svc.UpdateVersionsAsync(
                     WorkspaceId,
+                    ct,
                     selectedRepositoryIds: repoIds,
                     filterPatternTokensToSelectedRepositories: false,
-                    cancellationToken: ct);
+                    checkAfter: true,
+                    progress: job.ToOperationProgress()));
 
-                if (error != null)
-                {
-                    SafeInvoke(() => errorMessage = error);
-                    return;
-                }
+            if (result.Error != null)
+            {
+                SafeInvoke(() => errorMessage = result.Error);
+                return;
+            }
 
-                job.ReportProgress("Checking file versions...");
-                await svc.CheckAndPersistFileVersionStatusAsync(WorkspaceId, ct, forceFresh: true);
-
-                await InvokeAsync(async () =>
-                {
-                    if (_disposed) return;
-                    await RefreshFromSync();
-                    StateHasChanged();
-                    if (failed > 0)
-                        errorMessage = $"Updated {updated} line(s). {failed} file(s) could not be updated - check logs.";
-                    else if (updated > 0)
-                        ToastService.Show($"Updated {updated} line(s) in configured files.");
-                    else
-                        ToastService.Show("File versions are already up to date.");
-                });
+            await InvokeAsync(async () =>
+            {
+                if (_disposed) return;
+                await RefreshFromSync();
+                StateHasChanged();
+                if (result.Failed > 0)
+                    errorMessage = $"Updated {result.Updated} line(s). {result.Failed} file(s) could not be updated - check logs.";
+                else if (result.Updated > 0)
+                    ToastService.Show($"Updated {result.Updated} line(s) in configured files.");
+                else
+                    ToastService.Show("File versions are already up to date.");
             });
         }, new PageJobOptions
         {
@@ -202,62 +193,33 @@ public sealed partial class WorkspaceRepositories
         StartPageJob(jobLabel, async (job, ct) =>
         {
             var repoIds = new HashSet<int> { repositoryId };
-
-            // Two services needed (WorkspaceFileVersionService + WorkspaceGitService for optional commit) -
-            // keep separate ScopedExecutor calls since each service is stateless.
-            var (updated, failed, error, updatedFiles) = await ScopedExecutor.ExecuteAsync<
-                WorkspaceFileVersionService,
-                (int Updated, int Failed, string? Error, IReadOnlyList<(int RepositoryId, string RepoName, string FilePath)> UpdatedFiles)>(
-                svc => svc.UpdateAllVersionsAsync(
+            var result = await ScopedExecutor.ExecuteAsync<IWorkspaceFileOperations, WorkspaceFileVersionUpdateResult>(
+                svc => svc.UpdateVersionsAsync(
                     WorkspaceId,
+                    ct,
                     selectedRepositoryIds: repoIds,
                     filterPatternTokensToSelectedRepositories: false,
-                    cancellationToken: ct));
+                    commitUpdatedFiles: shouldCommit,
+                    checkAfter: true,
+                    progress: job.ToOperationProgress()));
 
-            if (error != null)
+            if (result.Error != null)
             {
-                SafeInvoke(() => errorMessage = error);
+                SafeInvoke(() => errorMessage = result.Error);
                 return;
             }
-
-            if (shouldCommit && updatedFiles is { Count: > 0 })
-            {
-                job.ReportProgress("Committing updated file versions...");
-                var byRepo = updatedFiles
-                    .GroupBy(x => (x.RepositoryId, x.RepoName))
-                    .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
-                    .ToList();
-                var commitResults = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, IReadOnlyList<(int RepoId, bool Committed, string? ErrorMessage)>>(
-                    svc => svc.CommitFilePathsAsync(
-                        WorkspaceId,
-                        byRepo,
-                        onProgress: (c, t, _) => job.ReportProgress($"Committed version files {c} of {t}"),
-                        cancellationToken: ct));
-                foreach (var (_, committed, errMsg) in commitResults)
-                {
-                    if (!string.IsNullOrEmpty(errMsg))
-                    {
-                        SafeInvoke(() => errorMessage = errMsg);
-                        return;
-                    }
-                }
-            }
-
-            job.ReportProgress("Checking file versions...");
-            await ScopedExecutor.ExecuteAsync<WorkspaceFileVersionService>(
-                svc => svc.CheckAndPersistFileVersionStatusAsync(WorkspaceId, ct, forceFresh: true));
 
             await InvokeAsync(async () =>
             {
                 if (_disposed) return;
                 await RefreshFromSync();
                 StateHasChanged();
-                if (failed > 0)
-                    errorMessage = $"Updated {updated} line(s). {failed} file(s) could not be updated - check logs.";
-                else if (updated > 0)
+                if (result.Failed > 0)
+                    errorMessage = $"Updated {result.Updated} line(s). {result.Failed} file(s) could not be updated - check logs.";
+                else if (result.Updated > 0)
                     ToastService.Show(shouldCommit
-                        ? $"Updated and committed {updated} line(s) in configured files."
-                        : $"Updated {updated} line(s) in configured files.");
+                        ? $"Updated and committed {result.Updated} line(s) in configured files."
+                        : $"Updated {result.Updated} line(s) in configured files.");
                 else
                     ToastService.Show("File versions are already up to date.");
             });

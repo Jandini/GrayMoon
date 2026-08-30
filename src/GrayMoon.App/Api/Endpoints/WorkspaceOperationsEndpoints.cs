@@ -216,7 +216,7 @@ public static class WorkspaceOperationsEndpoints
         CancellationToken cancellationToken)
         => WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Restoring packages...", async (progress, ct) =>
         {
-            var count = await operations.RestorePackagesAsync(workspaceId, progress.ToMessageAction(), ct);
+            var count = await operations.RestorePackagesAsync(workspaceId, progress, ct);
             return Results.Ok(new { success = true, restored = count });
         }, cancellationToken);
 
@@ -327,10 +327,10 @@ public static class WorkspaceOperationsEndpoints
         CancellationToken cancellationToken)
         => WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Updating file versions...", async (_, ct) =>
         {
-            var (updated, failed, error) = await operations.UpdateVersionsAsync(workspaceId, ct);
-            return string.IsNullOrWhiteSpace(error)
-                ? Results.Ok(new { success = true, updated, failed })
-                : Results.BadRequest(new { success = false, updated, failed, error });
+            var result = await operations.UpdateVersionsAsync(workspaceId, ct);
+            return string.IsNullOrWhiteSpace(result.Error)
+                ? Results.Ok(new { success = true, updated = result.Updated, failed = result.Failed })
+                : Results.BadRequest(new { success = false, updated = result.Updated, failed = result.Failed, error = result.Error });
         }, cancellationToken);
 }
 

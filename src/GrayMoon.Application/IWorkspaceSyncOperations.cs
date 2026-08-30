@@ -38,4 +38,10 @@ public interface IWorkspaceSyncOperations
         bool keepChanges,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken);
+
+    Task QuickFetchAsync(
+        int workspaceId,
+        IReadOnlyCollection<int>? repositoryIds,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken);
 }

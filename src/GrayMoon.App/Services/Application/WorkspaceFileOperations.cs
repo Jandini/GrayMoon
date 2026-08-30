@@ -8,7 +8,8 @@ public sealed class WorkspaceFileOperations(
     WorkspaceFileRepository fileRepository,
     WorkspaceService workspaceService,
     IAgentBridge agentBridge,
-    WorkspaceFileVersionService fileVersionService) : IWorkspaceFileOperations
+    WorkspaceFileVersionService fileVersionService,
+    WorkspaceGitService workspaceGitService) : IWorkspaceFileOperations
 {
     public async Task<List<WorkspaceFileDto>?> ListAsync(int workspaceId, CancellationToken cancellationToken)
     {
@@ -86,9 +87,54 @@ public sealed class WorkspaceFileOperations(
         return (true, true, data, null);
     }
 
-    public async Task<(int Updated, int Failed, string? Error)> UpdateVersionsAsync(int workspaceId, CancellationToken cancellationToken)
+    public async Task<WorkspaceFileVersionUpdateResult> UpdateVersionsAsync(
+        int workspaceId,
+        CancellationToken cancellationToken,
+        IReadOnlySet<int>? selectedRepositoryIds = null,
+        bool filterPatternTokensToSelectedRepositories = true,
+        bool commitUpdatedFiles = false,
+        bool checkAfter = false,
+        IProgress<OperationProgress>? progress = null)
     {
-        var (updated, failed, error, _) = await fileVersionService.UpdateAllVersionsAsync(workspaceId, cancellationToken: cancellationToken);
-        return (updated, failed, error);
+        progress.Report("Updating file versions...");
+        var (updated, failed, error, updatedFiles) = await fileVersionService.UpdateAllVersionsAsync(
+            workspaceId,
+            selectedRepositoryIds: selectedRepositoryIds,
+            filterPatternTokensToSelectedRepositories: filterPatternTokensToSelectedRepositories,
+            cancellationToken: cancellationToken);
+
+        var mappedFiles = updatedFiles
+            .Select(f => new WorkspaceFileVersionUpdatedFile(f.RepositoryId, f.RepoName, f.FilePath))
+            .ToList();
+
+        if (error != null)
+            return new WorkspaceFileVersionUpdateResult(updated, failed, error, mappedFiles);
+
+        if (commitUpdatedFiles && updatedFiles.Count > 0)
+        {
+            progress.Report("Committing updated file versions...");
+            var byRepo = updatedFiles
+                .GroupBy(x => (x.RepositoryId, x.RepoName))
+                .Select(g => (g.Key.RepositoryId, g.Key.RepoName, (IReadOnlyList<string>)g.Select(x => x.FilePath).Distinct().ToList()))
+                .ToList();
+            var commitResults = await workspaceGitService.CommitFilePathsAsync(
+                workspaceId,
+                byRepo,
+                onProgress: (c, t, _) => progress.Report($"Committed version files {c} of {t}", c, t),
+                cancellationToken: cancellationToken);
+            foreach (var (_, _, errMsg) in commitResults)
+            {
+                if (!string.IsNullOrEmpty(errMsg))
+                    return new WorkspaceFileVersionUpdateResult(updated, failed, errMsg, mappedFiles);
+            }
+        }
+
+        if (checkAfter)
+        {
+            progress.Report("Checking file versions...");
+            await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, cancellationToken, forceFresh: true);
+        }
+
+        return new WorkspaceFileVersionUpdateResult(updated, failed, null, mappedFiles);
     }
 }
