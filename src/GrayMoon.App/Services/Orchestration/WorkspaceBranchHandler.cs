@@ -1,37 +1,30 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
+using GrayMoon.App.Api.Endpoints;
 using GrayMoon.App.Models.Api;
 
 namespace GrayMoon.App.Services.Orchestration;
 
 /// <summary>
 /// Handles branch-related operations: common branches, create branches, checkout, and sync-to-default.
-/// Stateless; UI state is owned by the caller.
+/// Stateless; UI state is owned by the caller. Calls <see cref="IWorkspaceBranchOperations"/> in-process.
 /// </summary>
 public sealed class WorkspaceBranchHandler(
     IServiceScopeFactory serviceScopeFactory,
-    IHttpClientFactory httpClientFactory,
+    IWorkspaceBranchOperations branchOperations,
     ILogger<WorkspaceBranchHandler> logger)
 {
     private const int DefaultMaxParallelOperations = 16;
 
-    public async Task<CommonBranchesApiResult?> GetCommonBranchesAsync(int workspaceId, string apiBaseUrl, CancellationToken cancellationToken)
+    public async Task<CommonBranchesApiResult?> GetCommonBranchesAsync(int workspaceId, CancellationToken cancellationToken)
     {
-        var httpClient = httpClientFactory.CreateClient();
-        var request = new { workspaceId };
-        var json = JsonSerializer.Serialize(request);
-        using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
-        using var response = await httpClient.PostAsync($"{apiBaseUrl}/api/branches/common", content, cancellationToken);
-
-        if (!response.IsSuccessStatusCode)
+        var outcome = await branchOperations.GetCommonBranchesAsync(workspaceId, cancellationToken);
+        if (!outcome.IsSuccessStatus)
         {
-            var errorText = await response.Content.ReadAsStringAsync(cancellationToken);
-            logger.LogWarning("Could not load common branches: {StatusCode}, {Error}", response.StatusCode, errorText);
+            logger.LogWarning("Could not load common branches: {StatusCode}, {Error}", outcome.StatusCode, outcome.ErrorText);
             return null;
         }
 
-        var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-        return JsonSerializer.Deserialize<CommonBranchesApiResult>(responseContent, AgentResponseJson.Options);
+        return outcome.Body as CommonBranchesApiResult;
     }
 
     public async Task CreateBranchesAsync(
@@ -63,53 +56,29 @@ public sealed class WorkspaceBranchHandler(
         string newBranchName,
         string baseBranch,
         bool setUpstream,
-        string apiBaseUrl,
         CancellationToken cancellationToken)
     {
-        var httpClient = httpClientFactory.CreateClient();
-        var apiRequest = new
+        var create = await branchOperations.CreateBranchAsync(workspaceId, repositoryId, newBranchName, baseBranch, cancellationToken);
+        if (!create.IsSuccessStatus)
         {
-            workspaceId,
-            repositoryId,
-            newBranchName,
-            baseBranch
-        };
-        var json = JsonSerializer.Serialize(apiRequest);
-        using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
-        using var response = await httpClient.PostAsync($"{apiBaseUrl}/api/branches/create", content, cancellationToken);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var errorText = await response.Content.ReadAsStringAsync(cancellationToken);
-            logger.LogError("Create branch failed: {StatusCode}, {Error}", response.StatusCode, errorText);
+            logger.LogError("Create branch failed: {StatusCode}, {Error}", create.StatusCode, create.ErrorText);
             return (false, "Failed to create branch.");
         }
 
-        var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-        var result = JsonSerializer.Deserialize<CreateBranchApiResult>(responseContent, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        var result = create.Body as CreateBranchApiResult;
         if (result is null || !result.Success)
             return (false, result?.Error ?? "Failed to create branch.");
 
         if (setUpstream)
         {
-            var upstreamRequest = new
+            var upstream = await branchOperations.SetUpstreamAsync(workspaceId, repositoryId, newBranchName, cancellationToken);
+            if (!upstream.IsSuccessStatus)
             {
-                workspaceId,
-                repositoryId,
-                branchName = newBranchName
-            };
-            var upstreamJson = JsonSerializer.Serialize(upstreamRequest);
-            using var upstreamContent = new StringContent(upstreamJson, System.Text.Encoding.UTF8, "application/json");
-            using var upstreamResponse = await httpClient.PostAsync($"{apiBaseUrl}/api/branches/set-upstream", upstreamContent, cancellationToken);
-            if (!upstreamResponse.IsSuccessStatusCode)
-            {
-                var upstreamError = await upstreamResponse.Content.ReadAsStringAsync(cancellationToken);
-                logger.LogWarning("Set upstream failed: {StatusCode}, {Error}", upstreamResponse.StatusCode, upstreamError);
+                logger.LogWarning("Set upstream failed: {StatusCode}, {Error}", upstream.StatusCode, upstream.ErrorText);
                 return (true, "Branch created but failed to set upstream.");
             }
 
-            var upstreamResponseContent = await upstreamResponse.Content.ReadAsStringAsync(cancellationToken);
-            var upstreamResult = JsonSerializer.Deserialize<CreateBranchApiResult>(upstreamResponseContent, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            var upstreamResult = upstream.Body as CreateBranchApiResult;
             if (upstreamResult != null && !upstreamResult.Success)
                 return (true, upstreamResult.Error ?? "Branch created but failed to set upstream.");
         }
@@ -121,51 +90,31 @@ public sealed class WorkspaceBranchHandler(
         int workspaceId,
         int repositoryId,
         string branchName,
-        string apiBaseUrl,
         CancellationToken cancellationToken)
-        => CheckoutBranchAsync(workspaceId, repositoryId, branchName, isTag: false, apiBaseUrl, cancellationToken);
+        => CheckoutBranchAsync(workspaceId, repositoryId, branchName, isTag: false, cancellationToken);
 
     public async Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(
         int workspaceId,
         int repositoryId,
         string branchName,
         bool isTag,
-        string apiBaseUrl,
         CancellationToken cancellationToken)
     {
-        var httpClient = httpClientFactory.CreateClient();
-        var apiRequest = new
-        {
-            repositoryId,
-            workspaceId,
-            branchName,
-            isTag
-        };
-        var json = JsonSerializer.Serialize(apiRequest);
-        using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
-        using var response = await httpClient.PostAsync($"{apiBaseUrl}/api/branches/checkout", content, cancellationToken);
-
         var failureLabel = isTag ? "Failed to checkout tag." : "Failed to checkout branch.";
+        var outcome = await branchOperations.CheckoutAsync(workspaceId, repositoryId, branchName, isTag, cancellationToken);
 
-        if (response.IsSuccessStatusCode)
+        if (outcome.IsSuccessStatus)
         {
-            var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-            var result = JsonSerializer.Deserialize<CheckoutBranchResponse>(responseContent, AgentResponseJson.Options);
-
+            var result = outcome.Body as CheckoutBranchApiResult;
             if (result != null && !result.Success)
-            {
                 return (false, !string.IsNullOrWhiteSpace(result.ErrorMessage) ? result.ErrorMessage : failureLabel);
-            }
 
             return (true, null);
         }
-        else
-        {
-            var errorText = await response.Content.ReadAsStringAsync(cancellationToken);
-            var message = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"{failureLabel.TrimEnd('.')}: {response.StatusCode}";
-            logger.LogError("Checkout {Kind} failed: {StatusCode}, {Error}", isTag ? "tag" : "branch", response.StatusCode, errorText);
-            return (false, message);
-        }
+
+        var message = outcome.ErrorText ?? $"{failureLabel.TrimEnd('.')}: {outcome.StatusCode}";
+        logger.LogError("Checkout {Kind} failed: {StatusCode}, {Error}", isTag ? "tag" : "branch", outcome.StatusCode, outcome.ErrorText);
+        return (false, message);
     }
 
     public async Task<(bool Success, string? ErrorMessage)> SyncToDefaultSingleAsync(
@@ -174,32 +123,27 @@ public sealed class WorkspaceBranchHandler(
         string? currentBranchName,
         bool deleteRemoteBranch,
         bool allowForceDeleteLocalBranch,
-        string apiBaseUrl,
         CancellationToken cancellationToken)
     {
-        var httpClient = httpClientFactory.CreateClient();
-        var baseUrl = apiBaseUrl;
+        var outcome = await branchOperations.SyncToDefaultAsync(
+            workspaceId,
+            repositoryId,
+            currentBranchName,
+            deleteRemoteBranch,
+            allowForceDeleteLocalBranch,
+            cancellationToken);
 
-        var apiRequest = new { workspaceId, repositoryId, currentBranchName, deleteRemoteBranch, allowForceDeleteLocalBranch };
-        var json = JsonSerializer.Serialize(apiRequest);
-        using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
-        using var response = await httpClient.PostAsync($"{baseUrl}/api/branches/sync-to-default", content, cancellationToken);
-
-        if (response.IsSuccessStatusCode)
-        {
+        if (outcome.IsSuccessStatus)
             return (true, null);
-        }
 
-        var errorText2 = await response.Content.ReadAsStringAsync(cancellationToken);
-        var errMsg = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText2) ?? $"Failed to sync to default branch: {response.StatusCode}";
-        logger.LogError("SyncToDefault failed for repo {RepositoryId}: {StatusCode}, {Error}", repositoryId, response.StatusCode, errorText2);
+        var errMsg = outcome.ErrorText ?? $"Failed to sync to default branch: {outcome.StatusCode}";
+        logger.LogError("SyncToDefault failed for repo {RepositoryId}: {StatusCode}, {Error}", repositoryId, outcome.StatusCode, outcome.ErrorText);
         return (false, errMsg);
     }
 
     public async Task<WorkspaceBranchBulkResult> FetchBranchesForWorkspaceAsync(
         int workspaceId,
         IReadOnlyCollection<int> repositoryIds,
-        string apiBaseUrl,
         Action<int, int>? reportProgress,
         CancellationToken cancellationToken)
     {
@@ -210,27 +154,22 @@ public sealed class WorkspaceBranchHandler(
         var completed = 0;
         var errors = new ConcurrentDictionary<int, string>();
         using var semaphore = new SemaphoreSlim(DefaultMaxParallelOperations, DefaultMaxParallelOperations);
-        var httpClient = httpClientFactory.CreateClient();
 
         var tasks = repositoryIds.Select(async repositoryId =>
         {
             await semaphore.WaitAsync(cancellationToken);
             try
             {
-                var apiRequest = new { workspaceId, repositoryId };
-                var json = JsonSerializer.Serialize(apiRequest);
-                using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
-                using var response = await httpClient.PostAsync($"{apiBaseUrl}/api/branches/refresh", content, cancellationToken);
-                if (!response.IsSuccessStatusCode)
+                await using var scope = serviceScopeFactory.CreateAsyncScope();
+                var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>();
+                var outcome = await ops.RefreshBranchesAsync(workspaceId, repositoryId, cancellationToken);
+                if (!outcome.IsSuccessStatus)
                 {
-                    var errorText = await response.Content.ReadAsStringAsync(cancellationToken);
-                    errors[repositoryId] = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText)
-                        ?? $"Failed to fetch branches: {response.StatusCode}";
+                    errors[repositoryId] = outcome.ErrorText ?? $"Failed to fetch branches: {outcome.StatusCode}";
                     return;
                 }
 
-                var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-                var result = JsonSerializer.Deserialize<BranchesResponse>(responseContent, AgentResponseJson.Options);
+                var result = TryReadRefreshBody(outcome.Body);
                 if (result?.Success == false)
                     errors[repositoryId] = result.ErrorMessage ?? "Failed to fetch branches.";
             }
@@ -260,7 +199,6 @@ public sealed class WorkspaceBranchHandler(
         int workspaceId,
         IReadOnlyCollection<int> repositoryIds,
         string branchName,
-        string apiBaseUrl,
         Action<int, int>? reportProgress,
         CancellationToken cancellationToken)
     {
@@ -271,29 +209,23 @@ public sealed class WorkspaceBranchHandler(
         var completed = 0;
         var errors = new ConcurrentDictionary<int, string>();
         using var semaphore = new SemaphoreSlim(DefaultMaxParallelOperations, DefaultMaxParallelOperations);
-        var httpClient = httpClientFactory.CreateClient();
 
         var tasks = repositoryIds.Select(async repositoryId =>
         {
             await semaphore.WaitAsync(cancellationToken);
             try
             {
-                var apiRequest = new { workspaceId, repositoryId, branchName };
-                var json = JsonSerializer.Serialize(apiRequest);
-                using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
-                using var response = await httpClient.PostAsync($"{apiBaseUrl}/api/branches/checkout", content, cancellationToken);
-                if (!response.IsSuccessStatusCode)
+                await using var scope = serviceScopeFactory.CreateAsyncScope();
+                var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>();
+                var outcome = await ops.CheckoutAsync(workspaceId, repositoryId, branchName, isTag: false, cancellationToken);
+                if (!outcome.IsSuccessStatus)
                 {
-                    var errorText = await response.Content.ReadAsStringAsync(cancellationToken);
-                    errors[repositoryId] = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText)
-                        ?? $"Failed to checkout branch: {response.StatusCode}";
+                    errors[repositoryId] = outcome.ErrorText ?? $"Failed to checkout branch: {outcome.StatusCode}";
                     return;
                 }
 
-                var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-                var result = JsonSerializer.Deserialize<CheckoutBranchResponse>(responseContent, AgentResponseJson.Options);
-                if (result is { Success: false })
-                    errors[repositoryId] = result.ErrorMessage ?? "Failed to checkout branch.";
+                if (outcome.Body is CheckoutBranchApiResult { Success: false } failed)
+                    errors[repositoryId] = failed.ErrorMessage ?? "Failed to checkout branch.";
             }
             catch (OperationCanceledException)
             {
@@ -317,35 +249,8 @@ public sealed class WorkspaceBranchHandler(
         return new WorkspaceBranchBulkResult(total - failureCount, failureCount, new Dictionary<int, string>(errors));
     }
 
-    public async Task<UpdateBranchFromDefaultResult> UpdateBranchFromDefaultAsync(int workspaceId, int repositoryId, string apiBaseUrl, CancellationToken cancellationToken)
-    {
-        var httpClient = httpClientFactory.CreateClient();
-        var request = new { workspaceId, repositoryId };
-        var json = JsonSerializer.Serialize(request);
-        using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
-
-        using var response = await httpClient.PostAsync($"{apiBaseUrl}/api/branches/update-from-default", content, cancellationToken);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var errorText = await response.Content.ReadAsStringAsync(cancellationToken);
-            var message = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText)
-                ?? $"Request failed: {response.StatusCode}";
-            logger.LogWarning("UpdateBranchFromDefault failed for repository {RepositoryId}: {Error}", repositoryId, message);
-            return new UpdateBranchFromDefaultResult(false, false, Array.Empty<string>(), message);
-        }
-
-        var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-        var result = JsonSerializer.Deserialize<UpdateBranchFromDefaultApiResult>(responseContent, AgentResponseJson.Options);
-        if (result == null)
-            return new UpdateBranchFromDefaultResult(false, false, Array.Empty<string>(), "Invalid response from server");
-
-        return new UpdateBranchFromDefaultResult(
-            result.Success,
-            result.HasConflicts,
-            result.ConflictFiles ?? Array.Empty<string>(),
-            null);
-    }
+    private static BranchesResponse? TryReadRefreshBody(object? body)
+        => body as BranchesResponse ?? AgentResponseJson.DeserializeAgentResponse<BranchesResponse>(body);
 }
 
 public sealed record WorkspaceBranchBulkResult(
@@ -361,17 +266,3 @@ public sealed record UpdateBranchFromDefaultResult(
     bool HasConflicts,
     IReadOnlyList<string> ConflictFiles,
     string? ErrorMessage);
-
-/// <summary>Mirrors the JSON returned by POST /api/branches/update-from-default.</summary>
-internal sealed class UpdateBranchFromDefaultApiResult
-{
-    [System.Text.Json.Serialization.JsonPropertyName("success")]
-    public bool Success { get; set; }
-
-    [System.Text.Json.Serialization.JsonPropertyName("hasConflicts")]
-    public bool HasConflicts { get; set; }
-
-    [System.Text.Json.Serialization.JsonPropertyName("conflictFiles")]
-    public IReadOnlyList<string>? ConflictFiles { get; set; }
-}
-

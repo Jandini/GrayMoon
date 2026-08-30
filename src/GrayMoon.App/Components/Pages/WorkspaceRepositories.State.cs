@@ -51,7 +51,6 @@ public sealed partial class WorkspaceRepositories
     private bool HasSearchFilter => !string.IsNullOrWhiteSpace(_effectiveSearch);
     private bool NoRepositoriesMatchSearch =>
         hasLoadedOnce && totalCount == 0 && !isInitialLoading && !string.IsNullOrWhiteSpace(_effectiveSearch);
-    private string ApiBaseUrl => NavigationManager.BaseUri.TrimEnd('/');
     private string RepositoriesModalTitle => $"Repositories for {workspace?.Name ?? "Workspace"}";
     private bool ShowRepositoriesFetchOverlay => _repositoriesModal.IsVisible && _repositoriesModal.IsFetching;
     private string RepositoriesFetchOverlayMessage => _repositoriesModal.FetchedRepositoryCount is null || _repositoriesModal.FetchedRepositoryCount == 0
