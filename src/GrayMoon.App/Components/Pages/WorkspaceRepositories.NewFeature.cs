@@ -64,13 +64,9 @@ public sealed partial class WorkspaceRepositories
                         tagFilteredRepoIds,
                         request.UpdateDependencies,
                         commitMessage: null,
-                        setProgress: msg => job.ReportProgress(msg),
-                        reportBranchProgress: (completed, total) =>
-                        {
-                            job.ReportProgress($"Created {completed} of {total} branches");
-                        },
+                        progress: job.ToOperationProgress(),
                         setRepositoryError: (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
-                        ct));
+                        cancellationToken: ct));
 
                 // Unconditional reload so workspaceRepositories is current for Phase 3
                 await ReloadWorkspaceDataFromFreshScopeAsync();

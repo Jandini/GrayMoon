@@ -37,6 +37,9 @@ public sealed class BackgroundJobHandle
         Changed?.Invoke();
     }
 
+    public IProgress<OperationProgress> ToOperationProgress()
+        => new Progress<OperationProgress>(p => ReportProgress(p.Message));
+
     public void Abort()
     {
         _cts.Cancel();

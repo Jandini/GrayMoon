@@ -52,7 +52,7 @@ public sealed partial class WorkspaceRepositories
                     WorkspaceId,
                     repoLinks,
                     keepChanges,
-                    job.ReportProgress,
+                    job.ToOperationProgress(),
                     ct);
 
                 await InvokeAsync(async () =>

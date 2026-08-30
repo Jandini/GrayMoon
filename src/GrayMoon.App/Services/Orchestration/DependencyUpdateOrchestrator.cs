@@ -34,7 +34,7 @@ public sealed class DependencyUpdateOrchestrator(
     public async Task<IReadOnlySet<int>> RunAsync(
         int workspaceId,
         CancellationToken cancellationToken,
-        Action<string> setProgress,
+        IProgress<OperationProgress>? progress,
         Action<int, string> onRepoError,
         Action? onAppSideComplete = null,
         IReadOnlySet<int>? repoIdsToUpdate = null,
@@ -56,6 +56,7 @@ public sealed class DependencyUpdateOrchestrator(
             repoIdsToUpdate == null ? "all repos (live, per level)" : $"{repoIdsToUpdate.Count} repo(s): [{string.Join(",", repoIdsToUpdate)}]",
             maxLevel?.ToString() ?? "none");
 
+        var setProgress = progress.ToMessageAction();
         var hadError = false;
         var allSyncedRepoIds = new HashSet<int>();
         void OnRepoError(int repoId, string msg)

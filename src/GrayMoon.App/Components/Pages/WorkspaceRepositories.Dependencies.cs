@@ -147,7 +147,7 @@ public sealed partial class WorkspaceRepositories
                 svc.RunUpdateAsync(
                     WorkspaceId,
                     ct,
-                    job.ReportProgress,
+                    job.ToOperationProgress(),
                     (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
                     repoIdsToUpdate: new HashSet<int> { repositoryId }));
         }, new PageJobOptions

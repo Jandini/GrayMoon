@@ -272,7 +272,7 @@ public sealed partial class WorkspaceRepositories
                     newBranchName,
                     baseBranch,
                     tagFilteredRepoIds,
-                    (completed, total) => { job.ReportProgress($"Created {completed} of {total} branches"); },
+                    job.ToOperationProgress(),
                     syncState: false,
                     cancellationToken: ct));
         }, new PageJobOptions

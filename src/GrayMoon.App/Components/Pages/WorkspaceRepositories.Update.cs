@@ -97,7 +97,7 @@ public sealed partial class WorkspaceRepositories
                 svc.RunUpdateAsync(
                     WorkspaceId,
                     ct,
-                    job.ReportProgress,
+                    job.ToOperationProgress(),
                     (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
                     repoIdsToUpdate: null,
                     commitMessage: commitMessage,
@@ -271,7 +271,7 @@ public sealed partial class WorkspaceRepositories
                     svc => svc.RunUpdateAsync(
                         WorkspaceId,
                         ct,
-                        job.ReportProgress,
+                        job.ToOperationProgress(),
                         (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
                         commitMessage: commitMessage,
                         includeDepsInCommitMessage: includeDepsInCommitMessage,
@@ -369,7 +369,7 @@ public sealed partial class WorkspaceRepositories
                     svc => svc.RunUpdateAsync(
                         WorkspaceId,
                         ct,
-                        job.ReportProgress,
+                        job.ToOperationProgress(),
                         (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
                         repoIdsToUpdate: null,
                         commitMessage: commitMessage,

@@ -110,7 +110,7 @@ public sealed partial class WorkspaceRepositories
                     WorkspaceId,
                     repositoryId,
                     ct,
-                    msg => { job.ReportProgress(msg); return Task.CompletedTask; },
+                    job.ToOperationProgress(),
                     (id, err) => SafeInvoke(() =>
                     {
                         if (err is null)

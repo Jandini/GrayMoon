@@ -58,7 +58,7 @@ public sealed class CommitSyncPullStateTests
             ctx.WorkspaceId,
             ctx.RepositoryId,
             CancellationToken.None,
-            _ => Task.CompletedTask,
+            new Progress<OperationProgress>(_ => { }),
             (_, _) => { },
             _ => { });
     }
