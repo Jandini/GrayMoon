@@ -223,7 +223,7 @@
                 var link = e.target.closest('.sidebar .nav-link');
                 if (!link) return;
                 var page = document.querySelector('.page');
-                if (!page || !page.classList.contains('page--navbar-collapsed')) return;
+                if (!page || (!page.classList.contains('page--navbar-collapsed') && !window.matchMedia('(max-width: 640.98px)').matches)) return;
                 var item = link.closest('[data-nav-label]');
                 var label = item ? item.getAttribute('data-nav-label') : '';
                 if (!label) return;

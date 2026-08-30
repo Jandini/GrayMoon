@@ -57,9 +57,9 @@
     --error: #f48771;
     --info: #4fc1ff;
 
-    /* Layout dimensions (mobile-first; overridden at >= 641px) */
-    --sidebar-width: 0px;
-    --topbar-height: 2.75rem;
+    /* Layout dimensions (desktop sidebar at all widths; icon-only below 641px) */
+    --sidebar-width: 180px;
+    --topbar-height: 3.5rem;
 
     /* Bootstrap h2 base is calc(1.325rem + 0.9vw); page titles use 70% of that */
     --page-title-font-size: calc((1.325rem + 0.9vw) * 0.7);
@@ -67,10 +67,9 @@
     --topbar-workspace-title-font-size: calc((1.325rem + 0.9vw) * 0.72);
 }
 
-@media (min-width: 641px) {
+@media (max-width: 640.98px) {
     :root {
-        --sidebar-width: 180px;
-        --topbar-height: 3.5rem;
+        --sidebar-width: 3.5rem;
     }
 }
 

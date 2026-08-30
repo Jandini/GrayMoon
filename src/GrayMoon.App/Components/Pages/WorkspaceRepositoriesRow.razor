@@ -33,7 +33,7 @@
             @if (!string.IsNullOrEmpty(repoUrl))
             {
                 <span class="repo-name-cell gm-menu-trigger">
-                    <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link" title="@RepositoryTypeTitle">
+                    <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link">
                         <strong>@repo.RepositoryName</strong>
                     </a>
                     @if (repo.Archived)
@@ -41,14 +41,17 @@
                         <span class="badge repo-archived-badge">archived</span>
                     }
                     <div class="gm-menu-panel">
-                        <GitHubSectionsMenu BaseUrls="@(new List<string> { repoUrl })" PrPullMap="@singleRepoPrPullMap" />
+                        <GitHubSectionsMenu BaseUrls="@(new List<string> { repoUrl })"
+                                            PrPullMap="@singleRepoPrPullMap"
+                                            TypeIcon="@RepositoryTypeIcon"
+                                            TypeLabel="@RepositoryTypeTitle" />
                     </div>
                 </span>
             }
             else
             {
                 <span class="repo-name-cell">
-                    <strong title="@RepositoryTypeTitle">@repo.RepositoryName</strong>
+                    <strong>@repo.RepositoryName</strong>
                     @if (repo.Archived)
                     {
                         <span class="badge repo-archived-badge">archived</span>
@@ -460,6 +463,16 @@
         ProjectType.Executable => "Executable",
         ProjectType.Library    => "Library",
         _                      => "Unknown"
+    };
+
+    private string RepositoryTypeIcon => Link?.RepositoryType switch
+    {
+        ProjectType.Service    => "bi-hdd-network",
+        ProjectType.Package    => "bi-box-seam",
+        ProjectType.Test       => "bi-check2-square",
+        ProjectType.Executable => "bi-terminal",
+        ProjectType.Library    => "bi-layers",
+        _                      => "bi-question-circle"
     };
 
     private async Task HandleBranchClick()
