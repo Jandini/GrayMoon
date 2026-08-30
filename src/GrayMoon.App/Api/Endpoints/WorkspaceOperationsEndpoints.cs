@@ -346,8 +346,8 @@ file static class WorkspaceCommandHttp
         IResult? result = null;
         var started = runner.TryStart(
             workspaceId,
-            WorkspaceJobKeys.WorkspaceFamily,
-            WorkspaceJobKeys.WorkspaceFamily,
+            "workspace",
+            WorkspaceJobKeys.RepositoriesOverlayKey(workspaceId),
             displayMessage,
             async (op, ct) =>
             {

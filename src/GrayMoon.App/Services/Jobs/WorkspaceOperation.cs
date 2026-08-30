@@ -15,7 +15,7 @@ public sealed class WorkspaceOperation
     public Guid Id { get; } = Guid.NewGuid();
     public int WorkspaceId { get; }
     public string OperationKind { get; }
-    public string OverlayFamily { get; }
+    public string OverlayKey { get; }
     public JobTerminalBuffer Terminal { get; } = new();
     public CancellationToken CancellationToken => _cts.Token;
     public Task WhenCompleted => _completed.Task;
@@ -34,11 +34,11 @@ public sealed class WorkspaceOperation
 
     public event Action? Changed;
 
-    internal WorkspaceOperation(int workspaceId, string operationKind, string overlayFamily, string displayMessage)
+    internal WorkspaceOperation(int workspaceId, string operationKind, string overlayKey, string displayMessage)
     {
         WorkspaceId = workspaceId;
         OperationKind = operationKind;
-        OverlayFamily = overlayFamily;
+        OverlayKey = overlayKey;
         _displayMessage = displayMessage;
     }
 

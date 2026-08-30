@@ -16,12 +16,13 @@ public interface IWorkspaceOperationRunner
     /// <summary>
     /// Starts work when the workspace is idle. If a mutation is already running, returns
     /// that operation and does not invoke <paramref name="work"/>.
+    /// <paramref name="overlayKey"/> is the originating page path; only that path shows the overlay.
     /// </summary>
     /// <returns>True when this call started new work; false when it returned the existing run.</returns>
     bool TryStart(
         int workspaceId,
         string operationKind,
-        string overlayFamily,
+        string overlayKey,
         string displayMessage,
         Func<WorkspaceOperation, CancellationToken, Task> work,
         out WorkspaceOperation operation);
