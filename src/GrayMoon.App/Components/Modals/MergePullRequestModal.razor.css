@@ -358,7 +358,7 @@
     background-color: #da3633;
     border-color: rgba(240, 246, 252, 0.1);
     color: #f0f6fc;
-    font-weight: 600;
+    font-weight: 400;
 }
 
 ::deep .merge-pr-btn-close:hover:not(:disabled),
@@ -377,6 +377,24 @@
     background-color: #30363d;
     border-color: rgba(240, 246, 252, 0.1);
     color: rgba(255, 255, 255, 0.5);
+}
+
+::deep .merge-pr-btn-close--muted {
+    background-color: #30363d;
+    border-color: rgba(240, 246, 252, 0.1);
+    color: #c9d1d9;
+}
+
+::deep .merge-pr-btn-close--muted:hover:not(:disabled),
+::deep .merge-pr-btn-close--muted:focus-visible:not(:disabled) {
+    background-color: #3d444d;
+    border-color: rgba(240, 246, 252, 0.1);
+    color: #f0f6fc;
+}
+
+::deep .merge-pr-btn-close--muted:active:not(:disabled) {
+    background-color: #30363d;
+    color: #c9d1d9;
 }
 
 ::deep .merge-pr-split-btn {

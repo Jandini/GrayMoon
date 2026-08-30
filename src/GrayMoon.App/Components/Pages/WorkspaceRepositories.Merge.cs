@@ -366,12 +366,12 @@ public sealed partial class WorkspaceRepositories
 
     private Task HandleClosePullRequestClickedAsync()
     {
-        if (_mergePrModal.Details?.ChangedFiles != 0 || _mergePrModal.IsMerging)
+        if (_mergePrModal.IsMerging)
             return Task.CompletedTask;
 
         var prNumber = _mergePrModal.PrNumber;
         ShowConfirm(
-            $"No file changed.\nClose pull request #{prNumber} without merging?",
+            $"Close pull request #{prNumber} without merging?",
             ExecuteClosePullRequestAsync,
             "Close");
         return Task.CompletedTask;

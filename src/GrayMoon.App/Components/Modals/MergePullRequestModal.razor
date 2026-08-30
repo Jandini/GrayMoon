@@ -280,15 +280,12 @@
                         <label class="form-check-label" for="merge-pr-sync-default">Sync to default branch</label>
                     </div>
                     <div class="merge-pr-footer-actions">
-                        @if (ShowClosePrButton)
-                        {
-                            <button type="button"
-                                    class="btn merge-pr-btn-close"
-                                    disabled="@(IsLoading || IsMerging)"
-                                    @onclick="HandleCloseClick">
-                                Close
-                            </button>
-                        }
+                        <button type="button"
+                                class="btn merge-pr-btn-close @(ShowClosePrAsDanger ? null : "merge-pr-btn-close--muted")"
+                                disabled="@(IsLoading || IsMerging)"
+                                @onclick="HandleCloseClick">
+                            Close
+                        </button>
                         <div class="btn-group merge-pr-split-btn">
                             <button type="button"
                                     class="btn merge-pr-btn-github @(ShowMergeWarningStyle ? "merge-pr-btn-github--warning" : null) merge-pr-split-btn__main"
@@ -353,7 +350,7 @@
     [Parameter] public string? ErrorMessage { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback<MergePullRequestChoice> OnMerge { get; set; }
-    /// <summary>Raised when the user clicks Close pull request, shown only when the PR has 0 files changed.</summary>
+    /// <summary>Raised when the user clicks Close. The button is always shown; it is red only when the PR has 0 files changed.</summary>
     [Parameter] public EventCallback OnClosePullRequest { get; set; }
     /// <summary>Workspace's Git Changes page URL, used to link the "N uncommitted changes" text in the local-state row. Null/empty hides the link.</summary>
     [Parameter] public string? ChangesUrl { get; set; }
@@ -574,8 +571,8 @@
         _showMethodDropdown = false;
     }
 
-    /// <summary>True when GitHub reports this PR changed no files - closing is a better option than an empty merge.</summary>
-    private bool ShowClosePrButton => Details?.ChangedFiles == 0;
+    /// <summary>True when GitHub reports this PR changed no files - Close renders red as the better option than an empty merge.</summary>
+    private bool ShowClosePrAsDanger => Details?.ChangedFiles == 0;
 
     private async Task HandleMergeClick()
     {
