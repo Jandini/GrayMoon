@@ -56,21 +56,3 @@ public static class WorkspaceEndpoints
         return TypedResults.Ok(data);
     }
 }
-
-public sealed class WorkspaceFileDto
-{
-    public int FileId { get; set; }
-    public int WorkspaceId { get; set; }
-    public int RepositoryId { get; set; }
-    public string? RepositoryName { get; set; }
-    public string FileName { get; set; } = string.Empty;
-    public string FilePath { get; set; } = string.Empty;
-    public bool IsMissingOnDisk { get; set; }
-}
-
-public sealed class AddWorkspaceFileRequest
-{
-    public int RepositoryId { get; set; }
-    public string FileName { get; set; } = string.Empty;
-    public string FilePath { get; set; } = string.Empty;
-}

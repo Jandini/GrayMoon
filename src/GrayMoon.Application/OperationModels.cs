@@ -1,4 +1,4 @@
-namespace GrayMoon.App.Services.Application;
+namespace GrayMoon.Application;
 
 public sealed record OperationProgress(string Message, int? Completed = null, int? Total = null);
 

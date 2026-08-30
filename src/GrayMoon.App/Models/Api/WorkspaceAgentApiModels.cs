@@ -33,25 +33,6 @@ public sealed class AgentRepositoriesListResponse
     public List<string>? Repositories { get; set; }
 }
 
-/// <summary>Agent SearchFiles response.</summary>
-public sealed class AgentSearchFilesResponse
-{
-    [JsonPropertyName("files")]
-    public List<AgentSearchFileItemDto>? Files { get; set; }
-}
-
-public sealed class AgentSearchFileItemDto
-{
-    [JsonPropertyName("repositoryName")]
-    public string? RepositoryName { get; set; }
-
-    [JsonPropertyName("filePath")]
-    public string? FilePath { get; set; }
-
-    [JsonPropertyName("fileName")]
-    public string? FileName { get; set; }
-}
-
 /// <summary>Agent UpdateFileVersions response.</summary>
 public sealed class AgentUpdateFileVersionsResponse
 {

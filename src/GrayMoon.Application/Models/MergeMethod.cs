@@ -1,6 +1,6 @@
 namespace GrayMoon.App.Models;
 
-/// <summary>A GitHub pull request merge method. Only methods the repository actually permits (per <see cref="GitHubRepositoryMergeSettingsDto"/>) are ever offered.</summary>
+/// <summary>A GitHub pull request merge method. Only methods the repository actually permits (per GitHubRepositoryMergeSettingsDto) are ever offered.</summary>
 public enum MergeMethod
 {
     Merge,
@@ -26,3 +26,6 @@ public static class MergeMethodExtensions
         _ => "Create a merge commit"
     };
 }
+
+/// <summary>Result of a merge attempt. Message is always GitHub's own error text on failure - GrayMoon never invents a reason.</summary>
+public sealed record MergeResult(bool Success, string? Message);

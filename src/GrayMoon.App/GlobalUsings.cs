@@ -1,3 +1,4 @@
+global using GrayMoon.Application;
 global using GrayMoon.App.Services.Agent;
 global using GrayMoon.App.Services.Application;
 global using GrayMoon.App.Services.Connectors;
