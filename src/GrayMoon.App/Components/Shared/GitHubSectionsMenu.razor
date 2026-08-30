@@ -4,7 +4,13 @@
 
 @if (ShowTitle)
 {
-    <div class="gm-menu-title">@Title</div>
+    <div class="gm-menu-title">
+        <span>@Title</span>
+        @if (!string.IsNullOrEmpty(TypeIcon))
+        {
+            <i class="bi @TypeIcon gm-menu-title-type" title="@TypeLabel" aria-label="@TypeLabel"></i>
+        }
+    </div>
 }
 @foreach (var item in Items)
 {
@@ -32,6 +38,10 @@
     [Parameter] public IReadOnlyDictionary<string, string>? PrPullMap { get; set; }
     [Parameter] public bool ShowTitle { get; set; } = true;
     [Parameter] public string Title { get; set; } = "Open in GitHub...";
+    /// <summary>Optional Bootstrap icon class (e.g. bi-box-seam) shown right-aligned on the title row.</summary>
+    [Parameter] public string? TypeIcon { get; set; }
+    /// <summary>Accessible name / tooltip for <see cref="TypeIcon"/>.</summary>
+    [Parameter] public string? TypeLabel { get; set; }
 
     private static readonly (string Label, string Icon, string Suffix)[] Items =
     [

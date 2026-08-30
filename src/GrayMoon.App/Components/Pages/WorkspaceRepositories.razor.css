@@ -191,10 +191,19 @@
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
+    user-select: text;
 }
 
 ::deep .repositories-table .repo-name-cell.gm-menu-trigger {
-    cursor: default;
+    cursor: pointer;
+    user-select: text;
+}
+
+::deep .repositories-table .repo-name-cell .repo-link,
+::deep .repositories-table .repo-name-cell .repo-link strong,
+::deep .repositories-table .repo-name-cell > strong {
+    user-select: text;
+    cursor: pointer;
 }
 
 ::deep .repositories-table .repo-archived-badge {
@@ -260,6 +269,8 @@
 }
 
 ::deep .repositories-table .gm-menu-title {
+    display: flex;
+    align-items: center;
     color: #888;
     font-size: 0.72rem;
     padding: 0.3rem 0.8rem 0.3rem;
@@ -267,6 +278,14 @@
     margin-bottom: 0.15rem;
     cursor: default;
     letter-spacing: 0.02em;
+}
+
+::deep .repositories-table .gm-menu-title-type {
+    margin-left: auto;
+    padding-left: 0.75rem;
+    font-size: 0.85rem;
+    color: #9a9a9a;
+    flex-shrink: 0;
 }
 
 ::deep .repositories-table .gm-menu-items--disabled {
