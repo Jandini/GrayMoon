@@ -93,9 +93,10 @@ public sealed partial class WorkspaceRepositories
     /// <summary>
     /// Re-runs only the review-details phase (reviews/checks/allowed methods/local-state) - the same
     /// background load that follows the snapshot when the dialog opens. Leaves title and branches
-    /// untouched so a just-edited title is not overwritten.
+    /// untouched so a just-edited title is not overwritten. Pass <paramref name="showLoading"/> as
+    /// false after a title save so the status rows stay visible while the refresh runs.
     /// </summary>
-    private async Task RefreshMergeDialogReviewDetailsAsync()
+    private async Task RefreshMergeDialogReviewDetailsAsync(bool showLoading = true)
     {
         var repositoryId = _mergePrModal.RepositoryId;
         var prNumber = _mergePrModal.PrNumber;
@@ -104,8 +105,11 @@ public sealed partial class WorkspaceRepositories
             return;
 
         var requestId = ++_mergeReviewDetailsRequestId;
-        _mergePrModal = _mergePrModal with { IsLoadingReviewDetails = true, ErrorMessage = null };
-        StateHasChanged();
+        if (showLoading)
+        {
+            _mergePrModal = _mergePrModal with { IsLoadingReviewDetails = true, ErrorMessage = null };
+            StateHasChanged();
+        }
 
         PullRequestMergeReviewDetails? review = null;
         try
@@ -184,7 +188,7 @@ public sealed partial class WorkspaceRepositories
             StateHasChanged();
         }
 
-        await RefreshMergeDialogReviewDetailsAsync();
+        await RefreshMergeDialogReviewDetailsAsync(showLoading: false);
     }
 
     private void CloseMergeModal()
