@@ -17,4 +17,11 @@ public interface IWorkspacePullRequestOperations
         MergeMethod method,
         string? expectedHeadSha,
         CancellationToken cancellationToken);
+
+    Task<MergeResult> UpdateTitleAsync(
+        int workspaceId,
+        int repositoryId,
+        int prNumber,
+        string title,
+        CancellationToken cancellationToken);
 }

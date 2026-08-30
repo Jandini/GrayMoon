@@ -274,6 +274,24 @@ public sealed class WorkspacePullRequestService(
             .Include(wr => wr.GitStatus)
             .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
 
+    /// <summary>Updates only the pull request title on GitHub. Leaves body, state, and base branch unchanged.</summary>
+    public async Task<MergeResult> UpdatePullRequestTitleAsync(int workspaceId, int repositoryId, int prNumber, string title, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return new MergeResult(false, "Title is required.");
+
+        var link = await GetLinkWithConnectorAsync(workspaceId, repositoryId, cancellationToken);
+        if (link?.Repository == null)
+            return new MergeResult(false, "Repository not found in this workspace.");
+
+        return await gitHubPullRequestMergeService.UpdatePullRequestTitleAsync(
+            link.Repository,
+            link.Repository.Connector,
+            prNumber,
+            title.Trim(),
+            cancellationToken);
+    }
+
     /// <summary>Merges the pull request via GitHub and, on success, forces an immediate PR refresh so the grid badge flips to "merged" without waiting for the next poll.</summary>
     public async Task<MergeResult> MergePullRequestAsync(int workspaceId, int repositoryId, int prNumber, MergeMethod method, string? expectedHeadSha, CancellationToken cancellationToken = default)
     {

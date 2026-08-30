@@ -263,6 +263,13 @@ public sealed class GitHubCreatePullRequestRequestDto
     public bool Draft { get; set; }
 }
 
+/// <summary>Body for PATCH /repos/{owner}/{repo}/pulls/{pull_number} when only the title is changing.</summary>
+public sealed class GitHubUpdatePullRequestTitleRequestDto
+{
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = string.Empty;
+}
+
 /// <summary>Body for POST /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers.</summary>
 public sealed class GitHubRequestReviewersRequestDto
 {

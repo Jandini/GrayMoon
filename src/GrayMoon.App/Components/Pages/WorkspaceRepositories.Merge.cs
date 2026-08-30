@@ -15,6 +15,7 @@ namespace GrayMoon.App.Components.Pages;
 public sealed partial class WorkspaceRepositories
 {
     private MergePullRequestModalState _mergePrModal = new();
+    private int _mergeReviewDetailsRequestId;
 
     private async Task OpenMergeDialogAsync(WorkspaceRepositoryLink link)
     {
@@ -86,18 +87,38 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
+        await RefreshMergeDialogReviewDetailsAsync();
+    }
+
+    /// <summary>
+    /// Re-runs only the review-details phase (reviews/checks/allowed methods/local-state) - the same
+    /// background load that follows the snapshot when the dialog opens. Leaves title and branches
+    /// untouched so a just-edited title is not overwritten.
+    /// </summary>
+    private async Task RefreshMergeDialogReviewDetailsAsync()
+    {
+        var repositoryId = _mergePrModal.RepositoryId;
+        var prNumber = _mergePrModal.PrNumber;
+        var headSha = _mergePrModal.Details?.HeadSha;
+        if (repositoryId <= 0 || prNumber <= 0 || !_mergePrModal.IsVisible || _mergePrModal.IsMerging)
+            return;
+
+        var requestId = ++_mergeReviewDetailsRequestId;
+        _mergePrModal = _mergePrModal with { IsLoadingReviewDetails = true, ErrorMessage = null };
+        StateHasChanged();
+
         PullRequestMergeReviewDetails? review = null;
         try
         {
             review = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, PullRequestMergeReviewDetails?>(
-                svc => svc.GetMergeReviewDetailsAsync(WorkspaceId, link.RepositoryId, prNumber.Value, snapshot.HeadSha));
+                svc => svc.GetMergeReviewDetailsAsync(WorkspaceId, repositoryId, prNumber, headSha));
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Failed to load merge review details for repo {RepositoryId}, PR #{PrNumber}", link.RepositoryId, prNumber.Value);
+            Logger.LogWarning(ex, "Failed to load merge review details for repo {RepositoryId}, PR #{PrNumber}", repositoryId, prNumber);
         }
 
-        if (_disposed || !_mergePrModal.IsVisible || _mergePrModal.RepositoryId != link.RepositoryId)
+        if (_disposed || !_mergePrModal.IsVisible || _mergePrModal.RepositoryId != repositoryId || requestId != _mergeReviewDetailsRequestId)
             return;
 
         _mergePrModal = _mergePrModal with
@@ -122,6 +143,48 @@ public sealed partial class WorkspaceRepositories
             ErrorMessage = review == null ? "Could not load review/check status from GitHub." : null
         };
         StateHasChanged();
+    }
+
+    private async Task HandleMergeDialogTitleChangedAsync(string title)
+    {
+        var repositoryId = _mergePrModal.RepositoryId;
+        var prNumber = _mergePrModal.PrNumber;
+        if (repositoryId <= 0 || prNumber <= 0 || !_mergePrModal.IsVisible || _mergePrModal.IsMerging)
+            return;
+
+        MergeResult result;
+        try
+        {
+            result = await ScopedExecutor.ExecuteAsync<IWorkspacePullRequestOperations, MergeResult>(
+                svc => svc.UpdateTitleAsync(WorkspaceId, repositoryId, prNumber, title, CancellationToken.None));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to update PR title for repo {RepositoryId}, PR #{PrNumber}", repositoryId, prNumber);
+            result = new MergeResult(false, ex.Message);
+        }
+
+        if (_disposed || !_mergePrModal.IsVisible || _mergePrModal.RepositoryId != repositoryId)
+            return;
+
+        if (!result.Success)
+        {
+            _mergePrModal = _mergePrModal with { ErrorMessage = result.Message ?? "Could not update the pull request title on GitHub." };
+            StateHasChanged();
+            return;
+        }
+
+        if (_mergePrModal.Details != null)
+        {
+            _mergePrModal = _mergePrModal with
+            {
+                Details = _mergePrModal.Details with { Title = title },
+                ErrorMessage = null
+            };
+            StateHasChanged();
+        }
+
+        await RefreshMergeDialogReviewDetailsAsync();
     }
 
     private void CloseMergeModal()

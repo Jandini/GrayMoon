@@ -203,6 +203,36 @@ public sealed class GitHubPullRequestMergeService(
         }
     }
 
+    /// <summary>Updates only the pull request title on GitHub. Does not change body, state, or base branch.</summary>
+    public async Task<MergeResult> UpdatePullRequestTitleAsync(Repository repository, Connector? connector, int prNumber, string title, CancellationToken cancellationToken = default)
+    {
+        if (repository == null || prNumber <= 0)
+            return new MergeResult(false, "Invalid repository or pull request.");
+        if (string.IsNullOrWhiteSpace(title))
+            return new MergeResult(false, "Title is required.");
+        if (connector == null || connector.ConnectorType != ConnectorType.GitHub || string.IsNullOrWhiteSpace(connector.UserToken))
+            return new MergeResult(false, "This repository is not connected to GitHub.");
+        if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(repository.CloneUrl, out var owner, out var repo) || owner == null || repo == null)
+            return new MergeResult(false, "Could not resolve the GitHub owner/repository from the clone URL.");
+
+        try
+        {
+            await gitHubService.UpdatePullRequestTitleAsync(connector, owner, repo, prNumber, title.Trim(), cancellationToken);
+            return new MergeResult(true, null);
+        }
+        catch (HttpRequestException ex)
+        {
+            var friendly = GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(ex);
+            logger.LogWarning(ex, "Update PR title failed for {Owner}/{Repo} PR #{Number}", owner, repo, prNumber);
+            return new MergeResult(false, friendly);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Update PR title errored for {Owner}/{Repo} PR #{Number}", owner, repo, prNumber);
+            return new MergeResult(false, ex.Message);
+        }
+    }
+
     private static (int Approved, int ChangesRequested, IReadOnlyList<string> Outstanding, IReadOnlyList<string> ApprovedBy) SummarizeReviews(
         List<GitHubPullRequestReviewDto> reviews,
         List<GitHubUserDto>? requestedReviewers,

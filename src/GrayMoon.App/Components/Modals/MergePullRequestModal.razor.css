@@ -5,7 +5,135 @@
 }
 
 ::deep .merge-pr-title {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.35rem;
     font-weight: 500;
+    line-height: 1.35;
+    min-height: 1.75rem;
+}
+
+::deep .merge-pr-title__text {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+::deep .merge-pr-title__edit {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    margin-top: 0.08rem;
+    padding: 0;
+    border: none;
+    border-radius: 0.25rem;
+    background: transparent;
+    color: #6e7681;
+    font-size: 0.78rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+::deep .merge-pr-title__edit:hover:not(:disabled),
+::deep .merge-pr-title__edit:focus-visible:not(:disabled) {
+    color: #c9d1d9;
+    background-color: rgba(110, 118, 129, 0.22);
+}
+
+::deep .merge-pr-title__edit:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--focus-ring-outer, rgba(255, 255, 255, 0.52));
+}
+
+::deep .merge-pr-title__edit:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+/*
+ * Compact single-line editor: the field is the chrome, and save/cancel sit inside it
+ * so they cannot outgrow the input. Height is locked to 1.75rem.
+ */
+::deep .merge-pr-title-editor {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 1.75rem;
+    padding: 0 0.18rem 0 0.55rem;
+    gap: 0.1rem;
+    background-color: var(--bg-input, #3c3c3c);
+    border: 1px solid var(--border-color, #3e3e42);
+    border-radius: 0.125rem;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+::deep .merge-pr-title-editor:focus-within {
+    border-color: var(--focus-ring-outer, rgba(255, 255, 255, 0.52));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+::deep .merge-pr-title-editor__input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-primary, #cccccc);
+    font: inherit;
+    font-weight: 500;
+    line-height: 1.75rem;
+    outline: none;
+    box-shadow: none;
+}
+
+::deep .merge-pr-title-editor__actions {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    height: 1.4rem;
+    padding-left: 0.2rem;
+    margin-left: 0.1rem;
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+::deep .merge-pr-title-editor__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.4rem;
+    height: 1.4rem;
+    padding: 0;
+    border: none;
+    border-radius: 0.125rem;
+    background: transparent;
+    color: #8b949e;
+    font-size: 0.8rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+::deep .merge-pr-title-editor__btn:hover:not(:disabled),
+::deep .merge-pr-title-editor__btn:focus-visible:not(:disabled) {
+    color: #c9d1d9;
+    background-color: rgba(110, 118, 129, 0.22);
+}
+
+::deep .merge-pr-title-editor__btn:disabled {
+    color: #484f58;
+    cursor: default;
+}
+
+::deep .merge-pr-title-editor__btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--focus-ring-outer, rgba(255, 255, 255, 0.52));
 }
 
 /*

@@ -62,7 +62,64 @@
                         }
                         else
                         {
-                            <div class="merge-pr-title mb-1">@Details.Title</div>
+                            <div class="merge-pr-title mb-1">
+                                @if (_isEditingTitle)
+                                {
+                                    <div class="merge-pr-title-editor">
+                                        <input type="text"
+                                               class="merge-pr-title-editor__input"
+                                               @bind="_titleDraft"
+                                               @bind:event="oninput"
+                                               @onkeydown="HandleTitleEditorKeyDown"
+                                               @onkeydown:stopPropagation="true"
+                                               @ref="_titleInput"
+                                               maxlength="256"
+                                               spellcheck="false"
+                                               autocomplete="off"
+                                               disabled="@_isSavingTitle"
+                                               aria-label="Pull request title" />
+                                        <div class="merge-pr-title-editor__actions">
+                                            <button type="button"
+                                                    class="merge-pr-title-editor__btn merge-pr-title-editor__btn--save"
+                                                    disabled="@(!CanSaveTitle)"
+                                                    title="Save"
+                                                    aria-label="Save title"
+                                                    @onmousedown:preventDefault
+                                                    @onclick="SaveTitle">
+                                                @if (_isSavingTitle)
+                                                {
+                                                    <span class="spinner-border spinner-border-sm"></span>
+                                                }
+                                                else
+                                                {
+                                                    <i class="bi bi-check-lg"></i>
+                                                }
+                                            </button>
+                                            <button type="button"
+                                                    class="merge-pr-title-editor__btn merge-pr-title-editor__btn--cancel"
+                                                    disabled="@_isSavingTitle"
+                                                    title="Cancel"
+                                                    aria-label="Cancel title edit"
+                                                    @onmousedown:preventDefault
+                                                    @onclick="CancelTitleEdit">
+                                                <i class="bi bi-x-lg"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span class="merge-pr-title__text">@DisplayTitle</span>
+                                    <button type="button"
+                                            class="merge-pr-title__edit"
+                                            title="Edit title"
+                                            aria-label="Edit title"
+                                            disabled="@IsMerging"
+                                            @onclick="BeginTitleEdit">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                }
+                            </div>
                             <div class="merge-pr-branches text-muted mb-3">
                                 <code>@Details.HeadRef</code>
                                 <span class="mx-1">&#8594;</span>
@@ -280,6 +337,8 @@
     [Parameter] public EventCallback OnPullRequested { get; set; }
     /// <summary>True while a push/pull triggered from the local-state row is running. Drops the dialog's z-index below the page's LoadingOverlay so it visually covers the (still-mounted) dialog instead of the dialog disappearing.</summary>
     [Parameter] public bool IsSyncingLocalState { get; set; }
+    /// <summary>Raised with the new title so the caller can PATCH it on GitHub, then re-run the review/checks phase only after that update succeeds.</summary>
+    [Parameter] public EventCallback<string> OnTitleChanged { get; set; }
 
     private MergeMethod _selectedMethod;
     private bool _showMethodDropdown;
@@ -287,6 +346,19 @@
     private bool _focusOnNextRender;
     private int? _lastDetailsNumber;
     private ElementReference _modalElement;
+    private ElementReference _titleInput;
+
+    private bool _isEditingTitle;
+    private bool _isSavingTitle;
+    private bool _titleOverridden;
+    private bool _focusTitleInput;
+    private string _displayTitle = string.Empty;
+    private string _titleDraft = string.Empty;
+
+    private string DisplayTitle => _titleOverridden || !string.IsNullOrEmpty(_displayTitle) ? _displayTitle : (Details?.Title ?? string.Empty);
+    private bool CanSaveTitle => !_isSavingTitle
+                                 && !string.IsNullOrWhiteSpace(_titleDraft)
+                                 && !string.Equals(_titleDraft.Trim(), DisplayTitle, StringComparison.Ordinal);
 
     /// <summary>Backed by <see cref="SyncToDefaultPreference"/> (a singleton) so the checkbox remembers the user's
     /// last choice across dialog opens and page navigation, instead of resetting to unchecked every time.</summary>
@@ -316,6 +388,7 @@
         {
             _wasVisible = false;
             _lastDetailsNumber = null;
+            ResetTitleEditState();
         }
 
         if (Details == null)
@@ -327,18 +400,46 @@
             _selectedMethod = Details.DefaultMergeMethod ?? MergeMethod.Merge;
             _showMethodDropdown = false;
             _defaultMethodApplied = Details.AllowedMergeMethods.Count > 0;
+            ApplyIncomingTitle(Details.Title, force: true);
         }
-        else if (!_defaultMethodApplied && Details.AllowedMergeMethods.Count > 0)
+        else
         {
-            // The review-details phase just resolved for the PR we already showed a snapshot for - apply its
-            // real default method now instead of leaving the placeholder selection from before it was known.
-            _selectedMethod = Details.DefaultMergeMethod ?? MergeMethod.Merge;
-            _defaultMethodApplied = true;
+            if (_isEditingTitle && !_isSavingTitle
+                && !string.IsNullOrEmpty(Details.Title)
+                && string.Equals(Details.Title, _titleDraft.Trim(), StringComparison.Ordinal)
+                && !string.Equals(Details.Title, _displayTitle, StringComparison.Ordinal))
+            {
+                // GitHub accepted the new title; the parent updated Details.Title after the PATCH.
+                _displayTitle = Details.Title;
+                _titleDraft = Details.Title;
+                _titleOverridden = true;
+                _isEditingTitle = false;
+            }
+            else if (!_titleOverridden && !_isEditingTitle && !string.IsNullOrEmpty(Details.Title) && _displayTitle != Details.Title)
+            {
+                // Snapshot/refresh filled in the title after the dialog already opened for this PR.
+                ApplyIncomingTitle(Details.Title, force: false);
+            }
+
+            if (!_defaultMethodApplied && Details.AllowedMergeMethods.Count > 0)
+            {
+                // The review-details phase just resolved for the PR we already showed a snapshot for - apply its
+                // real default method now instead of leaving the placeholder selection from before it was known.
+                _selectedMethod = Details.DefaultMergeMethod ?? MergeMethod.Merge;
+                _defaultMethodApplied = true;
+            }
         }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (_focusTitleInput && IsVisible && _isEditingTitle)
+        {
+            _focusTitleInput = false;
+            await _titleInput.FocusAsync();
+            return;
+        }
+
         if (!_focusOnNextRender || !IsVisible)
             return;
         _focusOnNextRender = false;
@@ -349,11 +450,92 @@
     {
         if (e.Key == "Escape")
         {
-            if (_showMethodDropdown)
+            if (_isEditingTitle)
+                CancelTitleEdit();
+            else if (_showMethodDropdown)
                 _showMethodDropdown = false;
             else
                 await OnCancel.InvokeAsync();
         }
+    }
+
+    private void BeginTitleEdit()
+    {
+        if (IsMerging)
+            return;
+        _titleDraft = DisplayTitle;
+        _isEditingTitle = true;
+        _focusTitleInput = true;
+    }
+
+    private void CancelTitleEdit()
+    {
+        if (_isSavingTitle)
+            return;
+        _isEditingTitle = false;
+        _titleDraft = DisplayTitle;
+        _focusTitleInput = false;
+    }
+
+    private async Task SaveTitle()
+    {
+        if (!CanSaveTitle)
+            return;
+
+        var title = _titleDraft.Trim();
+        _isSavingTitle = true;
+        try
+        {
+            if (OnTitleChanged.HasDelegate)
+                await OnTitleChanged.InvokeAsync(title);
+
+            // Parent updates Details.Title only after GitHub accepts the PATCH. Stay in edit mode on failure.
+            if (Details != null && string.Equals(Details.Title, title, StringComparison.Ordinal))
+            {
+                _displayTitle = title;
+                _titleDraft = title;
+                _titleOverridden = true;
+                _isEditingTitle = false;
+                _focusTitleInput = false;
+            }
+        }
+        finally
+        {
+            _isSavingTitle = false;
+        }
+    }
+
+    private async Task HandleTitleEditorKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            await SaveTitle();
+        else if (e.Key == "Escape")
+            CancelTitleEdit();
+    }
+
+    private void ApplyIncomingTitle(string title, bool force)
+    {
+        if (force)
+        {
+            _displayTitle = title;
+            _titleDraft = title;
+            _isEditingTitle = false;
+            _titleOverridden = false;
+            _focusTitleInput = false;
+            return;
+        }
+
+        _displayTitle = title;
+    }
+
+    private void ResetTitleEditState()
+    {
+        _isEditingTitle = false;
+        _isSavingTitle = false;
+        _titleOverridden = false;
+        _focusTitleInput = false;
+        _displayTitle = string.Empty;
+        _titleDraft = string.Empty;
     }
 
     private void ToggleMethodDropdown() => _showMethodDropdown = !_showMethodDropdown;

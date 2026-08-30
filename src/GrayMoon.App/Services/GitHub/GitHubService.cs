@@ -554,6 +554,32 @@ public class GitHubService : IConnectorService
         await PatchAsync(connector, requestUri, payload, cancellationToken);
     }
 
+    /// <summary>Updates only the pull request title via PATCH /repos/{owner}/{repo}/pulls/{pull_number}. Throws on non-success.</summary>
+    public async Task UpdatePullRequestTitleAsync(
+        Connector connector,
+        string owner,
+        string repo,
+        int pullNumber,
+        string title,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (string.IsNullOrWhiteSpace(repo))
+            throw new ArgumentException("Repository is required.", nameof(repo));
+        if (pullNumber <= 0)
+            throw new ArgumentOutOfRangeException(nameof(pullNumber));
+        if (string.IsNullOrWhiteSpace(title))
+            throw new ArgumentException("Title is required.", nameof(title));
+
+        EnsureConnectorConfigured(connector);
+
+        var body = new GitHubUpdatePullRequestTitleRequestDto { Title = title.Trim() };
+        var requestUri = $"repos/{owner}/{repo}/pulls/{pullNumber}";
+        var payload = JsonSerializer.Serialize(body);
+        await PatchAsync(connector, requestUri, payload, cancellationToken);
+    }
+
     /// <summary>Creates a pull request via POST /repos/{owner}/{repo}/pulls. Throws on non-success.</summary>
     public async Task<GitHubPullRequestDto> CreatePullRequestAsync(
         Connector connector,
