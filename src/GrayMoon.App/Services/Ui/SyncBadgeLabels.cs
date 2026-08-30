@@ -1,0 +1,21 @@
+using GrayMoon.App.Models;
+
+namespace GrayMoon.App.Services.Ui;
+
+/// <summary>Display text for RepoSyncStatus badges and search.</summary>
+public static class SyncBadgeLabels
+{
+    public static string GetSyncBadgeText(RepoSyncStatus status)
+    {
+        return status switch
+        {
+            RepoSyncStatus.InSync => "in sync",
+            RepoSyncStatus.NeedsSync => "sync",
+            RepoSyncStatus.NotCloned => "not cloned",
+            RepoSyncStatus.VersionMismatch => "version",
+            RepoSyncStatus.Error => "error",
+            _ => "sync"
+        };
+    }
+}
+
