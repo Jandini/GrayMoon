@@ -264,7 +264,7 @@
                                                 <td class="col-repo">
                                                     @if (showRepoBranchInRow)
                                                     {
-                                                        var repoUrl = GrayMoon.App.Services.RepositoryUrlHelper.GetRepositoryUrl(row.Repo.CloneUrl);
+                                                        var repoUrl = GrayMoon.App.Services.GitHub.RepositoryUrlHelper.GetRepositoryUrl(row.Repo.CloneUrl);
                                                         @if (!string.IsNullOrWhiteSpace(repoUrl))
                                                         {
                                                             <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link">

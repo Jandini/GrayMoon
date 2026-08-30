@@ -1,0 +1,152 @@
+using System.Collections.Concurrent;
+using GrayMoon.App.Models;
+using GrayMoon.App.Repositories;
+
+namespace GrayMoon.App.Services.Connectors;
+
+/// <summary>Syncs workspace packages to NuGet registries: for each package, finds which connector (registry) contains it and persists MatchedConnectorId. Matching is by package ID only (any version).</summary>
+public sealed class PackageRegistrySyncService(
+    ConnectorRepository connectorRepository,
+    WorkspaceProjectRepository workspaceProjectRepository,
+    NuGetService nuGetService,
+    Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions,
+    ILogger<PackageRegistrySyncService> logger)
+{
+    /// <summary>For each package in the workspace, checks all active NuGet connectors in parallel and sets MatchedConnectorId to the first registry that contains the package (by ID; no particular version required). Up to 8 packages are checked in parallel.</summary>
+    public async Task SyncWorkspacePackageRegistriesAsync(
+        int workspaceId,
+        IProgress<(int completed, int total)>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var packages = await workspaceProjectRepository.GetPackagesByWorkspaceIdAsync(workspaceId, cancellationToken);
+        logger.LogTrace("Sync registries workspace {WorkspaceId}: loaded {PackageCount} packages.", workspaceId, packages.Count);
+        if (packages.Count == 0)
+        {
+            progress?.Report((0, 0));
+            return;
+        }
+
+        var connectors = (await connectorRepository.GetActiveAsync())
+            .Where(c => c.ConnectorType == ConnectorType.NuGet)
+            .ToList();
+        logger.LogTrace("Sync registries workspace {WorkspaceId}: {ConnectorCount} active NuGet connectors.", workspaceId, connectors.Count);
+        if (connectors.Count == 0)
+        {
+            logger.LogTrace("No active NuGet connectors; clearing registry match for workspace {WorkspaceId}.", workspaceId);
+            var clear = packages.ToDictionary(p => p.ProjectId, _ => (int?)null);
+            await workspaceProjectRepository.SetPackagesMatchedConnectorsAsync(workspaceId, clear, cancellationToken);
+            progress?.Report((packages.Count, packages.Count));
+            return;
+        }
+
+        var projectIdToConnectorId = new ConcurrentDictionary<int, int?>();
+        var total = packages.Count;
+        var completed = 0;
+
+        var maxParallel = Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
+        var options = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = maxParallel,
+            CancellationToken = cancellationToken
+        };
+
+        await Parallel.ForEachAsync(packages, options, async (p, ct) =>
+        {
+            var packageId = (p.PackageId ?? p.ProjectName).Trim();
+            if (string.IsNullOrEmpty(packageId))
+            {
+                logger.LogTrace("Package ProjectId={ProjectId}: empty PackageId, skipping.", p.ProjectId);
+                projectIdToConnectorId[p.ProjectId] = null;
+                var c = Interlocked.Increment(ref completed);
+                progress?.Report((c, total));
+                return;
+            }
+
+            // Try all NuGet connectors in parallel; match by package ID only (no particular version required).
+            int? matchedConnectorId = null;
+            var lookupTasks = connectors.Select(async connector =>
+            {
+                try
+                {
+                    logger.LogTrace("Registry lookup: PackageId={PackageId}, trying connector {ConnectorName} (Id={ConnectorId}).", packageId, connector.ConnectorName, connector.ConnectorId);
+                    var exists = await nuGetService.PackageExistsAsync(connector, packageId, ct);
+                    if (exists)
+                        logger.LogTrace("Registry match: PackageId={PackageId} found in connector {ConnectorName} (Id={ConnectorId}).", packageId, connector.ConnectorName, connector.ConnectorId);
+                    else
+                        logger.LogTrace("Registry lookup: PackageId={PackageId} not in connector {ConnectorName}.", packageId, connector.ConnectorName);
+                    return (connector, exists);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogTrace(ex, "Registry lookup: PackageId={PackageId} error for connector {ConnectorName}: {Message}.", packageId, connector.ConnectorName, ex.Message);
+                    return (connector, false);
+                }
+            });
+            var results = await Task.WhenAll(lookupTasks);
+            var firstMatch = results.FirstOrDefault(r => r.Item2);
+            if (firstMatch.Item1 != null)
+                matchedConnectorId = firstMatch.Item1.ConnectorId;
+            if (matchedConnectorId == null)
+                logger.LogTrace("Registry lookup: PackageId={PackageId} matched no connector.", packageId);
+            projectIdToConnectorId[p.ProjectId] = matchedConnectorId;
+            var done = Interlocked.Increment(ref completed);
+            progress?.Report((done, total));
+        });
+
+        logger.LogTrace("Persisting {Count} package registry matches for workspace {WorkspaceId}.", projectIdToConnectorId.Count, workspaceId);
+        await workspaceProjectRepository.SetPackagesMatchedConnectorsAsync(workspaceId, new Dictionary<int, int?>(projectIdToConnectorId), cancellationToken);
+        logger.LogTrace("Synced package registries for workspace {WorkspaceId}: {PackageCount} packages, {ConnectorCount} NuGet connectors.", workspaceId, packages.Count, connectors.Count);
+    }
+
+    /// <summary>Syncs registry matches only for workspace packages whose PackageId is in <paramref name="packageIds"/>. Use when doing synchronized push for a single repo and only its required packages need matching.</summary>
+    public async Task SyncRegistriesForPackageIdsAsync(
+        int workspaceId,
+        IReadOnlySet<string> packageIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (packageIds == null || packageIds.Count == 0) return;
+        var packages = await workspaceProjectRepository.GetPackagesByWorkspaceIdAndPackageIdsAsync(workspaceId, packageIds, cancellationToken);
+        logger.LogTrace("Sync registries for {PackageCount} selected packages in workspace {WorkspaceId}.", packages.Count, workspaceId);
+        if (packages.Count == 0) return;
+
+        var connectors = (await connectorRepository.GetActiveAsync())
+            .Where(c => c.ConnectorType == ConnectorType.NuGet)
+            .ToList();
+        if (connectors.Count == 0) return;
+
+        var projectIdToConnectorId = new ConcurrentDictionary<int, int?>();
+        var total = packages.Count;
+        var completed = 0;
+        var maxParallel = Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
+        var options = new ParallelOptions { MaxDegreeOfParallelism = maxParallel, CancellationToken = cancellationToken };
+
+        await Parallel.ForEachAsync(packages, options, async (p, ct) =>
+        {
+            var packageId = (p.PackageId ?? p.ProjectName).Trim();
+            if (string.IsNullOrEmpty(packageId))
+            {
+                projectIdToConnectorId[p.ProjectId] = null;
+                Interlocked.Increment(ref completed);
+                return;
+            }
+            int? matchedConnectorId = null;
+            var lookupTasks = connectors.Select(async connector =>
+            {
+                try
+                {
+                    var exists = await nuGetService.PackageExistsAsync(connector, packageId, ct);
+                    return (connector, exists);
+                }
+                catch { return (connector, false); }
+            });
+            var results = await Task.WhenAll(lookupTasks);
+            var firstMatch = results.FirstOrDefault(r => r.Item2);
+            if (firstMatch.Item1 != null)
+                matchedConnectorId = firstMatch.Item1.ConnectorId;
+            projectIdToConnectorId[p.ProjectId] = matchedConnectorId;
+            Interlocked.Increment(ref completed);
+        });
+
+        await workspaceProjectRepository.SetPackagesMatchedConnectorsAsync(workspaceId, new Dictionary<int, int?>(projectIdToConnectorId), cancellationToken);
+    }
+}
