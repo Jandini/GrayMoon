@@ -14,6 +14,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    font-size: 1rem;
 }
 
 /* Height follows the item list; scroll only after the cap */
@@ -52,6 +53,6 @@
 }
 
 .sync-default-pr-badge {
-    font-size: 0.65em;
+    font-size: 0.75em;
     vertical-align: middle;
 }

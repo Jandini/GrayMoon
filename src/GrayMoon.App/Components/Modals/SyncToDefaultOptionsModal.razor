@@ -12,16 +12,16 @@
                     <button type="button" class="btn-close" aria-label="Close" @onclick="HandleCancelClick"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-2 small">@Message</p>
+                    <p class="mb-2">@Message</p>
                     @if (AnyCommitsWillBeLost)
                     {
-                        <div class="sync-to-default-lost-commits small" role="alert">
+                        <div class="sync-to-default-lost-commits" role="alert">
                             One or more repositories have local commits that are not on the default branch. These commits will be permanently lost when the branch is deleted. This cannot be undone.
                         </div>
                     }
                     @if (RepoItems.Count > 0)
                     {
-                        <div class="sync-to-default-options-scroll small mb-3">
+                        <div class="sync-to-default-options-scroll mb-3">
                             <ul class="list-unstyled mb-0 ps-0">
                                 @foreach (var item in RepoItems)
                                 {
@@ -46,7 +46,7 @@
                                         }
                                         @if (item.CommitsAhead > 0 && item.PrState is not "merged" and not "closed")
                                         {
-                                            <span class="text-danger ms-2" style="font-size:0.85em;">@item.CommitsAhead commit@(item.CommitsAhead == 1 ? "" : "s") will be lost</span>
+                                            <span class="text-danger ms-2">@item.CommitsAhead commit@(item.CommitsAhead == 1 ? "" : "s") will be lost</span>
                                         }
                                     </li>
                                 }
@@ -59,7 +59,7 @@
                             <input class="form-check-input" type="checkbox" id="deleteRemoteCheck"
                                    checked="@DeleteRemoteBranches"
                                    @onchange="OnDeleteRemoteChanged" />
-                            <label class="form-check-label small" for="deleteRemoteCheck">
+                            <label class="form-check-label" for="deleteRemoteCheck">
                                 Delete remote branch@(RepoItems.Count(r => r.HasRemote) > 1 ? "es" : "")
                             </label>
                         </div>
@@ -68,7 +68,7 @@
                         <input class="form-check-input" type="checkbox" id="forceDeleteLocalCheck"
                                checked="@AllowForceDeleteLocalBranch"
                                @onchange="OnAllowForceDeleteLocalChanged" />
-                        <label class="form-check-label small" for="forceDeleteLocalCheck">
+                        <label class="form-check-label" for="forceDeleteLocalCheck">
                             Delete local branches
                         </label>
                     </div>
