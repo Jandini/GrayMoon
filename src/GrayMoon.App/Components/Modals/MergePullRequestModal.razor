@@ -313,8 +313,19 @@
                                     <div class="merge-pr-method-menu">
                                         @foreach (var method in Details.AllowedMergeMethods)
                                         {
-                                            <button type="button" class="dropdown-item" @onclick="() => SelectMethod(method)">
-                                                @method.ToDisplayLabel()
+                                            <button type="button"
+                                                    class="dropdown-item merge-pr-method-item @(_selectedMethod == method ? "merge-pr-method-item--selected" : null)"
+                                                    @onclick="() => SelectMethod(method)">
+                                                <span class="merge-pr-method-item__check" aria-hidden="true">
+                                                    @if (_selectedMethod == method)
+                                                    {
+                                                        <i class="bi bi-check-lg"></i>
+                                                    }
+                                                </span>
+                                                <span class="merge-pr-method-item__text">
+                                                    <span class="merge-pr-method-item__title">@method.ToDisplayLabel()</span>
+                                                    <span class="merge-pr-method-item__subtitle">@method.ToDescription()</span>
+                                                </span>
                                             </button>
                                         }
                                     </div>

@@ -25,6 +25,14 @@ public static class MergeMethodExtensions
         MergeMethod.Rebase => "Rebase and merge",
         _ => "Create a merge commit"
     };
+
+    /// <summary>Short explanation of what the method does to the branch's commits, for the merge-method dropdown.</summary>
+    public static string ToDescription(this MergeMethod method) => method switch
+    {
+        MergeMethod.Squash => "All commits from this branch will be combined into one commit in the base branch.",
+        MergeMethod.Rebase => "All commits from this branch will be rebased and added to the base branch.",
+        _ => "All commits from this branch will be added to the base branch via a merge commit."
+    };
 }
 
 /// <summary>Result of a merge attempt. Message is always GitHub's own error text on failure - GrayMoon never invents a reason.</summary>
