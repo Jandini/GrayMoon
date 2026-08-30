@@ -15,9 +15,7 @@
                     <p class="mb-2">@Message</p>
                     @if (AnyCommitsWillBeLost)
                     {
-                        <div class="gm-callout gm-callout--error" role="alert">
-                            One or more repositories have local commits that are not on the default branch. These commits will be permanently lost when the branch is deleted. This cannot be undone.
-                        </div>
+                        <div class="gm-callout gm-callout--error" role="alert">One or more repositories have local commits that are not on the default branch. These commits will be permanently lost when the branch is deleted. This cannot be undone.</div>
                     }
                     @if (RepoItems.Count > 0)
                     {
@@ -26,7 +24,7 @@
                                 @foreach (var item in RepoItems)
                                 {
                                     <li class="mb-1">
-                                        <code>@item.RepoName</code>
+                                        <code class="sync-to-default-repo-name">@item.RepoName</code>
                                         <span class="text-muted ms-2">@item.BranchName</span>
                                         @if (item.HasRemote)
                                         {

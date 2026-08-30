@@ -31,9 +31,7 @@
 
                     @if (DirectoryAlreadyExists)
                     {
-                        <div class="gm-callout gm-callout--warning" role="alert">
-                            The workspace directory exists with @ExistingRepositoryCount @(ExistingRepositoryCount == 1 ? "repository" : "repositories").
-                        </div>
+                        <div class="gm-callout gm-callout--warning" role="alert">The workspace directory exists with @ExistingRepositoryCount @(ExistingRepositoryCount == 1 ? "repository" : "repositories").</div>
                     }
 
                     @if (ErrorMessage != null)

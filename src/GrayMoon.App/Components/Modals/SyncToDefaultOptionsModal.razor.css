@@ -44,6 +44,10 @@
     background: #5a6268;
 }
 
+.sync-to-default-repo-name {
+    font-size: 1em;
+}
+
 .sync-default-pr-badge {
     font-size: 0.75em;
     vertical-align: middle;

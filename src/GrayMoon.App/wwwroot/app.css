@@ -768,10 +768,10 @@ h1:focus {
 
 /* Dialog callouts (GHA log error/warning treatment) */
 .gm-callout {
-    padding: 0.5rem 1rem;
-    margin-bottom: 1rem;
+    padding: 0.35rem 0.75rem;
+    margin-bottom: 0.75rem;
     color: #d4d4d4;
-    white-space: pre-wrap;
+    white-space: normal;
     overflow-wrap: break-word;
     word-break: break-word;
     border: none;
@@ -781,6 +781,7 @@ h1:focus {
 .gm-callout--error {
     background: rgba(248, 113, 113, 0.22);
     box-shadow: inset 3px 0 0 #f87171;
+    white-space: pre-line;
 }
 
 .gm-callout--warning {
