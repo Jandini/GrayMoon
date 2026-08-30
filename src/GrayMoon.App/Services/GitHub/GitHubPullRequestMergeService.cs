@@ -160,7 +160,7 @@ public sealed class GitHubPullRequestMergeService(
         var settings = settingsTask.Result;
         var checkRuns = checksTask.Result;
 
-        var (approvedCount, changesRequestedCount, outstandingReviewers, approvedByUsers) = SummarizeReviews(reviews, pr?.RequestedReviewers);
+        var (approvedCount, changesRequestedCount, outstandingReviewers, approvedByUsers) = SummarizeReviews(reviews, pr?.RequestedReviewers, pr?.RequestedTeams);
         var checksSummary = SummarizeChecks(checkRuns);
         var allowedMethods = GetAllowedMergeMethods(settings);
         var defaultMethod = DefaultMethodPriority.FirstOrDefault(m => allowedMethods.Contains(m), allowedMethods.FirstOrDefault());
@@ -205,7 +205,8 @@ public sealed class GitHubPullRequestMergeService(
 
     private static (int Approved, int ChangesRequested, IReadOnlyList<string> Outstanding, IReadOnlyList<string> ApprovedBy) SummarizeReviews(
         List<GitHubPullRequestReviewDto> reviews,
-        List<GitHubUserDto>? requestedReviewers)
+        List<GitHubUserDto>? requestedReviewers,
+        List<GitHubTeamDto>? requestedTeams)
     {
         // GitHub returns one row per review event; only the latest review per user reflects their current stance.
         var latestByUser = reviews
@@ -225,6 +226,9 @@ public sealed class GitHubPullRequestMergeService(
         var outstanding = (requestedReviewers ?? [])
             .Where(u => !string.IsNullOrWhiteSpace(u.Login) && !approvedLogins.Contains(u.Login!))
             .Select(u => u.Login!)
+            .Concat((requestedTeams ?? [])
+                .Select(t => t.Slug)
+                .Where(s => !string.IsNullOrWhiteSpace(s)))
             .ToList();
 
         return (approvedByUsers.Count, changesRequested, outstanding, approvedByUsers);
@@ -236,13 +240,22 @@ public sealed class GitHubPullRequestMergeService(
         if (runs.Count == 0)
             return new ChecksSummary { State = ChecksState.None };
 
-        var pending = runs.Count(r => !string.Equals(r.Status, "completed", StringComparison.OrdinalIgnoreCase));
-        var failed = runs.Count(r => string.Equals(r.Status, "completed", StringComparison.OrdinalIgnoreCase)
+        // The check-runs API returns every attempt; GitHub's merge box keeps the latest run per check name.
+        var latestByName = runs
+            .GroupBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g
+                .OrderBy(r => r.CompletedAt ?? r.StartedAt ?? DateTimeOffset.MinValue)
+                .ThenBy(r => r.Id)
+                .Last())
+            .ToList();
+
+        var pending = latestByName.Count(r => !string.Equals(r.Status, "completed", StringComparison.OrdinalIgnoreCase));
+        var failed = latestByName.Count(r => string.Equals(r.Status, "completed", StringComparison.OrdinalIgnoreCase)
             && r.Conclusion is not null
             && !string.Equals(r.Conclusion, "success", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(r.Conclusion, "neutral", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(r.Conclusion, "skipped", StringComparison.OrdinalIgnoreCase));
-        var passed = runs.Count - pending - failed;
+        var passed = latestByName.Count - pending - failed;
 
         var state = failed > 0 ? ChecksState.Failed : pending > 0 ? ChecksState.Pending : ChecksState.Passed;
         return new ChecksSummary { Passed = passed, Failed = failed, Pending = pending, State = state };

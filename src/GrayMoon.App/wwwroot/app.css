@@ -1185,7 +1185,7 @@ table.resizable-columns th:hover .resize-handle::after {
     background-color: #ffc107;
     color: #000 !important;
 }
-/* Mergeability colors: white text on green/red, black text on orange/yellow (better contrast on lighter hues). */
+/* Mergeability colors: white text on green/red/orange. */
 .repositories-table td.col-pr .pr-badge-open-unknown {
     background-color: #495057;
     color: #fff !important;
@@ -1200,11 +1200,11 @@ table.resizable-columns th:hover .resize-handle::after {
 }
 .repositories-table td.col-pr .pr-badge-open-checks {
     background-color: #d29922;
-    color: #000 !important;
+    color: #f5f5f5 !important;
 }
 .repositories-table td.col-pr .pr-badge-open-blocked {
     background-color: #e67700;
-    color: #000 !important;
+    color: #f5f5f5 !important;
 }
 .repositories-table td.col-pr .pr-badge-merged {
     background-color: #8957e5;
@@ -1242,7 +1242,7 @@ table.resizable-columns th:hover .resize-handle::after {
      * than "inherit" - inheriting from the table cell (whose font-size/line-height are much larger) is
      * what previously made this segment balloon in height and stretch the entire row. Text color is
      * intentionally NOT set here - it comes from the mergeability class (pr-badge-open-*) alongside it,
-     * so green/red segments get white and orange/yellow segments get black, matching every other badge.
+     * so every mergeability class supplies its own text color (white/whiteish on the warm hues).
      */
     display: inline-flex;
     align-items: center;

@@ -227,6 +227,9 @@ public class GitHubPullRequestDto
     [JsonPropertyName("requested_reviewers")]
     public List<GitHubUserDto>? RequestedReviewers { get; set; }
 
+    [JsonPropertyName("requested_teams")]
+    public List<GitHubTeamDto>? RequestedTeams { get; set; }
+
     [JsonPropertyName("draft")]
     public bool Draft { get; set; }
 }
@@ -329,6 +332,9 @@ public sealed class GitHubCheckRunsResponse
 
 public sealed class GitHubCheckRunDto
 {
+    [JsonPropertyName("id")]
+    public long Id { get; set; }
+
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
 
@@ -339,6 +345,12 @@ public sealed class GitHubCheckRunDto
     /// <summary>success, failure, neutral, cancelled, skipped, timed_out, action_required, or null while not completed.</summary>
     [JsonPropertyName("conclusion")]
     public string? Conclusion { get; set; }
+
+    [JsonPropertyName("started_at")]
+    public DateTimeOffset? StartedAt { get; set; }
+
+    [JsonPropertyName("completed_at")]
+    public DateTimeOffset? CompletedAt { get; set; }
 }
 
 /// <summary>Body for PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge.</summary>

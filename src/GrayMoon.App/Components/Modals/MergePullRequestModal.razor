@@ -118,6 +118,11 @@
                                         {
                                             <span class="merge-pr-placeholder merge-pr-placeholder--checks-subtitle"></span>
                                         }
+                                        else if (Details.Checks.State == ChecksState.Failed && !string.IsNullOrEmpty(ActionsUrl))
+                                        {
+                                            <a href="@ActionsUrl" class="merge-pr-changed-files-link">@($"{Details.Checks.Failed} failing")</a>
+                                            @($", {Details.Checks.Passed} successful check{(Details.Checks.Passed == 1 ? "" : "s")}")
+                                        }
                                         else if (Details.Checks.State == ChecksState.Pending && !string.IsNullOrEmpty(ActionsUrl))
                                         {
                                             <a href="@ActionsUrl" class="merge-pr-changed-files-link">@GetChecksSubtitle()</a>
@@ -215,7 +220,7 @@
                     </div>
                     <div class="btn-group merge-pr-split-btn">
                         <button type="button"
-                                class="btn merge-pr-btn-github @(Details is { CanMergeNow: true, HasMergeWarning: true } ? "merge-pr-btn-github--warning" : null) merge-pr-split-btn__main"
+                                class="btn merge-pr-btn-github @(ShowMergeWarningStyle ? "merge-pr-btn-github--warning" : null) merge-pr-split-btn__main"
                                 disabled="@(IsLoading || IsLoadingReviewDetails || IsMerging || Details is not { CanMergeNow: true })"
                                 @onclick="HandleMergeClick">
                             @if (IsLoading || IsLoadingReviewDetails)
@@ -227,7 +232,7 @@
                         @if (Details?.AllowedMergeMethods.Count > 1)
                         {
                             <button type="button"
-                                    class="btn merge-pr-btn-github @(Details is { CanMergeNow: true, HasMergeWarning: true } ? "merge-pr-btn-github--warning" : null) dropdown-toggle dropdown-toggle-split merge-pr-split-btn__toggle"
+                                    class="btn merge-pr-btn-github @(ShowMergeWarningStyle ? "merge-pr-btn-github--warning" : null) dropdown-toggle dropdown-toggle-split merge-pr-split-btn__toggle"
                                     disabled="@(IsLoading || IsLoadingReviewDetails || IsMerging || Details is not { CanMergeNow: true })"
                                     @onclick="ToggleMethodDropdown">
                                 <span class="visually-hidden">Choose merge method</span>
@@ -267,7 +272,7 @@
     [Parameter] public EventCallback<MergePullRequestChoice> OnMerge { get; set; }
     /// <summary>Workspace's Git Changes page URL, used to link the "N uncommitted changes" text in the local-state row. Null/empty hides the link.</summary>
     [Parameter] public string? ChangesUrl { get; set; }
-    /// <summary>Workspace's Actions page URL, used to link the "N checks still running" text in the checks row. Null/empty hides the link.</summary>
+    /// <summary>Workspace's Actions page URL, used to link the "N failing" / "N checks still running" text in the checks row. Null/empty hides the link.</summary>
     [Parameter] public string? ActionsUrl { get; set; }
     /// <summary>Raised when the user clicks the commits text in the local-state row while only unpushed (outgoing) commits exist.</summary>
     [Parameter] public EventCallback OnPushRequested { get; set; }
@@ -452,17 +457,23 @@
     };
 
     /// <summary>
-    /// GitHub's PR API never reports "N approving reviews required" directly - the closest signal available is
-    /// mergeable_state == "blocked" with no other explainable cause (no failing/pending checks, no changes
-    /// requested, nobody currently requested as a reviewer). That combination means branch protection requires
-    /// an approving review that nobody has even been asked for yet, which must read as blocked (red), not "not required" (green).
+    /// Orange when the local clone is unsynced or GitHub is blocking on unmet requirements (reviews/rules).
+    /// The latter stays available because the caller may be allowed to bypass - no extra checkbox.
     /// </summary>
-    private bool RequiresReviewButNoneRequested() => !IsLoadingReviewDetails
+    private bool ShowMergeWarningStyle => Details is { CanMergeNow: true } && (Details.HasMergeWarning || Details.IsMergeBlocked);
+
+    /// <summary>
+    /// GitHub's PR API never reports the exact required-review count. mergeable_state == "blocked" with checks
+    /// already settled (passed or none) means a required approving review is still missing - including when
+    /// assigned reviewers are a team or Copilot whose approval does not satisfy "reviewers with write access".
+    /// </summary>
+    private bool ReviewRequirementUnmet() => !IsLoadingReviewDetails
         && Details != null
-        && Details.ApprovedCount == 0
-        && Details.ChangesRequestedCount == 0
-        && Details.OutstandingReviewers.Count == 0
-        && string.Equals(Details.MergeableState, "blocked", StringComparison.OrdinalIgnoreCase);
+        && Details.IsMergeBlocked
+        && Details.Checks.State is ChecksState.Passed or ChecksState.None;
+
+    private bool ReviewRequired() => Details != null
+        && (Details.OutstandingReviewers.Count > 0 || ReviewRequirementUnmet());
 
     private string GetReviewIconClass()
     {
@@ -470,7 +481,7 @@
             return "merge-pr-status-icon--pending";
         if (Details == null)
             return "merge-pr-status-icon--neutral";
-        if (Details.ChangesRequestedCount > 0 || RequiresReviewButNoneRequested())
+        if (Details.ChangesRequestedCount > 0 || ReviewRequirementUnmet())
             return "merge-pr-status-icon--danger";
         if (Details.OutstandingReviewers.Count > 0)
             return "merge-pr-status-icon--pending";
@@ -483,7 +494,7 @@
             return "bi-three-dots";
         if (Details == null)
             return "bi-dash-lg";
-        if (Details.ChangesRequestedCount > 0 || RequiresReviewButNoneRequested())
+        if (Details.ChangesRequestedCount > 0 || ReviewRequirementUnmet())
             return "bi-x-lg";
         if (Details.OutstandingReviewers.Count > 0)
             return "bi-three-dots";
@@ -496,7 +507,7 @@
             return string.Empty;
         if (Details.ChangesRequestedCount > 0)
             return "Changes requested";
-        if (Details.OutstandingReviewers.Count > 0 || RequiresReviewButNoneRequested())
+        if (ReviewRequired())
             return "Review required";
         if (Details.ApprovedCount > 0)
             return "Review approved";
@@ -509,22 +520,11 @@
             return string.Empty;
         if (Details.ChangesRequestedCount > 0)
             return $"{Details.ChangesRequestedCount} review{(Details.ChangesRequestedCount == 1 ? "" : "s")} requested changes.";
-        if (Details.OutstandingReviewers.Count > 0)
-            return $"Waiting on {FormatNames(Details.OutstandingReviewers)}.";
+        if (ReviewRequired())
+            return "At least 1 approving review is required by reviewers with write access.";
         if (Details.ApprovedCount > 0)
-            return $"Approved by {FormatNames(Details.ApprovedByUsers)}.";
-        if (RequiresReviewButNoneRequested())
-            return "This repository requires an approving review, but none has been requested.";
+            return $"{Details.ApprovedCount} approving review{(Details.ApprovedCount == 1 ? "" : "s")}.";
         return "No reviewers were requested for this pull request.";
-    }
-
-    /// <summary>Keeps review-name subtitles short: shows up to 2 names, then a "+N more" suffix.</summary>
-    private static string FormatNames(IReadOnlyList<string> names)
-    {
-        const int maxShown = 2;
-        if (names.Count <= maxShown)
-            return string.Join(", ", names);
-        return $"{string.Join(", ", names.Take(maxShown))} +{names.Count - maxShown} more";
     }
 
     // GrayMoon-local 4th row: uncommitted changes / unpushed commits in the local clone. Purely informational
