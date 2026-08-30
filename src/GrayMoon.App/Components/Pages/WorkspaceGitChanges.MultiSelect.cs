@@ -74,8 +74,8 @@ public sealed partial class WorkspaceGitChanges
                     }
 
                     var result = unstage
-                        ? await AgentClient.UnstageAsync(resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, GitChangeOperationScope.ExplicitPaths, paths, ct)
-                        : await AgentClient.StageAsync(resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, GitChangeOperationScope.ExplicitPaths, paths, ct);
+                        ? await GitChangesOperations.UnstageAsync(WorkspaceId, resolved.Value.RepositoryId, GitChangeOperationScope.ExplicitPaths, paths, ct)
+                        : await GitChangesOperations.StageAsync(WorkspaceId, resolved.Value.RepositoryId, GitChangeOperationScope.ExplicitPaths, paths, ct);
 
                     await PersistMutationResultAsync(workspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);
                 }

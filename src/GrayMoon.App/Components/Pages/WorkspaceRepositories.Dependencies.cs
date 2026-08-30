@@ -74,9 +74,8 @@ public sealed partial class WorkspaceRepositories
         }
         try
         {
-            await using var scope = ServiceScopeFactory.CreateAsyncScope();
-            var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            var (payload, _) = await workspaceGitService.GetUpdatePlanAsync(WorkspaceId, new HashSet<int> { repositoryId });
+            var (payload, _) = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
+                svc => svc.GetUpdatePlanAsync(WorkspaceId, new HashSet<int> { repositoryId }));
             if (payload == null || payload.Count == 0)
             {
                 if (HasOutOfDateFiles(repositoryId))

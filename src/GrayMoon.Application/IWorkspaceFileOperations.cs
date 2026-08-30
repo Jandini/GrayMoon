@@ -32,5 +32,20 @@ public interface IWorkspaceFileOperations
         string? repositoryName,
         CancellationToken cancellationToken);
 
-    Task<(int Updated, int Failed, string? Error)> UpdateVersionsAsync(int workspaceId, CancellationToken cancellationToken);
+    Task<WorkspaceFileVersionUpdateResult> UpdateVersionsAsync(
+        int workspaceId,
+        CancellationToken cancellationToken,
+        IReadOnlySet<int>? selectedRepositoryIds = null,
+        bool filterPatternTokensToSelectedRepositories = true,
+        bool commitUpdatedFiles = false,
+        bool checkAfter = false,
+        IProgress<OperationProgress>? progress = null);
 }
+
+public sealed record WorkspaceFileVersionUpdatedFile(int RepositoryId, string RepoName, string FilePath);
+
+public sealed record WorkspaceFileVersionUpdateResult(
+    int Updated,
+    int Failed,
+    string? Error,
+    IReadOnlyList<WorkspaceFileVersionUpdatedFile> UpdatedFiles);

@@ -23,7 +23,7 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
-        var (updatePlan, _) = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
+        var (updatePlan, _) = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
             svc => svc.GetUpdatePlanAsync(WorkspaceId));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
@@ -127,7 +127,7 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
-        var (updatePlan, _) = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
+        var (updatePlan, _) = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
             svc => svc.GetUpdatePlanAsync(WorkspaceId));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
@@ -195,7 +195,7 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
-        var (updatePlan, _) = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
+        var (updatePlan, _) = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, (IReadOnlyList<SyncDependenciesRepoPayload> Payload, bool IsMultiLevel)>(
             svc => svc.GetUpdatePlanAsync(WorkspaceId));
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 

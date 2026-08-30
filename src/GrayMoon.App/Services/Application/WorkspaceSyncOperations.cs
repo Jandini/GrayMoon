@@ -8,7 +8,8 @@ public sealed class WorkspaceSyncOperations(
     WorkspaceSyncHandler syncHandler,
     WorkspaceCommitSyncHandler commitSyncHandler,
     WorkspaceUndoPushHandler undoPushHandler,
-    WorkspaceRepository workspaceRepository) : IWorkspaceSyncOperations
+    WorkspaceRepository workspaceRepository,
+    WorkspaceGitService workspaceGitService) : IWorkspaceSyncOperations
 {
     public Task<IReadOnlyDictionary<int, RepoGitVersionInfo>> SyncAsync(
         int workspaceId,
@@ -115,4 +116,15 @@ public sealed class WorkspaceSyncOperations(
             ? OperationResult.Ok()
             : OperationResult.Fail("Undo push failed for one or more repositories.", errors);
     }
+
+    public Task QuickFetchAsync(
+        int workspaceId,
+        IReadOnlyCollection<int>? repositoryIds,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+        => workspaceGitService.QuickFetchAsync(
+            workspaceId,
+            repositoryIds,
+            onProgress: (done, total) => progress.Report($"Fetched {done} of {total}", done, total),
+            cancellationToken);
 }

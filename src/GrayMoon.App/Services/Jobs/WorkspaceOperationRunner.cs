@@ -21,12 +21,12 @@ public sealed class WorkspaceOperationRunner : IWorkspaceOperationRunner
     public bool TryStart(
         int workspaceId,
         string operationKind,
-        string overlayFamily,
+        string overlayKey,
         string displayMessage,
         Func<WorkspaceOperation, CancellationToken, Task> work,
         out WorkspaceOperation operation)
     {
-        var created = new WorkspaceOperation(workspaceId, operationKind, overlayFamily, displayMessage);
+        var created = new WorkspaceOperation(workspaceId, operationKind, overlayKey, displayMessage);
         if (!_running.TryAdd(workspaceId, created))
         {
             operation = _running[workspaceId];

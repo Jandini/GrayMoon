@@ -53,12 +53,12 @@ public sealed partial class WorkspaceRepositories
         var label = $"Fetching {repoIds.Count} {(repoIds.Count == 1 ? "repository" : "repositories")}...";
         StartPageJob(label, async (job, ct) =>
         {
-            await ScopedExecutor.ExecuteAsync<WorkspaceGitService>(
+            await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations>(
                 svc => svc.QuickFetchAsync(
                     WorkspaceId,
-                    repositoryIds: repoIds,
-                    onProgress: (done, total) => job.ReportProgress($"Fetched {done} of {total}"),
-                    cancellationToken: ct),
+                    repoIds,
+                    job.ToOperationProgress(),
+                    ct),
                 ct);
         }, new PageJobOptions
         {
@@ -79,11 +79,12 @@ public sealed partial class WorkspaceRepositories
         {
             try
             {
-                await ScopedExecutor.ExecuteAsync<WorkspaceGitService>(
+                await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations>(
                     svc => svc.QuickFetchAsync(
                         WorkspaceId,
-                        onProgress: (done, total) => job.ReportProgress($"Fetched {done} of {total}"),
-                        cancellationToken: ct),
+                        repositoryIds: null,
+                        job.ToOperationProgress(),
+                        ct),
                     ct);
 
                 await InvokeAsync(async () =>

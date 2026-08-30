@@ -142,27 +142,12 @@ public sealed partial class WorkspaceRepositories
 
         StartPageJob("Fetching branches...", async (job, ct) =>
         {
-            var fetchAllDone = 0;
-            var successCount = 0;
-            var failureCount = 0;
-            using var fetchAllSemaphore = new System.Threading.SemaphoreSlim(8);
-            await Task.WhenAll(repoIds.Select(async repoId =>
-            {
-                await fetchAllSemaphore.WaitAsync(ct);
-                try
-                {
-                    var ok = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, bool>(
-                        svc => svc.RefreshBranchesForRepositoryAsync(repoId, WorkspaceId, ct));
-                    if (ok) Interlocked.Increment(ref successCount);
-                    else Interlocked.Increment(ref failureCount);
-                }
-                finally
-                {
-                    fetchAllSemaphore.Release();
-                    var c = Interlocked.Increment(ref fetchAllDone);
-                    job.ReportProgress($"Fetched branches in {c} of {repoIds.Count} repositories...");
-                }
-            }));
+            var result = await ScopedExecutor.ExecuteAsync<WorkspaceBranchHandler, WorkspaceBranchBulkResult>(
+                svc => svc.FetchBranchesForWorkspaceAsync(
+                    WorkspaceId,
+                    repoIds,
+                    (done, total) => job.ReportProgress($"Fetched branches in {done} of {total} repositories..."),
+                    ct));
 
             await InvokeAsync(async () =>
             {
@@ -172,8 +157,8 @@ public sealed partial class WorkspaceRepositories
                 StateHasChanged();
             });
 
-            if (failureCount > 0)
-                SafeInvoke(() => ToastService.ShowError($"Fetched branches for {successCount} repositories. {failureCount} failed."));
+            if (result.FailureCount > 0)
+                SafeInvoke(() => ToastService.ShowError($"Fetched branches for {result.SuccessCount} repositories. {result.FailureCount} failed."));
         }, new PageJobOptions
         {
             RefreshOnSuccess = false,

@@ -106,11 +106,10 @@ public sealed class BackgroundJobService : IBackgroundJobService, IDisposable
         string displayMessage,
         Func<BackgroundJobHandle, CancellationToken, Task> work)
     {
-        var overlayFamily = WorkspaceJobKeys.OverlayFamily(jobKey);
         _runner.TryStart(
             workspaceId,
-            operationKind: overlayFamily,
-            overlayFamily,
+            operationKind: jobKey,
+            overlayKey: jobKey,
             displayMessage,
             async (operation, ct) =>
             {
@@ -119,7 +118,10 @@ public sealed class BackgroundJobService : IBackgroundJobService, IDisposable
             },
             out var operation);
 
-        return Attach(jobKey, operation);
+        if (WorkspaceJobKeys.OverlayMatches(jobKey, operation))
+            return Attach(jobKey, operation);
+
+        return Attach(operation.OverlayKey, operation);
     }
 
     private bool TryGetMatchingOperation(string jobKey, out WorkspaceOperation? operation)

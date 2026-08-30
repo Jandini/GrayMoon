@@ -769,21 +769,18 @@
             try
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
-                var fileVersionService = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
-                var (updated, failed, error, _) = await fileVersionService.UpdateAllVersionsAsync(
-                    workspaceId, selectedRepositoryIds: null, cancellationToken: ct);
-
-                if (error == null)
-                {
-                    job.ReportProgress("Checking file versions...");
-                    await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, ct, forceFresh: true);
-                }
+                var fileOps = scope.ServiceProvider.GetRequiredService<IWorkspaceFileOperations>();
+                var result = await fileOps.UpdateVersionsAsync(
+                    workspaceId,
+                    ct,
+                    checkAfter: true,
+                    progress: job.ToOperationProgress());
 
                 if (!_disposed)
                     await InvokeAsync(() =>
                     {
-                        if (error != null) ToastService.ShowError(error);
-                        else if (failed > 0) ToastService.ShowError($"Updated {updated} line(s). {failed} file(s) could not be updated - check logs.");
+                        if (result.Error != null) ToastService.ShowError(result.Error);
+                        else if (result.Failed > 0) ToastService.ShowError($"Updated {result.Updated} line(s). {result.Failed} file(s) could not be updated - check logs.");
                         else ToastService.Show("Versions updated in configured files.");
                     });
             }

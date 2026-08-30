@@ -16,6 +16,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Parameter] public int WorkspaceId { get; set; }
 
     [Inject] private IWorkspaceGitChangesReadService ReadService { get; set; } = default!;
+    [Inject] private IWorkspaceGitChangesOperations GitChangesOperations { get; set; } = default!;
     [Inject] private IGitChangesAgentClient AgentClient { get; set; } = default!;
     [Inject] private WorkspaceGitChangesWriteQueue WriteQueue { get; set; } = default!;
     [Inject] private AppDbContext DbContext { get; set; } = default!;
@@ -502,18 +503,18 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private Task StageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey) =>
         scope == GitChangeOperationScope.Repository
             ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: true)
-            : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (root, wsName, repoName, repositoryId) =>
+            : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (_, _, _, repositoryId) =>
             {
-                var result = await AgentClient.StageAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
+                var result = await GitChangesOperations.StageAsync(WorkspaceId, repositoryId, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
             });
 
     private Task UnstageAsync(int workspaceRepositoryId, GitChangeOperationScope scope, IReadOnlyList<string> paths, string rowKey) =>
         scope == GitChangeOperationScope.Repository
             ? RunRepositoryScopedMutationJobAsync(workspaceRepositoryId, isStage: false)
-            : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (root, wsName, repoName, repositoryId) =>
+            : RunMutationAsync(workspaceRepositoryId, rowKey, isDiscard: false, async (_, _, _, repositoryId) =>
             {
-                var result = await AgentClient.UnstageAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
+                var result = await GitChangesOperations.UnstageAsync(WorkspaceId, repositoryId, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
             });
 
@@ -542,8 +543,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
                 }
 
                 var result = isStage
-                    ? await AgentClient.StageAsync(resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, GitChangeOperationScope.Repository, [], ct)
-                    : await AgentClient.UnstageAsync(resolved.Value.Root, resolved.Value.WorkspaceName, resolved.Value.RepositoryName, GitChangeOperationScope.Repository, [], ct);
+                    ? await GitChangesOperations.StageAsync(WorkspaceId, resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct)
+                    : await GitChangesOperations.UnstageAsync(WorkspaceId, resolved.Value.RepositoryId, GitChangeOperationScope.Repository, [], ct);
 
                 // reload:false - StartPageJob's own ReloadOnSuccess (properly dispatcher-marshalled via
                 // InvokeAsync) does the final LoadAsync() once this job body returns; calling LoadAsync's

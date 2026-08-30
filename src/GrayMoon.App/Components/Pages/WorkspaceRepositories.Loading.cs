@@ -333,8 +333,8 @@ public sealed partial class WorkspaceRepositories
     {
         try
         {
-            await ScopedExecutor.ExecuteAsync<WorkspaceGitService>(
-                svc => svc.RefreshBranchesAndBroadcastAsync(repositoryId, WorkspaceId, CancellationToken.None));
+            await ScopedExecutor.ExecuteAsync<IWorkspaceBranchOperations>(
+                svc => svc.RefreshBranchesAsync(WorkspaceId, repositoryId, CancellationToken.None));
         }
         catch (Exception ex)
         {
