@@ -24,7 +24,7 @@ else if (PullRequest != null && PullRequest.IsMerged)
        rel="noopener noreferrer"
        class="badge pr-badge pr-badge-merged"
        title="PR #@PullRequest.Number merged">merged</a>
-    @if (PullRequest.ChangedFiles is > 0)
+    @if (PullRequest.ChangedFiles is int)
     {
         <a href="@($"{PullRequest.HtmlUrl}/changes")"
            target="_blank"
@@ -42,7 +42,7 @@ else if (PullRequest != null && PullRequest.IsClosed)
        rel="noopener noreferrer"
        class="badge pr-badge pr-badge-closed"
        title="PR #@PullRequest.Number closed">closed</a>
-    @if (PullRequest.ChangedFiles is > 0)
+    @if (PullRequest.ChangedFiles is int)
     {
         <a href="@($"{PullRequest.HtmlUrl}/changes")"
            target="_blank"
@@ -66,7 +66,7 @@ else if (PullRequest != null && string.Equals(PullRequest.State, "open", StringC
                 @onclick:stopPropagation>
             #@PullRequest.Number
         </button>
-        @if (PullRequest.ChangedFiles is > 0)
+        @if (PullRequest.ChangedFiles is int)
         {
             <a href="@($"{PullRequest.HtmlUrl}/changes")"
                target="_blank"
