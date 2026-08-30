@@ -233,8 +233,17 @@ public sealed class WorkspaceProjectRepository(
                 && !string.IsNullOrWhiteSpace(r.ConsumerProjectFilePath)
                 && r.ConsumerRepositoryId != r.ProducerRepositoryId)
             .GroupBy(r => (r.ConsumerRepositoryId, ConsumerProjectFilePath: r.ConsumerProjectFilePath.Trim(), r.ProducerRepositoryId, PackageName: r.PackageName.Trim()))
-            .Select(g => g.Key)
-            .Select(k => new GeneratedPackageDependencyInfo(k.ConsumerRepositoryId, k.ConsumerProjectFilePath, k.ProducerRepositoryId, k.PackageName))
+            .Select(g =>
+            {
+                var first = g.First();
+                var version = string.IsNullOrWhiteSpace(first.Version) ? null : first.Version.Trim();
+                return new GeneratedPackageDependencyInfo(
+                    g.Key.ConsumerRepositoryId,
+                    g.Key.ConsumerProjectFilePath,
+                    g.Key.ProducerRepositoryId,
+                    g.Key.PackageName,
+                    version);
+            })
             .ToList();
 
         var existingGenerated = await dbContext.WorkspaceProjects
@@ -284,15 +293,16 @@ public sealed class WorkspaceProjectRepository(
             .ToListAsync(cancellationToken);
         var realByRepoAndPath = realProjects
             .Where(p => !string.IsNullOrWhiteSpace(p.ProjectFilePath))
-            .GroupBy(p => (p.RepositoryId, ProjectFilePath: p.ProjectFilePath.Trim().ToLowerInvariant()))
+            .GroupBy(p => (p.RepositoryId, ProjectFilePath: NormalizeRepoRelativePath(p.ProjectFilePath)))
             .ToDictionary(g => g.Key, g => g.First());
 
-        var desiredEdges = new HashSet<(int DependentProjectId, int ReferencedProjectId)>();
+        var desiredEdges = new Dictionary<(int DependentProjectId, int ReferencedProjectId), string?>();
         foreach (var r in distinctResolved)
         {
-            if (!realByRepoAndPath.TryGetValue((r.ConsumerRepositoryId, r.ConsumerProjectFilePath.Trim().ToLowerInvariant()), out var consumerProject)) continue;
+            if (!realByRepoAndPath.TryGetValue((r.ConsumerRepositoryId, NormalizeRepoRelativePath(r.ConsumerProjectFilePath)), out var consumerProject)) continue;
             if (!generatedByKey.TryGetValue((r.ProducerRepositoryId, r.PackageName), out var generatedProject)) continue;
-            desiredEdges.Add((consumerProject.ProjectId, generatedProject.ProjectId));
+            var version = string.IsNullOrWhiteSpace(r.Version) ? null : r.Version.Trim();
+            desiredEdges[(consumerProject.ProjectId, generatedProject.ProjectId)] = version;
         }
 
         var generatedProjectIds = generatedByKey.Values.Select(p => p.ProjectId).ToHashSet();
@@ -302,32 +312,48 @@ public sealed class WorkspaceProjectRepository(
                 .Where(d => generatedProjectIds.Contains(d.ReferencedProjectId))
                 .ToListAsync(cancellationToken);
 
+        var desiredEdgeKeys = desiredEdges.Keys.ToHashSet();
         var toRemoveEdges = existingGeneratedEdges
-            .Where(e => !desiredEdges.Contains((e.DependentProjectId, e.ReferencedProjectId)))
+            .Where(e => !desiredEdgeKeys.Contains((e.DependentProjectId, e.ReferencedProjectId)))
             .ToList();
         if (toRemoveEdges.Count > 0)
             dbContext.ProjectDependencies.RemoveRange(toRemoveEdges);
 
-        var existingEdgeKeys = existingGeneratedEdges
-            .Select(e => (e.DependentProjectId, e.ReferencedProjectId))
-            .ToHashSet();
+        var existingByKey = existingGeneratedEdges
+            .Where(e => desiredEdgeKeys.Contains((e.DependentProjectId, e.ReferencedProjectId)))
+            .ToDictionary(e => (e.DependentProjectId, e.ReferencedProjectId));
         var addedEdges = 0;
-        foreach (var (depId, refId) in desiredEdges)
+        var updatedEdges = 0;
+        foreach (var (key, version) in desiredEdges)
         {
-            if (existingEdgeKeys.Contains((depId, refId))) continue;
+            if (existingByKey.TryGetValue(key, out var existing))
+            {
+                if (!string.Equals(existing.Version, version, StringComparison.Ordinal))
+                {
+                    existing.Version = version;
+                    updatedEdges++;
+                }
+                continue;
+            }
+
             dbContext.ProjectDependencies.Add(new ProjectDependency
             {
-                DependentProjectId = depId,
-                ReferencedProjectId = refId
+                DependentProjectId = key.DependentProjectId,
+                ReferencedProjectId = key.ReferencedProjectId,
+                Version = version
             });
             addedEdges++;
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
         logger.LogInformation(
-            "Persistence: Generated package dependencies. WorkspaceId={WorkspaceId}, GeneratedPackages={PackageCount}, EdgesAdded={Added}, EdgesRemoved={Removed}",
-            workspaceId, desiredGeneratedKeys.Count, addedEdges, toRemoveEdges.Count);
+            "Persistence: Generated package dependencies. WorkspaceId={WorkspaceId}, GeneratedPackages={PackageCount}, EdgesAdded={Added}, EdgesUpdated={Updated}, EdgesRemoved={Removed}",
+            workspaceId, desiredGeneratedKeys.Count, addedEdges, updatedEdges, toRemoveEdges.Count);
     }
+
+    /// <summary>Repo-relative path identity: trim, unify separators to '/', case-insensitive.</summary>
+    private static string NormalizeRepoRelativePath(string path) =>
+        path.Trim().Replace('\\', '/').ToLowerInvariant();
 
     /// <summary>Recomputes DependencyLevel, Dependencies, and UnmatchedDeps from current DB state (workspace projects, project dependencies, and file version configs) and persists to WorkspaceRepositoryLink. Use after a repository version change (e.g. notify job) so the grid can refresh without re-reading .csproj files.</summary>
     public async Task RecomputeAndPersistRepositoryDependencyStatsAsync(int workspaceId, CancellationToken cancellationToken = default)

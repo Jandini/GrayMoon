@@ -13,10 +13,11 @@ public interface ICsProjFileParser
     Task<bool> UpdateAsync(string csprojPath, IReadOnlyDictionary<string, string> packageIdToNewVersion, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Finds the PackageReference Include name whose element text contains a match for the given version-pattern
+    /// Finds the PackageReference whose element text contains a match for the given version-pattern
     /// prefix/suffix (e.g. prefix="Version=\"" suffix="\" />"), scanning whole PackageReference elements so
     /// multiline attributes, attribute ordering, and whitespace variations are handled the same way as <see cref="UpdateAsync"/>.
-    /// Returns null if the file is missing/invalid or no PackageReference element matches.
+    /// Returns the Include name and the Version captured between prefix and suffix, or null if the file is
+    /// missing/invalid or no PackageReference element matches.
     /// </summary>
-    Task<string?> FindPackageReferenceForVersionPatternAsync(string csprojPath, string prefix, string suffix, CancellationToken cancellationToken = default);
+    Task<PackageReferenceMatch?> FindPackageReferenceForVersionPatternAsync(string csprojPath, string prefix, string suffix, CancellationToken cancellationToken = default);
 }

@@ -110,7 +110,7 @@ public sealed class CsProjFileParser : ICsProjFileParser
         return modified;
     }
 
-    public async Task<string?> FindPackageReferenceForVersionPatternAsync(string csprojPath, string prefix, string suffix, CancellationToken cancellationToken = default)
+    public async Task<PackageReferenceMatch?> FindPackageReferenceForVersionPatternAsync(string csprojPath, string prefix, string suffix, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(csprojPath) || !File.Exists(csprojPath) || string.IsNullOrEmpty(prefix))
             return null;
@@ -127,17 +127,18 @@ public sealed class CsProjFileParser : ICsProjFileParser
             return null;
         }
 
-        var patternRegex = new Regex(Regex.Escape(prefix) + ".*?" + Regex.Escape(suffix ?? ""), RegexOptions.Singleline);
+        var patternRegex = new Regex(Regex.Escape(prefix) + "(.*?)" + Regex.Escape(suffix ?? ""), RegexOptions.Singleline);
 
         foreach (Match elementMatch in PackageReferenceElementRegex.Matches(content))
         {
             var elementText = elementMatch.Value;
-            if (!patternRegex.IsMatch(elementText))
+            var versionMatch = patternRegex.Match(elementText);
+            if (!versionMatch.Success)
                 continue;
 
             var includeMatch = IncludeAttributeRegex.Match(elementText);
             if (includeMatch.Success)
-                return includeMatch.Groups[1].Value.Trim();
+                return new PackageReferenceMatch(includeMatch.Groups[1].Value.Trim(), versionMatch.Groups[1].Value.Trim());
         }
 
         return null;

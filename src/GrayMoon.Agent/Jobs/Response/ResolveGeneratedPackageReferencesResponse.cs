@@ -14,9 +14,10 @@ public sealed class ResolveGeneratedPackageReferencesFileResult
     [JsonPropertyName("packages")] public List<ResolveGeneratedPackageReferencesPackageEntry> Packages { get; set; } = [];
 }
 
-/// <summary>One resolved PackageReference: the repository-name token from the version pattern and the matching PackageReference Include name.</summary>
+/// <summary>One resolved PackageReference: the repository-name token from the version pattern, the matching PackageReference Include name, and that reference's Version.</summary>
 public sealed class ResolveGeneratedPackageReferencesPackageEntry
 {
     [JsonPropertyName("repoNameToken")] public string RepoNameToken { get; set; } = string.Empty;
     [JsonPropertyName("packageName")] public string PackageName { get; set; } = string.Empty;
+    [JsonPropertyName("version")] public string Version { get; set; } = string.Empty;
 }
