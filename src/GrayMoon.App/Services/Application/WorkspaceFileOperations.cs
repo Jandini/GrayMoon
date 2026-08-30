@@ -1,23 +1,7 @@
-using GrayMoon.App.Api.Endpoints;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 
 namespace GrayMoon.App.Services.Application;
-
-public interface IWorkspaceFileOperations
-{
-    Task<List<WorkspaceFileDto>?> ListAsync(int workspaceId, CancellationToken cancellationToken);
-
-    Task<(bool Found, int Added)> AddAsync(int workspaceId, IReadOnlyList<AddWorkspaceFileRequest> items, CancellationToken cancellationToken);
-
-    Task<(bool Found, bool AgentConnected, AgentSearchFilesResponse? Data, string? Error)> SearchAsync(
-        int workspaceId,
-        string? pattern,
-        string? repositoryName,
-        CancellationToken cancellationToken);
-
-    Task<(int Updated, int Failed, string? Error)> UpdateVersionsAsync(int workspaceId, CancellationToken cancellationToken);
-}
 
 public sealed class WorkspaceFileOperations(
     WorkspaceRepository workspaceRepository,

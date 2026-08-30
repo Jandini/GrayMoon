@@ -81,6 +81,3 @@ public sealed record PullRequestMergeDetails
     /// <summary>True when GitHub reports the PR as currently mergeable via any allowed method.</summary>
     public bool CanMergeNow => Mergeable == true && AllowedMergeMethods.Count > 0;
 }
-
-/// <summary>Result of a merge attempt. <see cref="Message"/> is always GitHub's own error text on failure - GrayMoon never invents a reason.</summary>
-public sealed record MergeResult(bool Success, string? Message);

@@ -3,9 +3,6 @@ using GrayMoon.App.Services.Queries;
 
 namespace GrayMoon.App.Services.Orchestration;
 
-/// <summary>Outcome of an unattended sync-to-default. <see cref="Completed"/> is false when fetch, safety, or sync aborted the batch.</summary>
-public sealed record UnattendedSyncToDefaultResult(bool Completed, string? AbortReason);
-
 /// <summary>
 /// Handles sync operations (git status, version, branch, commit counts) for workspace repositories.
 /// Stateless; all state is provided via callbacks.

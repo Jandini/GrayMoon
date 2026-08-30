@@ -17,23 +17,6 @@ public sealed class GitChangesDiffResult
     public GitDiffDocument? Diff { get; set; }
 }
 
-public sealed class GitChangesMutationResult
-{
-    public bool Success { get; set; }
-    public string? ErrorCode { get; set; }
-    public string? ErrorMessage { get; set; }
-    public GitChangeSnapshot? Snapshot { get; set; }
-}
-
-public sealed class GitChangesCommitResult
-{
-    public bool Success { get; set; }
-    public string? ErrorCode { get; set; }
-    public string? ErrorMessage { get; set; }
-    public string? CommitSha { get; set; }
-    public GitChangeSnapshot? Snapshot { get; set; }
-}
-
 /// <summary>
 /// Thin wrapper over <see cref="IAgentBridge.SendCommandAsync"/> for the five Git Changes agent commands.
 /// Callers resolve <paramref name="workspaceRoot"/>/<paramref name="workspaceName"/>/<paramref name="repositoryName"/>

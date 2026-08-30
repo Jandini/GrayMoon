@@ -19,7 +19,6 @@ public sealed partial class WorkspaceRepositories
             var allLinks = await GetAllLinksForOperationAsync();
             var plan = await PushOperations.GetPlanAsync(
                 WorkspaceId,
-                allLinks,
                 cancellationToken: CancellationToken.None);
             if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
             {
@@ -183,8 +182,7 @@ public sealed partial class WorkspaceRepositories
     {
         await using var planScope = ServiceScopeFactory.CreateAsyncScope();
         var planOps = planScope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
-        var allLinks = await GetAllLinksForOperationAsync();
-        var plan = await planOps.GetPlanAsync(WorkspaceId, allLinks, maxLevel, ct);
+        var plan = await planOps.GetPlanAsync(WorkspaceId, maxLevel, ct);
         if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
         {
             SafeInvoke(() => ToastService.Show(emptyMessage));

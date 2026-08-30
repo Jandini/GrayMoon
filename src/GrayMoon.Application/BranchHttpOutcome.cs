@@ -1,7 +1,7 @@
-namespace GrayMoon.App.Services.Application;
+namespace GrayMoon.Application;
 
 /// <summary>
-/// HTTP-mappable result for branch operations. Endpoints call <see cref="ToHttpResult"/>;
+/// HTTP-mappable result for branch operations. Endpoints map this via an App adapter;
 /// in-process callers inspect <see cref="StatusCode"/> and <see cref="Body"/>.
 /// </summary>
 public sealed class BranchHttpOutcome
@@ -25,19 +25,6 @@ public sealed class BranchHttpOutcome
         StatusCode = status,
         ProblemTitle = title
     };
-
-    public IResult ToHttpResult()
-    {
-        if (ProblemTitle != null)
-            return Results.Problem(ProblemTitle, statusCode: StatusCode);
-
-        return StatusCode switch
-        {
-            400 => Results.BadRequest(Body),
-            404 => Results.NotFound(Body),
-            _ => Results.Ok(Body)
-        };
-    }
 }
 
 /// <summary>Persisted branch/tag lists for a workspace repository (POST /api/branches/get).</summary>

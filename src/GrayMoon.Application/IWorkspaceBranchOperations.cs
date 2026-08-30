@@ -1,4 +1,4 @@
-namespace GrayMoon.App.Services.Application;
+namespace GrayMoon.Application;
 
 /// <summary>
 /// In-process branch operations shared by REST endpoints, page handlers, and modals.

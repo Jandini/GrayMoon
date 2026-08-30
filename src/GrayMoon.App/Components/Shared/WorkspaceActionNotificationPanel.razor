@@ -855,7 +855,7 @@
         var pushOps = scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
         var depService = scope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
 
-        var plan = await pushOps.GetPlanAsync(workspaceId, links, maxLevel, ct);
+        var plan = await pushOps.GetPlanAsync(workspaceId, maxLevel, ct);
         if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
         {
             if (!_disposed) _ = InvokeAsync(() => ToastService.Show("Nothing to push."));
