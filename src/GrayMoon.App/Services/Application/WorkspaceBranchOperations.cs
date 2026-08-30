@@ -16,6 +16,7 @@ public sealed class WorkspaceBranchOperations(
     WorkspaceRepository workspaceRepository,
     GitHubRepositoryRepository repoRepository,
     AppDbContext dbContext,
+    IDbContextFactory<AppDbContext> dbContextFactory,
     WorkspaceGitService workspaceGitService,
     WorkspaceRepositoryStateWriter stateWriter,
     IHubContext<WorkspaceSyncHub> hubContext,
@@ -29,10 +30,19 @@ public sealed class WorkspaceBranchOperations(
         if (resolved.Error != null)
             return resolved.Error;
 
-        var wr = resolved.Link!;
         try
         {
-            var rows = await dbContext.RepositoryBranches
+            // Fresh context: the circuit-scoped dbContext may still track a WorkspaceRepositoryLink
+            // written by an earlier open (e.g. feature/x) after merge+sync persisted main elsewhere.
+            await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var wr = await db.WorkspaceRepositories
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.WorkspaceId == workspaceId && x.RepositoryId == repositoryId, cancellationToken);
+            if (wr == null)
+                return BranchHttpOutcome.NotFound("Repository is not in the given workspace.");
+
+            var rows = await db.RepositoryBranches
+                .AsNoTracking()
                 .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
                 .ToListAsync(cancellationToken);
 
@@ -293,13 +303,16 @@ public sealed class WorkspaceBranchOperations(
         if (workspaceId <= 0)
             return BranchHttpOutcome.BadRequest("workspaceId is required.");
 
-        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
-        if (workspace == null)
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var workspaceExists = await db.Workspaces
+            .AsNoTracking()
+            .AnyAsync(w => w.WorkspaceId == workspaceId, cancellationToken);
+        if (!workspaceExists)
             return BranchHttpOutcome.NotFound("Workspace not found.");
 
-        var links = await dbContext.WorkspaceRepositories
+        var links = await db.WorkspaceRepositories
+            .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId)
-            .Include(wr => wr.Repository)
             .ToListAsync(cancellationToken);
 
         if (links.Count == 0)
@@ -318,7 +331,8 @@ public sealed class WorkspaceBranchOperations(
         var defaultBranchNames = new List<string>();
         foreach (var wr in links)
         {
-            var branches = await dbContext.RepositoryBranches
+            var branches = await db.RepositoryBranches
+                .AsNoTracking()
                 .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
                 .Select(rb => new { rb.BranchName, rb.IsRemote, rb.IsDefault })
                 .ToListAsync(cancellationToken);
