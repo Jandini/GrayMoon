@@ -44,14 +44,6 @@
     background: #5a6268;
 }
 
-.sync-to-default-lost-commits {
-    padding: 0.5rem 1rem;
-    margin-bottom: 1rem;
-    color: #d4d4d4;
-    background: rgba(248, 113, 113, 0.22);
-    box-shadow: inset 3px 0 0 #f87171;
-}
-
 .sync-default-pr-badge {
     font-size: 0.75em;
     vertical-align: middle;

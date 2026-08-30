@@ -123,7 +123,7 @@
 
                             @if (ErrorMessage != null)
                             {
-                                <div class="alert alert-danger">@ErrorMessage</div>
+                                <div class="gm-callout gm-callout--error" role="alert">@ErrorMessage</div>
                             }
                             <div class="modal-footer">
                                 <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
@@ -142,7 +142,7 @@
                         <p>Are you sure you want to delete <strong>@ConnectorName</strong>?</p>
                         @if (ErrorMessage != null)
                         {
-                            <div class="alert alert-danger">@ErrorMessage</div>
+                            <div class="gm-callout gm-callout--error" role="alert">@ErrorMessage</div>
                         }
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>

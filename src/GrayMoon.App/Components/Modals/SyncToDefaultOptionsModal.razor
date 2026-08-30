@@ -15,7 +15,7 @@
                     <p class="mb-2">@Message</p>
                     @if (AnyCommitsWillBeLost)
                     {
-                        <div class="sync-to-default-lost-commits" role="alert">
+                        <div class="gm-callout gm-callout--error" role="alert">
                             One or more repositories have local commits that are not on the default branch. These commits will be permanently lost when the branch is deleted. This cannot be undone.
                         </div>
                     }
