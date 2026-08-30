@@ -152,6 +152,33 @@ public class WorkspaceRepositoryLinkListQueryServiceTests
     }
 
     [Fact]
+    public async Task Snapshot_and_mapper_round_trip_archived_flag()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(8);
+        await using (ctx)
+        {
+            var archived = await ctx.DbContext.Repositories.AsTracking().FirstAsync();
+            archived.Archived = true;
+            await ctx.DbContext.SaveChangesAsync();
+
+            var snapshot = await ctx.WorkspaceRepoLinkQuery.GetSnapshotAsync(workspaceId, archived.RepositoryId);
+            Assert.NotNull(snapshot);
+            Assert.True(snapshot.Archived);
+
+            var link = WorkspaceRepositoryLinkListMapper.ToLink(snapshot);
+            Assert.True(link.Repository!.Archived);
+
+            var notArchived = await ctx.DbContext.Repositories
+                .AsNoTracking()
+                .FirstAsync(r => r.RepositoryId != archived.RepositoryId);
+            var other = await ctx.WorkspaceRepoLinkQuery.GetSnapshotAsync(workspaceId, notArchived.RepositoryId);
+            Assert.NotNull(other);
+            Assert.False(other.Archived);
+            Assert.False(WorkspaceRepositoryLinkListMapper.ToLink(other).Repository!.Archived);
+        }
+    }
+
+    [Fact]
     public async Task Header_state_aggregates_without_loading_all_columns()
     {
         var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(15);

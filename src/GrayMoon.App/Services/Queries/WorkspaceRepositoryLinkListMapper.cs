@@ -33,6 +33,7 @@ internal static class WorkspaceRepositoryLinkListMapper
                 RepositoryId = dto.RepositoryId,
                 RepositoryName = dto.RepositoryName,
                 CloneUrl = dto.CloneUrl,
+                Archived = dto.Archived,
             },
         };
 

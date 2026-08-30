@@ -43,7 +43,8 @@ public sealed record WorkspaceRepositoryLinkListItemDto(
     DateTimeOffset? PullRequestMergedAt,
     bool? PullRequestMergeable,
     string? PullRequestMergeableState,
-    int? PullRequestChangedFiles);
+    int? PullRequestChangedFiles,
+    bool Archived);
 
 public sealed record WorkspaceRepositoryLinkListPageResult(
     IReadOnlyList<WorkspaceRepositoryLinkListItemDto> Items,

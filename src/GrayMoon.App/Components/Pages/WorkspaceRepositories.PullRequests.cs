@@ -179,26 +179,14 @@ public sealed partial class WorkspaceRepositories
             }
 
             var successCount = results.Count(r => r.Success);
-            var failedCount = results.Count - successCount;
 
             SafeInvoke(() =>
             {
-                if (successCount > 0 && failedCount == 0)
-                {
+                foreach (var failed in results.Where(r => !r.Success))
+                    SetRepositoryError(failed.RepositoryId, failed.ErrorMessage ?? "Pull request creation failed.");
+
+                if (successCount > 0)
                     ToastService.Show($"Created {successCount} of {total} pull requests.");
-                }
-                else if (successCount > 0)
-                {
-                    ToastService.Show($"Created {successCount} of {total} pull requests.");
-                    var firstFailure = results.First(r => !r.Success);
-                    ToastService.ShowError($"{firstFailure.RepositoryName}: {firstFailure.ErrorMessage}");
-                }
-                else
-                {
-                    var firstFailure = results.FirstOrDefault(r => !r.Success);
-                    var msg = firstFailure?.ErrorMessage ?? "Pull request creation failed.";
-                    ToastService.ShowError($"No pull requests were created. {msg}");
-                }
             });
 
             var firstSuccess = results.FirstOrDefault(r => r.Success);

@@ -155,7 +155,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Update dependencies failed for repository {RepositoryId}", repositoryId);
-                SafeInvoke(() => ToastService.ShowError(ex.Message));
+                SafeInvoke(() => SetRepositoryError(repositoryId, ex.Message));
             }
         });
 

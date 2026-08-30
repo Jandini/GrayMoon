@@ -66,7 +66,7 @@ public sealed class PushOrchestrator(
         }
 
         logger.LogInformation("[PushOrchestrator {RunId}] Workspace {WorkspaceId}: push finished.", runId, workspaceId);
-        return OperationResult.Ok(repoErrors.Count > 0 ? new Dictionary<int, string>(repoErrors) : null);
+        return PushOperationResult.FromRepoErrors(repoErrors);
     }
 
     public async Task<OperationResult> PushSingleAsync(

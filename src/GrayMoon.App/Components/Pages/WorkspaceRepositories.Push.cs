@@ -212,7 +212,7 @@ public sealed partial class WorkspaceRepositories
                     syncedRepoIds: syncedRepoIds,
                     cancellationToken: ct,
                     runId: runId));
-            result.ShowRepoErrors(msg => SafeInvoke(() => ToastService.ShowError(msg)));
+            ApplyPushResult(result);
         }
         catch (OperationCanceledException)
         {
@@ -239,6 +239,18 @@ public sealed partial class WorkspaceRepositories
         }
     }
 
+    private void ApplyPushResult(OperationResult result)
+    {
+        if (result.RepoErrors is { Count: > 0 })
+        {
+            SafeInvoke(() => ApplyRepositoryErrors(result.RepoErrors));
+            return;
+        }
+
+        if (!result.Success && !string.IsNullOrWhiteSpace(result.Error))
+            SafeInvoke(() => ToastService.ShowError(result.Error));
+    }
+
     /// <summary>Push with upstream for a single repository (e.g. when user clicks the not-upstreamed badge). Uses the page overlay.</summary>
     private Task PushSingleRepositoryWithUpstreamAsync(int repositoryId, string? branchName)
     {
@@ -253,7 +265,7 @@ public sealed partial class WorkspaceRepositories
             if (result.Success)
                 await InvokeAsync(async () => { if (_disposed) return; await RefreshFromSync(); });
             else
-                SafeInvoke(() => ToastService.ShowError(result.Error ?? "Push failed."));
+                SafeInvoke(() => SetRepositoryError(repositoryId, result.Error ?? "Push failed."));
         }, new PageJobOptions
         {
             RefreshOnSuccess = false,
@@ -261,7 +273,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Push with upstream failed for repository {RepositoryId}", repositoryId);
-                SafeInvoke(() => ToastService.ShowError(ex.Message));
+                SafeInvoke(() => SetRepositoryError(repositoryId, ex.Message));
             }
         });
 
