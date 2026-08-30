@@ -15,7 +15,7 @@ public sealed class WorkspaceUndoPushHandler(
         int workspaceId,
         IReadOnlyList<WorkspaceRepositoryLink> repos,
         bool keepChanges,
-        Action<string> reportProgress,
+        IProgress<OperationProgress>? progress,
         CancellationToken ct)
     {
         var targets = repos
@@ -81,7 +81,7 @@ public sealed class WorkspaceUndoPushHandler(
                 semaphore.Release();
                 var c = Interlocked.Increment(ref completedCount);
                 if (total > 1)
-                    reportProgress($"Reverting {c} of {total} repositories...");
+                    progress.Report($"Reverting {c} of {total} repositories...", c, total);
             }
         });
 

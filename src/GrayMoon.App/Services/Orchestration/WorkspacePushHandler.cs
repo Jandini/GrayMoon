@@ -28,13 +28,12 @@ public sealed class WorkspacePushHandler(
         return (toPush, pushRepoIds, toPush.Count > 0);
     }
 
-    public async Task RunPushWithDependenciesAsync(
+    public async Task<OperationResult> RunPushWithDependenciesAsync(
         int workspaceId,
         IReadOnlySet<int> repoIds,
         bool synchronizedPush,
         IReadOnlySet<string> requiredPackageIds,
-        Action<string> setProgress,
-        Action<string> showToast,
+        IProgress<OperationProgress>? progress = null,
         Action? onAppSideComplete = null,
         IReadOnlySet<int>? syncedRepoIds = null,
         CancellationToken cancellationToken = default,
@@ -42,13 +41,12 @@ public sealed class WorkspacePushHandler(
     {
         try
         {
-            await pushOrchestrator.RunAsync(
+            return await pushOrchestrator.RunAsync(
                 workspaceId,
                 repoIds,
                 synchronizedPush,
                 requiredPackageIds,
-                setProgress,
-                showToast,
+                progress,
                 onAppSideComplete,
                 syncedRepoIds,
                 cancellationToken,
@@ -59,23 +57,22 @@ public sealed class WorkspacePushHandler(
             if (ex is SynchronizedPushNotPossibleException)
                 throw;
             logger.LogError(ex, "[PushOrchestrator {RunId}] Push with dependencies failed for workspace {WorkspaceId}", runId, workspaceId);
-            showToast(ex.Message);
             throw;
         }
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> PushSingleRepositoryWithUpstreamAsync(
+    public Task<OperationResult> PushSingleRepositoryWithUpstreamAsync(
         int workspaceId,
         int repositoryId,
         string? branchName,
-        Action<string> setProgress,
+        IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
-        return await pushOrchestrator.PushSingleAsync(
+        return pushOrchestrator.PushSingleAsync(
             workspaceId,
             repositoryId,
             branchName,
-            setProgress,
+            progress,
             cancellationToken);
     }
 }

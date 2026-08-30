@@ -15,7 +15,7 @@ public sealed class WorkspaceUpdateHandler(
     public async Task<IReadOnlySet<int>> RunUpdateAsync(
         int workspaceId,
         CancellationToken cancellationToken,
-        Action<string> setProgress,
+        IProgress<OperationProgress>? progress,
         Action<int, string> setRepositoryError,
         Action? onAppSideComplete = null,
         IReadOnlySet<int>? repoIdsToUpdate = null,
@@ -29,7 +29,7 @@ public sealed class WorkspaceUpdateHandler(
             return await dependencyUpdateOrchestrator.RunAsync(
                 workspaceId,
                 cancellationToken,
-                setProgress,
+                progress,
                 setRepositoryError,
                 onAppSideComplete,
                 repoIdsToUpdate,

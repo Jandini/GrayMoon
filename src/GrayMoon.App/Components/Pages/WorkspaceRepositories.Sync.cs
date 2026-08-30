@@ -121,7 +121,7 @@ public sealed partial class WorkspaceRepositories
                         repositoryIds,
                         skipDependencyLevelPersistence,
                         cancellationToken: ct,
-                        setProgress: job.ReportProgress,
+                        progress: job.ToOperationProgress(),
                         updateRepoGitInfo: (repoId, info) => SafeInvoke(() =>
                         {
                             if (_linkByRepoId.TryGetValue(repoId, out var wr))

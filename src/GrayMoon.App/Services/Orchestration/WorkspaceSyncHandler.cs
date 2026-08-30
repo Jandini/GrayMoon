@@ -17,7 +17,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
         IReadOnlyList<int>? repositoryIds,
         bool skipDependencyLevelPersistence,
         CancellationToken cancellationToken,
-        Action<string> setProgress,
+        IProgress<OperationProgress>? progress,
         Action<int, RepoGitVersionInfo> updateRepoGitInfo,
         Action<int, RepoSyncStatus> setRepoSyncStatus,
         Action? onAppSideComplete = null)
@@ -31,7 +31,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
                 workspaceId,
                 onProgress: (completed, total, repoId, info) =>
                 {
-                    setProgress($"Synchronized {completed} of {total}");
+                    progress.Report($"Synchronized {completed} of {total}", completed, total);
                     var status = !string.IsNullOrWhiteSpace(info.ErrorMessage) || info.Version != "-" || info.Branch != "-"
                         ? RepoSyncStatus.InSync
                         : RepoSyncStatus.Error;
@@ -60,11 +60,10 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
     public async Task<UnattendedSyncToDefaultResult> SyncToDefaultUnattendedAsync(
         int workspaceId,
         IReadOnlyList<int> repositoryIds,
-        Action<string> setProgress,
+        IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(repositoryIds);
-        ArgumentNullException.ThrowIfNull(setProgress);
 
         var ids = repositoryIds.Distinct().ToList();
         if (ids.Count == 0)
@@ -77,7 +76,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
 
         try
         {
-            setProgress(ids.Count == 1
+            progress.Report(ids.Count == 1
                 ? "Fetching latest branch state..."
                 : $"Fetching latest branch state for {ids.Count} repositories...");
 
@@ -101,7 +100,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
 
                 fetchDone++;
                 if (ids.Count > 1)
-                    setProgress($"Fetched {fetchDone} of {ids.Count}...");
+                    progress.Report($"Fetched {fetchDone} of {ids.Count}...", fetchDone, ids.Count);
             }
 
             try
@@ -140,7 +139,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
             if (toSync.Count == 0)
                 return new UnattendedSyncToDefaultResult(true, null);
 
-            setProgress(toSync.Count == 1
+            progress.Report(toSync.Count == 1
                 ? "Synchronizing to default branch..."
                 : $"Synchronizing {toSync.Count} repositories to default branch...");
 
@@ -164,7 +163,7 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
 
                 synced++;
                 if (toSync.Count > 1)
-                    setProgress($"Synchronized {synced} of {toSync.Count} to default branch");
+                    progress.Report($"Synchronized {synced} of {toSync.Count} to default branch", synced, toSync.Count);
             }
 
             await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);

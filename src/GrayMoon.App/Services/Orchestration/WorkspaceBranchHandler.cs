@@ -39,7 +39,7 @@ public sealed class WorkspaceBranchHandler(
         string newBranchName,
         string baseBranch,
         IReadOnlySet<int>? repositoryIds,
-        Action<int, int> reportProgress,
+        IProgress<OperationProgress>? progress = null,
         bool syncState = false,
         CancellationToken cancellationToken = default)
     {
@@ -50,7 +50,8 @@ public sealed class WorkspaceBranchHandler(
             workspaceId,
             newBranchName,
             baseBranch,
-            onProgress: (completed, total) => reportProgress(completed, total),
+            onProgress: (completed, total) =>
+                progress.Report($"Created {completed} of {total} branches", completed, total),
             repositoryIds: repositoryIds,
             syncState: syncState,
             cancellationToken: cancellationToken);

@@ -370,7 +370,7 @@ public sealed partial class WorkspaceRepositories
                 if (syncToDefault)
                 {
                     var syncResult = await ScopedExecutor.ExecuteAsync<WorkspaceSyncHandler, UnattendedSyncToDefaultResult>(
-                        svc => svc.SyncToDefaultUnattendedAsync(WorkspaceId, [repositoryId], job.ReportProgress, ct));
+                        svc => svc.SyncToDefaultUnattendedAsync(WorkspaceId, [repositoryId], job.ToOperationProgress(), ct));
 
                     if (!syncResult.Completed && syncResult.AbortReason != null)
                         SafeInvoke(() => ToastService.ShowError(syncResult.AbortReason));

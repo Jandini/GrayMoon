@@ -30,11 +30,11 @@ public sealed class WorkspaceCommitSyncHandler(
         int workspaceId,
         int repositoryId,
         CancellationToken cancellationToken,
-        Func<string, Task> setProgress,
+        IProgress<OperationProgress>? progress,
         Action<int, string?> setRepositoryError,
         Action<string?> setPageError)
     {
-        await setProgress("Synchronizing commits...");
+        progress.Report("Synchronizing commits...");
 
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
@@ -90,11 +90,11 @@ public sealed class WorkspaceCommitSyncHandler(
             if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
             {
                 setRepositoryError(repositoryId, result.ErrorMessage);
-                await setProgress(result.MergeConflict ? "Merge conflict detected. Merge aborted." : "Commit sync completed with errors.");
+                progress.Report(result.MergeConflict ? "Merge conflict detected. Merge aborted." : "Commit sync completed with errors.");
             }
             else if (result is { MergeConflict: true })
             {
-                await setProgress("Merge conflict detected. Merge aborted.");
+                progress.Report("Merge conflict detected. Merge aborted.");
             }
             else
             {

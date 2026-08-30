@@ -456,7 +456,7 @@
 
                 var links = ws.Repositories.ToList();
                 var undoPushHandler = scope.ServiceProvider.GetRequiredService<WorkspaceUndoPushHandler>();
-                await undoPushHandler.RunUndoPushAsync(workspaceId, links, keepChanges, job.ReportProgress, ct);
+                await undoPushHandler.RunUndoPushAsync(workspaceId, links, keepChanges, job.ToOperationProgress(), ct);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -585,7 +585,7 @@
                 await updateHandler.RunUpdateAsync(
                     workspaceId,
                     ct,
-                    job.ReportProgress,
+                    job.ToOperationProgress(),
                     (_, _) => { },
                     onAppSideComplete: () => { },
                     repoIdsToUpdate: reposNeedingWork,
@@ -648,7 +648,7 @@
                 await updateHandler.RunUpdateAsync(
                     workspaceId,
                     ct,
-                    job.ReportProgress,
+                    job.ToOperationProgress(),
                     (_, _) => { },
                     onAppSideComplete: () => { },
                     repoIdsToUpdate: reposNeedingWork,
@@ -731,7 +731,7 @@
                 await updateHandler.RunUpdateAsync(
                     workspaceId,
                     ct,
-                    job.ReportProgress,
+                    job.ToOperationProgress(),
                     (_, _) => { },
                     onAppSideComplete: () => { },
                     repoIdsToUpdate: reposNeedingWork,
@@ -884,15 +884,15 @@
             .Cast<string>()
             .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        await pushHandler.RunPushWithDependenciesAsync(
+        var pushResult = await pushHandler.RunPushWithDependenciesAsync(
             workspaceId,
             pushRepoIds,
             synchronizedPush,
             requiredPackageIds,
-            job.ReportProgress,
-            ToastService.ShowError,
+            job.ToOperationProgress(),
             onAppSideComplete: () => { },
             cancellationToken: ct);
+        pushResult.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); });
     }
 
     private Task OnPullBadgeClickAsync(WorkspaceNotification n, NotificationRepo repo)
@@ -1003,15 +1003,15 @@
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
                 var pushHandler = scope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
-                await pushHandler.RunPushWithDependenciesAsync(
+                var result = await pushHandler.RunPushWithDependenciesAsync(
                     workspaceId,
                     repoIds,
                     synchronizedPush,
                     requiredPackageIds,
-                    job.ReportProgress,
-                    ToastService.ShowError,
+                    job.ToOperationProgress(),
                     onAppSideComplete: () => { },
                     cancellationToken: ct);
+                result.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); });
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -1034,14 +1034,14 @@
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
                 var pushHandler = scope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
-                var (success, pushError) = await pushHandler.PushSingleRepositoryWithUpstreamAsync(
+                var result = await pushHandler.PushSingleRepositoryWithUpstreamAsync(
                     workspaceId,
                     repositoryId,
                     branchName,
-                    job.ReportProgress,
+                    job.ToOperationProgress(),
                     ct);
-                if (!success && !_disposed)
-                    _ = InvokeAsync(() => ToastService.ShowError(pushError ?? "Push failed."));
+                if (!result.Success && !_disposed)
+                    _ = InvokeAsync(() => ToastService.ShowError(result.Error ?? "Push failed."));
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -1068,7 +1068,7 @@
                     workspaceId,
                     repositoryId,
                     ct,
-                    msg => { job.ReportProgress(msg); return Task.CompletedTask; },
+                    job.ToOperationProgress(),
                     (_, _) => { },
                     _ => { });
             }
@@ -1113,7 +1113,7 @@
                         workspaceId,
                         repoIds[0],
                         ct,
-                        msg => { job.ReportProgress(msg); return Task.CompletedTask; },
+                        job.ToOperationProgress(),
                         (_, _) => { },
                         _ => { });
                 }

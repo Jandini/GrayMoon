@@ -230,15 +230,15 @@ public sealed partial class WorkspaceGitChanges
                 var pushRepoIds = succeeded.Select(s => s.RepositoryId).ToHashSet();
                 job.ReportProgress("Preparing push...");
 
-                await ScopedExecutor.ExecuteAsync<WorkspacePushHandler>(svc =>
+                var result = await ScopedExecutor.ExecuteAsync<WorkspacePushHandler, OperationResult>(svc =>
                     svc.RunPushWithDependenciesAsync(
                         WorkspaceId,
                         pushRepoIds,
                         synchronizedPush: false,
                         requiredPackageIds: EmptyPushPackageIds,
-                        job.ReportProgress,
-                        msg => SafeInvoke(() => ToastService.ShowError(msg)),
+                        job.ToOperationProgress(),
                         cancellationToken: ct));
+                result.ShowRepoErrors(msg => SafeInvoke(() => ToastService.ShowError(msg)));
             }
         });
     }

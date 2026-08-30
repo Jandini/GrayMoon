@@ -12,13 +12,12 @@ public sealed class PushOrchestrator(
     IServiceProvider serviceProvider,
     ILogger<PushOrchestrator> logger)
 {
-    public async Task RunAsync(
+    public async Task<OperationResult> RunAsync(
         int workspaceId,
         IReadOnlySet<int> repoIds,
         bool synchronizedPush,
         IReadOnlySet<string> requiredPackageIds,
-        Action<string> setProgress,
-        Action<string> showToast,
+        IProgress<OperationProgress>? progress = null,
         Action? onAppSideComplete = null,
         IReadOnlySet<int>? syncedRepoIds = null,
         CancellationToken cancellationToken = default,
@@ -27,6 +26,14 @@ public sealed class PushOrchestrator(
         logger.LogInformation(
             "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: starting push. Mode={Mode}, RepoCount={RepoCount}, RequiredPackages={RequiredPackages}",
             runId, workspaceId, synchronizedPush ? "synchronized" : "parallel", repoIds.Count, requiredPackageIds.Count);
+
+        var setProgress = progress.ToMessageAction();
+        var repoErrors = new System.Collections.Concurrent.ConcurrentDictionary<int, string>();
+        void OnRepoError(int id, string err)
+        {
+            repoErrors[id] = err;
+            progress.Report($"{id}: {err}");
+        }
 
         if (synchronizedPush)
         {
@@ -39,7 +46,7 @@ public sealed class PushOrchestrator(
                 workspaceId,
                 repoIds,
                 setProgress,
-                (id, err) => showToast($"{id}: {err}"),
+                OnRepoError,
                 onAppSideComplete,
                 packageRegistriesAlreadySynced: requiredPackageIds.Count > 0,
                 syncedRepoIds: syncedRepoIds,
@@ -53,27 +60,31 @@ public sealed class PushOrchestrator(
                 workspaceId,
                 repoIds,
                 setProgress,
-                (id, err) => showToast($"{id}: {err}"),
+                OnRepoError,
                 onAppSideComplete: null,
                 cancellationToken: cancellationToken);
         }
 
         logger.LogInformation("[PushOrchestrator {RunId}] Workspace {WorkspaceId}: push finished.", runId, workspaceId);
+        return OperationResult.Ok(repoErrors.Count > 0 ? new Dictionary<int, string>(repoErrors) : null);
     }
 
-    public Task<(bool Success, string? ErrorMessage)> PushSingleAsync(
+    public async Task<OperationResult> PushSingleAsync(
         int workspaceId,
         int repositoryId,
         string? branchName,
-        Action<string> setProgress,
+        IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
-        return workspacePushService.PushSingleRepositoryWithUpstreamAsync(
+        var (success, errorMessage) = await workspacePushService.PushSingleRepositoryWithUpstreamAsync(
             workspaceId,
             repositoryId,
             branchName,
-            msg => setProgress(msg),
+            progress.ToMessageAction(),
             cancellationToken);
+        return success
+            ? OperationResult.Ok()
+            : OperationResult.Fail(errorMessage ?? "Push failed.");
     }
 }
 

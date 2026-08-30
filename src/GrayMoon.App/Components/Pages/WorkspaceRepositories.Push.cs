@@ -211,21 +211,30 @@ public sealed partial class WorkspaceRepositories
     {
         try
         {
-            await ScopedExecutor.ExecuteAsync<WorkspacePushHandler>(svc =>
+            var result = await ScopedExecutor.ExecuteAsync<WorkspacePushHandler, OperationResult>(svc =>
                 svc.RunPushWithDependenciesAsync(
                     WorkspaceId,
                     repoIds,
                     synchronizedPush,
                     requiredPackageIds,
-                    job.ReportProgress,
-                    ToastService.ShowError,
+                    job.ToOperationProgress(),
                     syncedRepoIds: syncedRepoIds,
                     cancellationToken: ct,
                     runId: runId));
+            result.ShowRepoErrors(msg => SafeInvoke(() => ToastService.ShowError(msg)));
         }
         catch (OperationCanceledException)
         {
             SafeInvoke(() => ToastService.Show("Push cancelled."));
+            throw;
+        }
+        catch (SynchronizedPushNotPossibleException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            SafeInvoke(() => ToastService.ShowError(ex.Message));
             throw;
         }
         finally
@@ -247,13 +256,13 @@ public sealed partial class WorkspaceRepositories
 
         StartPageJob("Setting upstream...", async (job, ct) =>
         {
-            var (success, pushError) = await ScopedExecutor.ExecuteAsync<WorkspacePushHandler, (bool, string?)>(
-                svc => svc.PushSingleRepositoryWithUpstreamAsync(WorkspaceId, repositoryId, branchName, job.ReportProgress, ct));
+            var result = await ScopedExecutor.ExecuteAsync<WorkspacePushHandler, OperationResult>(
+                svc => svc.PushSingleRepositoryWithUpstreamAsync(WorkspaceId, repositoryId, branchName, job.ToOperationProgress(), ct));
 
-            if (success)
+            if (result.Success)
                 await InvokeAsync(async () => { if (_disposed) return; await RefreshFromSync(); });
             else
-                SafeInvoke(() => ToastService.ShowError(pushError ?? "Push failed."));
+                SafeInvoke(() => ToastService.ShowError(result.Error ?? "Push failed."));
         }, new PageJobOptions
         {
             RefreshOnSuccess = false,
