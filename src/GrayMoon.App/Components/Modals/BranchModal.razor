@@ -1,6 +1,4 @@
-@using System.Text.Json
-@inject IHttpClientFactory HttpClientFactory
-@inject NavigationManager NavigationManager
+@inject IWorkspaceBranchOperations BranchOperations
 @inject ILogger<BranchModal> Logger
 
 @if (IsVisible)
@@ -519,18 +517,8 @@
     {
         try
         {
-            var httpClient = HttpClientFactory.CreateClient();
-            var request = new { workspaceId = WorkspaceId, branchName };
-            var json = JsonSerializer.Serialize(request);
-            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
-            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/exists-in-workspace", content);
-            if (!response.IsSuccessStatusCode)
-                return 0;
-            var responseContent = await response.Content.ReadAsStringAsync();
-            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            var data = JsonSerializer.Deserialize<BranchExistsInWorkspaceResponse>(responseContent, options);
-            return data?.Count ?? 0;
+            var outcome = await BranchOperations.CountReposWithLocalBranchAsync(WorkspaceId, branchName);
+            return outcome.IsSuccessStatus && outcome.Body is BranchExistsCount data ? data.Count : 0;
         }
         catch
         {
@@ -570,10 +558,5 @@
             else if (!string.IsNullOrWhiteSpace(newBranchName?.Trim()))
                 await CreateAsync();
         }
-    }
-
-    private sealed class BranchExistsInWorkspaceResponse
-    {
-        public int Count { get; set; }
     }
 }

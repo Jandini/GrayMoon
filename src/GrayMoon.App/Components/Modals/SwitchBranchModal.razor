@@ -1,9 +1,7 @@
-@using System.Text.Json
 @using GrayMoon.App.Models
 @using GrayMoon.App.Models.Api
 @using GrayMoon.App.Services
-@inject IHttpClientFactory HttpClientFactory
-@inject NavigationManager NavigationManager
+@inject IWorkspaceBranchOperations BranchOperations
 @inject IJSRuntime JSRuntime
 @inject ILogger<SwitchBranchModal> Logger
 
@@ -643,31 +641,10 @@
 
         try
         {
-            var httpClient = HttpClientFactory.CreateClient();
-            var request = new
+            var outcome = await BranchOperations.GetBranchesAsync(WorkspaceId, RepositoryId);
+            if (outcome.IsSuccessStatus)
             {
-                workspaceId = WorkspaceId,
-                repositoryId = RepositoryId
-            };
-            var json = JsonSerializer.Serialize(request);
-            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            
-            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
-            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/get", content);
-            
-            if (response.IsSuccessStatusCode)
-            {
-                var responseContent = await response.Content.ReadAsStringAsync();
-                var data = JsonSerializer.Deserialize<BranchesResponse>(responseContent, AgentResponseJson.Options);
-                if (data != null)
-                {
-                    localBranches = data.LocalBranches?.Where(b => !IsSyntheticGitRefName(b)).ToList() ?? new List<string>();
-                    remoteBranches = data.RemoteBranches?.Where(b => !IsSyntheticGitRefName(b)).ToList() ?? new List<string>();
-                    tags = data.Tags?.Where(t => !string.IsNullOrWhiteSpace(t)).ToList() ?? new List<string>();
-                    currentBranchLocal = data.CurrentBranch;
-                    currentTag = data.CurrentTag;
-                    defaultBranch = data.DefaultBranch;
-                }
+                ApplyBranchLists(outcome.Body);
 
                 // Default the selection: tag tab pre-selects the current tag, otherwise pre-select the current branch.
                 if (!string.IsNullOrWhiteSpace(currentTag))
@@ -701,9 +678,8 @@
             }
             else
             {
-                var errorText = await response.Content.ReadAsStringAsync();
-                errorMessage = $"Failed to load branches: {response.StatusCode}";
-                Logger.LogError("Failed to load branches: {StatusCode}, {Error}", response.StatusCode, errorText);
+                errorMessage = $"Failed to load branches: {outcome.StatusCode}";
+                Logger.LogError("Failed to load branches: {StatusCode}, {Error}", outcome.StatusCode, outcome.ErrorText);
             }
         }
         catch (Exception ex)
@@ -718,31 +694,15 @@
         }
     }
 
-    /// <summary>Reload branch lists from persistence (GET api/branches/get) without running fetch. Used after delete so UI reflects updated persistence.</summary>
+    /// <summary>Reload branch lists from persistence without running fetch. Used after delete so UI reflects updated persistence.</summary>
     private async Task ReloadBranchesFromPersistenceAsync()
     {
         try
         {
-            var httpClient = HttpClientFactory.CreateClient();
-            var request = new { workspaceId = WorkspaceId, repositoryId = RepositoryId };
-            var json = JsonSerializer.Serialize(request);
-            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
-            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/get", content);
-
-            if (response.IsSuccessStatusCode)
+            var outcome = await BranchOperations.GetBranchesAsync(WorkspaceId, RepositoryId);
+            if (outcome.IsSuccessStatus)
             {
-                var responseContent = await response.Content.ReadAsStringAsync();
-                var data = JsonSerializer.Deserialize<BranchesResponse>(responseContent, AgentResponseJson.Options);
-                if (data != null)
-                {
-                    localBranches = data.LocalBranches?.Where(b => !IsSyntheticGitRefName(b)).ToList() ?? new List<string>();
-                    remoteBranches = data.RemoteBranches?.Where(b => !IsSyntheticGitRefName(b)).ToList() ?? new List<string>();
-                    tags = data.Tags?.Where(t => !string.IsNullOrWhiteSpace(t)).ToList() ?? new List<string>();
-                    currentBranchLocal = data.CurrentBranch;
-                    currentTag = data.CurrentTag;
-                    defaultBranch = data.DefaultBranch;
-                }
+                ApplyBranchLists(outcome.Body);
                 selectedBranch = !string.IsNullOrWhiteSpace(currentTag) && activeTab == "tags" ? currentTag : currentBranchLocal;
                 if (string.IsNullOrWhiteSpace(currentTag) && remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !IsCurrentBranchOnRemote())
                     showSyncToDefaultButton = true;
@@ -1061,24 +1021,10 @@
 
         try
         {
-            var httpClient = HttpClientFactory.CreateClient();
-            var request = new
+            var outcome = await BranchOperations.DeleteBranchAsync(WorkspaceId, RepositoryId, branchToDelete, deleteIsRemote, force);
+            if (outcome.IsSuccessStatus)
             {
-                workspaceId = WorkspaceId,
-                repositoryId = RepositoryId,
-                branchName = branchToDelete,
-                isRemote = deleteIsRemote,
-                force
-            };
-            var json = JsonSerializer.Serialize(request);
-            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
-            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/delete", content);
-
-            if (response.IsSuccessStatusCode)
-            {
-                var responseContent = await response.Content.ReadAsStringAsync();
-                var data = JsonSerializer.Deserialize<DeleteBranchApiResult>(responseContent, AgentResponseJson.Options);
+                var data = outcome.Body as DeleteBranchApiResult;
                 if (data != null && data.Success)
                 {
                     DismissDeleteConfirmation();
@@ -1101,9 +1047,8 @@
             }
             else
             {
-                var errorText = await response.Content.ReadAsStringAsync();
-                errorMessage = $"Delete failed: {response.StatusCode}";
-                Logger.LogError("Delete branch failed: {StatusCode}, {Error}", response.StatusCode, errorText);
+                errorMessage = $"Delete failed: {outcome.StatusCode}";
+                Logger.LogError("Delete branch failed: {StatusCode}, {Error}", outcome.StatusCode, outcome.ErrorText);
             }
         }
         catch (Exception ex)
@@ -1218,31 +1163,10 @@
 
         try
         {
-            var httpClient = HttpClientFactory.CreateClient();
-            var request = new
+            var outcome = await BranchOperations.RefreshBranchesAsync(WorkspaceId, RepositoryId);
+            if (outcome.IsSuccessStatus)
             {
-                workspaceId = WorkspaceId,
-                repositoryId = RepositoryId
-            };
-            var json = JsonSerializer.Serialize(request);
-            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            
-            var baseUrl = NavigationManager.BaseUri.TrimEnd('/');
-            var response = await httpClient.PostAsync($"{baseUrl}/api/branches/refresh", content);
-            
-            if (response.IsSuccessStatusCode)
-            {
-                var responseContent = await response.Content.ReadAsStringAsync();
-                var data = JsonSerializer.Deserialize<BranchesResponse>(responseContent, AgentResponseJson.Options);
-                if (data != null)
-                {
-                    localBranches = data.LocalBranches?.Where(b => !IsSyntheticGitRefName(b)).ToList() ?? new List<string>();
-                    remoteBranches = data.RemoteBranches?.Where(b => !IsSyntheticGitRefName(b)).ToList() ?? new List<string>();
-                    tags = data.Tags?.Where(t => !string.IsNullOrWhiteSpace(t)).ToList() ?? new List<string>();
-                    currentBranchLocal = data.CurrentBranch;
-                    currentTag = data.CurrentTag;
-                    defaultBranch = data.DefaultBranch;
-                }
+                ApplyBranchLists(outcome.Body);
 
                 // Pre-select the current item on the active tab.
                 if (activeTab == "tags")
@@ -1265,9 +1189,8 @@
             }
             else
             {
-                var errorText = await response.Content.ReadAsStringAsync();
-                errorMessage = ApiErrorHelper.TryGetErrorMessageFromResponseBody(errorText) ?? $"Failed to refresh branches: {response.StatusCode}";
-                Logger.LogError("Failed to refresh branches: {StatusCode}, {Error}", response.StatusCode, errorText);
+                errorMessage = outcome.ErrorText ?? $"Failed to refresh branches: {outcome.StatusCode}";
+                Logger.LogError("Failed to refresh branches: {StatusCode}, {Error}", outcome.StatusCode, outcome.ErrorText);
             }
         }
         catch (Exception ex)
@@ -1331,10 +1254,44 @@
         }
     }
 
-    private sealed class CreateBranchApiResult
+    private void ApplyBranchLists(object? body)
     {
-        public bool Success { get; set; }
-        public string? Error { get; set; }
+        IReadOnlyList<string>? local = null;
+        IReadOnlyList<string>? remote = null;
+        IReadOnlyList<string>? tagList = null;
+        string? current = null;
+        string? tag = null;
+        string? def = null;
+
+        if (body is WorkspaceBranchesSnapshot snapshot)
+        {
+            local = snapshot.LocalBranches;
+            remote = snapshot.RemoteBranches;
+            tagList = snapshot.Tags;
+            current = snapshot.CurrentBranch;
+            tag = snapshot.CurrentTag;
+            def = snapshot.DefaultBranch;
+        }
+        else
+        {
+            var data = body as BranchesResponse ?? AgentResponseJson.DeserializeAgentResponse<BranchesResponse>(body);
+            if (data != null)
+            {
+                local = data.LocalBranches;
+                remote = data.RemoteBranches;
+                tagList = data.Tags;
+                current = data.CurrentBranch;
+                tag = data.CurrentTag;
+                def = data.DefaultBranch;
+            }
+        }
+
+        localBranches = local?.Where(b => !IsSyntheticGitRefName(b)).ToList() ?? new List<string>();
+        remoteBranches = remote?.Where(b => !IsSyntheticGitRefName(b)).ToList() ?? new List<string>();
+        tags = tagList?.Where(t => !string.IsNullOrWhiteSpace(t)).ToList() ?? new List<string>();
+        currentBranchLocal = current;
+        currentTag = tag;
+        defaultBranch = def;
     }
 
 }
