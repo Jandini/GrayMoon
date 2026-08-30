@@ -364,6 +364,58 @@ public sealed partial class WorkspaceRepositories
         return string.Join(", ", parts.Take(parts.Count - 1)) + " and " + parts[^1];
     }
 
+    private Task HandleClosePullRequestClickedAsync()
+    {
+        if (_mergePrModal.Details?.ChangedFiles != 0 || _mergePrModal.IsMerging)
+            return Task.CompletedTask;
+
+        var prNumber = _mergePrModal.PrNumber;
+        ShowConfirm(
+            $"No file changed.\nClose pull request #{prNumber} without merging?",
+            ExecuteClosePullRequestAsync,
+            "Close");
+        return Task.CompletedTask;
+    }
+
+    private async Task ExecuteClosePullRequestAsync()
+    {
+        var repositoryId = _mergePrModal.RepositoryId;
+        var prNumber = _mergePrModal.PrNumber;
+        if (repositoryId <= 0 || prNumber <= 0 || _mergePrModal.IsMerging || IsJobRunning)
+            return;
+
+        _mergePrModal = _mergePrModal with { IsMerging = true, ErrorMessage = null };
+        StateHasChanged();
+
+        MergeResult result;
+        try
+        {
+            result = await ScopedExecutor.ExecuteAsync<IWorkspacePullRequestOperations, MergeResult>(
+                svc => svc.CloseAsync(WorkspaceId, repositoryId, prNumber, CancellationToken.None));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Close PR failed for repo {RepositoryId}, PR #{PrNumber}", repositoryId, prNumber);
+            result = new MergeResult(false, ex.Message);
+        }
+
+        if (_disposed)
+            return;
+
+        if (!result.Success)
+        {
+            _mergePrModal = _mergePrModal with { IsMerging = false, ErrorMessage = result.Message ?? "The pull request could not be closed." };
+            StateHasChanged();
+            return;
+        }
+
+        _mergePrModal = new MergePullRequestModalState();
+        ToastService.Show($"Closed pull request #{prNumber}.");
+        StateHasChanged();
+
+        await RefreshFromSync();
+    }
+
     private Task HandleMergeRequestedAsync(MergePullRequestChoice choice)
     {
         if (choice.SyncToDefault)

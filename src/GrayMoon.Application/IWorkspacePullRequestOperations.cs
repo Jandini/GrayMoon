@@ -24,4 +24,10 @@ public interface IWorkspacePullRequestOperations
         int prNumber,
         string title,
         CancellationToken cancellationToken);
+
+    Task<MergeResult> CloseAsync(
+        int workspaceId,
+        int repositoryId,
+        int prNumber,
+        CancellationToken cancellationToken);
 }

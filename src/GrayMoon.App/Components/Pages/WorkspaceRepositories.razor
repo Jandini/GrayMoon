@@ -361,6 +361,7 @@
                        ChangesUrl="@($"/workspaces/{WorkspaceId}/changes")"
                        ActionsUrl="@($"/workspaces/{WorkspaceId}/actions")"
                        OnMerge="HandleMergeButtonClickedAsync"
+                       OnClosePullRequest="HandleClosePullRequestClickedAsync"
                        OnCancel="CloseMergeModal"
                        OnPushRequested="HandleMergeDialogPushRequestedAsync"
                        OnPullRequested="HandleMergeDialogPullRequestedAsync"

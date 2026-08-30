@@ -1,7 +1,7 @@
 ::deep .merge-pr-modal-dialog {
     /* Auto-width up to a sensible cap so long PR titles have room without the dialog always being huge. */
     width: auto;
-    max-width: 640px;
+    max-width: 720px;
 }
 
 ::deep .merge-pr-title {
@@ -347,6 +347,38 @@
     border-color: #6c757d;
 }
 
+::deep .merge-pr-footer-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 0 0 auto;
+}
+
+::deep .merge-pr-btn-close {
+    background-color: #da3633;
+    border-color: rgba(240, 246, 252, 0.1);
+    color: #f0f6fc;
+    font-weight: 600;
+}
+
+::deep .merge-pr-btn-close:hover:not(:disabled),
+::deep .merge-pr-btn-close:focus-visible:not(:disabled) {
+    background-color: #f85149;
+    border-color: rgba(240, 246, 252, 0.1);
+    color: #fff;
+}
+
+::deep .merge-pr-btn-close:active:not(:disabled) {
+    background-color: #da3633;
+    color: #f0f6fc;
+}
+
+::deep .merge-pr-btn-close:disabled {
+    background-color: #30363d;
+    border-color: rgba(240, 246, 252, 0.1);
+    color: rgba(255, 255, 255, 0.5);
+}
+
 ::deep .merge-pr-split-btn {
     position: relative;
 }
@@ -423,10 +455,10 @@
     right: 0;
     margin-bottom: 0.25rem;
     min-width: 12rem;
-    background-color: var(--bg-card, #252526);
-    border: 1px solid var(--border-color, #3e3e42);
+    background-color: #141414;
+    border: 1px solid #2a2a2a;
     border-radius: 0.375rem;
-    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.35);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.55);
     padding: 0.25rem 0;
     z-index: 1080;
 }
@@ -442,6 +474,6 @@
 
 ::deep .merge-pr-method-menu .dropdown-item:hover,
 ::deep .merge-pr-method-menu .dropdown-item:focus-visible {
-    background-color: var(--bg-hover, #2a2d2e);
+    background-color: #222;
     color: var(--text-primary, #cccccc);
 }

@@ -166,21 +166,27 @@ public sealed class WorkspacePullRequestService(
             _cache.TryRemove(key, out _);
     }
 
-    /// <summary>Closes an open pull request for the given repository. Looks up the connector from the workspace link and calls GitHub API. Logs and returns silently on error.</summary>
-    public async Task ClosePullRequestAsync(int workspaceId, int repositoryId, int prNumber, CancellationToken cancellationToken = default)
+    /// <summary>Closes an open pull request via GitHub without merging and, on success, forces an immediate PR refresh so the grid badge drops the open-PR chip without waiting for the next poll.</summary>
+    public async Task<MergeResult> ClosePullRequestAsync(int workspaceId, int repositoryId, int prNumber, CancellationToken cancellationToken = default)
     {
-        if (prNumber <= 0) return;
+        if (prNumber <= 0)
+            return new MergeResult(false, "Invalid pull request.");
 
-        var link = await dbContext.WorkspaceRepositories
-            .AsNoTracking()
-            .Include(wr => wr.Repository)
-            .ThenInclude(r => r!.Connector)
-            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
-
+        var link = await GetLinkWithConnectorAsync(workspaceId, repositoryId, cancellationToken);
         if (link?.Repository == null)
-            return;
+            return new MergeResult(false, "Repository not found in this workspace.");
 
-        await gitHubPullRequestService.ClosePullRequestAsync(link.Repository, link.Repository.Connector, prNumber, cancellationToken);
+        var result = await gitHubPullRequestMergeService.ClosePullRequestAsync(
+            link.Repository,
+            link.Repository.Connector,
+            prNumber,
+            cancellationToken);
+        if (result.Success)
+        {
+            _cache.TryRemove((repositoryId, link.BranchName ?? string.Empty), out _);
+            await RefreshPullRequestsAsync(workspaceId, [repositoryId], force: true, cancellationToken: cancellationToken);
+        }
+        return result;
     }
 
     /// <summary>Refreshes PR for all repositories in the workspace.</summary>
