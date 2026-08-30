@@ -85,6 +85,8 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<WorkspaceCommitSyncHandler>();
         services.AddScoped<WorkspaceRepositoryLinkListQueryService>();
         services.AddScoped<SyncCommandHandler>();
+        services.AddScoped<WorkspaceBranchUpdateHandler>();
+        services.AddScoped<IWorkspaceBranchOperations, WorkspaceBranchOperations>();
 
         var provider = services.BuildServiceProvider();
 

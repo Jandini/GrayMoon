@@ -1,6 +1,8 @@
+using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Services;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GrayMoon.App.Tests;
@@ -154,5 +156,39 @@ public sealed class SyncToDefaultPersistenceTests
         var link = await ctx.ReadLinkAsync();
         Assert.Equal("feature/x", link.BranchName);
         Assert.Equal(3, link.OutgoingCommits);
+    }
+
+    [Fact]
+    public async Task GetBranches_after_sync_in_another_scope_returns_main_not_stale_tracked_branch()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        ctx.AgentBridge.Respond("SyncToDefaultBranch", SuccessfulResponse());
+
+        await using var circuitScope = ctx.CreateScope();
+        var circuitDb = circuitScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tracked = await circuitDb.WorkspaceRepositories
+            .FirstAsync(wr => wr.WorkspaceId == ctx.WorkspaceId && wr.RepositoryId == ctx.RepositoryId);
+        Assert.Equal("feature/x", tracked.BranchName);
+
+        await using (var jobScope = ctx.CreateScope())
+        {
+            var git = jobScope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+            var (success, error) = await git.SyncToDefaultDirectAsync(
+                ctx.WorkspaceId, ctx.RepositoryId, "feature/x",
+                deleteRemoteBranch: false, allowForceDeleteLocalBranch: true, CancellationToken.None);
+            Assert.True(success);
+            Assert.Null(error);
+        }
+
+        Assert.Equal("feature/x", tracked.BranchName);
+
+        var ops = circuitScope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>();
+        var outcome = await ops.GetBranchesAsync(ctx.WorkspaceId, ctx.RepositoryId);
+        Assert.True(outcome.IsSuccessStatus);
+        var snapshot = Assert.IsType<WorkspaceBranchesSnapshot>(outcome.Body);
+        Assert.Equal("main", snapshot.CurrentBranch);
+        Assert.Equal("main", snapshot.DefaultBranch);
+        Assert.Contains("origin/main", snapshot.RemoteBranches);
+        Assert.DoesNotContain(snapshot.LocalBranches, b => b == "feature/x");
     }
 }

@@ -658,15 +658,8 @@
                     selectedBranch = currentBranchLocal;
                 }
 
-                // Show sync button only when we have synced/fetched remote data (not when lists are empty from no sync yet) and we are on a real branch.
-                if (string.IsNullOrWhiteSpace(currentTag) && remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !IsCurrentBranchOnRemote())
-                {
-                    showSyncToDefaultButton = true;
-                }
-                else
-                {
-                    showSyncToDefaultButton = false;
-                }
+                // Show sync only when remotes are known, we are on a real non-default branch, and it is missing on remote.
+                showSyncToDefaultButton = remoteBranches.Count > 0 && ShouldShowSyncToDefaultButton();
 
                 // If no branches/tags were persisted, automatically fetch them (keep loading state)
                 if (localBranches.Count == 0 && remoteBranches.Count == 0 && tags.Count == 0)
@@ -704,10 +697,7 @@
             {
                 ApplyBranchLists(outcome.Body);
                 selectedBranch = !string.IsNullOrWhiteSpace(currentTag) && activeTab == "tags" ? currentTag : currentBranchLocal;
-                if (string.IsNullOrWhiteSpace(currentTag) && remoteBranches.Count > 0 && !string.IsNullOrWhiteSpace(currentBranchLocal) && !IsCurrentBranchOnRemote())
-                    showSyncToDefaultButton = true;
-                else
-                    showSyncToDefaultButton = false;
+                showSyncToDefaultButton = remoteBranches.Count > 0 && ShouldShowSyncToDefaultButton();
                 await OnBranchChanged.InvokeAsync();
             }
         }
@@ -845,6 +835,17 @@
             return true;
         var originRef = "origin/" + currentBranchLocal;
         return remoteBranches.Any(r => string.Equals(r, originRef, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>True when current is a real branch that is not the default and has no remote-tracking counterpart.</summary>
+    private bool ShouldShowSyncToDefaultButton()
+    {
+        if (!string.IsNullOrWhiteSpace(currentTag) || string.IsNullOrWhiteSpace(currentBranchLocal))
+            return false;
+        if (!string.IsNullOrWhiteSpace(defaultBranch)
+            && string.Equals(currentBranchLocal, defaultBranch, StringComparison.OrdinalIgnoreCase))
+            return false;
+        return !IsCurrentBranchOnRemote();
     }
 
     /// <summary>Local branches for "Based on" dropdown (current branch first).</summary>
@@ -1174,15 +1175,7 @@
                 else
                     selectedBranch = currentBranchLocal;
 
-                // Show sync button only when on a real branch (not on a tag) and current branch is missing on remote.
-                if (string.IsNullOrWhiteSpace(currentTag) && !string.IsNullOrWhiteSpace(currentBranchLocal) && !IsCurrentBranchOnRemote())
-                {
-                    showSyncToDefaultButton = true;
-                }
-                else
-                {
-                    showSyncToDefaultButton = false;
-                }
+                showSyncToDefaultButton = ShouldShowSyncToDefaultButton();
 
                 // Refresh workspace data
                 await OnBranchChanged.InvokeAsync();
