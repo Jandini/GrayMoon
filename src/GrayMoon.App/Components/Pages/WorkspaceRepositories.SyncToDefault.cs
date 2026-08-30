@@ -253,11 +253,7 @@ public sealed partial class WorkspaceRepositories
             }
             else if (errMsg != null)
             {
-                SafeInvoke(() =>
-                {
-                    repositoryErrors[repositoryId] = errMsg;
-                    ToastService.ShowError(errMsg);
-                });
+                SafeInvoke(() => SetRepositoryError(repositoryId, errMsg));
             }
         }, new PageJobOptions
         {
@@ -265,12 +261,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error syncing to default branch for repository {RepositoryId}", repositoryId);
-                var message = "An error occurred while syncing to default branch. The GrayMoon Agent may be offline.";
-                SafeInvoke(() =>
-                {
-                    repositoryErrors[repositoryId] = message;
-                    ToastService.ShowError(message);
-                });
+                SafeInvoke(() => SetRepositoryError(repositoryId, "An error occurred while syncing to default branch. The GrayMoon Agent may be offline."));
             }
         });
 
@@ -360,9 +351,7 @@ public sealed partial class WorkspaceRepositories
                     }
                     else if (errMsg != null)
                     {
-                        repositoryErrors[repoId] = errMsg;
-                        var repoName = TryGetLink(repoId)?.Repository?.RepositoryName ?? repoId.ToString();
-                        ToastService.ShowError($"{repoName}: {errMsg}");
+                        SetRepositoryError(repoId, errMsg);
                     }
                 }
             });
@@ -590,19 +579,12 @@ public sealed partial class WorkspaceRepositories
                     }
                     else if (errMsg != null)
                     {
-                        repositoryErrors[repoId] = errMsg;
-                        var repoName = TryGetLink(repoId)?.Repository?.RepositoryName ?? repoId.ToString();
-                        ToastService.ShowError($"{repoName}: {errMsg}");
+                        SetRepositoryError(repoId, errMsg);
                     }
                 }
 
-                if (total > 1)
-                {
-                    if (failureCount == 0)
-                        ToastService.Show($"Synced {successCount} of {total} repositories to default branch.");
-                    else
-                        ToastService.ShowError($"Synced {successCount} of {total} repositories to default branch ({failureCount} failed).");
-                }
+                if (total > 1 && failureCount == 0)
+                    ToastService.Show($"Synced {successCount} of {total} repositories to default branch.");
             });
         }, new PageJobOptions
         {

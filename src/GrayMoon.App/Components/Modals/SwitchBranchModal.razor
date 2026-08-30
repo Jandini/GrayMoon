@@ -19,10 +19,7 @@
                 <div class="modal-body">
                     @if (errorMessage != null)
                     {
-                        <div class="alert alert-danger alert-dismissible d-flex align-items-start" role="alert">
-                            <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">@errorMessage</div>
-                            <button type="button" class="btn-close ms-2" aria-label="Close" @onclick='() => { errorMessage = null; StateHasChanged(); }'></button>
-                        </div>
+                        <div class="gm-callout gm-callout--error" role="alert">@errorMessage</div>
                     }
                     else
                     {
@@ -301,10 +298,7 @@
                             @* New Branch tab UI (single-repo creation) *@
                             @if (errorMessage != null)
                             {
-                                <div class="alert alert-danger alert-dismissible d-flex align-items-start" role="alert">
-                                    <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">@errorMessage</div>
-                                    <button type="button" class="btn-close ms-2" aria-label="Close" @onclick='() => { errorMessage = null; StateHasChanged(); }'></button>
-                                </div>
+                                <div class="gm-callout gm-callout--error" role="alert">@errorMessage</div>
                             }
                             <div class="mb-3 switch-branch-field-block">
                                 <label class="form-label" for="new-branch-name">Branch name</label>

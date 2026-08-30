@@ -49,7 +49,16 @@ public sealed partial class WorkspaceRepositories
             {
                 var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(svc =>
                     svc.UndoPushAsync(WorkspaceId, keepChanges, job.ToOperationProgress(), ct));
-                result.ShowRepoErrors(msg => SafeInvoke(() => ToastService.ShowError(msg)));
+                SafeInvoke(() =>
+                {
+                    ApplyRepositoryErrors(result.RepoErrors);
+                    if (result.RepoErrors is not { Count: > 0 }
+                        && !result.Success
+                        && !string.IsNullOrWhiteSpace(result.Error))
+                    {
+                        errorMessage = result.Error;
+                    }
+                });
 
                 await InvokeAsync(async () =>
                 {

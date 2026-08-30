@@ -48,6 +48,8 @@
                                     OnSync="SyncAsync"
                                     OnQuickFetch="QuickFetchAsync"
                                     QuickFetchIsPrimary="@_quickFetchIsPrimary"
+                                    HasRepositoryErrors="@(repositoryErrors.Count > 0)"
+                                    OnClearErrors="ClearRepositoryErrors"
                                     OnSyncModeChanged="SetSyncModeAsync"
                                     OnRestorePackages="@RestorePackagesAsync"
                                     OnSearchChanged="OnSearchChanged"
@@ -188,8 +190,7 @@
                                                                   OnCopyDependencies="CopyDependenciesToClipboard"
                                                                   OnCreatePr="OpenPullRequestDialogForRepositoryAsync"
                                                                   OnUpgradeClick="ShowSwitchBranchModalOnTagsTab"
-                                                                  OnMergeClick="OpenMergeDialogAsync"
-                                                                  OnDismissError="() => DismissRepositoryError(wr.RepositoryId)" />
+                                                                  OnMergeClick="OpenMergeDialogAsync" />
                                     }
                                     else
                                     {

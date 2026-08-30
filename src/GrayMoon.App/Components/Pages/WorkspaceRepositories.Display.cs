@@ -48,12 +48,28 @@ public sealed partial class WorkspaceRepositories
         }
     }
 
-    private void DismissRepositoryError(int repositoryId)
+    private void ClearRepositoryErrors()
     {
-        if (repositoryErrors.Remove(repositoryId))
-        {
-            StateHasChanged();
-        }
+        if (repositoryErrors.Count == 0)
+            return;
+
+        repositoryErrors.Clear();
+        StateHasChanged();
+    }
+
+    private void SetRepositoryError(int repositoryId, string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return;
+        repositoryErrors[repositoryId] = message;
+    }
+
+    private void ApplyRepositoryErrors(IReadOnlyDictionary<int, string>? repoErrors)
+    {
+        if (repoErrors is not { Count: > 0 })
+            return;
+        foreach (var (id, err) in repoErrors)
+            SetRepositoryError(id, err);
     }
 
     private string? GetRepositoryError(int repositoryId) =>

@@ -36,6 +36,10 @@
                     <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link" title="@RepositoryTypeTitle">
                         <strong>@repo.RepositoryName</strong>
                     </a>
+                    @if (repo.Archived)
+                    {
+                        <span class="badge repo-archived-badge">archived</span>
+                    }
                     <div class="gm-menu-panel">
                         <GitHubSectionsMenu BaseUrls="@(new List<string> { repoUrl })" PrPullMap="@singleRepoPrPullMap" />
                     </div>
@@ -43,7 +47,13 @@
             }
             else
             {
-                <strong title="@RepositoryTypeTitle">@repo.RepositoryName</strong>
+                <span class="repo-name-cell">
+                    <strong title="@RepositoryTypeTitle">@repo.RepositoryName</strong>
+                    @if (repo.Archived)
+                    {
+                        <span class="badge repo-archived-badge">archived</span>
+                    }
+                </span>
             }
         </td>
         <td class="col-version">
@@ -391,17 +401,7 @@
     {
         <tr class="repo-error-row">
             <td colspan="@ColSpan" class="p-0">
-                <div class="alert alert-danger alert-dismissible mb-0 rounded-0" role="alert">
-                    <div class="d-flex align-items-start">
-                        <div class="flex-grow-1" style="white-space: pre-wrap; word-wrap: break-word;">
-                            <strong>Error:</strong> @RepositoryError
-                        </div>
-                        <button type="button"
-                                class="btn-close ms-2"
-                                aria-label="Close"
-                                @onclick="OnDismissError"></button>
-                    </div>
-                </div>
+                <div class="repo-error-line" role="alert">@RepositoryError</div>
             </td>
         </tr>
     }
@@ -445,7 +445,6 @@
     [Parameter] public EventCallback OnPullBadgeClick { get; set; }
     [Parameter] public EventCallback OnUpdateBranchClick { get; set; }
     [Parameter] public EventCallback OnSyncClick { get; set; }
-    [Parameter] public EventCallback OnDismissError { get; set; }
     [Parameter] public EventCallback<WorkspaceRepositoryLink> OnCreatePr { get; set; }
     [Parameter] public EventCallback<WorkspaceRepositoryLink> OnUpgradeClick { get; set; }
     /// <summary>Fired with the row's link when the user clicks the "merge" segment of the PR chip. The row doesn't know the PR number - the handler reads it from PrInfo.</summary>

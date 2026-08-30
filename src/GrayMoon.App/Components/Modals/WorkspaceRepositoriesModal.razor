@@ -150,7 +150,7 @@
 
                     @if (RenameWarnings is { Count: > 0 })
                     {
-                        <div class="alert alert-warning">
+                        <div class="gm-callout gm-callout--warning" role="alert">
                             <i class="bi bi-exclamation-triangle me-1"></i>
                             <strong>Repository rename detected.</strong> The following repositories were renamed in GitHub and have been updated automatically. Workspace links are preserved.
                             <ul class="mb-0 mt-1">
@@ -169,7 +169,7 @@
                     }
                     @if (ErrorMessage != null)
                     {
-                        <div class="alert alert-danger">@ErrorMessage</div>
+                        <div class="gm-callout gm-callout--error" role="alert">@ErrorMessage</div>
                     }
                 </div>
                 <div class="modal-footer">

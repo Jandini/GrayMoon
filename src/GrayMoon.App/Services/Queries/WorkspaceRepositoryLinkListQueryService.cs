@@ -286,7 +286,8 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             wr.PullRequest != null ? wr.PullRequest.MergedAt : null,
             wr.PullRequest != null ? wr.PullRequest.Mergeable : null,
             wr.PullRequest != null ? wr.PullRequest.MergeableState : null,
-            wr.PullRequest != null ? wr.PullRequest.ChangedFiles : null));
+            wr.PullRequest != null ? wr.PullRequest.ChangedFiles : null,
+            wr.Repository != null && wr.Repository.Archived));
 
     private static WorkspaceRepositoryLinkListCursor ToCursor(WorkspaceRepositoryLinkListItemDto dto) =>
         new(

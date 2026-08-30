@@ -320,7 +320,7 @@ public sealed class WorkspacePushService(
                 await TryRestoreReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, cancellationToken);
 
             levelProgress?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
-            await PushReposAsync(
+            var levelFailures = await PushReposAsync(
                 workspace,
                 reposAtLevel,
                 bearerByRepoId,
@@ -330,6 +330,15 @@ public sealed class WorkspacePushService(
                 refreshVersionAfterPush: true,
                 cancellationToken);
             await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
+            if (levelFailures.Count > 0)
+            {
+                _logger.LogWarning(
+                    "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: aborting synchronized push after {FailedCount} repository failure(s).",
+                    runId, workspaceId, level, levelFailures.Count);
+                levelProgress?.Invoke($"Push stopped: {levelFailures.Count} repository failure(s).");
+                return;
+            }
+
             pushedRepos.AddRange(reposAtLevel);
 
             _logger.LogInformation(
@@ -395,9 +404,9 @@ public sealed class WorkspacePushService(
         if (!success)
         {
             var rawErr = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage;
-            if (IsNonFastForwardRejection(rawErr))
+            if (PushErrorFormatter.IsNonFastForwardRejection(rawErr))
                 await FetchAfterRejectionAsync(workspaceId, repositoryId, repo.RepositoryName, workspace.Name, workspaceRoot, cancellationToken);
-            return (false, FormatPushError(rawErr));
+            return (false, PushErrorFormatter.Format(rawErr));
         }
 
         await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId,
@@ -739,7 +748,7 @@ public sealed class WorkspacePushService(
         await Task.WhenAll(tasks);
     }
 
-    private async Task PushReposAsync(
+    private async Task<IReadOnlyList<(int RepoId, string Error)>> PushReposAsync(
         Workspace workspace,
         IReadOnlyList<PushRepoPayload> repos,
         IReadOnlyDictionary<int, string?> bearerByRepoId,
@@ -749,11 +758,13 @@ public sealed class WorkspacePushService(
         bool refreshVersionAfterPush = false,
         CancellationToken cancellationToken = default)
     {
-        var completed = 0;
+        var succeeded = 0;
+        var finished = 0;
         var total = repos.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
         var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
         var rejectedRepos = new System.Collections.Concurrent.ConcurrentBag<(int RepoId, string RepoName)>();
+        var failures = new System.Collections.Concurrent.ConcurrentBag<(int RepoId, string Error)>();
         var pushTasks = repos.Select(async repo =>
         {
             await semaphore.WaitAsync(cancellationToken);
@@ -777,13 +788,19 @@ public sealed class WorkspacePushService(
                 if (!success)
                 {
                     var rawErr = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage;
-                    if (IsNonFastForwardRejection(rawErr))
+                    if (PushErrorFormatter.IsNonFastForwardRejection(rawErr))
                         rejectedRepos.Add((repo.RepoId, repo.RepoName));
-                    onRepoError?.Invoke(repo.RepoId, FormatPushError(rawErr));
+                    var formatted = PushErrorFormatter.Format(rawErr);
+                    failures.Add((repo.RepoId, formatted));
+                    onRepoError?.Invoke(repo.RepoId, formatted);
                 }
-                var c = Interlocked.Increment(ref completed);
-                onProgressMessage?.Invoke($"Pushed {c} of {total}");
-                if (c == total)
+                else
+                {
+                    var c = Interlocked.Increment(ref succeeded);
+                    onProgressMessage?.Invoke($"Pushed {c} of {total}");
+                }
+
+                if (Interlocked.Increment(ref finished) == total)
                     onAppSideComplete?.Invoke();
             }
             finally
@@ -794,44 +811,7 @@ public sealed class WorkspacePushService(
         await Task.WhenAll(pushTasks);
         foreach (var (repoId, repoName) in rejectedRepos)
             await FetchAfterRejectionAsync(workspace.WorkspaceId, repoId, repoName, workspace.Name, workspaceRoot, cancellationToken);
-    }
-
-    private static bool IsNonFastForwardRejection(string? err) =>
-        err != null &&
-        (err.Contains("non-fast-forward", StringComparison.OrdinalIgnoreCase) ||
-         (err.Contains("[rejected]", StringComparison.OrdinalIgnoreCase) && err.Contains("fetch first", StringComparison.OrdinalIgnoreCase)));
-
-    private static bool IsMergeConflictError(string? err) =>
-        err != null && err.Contains("merge conflict", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsPullFailureError(string? err) =>
-        err != null && err.Contains("pull failed", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsProtectedBranchRejection(string? err) =>
-        err != null &&
-        (err.Contains("protected branch", StringComparison.OrdinalIgnoreCase) ||
-         err.Contains("GH006", StringComparison.OrdinalIgnoreCase) ||
-         err.Contains("GH013", StringComparison.OrdinalIgnoreCase) ||
-         err.Contains("repository rule violations", StringComparison.OrdinalIgnoreCase) ||
-         err.Contains("pre-receive hook declined", StringComparison.OrdinalIgnoreCase) ||
-         err.Contains("hook declined", StringComparison.OrdinalIgnoreCase) ||
-         err.Contains("not allowed to push code to a protected branch", StringComparison.OrdinalIgnoreCase) ||
-         err.Contains("changes must be made through a pull request", StringComparison.OrdinalIgnoreCase) ||
-         err.Contains("TF401027", StringComparison.OrdinalIgnoreCase) ||
-         err.Contains("TF402455", StringComparison.OrdinalIgnoreCase));
-
-    private static string FormatPushError(string? rawError)
-    {
-        var err = rawError ?? "Push failed";
-        if (IsProtectedBranchRejection(err))
-            return "Push rejected: the remote branch is protected. Use a pull request or update branch protection rules to push directly.";
-        if (IsMergeConflictError(err))
-            return "Push skipped: merge conflict while pulling remote changes. Resolve conflicts and retry.";
-        if (IsPullFailureError(err))
-            return "Push skipped: could not pull remote changes. Check repository state and retry.";
-        if (IsNonFastForwardRejection(err))
-            return "Push rejected: remote has new commits. Fetching latest state - pull and retry.";
-        return err;
+        return failures.ToList();
     }
 
     private async Task FetchAfterRejectionAsync(int workspaceId, int repositoryId, string repoName, string workspaceName, string? workspaceRoot, CancellationToken cancellationToken)

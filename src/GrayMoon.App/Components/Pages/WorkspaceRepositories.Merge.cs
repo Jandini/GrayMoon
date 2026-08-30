@@ -373,7 +373,7 @@ public sealed partial class WorkspaceRepositories
                         svc => svc.SyncToDefaultAsync(WorkspaceId, [repositoryId], job.ToOperationProgress(), ct));
 
                     if (!syncResult.Completed && syncResult.AbortReason != null)
-                        SafeInvoke(() => ToastService.ShowError(syncResult.AbortReason));
+                        SafeInvoke(() => SetRepositoryError(repositoryId, syncResult.AbortReason));
                 }
 
                 await InvokeAsync(async () =>

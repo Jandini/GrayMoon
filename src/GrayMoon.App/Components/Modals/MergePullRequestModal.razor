@@ -48,7 +48,7 @@
                         }
                         else
                         {
-                            <div class="alert alert-danger mb-0">Could not load pull request details from GitHub.</div>
+                            <div class="gm-callout gm-callout--error mb-0" role="alert">Could not load pull request details from GitHub.</div>
                         }
                     }
                     else
@@ -201,7 +201,7 @@
 
                         @if (ErrorMessage != null)
                         {
-                            <div class="alert alert-danger mb-0">@ErrorMessage</div>
+                            <div class="gm-callout gm-callout--error mb-0" role="alert">@ErrorMessage</div>
                         }
                     }
                 </div>

@@ -157,8 +157,8 @@ public sealed partial class WorkspaceRepositories
                 StateHasChanged();
             });
 
-            if (result.FailureCount > 0)
-                SafeInvoke(() => ToastService.ShowError($"Fetched branches for {result.SuccessCount} repositories. {result.FailureCount} failed."));
+            if (result.ErrorsByRepositoryId.Count > 0)
+                SafeInvoke(() => ApplyRepositoryErrors(result.ErrorsByRepositoryId));
         }, new PageJobOptions
         {
             RefreshOnSuccess = false,
@@ -213,14 +213,6 @@ public sealed partial class WorkspaceRepositories
                 }
             });
 
-            if (result.FailureCount > 0)
-            {
-                var firstError = result.ErrorsByRepositoryId.Values.FirstOrDefault();
-                SafeInvoke(() => ToastService.ShowError(
-                    !string.IsNullOrWhiteSpace(firstError)
-                        ? firstError
-                        : $"Checked out branch in {result.SuccessCount} repositories. {result.FailureCount} failed."));
-            }
         }, new PageJobOptions
         {
             CancelToast = "Checkout cancelled.",
@@ -292,7 +284,7 @@ public sealed partial class WorkspaceRepositories
 
             if (!success)
             {
-                SafeInvoke(() => errorMessage = err ?? "Create branch failed. The GrayMoon Agent may be offline. Start the Agent and try again.");
+                SafeInvoke(() => SetRepositoryError(repositoryId, err ?? "Create branch failed. The GrayMoon Agent may be offline. Start the Agent and try again."));
             }
             else
             {
@@ -311,7 +303,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error creating branch for repository {RepositoryId}", repositoryId);
-                SafeInvoke(() => errorMessage = "An error occurred while creating branch.");
+                SafeInvoke(() => SetRepositoryError(repositoryId, "An error occurred while creating branch."));
             }
         });
 
@@ -334,15 +326,9 @@ public sealed partial class WorkspaceRepositories
             SafeInvoke(() =>
             {
                 if (success)
-                {
                     repositoryErrors.Remove(repositoryId);
-                }
                 else
-                {
-                    var message = errMsg ?? (isTag ? "Failed to checkout tag." : "Failed to checkout branch.");
-                    repositoryErrors[repositoryId] = message;
-                    ToastService.ShowError(message);
-                }
+                    SetRepositoryError(repositoryId, errMsg ?? (isTag ? "Failed to checkout tag." : "Failed to checkout branch."));
             });
         }, new PageJobOptions
         {
@@ -353,11 +339,7 @@ public sealed partial class WorkspaceRepositories
                 var message = isTag
                     ? "Failed to checkout tag. The GrayMoon Agent may be offline. Start the Agent and try again."
                     : "Failed to checkout branch. The GrayMoon Agent may be offline. Start the Agent and try again.";
-                SafeInvoke(() =>
-                {
-                    repositoryErrors[repositoryId] = message;
-                    ToastService.ShowError(message);
-                });
+                SafeInvoke(() => SetRepositoryError(repositoryId, message));
             }
         });
 
@@ -468,14 +450,16 @@ public sealed partial class WorkspaceRepositories
                     ? string.Join(", ", result.ConflictFiles)
                     : "unknown files";
                 var conflictCount = result.ConflictFiles.Count;
-                SafeInvoke(() => ToastService.ShowError(
+                SafeInvoke(() => SetRepositoryError(
+                    repositoryId,
                     $"Merge conflict in {conflictCount} {(conflictCount == 1 ? "file" : "files")}: {fileList}. " +
                     "Resolve the conflicts in your IDE, then commit."));
             }
             else if (!result.Success)
             {
-                var message = result.ErrorMessage ?? "Failed to update branch. The GrayMoon Agent may be offline.";
-                SafeInvoke(() => ToastService.ShowError(message));
+                SafeInvoke(() => SetRepositoryError(
+                    repositoryId,
+                    result.ErrorMessage ?? "Failed to update branch. The GrayMoon Agent may be offline."));
             }
             else
             {
@@ -486,7 +470,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error updating branch from default for repository {RepositoryId}", repositoryId);
-                SafeInvoke(() => ToastService.ShowError("An error occurred while updating branch."));
+                SafeInvoke(() => SetRepositoryError(repositoryId, "An error occurred while updating branch."));
             }
         });
 

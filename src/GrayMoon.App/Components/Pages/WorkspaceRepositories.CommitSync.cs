@@ -141,8 +141,7 @@ public sealed partial class WorkspaceRepositories
     {
         if (result.RepoErrors is { Count: > 0 })
         {
-            foreach (var (id, err) in result.RepoErrors)
-                SafeInvoke(() => repositoryErrors[id] = err);
+            SafeInvoke(() => ApplyRepositoryErrors(result.RepoErrors));
         }
 
         if (!result.Success && !string.IsNullOrWhiteSpace(result.Error))
