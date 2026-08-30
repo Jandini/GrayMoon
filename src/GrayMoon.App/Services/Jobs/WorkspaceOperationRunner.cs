@@ -56,6 +56,7 @@ public sealed class WorkspaceOperationRunner : IWorkspaceOperationRunner
             {
                 created.Changed -= RaiseChanged;
                 _running.TryRemove(new KeyValuePair<int, WorkspaceOperation>(workspaceId, created));
+                created.NotifySettled();
                 RaiseChanged();
             }
         });

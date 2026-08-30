@@ -1,4 +1,14 @@
 window.newPullRequestModal = {
+    // Focuses the title input and selects its current value so the user can
+    // overwrite the default with Ctrl+V without selecting first.
+    selectTitle: function (el) {
+        if (!el) return;
+        requestAnimationFrame(function () {
+            el.focus();
+            el.select();
+        });
+    },
+
     // Attaches a paste listener on the title input (idempotent). When the pasted text
     // contains multiple lines, the default paste is suppressed and the raw text is
     // forwarded to .NET so the first line can go to the title and the rest to the description.

@@ -195,7 +195,7 @@
             _focusTitleOnNextRender = false;
             try
             {
-                await titleInput.FocusAsync();
+                await JS.InvokeVoidAsync("newPullRequestModal.selectTitle", titleInput);
             }
             catch { }
 

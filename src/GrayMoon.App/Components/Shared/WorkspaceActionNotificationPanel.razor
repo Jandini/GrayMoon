@@ -9,7 +9,6 @@
 @inject IBackgroundJobService JobService
 @inject IToastService ToastService
 @inject ILogger<WorkspaceActionNotificationPanel> Logger
-@inject WorkspaceUndoPushHandler UndoPushHandler
 
 @{
     var currentPath = new Uri(NavigationManager.Uri).AbsolutePath.ToLowerInvariant();
@@ -450,13 +449,9 @@
             try
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
-                var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
-                var ws = await workspaceRepo.GetByIdAsync(workspaceId);
-                if (ws == null) return;
-
-                var links = ws.Repositories.ToList();
-                var undoPushHandler = scope.ServiceProvider.GetRequiredService<WorkspaceUndoPushHandler>();
-                await undoPushHandler.RunUndoPushAsync(workspaceId, links, keepChanges, job.ToOperationProgress(), ct);
+                var syncOps = scope.ServiceProvider.GetRequiredService<IWorkspaceSyncOperations>();
+                var result = await syncOps.UndoPushAsync(workspaceId, keepChanges, job.ToOperationProgress(), ct);
+                result.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); });
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -581,13 +576,12 @@
                     .ToHashSet();
 
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
-                var updateHandler = scope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
-                await updateHandler.RunUpdateAsync(
+                var updateOps = scope.ServiceProvider.GetRequiredService<IWorkspaceUpdateOperations>();
+                await updateOps.UpdateAsync(
                     workspaceId,
                     ct,
                     job.ToOperationProgress(),
                     (_, _) => { },
-                    onAppSideComplete: () => { },
                     repoIdsToUpdate: reposNeedingWork,
                     commitMessage: null,
                     includeDepsInCommitMessage: true);
@@ -644,13 +638,12 @@
                     .ToHashSet();
 
                 await using var updateScope = ServiceScopeFactory.CreateAsyncScope();
-                var updateHandler = updateScope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
-                await updateHandler.RunUpdateAsync(
+                var updateOps = updateScope.ServiceProvider.GetRequiredService<IWorkspaceUpdateOperations>();
+                await updateOps.UpdateAsync(
                     workspaceId,
                     ct,
                     job.ToOperationProgress(),
                     (_, _) => { },
-                    onAppSideComplete: () => { },
                     repoIdsToUpdate: reposNeedingWork,
                     commitMessage: null,
                     includeDepsInCommitMessage: true);
@@ -727,13 +720,12 @@
                     .ToHashSet();
 
                 await using var updateScope = ServiceScopeFactory.CreateAsyncScope();
-                var updateHandler = updateScope.ServiceProvider.GetRequiredService<WorkspaceUpdateHandler>();
-                await updateHandler.RunUpdateAsync(
+                var updateOps = updateScope.ServiceProvider.GetRequiredService<IWorkspaceUpdateOperations>();
+                await updateOps.UpdateAsync(
                     workspaceId,
                     ct,
                     job.ToOperationProgress(),
                     (_, _) => { },
-                    onAppSideComplete: () => { },
                     repoIdsToUpdate: reposNeedingWork,
                     commitMessage: null,
                     includeDepsInCommitMessage: true,
@@ -860,11 +852,11 @@
         int? maxLevel = null)
     {
         await using var scope = ServiceScopeFactory.CreateAsyncScope();
-        var pushHandler = scope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
+        var pushOps = scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
         var depService = scope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
 
-        var (_, pushRepoIds, hasUnpushed) = await pushHandler.GetPushPlanAsync(workspaceId, links, ct, maxLevel);
-        if (!hasUnpushed || pushRepoIds.Count == 0)
+        var plan = await pushOps.GetPlanAsync(workspaceId, links, maxLevel, ct);
+        if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
         {
             if (!_disposed) _ = InvokeAsync(() => ToastService.Show("Nothing to push."));
             return;
@@ -875,6 +867,7 @@
             .Where(wr => !maxLevel.HasValue || (wr.DependencyLevel ?? 0) <= maxLevel.Value)
             .Select(wr => wr.RepositoryId)
             .ToHashSet();
+        var pushRepoIds = plan.RepositoryIds;
         var depInfo = await depService.GetPushDependencyInfoForRepoSetAsync(workspaceId, pushRepoIds, ct);
         bool synchronizedPush = WorkspaceDependencyService.ShouldShowSynchronizedPushModal(depInfo, repoIdsThatNeedPush);
 
@@ -884,13 +877,12 @@
             .Cast<string>()
             .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        var pushResult = await pushHandler.RunPushWithDependenciesAsync(
+        var pushResult = await pushOps.PushAsync(
             workspaceId,
             pushRepoIds,
             synchronizedPush,
             requiredPackageIds,
             job.ToOperationProgress(),
-            onAppSideComplete: () => { },
             cancellationToken: ct);
         pushResult.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); });
     }
@@ -1002,14 +994,13 @@
             try
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
-                var pushHandler = scope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
-                var result = await pushHandler.RunPushWithDependenciesAsync(
+                var pushOps = scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
+                var result = await pushOps.PushAsync(
                     workspaceId,
                     repoIds,
                     synchronizedPush,
                     requiredPackageIds,
                     job.ToOperationProgress(),
-                    onAppSideComplete: () => { },
                     cancellationToken: ct);
                 result.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); });
             }
@@ -1033,8 +1024,8 @@
             try
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
-                var pushHandler = scope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
-                var result = await pushHandler.PushSingleRepositoryWithUpstreamAsync(
+                var pushOps = scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
+                var result = await pushOps.PushSingleAsync(
                     workspaceId,
                     repositoryId,
                     branchName,
@@ -1063,14 +1054,9 @@
             try
             {
                 await using var scope = ServiceScopeFactory.CreateAsyncScope();
-                var commitSyncHandler = scope.ServiceProvider.GetRequiredService<WorkspaceCommitSyncHandler>();
-                await commitSyncHandler.CommitSyncAsync(
-                    workspaceId,
-                    repositoryId,
-                    ct,
-                    job.ToOperationProgress(),
-                    (_, _) => { },
-                    _ => { });
+                var syncOps = scope.ServiceProvider.GetRequiredService<IWorkspaceSyncOperations>();
+                var result = await syncOps.PullAsync(workspaceId, repositoryId, job.ToOperationProgress(), ct);
+                result.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); });
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -1087,7 +1073,6 @@
     {
         if (IsWorkspaceJobRunning(workspaceId)) return Task.CompletedTask;
         PendingActionsService.Dismiss(workspaceId);
-        var apiBaseUrl = NavigationManager.BaseUri.TrimEnd('/');
         JobService.StartJob(WorkspaceJobKey(workspaceId), "Synchronizing commits...", async (job, ct) =>
         {
             try
@@ -1106,27 +1091,11 @@
                     .ToList();
                 if (repoIds.Count == 0) return;
 
-                var commitSyncHandler = scope.ServiceProvider.GetRequiredService<WorkspaceCommitSyncHandler>();
-                if (repoIds.Count == 1)
-                {
-                    await commitSyncHandler.CommitSyncAsync(
-                        workspaceId,
-                        repoIds[0],
-                        ct,
-                        job.ToOperationProgress(),
-                        (_, _) => { },
-                        _ => { });
-                }
-                else
-                {
-                    await commitSyncHandler.CommitSyncLevelAsync(
-                        workspaceId,
-                        repoIds,
-                        ct,
-                        (done, total) => { job.ReportProgress($"Pulled {done} of {total}"); return Task.CompletedTask; },
-                        (_, _) => { },
-                        _ => { });
-                }
+                var syncOps = scope.ServiceProvider.GetRequiredService<IWorkspaceSyncOperations>();
+                var result = repoIds.Count == 1
+                    ? await syncOps.PullAsync(workspaceId, repoIds[0], job.ToOperationProgress(), ct)
+                    : await syncOps.PullLevelAsync(workspaceId, repoIds, job.ToOperationProgress(), ct);
+                result.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); });
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)

@@ -115,8 +115,8 @@ public sealed partial class WorkspaceRepositories
         {
             try
             {
-                var repoGitInfos = await ScopedExecutor.ExecuteAsync<WorkspaceSyncHandler, IReadOnlyDictionary<int, RepoGitVersionInfo>>(
-                    svc => svc.RunSyncAsync(
+                var repoGitInfos = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, IReadOnlyDictionary<int, RepoGitVersionInfo>>(
+                    svc => svc.SyncAsync(
                         WorkspaceId,
                         repositoryIds,
                         skipDependencyLevelPersistence,

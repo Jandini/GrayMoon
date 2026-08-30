@@ -56,8 +56,8 @@ public sealed partial class WorkspaceRepositories
             IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
             try
             {
-                syncedRepoIds = await ScopedExecutor.ExecuteAsync<NewFeatureOrchestrator, IReadOnlySet<int>>(
-                    svc => svc.RunAsync(
+                syncedRepoIds = await ScopedExecutor.ExecuteAsync<IWorkspaceFeatureOperations, IReadOnlySet<int>>(
+                    svc => svc.CreateAsync(
                         WorkspaceId,
                         request.NewBranchName,
                         request.BaseBranch,

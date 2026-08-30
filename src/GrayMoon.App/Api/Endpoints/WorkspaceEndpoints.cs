@@ -1,6 +1,4 @@
 using GrayMoon.App.Models.Api;
-using GrayMoon.App.Repositories;
-using GrayMoon.App.Services;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
@@ -23,83 +21,38 @@ public static class WorkspaceEndpoints
     }
 
     private static async Task<Results<Ok<List<WorkspaceFileDto>>, NotFound>> GetWorkspaceFiles(
-        [FromRoute] int workspaceId,
-        [FromServices] WorkspaceFileRepository fileRepository,
+        int workspaceId,
+        IWorkspaceFileOperations operations,
         CancellationToken cancellationToken)
     {
-        var files = await fileRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
-        var dtos = files.Select(f => new WorkspaceFileDto
-        {
-            FileId = f.FileId,
-            WorkspaceId = f.WorkspaceId,
-            RepositoryId = f.RepositoryId,
-            RepositoryName = f.Repository?.RepositoryName,
-            FileName = f.FileName,
-            FilePath = f.FilePath,
-            IsMissingOnDisk = f.IsMissingOnDisk == true
-        }).ToList();
-        return TypedResults.Ok(dtos);
+        var files = await operations.ListAsync(workspaceId, cancellationToken);
+        return files == null ? TypedResults.NotFound() : TypedResults.Ok(files);
     }
 
     private static async Task<Results<Ok<object>, BadRequest<ProblemDetails>, NotFound>> PostWorkspaceFiles(
-        [FromRoute] int workspaceId,
-        [FromBody] List<AddWorkspaceFileRequest> body,
-        [FromServices] WorkspaceRepository workspaceRepository,
-        [FromServices] WorkspaceFileRepository fileRepository,
+        int workspaceId,
+        List<AddWorkspaceFileRequest>? body,
+        IWorkspaceFileOperations operations,
         CancellationToken cancellationToken)
     {
-        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
-        if (workspace == null)
+        var (found, added) = await operations.AddAsync(workspaceId, body ?? [], cancellationToken);
+        if (!found)
             return TypedResults.NotFound();
-
-        var repoIds = workspace.Repositories.Select(r => r.RepositoryId).ToHashSet();
-        var items = new List<(int RepositoryId, string FileName, string FilePath)>();
-        foreach (var item in body ?? [])
-        {
-            if (!repoIds.Contains(item.RepositoryId))
-                continue;
-            var fileName = (item.FileName ?? string.Empty).Trim();
-            var filePath = (item.FilePath ?? string.Empty).Trim().Replace('\\', '/');
-            if (fileName.Length == 0 || filePath.Length == 0)
-                continue;
-            items.Add((item.RepositoryId, fileName, filePath));
-        }
-
-        await fileRepository.AddRangeAsync(workspaceId, items, cancellationToken);
-        return TypedResults.Ok<object>(new { added = items.Count });
+        return TypedResults.Ok<object>(new { added });
     }
 
     private static async Task<Results<Ok<AgentSearchFilesResponse>, BadRequest<ProblemDetails>, NotFound>> SearchWorkspaceFiles(
-        [FromRoute] int workspaceId,
-        [FromQuery] string? pattern,
-        [FromQuery] string? repositoryName,
-        [FromServices] WorkspaceRepository workspaceRepository,
-        [FromServices] WorkspaceService workspaceService,
-        [FromServices] IAgentBridge agentBridge,
+        int workspaceId,
+        string? pattern,
+        string? repositoryName,
+        IWorkspaceFileOperations operations,
         CancellationToken cancellationToken)
     {
-        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
-        if (workspace == null)
+        var (found, agentConnected, data, error) = await operations.SearchAsync(workspaceId, pattern, repositoryName, cancellationToken);
+        if (!found)
             return TypedResults.NotFound();
-
-        if (!agentBridge.IsAgentConnected)
-            return TypedResults.BadRequest(new ProblemDetails { Title = "Agent not connected. Start GrayMoon.Agent to search files." });
-
-        var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
-        var searchPattern = string.IsNullOrWhiteSpace(pattern) ? "*" : pattern.Trim();
-        var response = await agentBridge.SendCommandAsync("SearchFiles", new
-        {
-            workspaceName = workspace.Name,
-            repositoryName = string.IsNullOrWhiteSpace(repositoryName) ? null : repositoryName.Trim(),
-            searchPattern,
-            workspaceRoot
-        }, cancellationToken);
-
-        if (!response.Success || response.Data == null)
-            return TypedResults.BadRequest(new ProblemDetails { Title = response.Error ?? "Search failed." });
-
-        var data = AgentResponseJson.DeserializeAgentResponse<AgentSearchFilesResponse>(response.Data);
-        data ??= new AgentSearchFilesResponse { Files = [] };
+        if (!agentConnected || data == null)
+            return TypedResults.BadRequest(new ProblemDetails { Title = error ?? "Search failed." });
         return TypedResults.Ok(data);
     }
 }

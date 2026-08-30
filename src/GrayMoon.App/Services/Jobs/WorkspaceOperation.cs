@@ -7,6 +7,7 @@ namespace GrayMoon.App.Services.Jobs;
 public sealed class WorkspaceOperation
 {
     private readonly CancellationTokenSource _cts = new();
+    private readonly TaskCompletionSource _completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private string _displayMessage;
     private BackgroundJobState _state = BackgroundJobState.Running;
     private Exception? _fault;
@@ -17,6 +18,10 @@ public sealed class WorkspaceOperation
     public string OverlayFamily { get; }
     public JobTerminalBuffer Terminal { get; } = new();
     public CancellationToken CancellationToken => _cts.Token;
+    public Task WhenCompleted => _completed.Task;
+
+    public IProgress<OperationProgress> ToOperationProgress()
+        => new Progress<OperationProgress>(p => ReportProgress(p.Message));
 
     public string DisplayMessage
     {
@@ -76,8 +81,14 @@ public sealed class WorkspaceOperation
         Changed?.Invoke();
     }
 
+    internal void NotifySettled()
+    {
+        _completed.TrySetResult();
+    }
+
     internal void Dispose()
     {
+        NotifySettled();
         _cts.Dispose();
     }
 }

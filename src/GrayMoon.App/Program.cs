@@ -157,6 +157,14 @@ try
     builder.Services.AddScoped<WorkspacePendingActionsService>();
     builder.Services.AddScoped<AppActivityStateService>();
     builder.Services.AddScoped<IWorkspaceBranchOperations, WorkspaceBranchOperations>();
+    builder.Services.AddScoped<IWorkspaceCatalogOperations, WorkspaceCatalogOperations>();
+    builder.Services.AddScoped<IWorkspacePushOperations, WorkspacePushOperations>();
+    builder.Services.AddScoped<IWorkspaceUpdateOperations, WorkspaceUpdateOperations>();
+    builder.Services.AddScoped<IWorkspaceFeatureOperations, WorkspaceFeatureOperations>();
+    builder.Services.AddScoped<IWorkspaceSyncOperations, WorkspaceSyncOperations>();
+    builder.Services.AddScoped<IWorkspacePullRequestOperations, WorkspacePullRequestOperations>();
+    builder.Services.AddScoped<IWorkspaceFileOperations, WorkspaceFileOperations>();
+    builder.Services.AddScoped<IWorkspaceGitChangesOperations, WorkspaceGitChangesOperations>();
     builder.Services.AddScoped<WorkspaceBranchHandler>();
     builder.Services.AddScoped<NewFeatureOrchestrator>();
     builder.Services.AddSingleton<IWorkspaceOperationRunner, WorkspaceOperationRunner>();

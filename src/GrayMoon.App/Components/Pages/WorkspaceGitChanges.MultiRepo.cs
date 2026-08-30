@@ -230,8 +230,8 @@ public sealed partial class WorkspaceGitChanges
                 var pushRepoIds = succeeded.Select(s => s.RepositoryId).ToHashSet();
                 job.ReportProgress("Preparing push...");
 
-                var result = await ScopedExecutor.ExecuteAsync<WorkspacePushHandler, OperationResult>(svc =>
-                    svc.RunPushWithDependenciesAsync(
+                var result = await ScopedExecutor.ExecuteAsync<IWorkspacePushOperations, OperationResult>(svc =>
+                    svc.PushAsync(
                         WorkspaceId,
                         pushRepoIds,
                         synchronizedPush: false,
