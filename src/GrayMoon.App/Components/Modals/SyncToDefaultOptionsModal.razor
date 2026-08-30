@@ -5,7 +5,7 @@
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
          @onkeydown="HandleKeyDown"
          @ref="_modalElement">
-        <div class="modal-dialog modal-lg sync-to-default-options-modal">
+        <div class="modal-dialog modal-dialog-centered modal-lg sync-to-default-options-modal">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Sync to Default</h5>
@@ -15,8 +15,7 @@
                     <p class="mb-2 small">@Message</p>
                     @if (AnyCommitsWillBeLost)
                     {
-                        <div class="alert alert-danger py-2 px-3 mb-3 small" role="alert">
-                            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                        <div class="sync-to-default-lost-commits small" role="alert">
                             One or more repositories have local commits that are not on the default branch. These commits will be permanently lost when the branch is deleted. This cannot be undone.
                         </div>
                     }

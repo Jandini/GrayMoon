@@ -401,7 +401,10 @@
     {
         <tr class="repo-error-row">
             <td colspan="@ColSpan" class="p-0">
-                <div class="repo-error-line">@RepositoryError</div>
+                <div class="repo-error-line" role="alert">
+                    <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+                    <span>@RepositoryError</span>
+                </div>
             </td>
         </tr>
     }

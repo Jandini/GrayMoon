@@ -1,20 +1,25 @@
-/* Keep the dialog within the viewport */
+/* Hug content; cap so a long repo list scrolls instead of filling the page */
 .sync-to-default-options-modal {
     max-height: calc(100vh - 2rem);
-    margin: 1rem auto;
+}
+
+.sync-to-default-options-modal .modal-content {
+    max-height: calc(100vh - 2rem);
+    display: flex;
+    flex-direction: column;
 }
 
 .sync-to-default-options-modal .modal-body {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    overflow: visible;
+    overflow: hidden;
 }
 
-/* Only the repo list scrolls */
+/* Height follows the item list; scroll only after the cap */
 .sync-to-default-options-scroll {
     flex: 0 1 auto;
-    max-height: 12rem;
+    max-height: min(22rem, calc(100vh - 18rem));
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: thin;
@@ -36,6 +41,14 @@
 
 .sync-to-default-options-scroll::-webkit-scrollbar-thumb:hover {
     background: #5a6268;
+}
+
+.sync-to-default-lost-commits {
+    padding: 0.5rem 1rem;
+    margin-bottom: 1rem;
+    color: #d4d4d4;
+    background: rgba(248, 113, 113, 0.22);
+    box-shadow: inset 3px 0 0 #f87171;
 }
 
 .sync-default-pr-badge {

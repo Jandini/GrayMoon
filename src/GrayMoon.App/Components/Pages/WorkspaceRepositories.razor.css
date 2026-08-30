@@ -863,7 +863,7 @@
     text-decoration: underline;
 }
 
-/* Repository error row - same treatment as a selected GHA log error line */
+/* Repository error row - same fill as SyncToDefaultOptionsModal alert-danger, current font kept */
 ::deep .repositories-table tr.repo-error-row,
 ::deep .repositories-table tr.repo-error-row:hover {
     background: transparent;
@@ -880,16 +880,26 @@
 }
 
 ::deep .repo-error-line {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.35rem;
     font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
     font-size: 0.8rem;
     line-height: 1.5;
-    padding: 0.25rem 1rem;
+    padding: 0.5rem 1rem;
+    margin: 0;
     white-space: pre-wrap;
     overflow-wrap: break-word;
     word-break: break-word;
-    color: #f87171;
-    background: rgba(248, 113, 113, 0.22);
-    box-shadow: inset 3px 0 0 #f87171;
+    color: var(--error);
+    background-color: rgba(244, 135, 113, 0.15);
+    border: 1px solid var(--error);
+    border-radius: 0;
+}
+
+::deep .repo-error-line i {
+    flex-shrink: 0;
+    margin-top: 0.15em;
 }
 
 /* Combined metrics column (divergence, PR, deps, commits, status) */
