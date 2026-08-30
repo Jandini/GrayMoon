@@ -40,7 +40,6 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || IsJobRunning || _undoPushModal.RepositoryLinks.Count == 0)
             return Task.CompletedTask;
 
-        var repoLinks = _undoPushModal.RepositoryLinks;
         CloseUndoPushModal();
         errorMessage = null;
 
@@ -48,12 +47,9 @@ public sealed partial class WorkspaceRepositories
         {
             try
             {
-                await UndoPushHandler.RunUndoPushAsync(
-                    WorkspaceId,
-                    repoLinks,
-                    keepChanges,
-                    job.ToOperationProgress(),
-                    ct);
+                var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(svc =>
+                    svc.UndoPushAsync(WorkspaceId, keepChanges, job.ToOperationProgress(), ct));
+                result.ShowRepoErrors(msg => SafeInvoke(() => ToastService.ShowError(msg)));
 
                 await InvokeAsync(async () =>
                 {

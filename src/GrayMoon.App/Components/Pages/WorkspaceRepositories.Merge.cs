@@ -337,8 +337,8 @@ public sealed partial class WorkspaceRepositories
                 MergeResult result;
                 try
                 {
-                    result = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, MergeResult>(
-                        svc => svc.MergePullRequestAsync(WorkspaceId, repositoryId, prNumber, method, headSha, ct));
+                    result = await ScopedExecutor.ExecuteAsync<IWorkspacePullRequestOperations, MergeResult>(
+                        svc => svc.MergeAsync(WorkspaceId, repositoryId, prNumber, method, headSha, ct));
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -369,8 +369,8 @@ public sealed partial class WorkspaceRepositories
 
                 if (syncToDefault)
                 {
-                    var syncResult = await ScopedExecutor.ExecuteAsync<WorkspaceSyncHandler, UnattendedSyncToDefaultResult>(
-                        svc => svc.SyncToDefaultUnattendedAsync(WorkspaceId, [repositoryId], job.ToOperationProgress(), ct));
+                    var syncResult = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, UnattendedSyncToDefaultResult>(
+                        svc => svc.SyncToDefaultAsync(WorkspaceId, [repositoryId], job.ToOperationProgress(), ct));
 
                     if (!syncResult.Completed && syncResult.AbortReason != null)
                         SafeInvoke(() => ToastService.ShowError(syncResult.AbortReason));

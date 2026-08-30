@@ -143,8 +143,8 @@ public sealed partial class WorkspaceRepositories
 
         StartPageJob("Updating repository...", async (job, ct) =>
         {
-            await ScopedExecutor.ExecuteAsync<WorkspaceUpdateHandler>(svc =>
-                svc.RunUpdateAsync(
+            await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations>(svc =>
+                svc.UpdateAsync(
                     WorkspaceId,
                     ct,
                     job.ToOperationProgress(),

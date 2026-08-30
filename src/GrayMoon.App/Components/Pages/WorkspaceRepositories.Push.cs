@@ -17,17 +17,17 @@ public sealed partial class WorkspaceRepositories
         try
         {
             var allLinks = await GetAllLinksForOperationAsync();
-            var (_, pushRepoIds, hasUnpushed) = await WorkspacePushHandler.GetPushPlanAsync(
+            var plan = await PushOperations.GetPlanAsync(
                 WorkspaceId,
                 allLinks,
-                CancellationToken.None);
-            if (!hasUnpushed || pushRepoIds.Count == 0)
+                cancellationToken: CancellationToken.None);
+            if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
             {
                 ToastService.Show("No repositories to push.");
                 return;
             }
 
-            var repoIdsWithUnpushed = pushRepoIds;
+            var repoIdsWithUnpushed = plan.RepositoryIds;
             var repoIdsThatNeedPush = allLinks
                 .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
@@ -182,22 +182,15 @@ public sealed partial class WorkspaceRepositories
         string emptyMessage, CancellationToken ct, int? maxLevel = null)
     {
         await using var planScope = ServiceScopeFactory.CreateAsyncScope();
-        var planPushHandler = planScope.ServiceProvider.GetRequiredService<WorkspacePushHandler>();
-        var planDepService = planScope.ServiceProvider.GetRequiredService<WorkspaceDependencyService>();
+        var planOps = planScope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
         var allLinks = await GetAllLinksForOperationAsync();
-        var (_, pushRepoIds, hasUnpushed) = await planPushHandler.GetPushPlanAsync(WorkspaceId, allLinks, ct, maxLevel);
-        if (!hasUnpushed || pushRepoIds.Count == 0)
+        var plan = await planOps.GetPlanAsync(WorkspaceId, allLinks, maxLevel, ct);
+        if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
         {
             SafeInvoke(() => ToastService.Show(emptyMessage));
             return null;
         }
-        var depInfo = await planDepService.GetPushDependencyInfoForRepoSetAsync(WorkspaceId, pushRepoIds, ct);
-        IReadOnlySet<string> requiredPackageIds = depInfo?.PayloadForRepo?.RequiredPackages
-            .Select(r => r.PackageId?.Trim())
-            .Where(id => !string.IsNullOrEmpty(id))
-            .Cast<string>()
-            .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        return (pushRepoIds, requiredPackageIds);
+        return (plan.RepositoryIds, plan.RequiredPackageIds);
     }
 
     private async Task ExecutePushCoreAsync(
@@ -211,8 +204,8 @@ public sealed partial class WorkspaceRepositories
     {
         try
         {
-            var result = await ScopedExecutor.ExecuteAsync<WorkspacePushHandler, OperationResult>(svc =>
-                svc.RunPushWithDependenciesAsync(
+            var result = await ScopedExecutor.ExecuteAsync<IWorkspacePushOperations, OperationResult>(svc =>
+                svc.PushAsync(
                     WorkspaceId,
                     repoIds,
                     synchronizedPush,
@@ -256,8 +249,8 @@ public sealed partial class WorkspaceRepositories
 
         StartPageJob("Setting upstream...", async (job, ct) =>
         {
-            var result = await ScopedExecutor.ExecuteAsync<WorkspacePushHandler, OperationResult>(
-                svc => svc.PushSingleRepositoryWithUpstreamAsync(WorkspaceId, repositoryId, branchName, job.ToOperationProgress(), ct));
+            var result = await ScopedExecutor.ExecuteAsync<IWorkspacePushOperations, OperationResult>(
+                svc => svc.PushSingleAsync(WorkspaceId, repositoryId, branchName, job.ToOperationProgress(), ct));
 
             if (result.Success)
                 await InvokeAsync(async () => { if (_disposed) return; await RefreshFromSync(); });
@@ -292,8 +285,8 @@ public sealed partial class WorkspaceRepositories
         job.ReportProgress("Restoring packages...");
         try
         {
-            var count = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, int>(
-                svc => svc.RestoreAllWorkspacePackagesAsync(WorkspaceId, job.ReportProgress, ct));
+            var count = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, int>(
+                svc => svc.RestorePackagesAsync(WorkspaceId, job.ReportProgress, ct));
 
             if (count > 0)
                 SafeInvoke(() => ToastService.Show($"Restored packages in {count} {(count == 1 ? "project" : "projects")}"));

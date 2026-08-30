@@ -93,8 +93,8 @@ public sealed partial class WorkspaceRepositories
 
         StartPageJob("Updating dependencies...", async (job, ct) =>
         {
-            await ScopedExecutor.ExecuteAsync<WorkspaceUpdateHandler>(svc =>
-                svc.RunUpdateAsync(
+            await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations>(svc =>
+                svc.UpdateAsync(
                     WorkspaceId,
                     ct,
                     job.ToOperationProgress(),
@@ -267,8 +267,8 @@ public sealed partial class WorkspaceRepositories
                 // target level) out of date once refreshed, which happens after this snapshot is taken.
                 // The orchestrator already scopes/skips per level live (via maxLevel), so no repo-id
                 // scope is needed here.
-                syncedRepoIds = await ScopedExecutor.ExecuteAsync<WorkspaceUpdateHandler, IReadOnlySet<int>>(
-                    svc => svc.RunUpdateAsync(
+                syncedRepoIds = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, IReadOnlySet<int>>(
+                    svc => svc.UpdateAsync(
                         WorkspaceId,
                         ct,
                         job.ToOperationProgress(),
@@ -365,8 +365,8 @@ public sealed partial class WorkspaceRepositories
             IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
             try
             {
-                syncedRepoIds = await ScopedExecutor.ExecuteAsync<WorkspaceUpdateHandler, IReadOnlySet<int>>(
-                    svc => svc.RunUpdateAsync(
+                syncedRepoIds = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, IReadOnlySet<int>>(
+                    svc => svc.UpdateAsync(
                         WorkspaceId,
                         ct,
                         job.ToOperationProgress(),

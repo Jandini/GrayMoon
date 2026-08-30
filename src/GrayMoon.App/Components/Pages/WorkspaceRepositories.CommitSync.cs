@@ -105,20 +105,9 @@ public sealed partial class WorkspaceRepositories
 
         StartPageJob("Synchronizing commits...", async (job, ct) =>
         {
-            await ScopedExecutor.ExecuteAsync<WorkspaceCommitSyncHandler>(svc =>
-                svc.CommitSyncAsync(
-                    WorkspaceId,
-                    repositoryId,
-                    ct,
-                    job.ToOperationProgress(),
-                    (id, err) => SafeInvoke(() =>
-                    {
-                        if (err is null)
-                            repositoryErrors.Remove(id);
-                        else
-                            repositoryErrors[id] = err;
-                    }),
-                    msg => SafeInvoke(() => errorMessage = msg)));
+            var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(svc =>
+                svc.PullAsync(WorkspaceId, repositoryId, job.ToOperationProgress(), ct));
+            ApplyPullResult(result);
         }, new PageJobOptions { RefreshOnCancel = true });
 
         return Task.CompletedTask;
@@ -140,22 +129,23 @@ public sealed partial class WorkspaceRepositories
 
         StartPageJob("Synchronizing commits...", async (job, ct) =>
         {
-            await ScopedExecutor.ExecuteAsync<WorkspaceCommitSyncHandler>(svc =>
-                svc.CommitSyncLevelAsync(
-                    WorkspaceId,
-                    repositoryIds,
-                    ct,
-                    (completed, total) => { job.ReportProgress($"Synchronized commits {completed} of {total}"); return Task.CompletedTask; },
-                    (id, err) => SafeInvoke(() =>
-                    {
-                        if (err is null)
-                            repositoryErrors.Remove(id);
-                        else
-                            repositoryErrors[id] = err;
-                    }),
-                    msg => SafeInvoke(() => errorMessage = msg)));
+            var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(svc =>
+                svc.PullLevelAsync(WorkspaceId, repositoryIds, job.ToOperationProgress(), ct));
+            ApplyPullResult(result);
         }, new PageJobOptions { RefreshOnCancel = true });
 
         return Task.CompletedTask;
+    }
+
+    private void ApplyPullResult(OperationResult result)
+    {
+        if (result.RepoErrors is { Count: > 0 })
+        {
+            foreach (var (id, err) in result.RepoErrors)
+                SafeInvoke(() => repositoryErrors[id] = err);
+        }
+
+        if (!result.Success && !string.IsNullOrWhiteSpace(result.Error))
+            SafeInvoke(() => errorMessage = result.Error);
     }
 }
