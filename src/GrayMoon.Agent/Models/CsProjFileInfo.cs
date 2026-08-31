@@ -58,3 +58,6 @@ public sealed class NuGetPackageReference
     [JsonPropertyName("version")]
     public required string Version { get; init; }
 }
+
+/// <summary>A PackageReference Include and the Version value captured between a version-pattern prefix and suffix.</summary>
+public sealed record PackageReferenceMatch(string Include, string Version);

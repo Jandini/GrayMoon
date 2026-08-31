@@ -19,30 +19,11 @@ internal static class GitResiliencePipelines
     /// The fallback strategy converts a <see cref="TimeoutRejectedException"/> (raised only if this
     /// backstop itself trips) into the same synthetic failed-result shape <c>CommandLineService</c> uses,
     /// and the retry's <c>ShouldHandle</c> also treats that exception like a normal non-zero exit so the
-    /// existing retry-on-bad-exit-code behavior is preserved rather than an unhandled exception reaching
+    /// existing retry-on-transient-failure behavior is preserved rather than an unhandled exception reaching
     /// callers that only expect a result tuple back from <c>ExecuteAsync</c>.
     /// </summary>
     public static ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CreateSafeDirectoryPipeline(ILogger logger, TimeSpan attemptTimeout)
-        => new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-            .AddFallback(CreateTimeoutFallbackOptions(attemptTimeout))
-            .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
-            {
-                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-                    .HandleResult(r => r.ExitCode != 0)
-                    .Handle<TimeoutRejectedException>(),
-                MaxRetryAttempts = 3,
-                Delay = TimeSpan.FromMilliseconds(100),
-                BackoffType = DelayBackoffType.Exponential,
-                UseJitter = true,
-                OnRetry = args =>
-                {
-                    var exitCode = args.Outcome.Result.ExitCode;
-                    logger.LogWarning("Git safe-directory retry {Attempt} (ExitCode={ExitCode})", args.AttemptNumber, exitCode);
-                    return ValueTask.CompletedTask;
-                }
-            })
-            .AddTimeout(attemptTimeout)
-            .Build();
+        => CreateRetryPipeline(logger, attemptTimeout, delayMs: 100, operationLabel: "safe-directory");
 
     /// <summary>
     /// Clone is the one pipeline where <paramref name="attemptTimeout"/> may legitimately be
@@ -54,9 +35,40 @@ internal static class GitResiliencePipelines
     /// so retry's extra <c>Handle&lt;TimeoutRejectedException&gt;()</c> clause is simply inert in that case.
     /// </summary>
     public static ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CreateClonePipeline(ILogger logger, TimeSpan attemptTimeout)
+        => CreateRetryPipeline(logger, attemptTimeout, delayMs: 200, operationLabel: "clone", allowInfiniteTimeout: true);
+
+    public static ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CreateFetchPipeline(ILogger logger, TimeSpan attemptTimeout)
+        => CreateRetryPipeline(logger, attemptTimeout, delayMs: 200, operationLabel: "fetch");
+
+    public static ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CreatePullPipeline(ILogger logger, TimeSpan attemptTimeout)
+        => CreateRetryPipeline(logger, attemptTimeout, delayMs: 200, operationLabel: "pull");
+
+    public static ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CreatePushPipeline(ILogger logger, TimeSpan attemptTimeout)
+        => CreateRetryPipeline(logger, attemptTimeout, delayMs: 200, operationLabel: "push");
+
+    public static ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CreateLsRemotePipeline(ILogger logger, TimeSpan attemptTimeout)
+        => CreateRetryPipeline(logger, attemptTimeout, delayMs: 200, operationLabel: "ls-remote");
+
+    public static ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CreateMinimalFetchPipeline(ILogger logger, TimeSpan attemptTimeout)
+        => CreateRetryPipeline(logger, attemptTimeout, delayMs: 200, operationLabel: "fetch (minimal)");
+
+    /// <summary>
+    /// Shared retry factory: only known-transient git failures (see <see cref="GitRetryClassifier"/>)
+    /// and Polly-level timeouts are retried. Definitive errors (dirty worktree, conflicts, auth,
+    /// missing refs, protected branches) fail on the first attempt.
+    /// </summary>
+    private static ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CreateRetryPipeline(
+        ILogger logger,
+        TimeSpan attemptTimeout,
+        int delayMs,
+        string operationLabel,
+        bool allowInfiniteTimeout = false)
     {
         var builder = new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>();
         var hasTimeout = attemptTimeout != Timeout.InfiniteTimeSpan;
+
+        if (!hasTimeout && !allowInfiniteTimeout)
+            throw new ArgumentOutOfRangeException(nameof(attemptTimeout), "A finite attempt timeout is required.");
 
         if (hasTimeout)
             builder.AddFallback(CreateTimeoutFallbackOptions(attemptTimeout));
@@ -64,16 +76,16 @@ internal static class GitResiliencePipelines
         builder.AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
         {
             ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-                .HandleResult(r => r.ExitCode != 0)
+                .HandleResult(r => GitRetryClassifier.IsRetryable(r.ExitCode, r.Stdout, r.Stderr))
                 .Handle<TimeoutRejectedException>(),
             MaxRetryAttempts = 3,
-            Delay = TimeSpan.FromMilliseconds(200),
+            Delay = TimeSpan.FromMilliseconds(delayMs),
             BackoffType = DelayBackoffType.Exponential,
             UseJitter = true,
             OnRetry = args =>
             {
                 var exitCode = args.Outcome.Result.ExitCode;
-                logger.LogWarning("Git clone retry {Attempt} (ExitCode={ExitCode})", args.AttemptNumber, exitCode);
+                logger.LogWarning("Git {Operation} retry {Attempt} (ExitCode={ExitCode})", operationLabel, args.AttemptNumber, exitCode);
                 return ValueTask.CompletedTask;
             }
         });
@@ -83,121 +95,6 @@ internal static class GitResiliencePipelines
 
         return builder.Build();
     }
-
-    public static ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CreateFetchPipeline(ILogger logger, TimeSpan attemptTimeout)
-        => new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-            .AddFallback(CreateTimeoutFallbackOptions(attemptTimeout))
-            .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
-            {
-                // Retry any non-zero exit code from git fetch (e.g., transient network failures).
-                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-                    .HandleResult(r => r.ExitCode != 0)
-                    .Handle<TimeoutRejectedException>(),
-                MaxRetryAttempts = 3,
-                Delay = TimeSpan.FromMilliseconds(200),
-                BackoffType = DelayBackoffType.Exponential,
-                UseJitter = true,
-                OnRetry = args =>
-                {
-                    var exitCode = args.Outcome.Result.ExitCode;
-                    logger.LogWarning("Git fetch retry {Attempt} (ExitCode={ExitCode})", args.AttemptNumber, exitCode);
-                    return ValueTask.CompletedTask;
-                }
-            })
-            .AddTimeout(attemptTimeout)
-            .Build();
-
-    public static ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CreatePullPipeline(ILogger logger, TimeSpan attemptTimeout)
-        => new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-            .AddFallback(CreateTimeoutFallbackOptions(attemptTimeout))
-            .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
-            {
-                // Retry transient failures (non-zero exit) but not merge conflicts which are deterministic.
-                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-                    .HandleResult(r => r.ExitCode != 0 && !IsMergeConflict(r.Stdout, r.Stderr))
-                    .Handle<TimeoutRejectedException>(),
-                MaxRetryAttempts = 3,
-                Delay = TimeSpan.FromMilliseconds(200),
-                BackoffType = DelayBackoffType.Exponential,
-                UseJitter = true,
-                OnRetry = args =>
-                {
-                    var exitCode = args.Outcome.Result.ExitCode;
-                    logger.LogWarning("Git pull retry {Attempt} (ExitCode={ExitCode})", args.AttemptNumber, exitCode);
-                    return ValueTask.CompletedTask;
-                }
-            })
-            .AddTimeout(attemptTimeout)
-            .Build();
-
-    public static ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CreatePushPipeline(ILogger logger, TimeSpan attemptTimeout)
-        => new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-            .AddFallback(CreateTimeoutFallbackOptions(attemptTimeout))
-            .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
-            {
-                // Retry transient failures (non-zero exit) but not protected-branch rejections which are deterministic.
-                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-                    .HandleResult(r => r.ExitCode != 0 && !IsProtectedBranchRejection(r.Stdout, r.Stderr))
-                    .Handle<TimeoutRejectedException>(),
-                MaxRetryAttempts = 3,
-                Delay = TimeSpan.FromMilliseconds(200),
-                BackoffType = DelayBackoffType.Exponential,
-                UseJitter = true,
-                OnRetry = args =>
-                {
-                    var exitCode = args.Outcome.Result.ExitCode;
-                    logger.LogWarning("Git push retry {Attempt} (ExitCode={ExitCode})", args.AttemptNumber, exitCode);
-                    return ValueTask.CompletedTask;
-                }
-            })
-            .AddTimeout(attemptTimeout)
-            .Build();
-
-    public static ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CreateLsRemotePipeline(ILogger logger, TimeSpan attemptTimeout)
-        => new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-            .AddFallback(CreateTimeoutFallbackOptions(attemptTimeout))
-            .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
-            {
-                // Retry any non-zero exit code from git ls-remote (e.g., transient network failures).
-                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-                    .HandleResult(r => r.ExitCode != 0)
-                    .Handle<TimeoutRejectedException>(),
-                MaxRetryAttempts = 3,
-                Delay = TimeSpan.FromMilliseconds(200),
-                BackoffType = DelayBackoffType.Exponential,
-                UseJitter = true,
-                OnRetry = args =>
-                {
-                    var exitCode = args.Outcome.Result.ExitCode;
-                    logger.LogWarning("Git ls-remote retry {Attempt} (ExitCode={ExitCode})", args.AttemptNumber, exitCode);
-                    return ValueTask.CompletedTask;
-                }
-            })
-            .AddTimeout(attemptTimeout)
-            .Build();
-
-    public static ResiliencePipeline<(int ExitCode, string? Stdout, string? Stderr)> CreateMinimalFetchPipeline(ILogger logger, TimeSpan attemptTimeout)
-        => new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-            .AddFallback(CreateTimeoutFallbackOptions(attemptTimeout))
-            .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
-            {
-                // Retry any non-zero exit code from minimal git fetch (e.g., transient network failures).
-                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
-                    .HandleResult(r => r.ExitCode != 0)
-                    .Handle<TimeoutRejectedException>(),
-                MaxRetryAttempts = 3,
-                Delay = TimeSpan.FromMilliseconds(200),
-                BackoffType = DelayBackoffType.Exponential,
-                UseJitter = true,
-                OnRetry = args =>
-                {
-                    var exitCode = args.Outcome.Result.ExitCode;
-                    logger.LogWarning("Git fetch (minimal) retry {Attempt} (ExitCode={ExitCode})", args.AttemptNumber, exitCode);
-                    return ValueTask.CompletedTask;
-                }
-            })
-            .AddTimeout(attemptTimeout)
-            .Build();
 
     /// <summary>
     /// Converts a <see cref="TimeoutRejectedException"/> that survives all retry attempts into the same
@@ -213,26 +110,15 @@ internal static class GitResiliencePipelines
                 (-1, null, $"Operation timed out after {attemptTimeout.TotalSeconds:0}s."))
         };
 
+    /// <summary>
+    /// Result-mapping helper for pull/merge callers: a conflict is a definitive local state, not a
+    /// retry signal. Retry decisions go through <see cref="GitRetryClassifier"/>.
+    /// </summary>
     internal static bool IsMergeConflict(string? stdout, string? stderr)
     {
         var combined = string.Concat(stdout ?? string.Empty, stderr ?? string.Empty);
         return combined.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase)
             || combined.Contains("merge conflict", StringComparison.OrdinalIgnoreCase)
             || combined.Contains("Automatic merge failed", StringComparison.OrdinalIgnoreCase);
-    }
-
-    internal static bool IsProtectedBranchRejection(string? stdout, string? stderr)
-    {
-        var combined = string.Concat(stdout ?? string.Empty, stderr ?? string.Empty);
-        return combined.Contains("protected branch", StringComparison.OrdinalIgnoreCase)
-            || combined.Contains("GH006", StringComparison.OrdinalIgnoreCase)
-            || combined.Contains("GH013", StringComparison.OrdinalIgnoreCase)
-            || combined.Contains("repository rule violations", StringComparison.OrdinalIgnoreCase)
-            || combined.Contains("pre-receive hook declined", StringComparison.OrdinalIgnoreCase)
-            || combined.Contains("hook declined", StringComparison.OrdinalIgnoreCase)
-            || combined.Contains("not allowed to push code to a protected branch", StringComparison.OrdinalIgnoreCase)
-            || combined.Contains("changes must be made through a pull request", StringComparison.OrdinalIgnoreCase)
-            || combined.Contains("TF401027", StringComparison.OrdinalIgnoreCase)
-            || combined.Contains("TF402455", StringComparison.OrdinalIgnoreCase);
     }
 }

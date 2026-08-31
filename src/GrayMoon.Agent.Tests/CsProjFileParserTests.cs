@@ -27,7 +27,9 @@ public class CsProjFileParserTests
             var parser = new CsProjFileParser();
             var result = await parser.FindPackageReferenceForVersionPatternAsync(path, "Version=\"", "\" />");
 
-            Assert.Equal("GrayMoon.Abstractions", result);
+            Assert.NotNull(result);
+            Assert.Equal("GrayMoon.Abstractions", result.Include);
+            Assert.Equal("1.2.3", result.Version);
         }
         finally
         {
@@ -53,7 +55,9 @@ public class CsProjFileParserTests
             var parser = new CsProjFileParser();
             var result = await parser.FindPackageReferenceForVersionPatternAsync(path, "Version=\"", "\"");
 
-            Assert.Equal("GrayMoon.Common", result);
+            Assert.NotNull(result);
+            Assert.Equal("GrayMoon.Common", result.Include);
+            Assert.Equal("9.9.9", result.Version);
         }
         finally
         {
@@ -79,7 +83,9 @@ public class CsProjFileParserTests
             var parser = new CsProjFileParser();
             var result = await parser.FindPackageReferenceForVersionPatternAsync(path, "<Version>", "</Version>");
 
-            Assert.Equal("GrayMoon.Common", result);
+            Assert.NotNull(result);
+            Assert.Equal("GrayMoon.Common", result.Include);
+            Assert.Equal("4.5.6", result.Version);
         }
         finally
         {

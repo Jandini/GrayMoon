@@ -114,6 +114,78 @@ public sealed class WorkspaceProjectRepositoryGeneratedPackageTests
         Assert.DoesNotContain(ctx.ProducerRepositoryId, bySource.FromProject);
         Assert.DoesNotContain(ctx.ProducerRepositoryId, bySource.FromFile);
     }
+
+    [Fact]
+    public async Task SyncGeneratedPackageDependenciesAsync_joins_consumer_project_when_path_separators_differ()
+    {
+        await using var ctx = await GeneratedPackageTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        await ctx.Repo(scope).SyncGeneratedPackageDependenciesAsync(
+            ctx.WorkspaceId,
+            [ctx.MakeInfo(consumerProjectFilePath: @"src\Consumer\Consumer.csproj", version: "1.2.3")]);
+
+        var db = ctx.Db(scope);
+        var generated = await db.WorkspaceProjects.SingleAsync(p => p.IsGenerated);
+        var edge = await db.ProjectDependencies.SingleAsync();
+        Assert.Equal(ctx.ConsumerProjectId, edge.DependentProjectId);
+        Assert.Equal(generated.ProjectId, edge.ReferencedProjectId);
+        Assert.Equal("1.2.3", edge.Version);
+    }
+
+    [Fact]
+    public async Task SyncGeneratedPackageDependenciesAsync_persists_and_updates_edge_version()
+    {
+        await using var ctx = await GeneratedPackageTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var repo = ctx.Repo(scope);
+
+        await repo.SyncGeneratedPackageDependenciesAsync(ctx.WorkspaceId, [ctx.MakeInfo(version: "1.0.0")]);
+        var first = await ctx.Db(scope).ProjectDependencies.SingleAsync();
+        Assert.Equal("1.0.0", first.Version);
+
+        await repo.SyncGeneratedPackageDependenciesAsync(ctx.WorkspaceId, [ctx.MakeInfo(version: "2.0.0")]);
+        var updated = await ctx.Db(scope).ProjectDependencies.SingleAsync();
+        Assert.Equal("2.0.0", updated.Version);
+        Assert.Equal(1, await ctx.Db(scope).ProjectDependencies.CountAsync());
+    }
+
+    [Fact]
+    public async Task GetPushPlanPayloadAsync_includes_generated_package_version_on_consumer()
+    {
+        await using var ctx = await GeneratedPackageTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var repo = ctx.Repo(scope);
+        var db = ctx.Db(scope);
+
+        var nugetConnector = new Connector
+        {
+            ConnectorName = "nuget-prod",
+            ConnectorType = ConnectorType.NuGet,
+            ApiBaseUrl = "https://api.nuget.org/v3/index.json",
+            IsActive = true,
+            IsHealthy = true,
+        };
+        db.Connectors.Add(nugetConnector);
+        await db.SaveChangesAsync();
+
+        var links = await db.WorkspaceRepositories.Where(wr => wr.WorkspaceId == ctx.WorkspaceId).ToListAsync();
+        links.Single(l => l.RepositoryId == ctx.ProducerRepositoryId).DependencyLevel = 1;
+        links.Single(l => l.RepositoryId == ctx.ConsumerRepositoryId).DependencyLevel = 2;
+        await db.SaveChangesAsync();
+
+        await repo.SyncGeneratedPackageDependenciesAsync(ctx.WorkspaceId, [ctx.MakeInfo(version: "3.4.5")]);
+
+        var generated = await db.WorkspaceProjects.SingleAsync(p => p.IsGenerated);
+        generated.MatchedConnectorId = nugetConnector.ConnectorId;
+        await db.SaveChangesAsync();
+
+        var plan = await repo.GetPushPlanPayloadAsync(ctx.WorkspaceId);
+        var consumer = plan.Single(p => p.RepoId == ctx.ConsumerRepositoryId);
+        var required = Assert.Single(consumer.RequiredPackages);
+        Assert.Equal(PackageName, required.PackageId);
+        Assert.Equal("3.4.5", required.Version);
+        Assert.Equal(nugetConnector.ConnectorId, required.MatchedConnectorId);
+    }
 }
 
 /// <summary>In-memory SQLite DI context seeded with a producer repo (no physical project) and a consumer repo with one real .csproj-backed project, for generated-package tests.</summary>
@@ -210,8 +282,8 @@ public sealed class GeneratedPackageTestContext : IAsyncDisposable
 
     public AppDbContext Db(AsyncServiceScope scope) => scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-    public GeneratedPackageDependencyInfo MakeInfo() =>
-        new(ConsumerRepositoryId, ConsumerProjectFilePath, ProducerRepositoryId, PackageName);
+    public GeneratedPackageDependencyInfo MakeInfo(string? consumerProjectFilePath = null, string? version = null) =>
+        new(ConsumerRepositoryId, consumerProjectFilePath ?? ConsumerProjectFilePath, ProducerRepositoryId, PackageName, version);
 
     public async ValueTask DisposeAsync()
     {

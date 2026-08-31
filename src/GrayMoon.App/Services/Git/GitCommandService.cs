@@ -1,5 +1,6 @@
 using System.Text;
 using GrayMoon.Common;
+using GrayMoon.Common.Git;
 using Polly;
 using Polly.Retry;
 
@@ -103,7 +104,8 @@ public class GitCommandService(ILogger<GitCommandService> logger, ICommandLineSe
         new ResiliencePipelineBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
             .AddRetry(new RetryStrategyOptions<(int ExitCode, string? Stdout, string? Stderr)>
             {
-                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>().HandleResult(r => r.ExitCode != 0),
+                ShouldHandle = new PredicateBuilder<(int ExitCode, string? Stdout, string? Stderr)>()
+                    .HandleResult(r => GitRetryClassifier.IsRetryable(r.ExitCode, r.Stdout, r.Stderr)),
                 MaxRetryAttempts = 3,
                 Delay = TimeSpan.FromMilliseconds(100),
                 BackoffType = DelayBackoffType.Exponential,

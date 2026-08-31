@@ -26,4 +26,28 @@ public sealed class WorkspacePullRequestOperations(
             method,
             expectedHeadSha,
             cancellationToken);
+
+    public Task<MergeResult> UpdateTitleAsync(
+        int workspaceId,
+        int repositoryId,
+        int prNumber,
+        string title,
+        CancellationToken cancellationToken)
+        => workspacePullRequestService.UpdatePullRequestTitleAsync(
+            workspaceId,
+            repositoryId,
+            prNumber,
+            title,
+            cancellationToken);
+
+    public Task<MergeResult> CloseAsync(
+        int workspaceId,
+        int repositoryId,
+        int prNumber,
+        CancellationToken cancellationToken)
+        => workspacePullRequestService.ClosePullRequestAsync(
+            workspaceId,
+            repositoryId,
+            prNumber,
+            cancellationToken);
 }

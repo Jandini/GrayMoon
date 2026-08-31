@@ -160,7 +160,7 @@ public sealed class GitHubPullRequestMergeService(
         var settings = settingsTask.Result;
         var checkRuns = checksTask.Result;
 
-        var (approvedCount, changesRequestedCount, outstandingReviewers, approvedByUsers) = SummarizeReviews(reviews, pr?.RequestedReviewers);
+        var (approvedCount, changesRequestedCount, outstandingReviewers, approvedByUsers) = SummarizeReviews(reviews, pr?.RequestedReviewers, pr?.RequestedTeams);
         var checksSummary = SummarizeChecks(checkRuns);
         var allowedMethods = GetAllowedMergeMethods(settings);
         var defaultMethod = DefaultMethodPriority.FirstOrDefault(m => allowedMethods.Contains(m), allowedMethods.FirstOrDefault());
@@ -203,9 +203,68 @@ public sealed class GitHubPullRequestMergeService(
         }
     }
 
+    /// <summary>Closes an open pull request via GitHub without merging. Returns GitHub's own error text on failure.</summary>
+    public async Task<MergeResult> ClosePullRequestAsync(Repository repository, Connector? connector, int prNumber, CancellationToken cancellationToken = default)
+    {
+        if (repository == null || prNumber <= 0)
+            return new MergeResult(false, "Invalid repository or pull request.");
+        if (connector == null || connector.ConnectorType != ConnectorType.GitHub || string.IsNullOrWhiteSpace(connector.UserToken))
+            return new MergeResult(false, "This repository is not connected to GitHub.");
+        if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(repository.CloneUrl, out var owner, out var repo) || owner == null || repo == null)
+            return new MergeResult(false, "Could not resolve the GitHub owner/repository from the clone URL.");
+
+        try
+        {
+            await gitHubService.ClosePullRequestAsync(connector, owner, repo, prNumber, cancellationToken);
+            return new MergeResult(true, null);
+        }
+        catch (HttpRequestException ex)
+        {
+            var friendly = GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(ex);
+            logger.LogWarning(ex, "Close PR failed for {Owner}/{Repo} PR #{Number}", owner, repo, prNumber);
+            return new MergeResult(false, friendly);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Close PR errored for {Owner}/{Repo} PR #{Number}", owner, repo, prNumber);
+            return new MergeResult(false, ex.Message);
+        }
+    }
+
+    /// <summary>Updates only the pull request title on GitHub. Does not change body, state, or base branch.</summary>
+    public async Task<MergeResult> UpdatePullRequestTitleAsync(Repository repository, Connector? connector, int prNumber, string title, CancellationToken cancellationToken = default)
+    {
+        if (repository == null || prNumber <= 0)
+            return new MergeResult(false, "Invalid repository or pull request.");
+        if (string.IsNullOrWhiteSpace(title))
+            return new MergeResult(false, "Title is required.");
+        if (connector == null || connector.ConnectorType != ConnectorType.GitHub || string.IsNullOrWhiteSpace(connector.UserToken))
+            return new MergeResult(false, "This repository is not connected to GitHub.");
+        if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(repository.CloneUrl, out var owner, out var repo) || owner == null || repo == null)
+            return new MergeResult(false, "Could not resolve the GitHub owner/repository from the clone URL.");
+
+        try
+        {
+            await gitHubService.UpdatePullRequestTitleAsync(connector, owner, repo, prNumber, title.Trim(), cancellationToken);
+            return new MergeResult(true, null);
+        }
+        catch (HttpRequestException ex)
+        {
+            var friendly = GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(ex);
+            logger.LogWarning(ex, "Update PR title failed for {Owner}/{Repo} PR #{Number}", owner, repo, prNumber);
+            return new MergeResult(false, friendly);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Update PR title errored for {Owner}/{Repo} PR #{Number}", owner, repo, prNumber);
+            return new MergeResult(false, ex.Message);
+        }
+    }
+
     private static (int Approved, int ChangesRequested, IReadOnlyList<string> Outstanding, IReadOnlyList<string> ApprovedBy) SummarizeReviews(
         List<GitHubPullRequestReviewDto> reviews,
-        List<GitHubUserDto>? requestedReviewers)
+        List<GitHubUserDto>? requestedReviewers,
+        List<GitHubTeamDto>? requestedTeams)
     {
         // GitHub returns one row per review event; only the latest review per user reflects their current stance.
         var latestByUser = reviews
@@ -225,6 +284,9 @@ public sealed class GitHubPullRequestMergeService(
         var outstanding = (requestedReviewers ?? [])
             .Where(u => !string.IsNullOrWhiteSpace(u.Login) && !approvedLogins.Contains(u.Login!))
             .Select(u => u.Login!)
+            .Concat((requestedTeams ?? [])
+                .Select(t => t.Slug)
+                .Where(s => !string.IsNullOrWhiteSpace(s)))
             .ToList();
 
         return (approvedByUsers.Count, changesRequested, outstanding, approvedByUsers);
@@ -236,13 +298,22 @@ public sealed class GitHubPullRequestMergeService(
         if (runs.Count == 0)
             return new ChecksSummary { State = ChecksState.None };
 
-        var pending = runs.Count(r => !string.Equals(r.Status, "completed", StringComparison.OrdinalIgnoreCase));
-        var failed = runs.Count(r => string.Equals(r.Status, "completed", StringComparison.OrdinalIgnoreCase)
+        // The check-runs API returns every attempt; GitHub's merge box keeps the latest run per check name.
+        var latestByName = runs
+            .GroupBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g
+                .OrderBy(r => r.CompletedAt ?? r.StartedAt ?? DateTimeOffset.MinValue)
+                .ThenBy(r => r.Id)
+                .Last())
+            .ToList();
+
+        var pending = latestByName.Count(r => !string.Equals(r.Status, "completed", StringComparison.OrdinalIgnoreCase));
+        var failed = latestByName.Count(r => string.Equals(r.Status, "completed", StringComparison.OrdinalIgnoreCase)
             && r.Conclusion is not null
             && !string.Equals(r.Conclusion, "success", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(r.Conclusion, "neutral", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(r.Conclusion, "skipped", StringComparison.OrdinalIgnoreCase));
-        var passed = runs.Count - pending - failed;
+        var passed = latestByName.Count - pending - failed;
 
         var state = failed > 0 ? ChecksState.Failed : pending > 0 ? ChecksState.Pending : ChecksState.Passed;
         return new ChecksSummary { Passed = passed, Failed = failed, Pending = pending, State = state };

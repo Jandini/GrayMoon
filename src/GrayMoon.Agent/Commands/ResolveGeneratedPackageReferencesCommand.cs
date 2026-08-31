@@ -50,13 +50,14 @@ public sealed class ResolveGeneratedPackageReferencesCommand(IGitService git, IC
 
             foreach (var (prefix, repoName, suffix) in ParsePatternLines(pattern))
             {
-                var packageName = await csProjFileParser.FindPackageReferenceForVersionPatternAsync(fullFilePath, prefix, suffix, cancellationToken);
-                if (!string.IsNullOrWhiteSpace(packageName))
+                var match = await csProjFileParser.FindPackageReferenceForVersionPatternAsync(fullFilePath, prefix, suffix, cancellationToken);
+                if (match != null && !string.IsNullOrWhiteSpace(match.Include))
                 {
                     fileResult.Packages.Add(new ResolveGeneratedPackageReferencesPackageEntry
                     {
                         RepoNameToken = repoName,
-                        PackageName = packageName
+                        PackageName = match.Include,
+                        Version = match.Version
                     });
                 }
             }

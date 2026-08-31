@@ -67,11 +67,17 @@ public sealed record PullRequestMergeDetails
 
     /// <summary>
     /// True when the merge button itself should render as an orange "proceed with caution" warning: the local
-    /// clone has unsynced work. Deliberately does NOT factor in pending/failing checks - GitHub's own Mergeable/
-    /// CanMergeNow already reflects whether checks actually block the merge per this repository's branch
-    /// protection rules, so a check that GitHub doesn't require running is not a real reason to warn.
+    /// clone has unsynced work. Deliberately does NOT factor in pending/failing checks or a blocked mergeable
+    /// state - those use <see cref="IsMergeBlocked"/> so the local-state "merge anyway?" confirm stays about
+    /// the clone only.
     /// </summary>
     public bool HasMergeWarning => HasLocalWarning;
+
+    /// <summary>
+    /// True when GitHub reports mergeable_state blocked - required reviews, checks, or rules are not met.
+    /// The merge button stays available (the caller may be allowed to bypass) but should render as a warning.
+    /// </summary>
+    public bool IsMergeBlocked => string.Equals(MergeableState, "blocked", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Merge methods GitHub currently permits for this repository. Only these may ever be offered to the user.</summary>
     public IReadOnlyList<MergeMethod> AllowedMergeMethods { get; init; } = Array.Empty<MergeMethod>();

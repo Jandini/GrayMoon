@@ -166,21 +166,27 @@ public sealed class WorkspacePullRequestService(
             _cache.TryRemove(key, out _);
     }
 
-    /// <summary>Closes an open pull request for the given repository. Looks up the connector from the workspace link and calls GitHub API. Logs and returns silently on error.</summary>
-    public async Task ClosePullRequestAsync(int workspaceId, int repositoryId, int prNumber, CancellationToken cancellationToken = default)
+    /// <summary>Closes an open pull request via GitHub without merging and, on success, forces an immediate PR refresh so the grid badge drops the open-PR chip without waiting for the next poll.</summary>
+    public async Task<MergeResult> ClosePullRequestAsync(int workspaceId, int repositoryId, int prNumber, CancellationToken cancellationToken = default)
     {
-        if (prNumber <= 0) return;
+        if (prNumber <= 0)
+            return new MergeResult(false, "Invalid pull request.");
 
-        var link = await dbContext.WorkspaceRepositories
-            .AsNoTracking()
-            .Include(wr => wr.Repository)
-            .ThenInclude(r => r!.Connector)
-            .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
-
+        var link = await GetLinkWithConnectorAsync(workspaceId, repositoryId, cancellationToken);
         if (link?.Repository == null)
-            return;
+            return new MergeResult(false, "Repository not found in this workspace.");
 
-        await gitHubPullRequestService.ClosePullRequestAsync(link.Repository, link.Repository.Connector, prNumber, cancellationToken);
+        var result = await gitHubPullRequestMergeService.ClosePullRequestAsync(
+            link.Repository,
+            link.Repository.Connector,
+            prNumber,
+            cancellationToken);
+        if (result.Success)
+        {
+            _cache.TryRemove((repositoryId, link.BranchName ?? string.Empty), out _);
+            await RefreshPullRequestsAsync(workspaceId, [repositoryId], force: true, cancellationToken: cancellationToken);
+        }
+        return result;
     }
 
     /// <summary>Refreshes PR for all repositories in the workspace.</summary>
@@ -273,6 +279,24 @@ public sealed class WorkspacePullRequestService(
             .ThenInclude(r => r!.Connector)
             .Include(wr => wr.GitStatus)
             .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
+
+    /// <summary>Updates only the pull request title on GitHub. Leaves body, state, and base branch unchanged.</summary>
+    public async Task<MergeResult> UpdatePullRequestTitleAsync(int workspaceId, int repositoryId, int prNumber, string title, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return new MergeResult(false, "Title is required.");
+
+        var link = await GetLinkWithConnectorAsync(workspaceId, repositoryId, cancellationToken);
+        if (link?.Repository == null)
+            return new MergeResult(false, "Repository not found in this workspace.");
+
+        return await gitHubPullRequestMergeService.UpdatePullRequestTitleAsync(
+            link.Repository,
+            link.Repository.Connector,
+            prNumber,
+            title.Trim(),
+            cancellationToken);
+    }
 
     /// <summary>Merges the pull request via GitHub and, on success, forces an immediate PR refresh so the grid badge flips to "merged" without waiting for the next poll.</summary>
     public async Task<MergeResult> MergePullRequestAsync(int workspaceId, int repositoryId, int prNumber, MergeMethod method, string? expectedHeadSha, CancellationToken cancellationToken = default)

@@ -62,7 +62,64 @@
                         }
                         else
                         {
-                            <div class="merge-pr-title mb-1">@Details.Title</div>
+                            <div class="merge-pr-title mb-1">
+                                @if (_isEditingTitle)
+                                {
+                                    <div class="merge-pr-title-editor">
+                                        <input type="text"
+                                               class="merge-pr-title-editor__input"
+                                               @bind="_titleDraft"
+                                               @bind:event="oninput"
+                                               @onkeydown="HandleTitleEditorKeyDown"
+                                               @onkeydown:stopPropagation="true"
+                                               @ref="_titleInput"
+                                               maxlength="256"
+                                               spellcheck="false"
+                                               autocomplete="off"
+                                               disabled="@_isSavingTitle"
+                                               aria-label="Pull request title" />
+                                        <div class="merge-pr-title-editor__actions">
+                                            <button type="button"
+                                                    class="merge-pr-title-editor__btn merge-pr-title-editor__btn--save"
+                                                    disabled="@(!CanSaveTitle)"
+                                                    title="Save"
+                                                    aria-label="Save title"
+                                                    @onmousedown:preventDefault
+                                                    @onclick="SaveTitle">
+                                                @if (_isSavingTitle)
+                                                {
+                                                    <span class="spinner-border spinner-border-sm"></span>
+                                                }
+                                                else
+                                                {
+                                                    <i class="bi bi-check-lg"></i>
+                                                }
+                                            </button>
+                                            <button type="button"
+                                                    class="merge-pr-title-editor__btn merge-pr-title-editor__btn--cancel"
+                                                    disabled="@_isSavingTitle"
+                                                    title="Cancel"
+                                                    aria-label="Cancel title edit"
+                                                    @onmousedown:preventDefault
+                                                    @onclick="CancelTitleEdit">
+                                                <i class="bi bi-x-lg"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span class="merge-pr-title__text">@DisplayTitle</span>
+                                    <button type="button"
+                                            class="merge-pr-title__edit"
+                                            title="Edit title"
+                                            aria-label="Edit title"
+                                            disabled="@IsMerging"
+                                            @onclick="BeginTitleEdit">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                }
+                            </div>
                             <div class="merge-pr-branches text-muted mb-3">
                                 <code>@Details.HeadRef</code>
                                 <span class="mx-1">&#8594;</span>
@@ -118,6 +175,11 @@
                                         {
                                             <span class="merge-pr-placeholder merge-pr-placeholder--checks-subtitle"></span>
                                         }
+                                        else if (Details.Checks.State == ChecksState.Failed && !string.IsNullOrEmpty(ActionsUrl))
+                                        {
+                                            <a href="@ActionsUrl" class="merge-pr-changed-files-link">@($"{Details.Checks.Failed} failing")</a>
+                                            @($", {Details.Checks.Passed} successful check{(Details.Checks.Passed == 1 ? "" : "s")}")
+                                        }
                                         else if (Details.Checks.State == ChecksState.Pending && !string.IsNullOrEmpty(ActionsUrl))
                                         {
                                             <a href="@ActionsUrl" class="merge-pr-changed-files-link">@GetChecksSubtitle()</a>
@@ -143,6 +205,10 @@
                                                target="_blank"
                                                rel="noopener noreferrer"
                                                class="merge-pr-changed-files-link">@Details.ChangedFiles file@(Details.ChangedFiles == 1 ? "" : "s") changed</a>
+                                        }
+                                        else if (Details.ChangedFiles == 0)
+                                        {
+                                            @(" ")<span>No file changed</span>
                                         }
                                     </div>
                                 </div>
@@ -213,37 +279,56 @@
                                disabled="@(IsLoading || IsLoadingReviewDetails || IsMerging)" />
                         <label class="form-check-label" for="merge-pr-sync-default">Sync to default branch</label>
                     </div>
-                    <div class="btn-group merge-pr-split-btn">
+                    <div class="merge-pr-footer-actions">
                         <button type="button"
-                                class="btn merge-pr-btn-github @(Details is { CanMergeNow: true, HasMergeWarning: true } ? "merge-pr-btn-github--warning" : null) merge-pr-split-btn__main"
-                                disabled="@(IsLoading || IsLoadingReviewDetails || IsMerging || Details is not { CanMergeNow: true })"
-                                @onclick="HandleMergeClick">
-                            @if (IsLoading || IsLoadingReviewDetails)
-                            {
-                                <span class="spinner-border spinner-border-sm me-2"></span>
-                            }
-                            @(Details == null ? "Unavailable" : (IsLoading || IsLoadingReviewDetails) ? "Loading…" : _selectedMethod.ToDisplayLabel())
+                                class="btn merge-pr-btn-close @(ShowClosePrAsRecommended ? null : "merge-pr-btn-close--muted")"
+                                disabled="@(IsLoading || IsMerging)"
+                                @onclick="HandleCloseClick">
+                            Close
                         </button>
-                        @if (Details?.AllowedMergeMethods.Count > 1)
-                        {
+                        <div class="btn-group merge-pr-split-btn">
                             <button type="button"
-                                    class="btn merge-pr-btn-github @(Details is { CanMergeNow: true, HasMergeWarning: true } ? "merge-pr-btn-github--warning" : null) dropdown-toggle dropdown-toggle-split merge-pr-split-btn__toggle"
+                                    class="btn merge-pr-btn-github @(ShowMergeWarningStyle ? "merge-pr-btn-github--warning" : null) merge-pr-split-btn__main"
                                     disabled="@(IsLoading || IsLoadingReviewDetails || IsMerging || Details is not { CanMergeNow: true })"
-                                    @onclick="ToggleMethodDropdown">
-                                <span class="visually-hidden">Choose merge method</span>
+                                    @onclick="HandleMergeClick">
+                                @if (IsLoading || IsLoadingReviewDetails)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2"></span>
+                                }
+                                @(Details == null ? "Unavailable" : (IsLoading || IsLoadingReviewDetails) ? "Loading…" : _selectedMethod.ToDisplayLabel())
                             </button>
-                            @if (_showMethodDropdown)
+                            @if (Details?.AllowedMergeMethods.Count > 1)
                             {
-                                <div class="merge-pr-method-menu">
-                                    @foreach (var method in Details.AllowedMergeMethods)
-                                    {
-                                        <button type="button" class="dropdown-item" @onclick="() => SelectMethod(method)">
-                                            @method.ToDisplayLabel()
-                                        </button>
-                                    }
-                                </div>
+                                <button type="button"
+                                        class="btn merge-pr-btn-github @(ShowMergeWarningStyle ? "merge-pr-btn-github--warning" : null) dropdown-toggle dropdown-toggle-split merge-pr-split-btn__toggle"
+                                        disabled="@(IsLoading || IsLoadingReviewDetails || IsMerging || Details is not { CanMergeNow: true })"
+                                        @onclick="ToggleMethodDropdown">
+                                    <span class="visually-hidden">Choose merge method</span>
+                                </button>
+                                @if (_showMethodDropdown)
+                                {
+                                    <div class="merge-pr-method-menu">
+                                        @foreach (var method in Details.AllowedMergeMethods)
+                                        {
+                                            <button type="button"
+                                                    class="dropdown-item merge-pr-method-item @(_selectedMethod == method ? "merge-pr-method-item--selected" : null)"
+                                                    @onclick="() => SelectMethod(method)">
+                                                <span class="merge-pr-method-item__check" aria-hidden="true">
+                                                    @if (_selectedMethod == method)
+                                                    {
+                                                        <i class="bi bi-check-lg"></i>
+                                                    }
+                                                </span>
+                                                <span class="merge-pr-method-item__text">
+                                                    <span class="merge-pr-method-item__title">@method.ToDisplayLabel()</span>
+                                                    <span class="merge-pr-method-item__subtitle">@method.ToDescription()</span>
+                                                </span>
+                                            </button>
+                                        }
+                                    </div>
+                                }
                             }
-                        }
+                        </div>
                     </div>
                 </div>
             </div>
@@ -265,9 +350,11 @@
     [Parameter] public string? ErrorMessage { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback<MergePullRequestChoice> OnMerge { get; set; }
+    /// <summary>Raised when the user clicks Close. The button is always shown; it is red only when the PR has 0 files changed.</summary>
+    [Parameter] public EventCallback OnClosePullRequest { get; set; }
     /// <summary>Workspace's Git Changes page URL, used to link the "N uncommitted changes" text in the local-state row. Null/empty hides the link.</summary>
     [Parameter] public string? ChangesUrl { get; set; }
-    /// <summary>Workspace's Actions page URL, used to link the "N checks still running" text in the checks row. Null/empty hides the link.</summary>
+    /// <summary>Workspace's Actions page URL, used to link the "N failing" / "N checks still running" text in the checks row. Null/empty hides the link.</summary>
     [Parameter] public string? ActionsUrl { get; set; }
     /// <summary>Raised when the user clicks the commits text in the local-state row while only unpushed (outgoing) commits exist.</summary>
     [Parameter] public EventCallback OnPushRequested { get; set; }
@@ -275,6 +362,8 @@
     [Parameter] public EventCallback OnPullRequested { get; set; }
     /// <summary>True while a push/pull triggered from the local-state row is running. Drops the dialog's z-index below the page's LoadingOverlay so it visually covers the (still-mounted) dialog instead of the dialog disappearing.</summary>
     [Parameter] public bool IsSyncingLocalState { get; set; }
+    /// <summary>Raised with the new title so the caller can PATCH it on GitHub, then re-run the review/checks phase only after that update succeeds.</summary>
+    [Parameter] public EventCallback<string> OnTitleChanged { get; set; }
 
     private MergeMethod _selectedMethod;
     private bool _showMethodDropdown;
@@ -282,6 +371,19 @@
     private bool _focusOnNextRender;
     private int? _lastDetailsNumber;
     private ElementReference _modalElement;
+    private ElementReference _titleInput;
+
+    private bool _isEditingTitle;
+    private bool _isSavingTitle;
+    private bool _titleOverridden;
+    private bool _focusTitleInput;
+    private string _displayTitle = string.Empty;
+    private string _titleDraft = string.Empty;
+
+    private string DisplayTitle => _titleOverridden || !string.IsNullOrEmpty(_displayTitle) ? _displayTitle : (Details?.Title ?? string.Empty);
+    private bool CanSaveTitle => !_isSavingTitle
+                                 && !string.IsNullOrWhiteSpace(_titleDraft)
+                                 && !string.Equals(_titleDraft.Trim(), DisplayTitle, StringComparison.Ordinal);
 
     /// <summary>Backed by <see cref="SyncToDefaultPreference"/> (a singleton) so the checkbox remembers the user's
     /// last choice across dialog opens and page navigation, instead of resetting to unchecked every time.</summary>
@@ -311,6 +413,7 @@
         {
             _wasVisible = false;
             _lastDetailsNumber = null;
+            ResetTitleEditState();
         }
 
         if (Details == null)
@@ -322,18 +425,46 @@
             _selectedMethod = Details.DefaultMergeMethod ?? MergeMethod.Merge;
             _showMethodDropdown = false;
             _defaultMethodApplied = Details.AllowedMergeMethods.Count > 0;
+            ApplyIncomingTitle(Details.Title, force: true);
         }
-        else if (!_defaultMethodApplied && Details.AllowedMergeMethods.Count > 0)
+        else
         {
-            // The review-details phase just resolved for the PR we already showed a snapshot for - apply its
-            // real default method now instead of leaving the placeholder selection from before it was known.
-            _selectedMethod = Details.DefaultMergeMethod ?? MergeMethod.Merge;
-            _defaultMethodApplied = true;
+            if (_isEditingTitle && !_isSavingTitle
+                && !string.IsNullOrEmpty(Details.Title)
+                && string.Equals(Details.Title, _titleDraft.Trim(), StringComparison.Ordinal)
+                && !string.Equals(Details.Title, _displayTitle, StringComparison.Ordinal))
+            {
+                // GitHub accepted the new title; the parent updated Details.Title after the PATCH.
+                _displayTitle = Details.Title;
+                _titleDraft = Details.Title;
+                _titleOverridden = true;
+                _isEditingTitle = false;
+            }
+            else if (!_titleOverridden && !_isEditingTitle && !string.IsNullOrEmpty(Details.Title) && _displayTitle != Details.Title)
+            {
+                // Snapshot/refresh filled in the title after the dialog already opened for this PR.
+                ApplyIncomingTitle(Details.Title, force: false);
+            }
+
+            if (!_defaultMethodApplied && Details.AllowedMergeMethods.Count > 0)
+            {
+                // The review-details phase just resolved for the PR we already showed a snapshot for - apply its
+                // real default method now instead of leaving the placeholder selection from before it was known.
+                _selectedMethod = Details.DefaultMergeMethod ?? MergeMethod.Merge;
+                _defaultMethodApplied = true;
+            }
         }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (_focusTitleInput && IsVisible && _isEditingTitle)
+        {
+            _focusTitleInput = false;
+            await _titleInput.FocusAsync();
+            return;
+        }
+
         if (!_focusOnNextRender || !IsVisible)
             return;
         _focusOnNextRender = false;
@@ -344,11 +475,92 @@
     {
         if (e.Key == "Escape")
         {
-            if (_showMethodDropdown)
+            if (_isEditingTitle)
+                CancelTitleEdit();
+            else if (_showMethodDropdown)
                 _showMethodDropdown = false;
             else
                 await OnCancel.InvokeAsync();
         }
+    }
+
+    private void BeginTitleEdit()
+    {
+        if (IsMerging)
+            return;
+        _titleDraft = DisplayTitle;
+        _isEditingTitle = true;
+        _focusTitleInput = true;
+    }
+
+    private void CancelTitleEdit()
+    {
+        if (_isSavingTitle)
+            return;
+        _isEditingTitle = false;
+        _titleDraft = DisplayTitle;
+        _focusTitleInput = false;
+    }
+
+    private async Task SaveTitle()
+    {
+        if (!CanSaveTitle)
+            return;
+
+        var title = _titleDraft.Trim();
+        _isSavingTitle = true;
+        try
+        {
+            if (OnTitleChanged.HasDelegate)
+                await OnTitleChanged.InvokeAsync(title);
+
+            // Parent updates Details.Title only after GitHub accepts the PATCH. Stay in edit mode on failure.
+            if (Details != null && string.Equals(Details.Title, title, StringComparison.Ordinal))
+            {
+                _displayTitle = title;
+                _titleDraft = title;
+                _titleOverridden = true;
+                _isEditingTitle = false;
+                _focusTitleInput = false;
+            }
+        }
+        finally
+        {
+            _isSavingTitle = false;
+        }
+    }
+
+    private async Task HandleTitleEditorKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            await SaveTitle();
+        else if (e.Key == "Escape")
+            CancelTitleEdit();
+    }
+
+    private void ApplyIncomingTitle(string title, bool force)
+    {
+        if (force)
+        {
+            _displayTitle = title;
+            _titleDraft = title;
+            _isEditingTitle = false;
+            _titleOverridden = false;
+            _focusTitleInput = false;
+            return;
+        }
+
+        _displayTitle = title;
+    }
+
+    private void ResetTitleEditState()
+    {
+        _isEditingTitle = false;
+        _isSavingTitle = false;
+        _titleOverridden = false;
+        _focusTitleInput = false;
+        _displayTitle = string.Empty;
+        _titleDraft = string.Empty;
     }
 
     private void ToggleMethodDropdown() => _showMethodDropdown = !_showMethodDropdown;
@@ -359,11 +571,20 @@
         _showMethodDropdown = false;
     }
 
+    /// <summary>True when GitHub reports this PR changed no files - Close renders green as the better option than an empty merge.</summary>
+    private bool ShowClosePrAsRecommended => Details?.ChangedFiles == 0;
+
     private async Task HandleMergeClick()
     {
         _showMethodDropdown = false;
         if (Details != null && OnMerge.HasDelegate)
             await OnMerge.InvokeAsync(new MergePullRequestChoice(_selectedMethod, _syncToDefault));
+    }
+
+    private async Task HandleCloseClick()
+    {
+        if (OnClosePullRequest.HasDelegate)
+            await OnClosePullRequest.InvokeAsync();
     }
 
     // GitHub-style status rows: a colored icon circle + bold title + muted subtitle per row,
@@ -452,17 +673,23 @@
     };
 
     /// <summary>
-    /// GitHub's PR API never reports "N approving reviews required" directly - the closest signal available is
-    /// mergeable_state == "blocked" with no other explainable cause (no failing/pending checks, no changes
-    /// requested, nobody currently requested as a reviewer). That combination means branch protection requires
-    /// an approving review that nobody has even been asked for yet, which must read as blocked (red), not "not required" (green).
+    /// Orange when the local clone is unsynced or GitHub is blocking on unmet requirements (reviews/rules).
+    /// The latter stays available because the caller may be allowed to bypass - no extra checkbox.
     /// </summary>
-    private bool RequiresReviewButNoneRequested() => !IsLoadingReviewDetails
+    private bool ShowMergeWarningStyle => Details is { CanMergeNow: true } && (Details.HasMergeWarning || Details.IsMergeBlocked);
+
+    /// <summary>
+    /// GitHub's PR API never reports the exact required-review count. mergeable_state == "blocked" with checks
+    /// already settled (passed or none) means a required approving review is still missing - including when
+    /// assigned reviewers are a team or Copilot whose approval does not satisfy "reviewers with write access".
+    /// </summary>
+    private bool ReviewRequirementUnmet() => !IsLoadingReviewDetails
         && Details != null
-        && Details.ApprovedCount == 0
-        && Details.ChangesRequestedCount == 0
-        && Details.OutstandingReviewers.Count == 0
-        && string.Equals(Details.MergeableState, "blocked", StringComparison.OrdinalIgnoreCase);
+        && Details.IsMergeBlocked
+        && Details.Checks.State is ChecksState.Passed or ChecksState.None;
+
+    private bool ReviewRequired() => Details != null
+        && (Details.OutstandingReviewers.Count > 0 || ReviewRequirementUnmet());
 
     private string GetReviewIconClass()
     {
@@ -470,7 +697,7 @@
             return "merge-pr-status-icon--pending";
         if (Details == null)
             return "merge-pr-status-icon--neutral";
-        if (Details.ChangesRequestedCount > 0 || RequiresReviewButNoneRequested())
+        if (Details.ChangesRequestedCount > 0 || ReviewRequirementUnmet())
             return "merge-pr-status-icon--danger";
         if (Details.OutstandingReviewers.Count > 0)
             return "merge-pr-status-icon--pending";
@@ -483,7 +710,7 @@
             return "bi-three-dots";
         if (Details == null)
             return "bi-dash-lg";
-        if (Details.ChangesRequestedCount > 0 || RequiresReviewButNoneRequested())
+        if (Details.ChangesRequestedCount > 0 || ReviewRequirementUnmet())
             return "bi-x-lg";
         if (Details.OutstandingReviewers.Count > 0)
             return "bi-three-dots";
@@ -496,7 +723,7 @@
             return string.Empty;
         if (Details.ChangesRequestedCount > 0)
             return "Changes requested";
-        if (Details.OutstandingReviewers.Count > 0 || RequiresReviewButNoneRequested())
+        if (ReviewRequired())
             return "Review required";
         if (Details.ApprovedCount > 0)
             return "Review approved";
@@ -509,22 +736,11 @@
             return string.Empty;
         if (Details.ChangesRequestedCount > 0)
             return $"{Details.ChangesRequestedCount} review{(Details.ChangesRequestedCount == 1 ? "" : "s")} requested changes.";
-        if (Details.OutstandingReviewers.Count > 0)
-            return $"Waiting on {FormatNames(Details.OutstandingReviewers)}.";
+        if (ReviewRequired())
+            return "This pull request needs an approval from someone with write permission.";
         if (Details.ApprovedCount > 0)
-            return $"Approved by {FormatNames(Details.ApprovedByUsers)}.";
-        if (RequiresReviewButNoneRequested())
-            return "This repository requires an approving review, but none has been requested.";
+            return $"{Details.ApprovedCount} approving review{(Details.ApprovedCount == 1 ? "" : "s")}.";
         return "No reviewers were requested for this pull request.";
-    }
-
-    /// <summary>Keeps review-name subtitles short: shows up to 2 names, then a "+N more" suffix.</summary>
-    private static string FormatNames(IReadOnlyList<string> names)
-    {
-        const int maxShown = 2;
-        if (names.Count <= maxShown)
-            return string.Join(", ", names);
-        return $"{string.Join(", ", names.Take(maxShown))} +{names.Count - maxShown} more";
     }
 
     // GrayMoon-local 4th row: uncommitted changes / unpushed commits in the local clone. Purely informational

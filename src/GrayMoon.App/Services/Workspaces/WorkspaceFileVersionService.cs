@@ -279,7 +279,8 @@ public sealed class WorkspaceFileVersionService(
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return;
 
-        await SyncGeneratedPackageDependenciesAsync(workspaceId, cancellationToken);
+        if (await SyncGeneratedPackageDependenciesAsync(workspaceId, cancellationToken))
+            await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
 
         var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
         var trackedFiles = await dbContext.WorkspaceFiles
@@ -547,7 +548,8 @@ public sealed class WorkspaceFileVersionService(
                         consumerRepositoryId,
                         matchingCfg.File.FilePath,
                         producerRepositoryId,
-                        pkg.PackageName));
+                        pkg.PackageName,
+                        string.IsNullOrWhiteSpace(pkg.Version) ? null : pkg.Version.Trim()));
                 }
             }
 
@@ -579,6 +581,7 @@ public sealed class WorkspaceFileVersionService(
     {
         [System.Text.Json.Serialization.JsonPropertyName("repoNameToken")] public string? RepoNameToken { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("packageName")] public string? PackageName { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("version")] public string? Version { get; set; }
     }
 
     private async Task ApplyFileConfigLinkCountersAsync(
