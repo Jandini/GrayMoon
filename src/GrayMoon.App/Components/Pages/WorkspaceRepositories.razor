@@ -48,7 +48,7 @@
                                     OnSync="SyncAsync"
                                     OnQuickFetch="QuickFetchAsync"
                                     QuickFetchIsPrimary="@_quickFetchIsPrimary"
-                                    HasRepositoryErrors="@(repositoryErrors.Count > 0)"
+                                    HasRepositoryErrors="@HasAnyCalloutErrors"
                                     OnClearErrors="ClearRepositoryErrors"
                                     OnSyncModeChanged="SetSyncModeAsync"
                                     OnRestorePackages="@RestorePackagesAsync"
@@ -57,12 +57,10 @@
                                     OnSearchKeyDown="OnSearchKeyDown" />
         @if (errorMessage != null)
         {
-            <div class="alert alert-danger">
-                <i class="bi bi-exclamation-triangle"></i> @errorMessage
-            </div>
+            <div class="page-error-callout repo-error-line" role="alert">@errorMessage</div>
         }
     </div>
-    @if (errorMessage == null)
+    @if (workspace != null)
     {
         <div class="grid-page-body">
             <div class="card page-card mb-4">

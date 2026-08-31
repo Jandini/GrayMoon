@@ -55,8 +55,10 @@ public sealed class WorkspaceSyncOperations(
             },
             err => pageError = err);
 
-        if (!string.IsNullOrWhiteSpace(pageError) || repoErrors.Count > 0)
-            return OperationResult.Fail(pageError ?? "Pull failed.", repoErrors);
+        if (repoErrors.Count > 0)
+            return OperationResult.Fail("Pull failed.", repoErrors);
+        if (!string.IsNullOrWhiteSpace(pageError))
+            return OperationResult.Fail(pageError);
 
         return OperationResult.Ok();
     }
@@ -85,8 +87,10 @@ public sealed class WorkspaceSyncOperations(
             },
             err => pageError = err);
 
-        if (!string.IsNullOrWhiteSpace(pageError) || repoErrors.Count > 0)
-            return OperationResult.Fail(pageError ?? "Pull failed.", repoErrors);
+        if (repoErrors.Count > 0)
+            return OperationResult.Fail("Pull failed.", repoErrors);
+        if (!string.IsNullOrWhiteSpace(pageError))
+            return OperationResult.Fail(pageError);
 
         return OperationResult.Ok();
     }
@@ -117,14 +121,19 @@ public sealed class WorkspaceSyncOperations(
             : OperationResult.Fail("Undo push failed for one or more repositories.", errors);
     }
 
-    public Task QuickFetchAsync(
+    public async Task<OperationResult> QuickFetchAsync(
         int workspaceId,
         IReadOnlyCollection<int>? repositoryIds,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
-        => workspaceGitService.QuickFetchAsync(
+    {
+        var errors = await workspaceGitService.QuickFetchAsync(
             workspaceId,
             repositoryIds,
             onProgress: (done, total) => progress.Report($"Fetched {done} of {total}", done, total),
             cancellationToken);
+        return errors.Count == 0
+            ? OperationResult.Ok()
+            : OperationResult.Fail("Fetch failed.", errors);
+    }
 }

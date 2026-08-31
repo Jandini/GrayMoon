@@ -48,20 +48,39 @@ public sealed partial class WorkspaceRepositories
         }
     }
 
+    private bool HasAnyCalloutErrors =>
+        repositoryErrors.Count > 0 || !string.IsNullOrWhiteSpace(errorMessage);
+
     private void ClearRepositoryErrors()
     {
-        if (repositoryErrors.Count == 0)
+        if (!HasAnyCalloutErrors)
             return;
 
         repositoryErrors.Clear();
+        errorMessage = null;
         StateHasChanged();
     }
+
+    private void ClearRepositoryError(int repositoryId) =>
+        repositoryErrors.Remove(repositoryId);
 
     private void SetRepositoryError(int repositoryId, string? message)
     {
         if (string.IsNullOrWhiteSpace(message))
             return;
-        repositoryErrors[repositoryId] = message;
+        repositoryErrors.TryGetValue(repositoryId, out var existing);
+        var next = AppendErrorText(existing, message);
+        if (next is null || string.Equals(existing, next, StringComparison.Ordinal))
+            return;
+        repositoryErrors[repositoryId] = next;
+    }
+
+    private void SetPageError(string? message)
+    {
+        var next = AppendErrorText(errorMessage, message);
+        if (next is null || string.Equals(errorMessage, next, StringComparison.Ordinal))
+            return;
+        errorMessage = next;
     }
 
     private void ApplyRepositoryErrors(IReadOnlyDictionary<int, string>? repoErrors)
@@ -70,6 +89,18 @@ public sealed partial class WorkspaceRepositories
             return;
         foreach (var (id, err) in repoErrors)
             SetRepositoryError(id, err);
+    }
+
+    private static string? AppendErrorText(string? existing, string? incoming)
+    {
+        if (string.IsNullOrWhiteSpace(incoming))
+            return existing;
+        var trimmed = incoming.Trim();
+        if (string.IsNullOrWhiteSpace(existing))
+            return trimmed;
+        if (existing.Contains(trimmed, StringComparison.Ordinal))
+            return existing;
+        return existing + "\n" + trimmed;
     }
 
     private string? GetRepositoryError(int repositoryId) =>

@@ -27,7 +27,7 @@ public sealed class WorkspaceBranchHandler(
         return outcome.Body as CommonBranchesApiResult;
     }
 
-    public async Task CreateBranchesAsync(
+    public async Task<IReadOnlyDictionary<int, string>> CreateBranchesAsync(
         int workspaceId,
         string newBranchName,
         string baseBranch,
@@ -39,7 +39,7 @@ public sealed class WorkspaceBranchHandler(
         await using var scope = serviceScopeFactory.CreateAsyncScope();
         var workspaceGitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
 
-        await workspaceGitService.CreateBranchesAsync(
+        return await workspaceGitService.CreateBranchesAsync(
             workspaceId,
             newBranchName,
             baseBranch,

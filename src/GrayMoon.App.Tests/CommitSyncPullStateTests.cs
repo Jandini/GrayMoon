@@ -103,4 +103,27 @@ public sealed class CommitSyncPullStateTests
         Assert.Equal("main", link.BranchName);
         Assert.Equal(2, link.DefaultBranchBehindCommits);
     }
+
+    [Fact]
+    public async Task Pull_failure_sets_repo_error_not_page_error()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        const string gitError = "Please commit your changes or stash them before you merge. Aborting";
+        ctx.AgentBridge.Respond("CommitSyncRepository", data: null, success: false, error: gitError);
+
+        string? repoError = null;
+        string? pageError = null;
+        await using var scope = ctx.CreateScope();
+        var handler = scope.ServiceProvider.GetRequiredService<WorkspaceCommitSyncHandler>();
+        await handler.CommitSyncAsync(
+            ctx.WorkspaceId,
+            ctx.RepositoryId,
+            CancellationToken.None,
+            new Progress<OperationProgress>(_ => { }),
+            (_, msg) => repoError = msg,
+            err => pageError = err);
+
+        Assert.Equal(gitError, repoError);
+        Assert.Null(pageError);
+    }
 }

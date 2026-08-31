@@ -11,8 +11,6 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || !HasRepositories || IsJobRunning)
             return Task.CompletedTask;
 
-        errorMessage = null;
-
         StartPageJob("Updating file versions...", async (job, ct) =>
         {
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceFileOperations, WorkspaceFileVersionUpdateResult>(
@@ -29,9 +27,9 @@ public sealed partial class WorkspaceRepositories
                     await RefreshFromSync();
                 StateHasChanged();
                 if (result.Error != null)
-                    errorMessage = result.Error;
+                    SetPageError(result.Error);
                 else if (result.Failed > 0)
-                    errorMessage = $"Updated {result.Updated} line(s). {result.Failed} file(s) could not be updated - check logs.";
+                    SetPageError($"Updated {result.Updated} line(s). {result.Failed} file(s) could not be updated - check logs.");
                 else
                     ToastService.Show(result.Updated > 0 ? "Versions updated in configured files." : "File versions are already up to date.");
             });
@@ -41,7 +39,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error updating file versions for WorkspaceId={WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => errorMessage = "Failed to update file versions. Please try again.");
+                SafeInvoke(() => SetPageError("Failed to update file versions. Please try again."));
             }
         });
 
@@ -58,8 +56,6 @@ public sealed partial class WorkspaceRepositories
             return Task.CompletedTask;
         }
 
-        errorMessage = null;
-
         StartPageJob("Updating file versions...", async (job, ct) =>
         {
             var repoIds = new HashSet<int> { repositoryId };
@@ -74,7 +70,7 @@ public sealed partial class WorkspaceRepositories
 
             if (result.Error != null)
             {
-                SafeInvoke(() => errorMessage = result.Error);
+                SafeInvoke(() => SetPageError(result.Error));
                 return;
             }
 
@@ -84,7 +80,7 @@ public sealed partial class WorkspaceRepositories
                 await RefreshFromSync();
                 StateHasChanged();
                 if (result.Failed > 0)
-                    errorMessage = $"Updated {result.Updated} line(s). {result.Failed} file(s) could not be updated - check logs.";
+                    SetPageError($"Updated {result.Updated} line(s). {result.Failed} file(s) could not be updated - check logs.");
                 else if (result.Updated > 0)
                     ToastService.Show($"Updated {result.Updated} line(s) in configured files.");
                 else
@@ -96,7 +92,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error updating file versions for repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
-                SafeInvoke(() => errorMessage = "Failed to update file versions. Please try again.");
+                SafeInvoke(() => SetPageError("Failed to update file versions. Please try again."));
             }
         });
 
@@ -186,7 +182,6 @@ public sealed partial class WorkspaceRepositories
             return Task.CompletedTask;
         }
 
-        errorMessage = null;
         CloseVersionFilesCommitModal();
 
         var jobLabel = shouldCommit ? "Updating and committing file versions..." : "Updating file versions...";
@@ -205,7 +200,7 @@ public sealed partial class WorkspaceRepositories
 
             if (result.Error != null)
             {
-                SafeInvoke(() => errorMessage = result.Error);
+                SafeInvoke(() => SetPageError(result.Error));
                 return;
             }
 
@@ -215,7 +210,7 @@ public sealed partial class WorkspaceRepositories
                 await RefreshFromSync();
                 StateHasChanged();
                 if (result.Failed > 0)
-                    errorMessage = $"Updated {result.Updated} line(s). {result.Failed} file(s) could not be updated - check logs.";
+                    SetPageError($"Updated {result.Updated} line(s). {result.Failed} file(s) could not be updated - check logs.");
                 else if (result.Updated > 0)
                     ToastService.Show(shouldCommit
                         ? $"Updated and committed {result.Updated} line(s) in configured files."
@@ -229,7 +224,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error updating file versions for repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
-                SafeInvoke(() => errorMessage = "Failed to update file versions. Please try again.");
+                SafeInvoke(() => SetPageError("Failed to update file versions. Please try again."));
             }
         });
 

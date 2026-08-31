@@ -41,7 +41,6 @@ public sealed partial class WorkspaceRepositories
             return;
 
         CloseNewFeatureModal();
-        errorMessage = null;
 
         var allLinks = await GetAllLinksForOperationAsync();
         var tagFilteredRepoIds = request.SkipReposOnTags
@@ -65,7 +64,7 @@ public sealed partial class WorkspaceRepositories
                         request.UpdateDependencies,
                         commitMessage: null,
                         progress: job.ToOperationProgress(),
-                        setRepositoryError: (repoId, msg) => SafeInvoke(() => { repositoryErrors[repoId] = msg; }),
+                        setRepositoryError: (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
                         cancellationToken: ct));
 
                 // Unconditional reload so workspaceRepositories is current for Phase 3

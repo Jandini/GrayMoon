@@ -101,13 +101,13 @@ public sealed partial class WorkspaceRepositories
             return Task.CompletedTask;
         }
 
-        errorMessage = null;
-
         StartPageJob("Synchronizing commits...", async (job, ct) =>
         {
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(svc =>
                 svc.PullAsync(WorkspaceId, repositoryId, job.ToOperationProgress(), ct));
             ApplyPullResult(result);
+            if (result.Success)
+                SafeInvoke(() => ClearRepositoryError(repositoryId));
         }, new PageJobOptions { RefreshOnCancel = true });
 
         return Task.CompletedTask;
@@ -125,13 +125,19 @@ public sealed partial class WorkspaceRepositories
             return Task.CompletedTask;
         }
 
-        errorMessage = null;
-
         StartPageJob("Synchronizing commits...", async (job, ct) =>
         {
             var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(svc =>
                 svc.PullLevelAsync(WorkspaceId, repositoryIds, job.ToOperationProgress(), ct));
             ApplyPullResult(result);
+            SafeInvoke(() =>
+            {
+                foreach (var id in repositoryIds)
+                {
+                    if (result.RepoErrors is null || !result.RepoErrors.ContainsKey(id))
+                        ClearRepositoryError(id);
+                }
+            });
         }, new PageJobOptions { RefreshOnCancel = true });
 
         return Task.CompletedTask;
@@ -142,9 +148,10 @@ public sealed partial class WorkspaceRepositories
         if (result.RepoErrors is { Count: > 0 })
         {
             SafeInvoke(() => ApplyRepositoryErrors(result.RepoErrors));
+            return;
         }
 
         if (!result.Success && !string.IsNullOrWhiteSpace(result.Error))
-            SafeInvoke(() => errorMessage = result.Error);
+            SafeInvoke(() => SetPageError(result.Error));
     }
 }

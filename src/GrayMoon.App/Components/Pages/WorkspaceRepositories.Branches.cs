@@ -166,7 +166,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error fetching branches across workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => ToastService.ShowError("Failed to fetch branches across workspace."));
+                SafeInvoke(() => SetPageError("Failed to fetch branches across workspace."));
             }
         });
 
@@ -207,9 +207,9 @@ public sealed partial class WorkspaceRepositories
                 foreach (var repoId in repoIds)
                 {
                     if (result.ErrorsByRepositoryId.TryGetValue(repoId, out var error))
-                        repositoryErrors[repoId] = error;
+                        SetRepositoryError(repoId, error);
                     else
-                        repositoryErrors.Remove(repoId);
+                        ClearRepositoryError(repoId);
                 }
             });
 
@@ -219,7 +219,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error checking out branch {BranchName} across workspace {WorkspaceId}", branchName, WorkspaceId);
-                SafeInvoke(() => ToastService.ShowError("Failed to check out branch across workspace."));
+                SafeInvoke(() => SetPageError("Failed to check out branch across workspace."));
             }
         });
 
@@ -232,7 +232,6 @@ public sealed partial class WorkspaceRepositories
             return;
 
         CloseBranchModal();
-        errorMessage = null;
 
         var allLinks = await GetAllLinksForOperationAsync();
         var tagFilteredRepoIds = skipReposOnTags
@@ -241,7 +240,7 @@ public sealed partial class WorkspaceRepositories
 
         StartPageJob("Creating branches...", async (job, ct) =>
         {
-            await ScopedExecutor.ExecuteAsync<WorkspaceBranchHandler>(svc =>
+            var errors = await ScopedExecutor.ExecuteAsync<WorkspaceBranchHandler, IReadOnlyDictionary<int, string>>(svc =>
                 svc.CreateBranchesAsync(
                     WorkspaceId,
                     newBranchName,
@@ -250,13 +249,14 @@ public sealed partial class WorkspaceRepositories
                     job.ToOperationProgress(),
                     syncState: false,
                     cancellationToken: ct));
+            SafeInvoke(() => ApplyRepositoryErrors(errors));
         }, new PageJobOptions
         {
             RefreshOnCancel = true,
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error creating branches for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => errorMessage = "Create branches failed. The GrayMoon Agent may be offline. Start the Agent and try again.");
+                SafeInvoke(() => SetPageError("Create branches failed. The GrayMoon Agent may be offline. Start the Agent and try again."));
             }
         });
 
@@ -275,7 +275,6 @@ public sealed partial class WorkspaceRepositories
             return Task.CompletedTask;
 
         CloseSwitchBranchModal();
-        errorMessage = null;
 
         StartPageJob("Creating branch...", async (job, ct) =>
         {
@@ -289,7 +288,7 @@ public sealed partial class WorkspaceRepositories
             else
             {
                 if (err != null)
-                    SafeInvoke(() => errorMessage = err);
+                    SafeInvoke(() => SetRepositoryError(repositoryId, err));
 
                 await InvokeAsync(async () =>
                 {
@@ -316,8 +315,6 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || IsJobRunning)
             return Task.CompletedTask;
 
-        errorMessage = null;
-
         StartPageJob(isTag ? "Checking out tag..." : "Checking out branch...", async (job, ct) =>
         {
             var (success, errMsg) = await ScopedExecutor.ExecuteAsync<WorkspaceBranchHandler, (bool Success, string? ErrorMessage)>(
@@ -326,7 +323,7 @@ public sealed partial class WorkspaceRepositories
             SafeInvoke(() =>
             {
                 if (success)
-                    repositoryErrors.Remove(repositoryId);
+                    ClearRepositoryError(repositoryId);
                 else
                     SetRepositoryError(repositoryId, errMsg ?? (isTag ? "Failed to checkout tag." : "Failed to checkout branch."));
             });

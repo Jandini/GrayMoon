@@ -10,14 +10,12 @@ public sealed partial class WorkspaceRepositories
     {
         if (workspace == null || !HasRepositories || IsJobRunning) return Task.CompletedTask;
         var skipDependencyLevelPersistence = !string.IsNullOrEmpty(errorMessage);
-        errorMessage = null;
         return RunSyncJobAsync(null, "Synchronizing...", skipDependencyLevelPersistence);
     }
 
     private Task SyncLevelAsync(List<int> repositoryIds)
     {
         if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || IsJobRunning) return Task.CompletedTask;
-        errorMessage = null;
         var label = $"Synchronizing {repositoryIds.Count} {(repositoryIds.Count == 1 ? "repository" : "repositories")}...";
         return RunSyncJobAsync(repositoryIds, label, skipDependencyLevelPersistence: true);
     }
@@ -25,7 +23,6 @@ public sealed partial class WorkspaceRepositories
     private Task SyncSingleRepoAsync(int repositoryId)
     {
         if (workspace == null || !HasRepositories || IsJobRunning) return Task.CompletedTask;
-        errorMessage = null;
         return RunSyncJobAsync(new[] { repositoryId }, "Synchronizing repository...", skipDependencyLevelPersistence: true);
     }
 
@@ -49,24 +46,24 @@ public sealed partial class WorkspaceRepositories
         if (workspace == null || IsJobRunning) return;
         var repoIds = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToList();
         if (repoIds.Count == 0) return;
-        errorMessage = null;
         var label = $"Fetching {repoIds.Count} {(repoIds.Count == 1 ? "repository" : "repositories")}...";
         StartPageJob(label, async (job, ct) =>
         {
-            await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations>(
+            var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(
                 svc => svc.QuickFetchAsync(
                     WorkspaceId,
                     repoIds,
                     job.ToOperationProgress(),
                     ct),
                 ct);
+            SafeInvoke(() => ApplyFetchResult(result, repoIds));
         }, new PageJobOptions
         {
             CancelToast = "Fetch cancelled.",
             OnError = ex =>
             {
                 Logger.LogError(ex, "Fetch failed for a dependency level in workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => errorMessage = "Fetch failed. Check the logs for details.");
+                SafeInvoke(() => SetPageError("Fetch failed. Check the logs for details."));
             }
         });
     }
@@ -74,12 +71,11 @@ public sealed partial class WorkspaceRepositories
     private Task QuickFetchAsync()
     {
         if (workspace == null || !HasRepositories || IsJobRunning) return Task.CompletedTask;
-        errorMessage = null;
         JobService.StartJob(PageJobKey, "Fetching commits...", async (job, ct) =>
         {
             try
             {
-                await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations>(
+                var result = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, OperationResult>(
                     svc => svc.QuickFetchAsync(
                         WorkspaceId,
                         repositoryIds: null,
@@ -92,6 +88,7 @@ public sealed partial class WorkspaceRepositories
                     if (_disposed) return;
                     await ReloadWorkspaceDataFromFreshScopeAsync();
                     ApplySyncStateFromLoadedItems();
+                    ApplyFetchResult(result, _linkByRepoId.Keys);
                     StateHasChanged();
                 });
             }
@@ -103,11 +100,33 @@ public sealed partial class WorkspaceRepositories
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Quick Fetch failed for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => errorMessage = "Fetch failed. Check the logs for details.");
+                SafeInvoke(() => SetPageError("Fetch failed. Check the logs for details."));
                 throw;
             }
         });
         return Task.CompletedTask;
+    }
+
+    private void ApplyFetchResult(OperationResult result, IEnumerable<int>? attemptedRepoIds)
+    {
+        if (result.RepoErrors is { Count: > 0 })
+            ApplyRepositoryErrors(result.RepoErrors);
+
+        if (attemptedRepoIds != null)
+        {
+            foreach (var id in attemptedRepoIds)
+            {
+                if (result.RepoErrors is null || !result.RepoErrors.ContainsKey(id))
+                    ClearRepositoryError(id);
+            }
+        }
+
+        if (result.RepoErrors is not { Count: > 0 }
+            && !result.Success
+            && !string.IsNullOrWhiteSpace(result.Error))
+        {
+            SetPageError(result.Error);
+        }
     }
 
     private Task RunSyncJobAsync(IReadOnlyList<int>? repositoryIds, string jobLabel, bool skipDependencyLevelPersistence)
@@ -144,9 +163,9 @@ public sealed partial class WorkspaceRepositories
                     foreach (var (repoId, info) in repoGitInfos)
                     {
                         if (!string.IsNullOrWhiteSpace(info.ErrorMessage))
-                            repositoryErrors[repoId] = info.ErrorMessage;
+                            SetRepositoryError(repoId, info.ErrorMessage);
                         else
-                            repositoryErrors.Remove(repoId);
+                            ClearRepositoryError(repoId);
                     }
                     StateHasChanged();
                 });
@@ -159,19 +178,19 @@ public sealed partial class WorkspaceRepositories
             catch (AgentNotConnectedException ex)
             {
                 Logger.LogError(ex, "Sync failed for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => errorMessage = $"Sync failed. {ex.Message}");
+                SafeInvoke(() => SetPageError($"Sync failed. {ex.Message}"));
                 throw;
             }
             catch (ConnectorHealthException ex)
             {
                 Logger.LogError(ex, "Sync failed for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => errorMessage = $"Sync failed. {ex.Message}");
+                SafeInvoke(() => SetPageError($"Sync failed. {ex.Message}"));
                 throw;
             }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Sync failed for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => errorMessage = "Sync failed. An unexpected error occurred. Check the logs for details.");
+                SafeInvoke(() => SetPageError("Sync failed. An unexpected error occurred. Check the logs for details."));
                 throw;
             }
         });

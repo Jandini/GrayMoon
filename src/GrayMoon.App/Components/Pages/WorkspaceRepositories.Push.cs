@@ -62,7 +62,7 @@ public sealed partial class WorkspaceRepositories
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error getting push plan for workspace {WorkspaceId}", WorkspaceId);
-            errorMessage = "Could not determine push plan. The GrayMoon Agent may be offline.";
+            SetPageError("Could not determine push plan. The GrayMoon Agent may be offline.");
         }
     }
 
@@ -225,7 +225,7 @@ public sealed partial class WorkspaceRepositories
         }
         catch (Exception ex)
         {
-            SafeInvoke(() => ToastService.ShowError(ex.Message));
+            SafeInvoke(() => SetPageError(ex.Message));
             throw;
         }
         finally
@@ -248,7 +248,7 @@ public sealed partial class WorkspaceRepositories
         }
 
         if (!result.Success && !string.IsNullOrWhiteSpace(result.Error))
-            SafeInvoke(() => ToastService.ShowError(result.Error));
+            SafeInvoke(() => SetPageError(result.Error));
     }
 
     /// <summary>Push with upstream for a single repository (e.g. when user clicks the not-upstreamed badge). Uses the page overlay.</summary>

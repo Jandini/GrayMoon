@@ -24,7 +24,7 @@ public sealed class NewFeatureOrchestrator(
         logger.LogInformation("NewFeatureOrchestrator starting for workspace {WorkspaceId}: branch={Branch}, updateDeps={UpdateDeps}", workspaceId, newBranchName, updateDependencies);
 
         progress.Report("Creating branches...");
-        await branchHandler.CreateBranchesAsync(
+        var branchErrors = await branchHandler.CreateBranchesAsync(
             workspaceId,
             newBranchName,
             baseBranch,
@@ -32,6 +32,8 @@ public sealed class NewFeatureOrchestrator(
             progress,
             syncState: true,
             cancellationToken);
+        foreach (var (repoId, msg) in branchErrors)
+            setRepositoryError(repoId, msg);
 
         IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
         if (updateDependencies)
