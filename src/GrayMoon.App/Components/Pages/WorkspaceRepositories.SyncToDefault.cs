@@ -282,8 +282,6 @@ public sealed partial class WorkspaceRepositories
 
         var checkResults = _syncToDefaultCheckResults;
         _syncToDefaultCheckResults = null;
-        errorMessage = null;
-
         StartPageJob("Synchronizing to default branch...", async (job, ct) =>
         {
             var total = repositoryIds.Count;
@@ -360,7 +358,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error syncing to default branch for level");
-                SafeInvoke(() => errorMessage = "An error occurred while syncing to default branch. The GrayMoon Agent may be offline.");
+                SafeInvoke(() => SetPageError("An error occurred while syncing to default branch. The GrayMoon Agent may be offline."));
             }
         });
 
@@ -494,8 +492,6 @@ public sealed partial class WorkspaceRepositories
         }
 
         var total = repoItems.Count;
-        errorMessage = null;
-
         StartPageJob("Synchronizing to default branch...", async (job, ct) =>
         {
             var maxParallel = Math.Max(1, WorkspaceOptions?.Value?.MaxParallelOperations ?? 16);
@@ -591,7 +587,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error syncing all repositories to default branch");
-                SafeInvoke(() => errorMessage = "An error occurred while syncing to default branch. The GrayMoon Agent may be offline.");
+                SafeInvoke(() => SetPageError("An error occurred while syncing to default branch. The GrayMoon Agent may be offline."));
             }
         });
 

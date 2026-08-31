@@ -20,7 +20,7 @@ public sealed partial class WorkspaceRepositories
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error loading workspace {WorkspaceId}", WorkspaceId);
-            errorMessage = "Failed to load workspace. Please try again later.";
+            SetPageError("Failed to load workspace. Please try again later.");
             ClearGridState();
         }
         finally
@@ -33,7 +33,7 @@ public sealed partial class WorkspaceRepositories
         workspace = await WorkspacePageService.WorkspaceRepository.GetHeaderAsync(WorkspaceId);
         if (workspace == null)
         {
-            errorMessage = "Workspace not found.";
+            SetPageError("Workspace not found.");
         }
     }
     private async Task LoadHeaderStateAsync(CancellationToken cancellationToken = default)
@@ -42,13 +42,8 @@ public sealed partial class WorkspaceRepositories
     }
     private async Task ResetAndLoadFromTopAsync(bool restoreScroll = true)
     {
-        if (workspace == null && errorMessage == null)
+        if (workspace == null)
         {
-            return;
-        }
-        if (errorMessage != null)
-        {
-            isInitialLoading = false;
             return;
         }
 
@@ -103,7 +98,7 @@ public sealed partial class WorkspaceRepositories
                 if (generation == _queryLoader.Generation && !_disposed)
                 {
                     Logger.LogError(ex, "Error loading repositories for workspace {WorkspaceId}", WorkspaceId);
-                    errorMessage = "Failed to load workspace. Please try again later.";
+                    SetPageError("Failed to load workspace. Please try again later.");
                     ClearGridState();
                 }
             }
@@ -376,7 +371,7 @@ public sealed partial class WorkspaceRepositories
             if (_disposed) return;
             if (w == null)
             {
-                errorMessage = "Workspace not found.";
+                SetPageError("Workspace not found.");
                 ClearGridState();
                 return;
             }
@@ -409,7 +404,7 @@ public sealed partial class WorkspaceRepositories
                     repo => repo.GetHeaderAsync(WorkspaceId));
                 if (w == null)
                 {
-                    errorMessage = "Workspace not found.";
+                    SetPageError("Workspace not found.");
                     ClearGridState();
                     await InvokeAsync(StateHasChanged);
                     return;

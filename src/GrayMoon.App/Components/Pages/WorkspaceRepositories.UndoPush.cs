@@ -41,7 +41,6 @@ public sealed partial class WorkspaceRepositories
             return Task.CompletedTask;
 
         CloseUndoPushModal();
-        errorMessage = null;
 
         JobService.StartJob(PageJobKey, "Reverting outgoing commits...", async (job, ct) =>
         {
@@ -56,7 +55,7 @@ public sealed partial class WorkspaceRepositories
                         && !result.Success
                         && !string.IsNullOrWhiteSpace(result.Error))
                     {
-                        errorMessage = result.Error;
+                        SetPageError(result.Error);
                     }
                 });
 

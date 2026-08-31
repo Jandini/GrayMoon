@@ -788,7 +788,7 @@ public class WorkspaceGitService(
     /// Significantly faster than a full Sync. Pass <paramref name="repositoryIds"/> to restrict the fetch to
     /// a specific subset (e.g. one dependency level); null fetches every repository in the workspace.
     /// </summary>
-    public async Task QuickFetchAsync(
+    public async Task<IReadOnlyDictionary<int, string>> QuickFetchAsync(
         int workspaceId,
         IReadOnlyCollection<int>? repositoryIds = null,
         Action<int, int>? onProgress = null,
@@ -807,7 +807,8 @@ public class WorkspaceGitService(
             .Where(l => l.Repository != null && (repositoryIds == null || repositoryIds.Contains(l.RepositoryId)))
             .ToList();
 
-        if (links.Count == 0) return;
+        if (links.Count == 0)
+            return new Dictionary<int, string>();
 
         _logger.LogInformation("Quick Fetch triggered. Workspace={WorkspaceName}, RepoCount={Count}", workspace.Name, links.Count);
 
@@ -831,12 +832,15 @@ public class WorkspaceGitService(
                     workspaceRoot
                 };
                 var response = await _agentBridge.SendCommandAsync("FetchCommits", args, cancellationToken);
-                var data = response.Success && response.Data != null
+                var data = response.Data != null
                     ? AgentResponseJson.DeserializeAgentResponse<AgentFetchCommitsResponse>(response.Data)
                     : null;
+                string? error = null;
+                if (!response.Success || data is { Success: false, ErrorMessage: not null })
+                    error = data?.ErrorMessage ?? response.Error ?? "Fetch failed.";
                 var count = Interlocked.Increment(ref completedCount);
                 onProgress?.Invoke(count, totalCount);
-                return (link.WorkspaceRepositoryId, repo.RepositoryId, data);
+                return (link.WorkspaceRepositoryId, repo.RepositoryId, data, error);
             }
             finally
             {
@@ -853,9 +857,9 @@ public class WorkspaceGitService(
             .Where(wr => wr.WorkspaceId == workspaceId && repoIds.Contains(wr.RepositoryId))
             .ToListAsync(cancellationToken);
 
-        foreach (var (_, repoId, data) in results)
+        foreach (var (_, repoId, data, error) in results)
         {
-            if (data == null) continue;
+            if (data == null || !string.IsNullOrWhiteSpace(error)) continue;
             var wr = wrLinks.FirstOrDefault(w => w.RepositoryId == repoId);
             if (wr == null) continue;
 
@@ -870,8 +874,9 @@ public class WorkspaceGitService(
 
         // Update RepositoryBranch tag rows and HasNewerTag. Pass localBranches/remoteBranches as null so
         // existing branch rows are not touched - only tag rows are refreshed.
-        foreach (var (wrId, _, data) in results)
+        foreach (var (wrId, _, data, error) in results)
         {
+            if (!string.IsNullOrWhiteSpace(error)) continue;
             if (data?.Tags == null && string.IsNullOrWhiteSpace(data?.CurrentTag)) continue;
             await PersistBranchesAsync(wrId, localBranches: null, remoteBranches: null, defaultBranchName: null,
                 tags: data?.Tags, currentTag: data?.CurrentTag, cancellationToken);
@@ -881,6 +886,10 @@ public class WorkspaceGitService(
             await _hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
         _logger.LogDebug("Quick Fetch completed for workspace {WorkspaceName}", workspace.Name);
+
+        return results
+            .Where(r => !string.IsNullOrWhiteSpace(r.error))
+            .ToDictionary(r => r.RepositoryId, r => r.error!);
     }
 
     /// <summary>Refreshes version for a single repo and persists. Returns (success, errorMessage) for caller to report and optionally stop workflow.</summary>
@@ -1493,7 +1502,7 @@ public class WorkspaceGitService(
         => _branchWriter.PersistAsync(workspaceRepositoryId, localBranches, remoteBranches, defaultBranchName, tags, currentTag, cancellationToken);
 
     /// <summary>Creates a new branch in all workspace repos (in parallel), then checks it out. baseBranch is "__default__" to use each repo's default, or a branch name. When <paramref name="repositoryIds"/> is set, only those repos are included. When <paramref name="syncState"/> is true, hooks are suppressed and the agent returns full state inline so the app can persist it without waiting for async hook syncs.</summary>
-    public async Task CreateBranchesAsync(
+    public async Task<IReadOnlyDictionary<int, string>> CreateBranchesAsync(
         int workspaceId,
         string newBranchName,
         string baseBranch,
@@ -1518,8 +1527,9 @@ public class WorkspaceGitService(
             links = links.Where(wr => repositoryIds.Contains(wr.RepositoryId)).ToList();
 
         if (links.Count == 0)
-            return;
+            return new Dictionary<int, string>();
 
+        var errors = new ConcurrentDictionary<int, string>();
         var useDefaultBase = string.Equals(baseBranch, "__default__", StringComparison.OrdinalIgnoreCase);
         var completedCount = 0;
         var totalCount = links.Count;
@@ -1595,6 +1605,11 @@ public class WorkspaceGitService(
                             wr.DefaultBranchAheadCommits = createResponse.DefaultBranchAhead;
                     }
                 }
+                else
+                {
+                    var err = createResponse?.ErrorMessage ?? response.Error ?? "Failed to create branch.";
+                    errors[wr.RepositoryId] = err;
+                }
             }
             finally
             {
@@ -1614,6 +1629,7 @@ public class WorkspaceGitService(
         }
 
         _hubContext?.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
+        return errors;
     }
 
     /// <summary>Ensures a local branch is present in RepositoryBranches for the given workspace repository. Adds it if missing; does not remove other branches.</summary>

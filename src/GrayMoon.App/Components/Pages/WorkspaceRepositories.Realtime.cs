@@ -14,7 +14,7 @@ public sealed partial class WorkspaceRepositories
         {
             try { await JSRuntime.InvokeVoidAsync("focusElement", "workspace-repos-search"); } catch { /* ignore */ }
         }
-        if (firstRender && workspace != null && errorMessage == null && _hubConnection == null)
+        if (firstRender && workspace != null && _hubConnection == null)
         {
             _hubConnection = new HubConnectionBuilder()
                 .WithUrl(NavigationManager.ToAbsoluteUri("/hubs/workspace-sync"))
@@ -60,7 +60,7 @@ public sealed partial class WorkspaceRepositories
             _hubConnection.On<int, int, string>("RepositoryError", (workspaceId, repositoryId, msg) =>
             {
                 if (workspaceId != WorkspaceId || string.IsNullOrWhiteSpace(msg)) return;
-                repositoryErrors[repositoryId] = msg;
+                SetRepositoryError(repositoryId, msg);
                 _ = InvokeAsync(StateHasChanged);
             });
             await _hubConnection.StartAsync();

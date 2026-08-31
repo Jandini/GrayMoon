@@ -898,6 +898,7 @@
     text-overflow: unset;
 }
 
+.page-error-callout,
 ::deep .repo-error-line {
     font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
     font-size: 0.8rem;
@@ -910,6 +911,10 @@
     color: #d4d4d4;
     background: rgba(248, 113, 113, 0.22);
     box-shadow: inset 3px 0 0 #f87171;
+}
+
+.page-error-callout {
+    margin-top: 0.5rem;
 }
 
 /* Combined metrics column (divergence, PR, deps, commits, status) */

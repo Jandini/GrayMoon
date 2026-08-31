@@ -77,7 +77,6 @@ public sealed class WorkspaceCommitSyncHandler(
                 var err = response.Error ?? "Commit sync failed.";
                 logger.LogWarning("CommitSync failed for repository {RepositoryId}: {Error}", repositoryId, err);
                 setRepositoryError(repositoryId, err);
-                setPageError(err);
                 await SetSyncStatusErrorAsync(dbContext, workspaceId, repositoryId, cancellationToken);
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
                 return;
@@ -105,7 +104,6 @@ public sealed class WorkspaceCommitSyncHandler(
         {
             logger.LogError(ex, "Error executing CommitSync for repository {RepositoryId}", repositoryId);
             setRepositoryError(repositoryId, ex.Message);
-            setPageError(ex.Message);
         }
     }
 

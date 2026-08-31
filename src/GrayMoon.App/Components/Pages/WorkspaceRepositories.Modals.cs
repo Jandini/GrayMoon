@@ -102,7 +102,8 @@ public sealed partial class WorkspaceRepositories
 
     private void ShowOperationError(string title, string message)
     {
-        _operationErrorModal = _operationErrorModal with { IsVisible = true, Title = title, Message = message };
+        var text = string.IsNullOrWhiteSpace(title) ? message : $"{title}: {message}";
+        SetPageError(text);
         _ = InvokeAsync(StateHasChanged);
     }
 

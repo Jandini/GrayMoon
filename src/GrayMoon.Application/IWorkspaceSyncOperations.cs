@@ -39,7 +39,7 @@ public interface IWorkspaceSyncOperations
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken);
 
-    Task QuickFetchAsync(
+    Task<OperationResult> QuickFetchAsync(
         int workspaceId,
         IReadOnlyCollection<int>? repositoryIds,
         IProgress<OperationProgress>? progress,
