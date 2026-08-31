@@ -355,22 +355,23 @@
 }
 
 ::deep .merge-pr-btn-close {
-    background-color: #da3633;
+    background-color: #238636;
     border-color: rgba(240, 246, 252, 0.1);
-    color: #f0f6fc;
-    font-weight: 400;
+    color: #fff;
+    /* Match merge-pr-btn-github: Close is the recommended action when the PR changed 0 files. */
+    font-weight: 600;
 }
 
 ::deep .merge-pr-btn-close:hover:not(:disabled),
 ::deep .merge-pr-btn-close:focus-visible:not(:disabled) {
-    background-color: #f85149;
+    background-color: #2ea043;
     border-color: rgba(240, 246, 252, 0.1);
     color: #fff;
 }
 
 ::deep .merge-pr-btn-close:active:not(:disabled) {
-    background-color: #da3633;
-    color: #f0f6fc;
+    background-color: #238636;
+    color: #fff;
 }
 
 ::deep .merge-pr-btn-close:disabled {
@@ -383,6 +384,7 @@
     background-color: #30363d;
     border-color: rgba(240, 246, 252, 0.1);
     color: #c9d1d9;
+    font-weight: 400;
 }
 
 ::deep .merge-pr-btn-close--muted:hover:not(:disabled),

@@ -7,5 +7,5 @@ namespace GrayMoon.App.Services.Ui;
 /// </summary>
 public sealed class MergePullRequestSyncToDefaultPreferenceService
 {
-    public bool SyncToDefault { get; set; } = true;
+    public bool SyncToDefault { get; set; } = false;
 }

@@ -281,7 +281,7 @@
                     </div>
                     <div class="merge-pr-footer-actions">
                         <button type="button"
-                                class="btn merge-pr-btn-close @(ShowClosePrAsDanger ? null : "merge-pr-btn-close--muted")"
+                                class="btn merge-pr-btn-close @(ShowClosePrAsRecommended ? null : "merge-pr-btn-close--muted")"
                                 disabled="@(IsLoading || IsMerging)"
                                 @onclick="HandleCloseClick">
                             Close
@@ -571,8 +571,8 @@
         _showMethodDropdown = false;
     }
 
-    /// <summary>True when GitHub reports this PR changed no files - Close renders red as the better option than an empty merge.</summary>
-    private bool ShowClosePrAsDanger => Details?.ChangedFiles == 0;
+    /// <summary>True when GitHub reports this PR changed no files - Close renders green as the better option than an empty merge.</summary>
+    private bool ShowClosePrAsRecommended => Details?.ChangedFiles == 0;
 
     private async Task HandleMergeClick()
     {
