@@ -19,9 +19,10 @@ public class DebouncedQueryLoaderTests
     {
         using var loader = new DebouncedQueryLoader();
         var runs = 0;
-        var first = loader.DebounceSearchAsync(async () => { runs++; await Task.CompletedTask; }, 200);
-        await Task.Delay(50);
-        var second = loader.DebounceSearchAsync(async () => { runs++; await Task.CompletedTask; }, 200);
+        // Second call must start before the first delay can fire; a wall-clock wait here is what
+        // flaked on CI when the runner paused longer than the first delay.
+        var first = loader.DebounceSearchAsync(async () => { runs++; await Task.CompletedTask; }, delayMs: 30_000);
+        var second = loader.DebounceSearchAsync(async () => { runs++; await Task.CompletedTask; }, delayMs: 1);
         await Task.WhenAll(first, second);
         Assert.Equal(1, runs);
     }
