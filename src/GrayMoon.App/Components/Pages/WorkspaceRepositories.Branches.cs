@@ -128,6 +128,39 @@ public sealed partial class WorkspaceRepositories
         };
     }
 
+    private Task FetchSwitchBranchModalAsync()
+    {
+        if (workspace == null || IsJobRunning)
+            return Task.CompletedTask;
+
+        var repositoryId = _switchBranchModal.RepositoryId;
+        if (repositoryId <= 0)
+            return Task.CompletedTask;
+
+        StartPageJob("Fetching branches...", async (job, ct) =>
+        {
+            var outcome = await ScopedExecutor.ExecuteAsync<IWorkspaceBranchOperations, BranchHttpOutcome>(
+                svc => svc.RefreshBranchesAsync(WorkspaceId, repositoryId, ct));
+
+            if (!outcome.IsSuccessStatus)
+            {
+                SafeInvoke(() => SetRepositoryError(
+                    repositoryId,
+                    outcome.ErrorText ?? "Failed to fetch branches."));
+            }
+        }, new PageJobOptions
+        {
+            CancelToast = "Fetch branches cancelled.",
+            OnError = ex =>
+            {
+                Logger.LogError(ex, "Error fetching branches for repository {RepositoryId}", repositoryId);
+                SafeInvoke(() => SetRepositoryError(repositoryId, "Failed to fetch branches."));
+            }
+        });
+
+        return Task.CompletedTask;
+    }
+
     private async Task FetchCommonBranchesAcrossWorkspaceAsync()
     {
         if (workspace == null || IsJobRunning)

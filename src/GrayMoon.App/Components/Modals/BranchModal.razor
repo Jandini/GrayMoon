@@ -3,7 +3,12 @@
 
 @if (IsVisible)
 {
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+    @*
+        z-index drops below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while
+        IsBusy so Fetch (and other page jobs started from this dialog) cover the still-mounted dialog
+        instead of the dialog staying visually on top.
+    *@
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @(IsBusy ? 50 : 1055);"
          @onkeydown="HandleKeyDown"
          @ref="modalElement">
         <div class="modal-dialog branch-modal-dialog">
@@ -223,6 +228,8 @@
     /// <summary>Local branch name when every repo in the workspace reports the same current branch; used for Current badge and disabling redundant checkout.</summary>
     [Parameter] public string? WorkspaceUnifiedCurrentBranch { get; set; }
     [Parameter] public bool HasTaggedRepos { get; set; }
+    /// <summary>True while a page job (e.g. Fetch) is running. Drops the dialog below the page LoadingOverlay.</summary>
+    [Parameter] public bool IsBusy { get; set; }
     [Parameter] public string? InitialTab { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback<(string NewBranchName, string BaseBranch, bool SkipReposOnTags)> OnCreateBranch { get; set; }

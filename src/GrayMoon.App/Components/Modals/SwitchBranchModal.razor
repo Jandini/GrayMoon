@@ -7,7 +7,11 @@
 
 @if (IsVisible)
 {
-    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+    @*
+        z-index drops below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while
+        a page job is running so the overlay covers this still-mounted dialog.
+    *@
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @(IsBusy ? 50 : 1055);"
          @onkeydown="HandleKeyDown"
          @ref="modalElement">
         <div class="modal-dialog modal-lg">
@@ -384,8 +388,8 @@
                         {
                             <button type="button" 
                                     class="btn btn-outline-secondary"
-                                    @onclick="RefreshBranchesAsync"
-                                    disabled="@isRefreshing">
+                                    @onclick="OnFetchClicked"
+                                    disabled="@(isRefreshing || IsBusy)">
                                 @if (isRefreshing)
                                 {
                                     <span class="spinner-border spinner-border-sm me-1"></span>
@@ -460,12 +464,15 @@
 
 @code {
     [Parameter] public bool IsVisible { get; set; }
+    /// <summary>True while a page job is running. Drops the dialog below the page LoadingOverlay.</summary>
+    [Parameter] public bool IsBusy { get; set; }
     [Parameter] public int WorkspaceId { get; set; }
     [Parameter] public int RepositoryId { get; set; }
     [Parameter] public string? RepositoryName { get; set; }
     [Parameter] public string? CurrentBranch { get; set; }
     [Parameter] public string? RepositoryUrl { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback OnFetchBranches { get; set; }
     [Parameter] public EventCallback OnBranchChanged { get; set; }
     [Parameter] public EventCallback<(int RepositoryId, string BranchName, bool IsTag)> OnCheckoutBranch { get; set; }
     [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string CurrentBranchName, string DefaultBranch)> OnSyncToDefault { get; set; }
@@ -528,9 +535,13 @@
     private bool _scrollToDeleteConfirm;
     /// <summary>True after local delete failed with git "not fully merged"; show second-step force delete UI.</summary>
     private bool _awaitingForceDeleteConfirmation;
+    private bool _wasBusy;
 
     protected override async Task OnParametersSetAsync()
     {
+        var busyJustEnded = _wasBusy && !IsBusy;
+        _wasBusy = IsBusy;
+
         if (IsVisible)
         {
             if (!_prevVisible)
@@ -558,12 +569,39 @@
             else
             {
                 currentBranchLocal = CurrentBranch;
-                // Do not reload from persistence when modal was already open (e.g. after Fetch) to avoid flicker
+                // Reload lists after a page job (Fetch) finishes so the overlay path can persist then re-read.
+                if (busyJustEnded)
+                    await ReloadListsAfterPageJobAsync();
             }
         }
         else
         {
             _prevVisible = false;
+        }
+    }
+
+    private async Task OnFetchClicked()
+    {
+        if (IsBusy || isRefreshing)
+            return;
+        await OnFetchBranches.InvokeAsync();
+    }
+
+    private async Task ReloadListsAfterPageJobAsync()
+    {
+        try
+        {
+            var outcome = await BranchOperations.GetBranchesAsync(WorkspaceId, RepositoryId);
+            if (outcome.IsSuccessStatus)
+            {
+                ApplyBranchLists(outcome.Body);
+                selectedBranch = !string.IsNullOrWhiteSpace(currentTag) && activeTab == "tags" ? currentTag : currentBranchLocal;
+                showSyncToDefaultButton = remoteBranches.Count > 0 && ShouldShowSyncToDefaultButton();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not reload branches after fetch");
         }
     }
 
