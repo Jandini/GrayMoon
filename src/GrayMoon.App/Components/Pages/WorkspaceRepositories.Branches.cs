@@ -60,13 +60,14 @@ public sealed partial class WorkspaceRepositories
         StateHasChanged();
     }
 
-    /// <summary>When every workspace repo has the same non-empty <see cref="WorkspaceRepositoryLink.BranchName"/>, returns that name; otherwise null.</summary>
+    /// <summary>When every non-tag workspace repo has the same non-empty <see cref="WorkspaceRepositoryLink.BranchName"/>, returns that name; otherwise null.</summary>
     private static string? GetUnifiedWorkspaceCurrentBranch(IReadOnlyList<WorkspaceRepositoryLink> links)
     {
-        if (links.Count == 0)
+        var branchLinks = links.Where(l => !l.IsOnTag).ToList();
+        if (branchLinks.Count == 0)
             return null;
         string? first = null;
-        foreach (var link in links)
+        foreach (var link in branchLinks)
         {
             var name = link.BranchName?.Trim();
             if (string.IsNullOrWhiteSpace(name))
