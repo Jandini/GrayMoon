@@ -34,7 +34,7 @@
                             <span class="merge-pr-header-link fw-normal fs-6 ms-1">#@PrNumber</span>
                         }
                     </h5>
-                    <button type="button" class="btn-close flex-shrink-0" aria-label="Close" @onclick="OnCancel"></button>
+                    <button type="button" class="btn-close flex-shrink-0" aria-label="Dismiss" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body merge-pr-modal-body">
                     @if (Details == null)
@@ -271,7 +271,7 @@
                         }
                     }
                 </div>
-                @* Always visible (even mid-load) so the dialog's footprint doesn't jump once the button becomes enabled - it just reads "Loading…" until the merge is actually possible to evaluate. *@
+                @* Always visible (even mid-load) so the dialog's footprint doesn't jump once the button becomes enabled. *@
                 <div class="modal-footer merge-pr-modal-footer">
                     <div class="form-check mb-0 merge-pr-sync-default-check">
                         <input class="form-check-input" type="checkbox" id="merge-pr-sync-default"
@@ -280,53 +280,62 @@
                         <label class="form-check-label" for="merge-pr-sync-default">Sync to default branch</label>
                     </div>
                     <div class="merge-pr-footer-actions">
-                        <button type="button"
-                                class="btn merge-pr-btn-close @(ShowClosePrAsRecommended ? null : "merge-pr-btn-close--muted")"
-                                disabled="@(IsLoading || IsMerging)"
-                                @onclick="HandleCloseClick">
-                            Close
-                        </button>
-                        <div class="btn-group merge-pr-split-btn">
+                        <div class="btn-group merge-pr-split-btn @(IsPrimaryActionDisabled ? "merge-pr-split-btn--pending" : null)">
                             <button type="button"
-                                    class="btn merge-pr-btn-github @(ShowMergeWarningStyle ? "merge-pr-btn-github--warning" : null) merge-pr-split-btn__main"
-                                    disabled="@(IsLoading || IsLoadingReviewDetails || IsMerging || Details is not { CanMergeNow: true })"
-                                    @onclick="HandleMergeClick">
-                                @if (IsLoading || IsLoadingReviewDetails)
+                                    class="btn merge-pr-split-btn__main @PrimaryActionButtonClass"
+                                    disabled="@IsPrimaryActionDisabled"
+                                    @onclick="HandlePrimaryActionClick">
+                                @if (ShowPrimaryActionSpinner)
                                 {
                                     <span class="spinner-border spinner-border-sm me-2"></span>
                                 }
-                                @(Details == null ? "Unavailable" : (IsLoading || IsLoadingReviewDetails) ? "Loading…" : _selectedMethod.ToDisplayLabel())
+                                @PrimaryActionLabel
                             </button>
-                            @if (Details?.AllowedMergeMethods.Count > 1)
+                            <button type="button"
+                                    class="btn dropdown-toggle dropdown-toggle-split merge-pr-split-btn__toggle @PrimaryActionButtonClass"
+                                    disabled="@(IsLoading || IsMerging)"
+                                    @onclick="ToggleMethodDropdown">
+                                <span class="visually-hidden">Choose merge method or close pull request</span>
+                            </button>
+                            @if (_showMethodDropdown)
                             {
-                                <button type="button"
-                                        class="btn merge-pr-btn-github @(ShowMergeWarningStyle ? "merge-pr-btn-github--warning" : null) dropdown-toggle dropdown-toggle-split merge-pr-split-btn__toggle"
-                                        disabled="@(IsLoading || IsLoadingReviewDetails || IsMerging || Details is not { CanMergeNow: true })"
-                                        @onclick="ToggleMethodDropdown">
-                                    <span class="visually-hidden">Choose merge method</span>
-                                </button>
-                                @if (_showMethodDropdown)
-                                {
-                                    <div class="merge-pr-method-menu">
-                                        @foreach (var method in Details.AllowedMergeMethods)
-                                        {
-                                            <button type="button"
-                                                    class="dropdown-item merge-pr-method-item @(_selectedMethod == method ? "merge-pr-method-item--selected" : null)"
-                                                    @onclick="() => SelectMethod(method)">
-                                                <span class="merge-pr-method-item__check" aria-hidden="true">
-                                                    @if (_selectedMethod == method)
-                                                    {
-                                                        <i class="bi bi-check-lg"></i>
-                                                    }
-                                                </span>
-                                                <span class="merge-pr-method-item__text">
-                                                    <span class="merge-pr-method-item__title">@method.ToDisplayLabel()</span>
-                                                    <span class="merge-pr-method-item__subtitle">@method.ToDescription()</span>
-                                                </span>
-                                            </button>
-                                        }
-                                    </div>
-                                }
+                                <div class="merge-pr-method-menu">
+                                    @foreach (var method in AllowedMergeMethods)
+                                    {
+                                        <button type="button"
+                                                class="dropdown-item merge-pr-method-item @(!_closePrSelected && _selectedMethod == method ? "merge-pr-method-item--selected" : null)"
+                                                @onclick="() => SelectMethod(method)">
+                                            <span class="merge-pr-method-item__check" aria-hidden="true">
+                                                @if (!_closePrSelected && _selectedMethod == method)
+                                                {
+                                                    <i class="bi bi-check-lg"></i>
+                                                }
+                                            </span>
+                                            <span class="merge-pr-method-item__text">
+                                                <span class="merge-pr-method-item__title">@method.ToDisplayLabel()</span>
+                                                <span class="merge-pr-method-item__subtitle">@method.ToDescription()</span>
+                                            </span>
+                                        </button>
+                                    }
+                                    @if (AllowedMergeMethods.Count > 0)
+                                    {
+                                        <div class="merge-pr-method-menu__separator" role="separator"></div>
+                                    }
+                                    <button type="button"
+                                            class="dropdown-item merge-pr-method-item merge-pr-method-item--close @(_closePrSelected ? "merge-pr-method-item--selected" : null)"
+                                            @onclick="SelectClosePullRequest">
+                                        <span class="merge-pr-method-item__check" aria-hidden="true">
+                                            @if (_closePrSelected)
+                                            {
+                                                <i class="bi bi-check-lg"></i>
+                                            }
+                                        </span>
+                                        <span class="merge-pr-method-item__text">
+                                            <span class="merge-pr-method-item__title">Close pull request</span>
+                                            <span class="merge-pr-method-item__subtitle">Close this pull request without merging.</span>
+                                        </span>
+                                    </button>
+                                </div>
                             }
                         </div>
                     </div>
@@ -350,7 +359,7 @@
     [Parameter] public string? ErrorMessage { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback<MergePullRequestChoice> OnMerge { get; set; }
-    /// <summary>Raised when the user clicks Close. The button is always shown; it is red only when the PR has 0 files changed.</summary>
+    /// <summary>Raised when the user chooses Close pull request from the merge-action dropdown (or the primary button when that action is selected). The parent still shows its own confirmation before closing the PR.</summary>
     [Parameter] public EventCallback OnClosePullRequest { get; set; }
     /// <summary>Workspace's Git Changes page URL, used to link the "N uncommitted changes" text in the local-state row. Null/empty hides the link.</summary>
     [Parameter] public string? ChangesUrl { get; set; }
@@ -367,6 +376,9 @@
 
     private MergeMethod _selectedMethod;
     private bool _showMethodDropdown;
+    private bool _closePrSelected;
+    private bool _closePrDefaultApplied;
+    private bool _userPickedAction;
     private bool _wasVisible;
     private bool _focusOnNextRender;
     private int? _lastDetailsNumber;
@@ -413,6 +425,9 @@
         {
             _wasVisible = false;
             _lastDetailsNumber = null;
+            _closePrSelected = false;
+            _closePrDefaultApplied = false;
+            _userPickedAction = false;
             ResetTitleEditState();
         }
 
@@ -425,6 +440,8 @@
             _selectedMethod = Details.DefaultMergeMethod ?? MergeMethod.Merge;
             _showMethodDropdown = false;
             _defaultMethodApplied = Details.AllowedMergeMethods.Count > 0;
+            _userPickedAction = false;
+            ApplyClosePrDefault(Details.ChangedFiles);
             ApplyIncomingTitle(Details.Title, force: true);
         }
         else
@@ -453,6 +470,9 @@
                 _selectedMethod = Details.DefaultMergeMethod ?? MergeMethod.Merge;
                 _defaultMethodApplied = true;
             }
+
+            if (!_closePrDefaultApplied)
+                ApplyClosePrDefault(Details.ChangedFiles);
         }
     }
 
@@ -568,11 +588,77 @@
     private void SelectMethod(MergeMethod method)
     {
         _selectedMethod = method;
+        _closePrSelected = false;
+        _userPickedAction = true;
         _showMethodDropdown = false;
     }
 
-    /// <summary>True when GitHub reports this PR changed no files - Close renders green as the better option than an empty merge.</summary>
+    private void SelectClosePullRequest()
+    {
+        _closePrSelected = true;
+        _userPickedAction = true;
+        _showMethodDropdown = false;
+    }
+
+    /// <summary>
+    /// When GitHub reports 0 changed files, Close pull request is the default primary action.
+    /// Skipped once the user has picked an action themselves so a late snapshot cannot undo that choice.
+    /// </summary>
+    private void ApplyClosePrDefault(int? changedFiles)
+    {
+        if (changedFiles is null)
+            return;
+
+        _closePrDefaultApplied = true;
+        if (!_userPickedAction)
+            _closePrSelected = changedFiles == 0;
+    }
+
+    /// <summary>True when GitHub reports this PR changed no files - Close pull request is the better default than an empty merge.</summary>
     private bool ShowClosePrAsRecommended => Details?.ChangedFiles == 0;
+
+    private IReadOnlyList<MergeMethod> AllowedMergeMethods => Details?.AllowedMergeMethods ?? Array.Empty<MergeMethod>();
+
+    private string PrimaryActionLabel
+    {
+        get
+        {
+            if (_closePrSelected)
+                return "Close pull request";
+            if (Details == null)
+                return "Unavailable";
+            if (IsLoading || IsLoadingReviewDetails)
+                return "Loading…";
+            return _selectedMethod.ToDisplayLabel();
+        }
+    }
+
+    private bool ShowPrimaryActionSpinner => !_closePrSelected && (IsLoading || IsLoadingReviewDetails);
+
+    private bool IsPrimaryActionDisabled => _closePrSelected
+        ? IsLoading || IsMerging
+        : IsLoading || IsLoadingReviewDetails || IsMerging || Details is not { CanMergeNow: true };
+
+    private string PrimaryActionButtonClass
+    {
+        get
+        {
+            if (_closePrSelected)
+                return ShowClosePrAsRecommended ? "merge-pr-btn-close" : "merge-pr-btn-close merge-pr-btn-close--muted";
+            return ShowMergeWarningStyle ? "merge-pr-btn-github merge-pr-btn-github--warning" : "merge-pr-btn-github";
+        }
+    }
+
+    private async Task HandlePrimaryActionClick()
+    {
+        if (_closePrSelected)
+        {
+            await HandleCloseClick();
+            return;
+        }
+
+        await HandleMergeClick();
+    }
 
     private async Task HandleMergeClick()
     {
@@ -583,6 +669,7 @@
 
     private async Task HandleCloseClick()
     {
+        _showMethodDropdown = false;
         if (OnClosePullRequest.HasDelegate)
             await OnClosePullRequest.InvokeAsync();
     }

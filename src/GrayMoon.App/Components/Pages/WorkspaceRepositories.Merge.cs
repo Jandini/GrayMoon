@@ -373,7 +373,7 @@ public sealed partial class WorkspaceRepositories
         ShowConfirm(
             $"Close pull request #{prNumber} without merging?",
             ExecuteClosePullRequestAsync,
-            "Close");
+            "Close pull request");
         return Task.CompletedTask;
     }
 

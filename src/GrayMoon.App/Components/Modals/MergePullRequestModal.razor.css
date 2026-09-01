@@ -354,6 +354,10 @@
     flex: 0 0 auto;
 }
 
+/*
+ * Close pull request as the split-button primary action. Green when the PR changed 0 files
+ * (recommended default); muted gray when the user selected it on a PR that has file changes.
+ */
 ::deep .merge-pr-btn-close {
     background-color: #238636;
     border-color: rgba(240, 246, 252, 0.1);
@@ -463,6 +467,20 @@
     border-left: 1px solid rgba(255, 255, 255, 0.3);
 }
 
+/*
+ * The caret stays enabled so Close pull request is reachable while merge is still loading or
+ * blocked. Without this, merge-pr-btn-github would paint that half green while the main action
+ * is still the disabled gray.
+ */
+::deep .merge-pr-split-btn--pending .btn.merge-pr-split-btn__toggle:not(:disabled),
+::deep .merge-pr-split-btn--pending .btn.merge-pr-split-btn__toggle:not(:disabled):hover,
+::deep .merge-pr-split-btn--pending .btn.merge-pr-split-btn__toggle:not(:disabled):focus-visible,
+::deep .merge-pr-split-btn--pending .btn.merge-pr-split-btn__toggle:not(:disabled):active {
+    background-color: #30363d;
+    border-color: rgba(240, 246, 252, 0.1);
+    color: rgba(255, 255, 255, 0.5);
+}
+
 ::deep .merge-pr-method-menu {
     /*
      * Use the app's own theme variables (--bg-card/--border-color/--text-primary), not bootstrap's
@@ -542,4 +560,19 @@
 ::deep .merge-pr-method-menu .dropdown-item:hover .merge-pr-method-item__title,
 ::deep .merge-pr-method-menu .dropdown-item:focus-visible .merge-pr-method-item__title {
     color: #fff;
+}
+
+::deep .merge-pr-method-menu__separator {
+    height: 1px;
+    margin: 0.25rem 0;
+    background-color: #2a2a2a;
+}
+
+::deep .merge-pr-method-item--close .merge-pr-method-item__title {
+    color: #f85149;
+}
+
+::deep .merge-pr-method-menu .dropdown-item.merge-pr-method-item--close:hover .merge-pr-method-item__title,
+::deep .merge-pr-method-menu .dropdown-item.merge-pr-method-item--close:focus-visible .merge-pr-method-item__title {
+    color: #ff7b72;
 }
