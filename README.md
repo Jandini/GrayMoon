@@ -64,3 +64,5 @@ Everything else - every page, every workflow, every real-world walkthrough - liv
 ## License
 
 GrayMoon is dual-licensed: free for personal, educational, and evaluation use under [LICENSE-NON-COMMERCIAL.txt](LICENSE-NON-COMMERCIAL.txt), with a commercial license available under [LICENSE-COMMERCIAL.txt](LICENSE-COMMERCIAL.txt) for business use. See [graymoon.io](https://graymoon.io/) for details.
+
+

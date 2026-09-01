@@ -5,9 +5,7 @@
 <div class="git-changes-tree">
     @if (!string.IsNullOrEmpty(OfflineNotice))
     {
-        <div class="git-changes-offline-notice">
-            @OfflineNotice
-        </div>
+        <div class="gm-callout gm-callout--warning" role="alert">@OfflineNotice</div>
     }
 
     @if (Rows.Count == 0)

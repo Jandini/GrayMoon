@@ -118,14 +118,8 @@
 }
 
 
-.git-changes-offline-notice {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.35rem 0.5rem 0.25rem;
-    color: var(--warning);
-    font-size: 0.78rem;
-    min-width: 0;
+.git-changes-tree > .gm-callout {
+    margin: 0.35rem 0.5rem 0.5rem;
 }
 
 .git-changes-empty {

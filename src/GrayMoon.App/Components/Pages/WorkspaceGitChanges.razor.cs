@@ -172,15 +172,27 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         StartScanJob("Refreshing repositories...");
     }
 
-    private string MostRecentPersistedLabel()
+    private string? OfflineNotice
     {
-        var latest = _view?.Repositories.Select(r => r.PersistedAt).Where(t => t.HasValue).Select(t => t!.Value).OrderDescending().FirstOrDefault();
-        return latest is { } value ? $" from {value.ToLocalTime():t}" : string.Empty;
-    }
+        get
+        {
+            if (AgentBridge.IsAgentConnected)
+            {
+                return null;
+            }
 
-    private string? OfflineNotice => !AgentBridge.IsAgentConnected
-        ? $"Agent offline • showing persisted state{(_view?.Repositories.Count > 0 ? MostRecentPersistedLabel() : string.Empty)}"
-        : null;
+            var latest = _view?.Repositories
+                .Select(r => r.PersistedAt)
+                .Where(t => t.HasValue)
+                .Select(t => t!.Value)
+                .OrderDescending()
+                .FirstOrDefault();
+
+            return latest is { } value
+                ? $"Agent is offline, showing state from {value.ToLocalTime():HH:mm}"
+                : "Agent is offline";
+        }
+    }
 
     private void RebuildRows()
     {
