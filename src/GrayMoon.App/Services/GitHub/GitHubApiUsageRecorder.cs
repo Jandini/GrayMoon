@@ -1,42 +1,53 @@
 using System.Collections.Concurrent;
-using GrayMoon.App.Data;
-using GrayMoon.App.Models;
-using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.GitHub;
 
 /// <summary>
-/// Records every GitHub API call (including retried attempts) into in-memory hourly counters, then flushes
-/// them to <see cref="GitHubApiUsageHourly"/> periodically. In-memory counting keeps the hot path (every
-/// GitHub call) free of a DB round-trip; periodic flush keeps counts from being lost entirely on restart
-/// during development (see the "restart-surviving persistence" test), at the cost of losing at most one
-/// flush interval's worth of counts if the app crashes uncleanly.
+/// One interval's counts for a single connector + category, produced by
+/// <see cref="IGitHubApiUsageRecorder.TakeSnapshot"/>.
+/// </summary>
+public sealed record GitHubApiUsageSnapshotEntry(
+    int ConnectorId,
+    string ConnectorName,
+    string Category,
+    int RequestCount,
+    int NotModifiedCount,
+    int ErrorCount);
+
+/// <summary>
+/// Records every GitHub API call (including retried attempts) into in-memory counters. The logger hosted
+/// service snapshots these every 30 minutes. Counts are process-lifetime only - a restart starts from zero.
 /// </summary>
 public interface IGitHubApiUsageRecorder
 {
-    void Record(int connectorId, string requestUri, bool isNotModified, bool isError);
+    void Record(int connectorId, string connectorName, string requestUri, bool isNotModified, bool isError);
 
-    Task FlushAsync(CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Snapshot-and-remove so counts recorded concurrently during logging start a fresh entry rather than
+    /// being lost or double-logged.
+    /// </summary>
+    IReadOnlyList<GitHubApiUsageSnapshotEntry> TakeSnapshot();
 }
 
-public sealed class GitHubApiUsageRecorder(
-    IDbContextFactory<AppDbContext> dbContextFactory,
-    ILogger<GitHubApiUsageRecorder> logger) : IGitHubApiUsageRecorder
+public sealed class GitHubApiUsageRecorder : IGitHubApiUsageRecorder
 {
     private sealed class Counter
     {
+        public string ConnectorName = string.Empty;
         public int RequestCount;
         public int NotModifiedCount;
         public int ErrorCount;
     }
 
-    private readonly ConcurrentDictionary<(int ConnectorId, string Category, DateTime HourBucketUtc), Counter> _counters = new();
+    private readonly ConcurrentDictionary<(int ConnectorId, string Category), Counter> _counters = new();
 
-    public void Record(int connectorId, string requestUri, bool isNotModified, bool isError)
+    public void Record(int connectorId, string connectorName, string requestUri, bool isNotModified, bool isError)
     {
         var category = GitHubApiUsageCategoryMapper.Categorize(requestUri);
-        var hourBucket = TruncateToHour(DateTime.UtcNow);
-        var counter = _counters.GetOrAdd((connectorId, category, hourBucket), static _ => new Counter());
+        var counter = _counters.GetOrAdd((connectorId, category), static _ => new Counter());
+
+        if (!string.IsNullOrEmpty(connectorName))
+            counter.ConnectorName = connectorName;
 
         Interlocked.Increment(ref counter.RequestCount);
         if (isNotModified)
@@ -45,57 +56,30 @@ public sealed class GitHubApiUsageRecorder(
             Interlocked.Increment(ref counter.ErrorCount);
     }
 
-    public async Task FlushAsync(CancellationToken cancellationToken = default)
+    public IReadOnlyList<GitHubApiUsageSnapshotEntry> TakeSnapshot()
     {
         if (_counters.IsEmpty)
-            return;
+            return [];
 
-        // Snapshot-and-remove so counts recorded concurrently during the flush start a fresh entry rather
-        // than being lost or double-flushed.
-        var snapshot = new List<((int ConnectorId, string Category, DateTime HourBucketUtc) Key, Counter Counter)>();
+        var snapshot = new List<GitHubApiUsageSnapshotEntry>();
         foreach (var key in _counters.Keys.ToArray())
         {
-            if (_counters.TryRemove(key, out var counter))
-                snapshot.Add((key, counter));
+            if (!_counters.TryRemove(key, out var counter))
+                continue;
+
+            var name = string.IsNullOrEmpty(counter.ConnectorName)
+                ? $"connector#{key.ConnectorId}"
+                : counter.ConnectorName;
+
+            snapshot.Add(new GitHubApiUsageSnapshotEntry(
+                key.ConnectorId,
+                name,
+                key.Category,
+                counter.RequestCount,
+                counter.NotModifiedCount,
+                counter.ErrorCount));
         }
 
-        if (snapshot.Count == 0)
-            return;
-
-        try
-        {
-            await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-
-            foreach (var (key, counter) in snapshot)
-            {
-                var row = await dbContext.GitHubApiUsageHourly.FirstOrDefaultAsync(
-                    u => u.ConnectorId == key.ConnectorId && u.Category == key.Category && u.HourBucketUtc == key.HourBucketUtc,
-                    cancellationToken);
-
-                if (row == null)
-                {
-                    row = new GitHubApiUsageHourly
-                    {
-                        ConnectorId = key.ConnectorId,
-                        Category = key.Category,
-                        HourBucketUtc = key.HourBucketUtc
-                    };
-                    dbContext.GitHubApiUsageHourly.Add(row);
-                }
-
-                row.RequestCount += counter.RequestCount;
-                row.NotModifiedCount += counter.NotModifiedCount;
-                row.ErrorCount += counter.ErrorCount;
-            }
-
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to flush GitHub API usage counters; this interval's counts are lost, counting resumes for the next interval");
-        }
+        return snapshot;
     }
-
-    private static DateTime TruncateToHour(DateTime utcNow) =>
-        new(utcNow.Year, utcNow.Month, utcNow.Day, utcNow.Hour, 0, 0, DateTimeKind.Utc);
 }

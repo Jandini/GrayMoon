@@ -21,7 +21,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Setting> Settings => Set<Setting>();
     public DbSet<WorkspaceGitRepositoryStatus> WorkspaceGitRepositoryStatuses => Set<WorkspaceGitRepositoryStatus>();
     public DbSet<WorkspaceGitChangeEntry> WorkspaceGitChangeEntries => Set<WorkspaceGitChangeEntry>();
-    public DbSet<GitHubApiUsageHourly> GitHubApiUsageHourly => Set<GitHubApiUsageHourly>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -415,21 +414,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany(wr => wr.GitChangeEntries)
                 .HasForeignKey(e => e.WorkspaceRepositoryId)
                 .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        modelBuilder.Entity<GitHubApiUsageHourly>(entity =>
-        {
-            entity.ToTable("GitHubApiUsageHourly");
-            entity.HasKey(u => u.GitHubApiUsageHourlyId);
-            entity.Property(u => u.GitHubApiUsageHourlyId).ValueGeneratedOnAdd();
-
-            entity.HasIndex(u => new { u.ConnectorId, u.Category, u.HourBucketUtc })
-                .IsUnique();
-
-            entity.Property(u => u.Category).IsRequired().HasMaxLength(50);
-            entity.Property(u => u.RequestCount).HasDefaultValue(0);
-            entity.Property(u => u.NotModifiedCount).HasDefaultValue(0);
-            entity.Property(u => u.ErrorCount).HasDefaultValue(0);
         });
     }
 }

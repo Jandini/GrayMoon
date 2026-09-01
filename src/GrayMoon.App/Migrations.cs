@@ -18,6 +18,7 @@ public static class Migrations
         await SeedDefaultWorkspaceRootPathAsync(dbContext);
         await MigrateWorkspaceRepositoriesHasSelfFileVersionTokenAsync(dbContext);
         await MigrateWorkspaceProjectsIsGeneratedAsync(dbContext);
+        await MigrateDropGitHubApiUsageHourlyAsync(dbContext);
     }
 
     /// <summary>
@@ -117,6 +118,33 @@ public static class Migrations
         catch
         {
             // Seed may already be applied or table doesn't exist yet
+        }
+    }
+
+    /// <summary>
+    /// Drops GitHubApiUsageHourly if a prior build created it via EnsureCreated. Usage counters are now
+    /// in-memory only, so the table is unused. No-op when the table was never created.
+    /// </summary>
+    public static async Task MigrateDropGitHubApiUsageHourlyAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using var checkCmd = conn.CreateCommand();
+            checkCmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='GitHubApiUsageHourly'";
+            if (Convert.ToInt32(await checkCmd.ExecuteScalarAsync()) == 0)
+                return;
+
+            await using var dropCmd = conn.CreateCommand();
+            dropCmd.CommandText = "DROP TABLE IF EXISTS GitHubApiUsageHourly";
+            await dropCmd.ExecuteNonQueryAsync();
+        }
+        catch
+        {
+            // Table doesn't exist or already dropped.
         }
     }
 }

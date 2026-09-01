@@ -936,7 +936,7 @@ public class GitHubService : IConnectorService
             using var request = CreateGetRequest(connector, requestUri);
             var result = await _httpClient.SendAsync(request, ct);
             RecordRateLimit(connector, result);
-            _usageRecorder.Record(connector.ConnectorId, requestUri, isNotModified: false, isError: !result.IsSuccessStatusCode);
+            _usageRecorder.Record(connector.ConnectorId, connector.ConnectorName, requestUri, isNotModified: false, isError: !result.IsSuccessStatusCode);
             return result;
         }, cancellationToken);
 
@@ -1004,6 +1004,7 @@ public class GitHubService : IConnectorService
             RecordRateLimit(connector, result);
             _usageRecorder.Record(
                 connector.ConnectorId,
+                connector.ConnectorName,
                 requestUri,
                 isNotModified: result.StatusCode == HttpStatusCode.NotModified,
                 isError: !result.IsSuccessStatusCode && result.StatusCode != HttpStatusCode.NotModified);
