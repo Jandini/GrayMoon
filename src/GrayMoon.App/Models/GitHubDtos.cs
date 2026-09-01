@@ -323,6 +323,9 @@ public sealed class GitHubPullRequestReviewDto
     [JsonPropertyName("state")]
     public string State { get; set; } = string.Empty;
 
+    [JsonPropertyName("body")]
+    public string? Body { get; set; }
+
     [JsonPropertyName("submitted_at")]
     public DateTimeOffset? SubmittedAt { get; set; }
 }

@@ -283,7 +283,28 @@
 }
 
 ::deep .merge-pr-status-text {
+    flex: 1 1 auto;
     min-width: 0;
+}
+
+::deep .merge-pr-review-comments-link {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    margin-top: 0.05rem;
+    color: var(--text-secondary, #8b949e);
+    font-size: 1rem;
+    line-height: 1;
+    text-decoration: none;
+}
+
+::deep .merge-pr-review-comments-link:hover,
+::deep .merge-pr-review-comments-link:focus-visible {
+    color: #fff;
+    text-decoration: none;
 }
 
 ::deep .merge-pr-status-title {

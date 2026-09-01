@@ -47,6 +47,8 @@ public sealed record PullRequestMergeDetails
     public IReadOnlyList<string> OutstandingReviewers { get; init; } = Array.Empty<string>();
     /// <summary>Logins of reviewers whose latest review is an approval, for the dialog's "Approved by ..." subtitle.</summary>
     public IReadOnlyList<string> ApprovedByUsers { get; init; } = Array.Empty<string>();
+    /// <summary>True when any submitted review has a comment body or is a COMMENTED review - drives the conversation-link icon on the Review row.</summary>
+    public bool HasReviewerComments { get; init; }
 
     public ChecksSummary Checks { get; init; } = new();
 

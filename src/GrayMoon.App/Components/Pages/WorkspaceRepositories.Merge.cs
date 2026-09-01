@@ -136,6 +136,7 @@ public sealed partial class WorkspaceRepositories
                     ChangesRequestedCount = review.ChangesRequestedCount,
                     OutstandingReviewers = review.OutstandingReviewers,
                     ApprovedByUsers = review.ApprovedByUsers,
+                    HasReviewerComments = review.HasReviewerComments,
                     Checks = review.Checks,
                     AllowedMergeMethods = review.AllowedMergeMethods,
                     DefaultMergeMethod = review.DefaultMergeMethod,

@@ -154,6 +154,17 @@
                                         }
                                     </div>
                                 </div>
+                                @if (!IsLoadingReviewDetails && Details.HasReviewerComments && !string.IsNullOrWhiteSpace(Details.HtmlUrl))
+                                {
+                                    <a href="@Details.HtmlUrl"
+                                       target="_blank"
+                                       rel="noopener noreferrer"
+                                       class="merge-pr-review-comments-link"
+                                       title="View review comments"
+                                       aria-label="View review comments">
+                                        <i class="bi bi-chat"></i>
+                                    </a>
+                                }
                             </div>
                             <div class="merge-pr-status-item">
                                 <span class="merge-pr-status-icon @GetChecksIconClass()">
