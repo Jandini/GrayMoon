@@ -10,13 +10,15 @@ public enum ChecksState
     Pending
 }
 
-/// <summary>Aggregate check-run counts, never the individual check names/logs - the merge dialog only shows a compact summary.</summary>
+/// <summary>Aggregate check-run counts plus job URLs for the merge dialog's compact checks summary - never individual check names or logs.</summary>
 public sealed class ChecksSummary
 {
     public int Passed { get; init; }
     public int Failed { get; init; }
     public int Pending { get; init; }
     public ChecksState State { get; init; } = ChecksState.None;
+    /// <summary>Latest-by-name check-run browser URLs (one per check), used to open each GitHub Actions job in its own tab.</summary>
+    public IReadOnlyList<string> JobUrls { get; init; } = Array.Empty<string>();
 }
 
 /// <summary>

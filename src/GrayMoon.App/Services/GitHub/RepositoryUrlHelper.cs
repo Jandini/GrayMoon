@@ -97,6 +97,37 @@ public static class RepositoryUrlHelper
         return $"{root}/{owner}/{repositoryName}/actions/runs/{runId}";
     }
 
+    /// <summary>
+    /// Fallback browser URL for a check run when the API omits <c>html_url</c>:
+    /// <c>owner/repo/runs/{checkRunId}</c>. GitHub redirects Actions check runs to the job page.
+    /// </summary>
+    public static string? GetCheckRunWebUrl(string? cloneUrl, string? owner, string? repositoryName, long checkRunId, string? connectorApiBaseUrl = null)
+    {
+        if (checkRunId <= 0 || string.IsNullOrWhiteSpace(owner) || string.IsNullOrWhiteSpace(repositoryName))
+            return null;
+
+        var root = TryGetGitHostRootFromCloneUrl(cloneUrl, out var hostRoot)
+            ? hostRoot
+            : GetWebRootFromConnectorApiBase(connectorApiBaseUrl);
+        if (string.IsNullOrWhiteSpace(root))
+            return null;
+
+        root = root.TrimEnd('/');
+        return $"{root}/{owner}/{repositoryName}/runs/{checkRunId.ToString(CultureInfo.InvariantCulture)}";
+    }
+
+    /// <summary>Appends <c>pr={prNumber}</c> when missing so Actions job pages open in the pull-request context.</summary>
+    public static string AppendPrQuery(string url, int prNumber)
+    {
+        if (prNumber <= 0 || string.IsNullOrWhiteSpace(url))
+            return url;
+        if (url.Contains("pr=", StringComparison.OrdinalIgnoreCase))
+            return url;
+
+        var sep = url.Contains('?') ? '&' : '?';
+        return $"{url}{sep}pr={prNumber.ToString(CultureInfo.InvariantCulture)}";
+    }
+
     /// <summary>HTTPS origin (scheme + host, no path) from a git remote URL, when parseable.</summary>
     public static bool TryGetGitHostRootFromCloneUrl(string? cloneUrl, out string? root)
     {

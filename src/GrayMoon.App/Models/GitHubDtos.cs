@@ -361,6 +361,10 @@ public sealed class GitHubCheckRunDto
 
     [JsonPropertyName("completed_at")]
     public DateTimeOffset? CompletedAt { get; set; }
+
+    /// <summary>Browser URL for this check run. GitHub Actions jobs typically land on <c>/actions/runs/{runId}/job/{jobId}</c>.</summary>
+    [JsonPropertyName("html_url")]
+    public string? HtmlUrl { get; set; }
 }
 
 /// <summary>Body for PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge.</summary>

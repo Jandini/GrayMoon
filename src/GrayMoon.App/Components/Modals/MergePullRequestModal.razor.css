@@ -11,10 +11,11 @@
     font-weight: 500;
     line-height: 1.35;
     min-height: 1.75rem;
+    width: 100%;
 }
 
 ::deep .merge-pr-title__text {
-    flex: 0 1 auto;
+    flex: 1 1 auto;
     min-width: 0;
     overflow-wrap: anywhere;
 }
@@ -24,15 +25,14 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1.25rem;
-    height: 1.25rem;
-    margin-top: 0.08rem;
+    width: 1.5rem;
+    height: 1.5rem;
     padding: 0;
     border: none;
     border-radius: 0.25rem;
     background: transparent;
     color: #6e7681;
-    font-size: 0.78rem;
+    font-size: 0.85rem;
     line-height: 1;
     cursor: pointer;
     transition: color 0.15s ease, background-color 0.15s ease;
@@ -253,6 +253,10 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+::deep .merge-pr-status-item--icons-centered {
+    align-items: center;
+}
+
 ::deep .merge-pr-status-icon {
     flex: 0 0 auto;
     display: inline-flex;
@@ -287,7 +291,7 @@
     min-width: 0;
 }
 
-::deep .merge-pr-review-comments-link {
+::deep .merge-pr-status-action {
     flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
@@ -295,14 +299,23 @@
     width: 1.5rem;
     height: 1.5rem;
     margin-top: 0.05rem;
+    padding: 0;
+    border: none;
+    background: none;
     color: var(--text-secondary, #8b949e);
     font-size: 1rem;
     line-height: 1;
     text-decoration: none;
+    cursor: pointer;
 }
 
-::deep .merge-pr-review-comments-link:hover,
-::deep .merge-pr-review-comments-link:focus-visible {
+::deep .merge-pr-status-item--icons-centered .merge-pr-status-icon,
+::deep .merge-pr-status-item--icons-centered .merge-pr-status-action {
+    margin-top: 0;
+}
+
+::deep .merge-pr-status-action:hover,
+::deep .merge-pr-status-action:focus-visible {
     color: #fff;
     text-decoration: none;
 }

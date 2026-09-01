@@ -163,7 +163,7 @@ public sealed class GitHubPullRequestMergeService(
         var checkRuns = checksTask.Result;
 
         var (approvedCount, changesRequestedCount, outstandingReviewers, approvedByUsers, hasReviewerComments) = SummarizeReviews(reviews, pr?.RequestedReviewers, pr?.RequestedTeams);
-        var checksSummary = SummarizeChecks(checkRuns);
+        var checksSummary = SummarizeChecks(checkRuns, repository.CloneUrl, owner, repo, prNumber, connector.ApiBaseUrl);
         var allowedMethods = GetAllowedMergeMethods(settings);
         var defaultMethod = DefaultMethodPriority.FirstOrDefault(m => allowedMethods.Contains(m), allowedMethods.FirstOrDefault());
 
@@ -302,7 +302,13 @@ public sealed class GitHubPullRequestMergeService(
         return (approvedByUsers.Count, changesRequested, outstanding, approvedByUsers, hasReviewerComments);
     }
 
-    private static ChecksSummary SummarizeChecks(GitHubCheckRunsResponse? response)
+    private static ChecksSummary SummarizeChecks(
+        GitHubCheckRunsResponse? response,
+        string? cloneUrl,
+        string owner,
+        string repo,
+        int prNumber,
+        string? connectorApiBaseUrl)
     {
         var runs = response?.CheckRuns ?? [];
         if (runs.Count == 0)
@@ -326,7 +332,37 @@ public sealed class GitHubPullRequestMergeService(
         var passed = latestByName.Count - pending - failed;
 
         var state = failed > 0 ? ChecksState.Failed : pending > 0 ? ChecksState.Pending : ChecksState.Passed;
-        return new ChecksSummary { Passed = passed, Failed = failed, Pending = pending, State = state };
+        var jobUrls = latestByName
+            .Select(r => ResolveCheckJobUrl(r, cloneUrl, owner, repo, prNumber, connectorApiBaseUrl))
+            .Where(u => !string.IsNullOrWhiteSpace(u))
+            .Select(u => u!)
+            .ToList();
+
+        return new ChecksSummary
+        {
+            Passed = passed,
+            Failed = failed,
+            Pending = pending,
+            State = state,
+            JobUrls = jobUrls
+        };
+    }
+
+    private static string? ResolveCheckJobUrl(
+        GitHubCheckRunDto run,
+        string? cloneUrl,
+        string owner,
+        string repo,
+        int prNumber,
+        string? connectorApiBaseUrl)
+    {
+        var url = run.HtmlUrl;
+        if (string.IsNullOrWhiteSpace(url))
+            url = RepositoryUrlHelper.GetCheckRunWebUrl(cloneUrl, owner, repo, run.Id, connectorApiBaseUrl);
+        if (string.IsNullOrWhiteSpace(url))
+            return null;
+
+        return RepositoryUrlHelper.AppendPrQuery(url, prNumber);
     }
 
     /// <summary>Missing/null flags are treated as allowed, matching GitHub's own default-visible behavior for API responses that omit these fields (e.g. reduced token scope).</summary>

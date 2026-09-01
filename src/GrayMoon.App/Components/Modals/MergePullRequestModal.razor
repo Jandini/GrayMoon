@@ -2,6 +2,7 @@
 @using GrayMoon.App.Services
 @using Microsoft.AspNetCore.Components.Web
 @inject MergePullRequestSyncToDefaultPreferenceService SyncToDefaultPreference
+@inject IJSRuntime JS
 
 @if (IsVisible)
 {
@@ -159,14 +160,14 @@
                                     <a href="@Details.HtmlUrl"
                                        target="_blank"
                                        rel="noopener noreferrer"
-                                       class="merge-pr-review-comments-link"
+                                       class="merge-pr-status-action"
                                        title="View review comments"
                                        aria-label="View review comments">
                                         <i class="bi bi-chat"></i>
                                     </a>
                                 }
                             </div>
-                            <div class="merge-pr-status-item">
+                            <div class="merge-pr-status-item merge-pr-status-item--icons-centered">
                                 <span class="merge-pr-status-icon @GetChecksIconClass()">
                                     <i class="bi @GetChecksIconGlyph()"></i>
                                 </span>
@@ -186,12 +187,7 @@
                                         {
                                             <span class="merge-pr-placeholder merge-pr-placeholder--checks-subtitle"></span>
                                         }
-                                        else if (Details.Checks.State == ChecksState.Failed && !string.IsNullOrEmpty(ActionsUrl))
-                                        {
-                                            <a href="@ActionsUrl" class="merge-pr-changed-files-link">@($"{Details.Checks.Failed} failing")</a>
-                                            @($", {Details.Checks.Passed} successful check{(Details.Checks.Passed == 1 ? "" : "s")}")
-                                        }
-                                        else if (Details.Checks.State == ChecksState.Pending && !string.IsNullOrEmpty(ActionsUrl))
+                                        else if (!string.IsNullOrEmpty(ActionsUrl) && Details.Checks.State != ChecksState.None)
                                         {
                                             <a href="@ActionsUrl" class="merge-pr-changed-files-link">@GetChecksSubtitle()</a>
                                         }
@@ -201,8 +197,18 @@
                                         }
                                     </div>
                                 </div>
+                                @if (!IsLoadingReviewDetails && Details.Checks.JobUrls.Count > 0)
+                                {
+                                    <button type="button"
+                                            class="merge-pr-status-action"
+                                            title="Open GitHub Actions jobs"
+                                            aria-label="Open GitHub Actions jobs"
+                                            @onclick="OpenCheckJobUrlsAsync">
+                                        <i class="bi bi-play-circle"></i>
+                                    </button>
+                                }
                             </div>
-                            <div class="merge-pr-status-item">
+                            <div class="merge-pr-status-item merge-pr-status-item--icons-centered">
                                 <span class="merge-pr-status-icon @GetConflictsIconClass()">
                                     <i class="bi @GetConflictsIconGlyph()"></i>
                                 </span>
@@ -223,6 +229,17 @@
                                         }
                                     </div>
                                 </div>
+                                @if (!string.IsNullOrWhiteSpace(Details.HtmlUrl))
+                                {
+                                    <a href="@($"{Details.HtmlUrl}/files")"
+                                       target="_blank"
+                                       rel="noopener noreferrer"
+                                       class="merge-pr-status-action"
+                                       title="View changed files"
+                                       aria-label="View changed files">
+                                        <i class="bi bi-file-earmark"></i>
+                                    </a>
+                                }
                             </div>
                             <div class="merge-pr-status-item">
                                 <span class="merge-pr-status-icon @GetLocalStateIconClass()">
@@ -374,7 +391,7 @@
     [Parameter] public EventCallback OnClosePullRequest { get; set; }
     /// <summary>Workspace's Git Changes page URL, used to link the "N uncommitted changes" text in the local-state row. Null/empty hides the link.</summary>
     [Parameter] public string? ChangesUrl { get; set; }
-    /// <summary>Workspace's Actions page URL, used to link the "N failing" / "N checks still running" text in the checks row. Null/empty hides the link.</summary>
+    /// <summary>Workspace's Actions page URL, used to link the checks subtitle in the checks row. Null/empty hides the link.</summary>
     [Parameter] public string? ActionsUrl { get; set; }
     /// <summary>Raised when the user clicks the commits text in the local-state row while only unpushed (outgoing) commits exist.</summary>
     [Parameter] public EventCallback OnPushRequested { get; set; }
@@ -683,6 +700,15 @@
         _showMethodDropdown = false;
         if (OnClosePullRequest.HasDelegate)
             await OnClosePullRequest.InvokeAsync();
+    }
+
+    private async Task OpenCheckJobUrlsAsync()
+    {
+        var urls = Details?.Checks.JobUrls;
+        if (urls == null || urls.Count == 0)
+            return;
+
+        await JS.InvokeVoidAsync("graymoonOpenUrls", urls);
     }
 
     // GitHub-style status rows: a colored icon circle + bold title + muted subtitle per row,
