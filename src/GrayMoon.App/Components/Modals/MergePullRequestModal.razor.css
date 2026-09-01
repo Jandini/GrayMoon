@@ -354,6 +354,10 @@
     flex: 0 0 auto;
 }
 
+/*
+ * Close pull request as the split-button primary action. Green when the PR changed 0 files
+ * (recommended default); muted gray when the user selected it on a PR that has file changes.
+ */
 ::deep .merge-pr-btn-close {
     background-color: #238636;
     border-color: rgba(240, 246, 252, 0.1);
@@ -542,4 +546,19 @@
 ::deep .merge-pr-method-menu .dropdown-item:hover .merge-pr-method-item__title,
 ::deep .merge-pr-method-menu .dropdown-item:focus-visible .merge-pr-method-item__title {
     color: #fff;
+}
+
+::deep .merge-pr-method-menu__separator {
+    height: 1px;
+    margin: 0.25rem 0;
+    background-color: #2a2a2a;
+}
+
+::deep .merge-pr-method-item--close .merge-pr-method-item__title {
+    color: #f85149;
+}
+
+::deep .merge-pr-method-menu .dropdown-item.merge-pr-method-item--close:hover .merge-pr-method-item__title,
+::deep .merge-pr-method-menu .dropdown-item.merge-pr-method-item--close:focus-visible .merge-pr-method-item__title {
+    color: #ff7b72;
 }
