@@ -1,3 +1,4 @@
+using GrayMoon.App.Services.Queries;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.JSInterop;
 
@@ -62,6 +63,37 @@ public sealed partial class WorkspaceRepositories
                 if (workspaceId != WorkspaceId || string.IsNullOrWhiteSpace(msg)) return;
                 SetRepositoryError(repositoryId, msg);
                 _ = InvokeAsync(StateHasChanged);
+            });
+            _hubConnection.On<int, int>("GitChangesUpdated", async (workspaceId, repositoryId) =>
+            {
+                if (workspaceId != WorkspaceId) return;
+                if (IsBackgroundJobRunning)
+                {
+                    _pendingRefreshAfterJob = true;
+                    return;
+                }
+
+                if (!_linkByRepoId.ContainsKey(repositoryId))
+                    return;
+
+                try
+                {
+                    var dto = await LinkListQueryService.GetSnapshotAsync(WorkspaceId, repositoryId);
+                    if (dto is null || _disposed)
+                        return;
+
+                    await InvokeAsync(() =>
+                    {
+                        if (_disposed)
+                            return;
+                        CacheLink(WorkspaceRepositoryLinkListMapper.ToLink(dto), WorkspaceRepositoryLinkListMapper.ToPullRequestInfo(dto));
+                        StateHasChanged();
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "GitChangesUpdated snapshot refresh failed for workspace {WorkspaceId} repo {RepositoryId}", workspaceId, repositoryId);
+                }
             });
             await _hubConnection.StartAsync();
         }
