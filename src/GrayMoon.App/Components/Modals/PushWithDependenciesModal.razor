@@ -121,9 +121,10 @@
     protected override void OnParametersSet()
     {
         if (IsVisible && !_wasVisible)
+        {
             _focusOnNextRender = true;
-        if (IsVisible)
             SynchronizedPush = true;
+        }
         _wasVisible = IsVisible;
     }
 
