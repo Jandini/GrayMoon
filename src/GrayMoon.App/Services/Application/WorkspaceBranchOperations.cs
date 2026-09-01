@@ -315,6 +315,9 @@ public sealed class WorkspaceBranchOperations(
             .Where(wr => wr.WorkspaceId == workspaceId)
             .ToListAsync(cancellationToken);
 
+        // Repos checked out on a tag do not participate in the common-branch intersection.
+        links = links.Where(wr => !wr.IsOnTag).ToList();
+
         if (links.Count == 0)
         {
             return BranchHttpOutcome.Ok(new CommonBranchesApiResult
@@ -333,7 +336,7 @@ public sealed class WorkspaceBranchOperations(
         {
             var branches = await db.RepositoryBranches
                 .AsNoTracking()
-                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId)
+                .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && !rb.IsTag)
                 .Select(rb => new { rb.BranchName, rb.IsRemote, rb.IsDefault })
                 .ToListAsync(cancellationToken);
 

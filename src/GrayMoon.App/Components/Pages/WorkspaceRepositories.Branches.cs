@@ -60,13 +60,14 @@ public sealed partial class WorkspaceRepositories
         StateHasChanged();
     }
 
-    /// <summary>When every workspace repo has the same non-empty <see cref="WorkspaceRepositoryLink.BranchName"/>, returns that name; otherwise null.</summary>
+    /// <summary>When every non-tag workspace repo has the same non-empty <see cref="WorkspaceRepositoryLink.BranchName"/>, returns that name; otherwise null.</summary>
     private static string? GetUnifiedWorkspaceCurrentBranch(IReadOnlyList<WorkspaceRepositoryLink> links)
     {
-        if (links.Count == 0)
+        var branchLinks = links.Where(l => !l.IsOnTag).ToList();
+        if (branchLinks.Count == 0)
             return null;
         string? first = null;
-        foreach (var link in links)
+        foreach (var link in branchLinks)
         {
             var name = link.BranchName?.Trim();
             if (string.IsNullOrWhiteSpace(name))
@@ -125,6 +126,39 @@ public sealed partial class WorkspaceRepositories
             DefaultDisplayText = data.DefaultDisplayText ?? "multiple",
             WorkspaceUnifiedCurrentBranch = GetUnifiedWorkspaceCurrentBranch(allLinks)
         };
+    }
+
+    private Task FetchSwitchBranchModalAsync()
+    {
+        if (workspace == null || IsJobRunning)
+            return Task.CompletedTask;
+
+        var repositoryId = _switchBranchModal.RepositoryId;
+        if (repositoryId <= 0)
+            return Task.CompletedTask;
+
+        StartPageJob("Fetching branches...", async (job, ct) =>
+        {
+            var outcome = await ScopedExecutor.ExecuteAsync<IWorkspaceBranchOperations, BranchHttpOutcome>(
+                svc => svc.RefreshBranchesAsync(WorkspaceId, repositoryId, ct));
+
+            if (!outcome.IsSuccessStatus)
+            {
+                SafeInvoke(() => SetRepositoryError(
+                    repositoryId,
+                    outcome.ErrorText ?? "Failed to fetch branches."));
+            }
+        }, new PageJobOptions
+        {
+            CancelToast = "Fetch branches cancelled.",
+            OnError = ex =>
+            {
+                Logger.LogError(ex, "Error fetching branches for repository {RepositoryId}", repositoryId);
+                SafeInvoke(() => SetRepositoryError(repositoryId, "Failed to fetch branches."));
+            }
+        });
+
+        return Task.CompletedTask;
     }
 
     private async Task FetchCommonBranchesAcrossWorkspaceAsync()
