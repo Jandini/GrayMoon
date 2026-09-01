@@ -9,7 +9,7 @@ public interface IWorkspaceUpdateOperations
         IReadOnlySet<int>? repositoryIds = null,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlySet<int>> UpdateAsync(
+    Task<DependencyUpdateRunResult> UpdateAsync(
         int workspaceId,
         CancellationToken cancellationToken,
         IProgress<OperationProgress>? progress,

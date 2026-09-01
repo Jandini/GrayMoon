@@ -67,8 +67,8 @@ public interface IGitService
     Task<string?> GetCheckedOutTagAsync(string repoPath, CancellationToken ct);
     /// <summary>Gets the default branch origin ref (e.g., "origin/main") for passing to GetCommitCountsAsync/GetCommitCountsVsDefaultAsync to avoid resolving twice.</summary>
     Task<string?> GetDefaultBranchOriginRefAsync(string repoPath, CancellationToken ct);
-    /// <summary>Stages the given paths (relative to repo root) and creates a commit with the given message. Returns (success, errorMessage).</summary>
-    Task<(bool Success, bool Committed, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct);
+    /// <summary>Stages the given paths (relative to repo root) and creates a commit with the given message. Returns (success, committed, errorMessage). When <paramref name="skipHooks"/> is true, hooks are disabled for add and commit (orchestrated flows such as dependency update that persist state themselves).</summary>
+    Task<(bool Success, bool Committed, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct, bool skipHooks = false);
     /// <summary>Resets the current branch to origin/<paramref name="branchName"/>. When <paramref name="keepChanges"/> is true uses --mixed (changes remain in working tree); otherwise --hard. If the remote branch does not exist, pushes it upstream first using <paramref name="bearerToken"/>. Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> ResetToRemoteAsync(string repoPath, string branchName, bool keepChanges, string? bearerToken, CancellationToken ct);
     void CreateDirectory(string path);

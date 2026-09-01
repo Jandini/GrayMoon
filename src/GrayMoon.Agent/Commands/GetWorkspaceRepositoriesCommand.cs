@@ -13,7 +13,9 @@ public sealed class GetWorkspaceRepositoriesCommand(IGitService git) : ICommandH
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var path = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
-        var repositories = git.GetDirectories(path);
+        var repositories = git.GetDirectories(path)
+            .Where(name => HasGitMetadata(Path.Combine(path, name)))
+            .ToArray();
 
         if (repositories.Length == 0)
         {
@@ -59,5 +61,11 @@ public sealed class GetWorkspaceRepositoriesCommand(IGitService git) : ICommandH
                 semaphore.Release();
             }
         }
+    }
+
+    private static bool HasGitMetadata(string repoPath)
+    {
+        var git = Path.Combine(repoPath, ".git");
+        return Directory.Exists(git) || File.Exists(git);
     }
 }

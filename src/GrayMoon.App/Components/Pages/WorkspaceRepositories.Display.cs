@@ -68,6 +68,11 @@ public sealed partial class WorkspaceRepositories
     {
         if (string.IsNullOrWhiteSpace(message))
             return;
+        if (repositoryId == 0)
+        {
+            SetPageError(message);
+            return;
+        }
         repositoryErrors.TryGetValue(repositoryId, out var existing);
         var next = AppendErrorText(existing, message);
         if (next is null || string.Equals(existing, next, StringComparison.Ordinal))

@@ -189,6 +189,28 @@ public sealed class GitCliRepositoryGitChangesServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Stage_explicit_ignored_path_drops_it_and_stages_the_rest()
+    {
+        _repo.CommitInitial();
+        _repo.WriteFile(".gitignore", ".work\n");
+        _repo.RunGit("add", ".gitignore");
+        _repo.RunGit("commit", "-m", "ignore .work");
+        _repo.WriteFile("file.txt", "changed\n");
+        _repo.WriteFile(".work/Ignored.csproj", "<Project />\n");
+
+        var stageResult = await _service.StageAsync(
+            _repo.RepositoryPath,
+            new GitStageOperationRequest(GitChangeOperationScope.ExplicitPaths, ["file.txt", ".work/Ignored.csproj"]),
+            2,
+            CancellationToken.None);
+
+        Assert.True(stageResult.Success);
+        var change = Assert.Single(stageResult.Snapshot!.Changes, c => c.IsStaged);
+        Assert.Equal("file.txt", change.Path);
+        Assert.DoesNotContain(stageResult.Snapshot.Changes, c => c.Path.Contains(".work", StringComparison.OrdinalIgnoreCase) && c.IsStaged);
+    }
+
+    [Fact]
     public async Task Unstage_explicit_path_moves_file_back_to_changed()
     {
         _repo.CommitInitial("file.txt", "original\n");

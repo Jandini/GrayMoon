@@ -61,25 +61,7 @@ public sealed class CommitHookSyncCommand(IGitService git, ICsProjFileService cs
         }
 
         var projects = await findProjectsTask;
-        var syncProjects = projects?
-            .Where(p => !string.IsNullOrWhiteSpace(p.Name))
-            .Select(p => new RepositorySyncProjectNotification
-            {
-                Name = p.Name.Trim(),
-                ProjectType = (int)p.ProjectType,
-                ProjectPath = p.ProjectPath ?? "",
-                TargetFramework = p.TargetFramework ?? "",
-                PackageId = p.PackageId,
-                PackageReferences = p.PackageReferences
-                    .Where(pr => !string.IsNullOrWhiteSpace(pr.Name))
-                    .Select(pr => new RepositorySyncPackageReferenceNotification
-                    {
-                        Name = pr.Name.Trim(),
-                        Version = pr.Version ?? ""
-                    })
-                    .ToList()
-            })
-            .ToList();
+        var syncProjects = RepositorySyncProjectMapper.ToNotifications(projects);
 
         var connection = hubProvider.Connection;
         if (connection?.State == HubConnectionState.Connected)

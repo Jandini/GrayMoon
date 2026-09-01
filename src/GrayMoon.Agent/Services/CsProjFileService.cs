@@ -1,9 +1,10 @@
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Models;
+using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Agent.Services;
 
-public sealed class CsProjFileService(ICsProjFileParser parser) : ICsProjFileService
+public sealed class CsProjFileService(ICsProjFileParser parser, GitProcessRunner runner, ILogger<CsProjFileService> logger) : ICsProjFileService
 {
     private const int DefaultMaxParallel = 8;
 
@@ -69,6 +70,17 @@ public sealed class CsProjFileService(ICsProjFileParser parser) : ICsProjFileSer
             var subdirs = Directory.GetDirectories(repoPath)
                 .Where(d => !string.Equals(Path.GetFileName(d), ".git", StringComparison.OrdinalIgnoreCase))
                 .ToList();
+
+            if (subdirs.Count == 0)
+                return rootPaths;
+
+            var dirNames = subdirs.Select(d => Path.GetFileName(d)!).ToList();
+            var keptNames = await GitIgnoredPathFilter.KeepNonIgnoredAsync(runner, logger, repoPath, dirNames, cancellationToken);
+            if (keptNames.Count != dirNames.Count)
+            {
+                var keptSet = keptNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                subdirs = subdirs.Where(d => keptSet.Contains(Path.GetFileName(d)!)).ToList();
+            }
 
             if (subdirs.Count == 0)
                 return rootPaths;

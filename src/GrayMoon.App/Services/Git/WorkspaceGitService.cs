@@ -569,7 +569,8 @@ public class WorkspaceGitService(
         Action<int, int, int>? onProgress = null,
         CancellationToken cancellationToken = default,
         string? commitMessageOverride = null,
-        bool includeDepsInCommitMessage = true)
+        bool includeDepsInCommitMessage = true,
+        bool skipHooks = false)
     {
         if (!_agentBridge.IsAgentConnected || reposToCommit.Count == 0)
             return Array.Empty<(int, bool, string?)>();
@@ -632,7 +633,8 @@ public class WorkspaceGitService(
                     repositoryName = repo.RepoName,
                     commitMessage,
                     pathsToStage,
-                    workspaceRoot
+                    workspaceRoot,
+                    skipHooks
                 };
                 var response = await _agentBridge.SendCommandAsync("StageAndCommit", args, cancellationToken);
                 var parsed = response.Success && response.Data != null
@@ -662,7 +664,8 @@ public class WorkspaceGitService(
         IReadOnlyList<(int RepoId, string RepoName, IReadOnlyList<string> FilePaths)> reposAndPaths,
         Action<int, int, int>? onProgress = null,
         CancellationToken cancellationToken = default,
-        string? commitMessageOverride = null)
+        string? commitMessageOverride = null,
+        bool skipHooks = false)
     {
         if (!_agentBridge.IsAgentConnected || reposAndPaths.Count == 0)
             return Array.Empty<(int, bool, string?)>();
@@ -706,7 +709,8 @@ public class WorkspaceGitService(
                     repositoryName = repo.RepoName,
                     commitMessage,
                     pathsToStage,
-                    workspaceRoot
+                    workspaceRoot,
+                    skipHooks
                 };
                 var response = await _agentBridge.SendCommandAsync("StageAndCommit", args, cancellationToken);
                 var parsed = response.Success && response.Data != null

@@ -12,6 +12,7 @@ namespace GrayMoon.Agent.Commands;
 /// <summary>Fetches and pulls remote changes, then pushes when outgoing commits exist or upstream is not set.</summary>
 public sealed class PushRepositoryCommand(
     IGitService git,
+    ICsProjFileService csProjFileService,
     GitRemoteIntegrateService remoteIntegrate,
     IHubConnectionProvider hubProvider,
     ILogger<PushRepositoryCommand> logger) : ICommandHandler<PushRepositoryRequest, PushRepositoryResponse>
@@ -127,6 +128,7 @@ public sealed class PushRepositoryCommand(
             var (versionResult, _) = await git.GetVersionAsync(repoPath, nonNormalize: true, CancellationToken.None);
             var version = versionResult?.InformationalVersion ?? "-";
             var versionBranch = versionResult?.BranchName ?? versionResult?.EscapedBranchName ?? branch;
+            var projects = await csProjFileService.FindAsync(repoPath, CancellationToken.None);
 
             var notification = new RepositorySyncNotification
             {
@@ -139,6 +141,7 @@ public sealed class PushRepositoryCommand(
                 HasUpstream = hasUpstream,
                 DefaultBranchBehind = defaultBehind,
                 DefaultBranchAhead = defaultAhead,
+                Projects = RepositorySyncProjectMapper.ToNotifications(projects),
             };
             await connection.InvokeAsync(AgentHubMethods.SyncCommand, notification, CancellationToken.None);
             logger.LogInformation("Post-push SyncCommand sent: workspace={WorkspaceId}, repo={RepoId}, outgoing={Outgoing}, versionOnly={VersionOnly}",

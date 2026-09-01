@@ -217,15 +217,29 @@ public sealed class WorkspacePushService(
                 foreach (var cid in requiredForLevel.Select(r => r.MatchedConnectorId!.Value).Distinct())
                     connectorByIdForLevel[cid] = await _connectorRepository!.GetByIdAsync(cid);
 
-                while (getFoundCount() < totalDeps)
+                void AbortPackageWaitTimeout()
                 {
-                    linkedToken.ThrowIfCancellationRequested();
+                    levelProgress?.Invoke("Timed out.");
+                    _logger.LogWarning("[PushOrchestrator {RunId}] Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", runId, totalTimeout.TotalMinutes, getFoundCount(), totalDeps);
+                    PackageWaitTimeout.Report(reposAtLevel.Select(r => r.RepoId), onRepoError, getFoundCount(), totalDeps, totalTimeout);
+                }
+
+                try
+                {
+                    while (getFoundCount() < totalDeps)
+                    {
+                    if (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                    {
+                        AbortPackageWaitTimeout();
+                        return;
+                    }
+
+                    cancellationToken.ThrowIfCancellationRequested();
                     var remaining = deadline - DateTime.UtcNow;
                     if (remaining <= TimeSpan.Zero)
                     {
-                        levelProgress?.Invoke("Timed out.");
-                        _logger.LogWarning("[PushOrchestrator {RunId}] Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", runId, totalTimeout.TotalMinutes, getFoundCount(), totalDeps);
-                        throw new OperationCanceledException("Push wait for dependencies timed out.");
+                        AbortPackageWaitTimeout();
+                        return;
                     }
                     var found = getFoundCount();
                     var line1 = found == 0
@@ -310,6 +324,12 @@ public sealed class WorkspacePushService(
                     if (getFoundCount() >= totalDeps)
                         break;
                     await Task.Delay(TimeSpan.FromSeconds(1), linkedToken);
+                }
+                }
+                catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                {
+                    AbortPackageWaitTimeout();
+                    return;
                 }
             }
 

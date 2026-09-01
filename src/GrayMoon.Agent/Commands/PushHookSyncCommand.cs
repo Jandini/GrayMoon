@@ -12,7 +12,7 @@ namespace GrayMoon.Agent.Commands;
 /// actual post-push counts so DB persistence is updated regardless of whether the push
 /// originated from GrayMoon or an external IDE.
 /// </summary>
-public sealed class PushHookSyncCommand(IGitService git, IHubConnectionProvider hubProvider, ILogger<PushHookSyncCommand> logger)
+public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csProjFileService, IHubConnectionProvider hubProvider, ILogger<PushHookSyncCommand> logger)
 {
     public async Task ExecuteAsync(INotifyJob payload, CancellationToken cancellationToken = default)
     {
@@ -113,6 +113,8 @@ public sealed class PushHookSyncCommand(IGitService git, IHubConnectionProvider 
                 if (finalTag != null)
                     finalBranch = "-";
 
+                var projects = await csProjFileService.FindAsync(repoPath, CancellationToken.None);
+
                 // GitVersion alone can take seconds, so re-check rather than trusting the check above.
                 if (!await StillOnPushedBranchAsync(repoPath, branch, payload.RepositoryId))
                     return;
@@ -129,6 +131,7 @@ public sealed class PushHookSyncCommand(IGitService git, IHubConnectionProvider 
                     HasUpstream = hasUpstream,
                     DefaultBranchBehind = defaultBehind,
                     DefaultBranchAhead = defaultAhead,
+                    Projects = RepositorySyncProjectMapper.ToNotifications(projects),
                 };
                 await connection.InvokeAsync(AgentHubMethods.SyncCommand, finalNotification, CancellationToken.None);
                 logger.LogInformation("PushHookSync deferred SyncCommand sent: workspace={WorkspaceId}, repo={RepoId}, outgoing={Outgoing}, attempt={Attempt}",

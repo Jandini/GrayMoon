@@ -24,14 +24,15 @@ public sealed class DependencyUpdateOrchestrator(
     /// refresh projects, update+commit version files, sync+commit csproj deps, refresh repo versions.
     /// Walks all dependency levels (up to <paramref name="maxLevel"/>) so version-file work that appears
     /// after a lower-level commit is not skipped. Csproj sync is scoped to <paramref name="repoIdsToUpdate"/>.
-    /// Stops on first error and reports it via <paramref name="onRepoError"/>.
+    /// Stops after collecting every commit error at a level (files must not be left dirty as a successful update).
+/// Reports errors via <paramref name="onRepoError"/>.
     /// </summary>
     /// <param name="repoIdsToUpdate">Optional. When set, only these repositories are considered for the update plan and all steps.</param>
     /// <param name="commitMessage">Optional user-supplied commit subject line. When provided, replaces the default subject in all commits created during this update.</param>
     /// <param name="includeDepsInCommitMessage">When true, the list of updated packages is appended to the commit message body.</param>
     /// <param name="maxLevel">Optional. When set, only repositories at or below this dependency level are processed; higher levels are skipped.</param>
     /// <param name="runId">Optional caller-supplied correlation id included in every log line for this run so it can be filtered from application logs.</param>
-    public async Task<IReadOnlySet<int>> RunAsync(
+    public async Task<DependencyUpdateRunResult> RunAsync(
         int workspaceId,
         CancellationToken cancellationToken,
         IProgress<OperationProgress>? progress,
@@ -47,7 +48,7 @@ public sealed class DependencyUpdateOrchestrator(
         if (repoIdsToUpdate is { Count: 0 })
         {
             logger.LogInformation("[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: caller passed an empty repoIdsToUpdate set; nothing to do.", runId, workspaceId);
-            return new HashSet<int>();
+            return DependencyUpdateRunResult.Ok();
         }
 
         logger.LogInformation(
@@ -77,7 +78,7 @@ public sealed class DependencyUpdateOrchestrator(
         if (hadError)
         {
             logger.LogWarning("[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: aborting after RefreshWorkspaceProjectsAsync error.", runId, workspaceId);
-            return new HashSet<int>();
+            return DependencyUpdateRunResult.Failed();
         }
 
         // Step 2+: Walk every dependency level (up to maxLevel). Do not limit the level walk to the
@@ -89,7 +90,7 @@ public sealed class DependencyUpdateOrchestrator(
         if (levelRepoIds.Count == 0)
             hadError = true;
         if (hadError)
-            return new HashSet<int>();
+            return DependencyUpdateRunResult.Failed();
 
         logger.LogInformation(
             "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: {LevelCount} level(s) to walk: {Levels}",
@@ -166,15 +167,17 @@ public sealed class DependencyUpdateOrchestrator(
                 "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: version-file commit result: {CommittedCount} repo(s) committed: [{CommittedIds}]",
                 runId, workspaceId, level, vfCommittedRepoIds.Count, string.Join(",", vfCommittedRepoIds));
 
-            if (csprojScope.Count == 0)
+            // Version-file commits can change GitVersion consumed by this level's csproj plan.
+            // Refresh before GetUpdatePlanAsync / SyncDependenciesAsync, not only when csprojScope is empty.
+            if (vfCommittedRepoIds.Count > 0
+                && !await RefreshRepositoryVersionsAsync(vfCommittedRepoIds, workspaceId, cancellationToken, levelProgress, onAppSideComplete, OnRepoError))
             {
-                if (vfCommittedRepoIds.Count > 0
-                    && !await RefreshRepositoryVersionsAsync(vfCommittedRepoIds, workspaceId, cancellationToken, levelProgress, onAppSideComplete, OnRepoError))
-                {
-                    hadError = true;
-                }
-                continue;
+                hadError = true;
+                break;
             }
+
+            if (csprojScope.Count == 0)
+                continue;
 
             var (payload, _) = await workspaceGitService.GetUpdatePlanAsync(workspaceId, csprojScope, cancellationToken);
             var reposAtLevel = payload
@@ -186,15 +189,7 @@ public sealed class DependencyUpdateOrchestrator(
                 runId, workspaceId, level, reposAtLevel.Count, csprojScope.Count, string.Join(",", reposAtLevel.Select(r => r.RepoId)));
 
             if (reposAtLevel.Count == 0)
-            {
-                // No csproj work at this level, but version-file commits may need a version refresh.
-                if (vfCommittedRepoIds.Count > 0
-                    && !await RefreshRepositoryVersionsAsync(vfCommittedRepoIds, workspaceId, cancellationToken, levelProgress, onAppSideComplete, OnRepoError))
-                {
-                    hadError = true;
-                }
                 continue;
-            }
 
             levelProgress($"Updating {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
             var syncedRepoIds = await workspaceGitService.SyncDependenciesAsync(
@@ -214,14 +209,7 @@ public sealed class DependencyUpdateOrchestrator(
 
             var reposToCommit = reposAtLevel.Where(r => syncedRepoIds.Contains(r.RepoId)).ToList();
             if (reposToCommit.Count == 0)
-            {
-                if (vfCommittedRepoIds.Count > 0
-                    && !await RefreshRepositoryVersionsAsync(vfCommittedRepoIds, workspaceId, cancellationToken, levelProgress, onAppSideComplete, OnRepoError))
-                {
-                    hadError = true;
-                }
                 continue;
-            }
 
             levelProgress("Committing...");
             var commitResults = await workspaceGitService.CommitDependencyUpdatesAsync(
@@ -235,19 +223,15 @@ public sealed class DependencyUpdateOrchestrator(
                 },
                 cancellationToken,
                 commitMessageOverride: commitMessage,
-                includeDepsInCommitMessage: includeDepsInCommitMessage);
+                includeDepsInCommitMessage: includeDepsInCommitMessage,
+                skipHooks: true);
 
-            var csprojCommittedRepoIds = new List<int>();
-            foreach (var (repoId, committed, errMsg) in commitResults)
-            {
-                if (!string.IsNullOrEmpty(errMsg))
-                {
-                    OnRepoError(repoId, errMsg);
-                    break;
-                }
-                if (committed)
-                    csprojCommittedRepoIds.Add(repoId);
-            }
+            var classified = DependencyCommitResults.Classify(
+                commitResults,
+                reposToCommit.Select(r => r.RepoId).ToHashSet());
+            foreach (var (repoId, errMsg) in classified.Errors)
+                OnRepoError(repoId, errMsg);
+            var csprojCommittedRepoIds = classified.CommittedRepoIds;
 
             logger.LogInformation(
                 "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: committed csproj changes for {CommittedCount} repo(s): [{CommittedIds}]",
@@ -256,11 +240,8 @@ public sealed class DependencyUpdateOrchestrator(
             if (hadError)
                 break;
 
-            var toRefresh = csprojCommittedRepoIds
-                .Union(vfCommittedRepoIds)
-                .ToList();
-            if (toRefresh.Count > 0
-                && !await RefreshRepositoryVersionsAsync(toRefresh, workspaceId, cancellationToken, levelProgress, onAppSideComplete, OnRepoError))
+            if (csprojCommittedRepoIds.Count > 0
+                && !await RefreshRepositoryVersionsAsync(csprojCommittedRepoIds, workspaceId, cancellationToken, levelProgress, onAppSideComplete, OnRepoError))
             {
                 hadError = true;
                 break;
@@ -281,7 +262,7 @@ public sealed class DependencyUpdateOrchestrator(
             "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: run finished. HadError={HadError}, TotalSyncedRepos={SyncedCount}",
             runId, workspaceId, hadError, hadError ? 0 : allSyncedRepoIds.Count);
 
-        return hadError ? new HashSet<int>() : allSyncedRepoIds;
+        return hadError ? DependencyUpdateRunResult.Failed() : DependencyUpdateRunResult.Ok(allSyncedRepoIds);
     }
 
     private async Task<IReadOnlyList<(int Level, IReadOnlySet<int> RepoIds)>> GetRepositoryIdsByDependencyLevelAsync(
@@ -440,21 +421,16 @@ public sealed class DependencyUpdateOrchestrator(
             byRepo,
             onProgress: (c, t, _) => setProgress($"Committed version files {c} of {t}"),
             cancellationToken: cancellationToken,
-            commitMessageOverride: commitMessageOverride);
+            commitMessageOverride: commitMessageOverride,
+            skipHooks: true);
 
-        var committedVersionRepoIds = new List<int>();
-        foreach (var (repoId, committed, errMsg) in vfCommitResults)
-        {
-            if (!string.IsNullOrEmpty(errMsg))
-            {
-                onRepoError(repoId, errMsg);
-                return (false, []);
-            }
-            if (committed)
-                committedVersionRepoIds.Add(repoId);
-        }
+        var classified = DependencyCommitResults.Classify(vfCommitResults);
+        foreach (var (repoId, errMsg) in classified.Errors)
+            onRepoError(repoId, errMsg);
+        if (classified.Errors.Count > 0)
+            return (false, []);
 
-        return (true, committedVersionRepoIds);
+        return (true, classified.CommittedRepoIds);
     }
 
 }
