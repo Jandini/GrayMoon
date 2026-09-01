@@ -254,16 +254,16 @@ public sealed partial class WorkspaceRepositories
             var runId = Guid.NewGuid().ToString("N")[..8];
             Logger.LogInformation("[PushUpdated {RunId}] Level-Only Update & Push starting for workspace {WorkspaceId}, up to level {Level}", runId, WorkspaceId, level);
 
-            // Phase 1: update repos needing work up to the target level
+            // Phase 1: update repos needing work up to the target level.
+            // Do not pre-filter by a snapshot of repos already flagged as out of date: a level-1/2
+            // commit made during this run can only mark higher levels (up to and including the
+            // target level) out of date once refreshed, which happens after this snapshot is taken.
+            // The orchestrator already scopes/skips per level live (via maxLevel), so no repo-id
+            // scope is needed here.
             IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
             try
             {
-                // Do not pre-filter by a snapshot of repos already flagged as out of date: a level-1/2
-                // commit made during this run can only mark higher levels (up to and including the
-                // target level) out of date once refreshed, which happens after this snapshot is taken.
-                // The orchestrator already scopes/skips per level live (via maxLevel), so no repo-id
-                // scope is needed here.
-                syncedRepoIds = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, IReadOnlySet<int>>(
+                var updateResult = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, DependencyUpdateRunResult>(
                     svc => svc.UpdateAsync(
                         WorkspaceId,
                         ct,
@@ -277,6 +277,11 @@ public sealed partial class WorkspaceRepositories
 
                 await ReloadWorkspaceDataFromFreshScopeAsync();
                 _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
+
+                if (!updateResult.Success)
+                    return;
+
+                syncedRepoIds = updateResult.SyncedRepoIds;
             }
             catch (OperationCanceledException)
             {
@@ -359,7 +364,7 @@ public sealed partial class WorkspaceRepositories
             IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
             try
             {
-                syncedRepoIds = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, IReadOnlySet<int>>(
+                var updateResult = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, DependencyUpdateRunResult>(
                     svc => svc.UpdateAsync(
                         WorkspaceId,
                         ct,
@@ -372,6 +377,11 @@ public sealed partial class WorkspaceRepositories
 
                 await ReloadWorkspaceDataFromFreshScopeAsync();
                 _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
+
+                if (!updateResult.Success)
+                    return;
+
+                syncedRepoIds = updateResult.SyncedRepoIds;
             }
             catch (OperationCanceledException)
             {

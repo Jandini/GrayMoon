@@ -2,7 +2,7 @@ namespace GrayMoon.Application;
 
 public interface IWorkspaceFeatureOperations
 {
-    Task<IReadOnlySet<int>> CreateAsync(
+    Task<DependencyUpdateRunResult> CreateAsync(
         int workspaceId,
         string newBranchName,
         string baseBranch,

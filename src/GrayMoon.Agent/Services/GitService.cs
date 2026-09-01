@@ -1042,7 +1042,13 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
         var hooksArgs = GetHooksConfigArgs(skipHooks);
         var addPrefix = hooksArgs.Concat(["add"]).ToArray();
-        var (addExit, addOut, addErr) = await RunPathspecOperationAsync(repoPath, addPrefix, paths, ct);
+        var (addExit, addOut, addErr) = await GitIgnoredPathFilter.AddWithIgnoredFallbackAsync(
+            runner,
+            logger,
+            repoPath,
+            paths,
+            remaining => RunPathspecOperationAsync(repoPath, addPrefix, remaining, ct),
+            ct);
         if (addExit != 0)
         {
             var err = (addErr ?? addOut ?? "").Trim();

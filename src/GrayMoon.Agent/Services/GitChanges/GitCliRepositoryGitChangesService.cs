@@ -1,5 +1,6 @@
 using System.Text;
 using GrayMoon.Agent.Abstractions;
+using GrayMoon.Agent.Services;
 using GrayMoon.Common.Git;
 using Microsoft.Extensions.Logging;
 
@@ -179,7 +180,13 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
                 return new GitMutationResult { Success = false, ErrorCode = "NoPaths", ErrorMessage = "No paths to stage." };
             }
 
-            var (exitCode, stdout, stderr) = await RunPathspecOperationAsync(repoPath, ["add"], normalized, cancellationToken);
+            var (exitCode, stdout, stderr) = await GitIgnoredPathFilter.AddWithIgnoredFallbackAsync(
+                runner,
+                logger,
+                repoPath,
+                normalized,
+                remaining => RunPathspecOperationAsync(repoPath, ["add"], remaining, cancellationToken),
+                cancellationToken);
             if (exitCode != 0)
             {
                 return await MutationFailureAsync(repoPath, "StageFailed", (stderr ?? stdout ?? "git add failed").Trim(), nextSnapshotVersion, cancellationToken);

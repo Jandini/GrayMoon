@@ -2,14 +2,14 @@ using GrayMoon.Agent.Models;
 
 namespace GrayMoon.Agent.Abstractions;
 
-/// <summary>Finds and parses .csproj files within a repository path (root and subdirectories, excluding .git), with parallel subdirectory search.</summary>
+/// <summary>Finds and parses .csproj files within a repository path (root and subdirectories, excluding .git and gitignored top-level directories), with parallel subdirectory search.</summary>
 public interface ICsProjFileService
 {
-    /// <summary>Finds all *.csproj in repo root and subdirectories (except .git), parses each in parallel (up to maxParallel at a time when specified), and returns parsed info for every successfully parsed file. Failed parses are skipped.</summary>
+    /// <summary>Finds all *.csproj in repo root and subdirectories (except .git and gitignored top-level directories), parses each in parallel (up to maxParallel at a time when specified), and returns parsed info for every successfully parsed file. Failed parses are skipped.</summary>
     /// <param name="maxParallel">When null, uses a default (e.g. 8).</param>
     Task<IReadOnlyList<CsProjFileInfo>> FindAsync(string repoPath, CancellationToken cancellationToken = default, int? maxParallel = null);
 
-    /// <summary>Returns full paths of all *.csproj in repo root and subdirectories (except .git), searching subdirs in parallel.</summary>
+    /// <summary>Returns full paths of all *.csproj in repo root and subdirectories (except .git and gitignored top-level directories), searching subdirs in parallel.</summary>
     /// <param name="maxParallel">When null, uses a default (e.g. 8).</param>
     Task<IReadOnlyList<string>> GetProjectPathsAsync(string repoPath, CancellationToken cancellationToken = default, int? maxParallel = null);
 

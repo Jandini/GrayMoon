@@ -78,7 +78,7 @@ public static class WorkspaceOperationsEndpoints
         CancellationToken cancellationToken)
         => WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Updating dependencies...", async (progress, ct) =>
         {
-            await operations.UpdateAsync(
+            var result = await operations.UpdateAsync(
                 workspaceId,
                 ct,
                 progress,
@@ -87,7 +87,9 @@ public static class WorkspaceOperationsEndpoints
                 commitMessage: body?.CommitMessage,
                 includeDepsInCommitMessage: body?.IncludeDepsInCommitMessage ?? true,
                 maxLevel: body?.MaxLevel);
-            return Results.Ok(new { success = true });
+            return result.Success
+                ? Results.Ok(new { success = true })
+                : Results.BadRequest(new { success = false, error = "Update failed." });
         }, cancellationToken);
 
     private static Task<IResult> Push(
@@ -125,7 +127,7 @@ public static class WorkspaceOperationsEndpoints
 
         return WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Creating branches...", async (progress, ct) =>
         {
-            var synced = await operations.CreateAsync(
+            var created = await operations.CreateAsync(
                 workspaceId,
                 body.NewBranchName.Trim(),
                 body.BaseBranch ?? "__default__",
@@ -136,8 +138,12 @@ public static class WorkspaceOperationsEndpoints
                 (_, _) => { },
                 ct);
 
-            if (!body.PushChanges)
-                return Results.Ok(new { success = true, pushed = false });
+            if (!created.ShouldChainPush(body.PushChanges))
+            {
+                return created.Success
+                    ? Results.Ok(new { success = true, pushed = false })
+                    : Results.BadRequest(new { success = false, error = "Update failed." });
+            }
 
             var push = await pushOperations.PushPendingAsync(workspaceId, synchronizedPush: true, progress, ct);
             return push.Success

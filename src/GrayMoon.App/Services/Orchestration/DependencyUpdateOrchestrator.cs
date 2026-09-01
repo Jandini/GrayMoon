@@ -32,7 +32,7 @@ public sealed class DependencyUpdateOrchestrator(
     /// <param name="includeDepsInCommitMessage">When true, the list of updated packages is appended to the commit message body.</param>
     /// <param name="maxLevel">Optional. When set, only repositories at or below this dependency level are processed; higher levels are skipped.</param>
     /// <param name="runId">Optional caller-supplied correlation id included in every log line for this run so it can be filtered from application logs.</param>
-    public async Task<IReadOnlySet<int>> RunAsync(
+    public async Task<DependencyUpdateRunResult> RunAsync(
         int workspaceId,
         CancellationToken cancellationToken,
         IProgress<OperationProgress>? progress,
@@ -48,7 +48,7 @@ public sealed class DependencyUpdateOrchestrator(
         if (repoIdsToUpdate is { Count: 0 })
         {
             logger.LogInformation("[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: caller passed an empty repoIdsToUpdate set; nothing to do.", runId, workspaceId);
-            return new HashSet<int>();
+            return DependencyUpdateRunResult.Ok();
         }
 
         logger.LogInformation(
@@ -78,7 +78,7 @@ public sealed class DependencyUpdateOrchestrator(
         if (hadError)
         {
             logger.LogWarning("[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: aborting after RefreshWorkspaceProjectsAsync error.", runId, workspaceId);
-            return new HashSet<int>();
+            return DependencyUpdateRunResult.Failed();
         }
 
         // Step 2+: Walk every dependency level (up to maxLevel). Do not limit the level walk to the
@@ -90,7 +90,7 @@ public sealed class DependencyUpdateOrchestrator(
         if (levelRepoIds.Count == 0)
             hadError = true;
         if (hadError)
-            return new HashSet<int>();
+            return DependencyUpdateRunResult.Failed();
 
         logger.LogInformation(
             "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: {LevelCount} level(s) to walk: {Levels}",
@@ -262,7 +262,7 @@ public sealed class DependencyUpdateOrchestrator(
             "[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: run finished. HadError={HadError}, TotalSyncedRepos={SyncedCount}",
             runId, workspaceId, hadError, hadError ? 0 : allSyncedRepoIds.Count);
 
-        return hadError ? new HashSet<int>() : allSyncedRepoIds;
+        return hadError ? DependencyUpdateRunResult.Failed() : DependencyUpdateRunResult.Ok(allSyncedRepoIds);
     }
 
     private async Task<IReadOnlyList<(int Level, IReadOnlySet<int> RepoIds)>> GetRepositoryIdsByDependencyLevelAsync(

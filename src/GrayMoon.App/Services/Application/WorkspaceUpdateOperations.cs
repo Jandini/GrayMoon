@@ -12,7 +12,7 @@ public sealed class WorkspaceUpdateOperations(
         CancellationToken cancellationToken = default)
         => workspaceGitService.GetUpdatePlanAsync(workspaceId, repositoryIds, cancellationToken);
 
-    public Task<IReadOnlySet<int>> UpdateAsync(
+    public Task<DependencyUpdateRunResult> UpdateAsync(
         int workspaceId,
         CancellationToken cancellationToken,
         IProgress<OperationProgress>? progress,

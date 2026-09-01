@@ -49,6 +49,8 @@ public sealed class GitServiceStageAndCommitTests : IDisposable
         AssertHooksPrefix(commit);
         Assert.Contains("-F", commit);
         Assert.Contains("-", commit);
+        Assert.DoesNotContain(_recorder.ArgumentListCalls, c => c.Contains("check-ignore"));
+        Assert.DoesNotContain(_recorder.ArgumentListCalls, c => c.Contains("-f"));
     }
 
     [Fact]
@@ -116,6 +118,82 @@ public sealed class GitServiceStageAndCommitTests : IDisposable
         Assert.True(success);
         Assert.False(committed);
         Assert.Null(error);
+    }
+
+    [Fact]
+    public async Task Ignored_path_add_failure_drops_ignored_and_commits_the_rest()
+    {
+        _repo.CommitInitial();
+        _repo.WriteFile(".gitignore", ".work\n");
+        _repo.RunGit("add", ".gitignore");
+        _repo.RunGit("commit", "-m", "ignore .work");
+        _repo.WriteFile("src/Lib/Lib.csproj", "<Project />\n");
+        _repo.WriteFile(".work/Ignored.csproj", "<Project />\n");
+
+        var (success, committed, error) = await _git.StageAndCommitAsync(
+            _repo.RepositoryPath,
+            ["src/Lib/Lib.csproj", ".work/Ignored.csproj"],
+            "chore(deps): update package versions",
+            CancellationToken.None,
+            skipHooks: true);
+
+        Assert.True(success);
+        Assert.True(committed);
+        Assert.Null(error);
+
+        Assert.Contains(_recorder.ArgumentListCalls, c => c.Contains("check-ignore"));
+        Assert.Equal(2, _recorder.ArgumentListCalls.Count(c => c.Contains("add")));
+        Assert.DoesNotContain(_recorder.ArgumentListCalls, c => c.Contains("-f"));
+
+        var names = _repo.RunGit("log", "-1", "--name-only", "--pretty=format:").Stdout;
+        Assert.Contains("src/Lib/Lib.csproj", names);
+        Assert.DoesNotContain("Ignored.csproj", names);
+
+        Assert.True(File.Exists(Path.Combine(_repo.RepositoryPath, ".work", "Ignored.csproj")));
+        var trackedWork = _repo.RunGit("ls-files", ".work").Stdout;
+        Assert.True(string.IsNullOrWhiteSpace(trackedWork));
+    }
+
+    [Fact]
+    public async Task All_ignored_paths_is_nothing_staged()
+    {
+        _repo.CommitInitial();
+        _repo.WriteFile(".gitignore", ".work\n");
+        _repo.RunGit("add", ".gitignore");
+        _repo.RunGit("commit", "-m", "ignore .work");
+        _repo.WriteFile(".work/Ignored.csproj", "<Project />\n");
+
+        var (success, committed, error) = await _git.StageAndCommitAsync(
+            _repo.RepositoryPath,
+            [".work/Ignored.csproj"],
+            "chore(deps): update package versions",
+            CancellationToken.None);
+
+        Assert.True(success);
+        Assert.False(committed);
+        Assert.Null(error);
+        Assert.Contains(_recorder.ArgumentListCalls, c => c.Contains("check-ignore"));
+    }
+
+    [Fact]
+    public async Task Tracked_then_gitignored_file_still_stages_without_check_ignore()
+    {
+        _repo.CommitInitial("tracked.csproj", "<Project />\n");
+        _repo.WriteFile(".gitignore", "tracked.csproj\n");
+        _repo.RunGit("add", ".gitignore");
+        _repo.RunGit("commit", "-m", "ignore tracked csproj");
+        _repo.WriteFile("tracked.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+
+        var (success, committed, error) = await _git.StageAndCommitAsync(
+            _repo.RepositoryPath,
+            ["tracked.csproj"],
+            "chore: update tracked csproj",
+            CancellationToken.None);
+
+        Assert.True(success);
+        Assert.True(committed);
+        Assert.Null(error);
+        Assert.DoesNotContain(_recorder.ArgumentListCalls, c => c.Contains("check-ignore"));
     }
 
     private static void AssertHooksPrefix(IReadOnlyList<string> args)

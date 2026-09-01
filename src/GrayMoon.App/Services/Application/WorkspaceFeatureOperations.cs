@@ -2,7 +2,7 @@ namespace GrayMoon.App.Services.Application;
 
 public sealed class WorkspaceFeatureOperations(NewFeatureOrchestrator orchestrator) : IWorkspaceFeatureOperations
 {
-    public Task<IReadOnlySet<int>> CreateAsync(
+    public Task<DependencyUpdateRunResult> CreateAsync(
         int workspaceId,
         string newBranchName,
         string baseBranch,

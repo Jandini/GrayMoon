@@ -14,6 +14,22 @@ public sealed record OperationResult(
         => new(false, error, repoErrors);
 }
 
+/// <summary>
+/// Result of a dependency-update run. <see cref="Success"/> is false when any repo or workspace-level
+/// error was reported; chained push (New Feature / Update and Push) must not run in that case.
+/// An empty <see cref="SyncedRepoIds"/> with <see cref="Success"/> true means nothing needed updating.
+/// </summary>
+public sealed record DependencyUpdateRunResult(bool Success, IReadOnlySet<int> SyncedRepoIds)
+{
+    public static DependencyUpdateRunResult Ok(IReadOnlySet<int>? syncedRepoIds = null)
+        => new(true, syncedRepoIds ?? new HashSet<int>());
+
+    public static DependencyUpdateRunResult Failed()
+        => new(false, new HashSet<int>());
+
+    public bool ShouldChainPush(bool pushRequested) => pushRequested && Success;
+}
+
 public static class OperationProgressExtensions
 {
     public static void Report(

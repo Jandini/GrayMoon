@@ -55,7 +55,7 @@ public sealed partial class WorkspaceRepositories
             IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
             try
             {
-                syncedRepoIds = await ScopedExecutor.ExecuteAsync<IWorkspaceFeatureOperations, IReadOnlySet<int>>(
+                var updateResult = await ScopedExecutor.ExecuteAsync<IWorkspaceFeatureOperations, DependencyUpdateRunResult>(
                     svc => svc.CreateAsync(
                         WorkspaceId,
                         request.NewBranchName,
@@ -70,6 +70,11 @@ public sealed partial class WorkspaceRepositories
                 // Unconditional reload so workspaceRepositories is current for Phase 3
                 await ReloadWorkspaceDataFromFreshScopeAsync();
                 _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
+
+                if (!updateResult.ShouldChainPush(request.PushChanges))
+                    return;
+
+                syncedRepoIds = updateResult.SyncedRepoIds;
             }
             catch (OperationCanceledException)
             {
@@ -82,9 +87,6 @@ public sealed partial class WorkspaceRepositories
                 SafeInvoke(() => ShowOperationError("New Feature Failed", "Could not complete the New Feature workflow. The GrayMoon Agent may be offline or a dependency update failed. Check individual repository errors for details."));
                 throw;
             }
-
-            if (!request.PushChanges)
-                return;
 
             // Phase 3: determine push plan and execute push (per-level restore handled inside push service)
             job.ReportProgress("Preparing push...");
