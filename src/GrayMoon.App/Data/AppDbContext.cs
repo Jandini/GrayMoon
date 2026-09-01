@@ -412,7 +412,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.Property(e => e.WorktreeChange).HasConversion<int>();
 
             entity.HasOne<WorkspaceRepositoryLink>()
-                .WithMany()
+                .WithMany(wr => wr.GitChangeEntries)
                 .HasForeignKey(e => e.WorkspaceRepositoryId)
                 .OnDelete(DeleteBehavior.Cascade);
         });

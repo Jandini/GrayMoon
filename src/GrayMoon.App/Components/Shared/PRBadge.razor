@@ -1,8 +1,16 @@
 @using GrayMoon.App.Models
 @using Microsoft.AspNetCore.Components.Web
 
-@* PR column badge: none (dark gray), create (yellow, black text), #number (green), merged (purple), closed (red). Default "none" until data loads. *@
-@if (IsOnTag && HasNewerTag)
+@* PR column badge: uncommitted count (red, highest priority), none (dark gray), create (yellow, black text), #number (green), merged (purple), closed (red). Default "none" until data loads. *@
+@if (ShowsUncommittedChangesBadge(UncommittedChangedFileCount))
+{
+    var filesWord = UncommittedChangedFileCount == 1 ? "file" : "files";
+    <a href="@ChangesUrl"
+       class="badge pr-badge pr-badge-uncommitted"
+       title="@($"{UncommittedChangedFileCount} uncommitted {filesWord}")"
+       @onclick:stopPropagation>@UncommittedChangedFileCount</a>
+}
+else if (IsOnTag && HasNewerTag)
 {
     <span class="badge pr-badge pr-badge-create"
           role="button"
@@ -96,6 +104,9 @@ else
 
 @code {
     [Parameter] public PullRequestInfo? PullRequest { get; set; }
+    [Parameter] public int UncommittedChangedFileCount { get; set; }
+    /// <summary>Git Changes page URL. Used by the red uncommitted-count badge.</summary>
+    [Parameter] public string? ChangesUrl { get; set; }
     [Parameter] public int? DefaultBranchAheadCommits { get; set; }
     /// <summary>Deprecated. The create badge now invokes <see cref="OnCreateClick"/> instead of navigating to a URL.</summary>
     [Parameter] public string? CreatePrUrl { get; set; }
@@ -111,6 +122,10 @@ else
     [Parameter] public EventCallback OnUpgradeClick { get; set; }
     /// <summary>Raised with the PR number when the user clicks the "merge" segment of an open PR's chip.</summary>
     [Parameter] public EventCallback<int> OnMergeClick { get; set; }
+
+    /// <summary>True when the red uncommitted-count badge is shown: any unique persisted uncommitted path.</summary>
+    internal static bool ShowsUncommittedChangesBadge(int uncommittedChangedFileCount) =>
+        uncommittedChangedFileCount > 0;
 
     /// <summary>
     /// True when the yellow "create" badge is shown: PR state is verified, no PR already exists

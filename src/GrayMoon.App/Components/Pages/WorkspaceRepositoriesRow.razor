@@ -111,6 +111,8 @@
                 </span>
                 <span class="metrics-block metrics-pr text-nowrap">
                     <PRBadge PullRequest="@PrInfo"
+                            UncommittedChangedFileCount="@Link.UncommittedChangedFileCount"
+                            ChangesUrl="@($"/workspaces/{WorkspaceId}/changes")"
                             DefaultBranchAheadCommits="@Link.DefaultBranchAheadCommits"
                             IsPrVerified="@IsPrVerified"
                             IsOnTag="@Link.IsOnTag"

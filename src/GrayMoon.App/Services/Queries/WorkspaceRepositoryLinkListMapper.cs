@@ -28,6 +28,7 @@ internal static class WorkspaceRepositoryLinkListMapper
             RepositoryType = dto.RepositoryType,
             HasNewerTag = dto.HasNewerTag,
             HasSelfFileVersionToken = dto.HasSelfFileVersionToken,
+            UncommittedChangedFileCount = dto.UncommittedChangedFileCount,
             Repository = new Repository
             {
                 RepositoryId = dto.RepositoryId,

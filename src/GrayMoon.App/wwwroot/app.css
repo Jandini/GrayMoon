@@ -1214,6 +1214,13 @@ table.resizable-columns th:hover .resize-handle::after {
     background-color: #DA3633;
     color: #fff !important;
 }
+.repositories-table td.col-pr .pr-badge-uncommitted,
+.repositories-table td.col-pr a.pr-badge-uncommitted:hover,
+.repositories-table td.col-pr a.pr-badge-uncommitted:focus {
+    background-color: #dc3545;
+    color: #fff !important;
+    text-decoration: none;
+}
 .repositories-table td.col-pr .pr-badge-files-changed {
     margin-left: 0.25rem;
 }
@@ -1257,6 +1264,7 @@ table.resizable-columns th:hover .resize-handle::after {
     padding: 0.35em 0.4em 0.35em 0.65em;
     cursor: pointer;
     border-radius: 0;
+    text-decoration: none;
 }
 .repositories-table td.col-pr .pr-merge-chip__files {
     /* Background/text color comes from the shared mergeability class (pr-badge-open-*) applied

@@ -53,6 +53,19 @@ public sealed class LevelActionHighlightTests
         Assert.False(PRBadge.ShowsCreateBadge(true, true, pullRequest: null, defaultBranchAheadCommits: 4));
     }
 
+    [Fact]
+    public void UncommittedChanges_TrueWhenCountIsAtLeastOne()
+    {
+        Assert.True(PRBadge.ShowsUncommittedChangesBadge(1));
+        Assert.True(PRBadge.ShowsUncommittedChangesBadge(23));
+    }
+
+    [Fact]
+    public void UncommittedChanges_FalseWhenCountIsZero()
+    {
+        Assert.False(PRBadge.ShowsUncommittedChangesBadge(0));
+    }
+
     private static PullRequestInfo OpenPr() => new() { Number = 1, State = "open" };
 
     private static PullRequestInfo MergedPr() => new()
