@@ -786,6 +786,7 @@ h1:focus {
 .gm-callout--warning {
     background: rgba(251, 191, 36, 0.22);
     box-shadow: inset 3px 0 0 #fbbf24;
+    color: #fff;
 }
 
 /* Modals */
