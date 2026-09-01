@@ -118,7 +118,6 @@ try
     builder.Services.AddSingleton<IGitHubETagCache, GitHubETagCache>();
     builder.Services.AddSingleton<IGhaLiveFeedJobsCache, GhaLiveFeedJobsCache>();
     builder.Services.AddSingleton<IGitHubApiUsageRecorder, GitHubApiUsageRecorder>();
-    builder.Services.AddHostedService<GitHubApiUsageFlushBackgroundService>();
     builder.Services.AddHostedService<GitHubApiUsageLoggerBackgroundService>();
     builder.Services.AddScoped<SyncCommandHandler>();
     builder.Services.AddScoped<IAgentBridge, AgentBridge>();

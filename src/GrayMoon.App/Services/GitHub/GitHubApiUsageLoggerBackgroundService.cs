@@ -1,21 +1,18 @@
-using GrayMoon.App.Data;
-using Microsoft.EntityFrameworkCore;
-
 namespace GrayMoon.App.Services.GitHub;
 
 /// <summary>
-/// Every 10 minutes, logs the last hour's persisted GitHub API usage per connector (total calls, 304s,
+/// Every 30 minutes, logs in-memory GitHub API usage since the last snapshot per connector (total calls, 304s,
 /// errors, broken down by category) alongside the most recently observed rate-limit remaining/reset from
 /// <see cref="IGitHubRateLimitTracker"/>. Deliberately does not make its own GitHub call to cross-check
 /// (e.g. GET /rate_limit) - that would itself be a periodic background API consumer, which defeats the
 /// purpose of this service.
 /// </summary>
 public sealed class GitHubApiUsageLoggerBackgroundService(
-    IDbContextFactory<AppDbContext> dbContextFactory,
+    IGitHubApiUsageRecorder recorder,
     IGitHubRateLimitTracker rateLimitTracker,
     ILogger<GitHubApiUsageLoggerBackgroundService> logger) : BackgroundService
 {
-    private static readonly TimeSpan LogInterval = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan LogInterval = TimeSpan.FromMinutes(30);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -26,47 +23,37 @@ public sealed class GitHubApiUsageLoggerBackgroundService(
             while (!stoppingToken.IsCancellationRequested)
             {
                 await Task.Delay(LogInterval, stoppingToken);
-                await LogLastHourUsageAsync(stoppingToken);
+                LogUsage(logWhenEmpty: true);
             }
         }
         catch (OperationCanceledException)
         {
-            // Shutting down.
+            // Shutting down - log whatever is left so the last interval is not silently dropped.
+            LogUsage(logWhenEmpty: false);
         }
     }
 
-    private async Task LogLastHourUsageAsync(CancellationToken cancellationToken)
+    private void LogUsage(bool logWhenEmpty)
     {
         try
         {
-            await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-            var since = DateTime.UtcNow.AddHours(-1);
-
-            var rows = await dbContext.GitHubApiUsageHourly
-                .Where(u => u.HourBucketUtc >= since)
-                .ToListAsync(cancellationToken);
-
-            if (rows.Count == 0)
+            var entries = recorder.TakeSnapshot();
+            if (entries.Count == 0)
             {
-                logger.LogInformation("GitHub API usage (last hour): no calls recorded");
+                if (logWhenEmpty)
+                    logger.LogInformation("GitHub API usage (last 30 min): no calls recorded");
                 return;
             }
 
-            var connectorIds = rows.Select(r => r.ConnectorId).Distinct().ToList();
-            var connectorNames = await dbContext.Connectors
-                .Where(c => connectorIds.Contains(c.ConnectorId))
-                .ToDictionaryAsync(c => c.ConnectorId, c => c.ConnectorName, cancellationToken);
-
-            foreach (var group in rows.GroupBy(r => r.ConnectorId))
+            foreach (var group in entries.GroupBy(e => e.ConnectorId))
             {
-                var connectorName = connectorNames.TryGetValue(group.Key, out var name) ? name : $"connector#{group.Key}";
-                var total = group.Sum(r => r.RequestCount);
-                var notModified = group.Sum(r => r.NotModifiedCount);
-                var errors = group.Sum(r => r.ErrorCount);
+                var connectorName = group.First().ConnectorName;
+                var total = group.Sum(e => e.RequestCount);
+                var notModified = group.Sum(e => e.NotModifiedCount);
+                var errors = group.Sum(e => e.ErrorCount);
                 var byCategory = string.Join(", ", group
-                    .GroupBy(r => r.Category)
-                    .OrderByDescending(g => g.Sum(r => r.RequestCount))
-                    .Select(g => $"{g.Key}={g.Sum(r => r.RequestCount)}"));
+                    .OrderByDescending(e => e.RequestCount)
+                    .Select(e => $"{e.Category}={e.RequestCount}"));
 
                 var snapshot = rateLimitTracker.GetLatest(connectorName);
                 var quotaText = snapshot is { } s
@@ -77,7 +64,7 @@ public sealed class GitHubApiUsageLoggerBackgroundService(
                     : ", no rate-limit snapshot observed yet";
 
                 logger.LogInformation(
-                    "GitHub API usage (last hour) for {ConnectorName}: {Total} calls ({NotModified} not-modified, {Errors} errors) [{ByCategory}]{Quota}",
+                    "GitHub API usage (last 30 min) for {ConnectorName}: {Total} calls ({NotModified} not-modified, {Errors} errors) [{ByCategory}]{Quota}",
                     connectorName, total, notModified, errors, byCategory, quotaText);
             }
         }
