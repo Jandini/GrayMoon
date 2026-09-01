@@ -131,9 +131,7 @@ public sealed partial class WorkspaceGitChanges
         }
 
         var message = _workspaceCommitMessage;
-        var label = targets.Count == 1
-            ? $"Committing in {targets[0].RepositoryName}..."
-            : $"Committing in {targets.Count} repositories...";
+        var label = $"Committing in {targets.Count} repositor{(targets.Count == 1 ? "y" : "ies")}...";
 
         StartPageJob(label, async (job, ct) =>
         {
