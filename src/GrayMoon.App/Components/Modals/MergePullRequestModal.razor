@@ -280,7 +280,7 @@
                         <label class="form-check-label" for="merge-pr-sync-default">Sync to default branch</label>
                     </div>
                     <div class="merge-pr-footer-actions">
-                        <div class="btn-group merge-pr-split-btn">
+                        <div class="btn-group merge-pr-split-btn @(IsPrimaryActionDisabled ? "merge-pr-split-btn--pending" : null)">
                             <button type="button"
                                     class="btn merge-pr-split-btn__main @PrimaryActionButtonClass"
                                     disabled="@IsPrimaryActionDisabled"

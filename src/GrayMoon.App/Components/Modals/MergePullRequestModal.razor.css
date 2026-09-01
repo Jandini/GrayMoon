@@ -467,6 +467,20 @@
     border-left: 1px solid rgba(255, 255, 255, 0.3);
 }
 
+/*
+ * The caret stays enabled so Close pull request is reachable while merge is still loading or
+ * blocked. Without this, merge-pr-btn-github would paint that half green while the main action
+ * is still the disabled gray.
+ */
+::deep .merge-pr-split-btn--pending .btn.merge-pr-split-btn__toggle:not(:disabled),
+::deep .merge-pr-split-btn--pending .btn.merge-pr-split-btn__toggle:not(:disabled):hover,
+::deep .merge-pr-split-btn--pending .btn.merge-pr-split-btn__toggle:not(:disabled):focus-visible,
+::deep .merge-pr-split-btn--pending .btn.merge-pr-split-btn__toggle:not(:disabled):active {
+    background-color: #30363d;
+    border-color: rgba(240, 246, 252, 0.1);
+    color: rgba(255, 255, 255, 0.5);
+}
+
 ::deep .merge-pr-method-menu {
     /*
      * Use the app's own theme variables (--bg-card/--border-color/--text-primary), not bootstrap's
