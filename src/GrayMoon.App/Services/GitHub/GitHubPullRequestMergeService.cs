@@ -20,6 +20,7 @@ public sealed record PullRequestMergeReviewData(
     int ChangesRequestedCount,
     IReadOnlyList<string> OutstandingReviewers,
     IReadOnlyList<string> ApprovedByUsers,
+    bool HasReviewerComments,
     ChecksSummary Checks,
     IReadOnlyList<MergeMethod> AllowedMergeMethods,
     MergeMethod? DefaultMergeMethod);
@@ -71,6 +72,7 @@ public sealed class GitHubPullRequestMergeService(
             ChangesRequestedCount = review.ChangesRequestedCount,
             OutstandingReviewers = review.OutstandingReviewers,
             ApprovedByUsers = review.ApprovedByUsers,
+            HasReviewerComments = review.HasReviewerComments,
             Checks = review.Checks,
             AllowedMergeMethods = review.AllowedMergeMethods,
             DefaultMergeMethod = review.DefaultMergeMethod,
@@ -160,8 +162,8 @@ public sealed class GitHubPullRequestMergeService(
         var settings = settingsTask.Result;
         var checkRuns = checksTask.Result;
 
-        var (approvedCount, changesRequestedCount, outstandingReviewers, approvedByUsers) = SummarizeReviews(reviews, pr?.RequestedReviewers, pr?.RequestedTeams);
-        var checksSummary = SummarizeChecks(checkRuns);
+        var (approvedCount, changesRequestedCount, outstandingReviewers, approvedByUsers, hasReviewerComments) = SummarizeReviews(reviews, pr?.RequestedReviewers, pr?.RequestedTeams);
+        var checksSummary = SummarizeChecks(checkRuns, repository.CloneUrl, owner, repo, prNumber, connector.ApiBaseUrl);
         var allowedMethods = GetAllowedMergeMethods(settings);
         var defaultMethod = DefaultMethodPriority.FirstOrDefault(m => allowedMethods.Contains(m), allowedMethods.FirstOrDefault());
 
@@ -170,6 +172,7 @@ public sealed class GitHubPullRequestMergeService(
             changesRequestedCount,
             outstandingReviewers,
             approvedByUsers,
+            hasReviewerComments,
             checksSummary,
             allowedMethods,
             allowedMethods.Count > 0 ? defaultMethod : null);
@@ -261,7 +264,7 @@ public sealed class GitHubPullRequestMergeService(
         }
     }
 
-    private static (int Approved, int ChangesRequested, IReadOnlyList<string> Outstanding, IReadOnlyList<string> ApprovedBy) SummarizeReviews(
+    private static (int Approved, int ChangesRequested, IReadOnlyList<string> Outstanding, IReadOnlyList<string> ApprovedBy, bool HasReviewerComments) SummarizeReviews(
         List<GitHubPullRequestReviewDto> reviews,
         List<GitHubUserDto>? requestedReviewers,
         List<GitHubTeamDto>? requestedTeams)
@@ -289,10 +292,23 @@ public sealed class GitHubPullRequestMergeService(
                 .Where(s => !string.IsNullOrWhiteSpace(s)))
             .ToList();
 
-        return (approvedByUsers.Count, changesRequested, outstanding, approvedByUsers);
+        // Any submitted review with a body or COMMENTED state, not only the latest stance, so an earlier
+        // comment still surfaces the conversation icon after a later empty approval.
+        var hasReviewerComments = reviews.Any(r =>
+            !string.Equals(r.State, "PENDING", StringComparison.OrdinalIgnoreCase)
+            && (!string.IsNullOrWhiteSpace(r.Body)
+                || string.Equals(r.State, "COMMENTED", StringComparison.OrdinalIgnoreCase)));
+
+        return (approvedByUsers.Count, changesRequested, outstanding, approvedByUsers, hasReviewerComments);
     }
 
-    private static ChecksSummary SummarizeChecks(GitHubCheckRunsResponse? response)
+    private static ChecksSummary SummarizeChecks(
+        GitHubCheckRunsResponse? response,
+        string? cloneUrl,
+        string owner,
+        string repo,
+        int prNumber,
+        string? connectorApiBaseUrl)
     {
         var runs = response?.CheckRuns ?? [];
         if (runs.Count == 0)
@@ -316,7 +332,37 @@ public sealed class GitHubPullRequestMergeService(
         var passed = latestByName.Count - pending - failed;
 
         var state = failed > 0 ? ChecksState.Failed : pending > 0 ? ChecksState.Pending : ChecksState.Passed;
-        return new ChecksSummary { Passed = passed, Failed = failed, Pending = pending, State = state };
+        var jobUrls = latestByName
+            .Select(r => ResolveCheckJobUrl(r, cloneUrl, owner, repo, prNumber, connectorApiBaseUrl))
+            .Where(u => !string.IsNullOrWhiteSpace(u))
+            .Select(u => u!)
+            .ToList();
+
+        return new ChecksSummary
+        {
+            Passed = passed,
+            Failed = failed,
+            Pending = pending,
+            State = state,
+            JobUrls = jobUrls
+        };
+    }
+
+    private static string? ResolveCheckJobUrl(
+        GitHubCheckRunDto run,
+        string? cloneUrl,
+        string owner,
+        string repo,
+        int prNumber,
+        string? connectorApiBaseUrl)
+    {
+        var url = run.HtmlUrl;
+        if (string.IsNullOrWhiteSpace(url))
+            url = RepositoryUrlHelper.GetCheckRunWebUrl(cloneUrl, owner, repo, run.Id, connectorApiBaseUrl);
+        if (string.IsNullOrWhiteSpace(url))
+            return null;
+
+        return RepositoryUrlHelper.AppendPrQuery(url, prNumber);
     }
 
     /// <summary>Missing/null flags are treated as allowed, matching GitHub's own default-visible behavior for API responses that omit these fields (e.g. reduced token scope).</summary>
