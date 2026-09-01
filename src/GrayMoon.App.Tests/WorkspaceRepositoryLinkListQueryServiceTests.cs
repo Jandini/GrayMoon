@@ -1,5 +1,6 @@
 using GrayMoon.App.Models;
 using GrayMoon.App.Services.Queries;
+using GrayMoon.Common.Git;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Tests;
@@ -177,6 +178,71 @@ public class WorkspaceRepositoryLinkListQueryServiceTests
             Assert.False(WorkspaceRepositoryLinkListMapper.ToLink(other).Repository!.Archived);
         }
     }
+
+    [Fact]
+    public async Task Snapshot_uncommitted_count_is_unique_paths_for_staged_changed_and_mixed()
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(8);
+        await using (ctx)
+        {
+            var links = await ctx.DbContext.WorkspaceRepositories
+                .AsNoTracking()
+                .Where(wr => wr.WorkspaceId == workspaceId)
+                .OrderBy(wr => wr.WorkspaceRepositoryId)
+                .Take(3)
+                .ToListAsync();
+            Assert.Equal(3, links.Count);
+
+            var stagedOnly = links[0];
+            var changedOnly = links[1];
+            var mixed = links[2];
+
+            ctx.DbContext.WorkspaceGitChangeEntries.AddRange(
+                Entry(stagedOnly.WorkspaceRepositoryId, "src/a.cs", GitChangeKind.Modified, GitChangeKind.None),
+                Entry(stagedOnly.WorkspaceRepositoryId, "src/b.cs", GitChangeKind.Added, GitChangeKind.None),
+                Entry(stagedOnly.WorkspaceRepositoryId, "src/c.cs", GitChangeKind.Modified, GitChangeKind.None),
+                Entry(changedOnly.WorkspaceRepositoryId, "src/d.cs", GitChangeKind.None, GitChangeKind.Modified),
+                Entry(changedOnly.WorkspaceRepositoryId, "src/e.cs", GitChangeKind.None, GitChangeKind.Untracked),
+                Entry(mixed.WorkspaceRepositoryId, "src/both.cs", GitChangeKind.Modified, GitChangeKind.Modified),
+                Entry(mixed.WorkspaceRepositoryId, "src/staged.cs", GitChangeKind.Added, GitChangeKind.None),
+                Entry(mixed.WorkspaceRepositoryId, "src/changed.cs", GitChangeKind.None, GitChangeKind.Modified));
+            await ctx.DbContext.SaveChangesAsync();
+
+            var stagedSnapshot = await ctx.WorkspaceRepoLinkQuery.GetSnapshotAsync(workspaceId, stagedOnly.RepositoryId);
+            Assert.NotNull(stagedSnapshot);
+            Assert.Equal(3, stagedSnapshot.UncommittedChangedFileCount);
+            Assert.Equal(3, WorkspaceRepositoryLinkListMapper.ToLink(stagedSnapshot).UncommittedChangedFileCount);
+
+            var changedSnapshot = await ctx.WorkspaceRepoLinkQuery.GetSnapshotAsync(workspaceId, changedOnly.RepositoryId);
+            Assert.NotNull(changedSnapshot);
+            Assert.Equal(2, changedSnapshot.UncommittedChangedFileCount);
+
+            var mixedSnapshot = await ctx.WorkspaceRepoLinkQuery.GetSnapshotAsync(workspaceId, mixed.RepositoryId);
+            Assert.NotNull(mixedSnapshot);
+            Assert.Equal(3, mixedSnapshot.UncommittedChangedFileCount);
+
+            var clean = await ctx.DbContext.WorkspaceRepositories
+                .AsNoTracking()
+                .Where(wr => wr.WorkspaceId == workspaceId && wr.WorkspaceRepositoryId != stagedOnly.WorkspaceRepositoryId
+                    && wr.WorkspaceRepositoryId != changedOnly.WorkspaceRepositoryId
+                    && wr.WorkspaceRepositoryId != mixed.WorkspaceRepositoryId)
+                .Select(wr => wr.RepositoryId)
+                .FirstAsync();
+            var cleanSnapshot = await ctx.WorkspaceRepoLinkQuery.GetSnapshotAsync(workspaceId, clean);
+            Assert.NotNull(cleanSnapshot);
+            Assert.Equal(0, cleanSnapshot.UncommittedChangedFileCount);
+        }
+    }
+
+    private static WorkspaceGitChangeEntry Entry(int workspaceRepositoryId, string path, GitChangeKind index, GitChangeKind worktree) =>
+        new()
+        {
+            WorkspaceRepositoryId = workspaceRepositoryId,
+            Path = path,
+            IndexChange = index,
+            WorktreeChange = worktree,
+            IsTracked = worktree != GitChangeKind.Untracked,
+        };
 
     [Fact]
     public async Task Header_state_aggregates_without_loading_all_columns()

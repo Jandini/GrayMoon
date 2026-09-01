@@ -44,7 +44,8 @@ public sealed record WorkspaceRepositoryLinkListItemDto(
     bool? PullRequestMergeable,
     string? PullRequestMergeableState,
     int? PullRequestChangedFiles,
-    bool Archived);
+    bool Archived,
+    int UncommittedChangedFileCount);
 
 public sealed record WorkspaceRepositoryLinkListPageResult(
     IReadOnlyList<WorkspaceRepositoryLinkListItemDto> Items,

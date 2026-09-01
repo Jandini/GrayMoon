@@ -98,4 +98,11 @@ public class WorkspaceRepositoryLink
 
     /// <summary>Persisted Git Changes status projection for this workspace-repo link. 1:1 optional.</summary>
     public WorkspaceGitRepositoryStatus? GitStatus { get; set; }
+
+    /// <summary>Unique persisted uncommitted paths (staged, unstaged, or both). Not a column - filled from the list-query DTO.</summary>
+    [NotMapped]
+    public int UncommittedChangedFileCount { get; set; }
+
+    /// <summary>Persisted Git Changes file rows for this workspace-repo link. Navigation only.</summary>
+    public ICollection<WorkspaceGitChangeEntry> GitChangeEntries { get; set; } = new List<WorkspaceGitChangeEntry>();
 }
