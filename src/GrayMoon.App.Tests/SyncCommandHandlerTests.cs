@@ -210,6 +210,48 @@ public sealed class SyncCommandHandlerTests
         Assert.Single(projects);
         Assert.Equal("Acme.Api", projects[0].ProjectName);
     }
+
+    [Fact]
+    public async Task Projects_with_package_references_update_project_dependencies_before_recompute()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await using var scope = ctx.CreateScope();
+        var handler = scope.ServiceProvider.GetRequiredService<SyncCommandHandler>();
+
+        await handler.HandleAsync(Notification(ctx, n =>
+        {
+            n.Version = "2.0.0";
+            n.Branch = "main";
+            n.Projects =
+            [
+                new RepositorySyncProjectNotification
+                {
+                    Name = "Acme.Lib",
+                    ProjectType = (int)ProjectType.Package,
+                    ProjectPath = "src/Acme.Lib/Acme.Lib.csproj",
+                    TargetFramework = "net10.0",
+                    PackageId = "Acme.Lib",
+                },
+                new RepositorySyncProjectNotification
+                {
+                    Name = "Acme.Api",
+                    ProjectType = (int)ProjectType.Service,
+                    ProjectPath = "src/Acme.Api/Acme.Api.csproj",
+                    TargetFramework = "net10.0",
+                    PackageReferences =
+                    [
+                        new RepositorySyncPackageReferenceNotification { Name = "Acme.Lib", Version = "2.0.0" }
+                    ]
+                }
+            ];
+        }));
+
+        var deps = await ctx.ReadDependenciesAsync();
+        var edge = Assert.Single(deps);
+        Assert.Equal("Acme.Api", edge.DependentProject!.ProjectName);
+        Assert.Equal("Acme.Lib", edge.ReferencedProject!.ProjectName);
+        Assert.Equal("2.0.0", edge.Version);
+    }
 }
 
 /// <summary>Mutable builder so tests can set only the fields they care about on an init-only notification.</summary>

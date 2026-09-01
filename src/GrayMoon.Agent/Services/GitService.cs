@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Models;
+using GrayMoon.Agent.Services.GitChanges;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -1026,7 +1027,7 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return new CommitCountsProbeResult(aheadCount, null, false, CountsProbed: true, UpstreamProbed: upstreamProbed);
     }
 
-    public async Task<(bool Success, bool Committed, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct)
+    public async Task<(bool Success, bool Committed, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct, bool skipHooks = false)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return (false, false, "Invalid repository path");
@@ -1035,12 +1036,13 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         if (string.IsNullOrWhiteSpace(commitMessage))
             return (false, false, "Commit message is required");
 
-        var paths = pathsToStage.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p!.Trim()).Distinct().ToList();
+        var paths = pathsToStage.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p!.Trim().Replace('\\', '/')).Distinct().ToList();
         if (paths.Count == 0)
             return (false, false, "No paths to stage");
 
-        var addArgs = "add -- " + string.Join(" ", paths.Select(p => p.Contains(' ') ? "\"" + p.Replace("\"", "\\\"") + "\"" : p));
-        var (addExit, addOut, addErr) = await runner.RunAsync("git", addArgs, repoPath, ct);
+        var hooksArgs = GetHooksConfigArgs(skipHooks);
+        var addPrefix = hooksArgs.Concat(["add"]).ToArray();
+        var (addExit, addOut, addErr) = await RunPathspecOperationAsync(repoPath, addPrefix, paths, ct);
         if (addExit != 0)
         {
             var err = (addErr ?? addOut ?? "").Trim();
@@ -1062,7 +1064,9 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         }
 
         var messageNormalized = commitMessage.Replace("\r\n", "\n").Replace("\r", "\n").TrimEnd();
-        var (commitExit, commitOut, commitErr) = await runner.RunWithStdinAsync("git", "commit -F -", repoPath, messageNormalized, ct);
+        var messageBytes = Encoding.UTF8.GetBytes(messageNormalized);
+        var commitArgs = hooksArgs.Concat(["commit", "-F", "-"]).ToArray();
+        var (commitExit, commitOut, commitErr) = await runner.RunAsync("git", commitArgs, repoPath, messageBytes, ct);
         if (commitExit != 0)
         {
             var err = (commitErr ?? commitOut ?? "").Trim();
@@ -1226,6 +1230,59 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
             return string.Empty;
         var escaped = EmptyHooksPath.Replace("\\", "\\\\").Replace("\"", "\\\"");
         return $"-c core.hooksPath=\"{escaped}\" ";
+    }
+
+    private static List<string> GetHooksConfigArgs(bool skipHooks)
+    {
+        if (!skipHooks)
+            return [];
+        return ["-c", $"core.hooksPath={EmptyHooksPath}"];
+    }
+
+    private async Task<(int ExitCode, string? Stdout, string? Stderr)> RunPathspecOperationAsync(
+        string repoPath,
+        IReadOnlyList<string> commandPrefix,
+        IReadOnlyList<string> paths,
+        CancellationToken cancellationToken)
+    {
+        var stdinBytes = GitPathspecStdinWriter.BuildNulDelimitedUtf8(paths);
+        var args = commandPrefix.Concat(["--pathspec-from-file=-", "--pathspec-file-nul"]).ToArray();
+        var result = await runner.RunAsync("git", args, repoPath, stdinBytes, cancellationToken);
+        if (result.ExitCode == 0)
+            return result;
+
+        if (!IsUnknownOptionError(result.Stderr, result.Stdout))
+            return result;
+
+        return await RunBoundedPathspecBatchesAsync(repoPath, commandPrefix, paths, cancellationToken);
+    }
+
+    private async Task<(int ExitCode, string? Stdout, string? Stderr)> RunBoundedPathspecBatchesAsync(
+        string repoPath,
+        IReadOnlyList<string> commandPrefix,
+        IReadOnlyList<string> paths,
+        CancellationToken cancellationToken)
+    {
+        var batches = GitPathspecStdinWriter.BuildBoundedBatches(paths);
+        for (var i = 0; i < batches.Count; i++)
+        {
+            var args = commandPrefix.Concat(["--"]).Concat(batches[i]).ToArray();
+            var result = await runner.RunAsync("git", args, repoPath, null, cancellationToken);
+            if (result.ExitCode != 0)
+            {
+                var error = $"Batch {i + 1} of {batches.Count} failed: {(result.Stderr ?? result.Stdout ?? "git failed").Trim()}";
+                return (result.ExitCode, result.Stdout, error);
+            }
+        }
+
+        return (0, null, null);
+    }
+
+    private static bool IsUnknownOptionError(string? stderr, string? stdout)
+    {
+        var text = (stderr ?? string.Empty) + " " + (stdout ?? string.Empty);
+        return text.Contains("unknown option", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("unrecognized argument", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsRemoteBranchAlreadyDeleted(string output)

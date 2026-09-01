@@ -23,7 +23,7 @@ public sealed class StageAndCommitCommand(IGitService git) : ICommandHandler<Sta
         if (checkedOutTag != null)
             return new StageAndCommitResponse { Success = true, Committed = false };
 
-        var (success, committed, errorMessage) = await git.StageAndCommitAsync(repoPath, pathsToStage.ToList(), commitMessage, cancellationToken);
+        var (success, committed, errorMessage) = await git.StageAndCommitAsync(repoPath, pathsToStage.ToList(), commitMessage, cancellationToken, skipHooks: request.SkipHooks);
         return new StageAndCommitResponse { Success = success, Committed = committed, ErrorMessage = errorMessage };
     }
 }

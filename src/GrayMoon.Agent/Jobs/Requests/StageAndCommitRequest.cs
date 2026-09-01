@@ -15,4 +15,7 @@ public sealed class StageAndCommitRequest : WorkspaceCommandRequest
 
     [JsonPropertyName("pathsToStage")]
     public IReadOnlyList<string>? PathsToStage { get; set; }
+
+    [JsonPropertyName("skipHooks")]
+    public bool SkipHooks { get; set; }
 }

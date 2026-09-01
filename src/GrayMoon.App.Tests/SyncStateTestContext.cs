@@ -185,6 +185,18 @@ public sealed class SyncStateTestContext : IAsyncDisposable
             .ToListAsync();
     }
 
+    public async Task<List<ProjectDependency>> ReadDependenciesAsync()
+    {
+        var factory = _provider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        return await db.ProjectDependencies
+            .AsNoTracking()
+            .Include(d => d.DependentProject)
+            .Include(d => d.ReferencedProject)
+            .Where(d => d.DependentProject != null && d.DependentProject.WorkspaceId == WorkspaceId)
+            .ToListAsync();
+    }
+
     public async Task<WorkspaceRepositoryPullRequest?> ReadPullRequestAsync()
     {
         var factory = _provider.GetRequiredService<IDbContextFactory<AppDbContext>>();
