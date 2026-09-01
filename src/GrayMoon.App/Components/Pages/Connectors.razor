@@ -57,9 +57,7 @@
         </div>
         @if (errorMessage != null)
         {
-            <div class="alert alert-danger">
-                <i class="bi bi-exclamation-triangle"></i> @errorMessage
-            </div>
+            <div class="gm-callout gm-callout--error" role="alert">@errorMessage</div>
         }
     </div>
     @if (errorMessage == null)
