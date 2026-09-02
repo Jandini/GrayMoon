@@ -5,9 +5,14 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
 
-public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService workspaceService, ILogger<WorkspaceRepository> logger)
+public class WorkspaceRepository(
+    AppDbContext dbContext,
+    IDbContextFactory<AppDbContext> dbContextFactory,
+    WorkspaceService workspaceService,
+    ILogger<WorkspaceRepository> logger)
 {
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly IDbContextFactory<AppDbContext> _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
     private readonly WorkspaceService _workspaceService = workspaceService ?? throw new ArgumentNullException(nameof(workspaceService));
     private readonly ILogger<WorkspaceRepository> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -56,29 +61,25 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
 
         await _workspaceService.CreateDirectoryAsync(workspace.Name, workspace.RootPath);
 
-        await ReplaceRepositoriesAsync(workspace.WorkspaceId, repositoryIds);
+        await using var db = await _dbContextFactory.CreateDbContextAsync();
+        await ReplaceRepositoriesAsync(db, workspace.WorkspaceId, repositoryIds);
         return workspace;
     }
 
     public async Task UpdateAsync(int workspaceId, string name, IReadOnlyCollection<int> repositoryIds, string? rootPath)
     {
         var normalized = NormalizeName(name);
-        if (await NameExistsAsync(normalized, workspaceId))
+
+        // Fresh context: the injected AppDbContext is circuit-scoped and may still track
+        // Workspace / WRL graphs loaded by Git Changes or other page services.
+        await using var db = await _dbContextFactory.CreateDbContextAsync();
+
+        if (await NameExistsAsync(db, normalized, workspaceId))
         {
             throw new InvalidOperationException("Workspace name already exists.");
         }
 
-        // Detach any WRL entities for this workspace that may have been loaded elsewhere in this
-        // circuit-scope DbContext - prevents stale-state DbUpdateConcurrencyException.
-        foreach (var entry in _dbContext.ChangeTracker.Entries<WorkspaceRepositoryLink>()
-            .Where(e => e.Entity.WorkspaceId == workspaceId)
-            .ToList())
-        {
-            entry.State = Microsoft.EntityFrameworkCore.EntityState.Detached;
-        }
-
-        // Load workspace WITHOUT Include(Repositories) - scalar update only.
-        var workspace = await _dbContext.Workspaces
+        var workspace = await db.Workspaces
             .FirstOrDefaultAsync(item => item.WorkspaceId == workspaceId);
 
         if (workspace == null)
@@ -88,10 +89,10 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
 
         workspace.Name = normalized;
         workspace.RootPath = string.IsNullOrWhiteSpace(rootPath) ? null : rootPath.Trim();
-        await _dbContext.SaveChangesAsync();
+        await db.SaveChangesAsync();
         _logger.LogInformation("Persistence: saved Workspace. Action=Update, WorkspaceId={WorkspaceId}, Name={Name}", workspaceId, workspace.Name);
 
-        await ReplaceRepositoriesAsync(workspace.WorkspaceId, repositoryIds);
+        await ReplaceRepositoriesAsync(db, workspace.WorkspaceId, repositoryIds);
     }
 
     public async Task DeleteAsync(int workspaceId)
@@ -208,20 +209,18 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
             workspaceId, toAdd.Count, string.Join(", ", toAdd));
     }
 
-    private async Task ReplaceRepositoriesAsync(int workspaceId, IReadOnlyCollection<int> repositoryIds)
+    private async Task ReplaceRepositoriesAsync(AppDbContext db, int workspaceId, IReadOnlyCollection<int> repositoryIds)
     {
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        await using var transaction = await db.Database.BeginTransactionAsync();
 
-        // Re-read current DB state with AsNoTracking - never rely on tracker state here.
-        var current = await _dbContext.WorkspaceRepositories
+        var current = await db.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId)
             .ToListAsync();
 
         var requestedIds = repositoryIds.Distinct().ToHashSet();
 
-        // Validate against actual repository rows (translate any stale IDs, log & skip missing ones).
-        var validRepoIds = await _dbContext.Repositories
+        var validRepoIds = await db.Repositories
             .AsNoTracking()
             .Where(r => requestedIds.Contains(r.RepositoryId))
             .Select(r => r.RepositoryId)
@@ -247,35 +246,24 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
 
         if (toRemove.Count > 0)
         {
-            var removedRepoIds = toRemove.Select(wr => wr.RepositoryId).ToHashSet();
+            var removedRepoIds = toRemove.Select(wr => wr.RepositoryId).ToList();
             var wrlIdsToRemove = toRemove.Select(wr => wr.WorkspaceRepositoryId).ToList();
 
-            // Detach any tracked WRL entities for these PKs before ExecuteDeleteAsync to prevent
-            // EF issuing a duplicate DELETE for the same rows via the change tracker.
-            foreach (var entry in _dbContext.ChangeTracker.Entries<WorkspaceRepositoryLink>()
-                .Where(e => wrlIdsToRemove.Contains(e.Entity.WorkspaceRepositoryId))
-                .ToList())
-            {
-                entry.State = Microsoft.EntityFrameworkCore.EntityState.Detached;
-            }
-
-            // Remove related WorkspaceProjects first (FK dependency).
-            await _dbContext.WorkspaceProjects
-                .Where(p => p.WorkspaceId == workspaceId && removedRepoIds.Contains(p.RepositoryId))
-                .ExecuteDeleteAsync();
+            await WorkspaceRepositoryLinkCleanup.DeleteDependentsAsync(
+                db, wrlIdsToRemove, removedRepoIds, workspaceId);
 
             _logger.LogDebug(
                 "ReplaceRepositories: Removing WorkspaceRepositoryLink rows. WorkspaceId={WorkspaceId}, WrlIds=[{WrlIds}]",
                 workspaceId, string.Join(", ", wrlIdsToRemove));
 
-            await _dbContext.WorkspaceRepositories
+            await db.WorkspaceRepositories
                 .Where(wr => wrlIdsToRemove.Contains(wr.WorkspaceRepositoryId))
                 .ExecuteDeleteAsync();
         }
 
         foreach (var repositoryId in toAdd)
         {
-            _dbContext.WorkspaceRepositories.Add(new WorkspaceRepositoryLink
+            db.WorkspaceRepositories.Add(new WorkspaceRepositoryLink
             {
                 WorkspaceId = workspaceId,
                 RepositoryId = repositoryId,
@@ -284,7 +272,7 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
         }
 
         if (toAdd.Count > 0)
-            await _dbContext.SaveChangesAsync();
+            await db.SaveChangesAsync();
 
         await transaction.CommitAsync();
         _logger.LogInformation(
@@ -292,9 +280,12 @@ public class WorkspaceRepository(AppDbContext dbContext, WorkspaceService worksp
             workspaceId, toRemove.Count, toAdd.Count, string.Join(", ", validSet));
     }
 
-    private async Task<bool> NameExistsAsync(string name, int? ignoreId = null)
+    private async Task<bool> NameExistsAsync(string name, int? ignoreId = null) =>
+        await NameExistsAsync(_dbContext, name, ignoreId);
+
+    private static async Task<bool> NameExistsAsync(AppDbContext db, string name, int? ignoreId = null)
     {
-        return await _dbContext.Workspaces.AnyAsync(workspace =>
+        return await db.Workspaces.AnyAsync(workspace =>
             workspace.WorkspaceId != ignoreId &&
             workspace.Name.ToLower() == name.ToLower());
     }

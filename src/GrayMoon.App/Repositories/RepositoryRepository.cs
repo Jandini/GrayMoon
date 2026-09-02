@@ -291,6 +291,13 @@ public class GitHubRepositoryRepository(AppDbContext dbContext, ILogger<GitHubRe
                     existing.First(r => r.RepositoryId == rid).RepositoryName);
 
             // Delete dependent rows first so FK constraint is not violated.
+            var wrlIdsToRemove = await _dbContext.WorkspaceRepositories
+                .Where(wr => toDeleteIds.Contains(wr.RepositoryId))
+                .Select(wr => wr.WorkspaceRepositoryId)
+                .ToListAsync();
+
+            await WorkspaceRepositoryLinkCleanup.DeleteDependentsAsync(_dbContext, wrlIdsToRemove, toDeleteIds);
+
             await _dbContext.WorkspaceRepositories
                 .Where(wr => toDeleteIds.Contains(wr.RepositoryId))
                 .ExecuteDeleteAsync();
