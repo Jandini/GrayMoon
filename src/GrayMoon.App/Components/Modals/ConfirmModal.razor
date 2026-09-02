@@ -5,17 +5,44 @@
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1085;"
          @onkeydown="HandleKeyDown"
          @ref="_modalElement">
-        <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-dialog modal-dialog-centered @(HasDetails ? "modal-dialog-scrollable confirm-modal" : null)">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Confirm</h5>
                     <button type="button" class="btn-close" aria-label="Close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-0" style="white-space: pre-line;">@Message</p>
+                    <p class="@(HasDetails ? "mb-2" : "mb-0")" style="white-space: pre-line;">@Message</p>
+                    @if (HasDetails)
+                    {
+                        <div class="confirm-modal-details">
+                            @foreach (var group in Details)
+                            {
+                                <div class="confirm-modal-details__group">
+                                    <div class="confirm-modal-details__heading">@group.Heading</div>
+                                    <ul class="list-unstyled mb-0">
+                                        @foreach (var item in group.Items)
+                                        {
+                                            <li class="confirm-modal-details__item">
+                                                <span class="confirm-modal-details__text" title="@item.Text">@item.Text</span>
+                                                @if (!string.IsNullOrEmpty(item.Secondary))
+                                                {
+                                                    <span class="confirm-modal-details__secondary" title="@item.Secondary">@item.Secondary</span>
+                                                }
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                        </div>
+                    }
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-primary" @onclick="OnConfirm">
+                    @if (!string.IsNullOrEmpty(FooterNote))
+                    {
+                        <span class="confirm-modal__footer-note me-auto">@FooterNote</span>
+                    }
+                    <button type="button" class="btn @(ConfirmIsDanger ? "btn-danger" : "btn-primary")" @onclick="OnConfirm">
                         @ConfirmButtonText
                     </button>
                     <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">
@@ -31,8 +58,13 @@
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public string Message { get; set; } = "Do you want to proceed?";
     [Parameter] public string ConfirmButtonText { get; set; } = "Yes";
+    [Parameter] public IReadOnlyList<ConfirmDetailGroup> Details { get; set; } = Array.Empty<ConfirmDetailGroup>();
+    [Parameter] public string? FooterNote { get; set; }
+    [Parameter] public bool ConfirmIsDanger { get; set; }
     [Parameter] public EventCallback OnConfirm { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
+
+    private bool HasDetails => Details.Count > 0;
 
     private ElementReference _modalElement;
 
