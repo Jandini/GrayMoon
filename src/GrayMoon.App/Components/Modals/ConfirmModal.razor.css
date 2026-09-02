@@ -1,0 +1,103 @@
+.confirm-modal {
+    --confirm-modal-max: min(90vw, 72rem);
+    --confirm-modal-path-max: min(calc(90vw - 3.5rem), 68.5rem);
+    width: max-content;
+    min-width: min(31.25rem, 90vw);
+    max-width: var(--confirm-modal-max);
+    max-height: calc(100vh - 2rem);
+    margin: 1rem auto;
+}
+
+.confirm-modal .modal-content {
+    width: max-content;
+    min-width: min(31.25rem, 90vw);
+    max-width: 100%;
+}
+
+.confirm-modal .modal-body {
+    min-height: 0;
+    min-width: 100%;
+    width: max-content;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.confirm-modal-details {
+    flex: 0 1 auto;
+    font-size: 0.875rem;
+    max-height: 16rem;
+    overflow-y: auto;
+    overflow-x: visible;
+    padding: 0;
+    scrollbar-width: auto;
+    scrollbar-color: #6c757d transparent;
+}
+
+.confirm-modal__footer-note {
+    min-width: 0;
+    margin-right: auto;
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.confirm-modal-details::-webkit-scrollbar {
+    width: 0.6rem;
+    height: 0.6rem;
+}
+
+.confirm-modal-details::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.confirm-modal-details::-webkit-scrollbar-thumb {
+    background: #6c757d;
+    border-radius: 0.3rem;
+}
+
+.confirm-modal-details::-webkit-scrollbar-thumb:hover {
+    background: #5a6268;
+}
+
+.confirm-modal-details__group + .confirm-modal-details__group {
+    margin-top: 0.7rem;
+}
+
+.confirm-modal-details__heading {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 0.2rem;
+}
+
+.confirm-modal-details__item {
+    width: max-content;
+    max-width: 100%;
+    margin-bottom: 0.2rem;
+}
+
+.confirm-modal-details__item:last-child {
+    margin-bottom: 0;
+}
+
+.confirm-modal-details__text,
+.confirm-modal-details__secondary {
+    display: inline-block;
+    max-width: var(--confirm-modal-path-max);
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.confirm-modal-details__text {
+    font-family: var(--bs-font-monospace, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    color: var(--text-primary);
+}
+
+.confirm-modal-details__secondary {
+    font-family: var(--bs-font-monospace, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    font-size: 0.8em;
+    color: var(--text-secondary);
+}

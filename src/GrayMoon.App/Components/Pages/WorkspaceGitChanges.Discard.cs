@@ -1,3 +1,4 @@
+using GrayMoon.App.Models;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Common.Git;
 
@@ -16,6 +17,9 @@ namespace GrayMoon.App.Components.Pages;
 /// </summary>
 public sealed partial class WorkspaceGitChanges
 {
+    private const int ConfirmDetailItemCap = 10;
+    private const string UndoFooterNote = "This cannot be undone.";
+
     private ConfirmModalState _confirmModal = new();
 
     private void CloseConfirmModal()
@@ -25,6 +29,9 @@ public sealed partial class WorkspaceGitChanges
             IsVisible = false,
             ButtonText = "Yes",
             PendingAction = null,
+            Details = Array.Empty<ConfirmDetailGroup>(),
+            FooterNote = null,
+            ConfirmIsDanger = false,
         };
         StateHasChanged();
     }
@@ -39,7 +46,13 @@ public sealed partial class WorkspaceGitChanges
         }
     }
 
-    private void ShowConfirm(string message, Func<Task> onConfirm, string confirmButtonText = "Yes")
+    private void ShowConfirm(
+        string message,
+        Func<Task> onConfirm,
+        string confirmButtonText = "Yes",
+        IReadOnlyList<ConfirmDetailGroup>? details = null,
+        string? footerNote = null,
+        bool confirmIsDanger = false)
     {
         _confirmModal = _confirmModal with
         {
@@ -47,6 +60,9 @@ public sealed partial class WorkspaceGitChanges
             Message = message,
             ButtonText = confirmButtonText,
             PendingAction = onConfirm,
+            Details = details ?? Array.Empty<ConfirmDetailGroup>(),
+            FooterNote = footerNote,
+            ConfirmIsDanger = confirmIsDanger,
         };
         StateHasChanged();
     }
@@ -74,13 +90,11 @@ public sealed partial class WorkspaceGitChanges
             return;
         }
 
-        var (fileCount, label) = scope switch
+        var (fileCount, details) = scope switch
         {
-            GitChangeOperationScope.Repository =>
-                (repo.Changes.Count(c => c.IsChanged), $"repository '{repo.RepositoryName}'"),
-            GitChangeOperationScope.Folder =>
-                (repo.Changes.Count(c => c.IsChanged && IsUnderFolder(c.Path, paths[0])), $"folder '{paths[0]}'"),
-            _ => (paths.Count, paths.Count == 1 ? $"'{paths[0]}'" : $"{paths.Count} files"),
+            GitChangeOperationScope.Repository => BuildRepositoryUndoDetails(repo),
+            GitChangeOperationScope.Folder => BuildFolderUndoDetails(repo, paths[0]),
+            _ => BuildFileUndoDetails(repo, paths),
         };
 
         if (fileCount == 0)
@@ -88,7 +102,7 @@ public sealed partial class WorkspaceGitChanges
             return;
         }
 
-        var message = $"Undo changes to {fileCount} file{(fileCount == 1 ? "" : "s")} in {label}? This cannot be undone.";
+        var message = $"Undo changes to {fileCount} file{(fileCount == 1 ? "" : "s")}?";
 
         ShowConfirm(message, () => scope == GitChangeOperationScope.Repository
             ? RunRepositoryScopedDiscardJobAsync(workspaceRepositoryId)
@@ -96,11 +110,76 @@ public sealed partial class WorkspaceGitChanges
             {
                 var result = await AgentClient.DiscardAsync(root, wsName, repoName, scope, paths, CancellationToken.None);
                 await PersistMutationResultAsync(workspaceRepositoryId, repositoryId, result.Success, result.Snapshot, result.ErrorMessage);
-            }), "Undo");
+            }), "Undo", details, UndoFooterNote, confirmIsDanger: true);
+    }
+
+    private static (int FileCount, IReadOnlyList<ConfirmDetailGroup> Details) BuildRepositoryUndoDetails(
+        WorkspaceGitChangesRepositoryView repo)
+    {
+        var files = repo.Changes.Where(c => c.IsChanged).Select(c => c.Path).ToList();
+        IReadOnlyList<ConfirmDetailGroup> details =
+        [
+            new("Repository", [new ConfirmDetailItem(repo.RepositoryName, FileCountLabel(files.Count))]),
+            new("Files", CapDetailItems(files)),
+        ];
+        return (files.Count, details);
+    }
+
+    private static (int FileCount, IReadOnlyList<ConfirmDetailGroup> Details) BuildFolderUndoDetails(
+        WorkspaceGitChangesRepositoryView repo,
+        string folderPath)
+    {
+        var files = repo.Changes
+            .Where(c => c.IsChanged && IsUnderFolder(c.Path, folderPath))
+            .Select(c => c.Path)
+            .ToList();
+        var lastSegment = LastPathSegment(folderPath);
+        var folderItem = lastSegment == folderPath
+            ? new ConfirmDetailItem(folderPath)
+            : new ConfirmDetailItem(lastSegment, folderPath);
+        IReadOnlyList<ConfirmDetailGroup> details =
+        [
+            new("Repository", [new ConfirmDetailItem(repo.RepositoryName)]),
+            new("Folder", [folderItem]),
+            new("Files", CapDetailItems(files)),
+        ];
+        return (files.Count, details);
+    }
+
+    private static (int FileCount, IReadOnlyList<ConfirmDetailGroup> Details) BuildFileUndoDetails(
+        WorkspaceGitChangesRepositoryView repo,
+        IReadOnlyList<string> paths)
+    {
+        IReadOnlyList<ConfirmDetailGroup> details =
+        [
+            new("Repository", [new ConfirmDetailItem(repo.RepositoryName)]),
+            new(paths.Count == 1 ? "File" : "Files", CapDetailItems(paths)),
+        ];
+        return (paths.Count, details);
     }
 
     private static bool IsUnderFolder(string path, string folderPath) =>
         path == folderPath || path.StartsWith(folderPath + "/", StringComparison.Ordinal);
+
+    private static string LastPathSegment(string path)
+    {
+        var normalized = path.Replace('\\', '/');
+        var slash = normalized.LastIndexOf('/');
+        return slash >= 0 ? normalized[(slash + 1)..] : normalized;
+    }
+
+    private static string FileCountLabel(int count) =>
+        $"{count} file{(count == 1 ? "" : "s")}";
+
+    private static IReadOnlyList<ConfirmDetailItem> CapDetailItems(IReadOnlyList<string> texts)
+    {
+        if (texts.Count > ConfirmDetailItemCap)
+        {
+            return [new ConfirmDetailItem(FileCountLabel(texts.Count))];
+        }
+
+        return texts.Select(t => new ConfirmDetailItem(t)).ToList();
+    }
 
     /// <summary>Repository-scope discard, mirroring <see cref="RunRepositoryScopedMutationJobAsync"/> -
     /// runs behind the page's LoadingOverlay/terminal job since it can touch every unstaged file/directory
@@ -159,13 +238,19 @@ public sealed partial class WorkspaceGitChanges
         }
 
         var fileCount = targets.Sum(r => r.ChangedCount);
-        var message = $"Undo all changes across {targets.Count} repositor{(targets.Count == 1 ? "y" : "ies")} ({fileCount} file{(fileCount == 1 ? "" : "s")})? This cannot be undone.";
+        var message = $"Undo all changes across {targets.Count} repositor{(targets.Count == 1 ? "y" : "ies")} ({fileCount} file{(fileCount == 1 ? "" : "s")})?";
+        var details = new ConfirmDetailGroup[]
+        {
+            new("Repositories", targets
+                .Select(r => new ConfirmDetailItem(r.RepositoryName, FileCountLabel(r.ChangedCount)))
+                .ToList()),
+        };
 
         ShowConfirm(message, () =>
         {
             RunDiscardAllChangedJob(targets);
             return Task.CompletedTask;
-        }, "Undo");
+        }, "Undo", details, UndoFooterNote, confirmIsDanger: true);
     }
 
     private void RunDiscardAllChangedJob(List<WorkspaceGitChangesRepositoryView> targets)
@@ -245,13 +330,21 @@ public sealed partial class WorkspaceGitChanges
         }
 
         var fileCount = targets.Sum(t => t.Value.Count);
-        var message = $"Undo changes to {fileCount} selected file{(fileCount == 1 ? "" : "s")}? This cannot be undone.";
+        var message = $"Undo changes to {fileCount} selected file{(fileCount == 1 ? "" : "s")}?";
+        var details = targets
+            .Select(kvp =>
+            {
+                var repoName = _view?.Repositories.FirstOrDefault(r => r.WorkspaceRepositoryId == kvp.Key)?.RepositoryName
+                    ?? $"repo {kvp.Key}";
+                return new ConfirmDetailGroup(repoName, CapDetailItems(kvp.Value));
+            })
+            .ToList();
 
         ShowConfirm(message, () =>
         {
             RunDiscardSelectedJob(targets);
             return Task.CompletedTask;
-        }, "Undo");
+        }, "Undo", details, UndoFooterNote, confirmIsDanger: true);
     }
 
     private void RunDiscardSelectedJob(Dictionary<int, IReadOnlyList<string>> targets)
@@ -312,6 +405,9 @@ public sealed partial class WorkspaceGitChanges
         public bool IsVisible { get; init; }
         public string Message { get; init; } = "";
         public string ButtonText { get; init; } = "Yes";
+        public IReadOnlyList<ConfirmDetailGroup> Details { get; init; } = Array.Empty<ConfirmDetailGroup>();
+        public string? FooterNote { get; init; }
+        public bool ConfirmIsDanger { get; init; }
         public Func<Task>? PendingAction { get; init; }
     }
 }
