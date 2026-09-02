@@ -67,7 +67,7 @@ public sealed class WorkspacePushService(
 
     /// <summary>
     /// Runs dependency-synchronized push: sync package registries (unless already done by caller), then push by level (lowest first).
-    /// For each level, waits until required packages are in registry (or pushes all at once if not possible), then pushes all repos at that level in parallel.
+    /// For each level, waits until required packages are in registry (or pushes all at once if not possible), then pushes all repos at that level in parallel, then restores locally so the next level's wait starts after restore.
     /// Ensures branch is upstreamed even when there are no commits to push.
     /// When <paramref name="repoIdsToPush"/> is set, only those repos are pushed.
     /// Set <paramref name="packageRegistriesAlreadySynced"/> to true when the caller already synced required packages
@@ -333,12 +333,6 @@ public sealed class WorkspacePushService(
                 }
             }
 
-            levelProgress?.Invoke("Restoring packages...");
-            if (syncedRepoIds is { Count: > 0 })
-                await RestoreUpdatedReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, syncedRepoIds, cancellationToken);
-            else
-                await TryRestoreReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, cancellationToken);
-
             levelProgress?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
             var levelFailures = await PushReposAsync(
                 workspace,
@@ -358,6 +352,12 @@ public sealed class WorkspacePushService(
                 levelProgress?.Invoke($"Push stopped: {levelFailures.Count} repository failure(s).");
                 return;
             }
+
+            levelProgress?.Invoke("Restoring packages...");
+            if (syncedRepoIds is { Count: > 0 })
+                await RestoreUpdatedReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, syncedRepoIds, cancellationToken);
+            else
+                await TryRestoreReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, cancellationToken);
 
             pushedRepos.AddRange(reposAtLevel);
 
