@@ -59,7 +59,12 @@ public sealed class WorkspaceTopBarServiceTests
             new AppSettingRepository(dbContext),
             Options.Create(new WorkspaceOptions()));
 
-        return new WorkspaceRepository(dbContext, workspaceService, NullLogger<WorkspaceRepository>.Instance);
+        return new WorkspaceRepository(
+            dbContext,
+            new GitChangesTestDbContext.TestDbContextFactory(
+                new DbContextOptionsBuilder<AppDbContext>().UseSqlite(dbContext.Database.GetDbConnection()).Options),
+            workspaceService,
+            NullLogger<WorkspaceRepository>.Instance);
     }
 
     [Fact]
