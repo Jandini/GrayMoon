@@ -18,7 +18,7 @@ public sealed class WorkspaceRepositoryReplaceTests
         public bool IsAgentConnected => false;
 
         public Task<AgentCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("Not used by these tests.");
+            Task.FromResult(new AgentCommandResponse(true, null, null));
     }
 
     [Fact]
@@ -51,6 +51,39 @@ public sealed class WorkspaceRepositoryReplaceTests
             .OrderBy(id => id)
             .ToListAsync();
         Assert.Equal(fx.RepositoryIds.OrderBy(id => id), relinked);
+    }
+
+    [Fact]
+    public async Task AddAsync_succeeds_when_circuit_context_tracks_wrl_and_detached_git_status_graph()
+    {
+        await using var fx = await Fixture.CreateAsync(linkCount: 1);
+
+        fx.CircuitDb.WorkspaceGitRepositoryStatuses.Add(new WorkspaceGitRepositoryStatus
+        {
+            WorkspaceRepositoryId = fx.LinkIds[0],
+            SnapshotVersion = 1,
+            BranchName = "main",
+            AgentScannedAt = DateTimeOffset.UtcNow,
+            PersistedAt = DateTimeOffset.UtcNow,
+        });
+        await fx.CircuitDb.SaveChangesAsync();
+
+        var link = await fx.CircuitDb.WorkspaceRepositories
+            .Include(l => l.Workspace)
+            .Include(l => l.GitStatus)
+            .FirstAsync(l => l.WorkspaceRepositoryId == fx.LinkIds[0]);
+        link.GitStatus!.StagedCount = 3;
+
+        foreach (var entry in fx.CircuitDb.ChangeTracker.Entries<WorkspaceRepositoryLink>().ToList())
+            entry.State = EntityState.Detached;
+
+        var catalog = fx.CreateWorkspaceRepository();
+        var created = await catalog.AddAsync("new-workspace", []);
+
+        Assert.True(created.WorkspaceId > 0);
+        await using var verify = fx.Factory.CreateDbContext();
+        Assert.NotNull(await verify.Workspaces.AsNoTracking()
+            .FirstOrDefaultAsync(w => w.Name == "new-workspace"));
     }
 
     [Fact]

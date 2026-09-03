@@ -48,20 +48,24 @@ public class WorkspaceRepository(
     public async Task<Workspace> AddAsync(string name, IReadOnlyCollection<int> repositoryIds)
     {
         var normalized = NormalizeName(name);
-        if (await NameExistsAsync(normalized))
+
+        // Fresh context: the injected AppDbContext is circuit-scoped and may still track
+        // Workspace / WRL graphs loaded by Git Changes or other page services.
+        await using var db = await _dbContextFactory.CreateDbContextAsync();
+
+        if (await NameExistsAsync(db, normalized))
         {
             throw new InvalidOperationException("Workspace name already exists.");
         }
 
         var workspace = new Workspace { Name = normalized };
         workspace.RootPath = await _workspaceService.GetRootPathAsync();
-        _dbContext.Workspaces.Add(workspace);
-        await _dbContext.SaveChangesAsync();
+        db.Workspaces.Add(workspace);
+        await db.SaveChangesAsync();
         _logger.LogInformation("Persistence: saved Workspace. Action=Add, WorkspaceId={WorkspaceId}, Name={Name}", workspace.WorkspaceId, workspace.Name);
 
         await _workspaceService.CreateDirectoryAsync(workspace.Name, workspace.RootPath);
 
-        await using var db = await _dbContextFactory.CreateDbContextAsync();
         await ReplaceRepositoriesAsync(db, workspace.WorkspaceId, repositoryIds);
         return workspace;
     }
