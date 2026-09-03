@@ -14,6 +14,7 @@ public interface IWorkspaceUpdateOperations
         CancellationToken cancellationToken,
         IProgress<OperationProgress>? progress,
         Action<int, string> setRepositoryError,
+        Action<int, string> setLevelError,
         IReadOnlySet<int>? repoIdsToUpdate = null,
         string? commitMessage = null,
         bool includeDepsInCommitMessage = true,

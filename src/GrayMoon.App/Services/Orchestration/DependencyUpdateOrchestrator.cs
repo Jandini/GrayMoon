@@ -25,7 +25,7 @@ public sealed class DependencyUpdateOrchestrator(
     /// Walks all dependency levels (up to <paramref name="maxLevel"/>) so version-file work that appears
     /// after a lower-level commit is not skipped. Csproj sync is scoped to <paramref name="repoIdsToUpdate"/>.
     /// Stops after collecting every commit error at a level (files must not be left dirty as a successful update).
-/// Reports errors via <paramref name="onRepoError"/>.
+/// Reports repository failures via <paramref name="onRepoError"/> and failures without a repository id via <paramref name="onLevelError"/>.
     /// </summary>
     /// <param name="repoIdsToUpdate">Optional. When set, only these repositories are considered for the update plan and all steps.</param>
     /// <param name="commitMessage">Optional user-supplied commit subject line. When provided, replaces the default subject in all commits created during this update.</param>
@@ -37,6 +37,7 @@ public sealed class DependencyUpdateOrchestrator(
         CancellationToken cancellationToken,
         IProgress<OperationProgress>? progress,
         Action<int, string> onRepoError,
+        Action<int, string> onLevelError,
         Action? onAppSideComplete = null,
         IReadOnlySet<int>? repoIdsToUpdate = null,
         string? commitMessage = null,
@@ -60,11 +61,16 @@ public sealed class DependencyUpdateOrchestrator(
         var setProgress = progress.ToMessageAction();
         var hadError = false;
         var allSyncedRepoIds = new HashSet<int>();
+        var sink = new OperationErrorSink(workspaceId, logger, onRepoError, onLevelError);
         void OnRepoError(int repoId, string msg)
         {
             hadError = true;
-            logger.LogWarning("[UpdateOrchestrator {RunId}] Workspace {WorkspaceId}: repo {RepoId} error: {Message}", runId, workspaceId, repoId, msg);
-            onRepoError(repoId, msg);
+            sink.Repository(repoId, msg);
+        }
+        void OnLevelError(int level, string msg)
+        {
+            hadError = true;
+            sink.Level(level, msg);
         }
 
         // Step 1: Refresh project data from .csproj files on disk.
@@ -84,7 +90,7 @@ public sealed class DependencyUpdateOrchestrator(
         // Step 2+: Walk every dependency level (up to maxLevel). Do not limit the level walk to the
         // initial reposNeedingWork set - a lower-level csproj commit refreshes GitVersion and can mark
         // higher-level version files out of date; those repos must still be visited for file updates.
-        var levelRepoIds = await GetRepositoryIdsByDependencyLevelAsync(workspaceId, selectedRepositoryIds: null, OnRepoError);
+        var levelRepoIds = await GetRepositoryIdsByDependencyLevelAsync(workspaceId, selectedRepositoryIds: null, OnLevelError);
         if (maxLevel.HasValue)
             levelRepoIds = levelRepoIds.Where(x => x.Level <= maxLevel.Value).ToList();
         if (levelRepoIds.Count == 0)
@@ -155,6 +161,7 @@ public sealed class DependencyUpdateOrchestrator(
                 levelProgress,
                 onAppSideComplete,
                 OnRepoError,
+                OnLevelError,
                 commitMessage,
                 runId);
             if (!vfOk)
@@ -268,12 +275,12 @@ public sealed class DependencyUpdateOrchestrator(
     private async Task<IReadOnlyList<(int Level, IReadOnlySet<int> RepoIds)>> GetRepositoryIdsByDependencyLevelAsync(
         int workspaceId,
         IReadOnlySet<int>? selectedRepositoryIds,
-        Action<int, string> onRepoError)
+        Action<int, string> onLevelError)
     {
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
         {
-            onRepoError(0, $"Workspace {workspaceId} not found.");
+            onLevelError(0, $"Workspace {workspaceId} not found.");
             return [];
         }
 
@@ -305,7 +312,7 @@ public sealed class DependencyUpdateOrchestrator(
                 return [(0, nonTaggedFromSelection)];
         }
 
-        onRepoError(0, "No repositories found for update.");
+        onLevelError(0, "No repositories found for update.");
         return [];
     }
 
@@ -367,6 +374,7 @@ public sealed class DependencyUpdateOrchestrator(
         Action<string> setProgress,
         Action? onAppSideComplete,
         Action<int, string> onRepoError,
+        Action<int, string> onLevelError,
         string? commitMessageOverride = null,
         string? runId = null)
     {
@@ -392,7 +400,7 @@ public sealed class DependencyUpdateOrchestrator(
 
         if (fileError != null && !fileError.Contains("No version configurations", StringComparison.OrdinalIgnoreCase))
         {
-            onRepoError(0, fileError);
+            onLevelError(level, fileError);
             return (false, []);
         }
 

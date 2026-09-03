@@ -78,6 +78,7 @@ public sealed class WorkspacePushService(
         IReadOnlySet<int>? repoIdsToPush = null,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
+        Action<int, string>? onLevelError = null,
         Action? onAppSideComplete = null,
         bool packageRegistriesAlreadySynced = false,
         IReadOnlySet<int>? syncedRepoIds = null,
@@ -219,9 +220,8 @@ public sealed class WorkspacePushService(
 
                 void AbortPackageWaitTimeout()
                 {
-                    levelProgress?.Invoke("Timed out.");
                     _logger.LogWarning("[PushOrchestrator {RunId}] Push wait: timed out after {TotalMinutes:F1} min. Found {Found} of {Total}.", runId, totalTimeout.TotalMinutes, getFoundCount(), totalDeps);
-                    PackageWaitTimeout.Report(reposAtLevel.Select(r => r.RepoId), onRepoError, getFoundCount(), totalDeps, totalTimeout);
+                    PackageWaitTimeout.Report(level, onLevelError, getFoundCount(), totalDeps, totalTimeout);
                 }
 
                 try
@@ -331,33 +331,58 @@ public sealed class WorkspacePushService(
                     AbortPackageWaitTimeout();
                     return;
                 }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "[PushOrchestrator {RunId}] Push wait: level {Level} failed.", runId, level);
+                    onLevelError?.Invoke(level, ex.Message);
+                    return;
+                }
             }
 
             levelProgress?.Invoke($"Pushing {reposAtLevel.Count} {(reposAtLevel.Count == 1 ? "repository" : "repositories")}...");
-            var levelFailures = await PushReposAsync(
-                workspace,
-                reposAtLevel,
-                bearerByRepoId,
-                levelProgress,
-                onRepoError,
-                onAppSideComplete: level == lastLevel ? null : onAppSideComplete,
-                refreshVersionAfterPush: true,
-                cancellationToken);
+            IReadOnlyList<(int RepoId, string Error)> levelFailures;
+            try
+            {
+                levelFailures = await PushReposAsync(
+                    workspace,
+                    reposAtLevel,
+                    bearerByRepoId,
+                    levelProgress,
+                    onRepoError,
+                    onAppSideComplete: level == lastLevel ? null : onAppSideComplete,
+                    refreshVersionAfterPush: true,
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: push failed.", runId, workspaceId, level);
+                onLevelError?.Invoke(level, ex.Message);
+                return;
+            }
             await UpdateCommitCountsAndUpstreamAfterPushAsync(workspaceId, reposAtLevel, cancellationToken);
             if (levelFailures.Count > 0)
             {
                 _logger.LogWarning(
                     "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: aborting synchronized push after {FailedCount} repository failure(s).",
                     runId, workspaceId, level, levelFailures.Count);
-                levelProgress?.Invoke($"Push stopped: {levelFailures.Count} repository failure(s).");
                 return;
             }
 
             levelProgress?.Invoke("Restoring packages...");
-            if (syncedRepoIds is { Count: > 0 })
-                await RestoreUpdatedReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, syncedRepoIds, cancellationToken);
-            else
-                await TryRestoreReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, cancellationToken);
+            try
+            {
+                var restoreFailed = syncedRepoIds is { Count: > 0 }
+                    ? await RestoreUpdatedReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, syncedRepoIds, onRepoError, cancellationToken)
+                    : await TryRestoreReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, onRepoError, cancellationToken);
+                if (restoreFailed)
+                    return;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: restore failed.", runId, workspaceId, level);
+                onLevelError?.Invoke(level, ex.Message);
+                return;
+            }
 
             pushedRepos.AddRange(reposAtLevel);
 
@@ -441,6 +466,7 @@ public sealed class WorkspacePushService(
         IReadOnlySet<int> repoIds,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
+        Action<int, string>? onLevelError = null,
         CancellationToken cancellationToken = default)
     {
         if (!_agentBridge.IsAgentConnected)
@@ -505,6 +531,7 @@ public sealed class WorkspacePushService(
         IReadOnlySet<int> repoIds,
         Action<string>? onProgressMessage = null,
         Action<int, string>? onRepoError = null,
+        Action<int, string>? onLevelError = null,
         Action? onAppSideComplete = null,
         CancellationToken cancellationToken = default)
     {
@@ -658,12 +685,13 @@ public sealed class WorkspacePushService(
         }
     }
 
-    private async Task RestoreUpdatedReposAtLevelAsync(
+    private async Task<bool> RestoreUpdatedReposAtLevelAsync(
         int workspaceId,
         string workspaceName,
         string? workspaceRoot,
         IReadOnlyList<PushRepoPayload> repos,
         IReadOnlySet<int> syncedRepoIds,
+        Action<int, string>? onRepoError,
         CancellationToken cancellationToken)
     {
         var repoIdsToRestore = repos
@@ -671,7 +699,7 @@ public sealed class WorkspacePushService(
             .Where(id => syncedRepoIds.Contains(id))
             .ToHashSet();
 
-        if (repoIdsToRestore.Count == 0) return;
+        if (repoIdsToRestore.Count == 0) return false;
 
         var repoNameById = repos
             .Where(r => repoIdsToRestore.Contains(r.RepoId))
@@ -682,12 +710,13 @@ public sealed class WorkspacePushService(
             .Where(p => p.WorkspaceId == workspaceId && repoIdsToRestore.Contains(p.RepositoryId) && p.ProjectFilePath != null)
             .ToListAsync(cancellationToken);
 
-        if (projects.Count == 0) return;
+        if (projects.Count == 0) return false;
 
         var pathsByRepoId = projects
             .GroupBy(p => p.RepositoryId)
             .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(p => p.ProjectFilePath!).ToList());
 
+        var failed = new int[1];
         var tasks = pathsByRepoId.Select(async kvp =>
         {
             if (!repoNameById.TryGetValue(kvp.Key, out var repositoryName)) return;
@@ -701,17 +730,21 @@ public sealed class WorkspacePushService(
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "dotnet restore failed for {RepoName} in workspace {WorkspaceName}, continuing", repositoryName, workspaceName);
+                _logger.LogError(ex, "dotnet restore failed for {RepoName} in workspace {WorkspaceName}", repositoryName, workspaceName);
+                onRepoError?.Invoke(kvp.Key, ex.Message);
+                Interlocked.Exchange(ref failed[0], 1);
             }
         });
         await Task.WhenAll(tasks);
+        return failed[0] != 0;
     }
 
-    private async Task TryRestoreReposAtLevelAsync(
+    private async Task<bool> TryRestoreReposAtLevelAsync(
         int workspaceId,
         string workspaceName,
         string? workspaceRoot,
         IReadOnlyList<PushRepoPayload> repos,
+        Action<int, string>? onRepoError,
         CancellationToken cancellationToken)
     {
         var repoIdSet = repos.Select(r => r.RepoId).ToHashSet();
@@ -722,7 +755,7 @@ public sealed class WorkspacePushService(
             .Where(p => p.WorkspaceId == workspaceId && repoIdSet.Contains(p.RepositoryId))
             .ToListAsync(cancellationToken);
 
-        if (projects.Count == 0) return;
+        if (projects.Count == 0) return false;
 
         var projectIdToRepoId = projects.ToDictionary(p => p.ProjectId, p => p.RepositoryId);
         var projectIdSet = projectIdToRepoId.Keys.ToHashSet();
@@ -747,8 +780,9 @@ public sealed class WorkspacePushService(
                 list.Add(filePath);
         }
 
-        if (pathsByRepoId.Count == 0) return;
+        if (pathsByRepoId.Count == 0) return false;
 
+        var failed = new int[1];
         var tasks = pathsByRepoId.Select(async kvp =>
         {
             if (!repoNameById.TryGetValue(kvp.Key, out var repositoryName)) return;
@@ -762,10 +796,13 @@ public sealed class WorkspacePushService(
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "dotnet restore failed for {RepoName} in workspace {WorkspaceName}, continuing", repositoryName, workspaceName);
+                _logger.LogError(ex, "dotnet restore failed for {RepoName} in workspace {WorkspaceName}", repositoryName, workspaceName);
+                onRepoError?.Invoke(kvp.Key, ex.Message);
+                Interlocked.Exchange(ref failed[0], 1);
             }
         });
         await Task.WhenAll(tasks);
+        return failed[0] != 0;
     }
 
     private async Task<IReadOnlyList<(int RepoId, string Error)>> PushReposAsync(
@@ -790,34 +827,47 @@ public sealed class WorkspacePushService(
             await semaphore.WaitAsync(cancellationToken);
             try
             {
-                if (_connectorHealthService != null)
-                    await _connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepoId, cancellationToken);
+                try
+                {
+                    if (_connectorHealthService != null)
+                        await _connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepoId, cancellationToken);
 
-                var args = new
-                {
-                    workspaceName = workspace.Name,
-                    repositoryId = repo.RepoId,
-                    repositoryName = repo.RepoName,
-                    bearerToken = bearerByRepoId.GetValueOrDefault(repo.RepoId),
-                    workspaceId = workspace.WorkspaceId,
-                    workspaceRoot,
-                    refreshVersionAfterPush
-                };
-                var response = await _agentBridge.SendCommandAsync("PushRepository", args, cancellationToken);
-                var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data) is { Success: true };
-                if (!success)
-                {
-                    var rawErr = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage;
-                    if (PushErrorFormatter.IsNonFastForwardRejection(rawErr))
-                        rejectedRepos.Add((repo.RepoId, repo.RepoName));
-                    var formatted = PushErrorFormatter.Format(rawErr);
-                    failures.Add((repo.RepoId, formatted));
-                    onRepoError?.Invoke(repo.RepoId, formatted);
+                    var args = new
+                    {
+                        workspaceName = workspace.Name,
+                        repositoryId = repo.RepoId,
+                        repositoryName = repo.RepoName,
+                        bearerToken = bearerByRepoId.GetValueOrDefault(repo.RepoId),
+                        workspaceId = workspace.WorkspaceId,
+                        workspaceRoot,
+                        refreshVersionAfterPush
+                    };
+                    var response = await _agentBridge.SendCommandAsync("PushRepository", args, cancellationToken);
+                    var success = response.Success && response.Data != null && AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data) is { Success: true };
+                    if (!success)
+                    {
+                        var rawErr = response.Error ?? AgentResponseJson.DeserializeAgentResponse<PushRepositoryResponse>(response.Data!)?.ErrorMessage;
+                        if (PushErrorFormatter.IsNonFastForwardRejection(rawErr))
+                            rejectedRepos.Add((repo.RepoId, repo.RepoName));
+                        var formatted = PushErrorFormatter.Format(rawErr);
+                        failures.Add((repo.RepoId, formatted));
+                        onRepoError?.Invoke(repo.RepoId, formatted);
+                    }
+                    else
+                    {
+                        var c = Interlocked.Increment(ref succeeded);
+                        onProgressMessage?.Invoke($"Pushed {c} of {total}");
+                    }
                 }
-                else
+                catch (OperationCanceledException)
                 {
-                    var c = Interlocked.Increment(ref succeeded);
-                    onProgressMessage?.Invoke($"Pushed {c} of {total}");
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Push failed for repository {RepositoryId} in workspace {WorkspaceId}", repo.RepoId, workspace.WorkspaceId);
+                    failures.Add((repo.RepoId, ex.Message));
+                    onRepoError?.Invoke(repo.RepoId, ex.Message);
                 }
 
                 if (Interlocked.Increment(ref finished) == total)

@@ -62,7 +62,8 @@ public sealed partial class WorkspaceRepositories
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error getting push plan for workspace {WorkspaceId}", WorkspaceId);
-            SetPageError("Could not determine push plan. The GrayMoon Agent may be offline.");
+            SetLevelError(0, ex.Message);
+            StateHasChanged();
         }
     }
 
@@ -225,7 +226,8 @@ public sealed partial class WorkspaceRepositories
         }
         catch (Exception ex)
         {
-            SafeInvoke(() => SetPageError(ex.Message));
+            Logger.LogError(ex, "Push failed for workspace {WorkspaceId}", WorkspaceId);
+            SafeInvoke(() => SetLevelError(0, ex.Message));
             throw;
         }
         finally
@@ -241,14 +243,15 @@ public sealed partial class WorkspaceRepositories
 
     private void ApplyPushResult(OperationResult result)
     {
-        if (result.RepoErrors is { Count: > 0 })
+        SafeInvoke(() =>
         {
-            SafeInvoke(() => ApplyRepositoryErrors(result.RepoErrors));
-            return;
-        }
-
-        if (!result.Success && !string.IsNullOrWhiteSpace(result.Error))
-            SafeInvoke(() => SetPageError(result.Error));
+            ApplyRepositoryErrors(result.RepoErrors);
+            ApplyLevelErrors(result.LevelErrors);
+            if (result.RepoErrors is { Count: > 0 } || result.LevelErrors is { Count: > 0 })
+                return;
+            if (!result.Success && !string.IsNullOrWhiteSpace(result.Error))
+                SetLevelError(0, result.Error);
+        });
     }
 
     /// <summary>Push with upstream for a single repository (e.g. when user clicks the not-upstreamed badge). Uses the page overlay.</summary>

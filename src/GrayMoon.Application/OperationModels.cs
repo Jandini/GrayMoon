@@ -5,13 +5,19 @@ public sealed record OperationProgress(string Message, int? Completed = null, in
 public sealed record OperationResult(
     bool Success,
     string? Error = null,
-    IReadOnlyDictionary<int, string>? RepoErrors = null)
+    IReadOnlyDictionary<int, string>? RepoErrors = null,
+    IReadOnlyDictionary<int, string>? LevelErrors = null)
 {
-    public static OperationResult Ok(IReadOnlyDictionary<int, string>? repoErrors = null)
-        => new(true, null, repoErrors);
+    public static OperationResult Ok(
+        IReadOnlyDictionary<int, string>? repoErrors = null,
+        IReadOnlyDictionary<int, string>? levelErrors = null)
+        => new(true, null, repoErrors, levelErrors);
 
-    public static OperationResult Fail(string error, IReadOnlyDictionary<int, string>? repoErrors = null)
-        => new(false, error, repoErrors);
+    public static OperationResult Fail(
+        string error,
+        IReadOnlyDictionary<int, string>? repoErrors = null,
+        IReadOnlyDictionary<int, string>? levelErrors = null)
+        => new(false, error, repoErrors, levelErrors);
 }
 
 /// <summary>

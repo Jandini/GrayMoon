@@ -49,7 +49,7 @@ public sealed partial class WorkspaceRepositories
     }
 
     private bool HasAnyCalloutErrors =>
-        repositoryErrors.Count > 0 || !string.IsNullOrWhiteSpace(errorMessage);
+        repositoryErrors.Count > 0 || levelErrors.Count > 0 || !string.IsNullOrWhiteSpace(errorMessage);
 
     private void ClearRepositoryErrors()
     {
@@ -57,6 +57,7 @@ public sealed partial class WorkspaceRepositories
             return;
 
         repositoryErrors.Clear();
+        levelErrors.Clear();
         errorMessage = null;
         StateHasChanged();
     }
@@ -68,16 +69,30 @@ public sealed partial class WorkspaceRepositories
     {
         if (string.IsNullOrWhiteSpace(message))
             return;
-        if (repositoryId == 0)
-        {
-            SetPageError(message);
-            return;
-        }
         repositoryErrors.TryGetValue(repositoryId, out var existing);
         var next = AppendErrorText(existing, message);
         if (next is null || string.Equals(existing, next, StringComparison.Ordinal))
             return;
         repositoryErrors[repositoryId] = next;
+    }
+
+    private void SetLevelError(int level, string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return;
+        levelErrors.TryGetValue(level, out var existing);
+        var next = AppendErrorText(existing, message);
+        if (next is null || string.Equals(existing, next, StringComparison.Ordinal))
+            return;
+        levelErrors[level] = next;
+    }
+
+    private void ApplyLevelErrors(IReadOnlyDictionary<int, string>? errors)
+    {
+        if (errors is not { Count: > 0 })
+            return;
+        foreach (var (level, err) in errors)
+            SetLevelError(level, err);
     }
 
     private void SetPageError(string? message)
@@ -110,6 +125,12 @@ public sealed partial class WorkspaceRepositories
 
     private string? GetRepositoryError(int repositoryId) =>
         repositoryErrors.TryGetValue(repositoryId, out var msg) ? msg : null;
+
+    private string? GetLevelError(int? levelKey)
+    {
+        var key = levelKey ?? 0;
+        return levelErrors.TryGetValue(key, out var msg) ? msg : null;
+    }
 
     private RepoSyncStatus GetRepoSyncStatus(int repositoryId) =>
         repoSyncStatus.TryGetValue(repositoryId, out var status) ? status : RepoSyncStatus.NeedsSync;

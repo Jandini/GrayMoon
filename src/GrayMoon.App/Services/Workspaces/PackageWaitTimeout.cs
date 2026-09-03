@@ -1,7 +1,7 @@
 namespace GrayMoon.App.Services.Workspaces;
 
 /// <summary>
-/// Package-wait timeout is not user cancel. Report it on each waiting repo and stop synchronized push.
+/// Package-wait timeout is not user cancel. Report it on the waiting level and stop synchronized push.
 /// </summary>
 internal static class PackageWaitTimeout
 {
@@ -9,14 +9,12 @@ internal static class PackageWaitTimeout
         => $"Timed out waiting for package dependencies after {timeout.TotalMinutes:0.#} min ({found} of {total} found).";
 
     internal static void Report(
-        IEnumerable<int> repoIds,
-        Action<int, string>? onRepoError,
+        int level,
+        Action<int, string>? onLevelError,
         int found,
         int total,
         TimeSpan timeout)
     {
-        var message = FormatMessage(found, total, timeout);
-        foreach (var repoId in repoIds)
-            onRepoError?.Invoke(repoId, message);
+        onLevelError?.Invoke(level, FormatMessage(found, total, timeout));
     }
 }

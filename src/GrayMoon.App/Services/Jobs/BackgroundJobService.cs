@@ -33,12 +33,14 @@ public sealed class BackgroundJobService : IBackgroundJobService, IDisposable
 {
     private readonly ConcurrentDictionary<string, BackgroundJobHandle> _jobs = new(StringComparer.OrdinalIgnoreCase);
     private readonly IWorkspaceOperationRunner _runner;
+    private readonly ILogger<BackgroundJobService> _logger;
 
     public event Action? Changed;
 
-    public BackgroundJobService(IWorkspaceOperationRunner runner)
+    public BackgroundJobService(IWorkspaceOperationRunner runner, ILogger<BackgroundJobService> logger)
     {
         _runner = runner;
+        _logger = logger;
         _runner.Changed += RaiseChanged;
     }
 
@@ -88,6 +90,7 @@ public sealed class BackgroundJobService : IBackgroundJobService, IDisposable
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Background job {JobKey} failed: {Message}", jobKey, ex.Message);
                 handle.MarkFaulted(ex);
             }
             finally

@@ -29,44 +29,62 @@ public sealed class PushOrchestrator(
 
         var setProgress = progress.ToMessageAction();
         var repoErrors = new System.Collections.Concurrent.ConcurrentDictionary<int, string>();
-        void OnRepoError(int id, string err)
-        {
-            repoErrors[id] = err;
-            progress.Report($"{id}: {err}");
-        }
+        var levelErrors = new System.Collections.Concurrent.ConcurrentDictionary<int, string>();
+        var sink = new OperationErrorSink(
+            workspaceId,
+            logger,
+            (id, err) => repoErrors[id] = err,
+            (level, err) => levelErrors[level] = err);
 
-        if (synchronizedPush)
+        try
         {
-            setProgress("Syncing package registries for required packages...");
-            if (requiredPackageIds.Count > 0 && serviceProvider.GetService<PackageRegistrySyncService>() is { } syncService)
-                await syncService.SyncRegistriesForPackageIdsAsync(workspaceId, requiredPackageIds, cancellationToken);
+            if (synchronizedPush)
+            {
+                setProgress("Syncing package registries for required packages...");
+                if (requiredPackageIds.Count > 0 && serviceProvider.GetService<PackageRegistrySyncService>() is { } syncService)
+                    await syncService.SyncRegistriesForPackageIdsAsync(workspaceId, requiredPackageIds, cancellationToken);
 
-            setProgress("Pushing synchronized...");
-            await workspacePushService.RunPushAsync(
-                workspaceId,
-                repoIds,
-                setProgress,
-                OnRepoError,
-                onAppSideComplete,
-                packageRegistriesAlreadySynced: requiredPackageIds.Count > 0,
-                syncedRepoIds: syncedRepoIds,
-                cancellationToken: cancellationToken,
-                runId: runId);
+                setProgress("Pushing synchronized...");
+                await workspacePushService.RunPushAsync(
+                    workspaceId,
+                    repoIds,
+                    setProgress,
+                    sink.Repository,
+                    sink.Level,
+                    onAppSideComplete,
+                    packageRegistriesAlreadySynced: requiredPackageIds.Count > 0,
+                    syncedRepoIds: syncedRepoIds,
+                    cancellationToken: cancellationToken,
+                    runId: runId);
+            }
+            else
+            {
+                setProgress("Pushing...");
+                await workspacePushService.RunPushReposParallelAsync(
+                    workspaceId,
+                    repoIds,
+                    setProgress,
+                    sink.Repository,
+                    sink.Level,
+                    onAppSideComplete: null,
+                    cancellationToken: cancellationToken);
+            }
         }
-        else
+        catch (SynchronizedPushNotPossibleException)
         {
-            setProgress("Pushing...");
-            await workspacePushService.RunPushReposParallelAsync(
-                workspaceId,
-                repoIds,
-                setProgress,
-                OnRepoError,
-                onAppSideComplete: null,
-                cancellationToken: cancellationToken);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            sink.Level(0, ex);
         }
 
         logger.LogInformation("[PushOrchestrator {RunId}] Workspace {WorkspaceId}: push finished.", runId, workspaceId);
-        return PushOperationResult.FromRepoErrors(repoErrors);
+        return PushOperationResult.FromErrors(repoErrors, levelErrors);
     }
 
     public async Task<OperationResult> PushSingleAsync(

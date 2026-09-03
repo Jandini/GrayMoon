@@ -11,6 +11,7 @@ public sealed class WorkspaceFeatureOperations(NewFeatureOrchestrator orchestrat
         string? commitMessage,
         IProgress<OperationProgress>? progress,
         Action<int, string> setRepositoryError,
+        Action<int, string> setLevelError,
         CancellationToken cancellationToken)
         => orchestrator.RunAsync(
             workspaceId,
@@ -21,5 +22,6 @@ public sealed class WorkspaceFeatureOperations(NewFeatureOrchestrator orchestrat
             commitMessage,
             progress,
             setRepositoryError,
+            setLevelError,
             cancellationToken);
 }
