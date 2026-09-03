@@ -62,7 +62,8 @@ public sealed partial class WorkspaceRepositories
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error getting update plan for workspace {WorkspaceId}", WorkspaceId);
-            SetPageError("Could not determine update plan. The GrayMoon Agent may be offline.");
+            SetLevelError(0, ex.Message);
+            StateHasChanged();
         }
     }
 
@@ -97,6 +98,7 @@ public sealed partial class WorkspaceRepositories
                     ct,
                     job.ToOperationProgress(),
                     (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
+                    (level, msg) => SafeInvoke(() => SetLevelError(level, msg)),
                     repoIdsToUpdate: null,
                     commitMessage: commitMessage,
                     includeDepsInCommitMessage: includeDepsInCommitMessage));
@@ -106,7 +108,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error updating dependencies for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => SetPageError("Update failed. The GrayMoon Agent may be offline. Start the Agent and try again."));
+                SafeInvoke(() => SetLevelError(0, ex.Message));
             }
         });
 
@@ -269,6 +271,7 @@ public sealed partial class WorkspaceRepositories
                         ct,
                         job.ToOperationProgress(),
                         (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
+                        (level, msg) => SafeInvoke(() => SetLevelError(level, msg)),
                         commitMessage: commitMessage,
                         includeDepsInCommitMessage: includeDepsInCommitMessage,
                         repoIdsToUpdate: null,
@@ -291,7 +294,7 @@ public sealed partial class WorkspaceRepositories
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Level-Only Update & Push: update failed for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => SetPageError("Update failed. The GrayMoon Agent may be offline. Start the Agent and try again."));
+                SafeInvoke(() => SetLevelError(0, ex.Message));
                 throw;
             }
 
@@ -314,7 +317,7 @@ public sealed partial class WorkspaceRepositories
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Level-Only Update & Push: failed to get push plan for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => ShowOperationError("Push Failed", $"Level {level} updated but push plan could not be determined. The GrayMoon Agent may be offline."));
+                SafeInvoke(() => SetLevelError(0, ex.Message));
                 throw;
             }
 
@@ -370,6 +373,7 @@ public sealed partial class WorkspaceRepositories
                         ct,
                         job.ToOperationProgress(),
                         (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
+                        (level, msg) => SafeInvoke(() => SetLevelError(level, msg)),
                         repoIdsToUpdate: null,
                         commitMessage: commitMessage,
                         includeDepsInCommitMessage: includeDepsInCommitMessage,
@@ -391,7 +395,7 @@ public sealed partial class WorkspaceRepositories
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Update & Push: update failed for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => SetPageError("Update failed. The GrayMoon Agent may be offline. Start the Agent and try again."));
+                SafeInvoke(() => SetLevelError(0, ex.Message));
                 throw;
             }
 
@@ -412,7 +416,7 @@ public sealed partial class WorkspaceRepositories
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Update & Push: failed to get push plan for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => ShowOperationError("Push Failed", "Update succeeded but push plan could not be determined. The GrayMoon Agent may be offline."));
+                SafeInvoke(() => SetLevelError(0, ex.Message));
                 throw;
             }
 

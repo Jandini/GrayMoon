@@ -134,6 +134,7 @@
                                         <WorkspaceRepositoriesLevelHeader @key="@($"lvl-{slot.LevelKey?.ToString() ?? "none"}")"
                                                                            WorkspaceId="@WorkspaceId"
                                                                            LevelKey="@slot.LevelKey"
+                                                                           LevelError="@GetLevelError(slot.LevelKey)"
                                                                            ColSpan="@TableColSpan"
                                                                            Group="@levelGroup"
                                                                            RepositoryCount="@slot.LevelRepoCount"

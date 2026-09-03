@@ -89,11 +89,10 @@ public sealed class WorkspaceCommitSyncHandler(
             if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
             {
                 setRepositoryError(repositoryId, result.ErrorMessage);
-                progress.Report(result.MergeConflict ? "Merge conflict detected. Merge aborted." : "Commit sync completed with errors.");
             }
             else if (result is { MergeConflict: true })
             {
-                progress.Report("Merge conflict detected. Merge aborted.");
+                setRepositoryError(repositoryId, "Merge conflict detected. Merge aborted.");
             }
             else
             {

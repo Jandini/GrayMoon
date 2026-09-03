@@ -83,6 +83,7 @@ public static class WorkspaceOperationsEndpoints
                 ct,
                 progress,
                 (_, _) => { },
+                (_, _) => { },
                 repoIdsToUpdate: body?.RepositoryIds?.ToHashSet(),
                 commitMessage: body?.CommitMessage,
                 includeDepsInCommitMessage: body?.IncludeDepsInCommitMessage ?? true,
@@ -135,6 +136,7 @@ public static class WorkspaceOperationsEndpoints
                 body.UpdateDependencies,
                 body.CommitMessage,
                 progress,
+                (_, _) => { },
                 (_, _) => { },
                 ct);
 

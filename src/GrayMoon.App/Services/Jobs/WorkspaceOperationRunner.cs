@@ -6,7 +6,7 @@ namespace GrayMoon.App.Services.Jobs;
 /// Singleton host for in-flight workspace mutations. Work continues after a circuit
 /// disposes so another tab (or later REST/MCP) can attach to the same run.
 /// </summary>
-public sealed class WorkspaceOperationRunner : IWorkspaceOperationRunner
+public sealed class WorkspaceOperationRunner(ILogger<WorkspaceOperationRunner> logger) : IWorkspaceOperationRunner
 {
     private readonly ConcurrentDictionary<int, WorkspaceOperation> _running = new();
 
@@ -50,6 +50,12 @@ public sealed class WorkspaceOperationRunner : IWorkspaceOperationRunner
             }
             catch (Exception ex)
             {
+                logger.LogError(
+                    ex,
+                    "Workspace {WorkspaceId} operation {OperationKind} failed: {Message}",
+                    workspaceId,
+                    operationKind,
+                    ex.Message);
                 created.MarkFaulted(ex);
             }
             finally

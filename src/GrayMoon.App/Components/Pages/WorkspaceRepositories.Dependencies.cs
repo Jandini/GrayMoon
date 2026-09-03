@@ -148,6 +148,7 @@ public sealed partial class WorkspaceRepositories
                     ct,
                     job.ToOperationProgress(),
                     (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
+                    (level, msg) => SafeInvoke(() => SetLevelError(level, msg)),
                     repoIdsToUpdate: new HashSet<int> { repositoryId }));
         }, new PageJobOptions
         {
@@ -190,7 +191,7 @@ public sealed partial class WorkspaceRepositories
             OnError = ex =>
             {
                 Logger.LogError(ex, "Error updating repository {RepositoryId} in workspace {WorkspaceId}", repositoryId, WorkspaceId);
-                SafeInvoke(() => SetRepositoryError(repositoryId, "Update failed. The GrayMoon Agent may be offline. Start the Agent and try again."));
+                SafeInvoke(() => SetRepositoryError(repositoryId, ex.Message));
             }
         });
 

@@ -19,9 +19,12 @@ public sealed class NewFeatureOrchestrator(
         string? commitMessage,
         IProgress<OperationProgress>? progress,
         Action<int, string> setRepositoryError,
+        Action<int, string> setLevelError,
         CancellationToken cancellationToken)
     {
         logger.LogInformation("NewFeatureOrchestrator starting for workspace {WorkspaceId}: branch={Branch}, updateDeps={UpdateDeps}", workspaceId, newBranchName, updateDependencies);
+
+        var sink = new OperationErrorSink(workspaceId, logger, setRepositoryError, setLevelError);
 
         progress.Report("Creating branches...");
         var branchErrors = await branchHandler.CreateBranchesAsync(
@@ -33,7 +36,7 @@ public sealed class NewFeatureOrchestrator(
             syncState: true,
             cancellationToken);
         foreach (var (repoId, msg) in branchErrors)
-            setRepositoryError(repoId, msg);
+            sink.Repository(repoId, msg);
 
         if (updateDependencies)
         {
@@ -43,6 +46,7 @@ public sealed class NewFeatureOrchestrator(
                 cancellationToken,
                 progress,
                 setRepositoryError,
+                setLevelError,
                 onAppSideComplete: null,
                 repoIdsToUpdate: null,
                 commitMessage: commitMessage,

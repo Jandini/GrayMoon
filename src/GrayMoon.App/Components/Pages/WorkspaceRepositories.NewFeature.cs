@@ -65,6 +65,7 @@ public sealed partial class WorkspaceRepositories
                         commitMessage: null,
                         progress: job.ToOperationProgress(),
                         setRepositoryError: (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
+                        setLevelError: (level, msg) => SafeInvoke(() => SetLevelError(level, msg)),
                         cancellationToken: ct));
 
                 // Unconditional reload so workspaceRepositories is current for Phase 3
@@ -84,7 +85,7 @@ public sealed partial class WorkspaceRepositories
             catch (Exception ex)
             {
                 Logger.LogError(ex, "New Feature: orchestration failed for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => ShowOperationError("New Feature Failed", "Could not complete the New Feature workflow. The GrayMoon Agent may be offline or a dependency update failed. Check individual repository errors for details."));
+                SafeInvoke(() => SetLevelError(0, ex.Message));
                 throw;
             }
 
@@ -105,7 +106,7 @@ public sealed partial class WorkspaceRepositories
             catch (Exception ex)
             {
                 Logger.LogError(ex, "New Feature: failed to get push plan for workspace {WorkspaceId}", WorkspaceId);
-                SafeInvoke(() => ShowOperationError("Push Failed", "Could not determine push plan. The GrayMoon Agent may be offline."));
+                SafeInvoke(() => SetLevelError(0, ex.Message));
                 throw;
             }
 
@@ -115,8 +116,8 @@ public sealed partial class WorkspaceRepositories
             }
             catch (SynchronizedPushNotPossibleException ex)
             {
-                SafeInvoke(() => ShowOperationError("Push Failed",
-                    $"Synchronized push could not complete: {ex.MissingPackagesCount} required package mapping(s) are missing. Check NuGet connector configuration and token, then retry."));
+                Logger.LogError(ex, "New Feature: synchronized push not possible for workspace {WorkspaceId}", WorkspaceId);
+                SafeInvoke(() => SetLevelError(0, ex.Message));
                 return;
             }
         }, new PageJobOptions { RefreshOnSuccess = false });

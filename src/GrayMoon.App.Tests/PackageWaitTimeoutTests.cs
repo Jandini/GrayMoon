@@ -15,15 +15,15 @@ public sealed class PackageWaitTimeoutTests
     }
 
     [Fact]
-    public void Report_writes_timeout_on_each_waiting_repo()
+    public void Report_writes_timeout_on_the_level_once()
     {
         var errors = new Dictionary<int, string>();
 
-        PackageWaitTimeout.Report([11, 22], (id, msg) => errors[id] = msg, found: 0, total: 2, timeout: TimeSpan.FromMinutes(3));
+        PackageWaitTimeout.Report(2, (level, msg) => errors[level] = msg, found: 0, total: 2, timeout: TimeSpan.FromMinutes(3));
 
-        Assert.Equal(2, errors.Count);
-        Assert.Equal(errors[11], errors[22]);
-        Assert.Contains("Timed out waiting for package dependencies", errors[11], StringComparison.Ordinal);
-        Assert.DoesNotContain("Push cancelled", errors[11], StringComparison.OrdinalIgnoreCase);
+        Assert.Single(errors);
+        Assert.True(errors.ContainsKey(2));
+        Assert.Contains("Timed out waiting for package dependencies", errors[2], StringComparison.Ordinal);
+        Assert.DoesNotContain("Push cancelled", errors[2], StringComparison.OrdinalIgnoreCase);
     }
 }

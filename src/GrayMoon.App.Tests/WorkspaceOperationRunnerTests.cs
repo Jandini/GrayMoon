@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 namespace GrayMoon.App.Tests;
 
 public sealed class WorkspaceOperationRunnerTests
@@ -5,7 +8,7 @@ public sealed class WorkspaceOperationRunnerTests
     [Fact]
     public async Task TryStart_second_caller_gets_existing_run_and_does_not_start_work()
     {
-        var runner = new WorkspaceOperationRunner();
+        var runner = new WorkspaceOperationRunner(NullLogger<WorkspaceOperationRunner>.Instance);
         var firstEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var firstRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var secondWorkRan = false;
@@ -47,6 +50,34 @@ public sealed class WorkspaceOperationRunnerTests
     }
 
     [Fact]
+    public async Task TryStart_logs_error_when_work_faults()
+    {
+        var logger = new RecordingLogger<WorkspaceOperationRunner>();
+        var runner = new WorkspaceOperationRunner(logger);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        runner.TryStart(
+            11,
+            "workspace",
+            WorkspaceJobKeys.RepositoriesOverlayKey(11),
+            "Pushing...",
+            (_, _) =>
+            {
+                entered.SetResult();
+                throw new InvalidOperationException("wait restore failed");
+            },
+            out _);
+
+        await entered.Task;
+        await WorkspaceJobTestWait.WaitUntilAsync(() => !runner.IsBusy(11));
+
+        Assert.Contains(logger.Entries, e =>
+            e.Level == LogLevel.Error
+            && e.Exception is InvalidOperationException
+            && e.Message.Contains("wait restore failed", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void WorkspaceJobKeys_classifies_mutation_keys()
     {
         Assert.True(WorkspaceJobKeys.IsMutationKey("/workspaces/3", out var reposId));
@@ -67,8 +98,8 @@ public sealed class BackgroundJobServiceWorkspaceLockTests
     [Fact]
     public async Task StartJob_on_second_workspace_key_does_not_run_a_second_body()
     {
-        var runner = new WorkspaceOperationRunner();
-        using var service = new BackgroundJobService(runner);
+        var runner = new WorkspaceOperationRunner(NullLogger<WorkspaceOperationRunner>.Instance);
+        using var service = new BackgroundJobService(runner, NullLogger<BackgroundJobService>.Instance);
         var firstEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var firstRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var secondWorkRan = false;
@@ -109,8 +140,8 @@ public sealed class BackgroundJobServiceWorkspaceLockTests
     [Fact]
     public async Task GetJob_attaches_only_on_originating_page_path()
     {
-        var runner = new WorkspaceOperationRunner();
-        using var service = new BackgroundJobService(runner);
+        var runner = new WorkspaceOperationRunner(NullLogger<WorkspaceOperationRunner>.Instance);
+        using var service = new BackgroundJobService(runner, NullLogger<BackgroundJobService>.Instance);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -140,8 +171,8 @@ public sealed class BackgroundJobServiceWorkspaceLockTests
     [Fact]
     public async Task Scan_key_does_not_take_the_workspace_lock()
     {
-        var runner = new WorkspaceOperationRunner();
-        using var service = new BackgroundJobService(runner);
+        var runner = new WorkspaceOperationRunner(NullLogger<WorkspaceOperationRunner>.Instance);
+        using var service = new BackgroundJobService(runner, NullLogger<BackgroundJobService>.Instance);
         var scanEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var scanRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var mutationRan = false;
@@ -164,6 +195,25 @@ public sealed class BackgroundJobServiceWorkspaceLockTests
         await WorkspaceJobTestWait.WaitUntilAsync(() => mutationRan);
         scanRelease.SetResult();
         await WorkspaceJobTestWait.WaitUntilAsync(() => !service.IsRunning("/workspaces/8/changes:scan"));
+    }
+
+    [Fact]
+    public async Task StartJob_logs_error_when_circuit_job_faults()
+    {
+        var runner = new WorkspaceOperationRunner(NullLogger<WorkspaceOperationRunner>.Instance);
+        var logger = new RecordingLogger<BackgroundJobService>();
+        using var service = new BackgroundJobService(runner, logger);
+
+        service.StartJob("/workspaces/8/changes:scan", "Refreshing...", (_, _) =>
+            throw new InvalidOperationException("scan boom"));
+
+        await WorkspaceJobTestWait.WaitUntilAsync(() =>
+            service.GetJob("/workspaces/8/changes:scan")?.State == BackgroundJobState.Faulted);
+
+        Assert.Contains(logger.Entries, e =>
+            e.Level == LogLevel.Error
+            && e.Exception is InvalidOperationException
+            && e.Message.Contains("scan boom", StringComparison.Ordinal));
     }
 
     private static void AssertNoRunningOverlay(BackgroundJobService service, string jobKey)

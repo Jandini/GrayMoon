@@ -11,5 +11,6 @@ public interface IWorkspaceFeatureOperations
         string? commitMessage,
         IProgress<OperationProgress>? progress,
         Action<int, string> setRepositoryError,
+        Action<int, string> setLevelError,
         CancellationToken cancellationToken);
 }

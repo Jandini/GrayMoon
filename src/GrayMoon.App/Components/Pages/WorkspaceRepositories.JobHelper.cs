@@ -53,6 +53,8 @@ public sealed partial class WorkspaceRepositories
             {
                 if (options.FailureLogMessage != null)
                     Logger.LogError(ex, options.FailureLogMessage);
+                else
+                    Logger.LogError(ex, "Workspace repositories page job failed for workspace {WorkspaceId}", WorkspaceId);
                 options.OnError?.Invoke(ex);
                 throw;
             }

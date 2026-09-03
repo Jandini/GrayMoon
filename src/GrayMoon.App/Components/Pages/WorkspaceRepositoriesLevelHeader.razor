@@ -70,10 +70,19 @@
         </div>
     </td>
 </tr>
+@if (!string.IsNullOrWhiteSpace(LevelError))
+{
+    <tr class="repo-error-row">
+        <td colspan="@ColSpan" class="p-0">
+            <div class="repo-error-line" role="alert">@LevelError</div>
+        </td>
+    </tr>
+}
 
 @code {
     [Parameter] public int WorkspaceId { get; set; }
     [Parameter] public int? LevelKey { get; set; }
+    [Parameter] public string? LevelError { get; set; }
     [Parameter] public int ColSpan { get; set; } = 8;
     [Parameter] public IEnumerable<WorkspaceRepositoryLink>? Group { get; set; }
     /// <summary>Total repositories at this level (may exceed hydrated <see cref="Group"/> count under virtual scroll).</summary>
