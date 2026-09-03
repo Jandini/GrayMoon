@@ -30,7 +30,7 @@
                                     IsCommitSyncing="@IsJobRunning"
                                     AgentTasksPendingCount="@AgentTasksPendingCount"
                                     IsRestoringPackages="@IsJobRunning"
-                                    IsOverlayVisible="@(isInitialLoading && !hasLoadedOnce || IsJobRunning || ShowRepositoriesFetchOverlay)"
+                                    IsOverlayVisible="@IsPageOverlayVisible"
                                     OnShowRepositories="ShowRepositoriesModalAsync"
                                     OnNewFeature="ShowNewFeatureModalAsync"
                                     OnShowBranch="() => ShowBranchModalAsync()"
