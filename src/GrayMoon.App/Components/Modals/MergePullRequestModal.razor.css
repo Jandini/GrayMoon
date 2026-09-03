@@ -31,7 +31,7 @@
     border: none;
     border-radius: 0.25rem;
     background: transparent;
-    color: #6e7681;
+    color: #555;
     font-size: 0.85rem;
     line-height: 1;
     cursor: pointer;
@@ -302,7 +302,7 @@
     padding: 0;
     border: none;
     background: none;
-    color: var(--text-secondary, #8b949e);
+    color: #555;
     font-size: 1rem;
     line-height: 1;
     text-decoration: none;
