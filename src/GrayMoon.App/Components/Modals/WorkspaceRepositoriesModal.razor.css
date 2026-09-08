@@ -166,6 +166,29 @@
     white-space: nowrap;
 }
 
+.repository-grid td:nth-child(2) .repo-name-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    text-overflow: clip;
+}
+
+.repo-name-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.repository-grid .repo-archived-badge {
+    background-color: #6f42c1;
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.4em 0.5em;
+    flex-shrink: 0;
+}
+
 /* Stretch the content area to fill the remaining flex space */
 .repo-modal-body-content {
     flex: 1 1 0;

@@ -110,7 +110,11 @@
                                                         </td>
                                                         <td>
                                                             <span class="repo-name-cell" title="@repository.RepositoryName">
-                                                                @repository.RepositoryName
+                                                                <span class="repo-name-text">@repository.RepositoryName</span>
+                                                                @if (repository.Archived)
+                                                                {
+                                                                    <span class="badge repo-archived-badge">archived</span>
+                                                                }
                                                             </span>
                                                         </td>
                                                         <td>
