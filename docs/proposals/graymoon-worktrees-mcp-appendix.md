@@ -1,4 +1,4 @@
-# Appendix — MCP-Controlled Worktrees and AI Agent Orchestration
+# Appendix - MCP-Controlled Worktrees and AI Agent Orchestration
 
 This appendix extends the GrayMoon worktree design with an MCP layer that allows AI clients and coding agents to safely inspect and control GrayMoon-managed development environments.
 
@@ -813,7 +813,7 @@ This keeps the MCP adapter thin and reusable.
 
 ## 16. Recommended Delivery Stages
 
-### V1 — Read-Only MCP
+### V1 - Read-Only MCP
 
 Expose:
 
@@ -833,7 +833,7 @@ Goal:
 
 ---
 
-### V2 — Worktree / Working Context Control
+### V2 - Worktree / Working Context Control
 
 Expose:
 
@@ -851,7 +851,7 @@ Goal:
 
 ---
 
-### V3 — Git Write Operations
+### V3 - Git Write Operations
 
 Expose:
 
@@ -867,7 +867,7 @@ Goal:
 
 ---
 
-### V4 — Remote Collaboration Operations
+### V4 - Remote Collaboration Operations
 
 Expose:
 
@@ -885,7 +885,7 @@ Goal:
 
 ---
 
-### V5 — Workspace-Level AI Orchestration
+### V5 - Workspace-Level AI Orchestration
 
 Expose high-level operations such as:
 
