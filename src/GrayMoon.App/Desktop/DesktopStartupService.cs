@@ -81,7 +81,7 @@ public sealed class DesktopStartupService : IHostedService
 
         using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.Out, PipeOptions.None);
 
-        // Attempt to connect with a short timeout — the pipe server should already be waiting
+        // Attempt to connect with a short timeout - the pipe server should already be waiting
         await client.ConnectAsync(timeout: 5000, cancellationToken);
 
         var json = JsonSerializer.Serialize(handshake);

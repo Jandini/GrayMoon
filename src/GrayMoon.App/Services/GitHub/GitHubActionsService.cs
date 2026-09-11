@@ -5,7 +5,7 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace GrayMoon.App.Services.GitHub;
 
-public class GitHubActionsService(
+public sealed class GitHubActionsService(
     ConnectorRepository connectorRepository,
     GitHubRepositoryService repositoryService,
     GitHubService gitHubService,

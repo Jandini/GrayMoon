@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.SignalR;
 namespace GrayMoon.App.Hubs;
 
 /// <summary>
-/// Desktop notification hub — exists for IHubContext&lt;DesktopNotificationHub&gt;.
+/// Desktop notification hub - exists for IHubContext&lt;DesktopNotificationHub&gt;.
 /// Only registered when GrayMoon.App is running in desktop mode (--desktop flag).
 ///
 /// Push notifications to GrayMoon.Desktop by injecting IHubContext&lt;DesktopNotificationHub&gt;

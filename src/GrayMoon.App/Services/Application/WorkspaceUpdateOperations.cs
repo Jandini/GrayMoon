@@ -51,4 +51,22 @@ public sealed class WorkspaceUpdateOperations(
             syncedRepoIds,
             progress.ToMessageAction(),
             cancellationToken);
+
+    public Task UpdateSingleRepositoryAsync(
+        int workspaceId,
+        int repositoryId,
+        Action<string>? onProgressMessage = null,
+        Action<int, string>? onRepoError = null,
+        CancellationToken cancellationToken = default)
+        => workspaceGitService.RunUpdateSingleRepositoryAsync(
+            workspaceId,
+            repositoryId,
+            onProgressMessage: onProgressMessage,
+            onRepoError: onRepoError,
+            cancellationToken: cancellationToken);
+
+    public Task RecomputeAndBroadcastWorkspaceSyncedAsync(
+        int workspaceId,
+        CancellationToken cancellationToken = default)
+        => workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
 }

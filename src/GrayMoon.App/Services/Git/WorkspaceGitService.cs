@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.Git;
 
-public class WorkspaceGitService(
+public sealed class WorkspaceGitService(
     IAgentBridge agentBridge,
     WorkspaceService workspaceService,
     WorkspaceRepository workspaceRepository,
@@ -1592,7 +1592,7 @@ public class WorkspaceGitService(
                     wr.BranchName = createResponse?.Branch ?? newBranchName;
                     if (syncState && createResponse != null)
                     {
-                        // Hooks were suppressed — persist all state returned inline so the next
+                        // Hooks were suppressed - persist all state returned inline so the next
                         // step (dependency update) sees a complete, consistent database.
                         wr.CheckedOutTag = null;
                         if (createResponse.Version != null)

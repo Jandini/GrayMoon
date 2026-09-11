@@ -31,4 +31,21 @@ public interface IWorkspaceUpdateOperations
         IReadOnlySet<int> syncedRepoIds,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken);
+
+    /// <summary>Update dependencies for a single repository only (refresh projects, sync deps, no commit).</summary>
+    Task UpdateSingleRepositoryAsync(
+        int workspaceId,
+        int repositoryId,
+        Action<string>? onProgressMessage = null,
+        Action<int, string>? onRepoError = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Closes out a user action: recomputes workspace-wide file-version and dependency stats, then
+    /// broadcasts WorkspaceSynced once so the grid refreshes. Call exactly once per action, after every
+    /// repository in the batch has been written.
+    /// </summary>
+    Task RecomputeAndBroadcastWorkspaceSyncedAsync(
+        int workspaceId,
+        CancellationToken cancellationToken = default);
 }

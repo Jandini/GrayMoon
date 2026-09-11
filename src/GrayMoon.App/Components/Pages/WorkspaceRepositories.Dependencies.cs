@@ -178,8 +178,8 @@ public sealed partial class WorkspaceRepositories
 
         StartPageJob("Updating repository...", async (job, ct) =>
         {
-            await ScopedExecutor.ExecuteAsync<WorkspaceGitService>(svc =>
-                svc.RunUpdateSingleRepositoryAsync(
+            await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations>(svc =>
+                svc.UpdateSingleRepositoryAsync(
                     WorkspaceId,
                     repositoryId,
                     onProgressMessage: job.ReportProgress,
@@ -288,10 +288,10 @@ public sealed partial class WorkspaceRepositories
         {
             await using var scope = ServiceScopeFactory.CreateAsyncScope();
             var customDepRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryCustomDependencyRepository>();
-            var gitService = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+            var updateOperations = scope.ServiceProvider.GetRequiredService<IWorkspaceUpdateOperations>();
 
             await customDepRepo.ReplaceCustomDependenciesForDependentAsync(WorkspaceId, dependentRepoId, selected);
-            await gitService.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId);
+            await updateOperations.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId);
             await ReloadWorkspaceDataFromFreshScopeAsync();
 
             CloseCustomDependenciesModal();

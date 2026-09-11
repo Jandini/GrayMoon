@@ -9,7 +9,7 @@ using Polly.Retry;
 
 namespace GrayMoon.App.Services.GitHub;
 
-public class GitHubService : IConnectorService
+public sealed class GitHubService : IConnectorService
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<GitHubService> _logger;
@@ -106,7 +106,7 @@ public class GitHubService : IConnectorService
             .Build();
 
     /// <summary>
-    /// Retry pipeline for live-feed polls: retries 502/503 but NOT 429 —
+    /// Retry pipeline for live-feed polls: retries 502/503 but NOT 429 -
     /// the polling loop owns rate-limit backoff so retrying here just wastes quota.
     /// </summary>
     private static readonly ResiliencePipeline<HttpResponseMessage> GitHubLiveFeedRetryPipeline =

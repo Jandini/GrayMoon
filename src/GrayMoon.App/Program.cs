@@ -277,7 +277,7 @@ try
     }
 
     // Only redirect to HTTPS when URLs include HTTPS (skip in container when only HTTP is used)
-    // Also skip in desktop mode — loopback HTTP only, no HTTPS needed.
+    // Also skip in desktop mode - loopback HTTP only, no HTTPS needed.
     if (!isDesktopMode && (app.Configuration["ASPNETCORE_URLS"] ?? "").Contains("https", StringComparison.OrdinalIgnoreCase))
     {
         app.UseHttpsRedirection();

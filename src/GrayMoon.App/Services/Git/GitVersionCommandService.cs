@@ -4,7 +4,7 @@ using GrayMoon.Common;
 
 namespace GrayMoon.App.Services.Git;
 
-public class GitVersionCommandService(ILogger<GitVersionCommandService> logger, ICommandLineService commandLine)
+public sealed class GitVersionCommandService(ILogger<GitVersionCommandService> logger, ICommandLineService commandLine)
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 

@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
 
-public class AppSettingRepository(AppDbContext db)
+public sealed class AppSettingRepository(AppDbContext db)
 {
     public const string WorkspaceRootPathKey = "WorkspaceRootPath";
 

@@ -3,7 +3,7 @@ using GrayMoon.App.Repositories;
 
 namespace GrayMoon.App.Services.GitHub;
 
-public class GitHubRepositoryService(
+public sealed class GitHubRepositoryService(
     ConnectorRepository connectorRepository,
     GitHubRepositoryRepository repositoryRepository,
     GitHubService gitHubService,

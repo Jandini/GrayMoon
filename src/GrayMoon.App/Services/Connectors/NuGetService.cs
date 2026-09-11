@@ -6,7 +6,7 @@ using GrayMoon.App.Models;
 
 namespace GrayMoon.App.Services.Connectors;
 
-public class NuGetService : IConnectorService
+public sealed class NuGetService : IConnectorService
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<NuGetService> _logger;

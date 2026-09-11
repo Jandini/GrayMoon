@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
 
-public class WorkspaceRepository(
+public sealed class WorkspaceRepository(
     AppDbContext dbContext,
     IDbContextFactory<AppDbContext> dbContextFactory,
     WorkspaceService workspaceService,

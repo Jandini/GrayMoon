@@ -169,7 +169,7 @@ public static class GhaLogParser
             int j = i + 2;
             while (j < text.Length && (text[j] == ';' || char.IsAsciiDigit(text[j]))) j++;
 
-            // Not a valid SGR sequence — treat the ESC as literal and advance past it
+            // Not a valid SGR sequence - treat the ESC as literal and advance past it
             if (j >= text.Length || text[j] != 'm')
             {
                 i++;
@@ -198,7 +198,7 @@ public static class GhaLogParser
                 sb.Append(_ansiSpanTable[code]);
                 inSpan = true;
             }
-            // All other codes silently consumed — matches original behavior
+            // All other codes silently consumed - matches original behavior
 
             start = j + 1;
             i = start;

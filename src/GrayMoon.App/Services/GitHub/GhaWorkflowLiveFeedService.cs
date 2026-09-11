@@ -148,7 +148,7 @@ public sealed class GhaWorkflowLiveFeedService(
                     StepProgress: state.LastStepProgress,
                     StepIndex: state.LastStepIndex,
                     StepCount: state.LastStepCount,
-                    NewLines: [$"Rate limited — pausing until {label}"],
+                    NewLines: [$"Rate limited - pausing until {label}"],
                     DelayMs: Math.Min(waitMs + jitter, 600_000));
             }
 
@@ -186,7 +186,7 @@ public sealed class GhaWorkflowLiveFeedService(
 
     private static int DeterminePollDelayMs(IReadOnlyList<GitHubWorkflowJobDto> jobs)
     {
-        // All jobs finished — workflow is done; parent will remove the terminal on next sync.
+        // All jobs finished - workflow is done; parent will remove the terminal on next sync.
         if (jobs.Count > 0 && jobs.All(j => string.Equals(j.Status, "completed", StringComparison.OrdinalIgnoreCase)))
             return PollIntervalIdleMs;
 
