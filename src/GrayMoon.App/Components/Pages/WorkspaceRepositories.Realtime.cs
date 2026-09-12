@@ -17,10 +17,7 @@ public sealed partial class WorkspaceRepositories
         }
         if (firstRender && workspace != null && _hubConnection == null)
         {
-            _hubConnection = new HubConnectionBuilder()
-                .WithUrl(NavigationManager.ToAbsoluteUri("/hubs/workspace-sync"))
-                .WithAutomaticReconnect()
-                .Build();
+            _hubConnection = WorkspaceSyncHubConnectionHelper.Create(NavigationManager);
             _hubConnection.On<int>("WorkspaceSynced", async (workspaceId) =>
             {
                 if (workspaceId != WorkspaceId) return;

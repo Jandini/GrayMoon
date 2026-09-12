@@ -107,8 +107,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
             _refreshDebounceCts?.Dispose();
             _refreshDebounceCts = null;
         }
-        _ = _hubConnection?.StopAsync();
-        _ = _hubConnection?.DisposeAsync().AsTask();
+        WorkspaceSyncHubConnectionHelper.DisposeFireAndForget(_hubConnection);
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
         _queryLoader.Dispose();

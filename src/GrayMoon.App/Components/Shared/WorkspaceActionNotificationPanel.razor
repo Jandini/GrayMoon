@@ -484,10 +484,7 @@
     {
         if (!firstRender) return;
 
-        _hubConnection = new HubConnectionBuilder()
-            .WithUrl(NavigationManager.ToAbsoluteUri("/hubs/workspace-sync"))
-            .WithAutomaticReconnect()
-            .Build();
+        _hubConnection = WorkspaceSyncHubConnectionHelper.Create(NavigationManager);
 
         _hubConnection.On<int>("WorkspaceSynced", async (workspaceId) =>
         {
@@ -533,8 +530,7 @@
         PendingActionsService.Changed -= OnServiceChanged;
         JobService.Changed -= OnServiceChanged;
         NavigationManager.LocationChanged -= OnLocationChanged;
-        _ = _hubConnection?.StopAsync();
-        _ = _hubConnection?.DisposeAsync().AsTask();
+        WorkspaceSyncHubConnectionHelper.DisposeFireAndForget(_hubConnection);
     }
 
     private Task RunUpdateAsync(WorkspaceNotification n)
