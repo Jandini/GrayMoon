@@ -9,10 +9,17 @@ namespace GrayMoon.Agent.Services.GitChanges;
 /// Reference-counted watcher leases keyed by repository path. A repository's <see cref="GitRepositoryWatcher"/>
 /// is created on first lease and stays alive while at least one lease is held, plus a short idle grace
 /// period after the last lease releases - so a watcher survives brief gaps between renewing operations
-/// instead of being torn down and recreated on every request.
+/// instead of being torn down and recreated on every request. When that idle grace period elapses with no
+/// renewed lease (a repository/workspace was removed, or simply not viewed again), this is also the point
+/// where the corresponding entries in <see cref="GitStatusRefreshCoordinator"/>, <see cref="GitChangesSnapshotCache"/>,
+/// and <see cref="GitChangesRepositoryRegistry"/> are pruned - the Agent has no direct signal for "this
+/// repository/workspace was deleted" (it only ever learns of a path via the App asking about it), so an
+/// expired watcher lease is the process-local proxy for that removal.
 /// </summary>
 public sealed class GitRepositoryWatcherManager(
     GitStatusRefreshCoordinator refreshCoordinator,
+    GitChangesSnapshotCache snapshotCache,
+    GitChangesRepositoryRegistry repositoryRegistry,
     IOptions<GitChangesOptions> options,
     ILoggerFactory loggerFactory,
     ILogger<GitRepositoryWatcherManager> logger) : IDisposable
@@ -59,6 +66,16 @@ public sealed class GitRepositoryWatcherManager(
             if (entry.LeaseCount <= 0 && _entries.TryRemove(new KeyValuePair<string, WatcherEntry>(key, entry)))
             {
                 entry.Dispose();
+
+                // This is the point where a repository truly stops being watched/queried (no lease
+                // renewed it before the idle grace period elapsed - the same signal a removed repository
+                // or a deleted workspace produces, since the App simply stops asking about that path).
+                // Prune the other git-changes dictionaries keyed by this same repo path so they don't
+                // grow unbounded for the lifetime of the process.
+                refreshCoordinator.RemoveTracker(key);
+                snapshotCache.Remove(key);
+                repositoryRegistry.Remove(key);
+
                 logger.LogDebug("Disposed idle git repository watcher for {RepoPath}", key);
             }
         });

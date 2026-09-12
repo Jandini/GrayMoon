@@ -71,6 +71,23 @@ public sealed class GitStatusRefreshCoordinator : IDisposable
 
     public RepositoryRefreshState GetState(string repoPath) => GetOrAddTracker(repoPath).State;
 
+    /// <summary>
+    /// Drops the refresh tracker for a repository that is no longer being watched (its
+    /// <see cref="GitRepositoryWatcherManager"/> lease has expired), so this dictionary does not grow
+    /// unbounded for the lifetime of the process as repositories/workspaces are added and removed. Safe to
+    /// call while a scan for this repository is in flight: the running <see cref="ExecuteScanLoopAsync"/>
+    /// loop holds its own reference to the tracker instance (not a dictionary lookup) and runs to
+    /// completion normally; a later <see cref="MarkDirty"/>/<see cref="RefreshNowAsync"/> for the same path
+    /// simply starts a fresh tracker.
+    /// </summary>
+    public void RemoveTracker(string repoPath)
+    {
+        if (_trackers.TryRemove(GitChangesSnapshotCache.NormalizeKey(repoPath), out var tracker))
+        {
+            tracker.Dispose();
+        }
+    }
+
     public void Dispose()
     {
         _disposed = true;

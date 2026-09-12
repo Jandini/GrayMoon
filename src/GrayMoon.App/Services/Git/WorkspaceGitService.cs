@@ -85,11 +85,11 @@ public sealed class WorkspaceGitService(
 
         _logger.LogInformation("Sync triggered by user (workspace UI). Workspace={WorkspaceName}, RepoCount={RepoCount}", workspace.Name, repos.Count);
 
-        // EF Core DbContext is not thread-safe; run health checks sequentially before the parallel block.
+        // Batched into one set-based query (instead of one EF round-trip per repo) before the parallel block.
         if (_connectorHealthService != null)
         {
-            foreach (var repo in repos)
-                await _connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
+            await _connectorHealthService.EnsureConnectorsHealthyForRepositoriesAsync(
+                repos.Select(r => r.RepositoryId), cancellationToken);
         }
 
         var completedCount = 0;
@@ -220,11 +220,12 @@ public sealed class WorkspaceGitService(
             }
         }));
 
-        foreach (var r in syncResults)
-        {
-            if (r.ProjectsDetail is { Count: > 0 })
-                await _workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, r.RepositoryId, r.ProjectsDetail, cancellationToken);
-        }
+        var repoProjectsToMerge = syncResults
+            .Where(r => r.ProjectsDetail is { Count: > 0 })
+            .Select(r => (r.RepositoryId, (IReadOnlyList<SyncProjectInfo>)r.ProjectsDetail!))
+            .ToList();
+        if (repoProjectsToMerge.Count > 0)
+            await _workspaceProjectRepository.MergeWorkspaceProjectsBatchAsync(workspaceId, repoProjectsToMerge, cancellationToken);
 
         var repoIdsToUpdate = syncResults.Select(r => r.RepositoryId).ToList();
         var linksToUpdate = await _dbContext.WorkspaceRepositories

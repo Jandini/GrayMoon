@@ -7,23 +7,23 @@ public sealed class JobTerminalBuffer
 {
     private const int MaxLines = 800;
     private readonly object _lock = new();
-    private readonly List<OverlayTerminalLine> _lines = [];
+    private readonly Queue<OverlayTerminalLine> _lines = new();
 
     public event Action? Changed;
 
     public IReadOnlyList<OverlayTerminalLine> GetSnapshot()
     {
         lock (_lock)
-            return _lines.ToList();
+            return _lines.ToArray();
     }
 
     public void Append(AgentCommandStreamLine line)
     {
         lock (_lock)
         {
-            _lines.Add(new OverlayTerminalLine(line.StreamLabel, line.Kind, line.Text));
+            _lines.Enqueue(new OverlayTerminalLine(line.StreamLabel, line.Kind, line.Text));
             while (_lines.Count > MaxLines)
-                _lines.RemoveAt(0);
+                _lines.Dequeue();
         }
 
         Changed?.Invoke();

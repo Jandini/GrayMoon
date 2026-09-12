@@ -52,7 +52,41 @@ public sealed class ConnectorHealthService(AppDbContext dbContext, ILogger<Conne
             return;
         }
 
-        var connector = repo.Connector;
+        EnsureHealthy(repo.Connector);
+    }
+
+    /// <summary>
+    /// Batched form of <see cref="EnsureConnectorHealthyForRepositoryAsync"/>: checks every repository in
+    /// <paramref name="repositoryIds"/> using one set-based query against a single DbContext instance instead of
+    /// one round-trip per repository. Throws for the first unhealthy connector encountered, in the same order as
+    /// <paramref name="repositoryIds"/> (matching the sequential-loop behavior this replaces). Repository ids that
+    /// no longer exist, or that have no connector, are silently skipped - same as the single-repository overload.
+    /// </summary>
+    public async Task EnsureConnectorsHealthyForRepositoriesAsync(IEnumerable<int> repositoryIds, CancellationToken cancellationToken = default)
+    {
+        var ids = repositoryIds as IReadOnlyCollection<int> ?? repositoryIds.ToList();
+        if (ids.Count == 0)
+            return;
+
+        var repos = await dbContext.Repositories
+            .Include(r => r.Connector)
+            .Where(r => ids.Contains(r.RepositoryId))
+            .ToListAsync(cancellationToken);
+
+        var reposById = repos.ToDictionary(r => r.RepositoryId);
+
+        foreach (var repositoryId in ids)
+        {
+            if (!reposById.TryGetValue(repositoryId, out var repo) || repo.Connector == null)
+                continue;
+
+            EnsureHealthy(repo.Connector);
+        }
+    }
+
+    /// <summary>Shared health check applied to a single connector; throws ConnectorHealthException when unhealthy.</summary>
+    private static void EnsureHealthy(Connector connector)
+    {
         var requiresToken = ConnectorHelpers.RequiresToken(connector.ConnectorType, connector.ApiBaseUrl);
 
         if (!requiresToken)

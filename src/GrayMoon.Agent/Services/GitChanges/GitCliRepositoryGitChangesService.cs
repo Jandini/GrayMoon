@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Services;
@@ -15,6 +16,15 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
     : IRepositoryGitChangesService
 {
     private const int SoftSizeLimitBytes = 5 * 1024 * 1024;
+
+    // The .git directory for a given working-directory path is static for the lifetime of this process -
+    // it only changes if the repo itself is deleted/recreated or its submodule-ness changes, neither of
+    // which happens without the Agent restarting (a new clone gets a fresh path). Caching it here removes
+    // a second "rev-parse --git-dir" process spawn from GetStatusAsync, which runs on every debounced
+    // watcher event and every monitoring-sweep renewal for every actively-watched repository. No eviction
+    // beyond what the git-changes watcher lifecycle already provides is needed: a repo path that stops
+    // being watched simply stops being queried, so this cache's cardinality tracks watched-repo cardinality.
+    private static readonly ConcurrentDictionary<string, string> GitDirCache = new(StringComparer.OrdinalIgnoreCase);
 
     public async Task<GitChangeStatusResult> GetStatusAsync(string repoPath, long snapshotVersion, CancellationToken cancellationToken)
     {
@@ -545,6 +555,12 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
 
     private async Task<string?> ResolveGitDirAsync(string repoPath, CancellationToken cancellationToken)
     {
+        var cacheKey = GitChangesSnapshotCache.NormalizeKey(repoPath);
+        if (GitDirCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
         var (exitCode, stdout, _) = await runner.RunAsync("git", ["--no-optional-locks", "rev-parse", "--git-dir"], repoPath, null, cancellationToken, GitLockIntent.Read);
         if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
         {
@@ -552,7 +568,9 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
         }
 
         var gitDir = stdout.Trim();
-        return Path.IsPathRooted(gitDir) ? gitDir : Path.GetFullPath(Path.Combine(repoPath, gitDir));
+        var resolved = Path.IsPathRooted(gitDir) ? gitDir : Path.GetFullPath(Path.Combine(repoPath, gitDir));
+        GitDirCache[cacheKey] = resolved;
+        return resolved;
     }
 
     private async Task<bool> IsBinaryAsync(string repoPath, string relativePath, GitDiffComparison comparison, CancellationToken cancellationToken)

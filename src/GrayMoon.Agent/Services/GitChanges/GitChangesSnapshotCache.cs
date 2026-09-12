@@ -28,6 +28,18 @@ public sealed class GitChangesSnapshotCache
     public GitChangeSnapshot? GetLatest(string repoPath) =>
         _latestSnapshots.TryGetValue(NormalizeKey(repoPath), out var snapshot) ? snapshot : null;
 
+    /// <summary>
+    /// Drops the version counter and cached snapshot for a repository that is no longer being watched
+    /// (its <see cref="GitRepositoryWatcherManager"/> lease has expired), so this dictionary does not grow
+    /// unbounded for the lifetime of the process as repositories/workspaces are added and removed.
+    /// </summary>
+    public void Remove(string repoPath)
+    {
+        var key = NormalizeKey(repoPath);
+        _versions.TryRemove(key, out _);
+        _latestSnapshots.TryRemove(key, out _);
+    }
+
     internal static string NormalizeKey(string repoPath) =>
         Path.GetFullPath(repoPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 }

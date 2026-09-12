@@ -25,7 +25,7 @@ public sealed class GitRepositoryWatcherManagerTests : IDisposable
         new(fake, new GitChangesSnapshotCache(), Options.Create(options), NullLogger<GitStatusRefreshCoordinator>.Instance);
 
     private static GitRepositoryWatcherManager CreateManager(GitStatusRefreshCoordinator coordinator, GitChangesOptions options) =>
-        new(coordinator, Options.Create(options), NullLoggerFactory.Instance, NullLogger<GitRepositoryWatcherManager>.Instance);
+        new(coordinator, new GitChangesSnapshotCache(), new GitChangesRepositoryRegistry(), Options.Create(options), NullLoggerFactory.Instance, NullLogger<GitRepositoryWatcherManager>.Instance);
 
     [Fact]
     public void Acquiring_the_same_repository_twice_creates_only_one_watcher()
