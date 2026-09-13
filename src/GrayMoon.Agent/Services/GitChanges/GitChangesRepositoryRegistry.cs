@@ -28,4 +28,12 @@ public sealed class GitChangesRepositoryRegistry
         repositoryId = 0;
         return false;
     }
+
+    /// <summary>
+    /// Drops the registry entry for a repository that is no longer being watched (its
+    /// <see cref="GitRepositoryWatcherManager"/> lease has expired), so this dictionary does not grow
+    /// unbounded for the lifetime of the process as repositories/workspaces are added and removed.
+    /// </summary>
+    public void Remove(string repoPath) =>
+        _entries.TryRemove(GitChangesSnapshotCache.NormalizeKey(repoPath), out _);
 }

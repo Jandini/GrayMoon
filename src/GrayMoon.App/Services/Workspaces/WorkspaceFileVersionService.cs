@@ -23,6 +23,21 @@ public sealed class WorkspaceFileVersionService(
 {
     private static readonly ConcurrentDictionary<int, object> CheckLocks = new();
     private static readonly ConcurrentDictionary<int, Task?> InFlightChecks = new();
+
+    /// <summary>
+    /// Removes the per-workspace check-coalescing gate for <paramref name="workspaceId"/> from <see cref="CheckLocks"/>.
+    /// Call when a workspace is deleted so this static, process-lifetime dictionary does not grow unbounded.
+    /// Safe even if a check is mid-flight: the task already holds its own reference to the (now-unlisted) gate
+    /// object, so an in-progress lock is unaffected; a later caller for the same (deleted) workspace id would only
+    /// mint a fresh gate via <c>GetOrAdd</c>, and <see cref="CheckAndPersistFileVersionStatusCoreAsync"/> already
+    /// no-ops once the workspace is gone. <see cref="InFlightChecks"/> needs no corresponding call - it already
+    /// self-prunes in <see cref="AwaitAndClearInFlightAsync"/>'s <c>finally</c> block.
+    /// </summary>
+    public static void RemoveWorkspaceCheckLock(int workspaceId)
+    {
+        CheckLocks.TryRemove(workspaceId, out _);
+    }
+
     /// <summary>
     /// For every file in the workspace that has a version pattern configured:
     ///   1. Resolves the current version for each repo from the workspace's repository links (DB state); no GitVersion is run.

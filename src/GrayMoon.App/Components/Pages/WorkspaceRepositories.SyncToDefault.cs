@@ -243,7 +243,7 @@ public sealed partial class WorkspaceRepositories
 
             // The sync persists this repository's own state; workspace-wide dependency and file-version
             // stats are recomputed here, once, as the batch boundary for this action.
-            await ScopedExecutor.ExecuteAsync<WorkspaceGitService>(
+            await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations>(
                 svc => svc.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId, ct));
 
             if (success)
@@ -336,7 +336,7 @@ public sealed partial class WorkspaceRepositories
             // file-version stats are recomputed once here, after every repository in the level has finished,
             // so the recompute reads a complete snapshot instead of racing N concurrent whole-workspace
             // read-then-overwrite passes.
-            await ScopedExecutor.ExecuteAsync<WorkspaceGitService>(
+            await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations>(
                 svc => svc.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId, ct));
 
             SafeInvoke(() =>
@@ -558,7 +558,7 @@ public sealed partial class WorkspaceRepositories
 
             // Recompute workspace-wide dependency/file-version stats exactly once, after every repo in this
             // "sync all to default" batch has finished, instead of racing N concurrent per-repo recomputes.
-            await ScopedExecutor.ExecuteAsync<WorkspaceGitService>(
+            await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations>(
                 svc => svc.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId, ct));
 
             var successCount = results.Count(r => r.Success);

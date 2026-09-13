@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
 
-public class WorkspaceRepository(
+public sealed class WorkspaceRepository(
     AppDbContext dbContext,
     IDbContextFactory<AppDbContext> dbContextFactory,
     WorkspaceService workspaceService,
@@ -112,6 +112,10 @@ public class WorkspaceRepository(
         _dbContext.Workspaces.Remove(workspace);
         await _dbContext.SaveChangesAsync();
         _logger.LogInformation("Persistence: saved Workspace. Action=Delete, WorkspaceId={WorkspaceId}, Name={Name}", workspaceId, workspace.Name);
+
+        // Prune the now-deleted workspace's per-workspace check-coalescing gate so it doesn't linger for the
+        // life of the process.
+        WorkspaceFileVersionService.RemoveWorkspaceCheckLock(workspaceId);
     }
 
     public async Task UpdateSyncMetadataAsync(int workspaceId, DateTime lastSyncedAt, bool isInSync)

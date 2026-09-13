@@ -573,7 +573,14 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
 
     private async Task<IReadOnlyList<string>> GetConflictFilesAsync(string repoPath, CancellationToken ct)
     {
-        var (exitCode, stdout, _) = await runner.RunAsync("git", "status --porcelain", repoPath, ct);
+        // Read-only: runs immediately after MergeFromRemoteAsync's own write-locked merge attempt has
+        // already completed and released the lock, purely to enumerate the conflicted paths for the
+        // caller. Matches the precedent already shipped in GitCliRepositoryGitChangesService, where a
+        // write-locked mutation (stage/unstage/discard) is immediately followed by a Read-intent status
+        // call to build the response snapshot - no caller of MergeFromRemoteAsync (only
+        // UpdateBranchFromDefaultCommand) does anything else with the repo after this call returns, so
+        // there is nothing for the write lock to order this against.
+        var (exitCode, stdout, _) = await runner.RunAsync("git", "--no-optional-locks status --porcelain", repoPath, ct, intent: GitLockIntent.Read);
         if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
             return Array.Empty<string>();
 

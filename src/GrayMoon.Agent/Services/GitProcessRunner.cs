@@ -71,9 +71,10 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
         string? workingDirectory,
         CancellationToken ct,
         bool? streamStderrAsStdout = null,
-        bool? mirrorFailureOutputAsStderr = null)
+        bool? mirrorFailureOutputAsStderr = null,
+        GitLockIntent intent = GitLockIntent.Write)
     {
-        if (RequiresRepoLock(fileName, arguments) && !string.IsNullOrWhiteSpace(workingDirectory))
+        if (intent == GitLockIntent.Write && RequiresRepoLock(fileName, arguments) && !string.IsNullOrWhiteSpace(workingDirectory))
         {
             var repoLock = GetRepoLock(workingDirectory);
             await repoLock.WaitAsync(ct);

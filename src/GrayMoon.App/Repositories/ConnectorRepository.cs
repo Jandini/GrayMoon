@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Repositories;
 
-public class ConnectorRepository(AppDbContext dbContext, ILogger<ConnectorRepository> logger)
+public sealed class ConnectorRepository(AppDbContext dbContext, ILogger<ConnectorRepository> logger)
 {
     public async Task<List<Connector>> GetAllAsync()
     {

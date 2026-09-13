@@ -4,7 +4,7 @@ using GrayMoon.App.Repositories;
 
 namespace GrayMoon.App.Services.Workspaces;
 
-public class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService> logger, AppSettingRepository appSettingRepository, Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions)
+public sealed class WorkspaceService(IAgentBridge agentBridge, ILogger<WorkspaceService> logger, AppSettingRepository appSettingRepository, Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions)
 {
     private string? _cachedRootPath;
     private readonly SemaphoreSlim _cacheLock = new(1, 1);

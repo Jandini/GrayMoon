@@ -8,7 +8,7 @@ namespace GrayMoon.App.Services.Agent;
 /// <summary>
 /// Background service that processes sync requests from a channel with controlled parallelism.
 /// </summary>
-public class SyncBackgroundService(
+public sealed class SyncBackgroundService(
     IServiceScopeFactory scopeFactory,
     ILogger<SyncBackgroundService> logger,
     IConfiguration configuration,

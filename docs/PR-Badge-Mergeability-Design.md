@@ -1,4 +1,4 @@
-# PR Badge Mergeability - Design Document (Not Implemented)
+# PR Badge Mergeability - Design Document
 
 ## Overview
 

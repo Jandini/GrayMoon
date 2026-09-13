@@ -63,7 +63,7 @@
     private string _boardCaption = "Steps · Waiting…";
     private string? _stepProgress;
 
-    // Spinner — runs on its own 200ms loop, independent of the API poll
+    // Spinner - runs on its own 200ms loop, independent of the API poll
     private static readonly char[] SpinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧'];
     private int _spinnerFrame;
     private string? _spinnerStepKey;
@@ -298,7 +298,7 @@
                 var stepKey = $"{job.Id}:{step.Number}";
                 if (!string.Equals(_spinnerStepKey, stepKey, StringComparison.Ordinal))
                 {
-                    // New step started — reset spinner
+                    // New step started - reset spinner
                     _spinnerStepKey = stepKey;
                     _spinnerFrame   = 0;
                     _spinnerText    = "";
