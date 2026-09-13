@@ -8,8 +8,9 @@ COPY . .
 
 # Publish Agent (framework-dependent, multi-file) for Linux x64 and Windows x64; pack as zip for download
 RUN apt-get update && apt-get install -y --no-install-recommends zip && rm -rf /var/lib/apt/lists/*
-RUN dotnet publish "src/GrayMoon.Agent/GrayMoon.Agent.csproj" -c Release -r linux-x64 -o /agent/publish-linux /p:Version=$VERSION /p:DisableGitVersionTask=true
-RUN dotnet publish "src/GrayMoon.Agent/GrayMoon.Agent.csproj" -c Release -r win-x64 -o /agent/publish-win /p:Version=$VERSION /p:DisableGitVersionTask=true
+RUN dotnet publish "src/GrayMoon.Agent/GrayMoon.Agent.csproj" -c Release -r linux-x64 -o /agent/publish-linux /p:Version=$VERSION /p:DisableGitVersionTask=true /p:DebugType=None /p:DebugSymbols=false /p:PublishReadyToRun=true
+RUN dotnet publish "src/GrayMoon.Agent/GrayMoon.Agent.csproj" -c Release -r win-x64 -o /agent/publish-win /p:Version=$VERSION /p:DisableGitVersionTask=true /p:DebugType=None /p:DebugSymbols=false /p:PublishReadyToRun=true
+RUN find /agent/publish-linux /agent/publish-win \( -name '*.pdb' -o -name '*.Development.*' -o -name '*.Development' \) -delete
 RUN cd /agent/publish-linux && zip -q -r /agent/graymoon-agent-linux.zip .
 RUN cd /agent/publish-win && zip -q -r /agent/graymoon-agent-windows.zip .
 
@@ -21,7 +22,8 @@ ARG VERSION=1.0.0
 COPY . .
 RUN dotnet publish "src/GrayMoon.App/GrayMoon.App.csproj" -c Release -o /app/publish \
   /p:UseAppHost=false \
-  /p:Version=$VERSION /p:DisableGitVersionTask=true
+  /p:Version=$VERSION /p:DisableGitVersionTask=true \
+  /p:DebugType=None /p:DebugSymbols=false
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
