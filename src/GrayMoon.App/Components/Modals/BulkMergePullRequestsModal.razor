@@ -14,6 +14,13 @@
                     </h5>
                     <button type="button" class="btn-close flex-shrink-0" aria-label="Dismiss" disabled="@IsRunning" @onclick="HandleCloseClick"></button>
                 </div>
+                @if (IsRunning)
+                {
+                    <div class="bulk-merge-pr-overlay">
+                        <div class="bulk-merge-pr-overlay__message">@OverlayMessage</div>
+                        <button type="button" class="btn merge-pr-btn-close--muted bulk-merge-pr-overlay__stop" @onclick="() => OnStop.InvokeAsync()">Stop</button>
+                    </div>
+                }
                 <div class="bulk-merge-pr-toolbar">
                     <div class="form-check mb-0 bulk-merge-pr-select-all">
                         <input class="form-check-input" type="checkbox" id="bulk-merge-pr-select-all"
@@ -73,16 +80,9 @@
                                             aria-label="View details for @row.RepositoryName PR #@row.PrNumber"
                                             disabled="@IsRunning"
                                             @onclick="() => OnRowInfo.InvokeAsync(row)">
-                                        @if (ShowRowSpinner(row))
-                                        {
-                                            <span class="spinner-border spinner-border-sm bulk-merge-pr-row__spinner"></span>
-                                        }
-                                        else
-                                        {
-                                            <span class="merge-pr-status-icon @GetRowIconClass(row)">
-                                                <i class="bi @GetRowIconGlyph(row)"></i>
-                                            </span>
-                                        }
+                                        <span class="merge-pr-status-icon @GetRowIconClass(row)">
+                                            <i class="bi @GetRowIconGlyph(row)"></i>
+                                        </span>
                                         <div class="merge-pr-status-text">
                                             <div class="merge-pr-status-title bulk-merge-pr-row__title">
                                                 <span class="bulk-merge-pr-row__repo">@row.RepositoryName</span>
@@ -125,21 +125,7 @@
                         </div>
                     </div>
                 </div>
-                @if (IsRunning)
-                {
-                    <div class="modal-footer bulk-merge-pr-modal-footer">
-                        <div class="bulk-merge-pr-progress">
-                            <div class="bulk-merge-pr-progress__status">
-                                Merging @Completed of @Total...@(Failed > 0 ? $" {Failed} failed" : "")
-                            </div>
-                            <div class="progress bulk-merge-pr-progress-track">
-                                <div class="progress-bar bulk-merge-pr-progress-bar" style="width:@(ProgressPercent)%"></div>
-                            </div>
-                        </div>
-                        <button type="button" class="btn merge-pr-btn-close--muted" @onclick="() => OnStop.InvokeAsync()">Stop</button>
-                    </div>
-                }
-                else if (HasRun)
+                @if (HasRun && !IsRunning)
                 {
                     <div class="modal-footer bulk-merge-pr-modal-footer">
                         <div class="@(FailedRowCount > 0 ? "gm-callout gm-callout--error mb-0" : "text-muted small") bulk-merge-pr-summary">
@@ -154,7 +140,7 @@
                         </div>
                     </div>
                 }
-                else
+                else if (!IsRunning)
                 {
                     <div class="modal-footer bulk-merge-pr-modal-footer">
                         <div class="form-check mb-0 merge-pr-sync-default-check">
@@ -212,7 +198,18 @@
     private int MergedRowCount => Rows.Count(r => r.Status is BulkMergeRowStatus.Merged or BulkMergeRowStatus.Synced or BulkMergeRowStatus.SyncFailed);
     private int FailedRowCount => Rows.Count(r => r.Status == BulkMergeRowStatus.Failed);
     private int SyncIssueCount => Rows.Count(r => r.Status == BulkMergeRowStatus.SyncFailed);
-    private double ProgressPercent => Total == 0 ? 0 : Math.Clamp((double)Completed / Total * 100, 0, 100);
+
+    private string OverlayMessage
+    {
+        get
+        {
+            if (Completed == 0)
+                return Total == 1 ? "Merging 1 pull request..." : "Merging pull requests...";
+
+            var failedSuffix = Failed > 0 ? $", {Failed} failed" : "";
+            return $"Merged {Completed} of {Total} pull request{(Total == 1 ? "" : "s")}{failedSuffix}";
+        }
+    }
 
     protected override void OnParametersSet()
     {
@@ -288,9 +285,6 @@
         BulkMergeMethodSelection.Rebase => MergeMethod.Rebase.ToDescription(),
         _ => "Each repository merges using whichever method its own GitHub settings allow by default."
     };
-
-    private static bool ShowRowSpinner(BulkMergePrRow row) =>
-        row.Status is BulkMergeRowStatus.Merging or BulkMergeRowStatus.SyncingToDefault;
 
     private static string GetRowIconClass(BulkMergePrRow row) => row.Status switch
     {
