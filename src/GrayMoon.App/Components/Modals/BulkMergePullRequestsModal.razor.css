@@ -1,14 +1,25 @@
 /* Wider than the single-PR dialog's 720px cap since rows carry repo name + PR title + status together, but
    still shrink-to-fit rather than full-bleed. */
+.bulk-merge-pr-modal-container {
+    /* Bootstrap `.modal` is `overflow-x: hidden` / `overflow-y: auto`, which makes a
+       viewport scrollport that still clips a menu hanging below a short dialog. */
+    overflow: visible;
+}
+
 ::deep .bulk-merge-pr-modal-dialog {
     width: auto;
     max-width: 760px;
+    overflow: visible;
 }
 
 ::deep .bulk-merge-pr-modal-dialog .modal-content {
     max-height: calc(100vh - 2rem);
     display: flex;
     flex-direction: column;
+    /* The method menu is taller than a short dialog (few PR rows). Global
+       `.modal-dialog > .modal-content { overflow: hidden }` would clip it;
+       the PR list still scrolls inside `.bulk-merge-pr-scroll`. */
+    overflow: visible;
 }
 
 /* Left/right zeroed (Bootstrap's .modal-body default is padding:1rem) so a row's own 1rem left padding
@@ -96,6 +107,9 @@
 
 ::deep .bulk-merge-pr-method-picker {
     position: relative;
+    /* Above the list/footer (in-flow siblings) so the overflowing menu isn't
+       covered; below `.bulk-merge-pr-overlay` (z-index 5) while a run is in flight. */
+    z-index: 1;
 }
 
 ::deep .bulk-merge-pr-method-btn {
