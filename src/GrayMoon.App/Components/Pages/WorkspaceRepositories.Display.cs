@@ -65,6 +65,12 @@ public sealed partial class WorkspaceRepositories
     private void ClearRepositoryError(int repositoryId) =>
         repositoryErrors.Remove(repositoryId);
 
+    private void ClearRepositoryErrorsFor(IEnumerable<int> repositoryIds)
+    {
+        foreach (var repositoryId in repositoryIds)
+            repositoryErrors.Remove(repositoryId);
+    }
+
     private void SetRepositoryError(int repositoryId, string? message)
     {
         if (string.IsNullOrWhiteSpace(message))

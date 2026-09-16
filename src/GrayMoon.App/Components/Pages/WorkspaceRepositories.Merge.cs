@@ -418,6 +418,7 @@ public sealed partial class WorkspaceRepositories
         }
 
         _mergePrModal = new MergePullRequestModalState();
+        ClearRepositoryError(repositoryId);
         ToastService.Show($"Closed pull request #{prNumber}.");
         StateHasChanged();
 
@@ -490,6 +491,7 @@ public sealed partial class WorkspaceRepositories
                 SafeInvoke(() =>
                 {
                     _mergePrModal = new MergePullRequestModalState();
+                    ClearRepositoryError(repositoryId);
                     ToastService.Show($"Merged pull request #{prNumber}.");
                     StateHasChanged();
                 });

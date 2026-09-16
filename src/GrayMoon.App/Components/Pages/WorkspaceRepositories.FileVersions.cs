@@ -6,10 +6,13 @@ public sealed partial class WorkspaceRepositories
 {
     private VersionFilesCommitModalState _versionFilesCommitModal = new();
 
-    private Task OnUpdateFilesClickAsync()
+    private async Task OnUpdateFilesClickAsync()
     {
         if (workspace == null || !HasRepositories || IsJobRunning)
-            return Task.CompletedTask;
+            return;
+
+        var allLinks = await GetAllLinksForOperationAsync();
+        var repoIds = allLinks.Select(wr => wr.RepositoryId).ToHashSet();
 
         StartPageJob("Updating file versions...", async (job, ct) =>
         {
@@ -27,11 +30,18 @@ public sealed partial class WorkspaceRepositories
                     await RefreshFromSync();
                 StateHasChanged();
                 if (result.Error != null)
+                {
                     SetPageError(result.Error);
+                }
                 else if (result.Failed > 0)
+                {
                     SetPageError($"Updated {result.Updated} line(s). {result.Failed} file(s) could not be updated - check logs.");
+                }
                 else
+                {
                     ToastService.Show(result.Updated > 0 ? "Versions updated in configured files." : "File versions are already up to date.");
+                    ClearRepositoryErrorsFor(repoIds);
+                }
             });
         }, new PageJobOptions
         {
@@ -42,8 +52,6 @@ public sealed partial class WorkspaceRepositories
                 SafeInvoke(() => SetPageError("Failed to update file versions. Please try again."));
             }
         });
-
-        return Task.CompletedTask;
     }
 
     private Task UpdateSingleRepositoryFileVersionsAsync(int repositoryId)
@@ -80,11 +88,14 @@ public sealed partial class WorkspaceRepositories
                 await RefreshFromSync();
                 StateHasChanged();
                 if (result.Failed > 0)
+                {
                     SetPageError($"Updated {result.Updated} line(s). {result.Failed} file(s) could not be updated - check logs.");
-                else if (result.Updated > 0)
-                    ToastService.Show($"Updated {result.Updated} line(s) in configured files.");
+                }
                 else
-                    ToastService.Show("File versions are already up to date.");
+                {
+                    ToastService.Show(result.Updated > 0 ? $"Updated {result.Updated} line(s) in configured files." : "File versions are already up to date.");
+                    ClearRepositoryError(repositoryId);
+                }
             });
         }, new PageJobOptions
         {
@@ -210,13 +221,18 @@ public sealed partial class WorkspaceRepositories
                 await RefreshFromSync();
                 StateHasChanged();
                 if (result.Failed > 0)
+                {
                     SetPageError($"Updated {result.Updated} line(s). {result.Failed} file(s) could not be updated - check logs.");
-                else if (result.Updated > 0)
-                    ToastService.Show(shouldCommit
-                        ? $"Updated and committed {result.Updated} line(s) in configured files."
-                        : $"Updated {result.Updated} line(s) in configured files.");
+                }
                 else
-                    ToastService.Show("File versions are already up to date.");
+                {
+                    ToastService.Show(result.Updated > 0
+                        ? (shouldCommit
+                            ? $"Updated and committed {result.Updated} line(s) in configured files."
+                            : $"Updated {result.Updated} line(s) in configured files.")
+                        : "File versions are already up to date.");
+                    ClearRepositoryError(repositoryId);
+                }
             });
         }, new PageJobOptions
         {

@@ -83,6 +83,7 @@ public sealed class WorkspacePullRequestService(
             .AsNoTracking()
             .Include(wr => wr.Repository)
             .ThenInclude(r => r!.Connector)
+            .Include(wr => wr.PullRequest)
             .Where(wr => wr.WorkspaceId == workspaceId && repositoryIds.Contains(wr.RepositoryId))
             .ToListAsync(cancellationToken);
 
@@ -123,6 +124,14 @@ public sealed class WorkspacePullRequestService(
                 }
 
                 var pr = await gitHubPullRequestService.GetPullRequestForBranchAsync(wr.Repository!, wr.Repository!.Connector, branch, cancellationToken);
+                // After GitHub auto-deletes the head branch on merge, the list-by-head lookup is empty even
+                // though GET /pulls/{number} still returns the merged PR. Fall back so post-merge
+                // sync-to-default still sees MergedAt and does not abort as "not safe".
+                if (pr == null && wr.PullRequest?.PullRequestNumber is int persistedNumber and > 0)
+                {
+                    pr = await gitHubPullRequestService.GetPullRequestByNumberAsync(
+                        wr.Repository!, wr.Repository!.Connector, persistedNumber, branch, cancellationToken);
+                }
                 _cache[cacheKey] = (pr, DateTime.UtcNow);
                 return (Wr: wr, Pr: pr, Outcome: PullRequestRefreshOutcome.Refreshed);
             }
@@ -329,6 +338,7 @@ public sealed class WorkspacePullRequestService(
         var result = await gitHubPullRequestMergeService.MergePullRequestAsync(link.Repository, link.Repository.Connector, prNumber, method, expectedHeadSha, cancellationToken);
         if (result.Success)
         {
+            await PersistMergedAsync(link.WorkspaceRepositoryId, prNumber, cancellationToken);
             _cache.TryRemove((repositoryId, link.BranchName ?? string.Empty), out _);
             await RefreshPullRequestsAsync(workspaceId, [repositoryId], force: true, cancellationToken: cancellationToken);
         }
@@ -430,6 +440,9 @@ public sealed class WorkspacePullRequestService(
         var result = await gitHubPullRequestMergeService.MergePullRequestAsync(
             link.Repository, link.Repository.Connector, request.PrNumber, method, request.ExpectedHeadSha, cancellationToken);
 
+        if (result.Success)
+            await PersistMergedAsync(link.WorkspaceRepositoryId, request.PrNumber, cancellationToken);
+
         return new MergePullRequestResult
         {
             RepositoryId = request.RepositoryId,
@@ -457,4 +470,16 @@ public sealed class WorkspacePullRequestService(
         Success = false,
         ErrorMessage = message
     };
+
+    /// <summary>
+    /// Writes merged/closed locally before the post-merge GitHub refresh so a list-by-head miss (GitHub already
+    /// deleted the branch) still has a PR number to fall back on.
+    /// </summary>
+    private Task PersistMergedAsync(int workspaceRepositoryId, int prNumber, CancellationToken cancellationToken) =>
+        pullRequestRepository.UpsertAsync(workspaceRepositoryId, new PullRequestInfo
+        {
+            Number = prNumber,
+            State = "closed",
+            MergedAt = DateTimeOffset.UtcNow
+        }, cancellationToken);
 }
