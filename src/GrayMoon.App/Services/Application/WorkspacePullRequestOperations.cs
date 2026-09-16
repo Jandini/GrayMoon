@@ -27,6 +27,13 @@ public sealed class WorkspacePullRequestOperations(
             expectedHeadSha,
             cancellationToken);
 
+    public Task<IReadOnlyList<MergePullRequestResult>> MergeManyAsync(
+        int workspaceId,
+        IReadOnlyList<MergePullRequestRequest> requests,
+        IProgress<MergePullRequestProgress>? progress,
+        CancellationToken cancellationToken)
+        => workspacePullRequestService.MergePullRequestsAsync(workspaceId, requests, progress, cancellationToken);
+
     public Task<MergeResult> UpdateTitleAsync(
         int workspaceId,
         int repositoryId,

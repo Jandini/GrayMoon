@@ -18,6 +18,12 @@ public interface IWorkspacePullRequestOperations
         string? expectedHeadSha,
         CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<MergePullRequestResult>> MergeManyAsync(
+        int workspaceId,
+        IReadOnlyList<MergePullRequestRequest> requests,
+        IProgress<MergePullRequestProgress>? progress,
+        CancellationToken cancellationToken);
+
     Task<MergeResult> UpdateTitleAsync(
         int workspaceId,
         int repositoryId,
