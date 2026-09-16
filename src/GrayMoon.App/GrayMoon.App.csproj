@@ -50,7 +50,9 @@
     </PropertyGroup>
     <Error Text="GrayMoon.Agent.csproj not found at $(AgentProj). GrayMoon.Desktop publishing requires the GrayMoon and GrayMoon.Desktop repositories checked out as sibling directories."
            Condition="!Exists('$(AgentProj)')" />
-    <Exec Command="dotnet publish &quot;$(AgentProj)&quot; -c $(Configuration) -r win-x64 --self-contained false -o &quot;$(AgentPublishDir)&quot;"
+    <Exec Command="dotnet publish &quot;$(AgentProj)&quot; -c $(Configuration) -r win-x64 --self-contained false -o &quot;$(AgentPublishDir)&quot; /p:DebugType=None /p:DebugSymbols=false /p:PublishReadyToRun=true"
+          Condition="Exists('$(AgentProj)')" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;Get-ChildItem -LiteralPath '$(AgentPublishDir)' -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq '.pdb' -or $_.Name -match '\.Development(\.|$)' } | Remove-Item -Force&quot;"
           Condition="Exists('$(AgentProj)')" />
     <MakeDir Directories="$(PublishDir)agent" Condition="Exists('$(AgentProj)') AND !Exists('$(PublishDir)agent')" />
     <Delete Files="$(AgentZipPath)" Condition="Exists('$(AgentZipPath)')" />
