@@ -28,6 +28,7 @@ public sealed partial class WorkspaceRepositories
         {
             IsVisible = true,
             RepositoryId = link.RepositoryId,
+            RepositoryName = link.Repository?.RepositoryName,
             PrNumber = prNumber.Value,
             // Already known from the polled PR badge state - link the header immediately and seed the Conflicts
             // row so it doesn't render blank while the (now ETag-cheap) snapshot call below confirms it.
@@ -527,6 +528,7 @@ public sealed partial class WorkspaceRepositories
     {
         public bool IsVisible { get; init; }
         public int RepositoryId { get; init; }
+        public string? RepositoryName { get; init; }
         public int PrNumber { get; init; }
         /// <summary>PR HTML URL known immediately from the polled PR badge state, before Details.HtmlUrl loads.</summary>
         public string? PrHtmlUrl { get; init; }

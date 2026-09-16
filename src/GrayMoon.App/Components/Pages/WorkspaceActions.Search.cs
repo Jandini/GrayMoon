@@ -6,6 +6,16 @@ namespace GrayMoon.App.Components.Pages;
 
 public sealed partial class WorkspaceActions
 {
+    private void ApplyIncomingSearchQuery()
+    {
+        var incoming = SearchQuery ?? string.Empty;
+        if (string.Equals(incoming, _appliedSearchQuery, StringComparison.Ordinal))
+            return;
+
+        _appliedSearchQuery = incoming;
+        searchTerm = incoming;
+    }
+
     internal void OnSearchChanged(ChangeEventArgs e)
     {
         searchTerm = e.Value?.ToString() ?? string.Empty;
@@ -99,14 +109,15 @@ public sealed partial class WorkspaceActions
         }
     }
 
-    private bool LineMatchesSearch(WorkspaceActionRow row, WorkflowActionLine line)
-    {
-        if (string.IsNullOrWhiteSpace(searchTerm))
-        {
-            return true;
-        }
+    private bool LineMatchesSearch(WorkspaceActionRow row, WorkflowActionLine line) =>
+        MatchesSearch(row, line, searchTerm);
 
-        return FilterSearchMatcher.Matches(searchTerm, term => MatchesActionLineTerm(row, line, term));
+    internal static bool MatchesSearch(WorkspaceActionRow row, WorkflowActionLine line, string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return true;
+
+        return FilterSearchMatcher.Matches(query, term => MatchesActionLineTerm(row, line, term));
     }
 
     private static bool MatchesActionLineTerm(WorkspaceActionRow row, WorkflowActionLine line, FilterSearchTerm term)

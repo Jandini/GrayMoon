@@ -10,6 +10,10 @@ public sealed partial class WorkspaceActions : IDisposable
 {
     [Parameter] public int WorkspaceId { get; set; }
 
+    /// <summary>Prefills the repository/workflow search from <c>?q=</c> (e.g. the merge-dialog checks link uses <c>repo:Name</c>).</summary>
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? SearchQuery { get; set; }
+
     [Inject] private WorkspaceActionService ActionService { get; set; } = null!;
     [Inject] private GitHubActionsService GitHubActionsService { get; set; } = null!;
     [Inject] private WorkspaceRepository WorkspaceRepository { get; set; } = null!;
@@ -23,9 +27,12 @@ public sealed partial class WorkspaceActions : IDisposable
 
     protected override async Task OnInitializedAsync()
     {
+        ApplyIncomingSearchQuery();
         ActivityStateService.BecameActive += OnActivityBecameActive;
         await LoadWorkspaceAsync();
     }
+
+    protected override void OnParametersSet() => ApplyIncomingSearchQuery();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

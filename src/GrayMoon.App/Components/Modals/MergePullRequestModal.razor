@@ -189,7 +189,7 @@
                                         }
                                         else if (!string.IsNullOrEmpty(ActionsUrl) && Details.Checks.State != ChecksState.None)
                                         {
-                                            <a href="@ActionsUrl" class="merge-pr-changed-files-link">@GetChecksSubtitle()</a>
+                                            <a href="@ChecksActionsHref" class="merge-pr-changed-files-link">@GetChecksSubtitle()</a>
                                         }
                                         else
                                         {
@@ -393,6 +393,8 @@
     [Parameter] public string? ChangesUrl { get; set; }
     /// <summary>Workspace's Actions page URL, used to link the checks subtitle in the checks row. Null/empty hides the link.</summary>
     [Parameter] public string? ActionsUrl { get; set; }
+    /// <summary>Repository shown in this dialog. Appended as a <c>repo:</c> search on <see cref="ActionsUrl"/> so WorkspaceActions opens filtered to this repo.</summary>
+    [Parameter] public string? RepositoryName { get; set; }
     /// <summary>Raised when the user clicks the commits text in the local-state row while only unpushed (outgoing) commits exist.</summary>
     [Parameter] public EventCallback OnPushRequested { get; set; }
     /// <summary>Raised when the user clicks the commits text in the local-state row while incoming commits exist (pull-only or pull+push sync) - mirrors CommitsBadge's own "incoming wins" click behavior.</summary>
@@ -766,6 +768,23 @@
             ChecksState.Pending => $"{checks.Pending} check{(checks.Pending == 1 ? "" : "s")} still running",
             _ => string.Empty
         };
+    }
+
+    /// <summary>Query-string key WorkspaceActions reads to prefill its repository/workflow search.</summary>
+    internal const string ActionsSearchQueryParameterName = "q";
+
+    private string ChecksActionsHref => BuildChecksActionsUrl(ActionsUrl, RepositoryName);
+
+    /// <summary>Appends <c>repo:{name}</c> to the Actions page URL so that page's search filter shows only this repository.</summary>
+    internal static string BuildChecksActionsUrl(string? actionsUrl, string? repositoryName)
+    {
+        if (string.IsNullOrEmpty(actionsUrl))
+            return string.Empty;
+        if (string.IsNullOrWhiteSpace(repositoryName))
+            return actionsUrl;
+
+        var separator = actionsUrl.Contains('?', StringComparison.Ordinal) ? '&' : '?';
+        return $"{actionsUrl}{separator}{ActionsSearchQueryParameterName}={Uri.EscapeDataString($"repo:{repositoryName.Trim()}")}";
     }
 
     private string GetConflictsIconClass() => Details?.Mergeable switch
