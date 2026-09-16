@@ -72,6 +72,9 @@ public sealed partial class WorkspaceRepositories
                 await ReloadWorkspaceDataFromFreshScopeAsync();
                 _ = InvokeAsync(() => { if (!_disposed) { ApplySyncStateFromLoadedItems(); StateHasChanged(); } });
 
+                if (updateResult.Success)
+                    SafeInvoke(() => ClearRepositoryErrorsFor(updateResult.SyncedRepoIds));
+
                 if (!updateResult.ShouldChainPush(request.PushChanges))
                     return;
 

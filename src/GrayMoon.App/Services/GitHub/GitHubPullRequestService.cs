@@ -43,16 +43,7 @@ public sealed class GitHubPullRequestService(
                 }
             }
 
-            return new PullRequestInfo
-            {
-                Number = dto.Number,
-                State = dto.State ?? string.Empty,
-                MergedAt = dto.MergedAt,
-                HtmlUrl = dto.HtmlUrl ?? string.Empty,
-                Mergeable = mergeable,
-                MergeableState = mergeableState,
-                ChangedFiles = changedFiles
-            };
+            return Map(dto, mergeable, mergeableState, changedFiles);
         }
         catch (Exception ex)
         {
@@ -60,6 +51,56 @@ public sealed class GitHubPullRequestService(
             return null;
         }
     }
+
+    /// <summary>
+    /// Fetches a pull request by number. When <paramref name="headBranch"/> is set, returns null unless the PR's
+    /// head ref is that branch, so a leftover merged PR from a previous branch cannot be attributed to the current one.
+    /// Used after merge when GitHub has already deleted the head branch and the list-by-head lookup comes back empty.
+    /// </summary>
+    public async Task<PullRequestInfo?> GetPullRequestByNumberAsync(
+        Repository repository,
+        Connector? connector,
+        int prNumber,
+        string? headBranch,
+        CancellationToken cancellationToken = default)
+    {
+        if (repository == null || prNumber <= 0)
+            return null;
+        if (connector == null || connector.ConnectorType != ConnectorType.GitHub || string.IsNullOrWhiteSpace(connector.UserToken))
+            return null;
+        if (!RepositoryUrlHelper.TryParseGitHubOwnerRepo(repository.CloneUrl, out var owner, out var repo) || owner == null || repo == null)
+            return null;
+
+        try
+        {
+            var dto = await gitHubService.GetPullRequestByNumberAsync(connector, owner, repo, prNumber, cancellationToken);
+            if (dto == null)
+                return null;
+
+            if (!string.IsNullOrWhiteSpace(headBranch)
+                && !string.IsNullOrWhiteSpace(dto.Head?.Ref)
+                && !string.Equals(dto.Head.Ref, headBranch, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            return Map(dto, dto.Mergeable, dto.MergeableState, dto.ChangedFiles);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "GetPullRequestByNumber failed. Repo={Repo}, PrNumber={PrNumber}", repository.RepositoryName, prNumber);
+            return null;
+        }
+    }
+
+    private static PullRequestInfo Map(GitHubPullRequestDto dto, bool? mergeable, string? mergeableState, int? changedFiles) => new()
+    {
+        Number = dto.Number,
+        State = dto.State ?? string.Empty,
+        MergedAt = dto.MergedAt,
+        HtmlUrl = dto.HtmlUrl ?? string.Empty,
+        Mergeable = mergeable,
+        MergeableState = mergeableState,
+        ChangedFiles = changedFiles
+    };
 
     /// <summary>Closes an open pull request for the given repository. Logs and returns silently on error - callers should not abort on close failure.</summary>
     public async Task ClosePullRequestAsync(Repository repository, Connector? connector, int prNumber, CancellationToken cancellationToken = default)

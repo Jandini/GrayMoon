@@ -2,7 +2,12 @@
 
 @if (IsVisible)
 {
-    <div class="modal show d-block bulk-merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1074;"
+    @*
+        z-index drops below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while
+        IsRunning so that overlay (with the live command terminal) covers the dialog for the merge and
+        optional sync-to-default - without unmounting the dialog, which would look like it closed and reopened.
+    *@
+    <div class="modal show d-block bulk-merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @(IsRunning ? 50 : 1074);"
          @onkeydown="HandleKeyDown"
          @ref="_modalElement">
         <div class="modal-dialog modal-dialog-centered bulk-merge-pr-modal-dialog">
@@ -14,13 +19,6 @@
                     </h5>
                     <button type="button" class="btn-close flex-shrink-0" aria-label="Dismiss" disabled="@IsRunning" @onclick="HandleCloseClick"></button>
                 </div>
-                @if (IsRunning)
-                {
-                    <div class="bulk-merge-pr-overlay">
-                        <div class="bulk-merge-pr-overlay__message">@OverlayMessage</div>
-                        <button type="button" class="btn merge-pr-btn-close--muted bulk-merge-pr-overlay__stop" @onclick="() => OnStop.InvokeAsync()">Stop</button>
-                    </div>
-                }
                 <div class="bulk-merge-pr-toolbar">
                     <div class="form-check mb-0 bulk-merge-pr-select-all">
                         <input class="form-check-input" type="checkbox" id="bulk-merge-pr-select-all"
@@ -168,10 +166,7 @@
     [Parameter] public EventCallback<bool> SyncToDefaultAfterMergeChanged { get; set; }
     [Parameter] public bool IsRunning { get; set; }
     [Parameter] public bool HasRun { get; set; }
-    [Parameter] public int Completed { get; set; }
-    [Parameter] public int Failed { get; set; }
     [Parameter] public EventCallback OnMerge { get; set; }
-    [Parameter] public EventCallback OnStop { get; set; }
     [Parameter] public EventCallback OnRetryFailed { get; set; }
     [Parameter] public EventCallback<BulkMergePrRow> OnRetryRow { get; set; }
     [Parameter] public EventCallback<BulkMergePrRow> OnRowInfo { get; set; }
@@ -198,18 +193,6 @@
     private int MergedRowCount => Rows.Count(r => r.Status is BulkMergeRowStatus.Merged or BulkMergeRowStatus.Synced or BulkMergeRowStatus.SyncFailed);
     private int FailedRowCount => Rows.Count(r => r.Status == BulkMergeRowStatus.Failed);
     private int SyncIssueCount => Rows.Count(r => r.Status == BulkMergeRowStatus.SyncFailed);
-
-    private string OverlayMessage
-    {
-        get
-        {
-            if (Completed == 0)
-                return Total == 1 ? "Merging 1 pull request..." : "Merging pull requests...";
-
-            var failedSuffix = Failed > 0 ? $", {Failed} failed" : "";
-            return $"Merged {Completed} of {Total} pull request{(Total == 1 ? "" : "s")}{failedSuffix}";
-        }
-    }
 
     protected override void OnParametersSet()
     {

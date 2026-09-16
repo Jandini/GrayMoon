@@ -107,8 +107,7 @@
 
 ::deep .bulk-merge-pr-method-picker {
     position: relative;
-    /* Above the list/footer (in-flow siblings) so the overflowing menu isn't
-       covered; below `.bulk-merge-pr-overlay` (z-index 5) while a run is in flight. */
+    /* Above the list/footer (in-flow siblings) so the overflowing menu isn't covered. */
     z-index: 1;
 }
 
@@ -413,30 +412,6 @@
 ::deep .merge-pr-sync-default-check .form-check-input:not(:checked) {
     background-color: #6c757d;
     border-color: #6c757d;
-}
-
-/* Covers the whole dialog (header/toolbar/list/footer) while a batch is running, replacing the old
-   per-row spinners and footer progress bar with a single status line - matches MergePullRequestModal's
-   intent of never unmounting the dialog mid-run, but drawn as its own layer instead of ceding z-index
-   to the page-level LoadingOverlay, since this needs custom wording (not a generic "Loading..." spinner). */
-::deep .bulk-merge-pr-overlay {
-    position: absolute;
-    inset: 0;
-    z-index: 5;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 1rem;
-    padding: 1.5rem;
-    background-color: rgba(13, 17, 23, 0.92);
-    border-radius: inherit;
-    text-align: center;
-}
-
-::deep .bulk-merge-pr-overlay__message {
-    font-size: 1rem;
-    color: #f0f6fc;
 }
 
 ::deep .bulk-merge-pr-summary {

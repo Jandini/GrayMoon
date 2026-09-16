@@ -92,7 +92,7 @@ public sealed partial class WorkspaceRepositories
 
         StartPageJob("Updating dependencies...", async (job, ct) =>
         {
-            await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations>(svc =>
+            var updateResult = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, DependencyUpdateRunResult>(svc =>
                 svc.UpdateAsync(
                     WorkspaceId,
                     ct,
@@ -102,6 +102,9 @@ public sealed partial class WorkspaceRepositories
                     repoIdsToUpdate: null,
                     commitMessage: commitMessage,
                     includeDepsInCommitMessage: includeDepsInCommitMessage));
+
+            if (updateResult.Success)
+                SafeInvoke(() => ClearRepositoryErrorsFor(updateResult.SyncedRepoIds));
         }, new PageJobOptions
         {
             RefreshOnCancel = true,
@@ -285,6 +288,7 @@ public sealed partial class WorkspaceRepositories
                     return;
 
                 syncedRepoIds = updateResult.SyncedRepoIds;
+                SafeInvoke(() => ClearRepositoryErrorsFor(syncedRepoIds));
             }
             catch (OperationCanceledException)
             {
@@ -386,6 +390,7 @@ public sealed partial class WorkspaceRepositories
                     return;
 
                 syncedRepoIds = updateResult.SyncedRepoIds;
+                SafeInvoke(() => ClearRepositoryErrorsFor(syncedRepoIds));
             }
             catch (OperationCanceledException)
             {

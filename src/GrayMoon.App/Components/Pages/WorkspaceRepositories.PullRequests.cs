@@ -184,6 +184,8 @@ public sealed partial class WorkspaceRepositories
             {
                 foreach (var failed in results.Where(r => !r.Success))
                     SetRepositoryError(failed.RepositoryId, failed.ErrorMessage ?? "Pull request creation failed.");
+                foreach (var succeeded in results.Where(r => r.Success))
+                    ClearRepositoryError(succeeded.RepositoryId);
 
                 if (successCount > 0)
                     ToastService.Show($"Created {successCount} of {total} pull requests.");

@@ -213,7 +213,7 @@ public sealed partial class WorkspaceRepositories
                     syncedRepoIds: syncedRepoIds,
                     cancellationToken: ct,
                     runId: runId));
-            ApplyPushResult(result);
+            ApplyPushResult(repoIds, result);
         }
         catch (OperationCanceledException)
         {
@@ -241,12 +241,22 @@ public sealed partial class WorkspaceRepositories
         }
     }
 
-    private void ApplyPushResult(OperationResult result)
+    private void ApplyPushResult(IReadOnlySet<int> repoIds, OperationResult result)
     {
         SafeInvoke(() =>
         {
             ApplyRepositoryErrors(result.RepoErrors);
             ApplyLevelErrors(result.LevelErrors);
+
+            // A LevelError can abort a level before every repo in it is attempted, leaving some
+            // repoIds with no per-repo verdict at all - only clear when RepoErrors is a complete
+            // per-repo account of this run (i.e. no level was aborted without attribution).
+            if (result.LevelErrors is not { Count: > 0 })
+            {
+                var failedRepoIds = result.RepoErrors?.Keys;
+                ClearRepositoryErrorsFor(failedRepoIds is null ? repoIds : repoIds.Where(id => !failedRepoIds.Contains(id)));
+            }
+
             if (result.RepoErrors is { Count: > 0 } || result.LevelErrors is { Count: > 0 })
                 return;
             if (!result.Success && !string.IsNullOrWhiteSpace(result.Error))
@@ -266,7 +276,10 @@ public sealed partial class WorkspaceRepositories
                 svc => svc.PushSingleAsync(WorkspaceId, repositoryId, branchName, job.ToOperationProgress(), ct));
 
             if (result.Success)
+            {
+                SafeInvoke(() => ClearRepositoryError(repositoryId));
                 await InvokeAsync(async () => { if (_disposed) return; await RefreshFromSync(); });
+            }
             else
                 SafeInvoke(() => SetRepositoryError(repositoryId, result.Error ?? "Push failed."));
         }, new PageJobOptions
@@ -283,17 +296,18 @@ public sealed partial class WorkspaceRepositories
         return Task.CompletedTask;
     }
 
-    private Task RestorePackagesAsync()
+    private async Task RestorePackagesAsync()
     {
         if (workspace == null || IsJobRunning)
-            return Task.CompletedTask;
+            return;
 
-        StartPageJob("Restoring packages...", RestorePackagesCoreAsync, new PageJobOptions { RefreshOnSuccess = false });
+        var allLinks = await GetAllLinksForOperationAsync();
+        var repoIds = allLinks.Select(wr => wr.RepositoryId).ToHashSet();
 
-        return Task.CompletedTask;
+        StartPageJob("Restoring packages...", (job, ct) => RestorePackagesCoreAsync(repoIds, job, ct), new PageJobOptions { RefreshOnSuccess = false });
     }
 
-    private async Task RestorePackagesCoreAsync(BackgroundJobHandle job, CancellationToken ct)
+    private async Task RestorePackagesCoreAsync(IReadOnlySet<int> repoIds, BackgroundJobHandle job, CancellationToken ct)
     {
         job.ReportProgress("Restoring packages...");
         try
@@ -301,8 +315,12 @@ public sealed partial class WorkspaceRepositories
             var count = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, int>(
                 svc => svc.RestorePackagesAsync(WorkspaceId, job.ToOperationProgress(), ct));
 
-            if (count > 0)
-                SafeInvoke(() => ToastService.Show($"Restored packages in {count} {(count == 1 ? "project" : "projects")}"));
+            SafeInvoke(() =>
+            {
+                ClearRepositoryErrorsFor(repoIds);
+                if (count > 0)
+                    ToastService.Show($"Restored packages in {count} {(count == 1 ? "project" : "projects")}");
+            });
         }
         catch (OperationCanceledException)
         {
@@ -336,8 +354,12 @@ public sealed partial class WorkspaceRepositories
             var count = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, int>(
                 svc => svc.RestoreSyncedPackagesAsync(WorkspaceId, repoIds, job.ToOperationProgress(), ct));
 
-            if (count > 0)
-                SafeInvoke(() => ToastService.Show($"Restored packages in {count} {(count == 1 ? "project" : "projects")}"));
+            SafeInvoke(() =>
+            {
+                ClearRepositoryErrorsFor(repoIds);
+                if (count > 0)
+                    ToastService.Show($"Restored packages in {count} {(count == 1 ? "project" : "projects")}");
+            });
         }, new PageJobOptions
         {
             RefreshOnSuccess = false,
@@ -359,8 +381,12 @@ public sealed partial class WorkspaceRepositories
             var count = await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations, int>(
                 svc => svc.RestoreSyncedPackagesAsync(WorkspaceId, syncedRepoIds, job.ToOperationProgress(), ct));
 
-            if (count > 0)
-                SafeInvoke(() => ToastService.Show($"Restored packages in {count} {(count == 1 ? "project" : "projects")}"));
+            SafeInvoke(() =>
+            {
+                ClearRepositoryErrorsFor(syncedRepoIds);
+                if (count > 0)
+                    ToastService.Show($"Restored packages in {count} {(count == 1 ? "project" : "projects")}");
+            });
         }
         catch (OperationCanceledException)
         {

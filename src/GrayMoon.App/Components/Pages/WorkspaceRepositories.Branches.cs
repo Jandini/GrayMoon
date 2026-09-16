@@ -148,6 +148,10 @@ public sealed partial class WorkspaceRepositories
                     repositoryId,
                     outcome.ErrorText ?? "Failed to fetch branches."));
             }
+            else
+            {
+                SafeInvoke(() => ClearRepositoryError(repositoryId));
+            }
         }, new PageJobOptions
         {
             CancelToast = "Fetch branches cancelled.",
@@ -191,8 +195,12 @@ public sealed partial class WorkspaceRepositories
                 StateHasChanged();
             });
 
-            if (result.ErrorsByRepositoryId.Count > 0)
-                SafeInvoke(() => ApplyRepositoryErrors(result.ErrorsByRepositoryId));
+            SafeInvoke(() =>
+            {
+                if (result.ErrorsByRepositoryId.Count > 0)
+                    ApplyRepositoryErrors(result.ErrorsByRepositoryId);
+                ClearRepositoryErrorsFor(repoIds.Where(id => !result.ErrorsByRepositoryId.ContainsKey(id)));
+            });
         }, new PageJobOptions
         {
             RefreshOnSuccess = false,
@@ -271,6 +279,7 @@ public sealed partial class WorkspaceRepositories
         var tagFilteredRepoIds = skipReposOnTags
             ? allLinks.Where(wr => !wr.IsOnTag).Select(wr => wr.RepositoryId).ToHashSet()
             : (IReadOnlySet<int>?)null;
+        var targetRepoIds = tagFilteredRepoIds ?? allLinks.Select(wr => wr.RepositoryId).ToHashSet();
 
         StartPageJob("Creating branches...", async (job, ct) =>
         {
@@ -283,7 +292,11 @@ public sealed partial class WorkspaceRepositories
                     job.ToOperationProgress(),
                     syncState: false,
                     cancellationToken: ct));
-            SafeInvoke(() => ApplyRepositoryErrors(errors));
+            SafeInvoke(() =>
+            {
+                ApplyRepositoryErrors(errors);
+                ClearRepositoryErrorsFor(targetRepoIds.Where(id => !errors.ContainsKey(id)));
+            });
         }, new PageJobOptions
         {
             RefreshOnCancel = true,
@@ -323,6 +336,8 @@ public sealed partial class WorkspaceRepositories
             {
                 if (err != null)
                     SafeInvoke(() => SetRepositoryError(repositoryId, err));
+                else
+                    SafeInvoke(() => ClearRepositoryError(repositoryId));
 
                 await InvokeAsync(async () =>
                 {
@@ -494,7 +509,11 @@ public sealed partial class WorkspaceRepositories
             }
             else
             {
-                SafeInvoke(() => ToastService.Show($"Branch updated successfully."));
+                SafeInvoke(() =>
+                {
+                    ClearRepositoryError(repositoryId);
+                    ToastService.Show($"Branch updated successfully.");
+                });
             }
         }, new PageJobOptions
         {
