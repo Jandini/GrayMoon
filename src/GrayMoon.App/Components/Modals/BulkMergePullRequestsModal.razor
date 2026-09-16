@@ -9,7 +9,6 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">
-                        <PullRequestIcon AdditionalClass="me-1" />
                         Merge pull requests
                         <span class="merge-pr-header-link fw-normal fs-6 ms-1">@LevelLabel</span>
                     </h5>
@@ -19,13 +18,16 @@
                     <div class="form-check mb-0 bulk-merge-pr-select-all">
                         <input class="form-check-input" type="checkbox" id="bulk-merge-pr-select-all"
                                checked="@AllSelected" disabled="@(IsRunning || Total == 0)" @onchange="ToggleSelectAll" />
+                        <span class="bulk-merge-pr-header-icon" aria-hidden="true">
+                            <PullRequestIcon />
+                        </span>
                         <label class="form-check-label text-muted small" for="bulk-merge-pr-select-all">
                             @SelectedCount of @Total selected
                         </label>
                     </div>
-                    <div class="btn-group merge-pr-split-btn bulk-merge-pr-method-picker">
+                    <div class="bulk-merge-pr-method-picker">
                         <button type="button" class="btn bulk-merge-pr-method-btn" disabled="@IsRunning" @onclick="ToggleMethodDropdown">
-                            @GetMethodLabel(SelectedMethod)
+                            @SelectedMethod.ToDisplayLabel()
                             <i class="bi bi-chevron-down ms-1"></i>
                         </button>
                         @if (_showMethodDropdown)
@@ -43,7 +45,8 @@
                                             }
                                         </span>
                                         <span class="merge-pr-method-item__text">
-                                            <span class="merge-pr-method-item__title">@GetMethodLabel(method)</span>
+                                            <span class="merge-pr-method-item__title">@method.ToDisplayLabel()</span>
+                                            <span class="merge-pr-method-item__subtitle">@GetMethodDescription(method)</span>
                                         </span>
                                     </button>
                                 }
@@ -64,34 +67,47 @@
                                                aria-label="Select @row.RepositoryName PR #@row.PrNumber"
                                                @onchange="() => ToggleRow(row)" />
                                     </div>
-                                    @if (ShowRowSpinner(row))
-                                    {
-                                        <span class="spinner-border spinner-border-sm bulk-merge-pr-row__spinner"></span>
-                                    }
-                                    else
-                                    {
-                                        <span class="merge-pr-status-icon @GetRowIconClass(row)">
-                                            <i class="bi @GetRowIconGlyph(row)"></i>
-                                        </span>
-                                    }
-                                    <div class="merge-pr-status-text">
-                                        <div class="merge-pr-status-title bulk-merge-pr-row__title">
-                                            <span class="bulk-merge-pr-row__repo">@row.RepositoryName</span>
-                                            <span class="bulk-merge-pr-row__pr">
-                                                #@row.PrNumber@(string.IsNullOrWhiteSpace(row.Title) ? "" : " - " + row.Title)
-                                            </span>
-                                        </div>
-                                        <div class="merge-pr-status-subtitle" title="@GetRowErrorTooltip(row)">
-                                            @GetRowStatusText(row)
-                                        </div>
-                                    </div>
                                     <button type="button"
-                                            class="merge-pr-status-action"
+                                            class="bulk-merge-pr-row__info"
                                             title="View details"
-                                            aria-label="View details for @row.RepositoryName"
+                                            aria-label="View details for @row.RepositoryName PR #@row.PrNumber"
                                             disabled="@IsRunning"
                                             @onclick="() => OnRowInfo.InvokeAsync(row)">
-                                        <i class="bi bi-info-circle"></i>
+                                        @if (ShowRowSpinner(row))
+                                        {
+                                            <span class="spinner-border spinner-border-sm bulk-merge-pr-row__spinner"></span>
+                                        }
+                                        else
+                                        {
+                                            <span class="merge-pr-status-icon @GetRowIconClass(row)">
+                                                <i class="bi @GetRowIconGlyph(row)"></i>
+                                            </span>
+                                        }
+                                        <div class="merge-pr-status-text">
+                                            <div class="merge-pr-status-title bulk-merge-pr-row__title">
+                                                <span class="bulk-merge-pr-row__repo">@row.RepositoryName</span>
+                                                @if (row.Status == BulkMergeRowStatus.LoadingSnapshot && string.IsNullOrWhiteSpace(row.Title))
+                                                {
+                                                    <span class="merge-pr-placeholder bulk-merge-pr-placeholder--title"></span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="bulk-merge-pr-row__pr">
+                                                        #@row.PrNumber@(string.IsNullOrWhiteSpace(row.Title) ? "" : " - " + row.Title)
+                                                    </span>
+                                                }
+                                            </div>
+                                            <div class="merge-pr-status-subtitle" title="@GetRowErrorTooltip(row)">
+                                                @if (row.Status == BulkMergeRowStatus.LoadingSnapshot)
+                                                {
+                                                    <span class="merge-pr-placeholder bulk-merge-pr-placeholder--subtitle"></span>
+                                                }
+                                                else
+                                                {
+                                                    @GetRowStatusText(row)
+                                                }
+                                            </div>
+                                        </div>
                                     </button>
                                     @if (row.Status is BulkMergeRowStatus.Failed or BulkMergeRowStatus.SyncFailed)
                                     {
@@ -265,12 +281,12 @@
             await SelectedMethodChanged.InvokeAsync(method);
     }
 
-    private static string GetMethodLabel(BulkMergeMethodSelection method) => method switch
+    private static string GetMethodDescription(BulkMergeMethodSelection method) => method switch
     {
-        BulkMergeMethodSelection.Squash => "Squash",
-        BulkMergeMethodSelection.Merge => "Merge commit",
-        BulkMergeMethodSelection.Rebase => "Rebase and merge",
-        _ => "Use each repo's default"
+        BulkMergeMethodSelection.Squash => MergeMethod.Squash.ToDescription(),
+        BulkMergeMethodSelection.Merge => MergeMethod.Merge.ToDescription(),
+        BulkMergeMethodSelection.Rebase => MergeMethod.Rebase.ToDescription(),
+        _ => "Each repository merges using whichever method its own GitHub settings allow by default."
     };
 
     private static bool ShowRowSpinner(BulkMergePrRow row) =>
@@ -278,7 +294,8 @@
 
     private static string GetRowIconClass(BulkMergePrRow row) => row.Status switch
     {
-        BulkMergeRowStatus.LoadingSnapshot => "merge-pr-status-icon--pending",
+        BulkMergeRowStatus.LoadingSnapshot => "merge-pr-status-icon--neutral",
+        BulkMergeRowStatus.Ready => GetReadyIconClass(row),
         BulkMergeRowStatus.Conflict => "merge-pr-status-icon--danger",
         BulkMergeRowStatus.Merged or BulkMergeRowStatus.Synced => "merge-pr-status-icon--success",
         BulkMergeRowStatus.Failed => "merge-pr-status-icon--danger",
@@ -289,20 +306,55 @@
     private static string GetRowIconGlyph(BulkMergePrRow row) => row.Status switch
     {
         BulkMergeRowStatus.LoadingSnapshot => "bi-three-dots",
+        BulkMergeRowStatus.Ready => GetReadyIconGlyph(row),
         BulkMergeRowStatus.Conflict => "bi-x-lg",
         BulkMergeRowStatus.Merged or BulkMergeRowStatus.Synced => "bi-check-lg",
         BulkMergeRowStatus.Failed => "bi-x-lg",
         BulkMergeRowStatus.SyncFailed => "bi-exclamation-lg",
         BulkMergeRowStatus.Skipped => "bi-dash-lg",
-        _ => "bi-record-circle"
+        _ => "bi-dash-lg"
     };
+
+    /// <summary>
+    /// Mirrors PRBadge.GetOpenPrMergeabilityClass so a Ready row reads the same GitHub mergeable_state
+    /// ("clean"/"unstable"/"blocked"/"dirty") as the PR badge elsewhere in the app, instead of a meaningless
+    /// neutral gray. Checked only when <see cref="BulkMergePrRow.HasLocalWarning"/> is false - GitHub reporting
+    /// "clean" must never paint the row green while the local clone still has uncommitted work GitHub can't see.
+    /// </summary>
+    private static string GetReadyIconClass(BulkMergePrRow row)
+    {
+        if (row.HasLocalWarning)
+            return "merge-pr-status-icon--pending";
+        var state = row.MergeableState ?? string.Empty;
+        if (row.Mergeable == false || string.Equals(state, "dirty", StringComparison.OrdinalIgnoreCase))
+            return "merge-pr-status-icon--danger";
+        if (string.Equals(state, "unstable", StringComparison.OrdinalIgnoreCase) || string.Equals(state, "blocked", StringComparison.OrdinalIgnoreCase))
+            return "merge-pr-status-icon--pending";
+        if (row.Mergeable == true || string.Equals(state, "clean", StringComparison.OrdinalIgnoreCase))
+            return "merge-pr-status-icon--success";
+        return "merge-pr-status-icon--neutral";
+    }
+
+    private static string GetReadyIconGlyph(BulkMergePrRow row)
+    {
+        if (row.HasLocalWarning)
+            return "bi-exclamation-lg";
+        var state = row.MergeableState ?? string.Empty;
+        if (row.Mergeable == false || string.Equals(state, "dirty", StringComparison.OrdinalIgnoreCase))
+            return "bi-x-lg";
+        if (string.Equals(state, "unstable", StringComparison.OrdinalIgnoreCase))
+            return "bi-three-dots";
+        if (string.Equals(state, "blocked", StringComparison.OrdinalIgnoreCase))
+            return "bi-exclamation-lg";
+        if (row.Mergeable == true || string.Equals(state, "clean", StringComparison.OrdinalIgnoreCase))
+            return "bi-check-lg";
+        return "bi-dash-lg";
+    }
 
     private static string GetRowStatusText(BulkMergePrRow row) => row.Status switch
     {
         BulkMergeRowStatus.LoadingSnapshot => "Checking...",
-        BulkMergeRowStatus.Ready => string.Equals(row.MergeableState, "blocked", StringComparison.OrdinalIgnoreCase)
-            ? "Ready to merge - GitHub may still require a review or check"
-            : "Ready to merge",
+        BulkMergeRowStatus.Ready => GetReadyStatusText(row),
         BulkMergeRowStatus.Conflict => "Has conflicts with base branch",
         BulkMergeRowStatus.Merging => "Merging...",
         BulkMergeRowStatus.SyncingToDefault => "Syncing to default branch...",
@@ -313,6 +365,31 @@
         BulkMergeRowStatus.Skipped => "Skipped",
         _ => string.Empty
     };
+
+    private static string GetReadyStatusText(BulkMergePrRow row)
+    {
+        if (row.HasLocalWarning)
+            return $"{GetLocalWarningText(row)} in the local clone - won't block the merge, but review first";
+        var state = row.MergeableState ?? string.Empty;
+        if (string.Equals(state, "blocked", StringComparison.OrdinalIgnoreCase))
+            return "Ready to merge - GitHub may still require a review or check";
+        if (string.Equals(state, "unstable", StringComparison.OrdinalIgnoreCase))
+            return "Ready to merge - some checks are still running or failing";
+        return "Ready to merge";
+    }
+
+    /// <summary>Mirrors MergePullRequestModal.GetCommitsText's wording for the same signals, so the two dialogs describe local git state identically.</summary>
+    private static string GetLocalWarningText(BulkMergePrRow row)
+    {
+        var parts = new List<string>();
+        if (row.UncommittedChangesCount > 0)
+            parts.Add($"{row.UncommittedChangesCount} uncommitted change{(row.UncommittedChangesCount == 1 ? "" : "s")}");
+        if (row.UnpushedCommitsCount > 0)
+            parts.Add($"{row.UnpushedCommitsCount} unpushed commit{(row.UnpushedCommitsCount == 1 ? "" : "s")}");
+        if (row.IncomingCommitsCount > 0)
+            parts.Add($"{row.IncomingCommitsCount} incoming commit{(row.IncomingCommitsCount == 1 ? "" : "s")}");
+        return parts.Count > 0 ? string.Join(", ", parts) : "Local branch is not in sync";
+    }
 
     private static string? GetRowErrorTooltip(BulkMergePrRow row) =>
         row.Status is BulkMergeRowStatus.Failed or BulkMergeRowStatus.SyncFailed ? row.ErrorMessage : null;

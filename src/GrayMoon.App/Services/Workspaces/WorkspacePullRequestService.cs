@@ -24,6 +24,9 @@ public enum PullRequestRefreshOutcome
 }
 
 /// <summary>Review-details phase result (<see cref="GitHubPullRequestMergeService.GetMergeReviewDetailsAsync"/>) plus the workspace's own persisted Git Changes projection (uncommitted changes / unpushed / incoming commits) - a GrayMoon-local, informational-only signal that never blocks the merge itself.</summary>
+/// <summary>Local-only git state for one repository - see <see cref="WorkspacePullRequestService.GetLocalGitStateAsync"/>.</summary>
+public readonly record struct LocalGitState(bool HasLocalWarning, int UncommittedChangesCount, int UnpushedCommitsCount, int IncomingCommitsCount);
+
 public sealed record PullRequestMergeReviewDetails(
     int ApprovedCount,
     int ChangesRequestedCount,
@@ -218,6 +221,22 @@ public sealed class WorkspacePullRequestService(
             unpushedCommitsCount: unpushedCount,
             incomingCommitsCount: incomingCount,
             cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Local-only git state (uncommitted changes / unpushed / incoming commits) for one repository - reads the
+    /// already-persisted Git Changes projection, no GitHub call. Used by the bulk-merge row list alongside
+    /// <see cref="GetMergeSnapshotAsync"/> so a row never shows "ready to merge" green while the local clone still
+    /// has uncommitted work, without paying for the heavier per-PR review-details GitHub round trip.
+    /// </summary>
+    public async Task<LocalGitState> GetLocalGitStateAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
+    {
+        var link = await GetLinkWithConnectorAndGitStatusAsync(workspaceId, repositoryId, cancellationToken);
+        if (link == null)
+            return default;
+
+        var (hasWarning, uncommittedCount, unpushedCount, incomingCount) = ComputeLocalGitState(link);
+        return new LocalGitState(hasWarning, uncommittedCount, unpushedCount, incomingCount);
     }
 
     /// <summary>

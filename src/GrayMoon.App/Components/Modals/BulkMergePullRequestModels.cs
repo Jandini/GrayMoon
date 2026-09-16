@@ -9,6 +9,26 @@ public enum BulkMergeMethodSelection
     RepositoryDefault
 }
 
+public static class BulkMergeMethodSelectionExtensions
+{
+    public static string ToDisplayLabel(this BulkMergeMethodSelection method) => method switch
+    {
+        BulkMergeMethodSelection.Squash => "Squash",
+        BulkMergeMethodSelection.Merge => "Merge commit",
+        BulkMergeMethodSelection.Rebase => "Rebase and merge",
+        _ => "Repo default"
+    };
+
+    /// <summary>Phrase for the "Merge N pull requests using ___?" confirmation - a noun phrase, unlike <see cref="ToDisplayLabel"/>'s button-label wording, so it reads naturally after "using".</summary>
+    public static string ToConfirmationPhrase(this BulkMergeMethodSelection method) => method switch
+    {
+        BulkMergeMethodSelection.Squash => "the Squash method",
+        BulkMergeMethodSelection.Merge => "a merge commit",
+        BulkMergeMethodSelection.Rebase => "Rebase and merge",
+        _ => "each repository's own default method"
+    };
+}
+
 public enum BulkMergeRowStatus
 {
     LoadingSnapshot,
@@ -38,6 +58,11 @@ public sealed class BulkMergePrRow
     public string? HeadSha { get; set; }
     public bool? Mergeable { get; set; }
     public string? MergeableState { get; set; }
+    /// <summary>Local-clone git state - uncommitted changes / unpushed / incoming commits. GrayMoon-local and informational only (GitHub's own mergeability is unaffected), but must still be surfaced so a row never reads "ready to merge" while the local working copy is out of sync.</summary>
+    public bool HasLocalWarning { get; set; }
+    public int UncommittedChangesCount { get; set; }
+    public int UnpushedCommitsCount { get; set; }
+    public int IncomingCommitsCount { get; set; }
     public bool IsSelected { get; set; }
     public BulkMergeRowStatus Status { get; set; } = BulkMergeRowStatus.LoadingSnapshot;
     public string? ErrorMessage { get; set; }

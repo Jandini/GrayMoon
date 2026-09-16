@@ -92,7 +92,12 @@ public sealed partial class WorkspaceRepositories
         _ = LoadBulkMergeSnapshotsAsync(_bulkMergeModal, rows);
     }
 
-    /// <summary>Cheap per-row snapshot fetch (title/branches/mergeability) - the same fast phase OpenMergeDialogAsync already uses for one PR, just looped with bounded concurrency.</summary>
+    /// <summary>
+    /// Cheap per-row snapshot fetch (title/branches/mergeability) - the same fast phase OpenMergeDialogAsync
+    /// already uses for one PR, just looped with bounded concurrency. Also pulls the row's local git state
+    /// (uncommitted changes / unpushed / incoming commits) - a plain read of the already-persisted Git Changes
+    /// projection, no extra GitHub call - so a row never shows green while the local clone is out of sync.
+    /// </summary>
     private async Task LoadBulkMergeSnapshotsAsync(BulkMergePullRequestsModalState modalGeneration, List<BulkMergePrRow> rows)
     {
         using var semaphore = new SemaphoreSlim(Math.Max(1, WorkspaceOptions.Value.MaxParallelOperations));
@@ -112,6 +117,17 @@ public sealed partial class WorkspaceRepositories
                     Logger.LogDebug(ex, "Failed to load bulk-merge snapshot for repo {RepositoryId}, PR #{PrNumber}", row.RepositoryId, row.PrNumber);
                 }
 
+                LocalGitState localState = default;
+                try
+                {
+                    localState = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, LocalGitState>(
+                        svc => svc.GetLocalGitStateAsync(WorkspaceId, row.RepositoryId));
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Failed to load local git state for repo {RepositoryId}", row.RepositoryId);
+                }
+
                 SafeInvoke(() =>
                 {
                     if (_bulkMergeModal != modalGeneration)
@@ -127,6 +143,11 @@ public sealed partial class WorkspaceRepositories
                         row.MergeableState = snapshot.MergeableState;
                         row.IsSelected = snapshot.Mergeable != false;
                     }
+
+                    row.HasLocalWarning = localState.HasLocalWarning;
+                    row.UncommittedChangesCount = localState.UncommittedChangesCount;
+                    row.UnpushedCommitsCount = localState.UnpushedCommitsCount;
+                    row.IncomingCommitsCount = localState.IncomingCommitsCount;
 
                     row.Status = row.Mergeable == false ? BulkMergeRowStatus.Conflict : BulkMergeRowStatus.Ready;
                 });
@@ -162,8 +183,23 @@ public sealed partial class WorkspaceRepositories
 
     private void StopBulkMerge() => JobService.GetJob(PageJobKey)?.Abort();
 
-    private void ExecuteBulkMerge() =>
-        RunBulkMergeAndSyncAsync(_bulkMergeModal.Rows.Where(r => r.IsSelected).ToList(), Array.Empty<BulkMergePrRow>());
+    /// <summary>Confirms before firing the batch, since selecting many rows and clicking once is easy to do by accident and there is no per-PR undo once GitHub accepts the merge.</summary>
+    private void ExecuteBulkMerge()
+    {
+        var rows = _bulkMergeModal.Rows.Where(r => r.IsSelected).ToList();
+        if (rows.Count == 0)
+            return;
+
+        var methodPhrase = _bulkMergeModal.SelectedMethod.ToConfirmationPhrase();
+        var syncSuffix = BulkMergeSyncToDefault ? " and synced to the default branch" : string.Empty;
+        var message = $"Merge {rows.Count} pull request{(rows.Count == 1 ? "" : "s")} using {methodPhrase}{syncSuffix}?";
+
+        ShowConfirm(message, () =>
+        {
+            RunBulkMergeAndSyncAsync(rows, Array.Empty<BulkMergePrRow>());
+            return Task.CompletedTask;
+        }, "Merge");
+    }
 
     /// <summary>Retries every currently-failed row: Failed rows re-merge (and, if the checkbox is on, sync); SyncFailed rows only re-run the sync step, since their merge already succeeded and re-issuing it would just have GitHub reject an already-merged PR.</summary>
     private void RetryFailedBulkMerge()
@@ -421,10 +457,25 @@ public sealed partial class WorkspaceRepositories
         if (snapshot == null || _disposed || !_bulkMergeModal.IsVisible)
             return;
 
+        LocalGitState localState = default;
+        try
+        {
+            localState = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, LocalGitState>(
+                svc => svc.GetLocalGitStateAsync(WorkspaceId, row.RepositoryId));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to refresh local git state after drill-in for repo {RepositoryId}", repositoryId);
+        }
+
         row.Title = snapshot.Title;
         row.HeadSha = snapshot.HeadSha;
         row.Mergeable = snapshot.Mergeable;
         row.MergeableState = snapshot.MergeableState;
+        row.HasLocalWarning = localState.HasLocalWarning;
+        row.UncommittedChangesCount = localState.UncommittedChangesCount;
+        row.UnpushedCommitsCount = localState.UnpushedCommitsCount;
+        row.IncomingCommitsCount = localState.IncomingCommitsCount;
         if (row.Status is BulkMergeRowStatus.LoadingSnapshot or BulkMergeRowStatus.Ready or BulkMergeRowStatus.Conflict)
             row.Status = row.Mergeable == false ? BulkMergeRowStatus.Conflict : BulkMergeRowStatus.Ready;
         StateHasChanged();

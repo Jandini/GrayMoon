@@ -11,12 +11,17 @@
     flex-direction: column;
 }
 
+/* Left/right zeroed (Bootstrap's .modal-body default is padding:1rem) so a row's own 1rem left padding
+   (on .merge-pr-status-item) is the only left inset - otherwise the two stack and rows sit 1rem deeper
+   than the toolbar's select-all checkbox, which only has the toolbar's own 1rem padding. */
 ::deep .bulk-merge-pr-modal-body {
     min-height: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
     padding-top: 0.5rem;
+    padding-left: 0;
+    padding-right: 0;
 }
 
 /* PR-count link in the header, matching MergePullRequestModal's own header-link typography. */
@@ -35,14 +40,58 @@
     flex: 0 0 auto;
 }
 
-::deep .bulk-merge-pr-select-all {
+/* Bootstrap's .form-check assumes block-flow layout (padding-left: 1.5em on the wrapper, offsetting
+   margin-left: -1.5em plus margin-top: 0.25em on the input) - flexing the wrapper without resetting
+   those breaks it: the negative margin pulls the input past the padding box so the label touches it,
+   and the stale margin-top pushes the input below center. Zero both and use gap for spacing instead. */
+::deep .bulk-merge-pr-select-all,
+::deep .bulk-merge-pr-row__check,
+::deep .merge-pr-sync-default-check {
     display: flex;
     align-items: center;
+    padding-left: 0;
 }
 
-::deep .bulk-merge-pr-select-all .form-check-input:not(:checked) {
+/* 0.75rem, not the label's usual 0.4rem gap - matches the row gap before .merge-pr-status-icon and the
+   icon-to-text gap inside .bulk-merge-pr-row__info, so the header icon lands in the same column as every
+   row's status icon below it. */
+::deep .bulk-merge-pr-select-all {
+    gap: 0.75rem;
+}
+
+::deep .merge-pr-sync-default-check {
+    gap: 0.4rem;
+}
+
+::deep .bulk-merge-pr-select-all .form-check-input,
+::deep .bulk-merge-pr-row__check .form-check-input,
+::deep .merge-pr-sync-default-check .form-check-input {
+    margin-left: 0;
+    margin-top: 0;
+}
+
+::deep .bulk-merge-pr-select-all .form-check-input:not(:checked),
+::deep .bulk-merge-pr-row__check .form-check-input:not(:checked),
+::deep .merge-pr-sync-default-check .form-check-input:not(:checked) {
     background-color: #6c757d;
     border-color: #6c757d;
+}
+
+/* Same 1.5rem slot as a row's .merge-pr-status-icon circle, so the header PR icon sits in the same
+   visual column as every row's check/status icon below it. */
+::deep .bulk-merge-pr-header-icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    color: var(--text-secondary, #8b949e);
+}
+
+::deep .bulk-merge-pr-header-icon .pull-request-icon {
+    width: 1.1rem;
+    height: 1.1rem;
 }
 
 ::deep .bulk-merge-pr-method-picker {
@@ -76,7 +125,8 @@
     bottom: auto;
     margin-top: 0.25rem;
     margin-bottom: 0;
-    min-width: 16rem;
+    min-width: 22rem;
+    max-width: 26rem;
 }
 
 /* Row list: height follows content, scrolls only past the cap - same thin-scrollbar convention as
@@ -118,9 +168,41 @@
 
 ::deep .bulk-merge-pr-row__check {
     flex: 0 0 auto;
+    margin-top: 0.05rem;
+}
+
+/* Replaces the separate (i) "view details" button - the icon + title/subtitle are now the click target
+   themselves, freeing the width that button and its gap used to take for the PR title. */
+::deep .bulk-merge-pr-row__info {
+    flex: 1 1 auto;
+    min-width: 0;
     display: flex;
-    align-items: center;
-    margin-top: 0.15rem;
+    align-items: flex-start;
+    gap: 0.75rem;
+    background: none;
+    border: none;
+    border-radius: 0.25rem;
+    padding: 0;
+    text-align: left;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+/* No hover fill on the info button alone - highlighting only the icon+text sub-region while the row's
+   checkbox strip stayed unhighlighted looked broken. The whole row highlights instead. */
+::deep .bulk-merge-pr-row__info:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--focus-ring-outer, rgba(255, 255, 255, 0.52));
+    border-radius: 0.25rem;
+}
+
+::deep .bulk-merge-pr-row__info:disabled {
+    cursor: default;
+}
+
+::deep .bulk-merge-pr-row:hover {
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 ::deep .bulk-merge-pr-row__spinner {
@@ -291,6 +373,13 @@
     line-height: 1.3;
 }
 
+::deep .merge-pr-method-item__subtitle {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: #8b949e;
+    line-height: 1.35;
+}
+
 ::deep .merge-pr-method-menu .dropdown-item:hover,
 ::deep .merge-pr-method-menu .dropdown-item:focus-visible {
     background-color: #222;
@@ -302,13 +391,17 @@
     color: #fff;
 }
 
-/* Footer, matching MergePullRequestModal's own .merge-pr-modal-footer layout/padding. */
+/* Footer, matching MergePullRequestModal's own .merge-pr-modal-footer layout/padding. Left/right bumped
+   from Bootstrap's .modal-footer default (0.75rem) to 1rem so the sync-to-default checkbox lines up with
+   the toolbar's select-all checkbox and the (now-unpadded) row checkboxes above it. */
 ::deep .bulk-merge-pr-modal-footer {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
     padding-top: 0.5625rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
 }
 
 ::deep .merge-pr-sync-default-check .form-check-input:not(:checked) {
@@ -383,4 +476,32 @@
     background-color: #3d444d;
     border-color: rgba(240, 246, 252, 0.1);
     color: #f0f6fc;
+}
+
+/* Pulsing skeleton for a row's title/subtitle while its snapshot is still loading, lifted directly from
+   MergePullRequestModal.razor.css - shown instead of a static "Checking..." string. */
+@keyframes bulk-merge-pr-placeholder-pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.35; }
+    100% { opacity: 1; }
+}
+
+::deep .merge-pr-placeholder {
+    display: inline-block;
+    border-radius: 0.25rem;
+    background-color: rgba(255, 255, 255, 0.18);
+    animation: bulk-merge-pr-placeholder-pulse 1.4s ease-in-out infinite;
+}
+
+/* Fixed rem, not a percentage: these placeholders sit in .merge-pr-status-text (flex: 1 1 auto;
+   min-width: 0), so a percentage width resolves against an indefinite/collapsed containing block and
+   computes to 0 - the bar would pulse but take no space. */
+::deep .bulk-merge-pr-placeholder--title {
+    width: 9rem;
+    height: 0.85rem;
+}
+
+::deep .bulk-merge-pr-placeholder--subtitle {
+    width: 6.5rem;
+    height: 0.75rem;
 }
