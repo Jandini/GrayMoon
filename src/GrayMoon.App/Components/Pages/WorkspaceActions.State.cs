@@ -76,6 +76,7 @@ public sealed partial class WorkspaceActions
     private bool _showSuccess = true;
     private bool _showNone;
     private string searchTerm = string.Empty;
+    private string? _appliedSearchQuery;
 
     private bool _logsModalVisible;
     private string? _logsConnectorName;
