@@ -311,6 +311,7 @@
                         <div class="btn-group merge-pr-split-btn @(IsPrimaryActionDisabled ? "merge-pr-split-btn--pending" : null)">
                             <button type="button"
                                     class="btn merge-pr-split-btn__main @PrimaryActionButtonClass"
+                                    data-default-action
                                     disabled="@IsPrimaryActionDisabled"
                                     @onclick="HandlePrimaryActionClick">
                                 @if (ShowPrimaryActionSpinner)
@@ -582,7 +583,7 @@
 
     private async Task HandleTitleEditorKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter")
+        if (ModalKeyboard.IsPlainEnter(e))
             await SaveTitle();
         else if (e.Key == "Escape")
             CancelTitleEdit();

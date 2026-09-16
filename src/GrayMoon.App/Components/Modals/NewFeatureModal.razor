@@ -32,7 +32,7 @@
                                 </div>
                             </div>
                             <div class="d-flex gap-2 mt-2">
-                                <button type="button" class="btn btn-warning" @onclick="ProceedWithCreateAsync" disabled="@isCreating">
+                                <button type="button" class="btn btn-warning" data-default-action @onclick="ProceedWithCreateAsync" disabled="@isCreating">
                                     Proceed
                                 </button>
                                 <button type="button" class="btn btn-outline-secondary" @onclick="DismissBranchExistsConfirmation" disabled="@isCreating">Cancel</button>
@@ -122,7 +122,7 @@
                 <div class="modal-footer">
                     @if (!showBranchExistsConfirmation)
                     {
-                        <button type="button" class="btn btn-primary" @onclick="CreateAsync"
+                        <button type="button" class="btn btn-primary" data-default-action @onclick="CreateAsync"
                                 disabled="@(string.IsNullOrWhiteSpace(newBranchName) || isCreating)">
                             Create
                         </button>
@@ -309,7 +309,7 @@
                 await OnCancel.InvokeAsync();
             return;
         }
-        if (e.Key == "Enter" && !isCreating)
+        if (ModalKeyboard.IsPlainEnter(e) && !isCreating)
         {
             if (showBranchExistsConfirmation)
                 await ProceedWithCreateAsync();
@@ -320,7 +320,7 @@
 
     private async Task HandleBranchNameKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter" && !isCreating)
+        if (ModalKeyboard.IsPlainEnter(e) && !isCreating)
         {
             if (showBranchExistsConfirmation)
                 await ProceedWithCreateAsync();

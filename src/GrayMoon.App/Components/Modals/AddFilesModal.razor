@@ -142,7 +142,7 @@
                     <span class="text-muted small">@(selectedKeys.Count > 0 ? $"{selectedKeys.Count} file(s) selected." : "No files selected.")</span>
                     <div>
                         <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
-                        <button type="button" class="btn btn-primary" @onclick="OnAddClick" disabled="@(selectedKeys.Count == 0)">
+                        <button type="button" class="btn btn-primary" data-default-action @onclick="OnAddClick" disabled="@(selectedKeys.Count == 0)">
                             Add
                         </button>
                     </div>

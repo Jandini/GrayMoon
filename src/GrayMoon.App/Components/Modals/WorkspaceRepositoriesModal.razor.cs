@@ -120,7 +120,7 @@ public sealed partial class WorkspaceRepositoriesModal : IAsyncDisposable
         {
             await OnCancel.InvokeAsync();
         }
-        else if (e.Key == "Enter")
+        else if (ModalKeyboard.IsPlainEnter(e))
         {
             await OnSave.InvokeAsync();
         }

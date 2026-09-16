@@ -41,7 +41,7 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
-                    <button type="button" class="btn btn-primary" @onclick="OnSave" disabled="@(IsSaving || IsCheckingDirectory || SaveDisabled)">
+                    <button type="button" class="btn btn-primary" data-default-action @onclick="OnSave" disabled="@(IsSaving || IsCheckingDirectory || SaveDisabled)">
                         @if (IsSaving)
                         {
                             <span class="spinner-border spinner-border-sm me-2"></span>
@@ -93,7 +93,7 @@
         {
             await OnCancel.InvokeAsync();
         }
-        else if (e.Key == "Enter" && !IsSaving && !IsCheckingDirectory && !SaveDisabled)
+        else if (ModalKeyboard.IsPlainEnter(e) && !IsSaving && !IsCheckingDirectory && !SaveDisabled)
         {
             await OnSave.InvokeAsync();
         }

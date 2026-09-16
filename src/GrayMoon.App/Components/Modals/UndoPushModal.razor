@@ -43,7 +43,7 @@
                     }
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-warning" @onclick="ProceedAsync">
+                    <button type="button" class="btn btn-warning" data-default-action @onclick="ProceedAsync">
                         Proceed
                     </button>
                     <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">
@@ -87,7 +87,7 @@
     {
         if (e.Key == "Escape")
             await OnCancel.InvokeAsync();
-        else if (e.Key == "Enter")
+        else if (ModalKeyboard.IsPlainEnter(e))
             await ProceedAsync();
     }
 }

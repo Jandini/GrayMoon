@@ -74,6 +74,7 @@
                 <div class="modal-footer">
                     <button type="button"
                             class="btn @(AnyCommitsWillBeLost ? "btn-danger" : "btn-primary")"
+                            data-default-action
                             disabled="@_isCountingDown"
                             @onclick="HandleProceedClick">
                         @if (_isCountingDown)
@@ -189,7 +190,7 @@
     {
         if (e.Key == "Escape")
             await HandleCancelClick();
-        else if (e.Key == "Enter" && !_isCountingDown)
+        else if (ModalKeyboard.IsPlainEnter(e) && !_isCountingDown)
             await HandleProceedClick();
     }
 }

@@ -13,6 +13,8 @@ public sealed partial class WorkspaceGitChanges
 
     private string _workspaceCommitMessage = string.Empty;
     private bool _workspaceCommitMessageHasContent;
+    private int _commitMessageBoxKey;
+    private string? _ignoreStaleCommitMessage;
 
     /// <summary>
     /// Restores the in-progress commit message for the current WorkspaceId from the circuit-scoped
@@ -28,6 +30,12 @@ public sealed partial class WorkspaceGitChanges
     private void OnWorkspaceCommitMessageInput(ChangeEventArgs e)
     {
         var newValue = e.Value?.ToString() ?? string.Empty;
+        if (_ignoreStaleCommitMessage != null)
+        {
+            if (newValue == _ignoreStaleCommitMessage)
+                return;
+            _ignoreStaleCommitMessage = null;
+        }
         var hadContent = _workspaceCommitMessageHasContent;
         var hasContent = !string.IsNullOrWhiteSpace(newValue);
         _workspaceCommitMessage = newValue;
@@ -194,11 +202,16 @@ public sealed partial class WorkspaceGitChanges
 
             if (succeeded.Count > 0)
             {
+                // Clear circuit memory even if the page was disposed (user navigated away mid-commit).
+                // SafeInvoke no-ops when disposed, which previously left the message in memory so it
+                // came back the next time Git Changes was opened.
+                CommitMessageMemory.Clear(WorkspaceId);
+                _ignoreStaleCommitMessage = message;
                 SafeInvoke(() =>
                 {
                     _workspaceCommitMessage = string.Empty;
                     _workspaceCommitMessageHasContent = false;
-                    CommitMessageMemory.Clear(WorkspaceId);
+                    _commitMessageBoxKey++;
                 });
             }
 

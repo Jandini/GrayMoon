@@ -127,6 +127,7 @@
                         </button>
                         <button type="button"
                                 class="btn btn-primary"
+                                data-default-action
                                 @onclick="HandleCreateClick"
                                 disabled="@(IsBusy || !IsValid)">
                             @if (IsBusy)

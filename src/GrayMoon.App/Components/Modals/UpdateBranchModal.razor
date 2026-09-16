@@ -38,7 +38,7 @@
                             @CommitsBehind @(CommitsBehind == 1 ? "commit" : "commits")
                         </a>
                     }
-                    <button type="button" class="btn btn-primary" @onclick="OnConfirm">
+                    <button type="button" class="btn btn-primary" data-default-action @onclick="OnConfirm">
                         Update Branch
                     </button>
                     <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">
@@ -72,7 +72,7 @@
     {
         if (e.Key == "Escape")
             await OnCancel.InvokeAsync();
-        else if (e.Key == "Enter")
+        else if (ModalKeyboard.IsPlainEnter(e))
             await OnConfirm.InvokeAsync();
     }
 }

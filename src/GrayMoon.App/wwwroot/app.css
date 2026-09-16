@@ -33,6 +33,8 @@
     --bg-active: #37373d;
     --bg-card: #252526;
     --bg-input: #3c3c3c;
+    --bg-input-disabled: #2b2b2b;
+    --text-input-disabled: #b8b8b8;
     --bg-table-stripe: #2d2d30;
     
     --text-primary: #cccccc;
@@ -314,6 +316,24 @@ h1:focus {
     border-color: var(--focus-ring-outer) !important;
     color: var(--text-primary);
     box-shadow: none !important;
+}
+
+/* Disabled fields: beat Bootstrap's light :disabled background so they stay muted in the dark UI. */
+input:disabled:not(.btn):not(.form-check-input):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="color"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]),
+textarea:disabled,
+select:disabled,
+.form-control:disabled,
+.form-select:disabled {
+    background-color: var(--bg-input-disabled) !important;
+    color: var(--text-input-disabled) !important;
+    border-color: var(--border-color) !important;
+    opacity: 1;
+    cursor: not-allowed;
+}
+
+.form-control:disabled::placeholder,
+.form-select:disabled::placeholder {
+    color: var(--text-muted);
 }
 
 .form-check-input:focus {

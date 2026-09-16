@@ -33,7 +33,7 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-warning" @onclick="OnProceedClick" disabled="@IsBusy">
+                    <button type="button" class="btn btn-warning" data-default-action @onclick="OnProceedClick" disabled="@IsBusy">
                         @if (IsBusy)
                         {
                             <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
