@@ -197,6 +197,12 @@ public sealed partial class WorkspaceRepositories
     {
         _mergePrModal = _mergePrModal with { IsVisible = false };
         StateHasChanged();
+
+        if (_bulkMergeModal.DrillInRepositoryId is int repositoryId)
+        {
+            _bulkMergeModal.DrillInRepositoryId = null;
+            _ = RefreshBulkMergeRowAfterDrillInAsync(repositoryId);
+        }
     }
 
     /// <summary>
