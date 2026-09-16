@@ -417,7 +417,7 @@
                         {
                             @if (showBranchExistsConfirmation)
                             {
-                                <button type="button" class="btn btn-primary" @onclick="CheckoutExistingBranchAsync" disabled="@(isCreating || isRefreshing)">
+                                <button type="button" class="btn btn-primary" data-default-action @onclick="CheckoutExistingBranchAsync" disabled="@(isCreating || isRefreshing)">
                                     @if (isCreating)
                                     {
                                         <span class="spinner-border spinner-border-sm me-2"></span>
@@ -427,7 +427,7 @@
                             }
                             else
                             {
-                                <button type="button" class="btn btn-primary" @onclick="CreateAsync" disabled="@(string.IsNullOrWhiteSpace(newBranchName?.Trim()) || isRefreshing)">
+                                <button type="button" class="btn btn-primary" data-default-action @onclick="CreateAsync" disabled="@(string.IsNullOrWhiteSpace(newBranchName?.Trim()) || isRefreshing)">
                                     Create
                                 </button>
                             }
@@ -436,6 +436,7 @@
                         {
                             <button type="button"
                                     class="btn btn-primary"
+                                    data-default-action
                                     @onclick="CreateFromFilter"
                                     disabled="@isRefreshing">
                                 Create
@@ -445,6 +446,7 @@
                         {
                             <button type="button" 
                                     class="btn btn-primary" 
+                                    data-default-action
                                     @onclick="CheckoutAsync"
                                     disabled="@IsCheckoutDisabled()">
                                 @if (isProcessing)
@@ -1249,7 +1251,7 @@
             await OnCancel.InvokeAsync();
             return;
         }
-        if (e.Key == "Enter" && activeTab == "newbranch" && !isCreating)
+        if (ModalKeyboard.IsPlainEnter(e) && activeTab == "newbranch" && !isCreating)
         {
             if (_suppressNextEnterForNewBranch)
             {
@@ -1265,7 +1267,7 @@
 
     private async Task HandleBranchNameKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter" && !isCreating)
+        if (ModalKeyboard.IsPlainEnter(e) && !isCreating)
         {
             if (_suppressNextEnterForNewBranch)
             {

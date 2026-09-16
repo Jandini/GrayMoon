@@ -214,7 +214,7 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" @onclick="CloseDeleteModal">Cancel</button>
-                    <button type="button" class="btn btn-danger" @onclick="DeleteWorkspaceAsync" disabled="@isDeleting">
+                    <button type="button" class="btn btn-danger" data-default-action @onclick="DeleteWorkspaceAsync" disabled="@isDeleting">
                         @if (isDeleting)
                         {
                             <span class="spinner-border spinner-border-sm me-2"></span>
@@ -598,7 +598,7 @@
         {
             CloseDeleteModal();
         }
-        else if (e.Key == "Enter")
+        else if (ModalKeyboard.IsPlainEnter(e))
         {
             await DeleteWorkspaceAsync();
         }

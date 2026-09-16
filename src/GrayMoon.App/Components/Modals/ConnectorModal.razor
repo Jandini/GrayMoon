@@ -127,7 +127,7 @@
                             }
                             <div class="modal-footer">
                                 <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
-                                <button type="submit" class="btn btn-primary" disabled="@IsSubmitting">
+                                <button type="submit" class="btn btn-primary" data-default-action disabled="@IsSubmitting">
                                     @if (IsSubmitting)
                                     {
                                         <span class="spinner-border spinner-border-sm me-2"></span>
@@ -146,7 +146,7 @@
                         }
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
-                            <button type="button" class="btn btn-danger" @onclick="() => OnDelete.InvokeAsync()" disabled="@IsSubmitting">
+                            <button type="button" class="btn btn-danger" data-default-action @onclick="() => OnDelete.InvokeAsync()" disabled="@IsSubmitting">
                                 @if (IsSubmitting)
                                 {
                                     <span class="spinner-border spinner-border-sm me-2"></span>
@@ -273,7 +273,7 @@
         {
             await OnCancel.InvokeAsync();
         }
-        else if (e.Key == "Enter" && Mode == ConnectorModalMode.Delete)
+        else if (ModalKeyboard.IsPlainEnter(e) && Mode == ConnectorModalMode.Delete)
         {
             await OnDelete.InvokeAsync();
         }

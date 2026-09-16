@@ -42,7 +42,7 @@
                     {
                         <span class="confirm-modal__footer-note me-auto">@FooterNote</span>
                     }
-                    <button type="button" class="btn @(ConfirmIsDanger ? "btn-danger" : "btn-primary")" @onclick="OnConfirm">
+                    <button type="button" class="btn @(ConfirmIsDanger ? "btn-danger" : "btn-primary")" data-default-action @onclick="OnConfirm">
                         @ConfirmButtonText
                     </button>
                     <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">
@@ -78,7 +78,7 @@
     {
         if (e.Key == "Escape")
             await OnCancel.InvokeAsync();
-        else if (e.Key == "Enter")
+        else if (ModalKeyboard.IsPlainEnter(e))
             await OnConfirm.InvokeAsync();
     }
 }

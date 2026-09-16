@@ -8,20 +8,31 @@ namespace GrayMoon.App.Services.GitChanges;
 public sealed class WorkspaceGitChangesCommitMessageMemory
 {
     private readonly Dictionary<int, string> _byWorkspace = new();
+    private readonly object _gate = new();
 
     public void Set(int workspaceId, string message)
     {
-        if (string.IsNullOrEmpty(message))
+        lock (_gate)
         {
-            _byWorkspace.Remove(workspaceId);
-            return;
-        }
+            if (string.IsNullOrEmpty(message))
+            {
+                _byWorkspace.Remove(workspaceId);
+                return;
+            }
 
-        _byWorkspace[workspaceId] = message;
+            _byWorkspace[workspaceId] = message;
+        }
     }
 
-    public string Get(int workspaceId) =>
-        _byWorkspace.TryGetValue(workspaceId, out var message) ? message : string.Empty;
+    public string Get(int workspaceId)
+    {
+        lock (_gate)
+            return _byWorkspace.TryGetValue(workspaceId, out var message) ? message : string.Empty;
+    }
 
-    public void Clear(int workspaceId) => _byWorkspace.Remove(workspaceId);
+    public void Clear(int workspaceId)
+    {
+        lock (_gate)
+            _byWorkspace.Remove(workspaceId);
+    }
 }

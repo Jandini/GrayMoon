@@ -39,7 +39,7 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-primary" @onclick="HandleProceed" disabled="@IsBusy">
+                    <button type="button" class="btn btn-primary" data-default-action @onclick="HandleProceed" disabled="@IsBusy">
                         Update
                     </button>
                     <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel" disabled="@IsBusy">
@@ -87,7 +87,7 @@
     {
         if (e.Key == "Escape")
             await OnCancel.InvokeAsync();
-        else if (e.Key == "Enter")
+        else if (ModalKeyboard.IsPlainEnter(e))
             await HandleProceed();
     }
 }

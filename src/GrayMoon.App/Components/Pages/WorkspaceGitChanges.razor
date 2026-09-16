@@ -69,6 +69,7 @@
                     <div class="git-changes-workspace-commit">
                         <form autocomplete="off" @onsubmit:preventDefault="true">
                         <textarea id="git-changes-commit-message"
+                                  @key="_commitMessageBoxKey"
                                   class="form-control git-changes-workspace-commit__message"
                                   rows="3"
                                   maxlength="10000"

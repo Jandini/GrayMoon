@@ -94,7 +94,7 @@
                         </button>
                     }
                     <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">Cancel</button>
-                    <button type="button" class="btn btn-primary" @onclick="SaveAsync">
+                    <button type="button" class="btn btn-primary" data-default-action @onclick="SaveAsync">
                         Save
                     </button>
                 </div>
@@ -232,7 +232,7 @@
         {
             if (e.Key == "ArrowDown") { suggestionIndex = Math.Min(suggestionIndex + 1, filteredRepos.Count - 1); return; }
             if (e.Key == "ArrowUp") { suggestionIndex = Math.Max(suggestionIndex - 1, 0); return; }
-            if (e.Key == "Enter" || e.Key == "Tab")
+            if (ModalKeyboard.IsPlainEnter(e) || e.Key == "Tab")
             {
                 if (filteredRepos.Count > 0) await AcceptSuggestion(filteredRepos[suggestionIndex]);
                 return;
