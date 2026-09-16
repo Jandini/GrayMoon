@@ -34,6 +34,7 @@ public sealed record PullRequestMergeReviewData(
 /// </summary>
 public sealed class GitHubPullRequestMergeService(
     GitHubService gitHubService,
+    IGitHubRateLimitTracker rateLimitTracker,
     ILogger<GitHubPullRequestMergeService> logger)
 {
     private static readonly MergeMethod[] DefaultMethodPriority = [MergeMethod.Squash, MergeMethod.Merge, MergeMethod.Rebase];
@@ -195,6 +196,17 @@ public sealed class GitHubPullRequestMergeService(
         }
         catch (HttpRequestException ex)
         {
+            // Merges never went through the shared rate-limit gate before - only the GHA poller set it. A 429
+            // here now pauses every poller for this connector too (grid, live-feed terminals, other merges).
+            if (ex is GitHubHttpRequestException ghEx && GitHubApiErrorHelper.LooksLikeRateLimit(ghEx.StatusCode, ghEx.Message))
+            {
+                var resetEpoch = ghEx.RateLimit?.ResetEpochUtcSeconds;
+                var resumeAt = resetEpoch.HasValue
+                    ? DateTimeOffset.FromUnixTimeSeconds(resetEpoch.Value).AddSeconds(5)
+                    : DateTimeOffset.UtcNow.AddSeconds(60);
+                rateLimitTracker.PauseUntil(connector.ConnectorName, resumeAt);
+            }
+
             var friendly = GitHubApiErrorHelper.FormatFriendlyGitHubHttpError(ex);
             logger.LogWarning(ex, "Merge PR failed for {Owner}/{Repo} PR #{Number}", owner, repo, prNumber);
             return new MergeResult(false, friendly);

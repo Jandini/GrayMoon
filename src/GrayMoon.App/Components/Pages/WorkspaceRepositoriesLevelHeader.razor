@@ -42,6 +42,9 @@
                         <div class="gm-menu-item @(HasCreatablePr ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Create pull requests" @onclick="HandleOpenPr" @onclick:stopPropagation>
                             <PullRequestIcon AdditionalClass="pull-request-icon--menu" /><span>Create PRs...</span>
                         </div>
+                        <div class="gm-menu-item @(HasMergeablePr ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Merge pull requests" @onclick="HandleOpenMergePrs" @onclick:stopPropagation>
+                            <PullRequestIcon AdditionalClass="pull-request-icon--menu" /><span>Merge PRs...</span>
+                        </div>
                     </div>
                     <div class="gm-menu-item gm-menu-trigger gm-menu-item--flyout" role="button" tabindex="0" aria-haspopup="true" title="Copy to clipboard">
                         <i class="bi bi-share" aria-hidden="true"></i><span>Share...</span>
@@ -91,6 +94,7 @@
     [Parameter] public EventCallback OnSyncToDefault { get; set; }
     [Parameter] public EventCallback OnSyncCommits { get; set; }
     [Parameter] public EventCallback OnOpenPr { get; set; }
+    [Parameter] public EventCallback OnOpenMergePrs { get; set; }
     [Parameter] public EventCallback OnSyncLevel { get; set; }
     [Parameter] public EventCallback OnFetchLevel { get; set; }
     [Parameter] public EventCallback OnRestorePackagesLevel { get; set; }
@@ -98,6 +102,8 @@
     [Parameter] public IReadOnlyDictionary<string, string>? OpenPrPullMap { get; set; }
     /// <summary>True when at least one repository in this level would show the yellow "create" PR badge - "Create PRs..." is highlighted.</summary>
     [Parameter] public bool HasCreatablePr { get; set; }
+    /// <summary>True when at least one repository in this level has an open, non-conflicted pull request - "Merge PRs..." is highlighted.</summary>
+    [Parameter] public bool HasMergeablePr { get; set; }
     /// <summary>True when at least one repository in this level has a merged pull request - "Sync to Default" is highlighted since the default branch has moved on.</summary>
     [Parameter] public bool HasMergedPr { get; set; }
     /// <summary>True when at least one repository in this level has incoming or outgoing commits - "Sync Commits" is highlighted. No-upstream does not count.</summary>
@@ -128,6 +134,11 @@
     private async Task HandleOpenPr()
     {
         if (!ActionsDisabled) await OnOpenPr.InvokeAsync();
+    }
+
+    private async Task HandleOpenMergePrs()
+    {
+        if (!ActionsDisabled) await OnOpenMergePrs.InvokeAsync();
     }
 
     private async Task HandleSyncLevel()

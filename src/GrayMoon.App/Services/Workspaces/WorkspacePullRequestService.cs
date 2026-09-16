@@ -24,6 +24,9 @@ public enum PullRequestRefreshOutcome
 }
 
 /// <summary>Review-details phase result (<see cref="GitHubPullRequestMergeService.GetMergeReviewDetailsAsync"/>) plus the workspace's own persisted Git Changes projection (uncommitted changes / unpushed / incoming commits) - a GrayMoon-local, informational-only signal that never blocks the merge itself.</summary>
+/// <summary>Local-only git state for one repository - see <see cref="WorkspacePullRequestService.GetLocalGitStateAsync"/>.</summary>
+public readonly record struct LocalGitState(bool HasLocalWarning, int UncommittedChangesCount, int UnpushedCommitsCount, int IncomingCommitsCount);
+
 public sealed record PullRequestMergeReviewDetails(
     int ApprovedCount,
     int ChangesRequestedCount,
@@ -221,6 +224,22 @@ public sealed class WorkspacePullRequestService(
     }
 
     /// <summary>
+    /// Local-only git state (uncommitted changes / unpushed / incoming commits) for one repository - reads the
+    /// already-persisted Git Changes projection, no GitHub call. Used by the bulk-merge row list alongside
+    /// <see cref="GetMergeSnapshotAsync"/> so a row never shows "ready to merge" green while the local clone still
+    /// has uncommitted work, without paying for the heavier per-PR review-details GitHub round trip.
+    /// </summary>
+    public async Task<LocalGitState> GetLocalGitStateAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
+    {
+        var link = await GetLinkWithConnectorAndGitStatusAsync(workspaceId, repositoryId, cancellationToken);
+        if (link == null)
+            return default;
+
+        var (hasWarning, uncommittedCount, unpushedCount, incomingCount) = ComputeLocalGitState(link);
+        return new LocalGitState(hasWarning, uncommittedCount, unpushedCount, incomingCount);
+    }
+
+    /// <summary>
     /// Fast phase for opening the merge dialog: just the (ETag-conditional) PR-by-number call, returning title/
     /// branches/conflicts so the dialog can render its header and Conflicts row before the heavier review-details
     /// phase below even starts.
@@ -322,4 +341,120 @@ public sealed class WorkspacePullRequestService(
             .Include(wr => wr.Repository)
             .ThenInclude(r => r!.Connector)
             .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
+
+    /// <summary>
+    /// Merges many pull requests across a workspace in one bounded-concurrency batch (the plural counterpart to
+    /// <see cref="MergePullRequestAsync"/>). A null <see cref="MergePullRequestRequest.Method"/> resolves the
+    /// repository's own GitHub-reported default merge method lazily, per request, rather than up front for every
+    /// candidate. On success, refreshes PR state once for the whole successfully-merged set.
+    /// </summary>
+    public async Task<IReadOnlyList<MergePullRequestResult>> MergePullRequestsAsync(
+        int workspaceId,
+        IReadOnlyList<MergePullRequestRequest> requests,
+        IProgress<MergePullRequestProgress>? progress,
+        CancellationToken cancellationToken = default)
+    {
+        if (requests.Count == 0) return Array.Empty<MergePullRequestResult>();
+
+        var repositoryIds = requests.Select(r => r.RepositoryId).Distinct().ToList();
+        var links = await dbContext.WorkspaceRepositories
+            .AsNoTracking()
+            .Include(wr => wr.Repository)
+            .ThenInclude(r => r!.Connector)
+            .Where(wr => wr.WorkspaceId == workspaceId && repositoryIds.Contains(wr.RepositoryId))
+            .ToListAsync(cancellationToken);
+        var linkByRepoId = links.ToDictionary(wr => wr.RepositoryId);
+
+        var total = requests.Count;
+        var completed = 0;
+        var failed = 0;
+
+        using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
+        var tasks = requests.Select(async request =>
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                var result = await MergeOneAsync(request, linkByRepoId, cancellationToken);
+
+                var completedCount = Interlocked.Increment(ref completed);
+                var failedCount = result.Success ? Volatile.Read(ref failed) : Interlocked.Increment(ref failed);
+                progress?.Report(new MergePullRequestProgress
+                {
+                    Completed = completedCount,
+                    Failed = failedCount,
+                    Total = total,
+                    CurrentRepositoryId = result.RepositoryId,
+                    CurrentSuccess = result.Success,
+                    CurrentErrorMessage = result.ErrorMessage
+                });
+
+                return result;
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        var results = await Task.WhenAll(tasks);
+
+        var successfulRepoIds = results.Where(r => r.Success).Select(r => r.RepositoryId).Distinct().ToList();
+        foreach (var repoId in successfulRepoIds)
+        {
+            if (linkByRepoId.TryGetValue(repoId, out var link))
+                _cache.TryRemove((repoId, link.BranchName ?? string.Empty), out _);
+        }
+
+        if (successfulRepoIds.Count > 0)
+            await RefreshPullRequestsAsync(workspaceId, successfulRepoIds, force: true, cancellationToken: cancellationToken);
+
+        return results;
+    }
+
+    private async Task<MergePullRequestResult> MergeOneAsync(
+        MergePullRequestRequest request,
+        IReadOnlyDictionary<int, WorkspaceRepositoryLink> linkByRepoId,
+        CancellationToken cancellationToken)
+    {
+        if (!linkByRepoId.TryGetValue(request.RepositoryId, out var link) || link.Repository == null)
+            return FailedMerge(request, "Repository not found in this workspace.");
+
+        var connectorName = link.Repository.Connector?.ConnectorName;
+        if (!string.IsNullOrWhiteSpace(connectorName) && rateLimitTracker.GetPausedUntil(connectorName) is { } pausedUntil)
+            return FailedMerge(request, $"GitHub rate limit - paused until {pausedUntil.UtcDateTime:HH:mm} UTC.");
+
+        var method = request.Method
+            ?? await ResolveDefaultMergeMethodAsync(link.Repository, link.Repository.Connector, request, cancellationToken);
+
+        var result = await gitHubPullRequestMergeService.MergePullRequestAsync(
+            link.Repository, link.Repository.Connector, request.PrNumber, method, request.ExpectedHeadSha, cancellationToken);
+
+        return new MergePullRequestResult
+        {
+            RepositoryId = request.RepositoryId,
+            PrNumber = request.PrNumber,
+            Success = result.Success,
+            ErrorMessage = result.Success ? null : result.Message
+        };
+    }
+
+    private async Task<MergeMethod> ResolveDefaultMergeMethodAsync(
+        Repository repository,
+        Connector? connector,
+        MergePullRequestRequest request,
+        CancellationToken cancellationToken)
+    {
+        var review = await gitHubPullRequestMergeService.GetMergeReviewDetailsAsync(
+            repository, connector, request.PrNumber, request.ExpectedHeadSha, cancellationToken);
+        return review?.DefaultMergeMethod ?? review?.AllowedMergeMethods.FirstOrDefault() ?? MergeMethod.Merge;
+    }
+
+    private static MergePullRequestResult FailedMerge(MergePullRequestRequest request, string message) => new()
+    {
+        RepositoryId = request.RepositoryId,
+        PrNumber = request.PrNumber,
+        Success = false,
+        ErrorMessage = message
+    };
 }

@@ -1,0 +1,396 @@
+@using Microsoft.AspNetCore.Components.Web
+
+@if (IsVisible)
+{
+    <div class="modal show d-block bulk-merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1074;"
+         @onkeydown="HandleKeyDown"
+         @ref="_modalElement">
+        <div class="modal-dialog modal-dialog-centered bulk-merge-pr-modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        Merge pull requests
+                        <span class="merge-pr-header-link fw-normal fs-6 ms-1">@LevelLabel</span>
+                    </h5>
+                    <button type="button" class="btn-close flex-shrink-0" aria-label="Dismiss" disabled="@IsRunning" @onclick="HandleCloseClick"></button>
+                </div>
+                <div class="bulk-merge-pr-toolbar">
+                    <div class="form-check mb-0 bulk-merge-pr-select-all">
+                        <input class="form-check-input" type="checkbox" id="bulk-merge-pr-select-all"
+                               checked="@AllSelected" disabled="@(IsRunning || Total == 0)" @onchange="ToggleSelectAll" />
+                        <span class="bulk-merge-pr-header-icon" aria-hidden="true">
+                            <PullRequestIcon />
+                        </span>
+                        <label class="form-check-label text-muted small" for="bulk-merge-pr-select-all">
+                            @SelectedCount of @Total selected
+                        </label>
+                    </div>
+                    <div class="bulk-merge-pr-method-picker">
+                        <button type="button" class="btn bulk-merge-pr-method-btn" disabled="@IsRunning" @onclick="ToggleMethodDropdown">
+                            @SelectedMethod.ToDisplayLabel()
+                            <i class="bi bi-chevron-down ms-1"></i>
+                        </button>
+                        @if (_showMethodDropdown)
+                        {
+                            <div class="merge-pr-method-menu bulk-merge-pr-method-menu">
+                                @foreach (var method in MethodChoices)
+                                {
+                                    <button type="button"
+                                            class="dropdown-item merge-pr-method-item @(SelectedMethod == method ? "merge-pr-method-item--selected" : null)"
+                                            @onclick="() => SelectMethod(method)">
+                                        <span class="merge-pr-method-item__check" aria-hidden="true">
+                                            @if (SelectedMethod == method)
+                                            {
+                                                <i class="bi bi-check-lg"></i>
+                                            }
+                                        </span>
+                                        <span class="merge-pr-method-item__text">
+                                            <span class="merge-pr-method-item__title">@method.ToDisplayLabel()</span>
+                                            <span class="merge-pr-method-item__subtitle">@GetMethodDescription(method)</span>
+                                        </span>
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="modal-body bulk-merge-pr-modal-body">
+                    <div class="bulk-merge-pr-scroll">
+                        <div class="merge-pr-status-list bulk-merge-pr-list">
+                            @foreach (var row in Rows)
+                            {
+                                <div class="merge-pr-status-item bulk-merge-pr-row" @key="row">
+                                    <div class="form-check bulk-merge-pr-row__check mb-0">
+                                        <input class="form-check-input" type="checkbox"
+                                               checked="@row.IsSelected"
+                                               disabled="@IsRunning"
+                                               aria-label="Select @row.RepositoryName PR #@row.PrNumber"
+                                               @onchange="() => ToggleRow(row)" />
+                                    </div>
+                                    <button type="button"
+                                            class="bulk-merge-pr-row__info"
+                                            title="View details"
+                                            aria-label="View details for @row.RepositoryName PR #@row.PrNumber"
+                                            disabled="@IsRunning"
+                                            @onclick="() => OnRowInfo.InvokeAsync(row)">
+                                        @if (ShowRowSpinner(row))
+                                        {
+                                            <span class="spinner-border spinner-border-sm bulk-merge-pr-row__spinner"></span>
+                                        }
+                                        else
+                                        {
+                                            <span class="merge-pr-status-icon @GetRowIconClass(row)">
+                                                <i class="bi @GetRowIconGlyph(row)"></i>
+                                            </span>
+                                        }
+                                        <div class="merge-pr-status-text">
+                                            <div class="merge-pr-status-title bulk-merge-pr-row__title">
+                                                <span class="bulk-merge-pr-row__repo">@row.RepositoryName</span>
+                                                @if (row.Status == BulkMergeRowStatus.LoadingSnapshot && string.IsNullOrWhiteSpace(row.Title))
+                                                {
+                                                    <span class="merge-pr-placeholder bulk-merge-pr-placeholder--title"></span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="bulk-merge-pr-row__pr">
+                                                        #@row.PrNumber@(string.IsNullOrWhiteSpace(row.Title) ? "" : " - " + row.Title)
+                                                    </span>
+                                                }
+                                            </div>
+                                            <div class="merge-pr-status-subtitle" title="@GetRowErrorTooltip(row)">
+                                                @if (row.Status == BulkMergeRowStatus.LoadingSnapshot)
+                                                {
+                                                    <span class="merge-pr-placeholder bulk-merge-pr-placeholder--subtitle"></span>
+                                                }
+                                                else
+                                                {
+                                                    @GetRowStatusText(row)
+                                                }
+                                            </div>
+                                        </div>
+                                    </button>
+                                    @if (row.Status is BulkMergeRowStatus.Failed or BulkMergeRowStatus.SyncFailed)
+                                    {
+                                        <button type="button"
+                                                class="merge-pr-status-action"
+                                                title="Retry"
+                                                aria-label="Retry @row.RepositoryName"
+                                                disabled="@IsRunning"
+                                                @onclick="() => OnRetryRow.InvokeAsync(row)">
+                                            <i class="bi bi-arrow-clockwise"></i>
+                                        </button>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+                @if (IsRunning)
+                {
+                    <div class="modal-footer bulk-merge-pr-modal-footer">
+                        <div class="bulk-merge-pr-progress">
+                            <div class="bulk-merge-pr-progress__status">
+                                Merging @Completed of @Total...@(Failed > 0 ? $" {Failed} failed" : "")
+                            </div>
+                            <div class="progress bulk-merge-pr-progress-track">
+                                <div class="progress-bar bulk-merge-pr-progress-bar" style="width:@(ProgressPercent)%"></div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn merge-pr-btn-close--muted" @onclick="() => OnStop.InvokeAsync()">Stop</button>
+                    </div>
+                }
+                else if (HasRun)
+                {
+                    <div class="modal-footer bulk-merge-pr-modal-footer">
+                        <div class="@(FailedRowCount > 0 ? "gm-callout gm-callout--error mb-0" : "text-muted small") bulk-merge-pr-summary">
+                            @MergedRowCount merged, @FailedRowCount failed@(SyncIssueCount > 0 ? $", {SyncIssueCount} sync issue{(SyncIssueCount == 1 ? "" : "s")}" : "")
+                        </div>
+                        <div class="bulk-merge-pr-footer-actions">
+                            @if (FailedRowCount > 0)
+                            {
+                                <button type="button" class="btn merge-pr-btn-close--muted" @onclick="() => OnRetryFailed.InvokeAsync()">Retry failed (@FailedRowCount)</button>
+                            }
+                            <button type="button" class="btn btn-outline-secondary" @onclick="HandleCloseClick">Close</button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="modal-footer bulk-merge-pr-modal-footer">
+                        <div class="form-check mb-0 merge-pr-sync-default-check">
+                            <input class="form-check-input" type="checkbox" id="bulk-merge-pr-sync-default"
+                                   checked="@SyncToDefaultAfterMerge" @onchange="OnSyncCheckboxChanged" />
+                            <label class="form-check-label" for="bulk-merge-pr-sync-default">Sync to default branch after merging</label>
+                        </div>
+                        <button type="button" class="btn merge-pr-btn-github" disabled="@(SelectedCount == 0 || AnySelectedSnapshotPending)" @onclick="() => OnMerge.InvokeAsync()">
+                            Merge @SelectedCount pull request@(SelectedCount == 1 ? "" : "s")
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public string LevelLabel { get; set; } = string.Empty;
+    [Parameter] public IReadOnlyList<BulkMergePrRow> Rows { get; set; } = Array.Empty<BulkMergePrRow>();
+    [Parameter] public BulkMergeMethodSelection SelectedMethod { get; set; }
+    [Parameter] public EventCallback<BulkMergeMethodSelection> SelectedMethodChanged { get; set; }
+    [Parameter] public bool SyncToDefaultAfterMerge { get; set; }
+    [Parameter] public EventCallback<bool> SyncToDefaultAfterMergeChanged { get; set; }
+    [Parameter] public bool IsRunning { get; set; }
+    [Parameter] public bool HasRun { get; set; }
+    [Parameter] public int Completed { get; set; }
+    [Parameter] public int Failed { get; set; }
+    [Parameter] public EventCallback OnMerge { get; set; }
+    [Parameter] public EventCallback OnStop { get; set; }
+    [Parameter] public EventCallback OnRetryFailed { get; set; }
+    [Parameter] public EventCallback<BulkMergePrRow> OnRetryRow { get; set; }
+    [Parameter] public EventCallback<BulkMergePrRow> OnRowInfo { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private static readonly BulkMergeMethodSelection[] MethodChoices =
+    [
+        BulkMergeMethodSelection.Squash,
+        BulkMergeMethodSelection.Merge,
+        BulkMergeMethodSelection.Rebase,
+        BulkMergeMethodSelection.RepositoryDefault
+    ];
+
+    private bool _showMethodDropdown;
+    private bool _wasVisible;
+    private bool _focusOnNextRender;
+    private ElementReference _modalElement;
+
+    private int Total => Rows.Count;
+    private int SelectedCount => Rows.Count(r => r.IsSelected);
+    private bool AllSelected => Rows.Count > 0 && Rows.All(r => r.IsSelected);
+    private bool AnySelectedSnapshotPending => Rows.Any(r => r.IsSelected && r.Status == BulkMergeRowStatus.LoadingSnapshot);
+    /// <summary>Computed from the durable per-row state, not the transient Completed/Failed progress counters (which reset on every run, including a retry) - so the finished summary describes the whole batch, not just the last retry.</summary>
+    private int MergedRowCount => Rows.Count(r => r.Status is BulkMergeRowStatus.Merged or BulkMergeRowStatus.Synced or BulkMergeRowStatus.SyncFailed);
+    private int FailedRowCount => Rows.Count(r => r.Status == BulkMergeRowStatus.Failed);
+    private int SyncIssueCount => Rows.Count(r => r.Status == BulkMergeRowStatus.SyncFailed);
+    private double ProgressPercent => Total == 0 ? 0 : Math.Clamp((double)Completed / Total * 100, 0, 100);
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !_wasVisible)
+        {
+            _wasVisible = true;
+            _showMethodDropdown = false;
+            _focusOnNextRender = true;
+        }
+        else if (!IsVisible)
+        {
+            _wasVisible = false;
+            _showMethodDropdown = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusOnNextRender || !IsVisible)
+            return;
+        _focusOnNextRender = false;
+        await _modalElement.FocusAsync();
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key != "Escape" || IsRunning)
+            return;
+
+        if (_showMethodDropdown)
+            _showMethodDropdown = false;
+        else
+            await HandleCloseClick();
+    }
+
+    private async Task HandleCloseClick()
+    {
+        if (IsRunning)
+            return;
+        if (OnClose.HasDelegate)
+            await OnClose.InvokeAsync();
+    }
+
+    private void ToggleSelectAll()
+    {
+        var next = !AllSelected;
+        foreach (var row in Rows)
+            row.IsSelected = next;
+    }
+
+    private void ToggleRow(BulkMergePrRow row) => row.IsSelected = !row.IsSelected;
+
+    private async Task OnSyncCheckboxChanged(ChangeEventArgs e)
+    {
+        var val = e.Value is bool b ? b : bool.TryParse(e.Value?.ToString(), out var p) && p;
+        if (SyncToDefaultAfterMergeChanged.HasDelegate)
+            await SyncToDefaultAfterMergeChanged.InvokeAsync(val);
+    }
+
+    private void ToggleMethodDropdown() => _showMethodDropdown = !_showMethodDropdown;
+
+    private async Task SelectMethod(BulkMergeMethodSelection method)
+    {
+        _showMethodDropdown = false;
+        if (SelectedMethodChanged.HasDelegate)
+            await SelectedMethodChanged.InvokeAsync(method);
+    }
+
+    private static string GetMethodDescription(BulkMergeMethodSelection method) => method switch
+    {
+        BulkMergeMethodSelection.Squash => MergeMethod.Squash.ToDescription(),
+        BulkMergeMethodSelection.Merge => MergeMethod.Merge.ToDescription(),
+        BulkMergeMethodSelection.Rebase => MergeMethod.Rebase.ToDescription(),
+        _ => "Each repository merges using whichever method its own GitHub settings allow by default."
+    };
+
+    private static bool ShowRowSpinner(BulkMergePrRow row) =>
+        row.Status is BulkMergeRowStatus.Merging or BulkMergeRowStatus.SyncingToDefault;
+
+    private static string GetRowIconClass(BulkMergePrRow row) => row.Status switch
+    {
+        BulkMergeRowStatus.LoadingSnapshot => "merge-pr-status-icon--neutral",
+        BulkMergeRowStatus.Ready => GetReadyIconClass(row),
+        BulkMergeRowStatus.Conflict => "merge-pr-status-icon--danger",
+        BulkMergeRowStatus.Merged or BulkMergeRowStatus.Synced => "merge-pr-status-icon--success",
+        BulkMergeRowStatus.Failed => "merge-pr-status-icon--danger",
+        BulkMergeRowStatus.SyncFailed => "merge-pr-status-icon--pending",
+        _ => "merge-pr-status-icon--neutral"
+    };
+
+    private static string GetRowIconGlyph(BulkMergePrRow row) => row.Status switch
+    {
+        BulkMergeRowStatus.LoadingSnapshot => "bi-three-dots",
+        BulkMergeRowStatus.Ready => GetReadyIconGlyph(row),
+        BulkMergeRowStatus.Conflict => "bi-x-lg",
+        BulkMergeRowStatus.Merged or BulkMergeRowStatus.Synced => "bi-check-lg",
+        BulkMergeRowStatus.Failed => "bi-x-lg",
+        BulkMergeRowStatus.SyncFailed => "bi-exclamation-lg",
+        BulkMergeRowStatus.Skipped => "bi-dash-lg",
+        _ => "bi-dash-lg"
+    };
+
+    /// <summary>
+    /// Mirrors PRBadge.GetOpenPrMergeabilityClass so a Ready row reads the same GitHub mergeable_state
+    /// ("clean"/"unstable"/"blocked"/"dirty") as the PR badge elsewhere in the app, instead of a meaningless
+    /// neutral gray. Checked only when <see cref="BulkMergePrRow.HasLocalWarning"/> is false - GitHub reporting
+    /// "clean" must never paint the row green while the local clone still has uncommitted work GitHub can't see.
+    /// </summary>
+    private static string GetReadyIconClass(BulkMergePrRow row)
+    {
+        if (row.HasLocalWarning)
+            return "merge-pr-status-icon--pending";
+        var state = row.MergeableState ?? string.Empty;
+        if (row.Mergeable == false || string.Equals(state, "dirty", StringComparison.OrdinalIgnoreCase))
+            return "merge-pr-status-icon--danger";
+        if (string.Equals(state, "unstable", StringComparison.OrdinalIgnoreCase) || string.Equals(state, "blocked", StringComparison.OrdinalIgnoreCase))
+            return "merge-pr-status-icon--pending";
+        if (row.Mergeable == true || string.Equals(state, "clean", StringComparison.OrdinalIgnoreCase))
+            return "merge-pr-status-icon--success";
+        return "merge-pr-status-icon--neutral";
+    }
+
+    private static string GetReadyIconGlyph(BulkMergePrRow row)
+    {
+        if (row.HasLocalWarning)
+            return "bi-exclamation-lg";
+        var state = row.MergeableState ?? string.Empty;
+        if (row.Mergeable == false || string.Equals(state, "dirty", StringComparison.OrdinalIgnoreCase))
+            return "bi-x-lg";
+        if (string.Equals(state, "unstable", StringComparison.OrdinalIgnoreCase))
+            return "bi-three-dots";
+        if (string.Equals(state, "blocked", StringComparison.OrdinalIgnoreCase))
+            return "bi-exclamation-lg";
+        if (row.Mergeable == true || string.Equals(state, "clean", StringComparison.OrdinalIgnoreCase))
+            return "bi-check-lg";
+        return "bi-dash-lg";
+    }
+
+    private static string GetRowStatusText(BulkMergePrRow row) => row.Status switch
+    {
+        BulkMergeRowStatus.LoadingSnapshot => "Checking...",
+        BulkMergeRowStatus.Ready => GetReadyStatusText(row),
+        BulkMergeRowStatus.Conflict => "Has conflicts with base branch",
+        BulkMergeRowStatus.Merging => "Merging...",
+        BulkMergeRowStatus.SyncingToDefault => "Syncing to default branch...",
+        BulkMergeRowStatus.Merged => "Merged",
+        BulkMergeRowStatus.Synced => "Merged and synced to default",
+        BulkMergeRowStatus.Failed => row.ErrorMessage ?? "The merge could not be completed.",
+        BulkMergeRowStatus.SyncFailed => $"Merged, but sync to default failed: {row.ErrorMessage}",
+        BulkMergeRowStatus.Skipped => "Skipped",
+        _ => string.Empty
+    };
+
+    private static string GetReadyStatusText(BulkMergePrRow row)
+    {
+        if (row.HasLocalWarning)
+            return $"{GetLocalWarningText(row)} in the local clone - won't block the merge, but review first";
+        var state = row.MergeableState ?? string.Empty;
+        if (string.Equals(state, "blocked", StringComparison.OrdinalIgnoreCase))
+            return "Ready to merge - GitHub may still require a review or check";
+        if (string.Equals(state, "unstable", StringComparison.OrdinalIgnoreCase))
+            return "Ready to merge - some checks are still running or failing";
+        return "Ready to merge";
+    }
+
+    /// <summary>Mirrors MergePullRequestModal.GetCommitsText's wording for the same signals, so the two dialogs describe local git state identically.</summary>
+    private static string GetLocalWarningText(BulkMergePrRow row)
+    {
+        var parts = new List<string>();
+        if (row.UncommittedChangesCount > 0)
+            parts.Add($"{row.UncommittedChangesCount} uncommitted change{(row.UncommittedChangesCount == 1 ? "" : "s")}");
+        if (row.UnpushedCommitsCount > 0)
+            parts.Add($"{row.UnpushedCommitsCount} unpushed commit{(row.UnpushedCommitsCount == 1 ? "" : "s")}");
+        if (row.IncomingCommitsCount > 0)
+            parts.Add($"{row.IncomingCommitsCount} incoming commit{(row.IncomingCommitsCount == 1 ? "" : "s")}");
+        return parts.Count > 0 ? string.Join(", ", parts) : "Local branch is not in sync";
+    }
+
+    private static string? GetRowErrorTooltip(BulkMergePrRow row) =>
+        row.Status is BulkMergeRowStatus.Failed or BulkMergeRowStatus.SyncFailed ? row.ErrorMessage : null;
+}

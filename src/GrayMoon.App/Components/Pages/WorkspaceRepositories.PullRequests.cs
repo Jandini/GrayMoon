@@ -281,6 +281,19 @@ public sealed partial class WorkspaceRepositories
         return false;
     }
 
+    /// <summary>True when at least one repository in the group has an open, non-conflicted pull request - "Merge PRs..." is highlighted. Cosmetic only, computed from the same render cache as GroupHasCreatablePr/GroupHasMergedPr - not the bulk-merge dialog's actual candidate source (see OpenMergePullRequestsDialogForLevelAsync).</summary>
+    private bool GroupHasMergeablePr(IEnumerable<WorkspaceRepositoryLink> group)
+    {
+        foreach (var wr in group)
+        {
+            if (prByRepositoryId.TryGetValue(wr.RepositoryId, out var pr)
+                && pr != null
+                && string.Equals(pr.State, "open", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
     private IReadOnlyDictionary<string, string> GetOpenPrPullMapForGroup(IEnumerable<WorkspaceRepositoryLink> group)
     {
         var map = new Dictionary<string, string>();
