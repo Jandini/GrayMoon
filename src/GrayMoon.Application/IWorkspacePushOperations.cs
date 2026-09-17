@@ -12,6 +12,12 @@ public interface IWorkspacePushOperations
         int? maxLevel = null,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Lightweight check (no dependency-package lookup) for which of the given repositories have unpushed commits or a branch never pushed upstream.</summary>
+    Task<IReadOnlySet<int>> GetRepositoryIdsNeedingPushAsync(
+        int workspaceId,
+        IReadOnlySet<int> repositoryIds,
+        CancellationToken cancellationToken = default);
+
     Task<OperationResult> PushAsync(
         int workspaceId,
         IReadOnlySet<int> repositoryIds,

@@ -20,6 +20,26 @@ public sealed class WorkspacePushOperations(
         return await GetPlanForLinksAsync(workspaceId, workspace.Repositories.ToList(), maxLevel, cancellationToken);
     }
 
+    public async Task<IReadOnlySet<int>> GetRepositoryIdsNeedingPushAsync(
+        int workspaceId,
+        IReadOnlySet<int> repositoryIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (repositoryIds.Count == 0)
+            return new HashSet<int>();
+
+        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            return new HashSet<int>();
+
+        return workspace.Repositories
+            .Where(wr => repositoryIds.Contains(wr.RepositoryId)
+                && !wr.IsOnTag
+                && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false))
+            .Select(wr => wr.RepositoryId)
+            .ToHashSet();
+    }
+
     public async Task<WorkspacePushPlan> GetPlanForLinksAsync(
         int workspaceId,
         IReadOnlyList<WorkspaceRepositoryLink> links,
