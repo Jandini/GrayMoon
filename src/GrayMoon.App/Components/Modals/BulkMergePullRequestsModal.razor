@@ -19,59 +19,65 @@
                     </h5>
                     <button type="button" class="btn-close flex-shrink-0" aria-label="Dismiss" disabled="@IsRunning" @onclick="HandleCloseClick"></button>
                 </div>
-                <div class="bulk-merge-pr-toolbar">
-                    <div class="form-check mb-0 bulk-merge-pr-select-all">
-                        <input class="form-check-input" type="checkbox" id="bulk-merge-pr-select-all"
-                               checked="@AllSelected" disabled="@(IsRunning || Total == 0)" @onchange="ToggleSelectAll" />
-                        <span class="bulk-merge-pr-header-icon" aria-hidden="true">
-                            <PullRequestIcon />
-                        </span>
-                        <label class="form-check-label text-muted small" for="bulk-merge-pr-select-all">
-                            @SelectedCount of @Total selected
-                        </label>
+                @if (!IsCompletedView)
+                {
+                    <div class="bulk-merge-pr-toolbar">
+                        <div class="form-check mb-0 bulk-merge-pr-select-all">
+                            <input class="form-check-input" type="checkbox" id="bulk-merge-pr-select-all"
+                                   checked="@AllSelected" disabled="@(IsRunning || Total == 0)" @onchange="ToggleSelectAll" />
+                            <span class="bulk-merge-pr-header-icon" aria-hidden="true">
+                                <PullRequestIcon />
+                            </span>
+                            <label class="form-check-label text-muted small" for="bulk-merge-pr-select-all">
+                                @SelectedCount of @Total selected
+                            </label>
+                        </div>
+                        <div class="bulk-merge-pr-method-picker">
+                            <button type="button" class="btn bulk-merge-pr-method-btn" disabled="@IsRunning" @onclick="ToggleMethodDropdown">
+                                @SelectedMethod.ToDisplayLabel()
+                                <i class="bi bi-chevron-down ms-1"></i>
+                            </button>
+                            @if (_showMethodDropdown)
+                            {
+                                <div class="merge-pr-method-menu bulk-merge-pr-method-menu">
+                                    @foreach (var method in MethodChoices)
+                                    {
+                                        <button type="button"
+                                                class="dropdown-item merge-pr-method-item @(SelectedMethod == method ? "merge-pr-method-item--selected" : null)"
+                                                @onclick="() => SelectMethod(method)">
+                                            <span class="merge-pr-method-item__check" aria-hidden="true">
+                                                @if (SelectedMethod == method)
+                                                {
+                                                    <i class="bi bi-check-lg"></i>
+                                                }
+                                            </span>
+                                            <span class="merge-pr-method-item__text">
+                                                <span class="merge-pr-method-item__title">@method.ToDisplayLabel()</span>
+                                                <span class="merge-pr-method-item__subtitle">@GetMethodDescription(method)</span>
+                                            </span>
+                                        </button>
+                                    }
+                                </div>
+                            }
+                        </div>
                     </div>
-                    <div class="bulk-merge-pr-method-picker">
-                        <button type="button" class="btn bulk-merge-pr-method-btn" disabled="@IsRunning" @onclick="ToggleMethodDropdown">
-                            @SelectedMethod.ToDisplayLabel()
-                            <i class="bi bi-chevron-down ms-1"></i>
-                        </button>
-                        @if (_showMethodDropdown)
-                        {
-                            <div class="merge-pr-method-menu bulk-merge-pr-method-menu">
-                                @foreach (var method in MethodChoices)
-                                {
-                                    <button type="button"
-                                            class="dropdown-item merge-pr-method-item @(SelectedMethod == method ? "merge-pr-method-item--selected" : null)"
-                                            @onclick="() => SelectMethod(method)">
-                                        <span class="merge-pr-method-item__check" aria-hidden="true">
-                                            @if (SelectedMethod == method)
-                                            {
-                                                <i class="bi bi-check-lg"></i>
-                                            }
-                                        </span>
-                                        <span class="merge-pr-method-item__text">
-                                            <span class="merge-pr-method-item__title">@method.ToDisplayLabel()</span>
-                                            <span class="merge-pr-method-item__subtitle">@GetMethodDescription(method)</span>
-                                        </span>
-                                    </button>
-                                }
-                            </div>
-                        }
-                    </div>
-                </div>
+                }
                 <div class="modal-body bulk-merge-pr-modal-body">
                     <div class="bulk-merge-pr-scroll">
                         <div class="merge-pr-status-list bulk-merge-pr-list">
                             @foreach (var row in Rows)
                             {
                                 <div class="merge-pr-status-item bulk-merge-pr-row" @key="row">
-                                    <div class="form-check bulk-merge-pr-row__check mb-0">
-                                        <input class="form-check-input" type="checkbox"
-                                               checked="@row.IsSelected"
-                                               disabled="@IsRunning"
-                                               aria-label="Select @row.RepositoryName PR #@row.PrNumber"
-                                               @onchange="() => ToggleRow(row)" />
-                                    </div>
+                                    @if (!IsCompletedView)
+                                    {
+                                        <div class="form-check bulk-merge-pr-row__check mb-0">
+                                            <input class="form-check-input" type="checkbox"
+                                                   checked="@row.IsSelected"
+                                                   disabled="@IsRunning"
+                                                   aria-label="Select @row.RepositoryName PR #@row.PrNumber"
+                                                   @onchange="() => ToggleRow(row)" />
+                                        </div>
+                                    }
                                     <button type="button"
                                             class="bulk-merge-pr-row__info"
                                             title="View details"
@@ -123,10 +129,10 @@
                         </div>
                     </div>
                 </div>
-                @if (HasRun && !IsRunning)
+                @if (IsCompletedView)
                 {
                     <div class="modal-footer bulk-merge-pr-modal-footer">
-                        <div class="@(FailedRowCount > 0 ? "gm-callout gm-callout--error mb-0" : "text-muted small") bulk-merge-pr-summary">
+                        <div class="text-muted small bulk-merge-pr-summary">
                             @MergedRowCount merged, @FailedRowCount failed@(SyncIssueCount > 0 ? $", {SyncIssueCount} sync issue{(SyncIssueCount == 1 ? "" : "s")}" : "")
                         </div>
                         <div class="bulk-merge-pr-footer-actions">
@@ -185,10 +191,14 @@
     private bool _focusOnNextRender;
     private ElementReference _modalElement;
 
+    /// <summary>True once the batch has finished (and isn't running again via retry) - the dialog then reads as a completed-merge summary rather than an active selection list, so per-row checkboxes and the selection/method toolbar are hidden.</summary>
+    private bool IsCompletedView => HasRun && !IsRunning;
+
     private int Total => Rows.Count;
     private int SelectedCount => Rows.Count(r => r.IsSelected);
     private bool AllSelected => Rows.Count > 0 && Rows.All(r => r.IsSelected);
-    private bool AnySelectedSnapshotPending => Rows.Any(r => r.IsSelected && r.Status == BulkMergeRowStatus.LoadingSnapshot);
+    /// <summary>Also true while GitHub hasn't finished computing a selected row's mergeability yet (CheckingMergeability) - Merge must wait for that to resolve for every selected PR before it can proceed, same as it already waits for the initial snapshot load.</summary>
+    private bool AnySelectedSnapshotPending => Rows.Any(r => r.IsSelected && r.Status is BulkMergeRowStatus.LoadingSnapshot or BulkMergeRowStatus.CheckingMergeability);
     /// <summary>Computed from the durable per-row state, not the transient Completed/Failed progress counters (which reset on every run, including a retry) - so the finished summary describes the whole batch, not just the last retry.</summary>
     private int MergedRowCount => Rows.Count(r => r.Status is BulkMergeRowStatus.Merged or BulkMergeRowStatus.Synced or BulkMergeRowStatus.SyncFailed);
     private int FailedRowCount => Rows.Count(r => r.Status == BulkMergeRowStatus.Failed);
@@ -271,7 +281,7 @@
 
     private static string GetRowIconClass(BulkMergePrRow row) => row.Status switch
     {
-        BulkMergeRowStatus.LoadingSnapshot => "merge-pr-status-icon--neutral",
+        BulkMergeRowStatus.LoadingSnapshot or BulkMergeRowStatus.CheckingMergeability => "merge-pr-status-icon--neutral",
         BulkMergeRowStatus.Ready => GetReadyIconClass(row),
         BulkMergeRowStatus.Conflict => "merge-pr-status-icon--danger",
         BulkMergeRowStatus.Merged or BulkMergeRowStatus.Synced => "merge-pr-status-icon--success",
@@ -282,7 +292,7 @@
 
     private static string GetRowIconGlyph(BulkMergePrRow row) => row.Status switch
     {
-        BulkMergeRowStatus.LoadingSnapshot => "bi-three-dots",
+        BulkMergeRowStatus.LoadingSnapshot or BulkMergeRowStatus.CheckingMergeability => "bi-three-dots",
         BulkMergeRowStatus.Ready => GetReadyIconGlyph(row),
         BulkMergeRowStatus.Conflict => "bi-x-lg",
         BulkMergeRowStatus.Merged or BulkMergeRowStatus.Synced => "bi-check-lg",
@@ -331,6 +341,7 @@
     private static string GetRowStatusText(BulkMergePrRow row) => row.Status switch
     {
         BulkMergeRowStatus.LoadingSnapshot => "Checking...",
+        BulkMergeRowStatus.CheckingMergeability => "Checking mergeability...",
         BulkMergeRowStatus.Ready => GetReadyStatusText(row),
         BulkMergeRowStatus.Conflict => "Has conflicts with base branch",
         BulkMergeRowStatus.Merging => "Merging...",
