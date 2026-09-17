@@ -32,6 +32,8 @@ public static class BulkMergeMethodSelectionExtensions
 public enum BulkMergeRowStatus
 {
     LoadingSnapshot,
+    /// <summary>Snapshot loaded, but GitHub's own mergeable computation hasn't resolved yet (Mergeable is still null / MergeableState is "unknown") - distinct from Ready/Conflict so the row never reads as mergeable, and from LoadingSnapshot so a pulsing title/subtitle placeholder isn't shown for data that's already loaded.</summary>
+    CheckingMergeability,
     Ready,
     Conflict,
     Merging,

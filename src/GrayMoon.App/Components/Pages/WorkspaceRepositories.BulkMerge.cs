@@ -149,7 +149,7 @@ public sealed partial class WorkspaceRepositories
                     row.UnpushedCommitsCount = localState.UnpushedCommitsCount;
                     row.IncomingCommitsCount = localState.IncomingCommitsCount;
 
-                    row.Status = row.Mergeable == false ? BulkMergeRowStatus.Conflict : BulkMergeRowStatus.Ready;
+                    row.Status = ResolveMergeabilityStatus(row.Mergeable);
                 });
             }
             finally
@@ -160,6 +160,73 @@ public sealed partial class WorkspaceRepositories
 
         await Task.WhenAll(tasks);
     }
+
+    /// <summary>
+    /// Re-fetches the merge snapshot for every row still waiting on GitHub's mergeability computation
+    /// (<see cref="BulkMergeRowStatus.CheckingMergeability"/> - Mergeable null / MergeableState "unknown").
+    /// GitHub can take a few seconds after a PR is opened/updated to finish that check, so this is called from
+    /// the same background PR polling loop that already keeps the grid and the single-PR merge dialog fresh
+    /// (WorkspaceRepositories.PrPolling.cs). Only runs while the dialog is still in its selection phase - once
+    /// a merge (or retry) is in flight or has finished, row status is driven by the merge/sync steps instead.
+    /// </summary>
+    private async Task RefreshBulkMergeMergeabilityIfDueAsync()
+    {
+        if (_disposed || !_bulkMergeModal.IsVisible || _bulkMergeModal.IsRunning || _bulkMergeModal.HasRun)
+            return;
+
+        var modalGeneration = _bulkMergeModal;
+        var pendingRows = modalGeneration.Rows.Where(r => r.Status == BulkMergeRowStatus.CheckingMergeability).ToList();
+        if (pendingRows.Count == 0)
+            return;
+
+        using var semaphore = new SemaphoreSlim(Math.Max(1, WorkspaceOptions.Value.MaxParallelOperations));
+        var tasks = pendingRows.Select(async row =>
+        {
+            await semaphore.WaitAsync();
+            try
+            {
+                PullRequestMergeSnapshot? snapshot;
+                try
+                {
+                    snapshot = await ScopedExecutor.ExecuteAsync<WorkspacePullRequestService, PullRequestMergeSnapshot?>(
+                        svc => svc.GetMergeSnapshotAsync(WorkspaceId, row.RepositoryId, row.PrNumber));
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Failed to refresh bulk-merge mergeability for repo {RepositoryId}, PR #{PrNumber}", row.RepositoryId, row.PrNumber);
+                    return;
+                }
+
+                if (snapshot == null)
+                    return;
+
+                SafeInvoke(() =>
+                {
+                    if (_bulkMergeModal != modalGeneration || row.Status != BulkMergeRowStatus.CheckingMergeability)
+                        return;
+
+                    row.Mergeable = snapshot.Mergeable;
+                    row.MergeableState = snapshot.MergeableState;
+                    row.IsSelected = snapshot.Mergeable != false;
+                    row.Status = ResolveMergeabilityStatus(row.Mergeable);
+                });
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
+    }
+
+    /// <summary>Never reports null Mergeable (GitHub still computing) as Ready or as a failure - see <see cref="BulkMergeRowStatus.CheckingMergeability"/>.</summary>
+    private static BulkMergeRowStatus ResolveMergeabilityStatus(bool? mergeable) => mergeable switch
+    {
+        false => BulkMergeRowStatus.Conflict,
+        null => BulkMergeRowStatus.CheckingMergeability,
+        _ => BulkMergeRowStatus.Ready
+    };
 
     private void SetBulkMergeMethod(BulkMergeMethodSelection method)
     {
@@ -188,12 +255,19 @@ public sealed partial class WorkspaceRepositories
         if (rows.Count == 0)
             return;
 
+        // Captured once here (the "Sync to default branch" checkbox is only editable during this pre-run
+        // selection phase) rather than re-read from the shared preference singleton on every later retry -
+        // otherwise a "Retry failed" click could pick up whatever that singleton now holds (e.g. changed via
+        // the single-PR merge dialog in the meantime) instead of the choice this batch was actually confirmed
+        // with, leaving sibling rows from the same run inconsistently synced.
+        var syncToDefault = BulkMergeSyncToDefault;
         var methodPhrase = _bulkMergeModal.SelectedMethod.ToConfirmationPhrase();
-        var syncSuffix = BulkMergeSyncToDefault ? " and synced to the default branch" : string.Empty;
+        var syncSuffix = syncToDefault ? " and synced to the default branch" : string.Empty;
         var message = $"Merge {rows.Count} pull request{(rows.Count == 1 ? "" : "s")} using {methodPhrase}{syncSuffix}?";
 
         ShowConfirm(message, () =>
         {
+            _bulkMergeModal.SyncToDefault = syncToDefault;
             RunBulkMergeAndSyncAsync(rows, Array.Empty<BulkMergePrRow>());
             return Task.CompletedTask;
         }, "Merge");
@@ -239,7 +313,7 @@ public sealed partial class WorkspaceRepositories
         _bulkMergeModal.Failed = 0;
         StateHasChanged();
 
-        var syncToDefault = BulkMergeSyncToDefault;
+        var syncToDefault = _bulkMergeModal.SyncToDefault;
         var method = ToMergeMethod(_bulkMergeModal.SelectedMethod);
         var requests = rowsToMerge.Select(r => new MergePullRequestRequest
         {
@@ -279,7 +353,14 @@ public sealed partial class WorkspaceRepositories
                         });
                     });
 
-                    IReadOnlyList<MergePullRequestResult> results;
+                    // Not re-thrown: rowsToSyncOnly below is an independent step (previously-merged rows only
+                    // needing their sync retried) and must still run even if this merge phase blew up entirely,
+                    // so a batch that mixes "needs re-merge" and "needs sync only" rows (RetryFailedBulkMerge)
+                    // never silently drops the sync-only half. The affected rows are already marked Failed with
+                    // the error surfaced per-row, matching how an individual GitHub merge failure (which never
+                    // throws - MergePullRequestResult.Success is just false) is already reported, so the job
+                    // itself does not need to fault too.
+                    IReadOnlyList<MergePullRequestResult> results = Array.Empty<MergePullRequestResult>();
                     try
                     {
                         results = await PullRequestOperations.MergeManyAsync(WorkspaceId, requests, progress, ct);
@@ -295,7 +376,6 @@ public sealed partial class WorkspaceRepositories
                                 row.ErrorMessage = ex.Message;
                             }
                         });
-                        throw;
                     }
 
                     succeededFromMerge = results
@@ -475,8 +555,8 @@ public sealed partial class WorkspaceRepositories
         row.UncommittedChangesCount = localState.UncommittedChangesCount;
         row.UnpushedCommitsCount = localState.UnpushedCommitsCount;
         row.IncomingCommitsCount = localState.IncomingCommitsCount;
-        if (row.Status is BulkMergeRowStatus.LoadingSnapshot or BulkMergeRowStatus.Ready or BulkMergeRowStatus.Conflict)
-            row.Status = row.Mergeable == false ? BulkMergeRowStatus.Conflict : BulkMergeRowStatus.Ready;
+        if (row.Status is BulkMergeRowStatus.LoadingSnapshot or BulkMergeRowStatus.CheckingMergeability or BulkMergeRowStatus.Ready or BulkMergeRowStatus.Conflict)
+            row.Status = ResolveMergeabilityStatus(row.Mergeable);
         StateHasChanged();
     }
 
@@ -492,6 +572,8 @@ public sealed partial class WorkspaceRepositories
         public string LevelLabel { get; set; } = string.Empty;
         public List<BulkMergePrRow> Rows { get; set; } = new();
         public BulkMergeMethodSelection SelectedMethod { get; set; } = BulkMergeMethodSelection.Squash;
+        /// <summary>Sync-to-default choice frozen at the first "Merge N pull requests" confirmation, so later "Retry failed"/single-row retries within this same dialog session use the choice the batch was actually confirmed with, not whatever the shared preference singleton (<see cref="MergePullRequestSyncToDefaultPreferenceService"/>) currently holds.</summary>
+        public bool SyncToDefault { get; set; }
         public bool IsRunning { get; set; }
         public bool HasRun { get; set; }
         public int Completed { get; set; }
