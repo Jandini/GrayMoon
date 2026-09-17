@@ -124,29 +124,34 @@
                         Open in GitHub
                     </button>
                     <div class="d-flex align-items-center gap-2">
-                        @if (_repoIdsNeedingPush.Count > 0 && !_isCheckingUnpushed)
-                        {
-                            <button type="button"
-                                    class="btn btn-link btn-sm p-0 new-pr-push-toggle"
-                                    @onclick="TogglePushAndCreate"
-                                    disabled="@IsBusy">
-                                @(_pushAndCreate ? "Use Create instead" : "Use Push & Create instead")
-                            </button>
-                        }
                         <button type="button" class="btn btn-outline-secondary" @onclick="HandleCancelClick" disabled="@IsBusy">
                             Cancel
                         </button>
                         <button type="button"
-                                class="btn @(_pushAndCreate ? "btn-warning" : "btn-primary")"
+                                class="btn btn-primary"
                                 data-default-action
-                                @onclick="HandleCreateClick"
-                                disabled="@(IsBusy || _isCheckingUnpushed || !IsValid)">
-                            @if (IsBusy || _isCheckingUnpushed)
+                                @onclick="() => HandleCreateClick(pushAndCreate: false)"
+                                disabled="@(IsBusy || !IsValid)">
+                            @if (IsBusy)
                             {
                                 <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
                             }
-                            @(_isCheckingUnpushed ? "Checking" : (_pushAndCreate ? "Push & Create" : "Create"))
+                            Create
                         </button>
+                        @if (_repoIdsNeedingPush.Count > 0 && !_isCheckingUnpushed)
+                        {
+                            <button type="button"
+                                    class="btn btn-warning"
+                                    data-default-action
+                                    @onclick="() => HandleCreateClick(pushAndCreate: true)"
+                                    disabled="@(IsBusy || !IsValid)">
+                                @if (IsBusy)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                                }
+                                Push & Create
+                            </button>
+                        }
                     </div>
                 </div>
             </div>
@@ -180,7 +185,6 @@
 
     private bool _isCheckingUnpushed;
     private HashSet<int> _repoIdsNeedingPush = new();
-    private bool _pushAndCreate;
     private CancellationTokenSource? _pushCheckCts;
 
     private bool HasUnifiedHeadBranch => Targets.Count > 0
@@ -203,7 +207,6 @@
             _focusTitleOnNextRender = true;
             _isCheckingUnpushed = false;
             _repoIdsNeedingPush = new();
-            _pushAndCreate = false;
 
             _ = LoadReviewersAsync();
             _ = CheckUnpushedCommitsAsync();
@@ -347,7 +350,6 @@
             if (ct.IsCancellationRequested) return;
 
             _repoIdsNeedingPush = needingPush.ToHashSet();
-            _pushAndCreate = _repoIdsNeedingPush.Count > 0;
         }
         catch (OperationCanceledException)
         {
@@ -363,11 +365,6 @@
             _isCheckingUnpushed = false;
             StateHasChanged();
         }
-    }
-
-    private void TogglePushAndCreate()
-    {
-        _pushAndCreate = !_pushAndCreate;
     }
 
     private static async Task FetchThrottledAsync(Func<Task> action, SemaphoreSlim semaphore, CancellationToken ct)
@@ -479,9 +476,9 @@
         await OnOpenInGitHub.InvokeAsync();
     }
 
-    private async Task HandleCreateClick()
+    private async Task HandleCreateClick(bool pushAndCreate)
     {
-        if (!IsValid || _isCheckingUnpushed) return;
+        if (!IsValid) return;
 
         var users = new List<string>();
         var teams = new List<string>();
@@ -498,7 +495,7 @@
             IsDraft: _isDraft,
             Reviewers: users,
             TeamReviewers: teams,
-            RepositoryIdsToPush: _pushAndCreate ? _repoIdsNeedingPush.ToList() : Array.Empty<int>());
+            RepositoryIdsToPush: pushAndCreate ? _repoIdsNeedingPush.ToList() : Array.Empty<int>());
 
         await OnCreate.InvokeAsync(result);
     }

@@ -112,7 +112,7 @@
                 <span class="metrics-block metrics-pr text-nowrap">
                     <PRBadge PullRequest="@PrInfo"
                             UncommittedChangedFileCount="@Link.UncommittedChangedFileCount"
-                            ChangesUrl="@($"/workspaces/{WorkspaceId}/changes")"
+                            ChangesUrl="@($"/workspaces/{WorkspaceId}/changes?q={Uri.EscapeDataString($"repo:{repo.RepositoryName}")}")"
                             DefaultBranchAheadCommits="@Link.DefaultBranchAheadCommits"
                             IsPrVerified="@IsPrVerified"
                             IsOnTag="@Link.IsOnTag"

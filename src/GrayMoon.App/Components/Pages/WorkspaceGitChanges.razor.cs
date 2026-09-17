@@ -15,6 +15,10 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 {
     [Parameter] public int WorkspaceId { get; set; }
 
+    /// <summary>Prefills the filter from `?q=` (e.g. the Workflow Repositories changed-files badge links here with `repo:Name`).</summary>
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? IncomingFilterQuery { get; set; }
+
     [Inject] private IWorkspaceGitChangesReadService ReadService { get; set; } = default!;
     [Inject] private IWorkspaceGitChangesOperations GitChangesOperations { get; set; } = default!;
     [Inject] private IGitChangesAgentClient AgentClient { get; set; } = default!;
@@ -37,6 +41,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     private IReadOnlyList<GitChangesTreeRow> _rows = [];
     private readonly HashSet<string> _collapsedKeys = [];
     private string _filterQuery = string.Empty;
+    private string? _appliedFilterQuery;
     private bool _isLoading = true;
     private string? _errorMessage;
     private bool _disposed;
@@ -61,10 +66,31 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     protected override Task OnInitializedAsync()
     {
         JobService.Changed += OnJobServiceChanged;
+        ApplyIncomingFilterQuery();
         EnsureActivitySubscription();
         RestoreWorkspaceCommitMessage();
         StartInitialLoadJob();
         return Task.CompletedTask;
+    }
+
+    /// <summary>Idempotently applies `?q=` to the filter box. Guarding on `_appliedFilterQuery` keeps this
+    /// safe to call from every OnParametersSetAsync pass (including the frequent, typing-independent ones
+    /// triggered by GitChangesUpdated/job-service activity) without repeatedly clobbering text the user has
+    /// since typed - mirrors WorkspaceActions.Search.cs's ApplyIncomingSearchQuery.</summary>
+    private void ApplyIncomingFilterQuery()
+    {
+        var incoming = IncomingFilterQuery ?? string.Empty;
+        if (string.Equals(incoming, _appliedFilterQuery, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _appliedFilterQuery = incoming;
+        _filterQuery = incoming;
+        if (_view != null)
+        {
+            RebuildRows();
+        }
     }
 
     private void OnJobServiceChanged()
@@ -79,6 +105,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     protected override Task OnParametersSetAsync()
     {
+        ApplyIncomingFilterQuery();
         EnsureActivitySubscription();
 
         if (_view != null && _view.WorkspaceId == WorkspaceId)
