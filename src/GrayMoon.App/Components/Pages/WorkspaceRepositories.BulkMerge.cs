@@ -509,6 +509,13 @@ public sealed partial class WorkspaceRepositories
 
         _bulkMergeModal.DrillInRepositoryId = row.RepositoryId;
         await OpenMergeDialogAsync(link);
+
+        // OpenMergeDialogAsync silently no-ops (no PR number resolved, e.g. an unhydrated row's PR info isn't
+        // loaded yet) without ever setting _mergePrModal.IsVisible - leaving DrillInRepositoryId set with no
+        // dialog open would otherwise make this row's bulk modal drop under the overlay for any later,
+        // unrelated page job (see IsCoveredByOverlay's binding in WorkspaceRepositories.razor).
+        if (!_mergePrModal.IsVisible && _bulkMergeModal.DrillInRepositoryId == row.RepositoryId)
+            _bulkMergeModal.DrillInRepositoryId = null;
     }
 
     /// <summary>Called from CloseMergeModal when the single-PR dialog it is closing was opened via drill-in from a bulk row, so that row's snapshot stays consistent with whatever the single-PR dialog may have changed (title edit, close-without-merge, etc).</summary>
@@ -557,6 +564,31 @@ public sealed partial class WorkspaceRepositories
         row.IncomingCommitsCount = localState.IncomingCommitsCount;
         if (row.Status is BulkMergeRowStatus.LoadingSnapshot or BulkMergeRowStatus.CheckingMergeability or BulkMergeRowStatus.Ready or BulkMergeRowStatus.Conflict)
             row.Status = ResolveMergeabilityStatus(row.Mergeable);
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Called by the single-PR dialog's own merge/close-without-merging success paths when that dialog was opened
+    /// via drill-in from a bulk row - those paths reset the single-PR dialog's state directly rather than through
+    /// CloseMergeModal, so the DrillInRepositoryId-based live refetch in <see cref="RefreshBulkMergeRowAfterDrillInAsync"/>
+    /// never runs for them. Sets the row to the already-known outcome instead of re-fetching from GitHub, since a
+    /// freshly merged/closed PR's own mergeability fields no longer describe an open, mergeable PR (e.g. GitHub
+    /// reports Mergeable as null post-merge, which <see cref="ResolveMergeabilityStatus"/> would otherwise read as
+    /// "still checking"). Unselects the row so a later "Merge N pull requests" click in the same dialog session
+    /// can't re-attempt an action GitHub already completed.
+    /// </summary>
+    private void ReflectBulkMergeDrillInResult(int repositoryId, BulkMergeRowStatus status, string? errorMessage = null)
+    {
+        if (!_bulkMergeModal.IsVisible)
+            return;
+
+        var row = _bulkMergeModal.Rows.FirstOrDefault(r => r.RepositoryId == repositoryId);
+        if (row == null)
+            return;
+
+        row.Status = status;
+        row.ErrorMessage = errorMessage;
+        row.IsSelected = false;
         StateHasChanged();
     }
 

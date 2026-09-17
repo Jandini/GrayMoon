@@ -361,6 +361,7 @@
                             SyncToDefaultAfterMerge="@BulkMergeSyncToDefault"
                             SyncToDefaultAfterMergeChanged="SetBulkMergeSyncToDefault"
                             IsRunning="@_bulkMergeModal.IsRunning"
+                            IsCoveredByOverlay="@(_bulkMergeModal.DrillInRepositoryId.HasValue && IsJobRunning)"
                             HasRun="@_bulkMergeModal.HasRun"
                             OnMerge="ExecuteBulkMerge"
                             OnRetryFailed="RetryFailedBulkMerge"

@@ -420,6 +420,11 @@ public sealed partial class WorkspaceRepositories
         _mergePrModal = new MergePullRequestModalState();
         ClearRepositoryError(repositoryId);
         ToastService.Show($"Closed pull request #{prNumber}.");
+        if (_bulkMergeModal.DrillInRepositoryId == repositoryId)
+        {
+            ReflectBulkMergeDrillInResult(repositoryId, BulkMergeRowStatus.Skipped);
+            _bulkMergeModal.DrillInRepositoryId = null;
+        }
         StateHasChanged();
 
         await RefreshFromSync();
@@ -493,16 +498,43 @@ public sealed partial class WorkspaceRepositories
                     _mergePrModal = new MergePullRequestModalState();
                     ClearRepositoryError(repositoryId);
                     ToastService.Show($"Merged pull request #{prNumber}.");
+                    if (_bulkMergeModal.DrillInRepositoryId == repositoryId)
+                    {
+                        ReflectBulkMergeDrillInResult(repositoryId, BulkMergeRowStatus.Merged);
+                        if (!syncToDefault)
+                            _bulkMergeModal.DrillInRepositoryId = null;
+                    }
                     StateHasChanged();
                 });
 
                 if (syncToDefault)
                 {
+                    SafeInvoke(() =>
+                    {
+                        if (_bulkMergeModal.DrillInRepositoryId == repositoryId)
+                            ReflectBulkMergeDrillInResult(repositoryId, BulkMergeRowStatus.SyncingToDefault);
+                    });
+
                     var syncResult = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, UnattendedSyncToDefaultResult>(
                         svc => svc.SyncToDefaultAsync(WorkspaceId, [repositoryId], job.ToOperationProgress(), ct));
 
-                    if (!syncResult.Completed && syncResult.AbortReason != null)
-                        SafeInvoke(() => SetRepositoryError(repositoryId, syncResult.AbortReason));
+                    SafeInvoke(() =>
+                    {
+                        var isBulkMergeDrillIn = _bulkMergeModal.DrillInRepositoryId == repositoryId;
+                        if (!syncResult.Completed && syncResult.AbortReason != null)
+                        {
+                            SetRepositoryError(repositoryId, syncResult.AbortReason);
+                            if (isBulkMergeDrillIn)
+                                ReflectBulkMergeDrillInResult(repositoryId, BulkMergeRowStatus.SyncFailed, syncResult.AbortReason);
+                        }
+                        else if (isBulkMergeDrillIn && syncResult.Completed)
+                        {
+                            ReflectBulkMergeDrillInResult(repositoryId, BulkMergeRowStatus.Synced);
+                        }
+
+                        if (isBulkMergeDrillIn)
+                            _bulkMergeModal.DrillInRepositoryId = null;
+                    });
                 }
 
                 await InvokeAsync(async () =>
