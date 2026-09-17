@@ -97,6 +97,20 @@
     align-self: baseline;
 }
 
+/* Hide AI workflows toggle: same .gha-status-chip shape as the status filter badges
+   (label + count), grouped under the same alignment rule as its siblings. It previously used
+   align-self: center while every other element on this row (title, subtitle, status chips)
+   aligns on text baseline - that mismatch is what made it read as vertically "off". */
+.workspace-actions-header .workspace-actions__ai-toggle {
+    flex: 0 0 auto;
+    align-self: baseline;
+}
+
+.workspace-actions__ai-toggle:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
 /* Separator between the workflow count and the status filter chips. */
 .workspace-actions__filter-sep {
     opacity: 0.45;
@@ -197,6 +211,28 @@
 .gha-status-chip--off .gha-status-chip__label.action-badge-none {
     background-color: #343a40 !important;
     color: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* AI toggle badge: page-local color, not a workflow status, so it has no app.css counterpart.
+   Checked (hiding AI workflows) reads as a deliberate, "pro" dark/near-black badge rather than
+   a green "success" state; unchecked falls back to the same off-gray every other chip uses.
+   Label and count use different shades (rather than the shared .action-badge-ai on both, like
+   every other status chip does) purely so the near-black fill still shows a visible seam
+   between the two segments. */
+.gha-status-chip__label.action-badge-ai {
+    background-color: #0a0c0e !important;
+    color: #fff !important;
+}
+
+.gha-status-chip__count.action-badge-ai {
+    background-color: #2d333b !important;
+    color: #fff !important;
+    border-left-color: rgba(255, 255, 255, 0.12);
+}
+
+.gha-status-chip--off .gha-status-chip__label.action-badge-ai {
+    background-color: #495057 !important;
+    color: rgba(255, 255, 255, 0.85) !important;
 }
 
 .gha-status-chip--off:hover .gha-status-chip__label {

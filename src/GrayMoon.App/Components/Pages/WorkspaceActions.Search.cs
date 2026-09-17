@@ -73,6 +73,29 @@ public sealed partial class WorkspaceActions
         StateHasChanged();
     }
 
+    internal async Task ToggleExcludeAiWorkflowsAsync()
+    {
+        if (workspace == null || _isTogglingAiFilter)
+            return;
+
+        var exclude = !workspace.ExcludeAiWorkflows;
+
+        try
+        {
+            _isTogglingAiFilter = true;
+            StateHasChanged();
+
+            await WorkspaceRepository.UpdateExcludeAiWorkflowsAsync(WorkspaceId, exclude);
+            workspace.ExcludeAiWorkflows = exclude;
+            await LoadWorkspaceAsync();
+        }
+        finally
+        {
+            _isTogglingAiFilter = false;
+            StateHasChanged();
+        }
+    }
+
     internal static IEnumerable<WorkflowActionLine> LinesForDisplay(WorkspaceActionRow row)
     {
         if (row.WorkflowLines.Count > 0)

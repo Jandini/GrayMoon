@@ -69,4 +69,31 @@ public sealed class WorkspaceActionsGatingTests
         Assert.False(WorkspaceActions.CanRun(row, line));
         Assert.False(WorkspaceActions.CanRunAgain(row, line));
     }
+
+    [Fact]
+    public void IsAiWorkflow_NullAction_ReturnsFalse()
+    {
+        Assert.False(WorkspaceActions.IsAiWorkflow(null));
+    }
+
+    [Fact]
+    public void IsAiWorkflow_MatchesNameCaseInsensitively()
+    {
+        var action = new ActionStatusInfo { WorkflowName = "Copilot Code Review" };
+        Assert.True(WorkspaceActions.IsAiWorkflow(action));
+    }
+
+    [Fact]
+    public void IsAiWorkflow_MatchesPathWhenNameIsNull()
+    {
+        var action = new ActionStatusInfo { WorkflowName = null, WorkflowPath = ".github/workflows/dependabot-auto-merge.yml" };
+        Assert.True(WorkspaceActions.IsAiWorkflow(action));
+    }
+
+    [Fact]
+    public void IsAiWorkflow_FalseForOrdinaryWorkflow()
+    {
+        var action = new ActionStatusInfo { WorkflowName = "CI", WorkflowPath = ".github/workflows/build-app.yml" };
+        Assert.False(WorkspaceActions.IsAiWorkflow(action));
+    }
 }

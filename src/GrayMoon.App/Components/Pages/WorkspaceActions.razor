@@ -100,6 +100,19 @@
                         }
                     </span>
                 }
+                @if (!isLoading && HasAnyWorkflowLines)
+                {
+                    <button type="button"
+                            class="gha-status-chip workspace-actions__ai-toggle @((workspace?.ExcludeAiWorkflows ?? true) ? "gha-status-chip--on" : "gha-status-chip--off")"
+                            aria-pressed="@((workspace?.ExcludeAiWorkflows ?? true) ? "true" : "false")"
+                            aria-label="Hide AI-driven workflows"
+                            title="@((workspace?.ExcludeAiWorkflows ?? true) ? "AI workflows are hidden - click to show" : "AI workflows are shown - click to hide")"
+                            disabled="@(isLoading || _isTogglingAiFilter)"
+                            @onclick="ToggleExcludeAiWorkflowsAsync">
+                        <span class="gha-status-chip__label action-badge action-badge-ai">ai</span>
+                        <span class="gha-status-chip__count action-badge action-badge-ai">@AiWorkflowCount</span>
+                    </button>
+                }
                 <span class="workspace-repos-title-spacer"></span>
             </div>
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">

@@ -19,5 +19,7 @@ public class Workspace
 
     public bool IsInSync { get; set; }
 
+    public bool ExcludeAiWorkflows { get; set; } = true;
+
     public ICollection<WorkspaceRepositoryLink> Repositories { get; set; } = new List<WorkspaceRepositoryLink>();
 }

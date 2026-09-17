@@ -145,6 +145,19 @@ public sealed class WorkspaceRepository(
         }
     }
 
+    public async Task UpdateExcludeAiWorkflowsAsync(int workspaceId, bool excludeAiWorkflows)
+    {
+        var workspace = await _dbContext.Workspaces
+            .FirstOrDefaultAsync(w => w.WorkspaceId == workspaceId);
+
+        if (workspace != null)
+        {
+            workspace.ExcludeAiWorkflows = excludeAiWorkflows;
+            await _dbContext.SaveChangesAsync();
+            _logger.LogInformation("Persistence: saved Workspace. Action=UpdateExcludeAiWorkflows, WorkspaceId={WorkspaceId}, ExcludeAiWorkflows={ExcludeAiWorkflows}", workspaceId, excludeAiWorkflows);
+        }
+    }
+
     public async Task<Workspace?> GetDefaultAsync()
     {
         return await _dbContext.Workspaces

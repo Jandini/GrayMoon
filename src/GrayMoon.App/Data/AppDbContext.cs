@@ -127,6 +127,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             entity.Property(workspace => workspace.IsInSync)
                 .HasDefaultValue(false);
+
+            entity.Property(workspace => workspace.ExcludeAiWorkflows)
+                .HasDefaultValue(true);
         });
 
         modelBuilder.Entity<WorkspaceRepositoryLink>(entity =>

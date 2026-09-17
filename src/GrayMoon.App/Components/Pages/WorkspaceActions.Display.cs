@@ -1,3 +1,5 @@
+using GrayMoon.App.Models;
+
 namespace GrayMoon.App.Components.Pages;
 
 public sealed partial class WorkspaceActions
@@ -76,6 +78,10 @@ public sealed partial class WorkspaceActions
         line.Action == null ||
         !string.Equals(line.Action.BranchName, row.Link.BranchName, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(line.Action.Status, "none", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Case-insensitive match on the GitHub-reported workflow name/path only - never reads workflow YAML file contents.</summary>
+    internal static bool IsAiWorkflow(ActionStatusInfo? action) =>
+        action != null && GrayMoon.App.Services.GitHub.AiWorkflowFilter.IsAiWorkflow(action.WorkflowName, action.WorkflowPath);
 
     internal static bool CanRerun(WorkspaceActionRow row, WorkflowActionLine line) =>
         IsLineFailedForBranch(row, line) && (line.Action?.RunId ?? 0) > 0;
