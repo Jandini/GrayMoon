@@ -46,7 +46,7 @@ public sealed class WorkspacePullRequestService(
     WorkspacePullRequestRepository pullRequestRepository,
     GitHubPullRequestService gitHubPullRequestService,
     GitHubPullRequestMergeService gitHubPullRequestMergeService,
-    AppDbContext dbContext,
+    IDbContextFactory<AppDbContext> dbContextFactory,
     IOptions<WorkspaceOptions> workspaceOptions,
     IGitHubRateLimitTracker rateLimitTracker,
     ILogger<WorkspacePullRequestService> logger)
@@ -79,6 +79,7 @@ public sealed class WorkspacePullRequestService(
         var outcomes = new Dictionary<int, PullRequestRefreshOutcome>();
         if (repositoryIds.Count == 0) return outcomes;
 
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var links = await dbContext.WorkspaceRepositories
             .AsNoTracking()
             .Include(wr => wr.Repository)
@@ -161,6 +162,7 @@ public sealed class WorkspacePullRequestService(
     /// <summary>Clears the persisted pull request for a repository without contacting GitHub. Used when the checked-out branch cannot have one (default branch, tag, or no branch at all).</summary>
     public async Task ClearPullRequestAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
     {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var workspaceRepositoryId = await dbContext.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId)
@@ -205,10 +207,14 @@ public sealed class WorkspacePullRequestService(
     /// <summary>Refreshes PR for all repositories in the workspace.</summary>
     public async Task RefreshPullRequestsForWorkspaceAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
-        var repoIds = await dbContext.WorkspaceRepositories
-            .Where(wr => wr.WorkspaceId == workspaceId)
-            .Select(wr => wr.RepositoryId)
-            .ToListAsync(cancellationToken);
+        List<int> repoIds;
+        await using (var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken))
+        {
+            repoIds = await dbContext.WorkspaceRepositories
+                .Where(wr => wr.WorkspaceId == workspaceId)
+                .Select(wr => wr.RepositoryId)
+                .ToListAsync(cancellationToken);
+        }
         await RefreshPullRequestsAsync(workspaceId, repoIds, cancellationToken: cancellationToken);
     }
 
@@ -302,13 +308,16 @@ public sealed class WorkspacePullRequestService(
         return (uncommittedChangesCount > 0, uncommittedChangesCount, unpushedCommitsCount, incomingCommitsCount);
     }
 
-    private Task<WorkspaceRepositoryLink?> GetLinkWithConnectorAndGitStatusAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken) =>
-        dbContext.WorkspaceRepositories
+    private async Task<WorkspaceRepositoryLink?> GetLinkWithConnectorAndGitStatusAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        return await dbContext.WorkspaceRepositories
             .AsNoTracking()
             .Include(wr => wr.Repository)
             .ThenInclude(r => r!.Connector)
             .Include(wr => wr.GitStatus)
             .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
+    }
 
     /// <summary>Updates only the pull request title on GitHub. Leaves body, state, and base branch unchanged.</summary>
     public async Task<MergeResult> UpdatePullRequestTitleAsync(int workspaceId, int repositoryId, int prNumber, string title, CancellationToken cancellationToken = default)
@@ -345,12 +354,15 @@ public sealed class WorkspacePullRequestService(
         return result;
     }
 
-    private Task<WorkspaceRepositoryLink?> GetLinkWithConnectorAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken) =>
-        dbContext.WorkspaceRepositories
+    private async Task<WorkspaceRepositoryLink?> GetLinkWithConnectorAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        return await dbContext.WorkspaceRepositories
             .AsNoTracking()
             .Include(wr => wr.Repository)
             .ThenInclude(r => r!.Connector)
             .FirstOrDefaultAsync(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId, cancellationToken);
+    }
 
     /// <summary>
     /// Merges many pull requests across a workspace in one bounded-concurrency batch (the plural counterpart to
@@ -367,12 +379,16 @@ public sealed class WorkspacePullRequestService(
         if (requests.Count == 0) return Array.Empty<MergePullRequestResult>();
 
         var repositoryIds = requests.Select(r => r.RepositoryId).Distinct().ToList();
-        var links = await dbContext.WorkspaceRepositories
-            .AsNoTracking()
-            .Include(wr => wr.Repository)
-            .ThenInclude(r => r!.Connector)
-            .Where(wr => wr.WorkspaceId == workspaceId && repositoryIds.Contains(wr.RepositoryId))
-            .ToListAsync(cancellationToken);
+        List<WorkspaceRepositoryLink> links;
+        await using (var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken))
+        {
+            links = await dbContext.WorkspaceRepositories
+                .AsNoTracking()
+                .Include(wr => wr.Repository)
+                .ThenInclude(r => r!.Connector)
+                .Where(wr => wr.WorkspaceId == workspaceId && repositoryIds.Contains(wr.RepositoryId))
+                .ToListAsync(cancellationToken);
+        }
         var linkByRepoId = links.ToDictionary(wr => wr.RepositoryId);
 
         var total = requests.Count;

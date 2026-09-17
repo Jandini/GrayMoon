@@ -37,7 +37,8 @@ public sealed partial class WorkspaceGitChanges
                 await _diffViewerRef.ClearAsync();
             }
 
-            var link = await DbContext.WorkspaceRepositories
+            await using var db = await DbContextFactory.CreateDbContextAsync();
+            var link = await db.WorkspaceRepositories
                 .Include(l => l.Workspace)
                 .Include(l => l.Repository)
                 .FirstOrDefaultAsync(l => l.WorkspaceRepositoryId == row.WorkspaceRepositoryId);
