@@ -75,6 +75,7 @@ public sealed partial class WorkspaceActions
     private bool _showRunning = true;
     private bool _showSuccess = true;
     private bool _showNone;
+    private bool _isTogglingAiFilter;
     private string searchTerm = string.Empty;
     private string? _appliedSearchQuery;
 
@@ -131,6 +132,17 @@ public sealed partial class WorkspaceActions
 
     internal int NoneCount => rows.Sum(row => row.WorkflowLines.Count(line =>
         string.IsNullOrWhiteSpace(row.ErrorMessage) && IsLineNoneForBranch(row, line)));
+
+    /// <summary>
+    /// Count of AI-driven workflow lines currently known to the grid. While <see cref="Workspace.ExcludeAiWorkflows"/>
+    /// is on, AI workflows are dropped before fetch/persist (see GitHubActionsService), so this reads 0 shortly
+    /// after the next refresh rather than tracking a live count of workflows that are no longer being pulled.
+    /// </summary>
+    internal int AiWorkflowCount => rows.Sum(row => row.WorkflowLines.Count(line =>
+        string.IsNullOrWhiteSpace(row.ErrorMessage) && IsAiWorkflow(line.Action)));
+
+    /// <summary>True when at least one workflow line (any status) exists anywhere in the grid. Gates the "ai" chip only - unlike the status chips it is meant to show even at a count of 0, but only for a workspace that actually has GitHub Actions workflows at all.</summary>
+    internal bool HasAnyWorkflowLines => ErrorCount + FailedCount + AbortedCount + RunningCount + SuccessCount + NoneCount > 0;
 
     internal string RerunAllOverlayMessage =>
         _rerunCompleted == 0

@@ -139,7 +139,12 @@ public sealed class GitHubActionsService(
     /// Fetches active workflows and the latest run per workflow for <paramref name="branch"/>.
     /// Each entry is independent (not cross-workflow aggregate).
     /// </summary>
-    public async Task<IReadOnlyList<ActionStatusInfo>?> GetWorkflowStatusesForBranchAsync(GitHubRepositoryEntry repository, string branch, CancellationToken cancellationToken = default)
+    /// <param name="excludeAiWorkflows">
+    /// When true, AI-driven workflows (see <see cref="AiWorkflowFilter"/>) are dropped before the
+    /// per-workflow workflow_dispatch YAML fetch (<see cref="GetCachedDispatchSupportAsync"/>), so hiding
+    /// them in the UI also skips the extra GitHub API calls made for them, not just their display.
+    /// </param>
+    public async Task<IReadOnlyList<ActionStatusInfo>?> GetWorkflowStatusesForBranchAsync(GitHubRepositoryEntry repository, string branch, bool excludeAiWorkflows = false, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(repository.OrgName) || string.IsNullOrWhiteSpace(repository.RepositoryName))
             return null;
@@ -159,6 +164,7 @@ public sealed class GitHubActionsService(
 
         var workflows = (await GetCachedWorkflowsAsync(connector, owner, repoName, cancellationToken))
             .Where(w => string.Equals(w.State, "active", StringComparison.OrdinalIgnoreCase))
+            .Where(w => !excludeAiWorkflows || !AiWorkflowFilter.IsAiWorkflow(w.Name, w.Path))
             .OrderBy(w => w.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -209,6 +215,9 @@ public sealed class GitHubActionsService(
         {
             foreach (var run in latestByWorkflowId.Values.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase))
             {
+                if (excludeAiWorkflows && AiWorkflowFilter.IsAiWorkflow(run.Name, null))
+                    continue;
+
                 var meta = await gitHubService.GetWorkflowByIdAsync(connector, owner, repoName, run.WorkflowId, cancellationToken);
                 var supportsDispatch = string.IsNullOrWhiteSpace(meta?.Path)
                     ? false

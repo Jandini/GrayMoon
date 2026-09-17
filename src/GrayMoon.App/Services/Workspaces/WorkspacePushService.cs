@@ -626,7 +626,7 @@ public sealed class WorkspacePushService(
             IReadOnlyList<ActionStatusInfo>? statuses;
             try
             {
-                statuses = await _gitHubActionsService.GetWorkflowStatusesForBranchAsync(entry, link.BranchName!, cancellationToken);
+                statuses = await _gitHubActionsService.GetWorkflowStatusesForBranchAsync(entry, link.BranchName!, cancellationToken: cancellationToken);
             }
             catch (Exception ex)
             {
