@@ -20,7 +20,8 @@ public interface IWorkspacePushOperations
         IProgress<OperationProgress>? progress = null,
         IReadOnlySet<int>? syncedRepoIds = null,
         CancellationToken cancellationToken = default,
-        string? runId = null);
+        string? runId = null,
+        bool restorePackages = true);
 
     Task<OperationResult> PushPendingAsync(
         int workspaceId,

@@ -37,7 +37,8 @@ public sealed class WorkspacePushHandler(
         Action? onAppSideComplete = null,
         IReadOnlySet<int>? syncedRepoIds = null,
         CancellationToken cancellationToken = default,
-        string? runId = null)
+        string? runId = null,
+        bool restorePackages = true)
     {
         try
         {
@@ -50,7 +51,8 @@ public sealed class WorkspacePushHandler(
                 onAppSideComplete,
                 syncedRepoIds,
                 cancellationToken,
-                runId);
+                runId,
+                restorePackages);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

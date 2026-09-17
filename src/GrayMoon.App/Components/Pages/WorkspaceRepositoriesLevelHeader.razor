@@ -43,7 +43,7 @@
                             <PullRequestIcon AdditionalClass="pull-request-icon--menu" /><span>Create PRs...</span>
                         </div>
                         <div class="gm-menu-item @(HasMergeablePr ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Merge pull requests" @onclick="HandleOpenMergePrs" @onclick:stopPropagation>
-                            <PullRequestIcon AdditionalClass="pull-request-icon--menu" /><span>Merge PRs...</span>
+                            <MergePullRequestIcon AdditionalClass="merge-pull-request-icon--menu" /><span>Merge PRs...</span>
                         </div>
                     </div>
                     <div class="gm-menu-item gm-menu-trigger gm-menu-item--flyout" role="button" tabindex="0" aria-haspopup="true" title="Copy to clipboard">

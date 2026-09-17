@@ -72,6 +72,8 @@ public sealed class WorkspacePushService(
     /// When <paramref name="repoIdsToPush"/> is set, only those repos are pushed.
     /// Set <paramref name="packageRegistriesAlreadySynced"/> to true when the caller already synced required packages
     /// (e.g. via SyncRegistriesForPackageIdsAsync) to avoid syncing twice.
+    /// Set <paramref name="restorePackages"/> to false to skip the per-level local restore (the push itself and
+    /// the NuGet-availability wait between levels are unaffected).
     /// </summary>
     public async Task RunPushAsync(
         int workspaceId,
@@ -83,7 +85,8 @@ public sealed class WorkspacePushService(
         bool packageRegistriesAlreadySynced = false,
         IReadOnlySet<int>? syncedRepoIds = null,
         CancellationToken cancellationToken = default,
-        string? runId = null)
+        string? runId = null,
+        bool restorePackages = true)
     {
         _logger.LogInformation(
             "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: RunPushAsync starting. Scope={Scope}",
@@ -368,20 +371,23 @@ public sealed class WorkspacePushService(
                 return;
             }
 
-            levelProgress?.Invoke("Restoring packages...");
-            try
+            if (restorePackages)
             {
-                var restoreFailed = syncedRepoIds is { Count: > 0 }
-                    ? await RestoreUpdatedReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, syncedRepoIds, onRepoError, cancellationToken)
-                    : await TryRestoreReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, onRepoError, cancellationToken);
-                if (restoreFailed)
+                levelProgress?.Invoke("Restoring packages...");
+                try
+                {
+                    var restoreFailed = syncedRepoIds is { Count: > 0 }
+                        ? await RestoreUpdatedReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, syncedRepoIds, onRepoError, cancellationToken)
+                        : await TryRestoreReposAtLevelAsync(workspaceId, workspace.Name, workspaceRoot, reposAtLevel, onRepoError, cancellationToken);
+                    if (restoreFailed)
+                        return;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: restore failed.", runId, workspaceId, level);
+                    onLevelError?.Invoke(level, ex.Message);
                     return;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogError(ex, "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: Level {Level}: restore failed.", runId, workspaceId, level);
-                onLevelError?.Invoke(level, ex.Message);
-                return;
+                }
             }
 
             pushedRepos.AddRange(reposAtLevel);

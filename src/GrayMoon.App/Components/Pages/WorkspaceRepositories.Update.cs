@@ -73,7 +73,7 @@ public sealed partial class WorkspaceRepositories
         StateHasChanged();
     }
 
-    private async Task OnUpdateProceedAsync((string? CommitMessage, bool IncludeDeps) args)
+    private async Task OnUpdateProceedAsync((string? CommitMessage, bool IncludeDeps, bool RestorePackages) args)
     {
         _updateModal = _updateModal with
         {
@@ -168,7 +168,7 @@ public sealed partial class WorkspaceRepositories
         StateHasChanged();
     }
 
-    private async Task OnUpdateAndPushProceedAsync((string? CommitMessage, bool IncludeDeps) args)
+    private async Task OnUpdateAndPushProceedAsync((string? CommitMessage, bool IncludeDeps, bool RestorePackages) args)
     {
         _updateAndPushModal = _updateAndPushModal with
         {
@@ -176,7 +176,7 @@ public sealed partial class WorkspaceRepositories
             LastCommitMessage = args.CommitMessage,
             LastIncludeDeps = args.IncludeDeps
         };
-        await RunUpdateAndPushCoreAsync(args.CommitMessage, args.IncludeDeps);
+        await RunUpdateAndPushCoreAsync(args.CommitMessage, args.IncludeDeps, args.RestorePackages);
     }
 
     private async Task OnLevelOnlyUpdateAndPushClickAsync()
@@ -237,7 +237,7 @@ public sealed partial class WorkspaceRepositories
         StateHasChanged();
     }
 
-    private async Task OnLevelOnlyUpdateAndPushProceedAsync((string? CommitMessage, bool IncludeDeps) args)
+    private async Task OnLevelOnlyUpdateAndPushProceedAsync((string? CommitMessage, bool IncludeDeps, bool RestorePackages) args)
     {
         var level = _levelOnlyUpdateAndPushModal.Level;
         _levelOnlyUpdateAndPushModal = _levelOnlyUpdateAndPushModal with
@@ -246,10 +246,10 @@ public sealed partial class WorkspaceRepositories
             LastCommitMessage = args.CommitMessage,
             LastIncludeDeps = args.IncludeDeps
         };
-        await RunLevelOnlyUpdateAndPushCoreAsync(level, args.CommitMessage, args.IncludeDeps);
+        await RunLevelOnlyUpdateAndPushCoreAsync(level, args.CommitMessage, args.IncludeDeps, args.RestorePackages);
     }
 
-    private Task RunLevelOnlyUpdateAndPushCoreAsync(int level, string? commitMessage = null, bool includeDepsInCommitMessage = true)
+    private Task RunLevelOnlyUpdateAndPushCoreAsync(int level, string? commitMessage = null, bool includeDepsInCommitMessage = true, bool restorePackages = false)
     {
         if (workspace == null || !HasRepositories || IsJobRunning)
             return Task.CompletedTask;
@@ -328,7 +328,7 @@ public sealed partial class WorkspaceRepositories
             // Phase 3: execute push (per-level restore of synced repos handled inside push service)
             try
             {
-                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds, runId: runId);
+                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds, runId: runId, restorePackages: restorePackages);
             }
             catch (SynchronizedPushNotPossibleException ex)
             {
@@ -338,8 +338,9 @@ public sealed partial class WorkspaceRepositories
                     {
                         JobService.StartJob(PageJobKey, "Preparing push...", async (j, c) =>
                         {
-                            await ExecutePushCoreAsync(j, c, pushRepoIds, synchronizedPush: false, requiredPackageIds, syncedRepoIds, runId: runId);
-                            await RestoreSyncedPackagesCoreAsync(syncedRepoIds, j, c);
+                            await ExecutePushCoreAsync(j, c, pushRepoIds, synchronizedPush: false, requiredPackageIds, syncedRepoIds, runId: runId, restorePackages: restorePackages);
+                            if (restorePackages)
+                                await RestoreSyncedPackagesCoreAsync(syncedRepoIds, j, c);
                         });
                         return Task.CompletedTask;
                     },
@@ -353,7 +354,7 @@ public sealed partial class WorkspaceRepositories
         return Task.CompletedTask;
     }
 
-    private Task RunUpdateAndPushCoreAsync(string? commitMessage = null, bool includeDepsInCommitMessage = true)
+    private Task RunUpdateAndPushCoreAsync(string? commitMessage = null, bool includeDepsInCommitMessage = true, bool restorePackages = false)
     {
         if (workspace == null || !HasRepositories || IsJobRunning)
             return Task.CompletedTask;
@@ -428,7 +429,7 @@ public sealed partial class WorkspaceRepositories
             // Phase 3: execute push (per-level restore of synced repos handled inside push service)
             try
             {
-                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds, runId: runId);
+                await ExecutePushCoreAsync(job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds, runId: runId, restorePackages: restorePackages);
             }
             catch (SynchronizedPushNotPossibleException ex)
             {
@@ -438,8 +439,9 @@ public sealed partial class WorkspaceRepositories
                     {
                         JobService.StartJob(PageJobKey, "Preparing push...", async (j, c) =>
                         {
-                            await ExecutePushCoreAsync(j, c, pushRepoIds, synchronizedPush: false, requiredPackageIds, syncedRepoIds, runId: runId);
-                            await RestoreSyncedPackagesCoreAsync(syncedRepoIds, j, c);
+                            await ExecutePushCoreAsync(j, c, pushRepoIds, synchronizedPush: false, requiredPackageIds, syncedRepoIds, runId: runId, restorePackages: restorePackages);
+                            if (restorePackages)
+                                await RestoreSyncedPackagesCoreAsync(syncedRepoIds, j, c);
                         });
                         return Task.CompletedTask;
                     },
