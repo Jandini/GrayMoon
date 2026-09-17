@@ -5,11 +5,13 @@ using Microsoft.EntityFrameworkCore;
 namespace GrayMoon.App.Repositories;
 
 /// <summary>Persistence for pull request state per workspace-repository link. Single place for all PR table read/write.</summary>
-public sealed class WorkspacePullRequestRepository(AppDbContext dbContext, ILogger<WorkspacePullRequestRepository> logger)
+public sealed class WorkspacePullRequestRepository(IDbContextFactory<AppDbContext> dbContextFactory, ILogger<WorkspacePullRequestRepository> logger)
 {
     /// <summary>Returns persisted PR state for all repositories in the workspace, keyed by RepositoryId. Missing row yields null (no PR or not yet checked).</summary>
     public async Task<IReadOnlyDictionary<int, PullRequestInfo?>> GetByWorkspaceIdAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
         var links = await dbContext.WorkspaceRepositories
             .AsNoTracking()
             .Include(wr => wr.PullRequest)
@@ -27,9 +29,17 @@ public sealed class WorkspacePullRequestRepository(AppDbContext dbContext, ILogg
         return result;
     }
 
-    /// <summary>Inserts or updates the PR row for the given workspace-repo link. Pass null to persist "no PR" with LastCheckedAt.</summary>
+    /// <summary>
+    /// Inserts or updates the PR row for the given workspace-repo link. Pass null to persist "no PR" with LastCheckedAt.
+    /// Uses its own factory-created <see cref="AppDbContext"/> (rather than a shared, circuit-scoped instance) because
+    /// callers such as bulk merge run many of these concurrently via a bounded <c>Task.WhenAll</c> fan-out - a shared
+    /// context there throws "A second operation was started on this context instance before a previous operation
+    /// completed." and can leave the shared instance unusable for the rest of the circuit (e.g. the Git Changes page).
+    /// </summary>
     public async Task UpsertAsync(int workspaceRepositoryId, PullRequestInfo? pr, CancellationToken cancellationToken = default)
     {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
         var now = DateTime.UtcNow;
         var existing = await dbContext.WorkspaceRepositoryPullRequests
             .FirstOrDefaultAsync(prr => prr.WorkspaceRepositoryId == workspaceRepositoryId, cancellationToken);

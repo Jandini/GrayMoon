@@ -27,9 +27,9 @@
     <div class="grid-page-body">
     @if (_errorMessage != null)
     {
-        <div class="gm-callout gm-callout--error" role="alert">@_errorMessage</div>
+        <div class="gm-callout gm-callout--error m-2" role="alert">@_errorMessage</div>
     }
-    else if (_view == null)
+    @if (_view == null)
     {
         @* Loading: the BackgroundJobOverlay (mounted in MainLayout) shows LoadingOverlay for the initial-load job. *@
     }

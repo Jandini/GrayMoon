@@ -135,6 +135,10 @@ Schema is owned by EF Core but applied via `EnsureCreated()`, which only creates
 
 Never delete a `Migrate*Async` method once it has shipped - some user's database may still depend on it running.
 
+### DbContext lifetime
+
+`AppDbContext` is registered twice in `Program.cs` (~line 95-96): as a scoped service and, separately, via `AddDbContextFactory<AppDbContext>` - `AddDbContext` + `AddDbContextFactory` together fails on EF Core 10, so the scoped registration is built from the factory. In Blazor Server, one circuit (one open browser tab) is one DI scope, so an injected scoped `AppDbContext` is a single shared instance for everything that page/circuit does - including background work resolved from the same scope. See `GrayMoon/AGENTS.md` for the rule this exists to prevent (concurrent `SaveChangesAsync` on that shared instance throws and can leave the whole circuit's database access broken, not just the operation that caused it).
+
 ### Background job system
 
 Long-running App-side operations (restore, update, push orchestration) run as background jobs so they survive page navigation within the same browser tab.

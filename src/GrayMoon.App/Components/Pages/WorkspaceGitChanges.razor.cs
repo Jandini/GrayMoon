@@ -19,7 +19,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Inject] private IWorkspaceGitChangesOperations GitChangesOperations { get; set; } = default!;
     [Inject] private IGitChangesAgentClient AgentClient { get; set; } = default!;
     [Inject] private WorkspaceGitChangesWriteQueue WriteQueue { get; set; } = default!;
-    [Inject] private AppDbContext DbContext { get; set; } = default!;
+    [Inject] private IDbContextFactory<AppDbContext> DbContextFactory { get; set; } = default!;
     [Inject] private WorkspaceService WorkspaceService { get; set; } = default!;
     [Inject] private IAgentBridge AgentBridge { get; set; } = default!;
     [Inject] private IToastService ToastService { get; set; } = default!;
@@ -120,7 +120,10 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
         try
         {
-            _workspace = await DbContext.Workspaces.AsNoTracking().FirstOrDefaultAsync(w => w.WorkspaceId == WorkspaceId);
+            await using (var db = await DbContextFactory.CreateDbContextAsync())
+            {
+                _workspace = await db.Workspaces.AsNoTracking().FirstOrDefaultAsync(w => w.WorkspaceId == WorkspaceId);
+            }
             _view = await ReadService.GetWorkspaceAsync(WorkspaceId, CancellationToken.None);
             RebuildRows();
             await ClearSelectionIfStaleAsync();
@@ -651,7 +654,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     private async Task<(string Root, string WorkspaceName, string RepositoryName, int RepositoryId)?> ResolveRepositoryAsync(int workspaceRepositoryId)
     {
-        var link = await DbContext.WorkspaceRepositories
+        await using var db = await DbContextFactory.CreateDbContextAsync();
+        var link = await db.WorkspaceRepositories
             .Include(l => l.Workspace)
             .Include(l => l.Repository)
             .FirstOrDefaultAsync(l => l.WorkspaceRepositoryId == workspaceRepositoryId);
