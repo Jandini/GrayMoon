@@ -350,6 +350,7 @@
 
 <NewPullRequestModal IsVisible="@_newPrModal.IsVisible"
                      IsBusy="@IsJobRunning"
+                     WorkspaceId="@WorkspaceId"
                      Targets="@_newPrModal.Targets"
                      OnCreate="HandleCreatePullRequestsAsync"
                      OnCancel="CloseNewPullRequestModal"

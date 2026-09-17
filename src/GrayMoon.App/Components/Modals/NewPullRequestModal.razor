@@ -1,8 +1,10 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services
+@using GrayMoon.Application
 @using Microsoft.Extensions.Options
 @implements IDisposable
 @inject IPullRequestService PullRequestService
+@inject IWorkspacePushOperations PushOperations
 @inject IOptions<WorkspaceOptions> WorkspaceOptions
 @inject ILogger<NewPullRequestModal> Logger
 @inject IJSRuntime JS
@@ -114,21 +116,21 @@
                         </div>
                     </div>
                 </div>
-                <div class="modal-footer d-flex justify-content-between">
+                <div class="modal-footer d-flex justify-content-between align-items-center">
                     <button type="button"
                             class="btn btn-secondary"
                             @onclick="HandleOpenInGitHubClick"
                             disabled="@IsBusy">
                         Open in GitHub
                     </button>
-                    <div class="d-flex gap-2">
+                    <div class="d-flex align-items-center gap-2">
                         <button type="button" class="btn btn-outline-secondary" @onclick="HandleCancelClick" disabled="@IsBusy">
                             Cancel
                         </button>
                         <button type="button"
                                 class="btn btn-primary"
                                 data-default-action
-                                @onclick="HandleCreateClick"
+                                @onclick="() => HandleCreateClick(pushAndCreate: false)"
                                 disabled="@(IsBusy || !IsValid)">
                             @if (IsBusy)
                             {
@@ -136,6 +138,20 @@
                             }
                             Create
                         </button>
+                        @if (_repoIdsNeedingPush.Count > 0 && !_isCheckingUnpushed)
+                        {
+                            <button type="button"
+                                    class="btn btn-warning"
+                                    data-default-action
+                                    @onclick="() => HandleCreateClick(pushAndCreate: true)"
+                                    disabled="@(IsBusy || !IsValid)">
+                                @if (IsBusy)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                                }
+                                Push & Create
+                            </button>
+                        }
                     </div>
                 </div>
             </div>
@@ -146,6 +162,7 @@
 @code {
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public bool IsBusy { get; set; }
+    [Parameter] public int WorkspaceId { get; set; }
     [Parameter] public IReadOnlyList<NewPrTargetRepo> Targets { get; set; } = Array.Empty<NewPrTargetRepo>();
     [Parameter] public EventCallback<NewPrFormResult> OnCreate { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
@@ -166,6 +183,10 @@
     private CancellationTokenSource? _reviewersCts;
     private DotNetObjectReference<NewPullRequestModal>? _dotNetRef;
 
+    private bool _isCheckingUnpushed;
+    private HashSet<int> _repoIdsNeedingPush = new();
+    private CancellationTokenSource? _pushCheckCts;
+
     private bool HasUnifiedHeadBranch => Targets.Count > 0
         && Targets.Select(t => t.HeadBranch).Distinct(StringComparer.Ordinal).Count() == 1;
 
@@ -184,8 +205,11 @@
             _selectedReviewerKeys.Clear();
             _allReviewers = new();
             _focusTitleOnNextRender = true;
+            _isCheckingUnpushed = false;
+            _repoIdsNeedingPush = new();
 
             _ = LoadReviewersAsync();
+            _ = CheckUnpushedCommitsAsync();
         }
     }
 
@@ -214,6 +238,9 @@
             _reviewersCts?.Cancel();
             _reviewersCts?.Dispose();
             _reviewersCts = null;
+            _pushCheckCts?.Cancel();
+            _pushCheckCts?.Dispose();
+            _pushCheckCts = null;
         }
         else if (IsVisible && !_wasVisible)
         {
@@ -240,6 +267,8 @@
     public void Dispose()
     {
         _dotNetRef?.Dispose();
+        _pushCheckCts?.Cancel();
+        _pushCheckCts?.Dispose();
     }
 
     private string ComputeDefaultTitle()
@@ -298,6 +327,42 @@
         finally
         {
             _isLoadingReviewers = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CheckUnpushedCommitsAsync()
+    {
+        if (Targets.Count == 0) return;
+
+        _pushCheckCts?.Cancel();
+        _pushCheckCts?.Dispose();
+        _pushCheckCts = new CancellationTokenSource();
+        var ct = _pushCheckCts.Token;
+
+        _isCheckingUnpushed = true;
+        StateHasChanged();
+
+        try
+        {
+            var repoIds = Targets.Select(t => t.RepositoryId).ToHashSet();
+            var needingPush = await PushOperations.GetRepositoryIdsNeedingPushAsync(WorkspaceId, repoIds, ct);
+            if (ct.IsCancellationRequested) return;
+
+            _repoIdsNeedingPush = needingPush.ToHashSet();
+        }
+        catch (OperationCanceledException)
+        {
+            // ignored
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to check for unpushed commits for {Count} target(s)", Targets.Count);
+            _repoIdsNeedingPush = new();
+        }
+        finally
+        {
+            _isCheckingUnpushed = false;
             StateHasChanged();
         }
     }
@@ -411,7 +476,7 @@
         await OnOpenInGitHub.InvokeAsync();
     }
 
-    private async Task HandleCreateClick()
+    private async Task HandleCreateClick(bool pushAndCreate)
     {
         if (!IsValid) return;
 
@@ -429,7 +494,8 @@
             Body: string.IsNullOrWhiteSpace(_body) ? null : _body,
             IsDraft: _isDraft,
             Reviewers: users,
-            TeamReviewers: teams);
+            TeamReviewers: teams,
+            RepositoryIdsToPush: pushAndCreate ? _repoIdsNeedingPush.ToList() : Array.Empty<int>());
 
         await OnCreate.InvokeAsync(result);
     }

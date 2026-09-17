@@ -9,10 +9,11 @@ public sealed record NewPrTargetRepo(
     string BaseBranch,
     string? CloneUrl);
 
-/// <summary>Result emitted by the New Pull Request modal when the user clicks Create.</summary>
+/// <summary>Result emitted by the New Pull Request modal when the user clicks Create (or Push &amp; Create).</summary>
 public sealed record NewPrFormResult(
     string Title,
     string? Body,
     bool IsDraft,
     IReadOnlyList<string> Reviewers,
-    IReadOnlyList<string> TeamReviewers);
+    IReadOnlyList<string> TeamReviewers,
+    IReadOnlyList<int> RepositoryIdsToPush);

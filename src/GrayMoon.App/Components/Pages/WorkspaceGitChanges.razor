@@ -14,7 +14,7 @@
                            HasChanges="@(ChangedRepositoryCount > 0)"
                            FilterQuery="@_filterQuery"
                            FilterQueryChanged="OnFilterChanged"
-                           IsFilterDisabled="@_isLoading"
+                           IsFilterDisabled="@(_view == null)"
                            OnRefresh="ManualRefreshAsync"
                            OnPreviousChange="() => _diffViewerRef!.GoToPreviousChangeAsync()"
                            OnNextChange="() => _diffViewerRef!.GoToNextChangeAsync()"

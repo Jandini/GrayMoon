@@ -136,16 +136,20 @@ public sealed partial class WorkspaceRepositories
             TeamReviewers = form.TeamReviewers
         }).ToList();
 
+        var repoIdsToPush = form.RepositoryIdsToPush.ToHashSet();
         var draftSuffix = form.IsDraft ? " as draft" : string.Empty;
+        var pushSuffix = repoIdsToPush.Count > 0
+            ? $" (pushing {repoIdsToPush.Count} {(repoIdsToPush.Count == 1 ? "repository" : "repositories")} first)"
+            : string.Empty;
         var message = requests.Count == 1
-            ? $"Create pull request for {requests[0].RepositoryName}{draftSuffix}?"
-            : $"Create {requests.Count} pull requests{draftSuffix}?";
+            ? $"Create pull request for {requests[0].RepositoryName}{draftSuffix}{pushSuffix}?"
+            : $"Create {requests.Count} pull requests{draftSuffix}{pushSuffix}?";
 
-        ShowConfirm(message, () => ExecuteCreatePullRequestsAsync(requests), "Create");
+        ShowConfirm(message, () => ExecuteCreatePullRequestsAsync(requests, repoIdsToPush), repoIdsToPush.Count > 0 ? "Push & Create" : "Create");
         return Task.CompletedTask;
     }
 
-    private Task ExecuteCreatePullRequestsAsync(IReadOnlyList<CreatePullRequestRequest> requests)
+    private Task ExecuteCreatePullRequestsAsync(IReadOnlyList<CreatePullRequestRequest> requests, IReadOnlySet<int> repoIdsToPush)
     {
         if (requests.Count == 0 || IsJobRunning)
             return Task.CompletedTask;
@@ -155,6 +159,45 @@ public sealed partial class WorkspaceRepositories
 
         JobService.StartJob(PageJobKey, total == 1 ? "Creating 1 pull request..." : $"Creating {total} pull requests...", async (job, ct) =>
         {
+            // Push and create run inside the same job so the loading overlay stays up continuously
+            // across both phases instead of disappearing and reappearing between two separate jobs.
+            if (repoIdsToPush.Count > 0)
+            {
+                job.ReportProgress(repoIdsToPush.Count == 1 ? "Pushing 1 repository..." : $"Pushing {repoIdsToPush.Count} repositories...");
+
+                var pushResult = await ScopedExecutor.ExecuteAsync<IWorkspacePushOperations, OperationResult>(svc =>
+                    svc.PushAsync(
+                        WorkspaceId,
+                        repoIdsToPush,
+                        synchronizedPush: false,
+                        requiredPackageIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                        job.ToOperationProgress(),
+                        cancellationToken: ct));
+
+                ApplyPushResult(repoIdsToPush, pushResult);
+
+                var failedPushRepoIds = pushResult.RepoErrors?.Keys.ToHashSet() ?? new HashSet<int>();
+                if (!pushResult.Success && failedPushRepoIds.Count == 0)
+                {
+                    // A push-wide failure with no per-repo attribution means we can't tell which
+                    // branches actually made it to the remote - bail out rather than risk creating
+                    // a pull request against a branch that was never pushed.
+                    SafeInvoke(() => ToastService.ShowError(pushResult.Error ?? "Push failed; no pull requests created."));
+                    return;
+                }
+
+                if (failedPushRepoIds.Count > 0)
+                {
+                    requests = requests.Where(r => !failedPushRepoIds.Contains(r.RepositoryId)).ToList();
+                    if (requests.Count == 0)
+                    {
+                        SafeInvoke(() => ToastService.ShowError("Push failed; no pull requests created."));
+                        return;
+                    }
+                    total = requests.Count;
+                }
+            }
+
             var progress = new Progress<CreatePullRequestProgress>(p =>
             {
                 job.ReportProgress(p.Created == 0
