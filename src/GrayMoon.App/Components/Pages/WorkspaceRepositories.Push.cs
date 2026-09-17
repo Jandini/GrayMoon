@@ -199,7 +199,8 @@ public sealed partial class WorkspaceRepositories
         bool synchronizedPush,
         IReadOnlySet<string> requiredPackageIds,
         IReadOnlySet<int>? syncedRepoIds = null,
-        string? runId = null)
+        string? runId = null,
+        bool restorePackages = true)
     {
         try
         {
@@ -212,7 +213,8 @@ public sealed partial class WorkspaceRepositories
                     job.ToOperationProgress(),
                     syncedRepoIds: syncedRepoIds,
                     cancellationToken: ct,
-                    runId: runId));
+                    runId: runId,
+                    restorePackages: restorePackages));
             ApplyPushResult(repoIds, result);
         }
         catch (OperationCanceledException)

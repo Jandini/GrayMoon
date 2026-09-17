@@ -21,7 +21,8 @@ public sealed class PushOrchestrator(
         Action? onAppSideComplete = null,
         IReadOnlySet<int>? syncedRepoIds = null,
         CancellationToken cancellationToken = default,
-        string? runId = null)
+        string? runId = null,
+        bool restorePackages = true)
     {
         logger.LogInformation(
             "[PushOrchestrator {RunId}] Workspace {WorkspaceId}: starting push. Mode={Mode}, RepoCount={RepoCount}, RequiredPackages={RequiredPackages}",
@@ -55,7 +56,8 @@ public sealed class PushOrchestrator(
                     packageRegistriesAlreadySynced: requiredPackageIds.Count > 0,
                     syncedRepoIds: syncedRepoIds,
                     cancellationToken: cancellationToken,
-                    runId: runId);
+                    runId: runId,
+                    restorePackages: restorePackages);
             }
             else
             {

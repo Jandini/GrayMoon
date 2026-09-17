@@ -48,7 +48,8 @@ public sealed class WorkspacePushOperations(
         IProgress<OperationProgress>? progress = null,
         IReadOnlySet<int>? syncedRepoIds = null,
         CancellationToken cancellationToken = default,
-        string? runId = null)
+        string? runId = null,
+        bool restorePackages = true)
         => pushHandler.RunPushWithDependenciesAsync(
             workspaceId,
             repositoryIds,
@@ -57,7 +58,8 @@ public sealed class WorkspacePushOperations(
             progress,
             syncedRepoIds: syncedRepoIds,
             cancellationToken: cancellationToken,
-            runId: runId);
+            runId: runId,
+            restorePackages: restorePackages);
 
     public async Task<OperationResult> PushPendingAsync(
         int workspaceId,
