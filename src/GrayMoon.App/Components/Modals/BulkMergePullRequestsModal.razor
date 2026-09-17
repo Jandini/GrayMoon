@@ -6,8 +6,11 @@
         z-index drops below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while
         IsRunning so that overlay (with the live command terminal) covers the dialog for the merge and
         optional sync-to-default - without unmounting the dialog, which would look like it closed and reopened.
+        IsCoveredByOverlay is the same drop for a job started by the drill-in single-PR dialog (stacked on top
+        of this one) - kept separate from IsRunning so it never touches IsCompletedView/the footer-mode
+        switches below, which must keep reflecting this dialog's own batch-run state, not the drill-in dialog's.
     *@
-    <div class="modal show d-block bulk-merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @(IsRunning ? 50 : 1074);"
+    <div class="modal show d-block bulk-merge-pr-modal-container" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: @((IsRunning || IsCoveredByOverlay) ? 50 : 1074);"
          @onkeydown="HandleKeyDown"
          @ref="_modalElement">
         <div class="modal-dialog modal-dialog-centered bulk-merge-pr-modal-dialog">
@@ -171,6 +174,8 @@
     [Parameter] public bool SyncToDefaultAfterMerge { get; set; }
     [Parameter] public EventCallback<bool> SyncToDefaultAfterMergeChanged { get; set; }
     [Parameter] public bool IsRunning { get; set; }
+    /// <summary>True while a job started by the drill-in single-PR dialog (stacked on top of this one) is running. Only affects the z-index style (see the comment above the outer div) - never <see cref="IsCompletedView"/> or the footer-mode checks, which must stay driven by this dialog's own <see cref="IsRunning"/>/<see cref="HasRun"/> state.</summary>
+    [Parameter] public bool IsCoveredByOverlay { get; set; }
     [Parameter] public bool HasRun { get; set; }
     [Parameter] public EventCallback OnMerge { get; set; }
     [Parameter] public EventCallback OnRetryFailed { get; set; }
@@ -351,6 +356,7 @@
         BulkMergeRowStatus.Failed => row.ErrorMessage ?? "The merge could not be completed.",
         BulkMergeRowStatus.SyncFailed => $"Merged, but sync to default failed: {row.ErrorMessage}",
         BulkMergeRowStatus.Skipped => "Skipped",
+        BulkMergeRowStatus.Closed => "Closed without merging",
         _ => string.Empty
     };
 
