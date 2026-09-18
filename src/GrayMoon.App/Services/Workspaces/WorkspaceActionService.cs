@@ -28,13 +28,12 @@ public sealed class WorkspaceActionService(
         int workspaceRepositoryId,
         GitHubRepositoryEntry repository,
         string branch,
-        bool excludeAiWorkflows = false,
         CancellationToken cancellationToken = default)
     {
         if (InFlightFetches.TryGetValue(workspaceRepositoryId, out var existing) && !existing.IsCompleted)
             return existing;
 
-        var fetchTask = FetchAndPersistCoreAsync(workspaceRepositoryId, repository, branch, excludeAiWorkflows, cancellationToken);
+        var fetchTask = FetchAndPersistCoreAsync(workspaceRepositoryId, repository, branch, cancellationToken);
         InFlightFetches[workspaceRepositoryId] = fetchTask;
         return AwaitAndClearInFlightAsync(workspaceRepositoryId, fetchTask);
     }
@@ -57,10 +56,9 @@ public sealed class WorkspaceActionService(
         int workspaceRepositoryId,
         GitHubRepositoryEntry repository,
         string branch,
-        bool excludeAiWorkflows,
         CancellationToken cancellationToken)
     {
-        var workflows = await gitHubActionsService.GetWorkflowStatusesForBranchAsync(repository, branch, excludeAiWorkflows, cancellationToken);
+        var workflows = await gitHubActionsService.GetWorkflowStatusesForBranchAsync(repository, branch, cancellationToken);
         if (workflows == null)
             return null;
 

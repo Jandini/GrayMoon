@@ -201,22 +201,16 @@ public sealed partial class WorkspaceActions
             await using var scope = ServiceScopeFactory.CreateAsyncScope();
             var actionService = scope.ServiceProvider.GetRequiredService<WorkspaceActionService>();
 
-            var excludeAiWorkflows = workspace?.ExcludeAiWorkflows == true;
             var list = await actionService.FetchAndPersistAsync(
                 row.Link.WorkspaceRepositoryId,
                 row.Repo,
                 row.Link.BranchName!,
-                excludeAiWorkflows,
                 cancellationToken);
 
             if (!cancellationToken.IsCancellationRequested && list != null)
             {
-                var visibleWorkflows = workspace?.ExcludeAiWorkflows == true
-                    ? list.Where(w => !IsAiWorkflow(w)).ToList()
-                    : list.ToList();
-
-                row.WorkflowLines = visibleWorkflows.Count > 0
-                    ? visibleWorkflows.Select(w => new WorkflowActionLine { Action = w }).ToList()
+                row.WorkflowLines = list.Count > 0
+                    ? list.Select(w => new WorkflowActionLine { Action = w }).ToList()
                     : [new WorkflowActionLine()];
                 ApplyActionLatches(row);
                 row.IsVerified = true;

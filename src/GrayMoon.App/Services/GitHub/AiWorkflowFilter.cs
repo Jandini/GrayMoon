@@ -1,9 +1,8 @@
 namespace GrayMoon.App.Services.GitHub;
 
 /// <summary>
-/// Shared "is this an AI-driven workflow" predicate used both to decide what to display
-/// (WorkspaceActions) and what to fetch from GitHub in the first place (GitHubActionsService),
-/// so hiding AI workflows also skips the per-workflow GitHub API calls made for them.
+/// Shared "is this an AI-driven workflow" predicate used by WorkspaceActions to count the AI badge
+/// and to hide those workflows from the grid and status chips while the badge is off.
 /// Case-insensitive match on the GitHub-reported workflow name/path only - never reads workflow YAML file contents.
 /// </summary>
 public static class AiWorkflowFilter
