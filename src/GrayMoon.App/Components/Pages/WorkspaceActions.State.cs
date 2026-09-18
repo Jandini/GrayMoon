@@ -108,41 +108,37 @@ public sealed partial class WorkspaceActions
         None
     }
 
+    /// <summary>False (default) keeps AI workflows in memory for <see cref="AiWorkflowCount"/> but out of the grid and status chips.</summary>
+    internal bool IncludeAiWorkflows => workspace?.ExcludeAiWorkflows != true;
+
     internal bool HasFailedRows => rows.Any(row =>
         row.WorkflowLines.Any(line =>
-            IsLineFailedForBranch(row, line)));
+            IsLineIncludedWhenAiFiltered(line) && IsLineFailedForBranch(row, line)));
 
     /// <summary>True when at least one failed workflow (anywhere in the grid) also supports workflow_dispatch, so the bulk "Run again" option has something to act on.</summary>
     internal bool HasFailedRowsSupportingRunAgain => rows.Any(row =>
-        row.WorkflowLines.Any(line => CanRunAgain(row, line)));
+        row.WorkflowLines.Any(line => IsLineIncludedWhenAiFiltered(line) && CanRunAgain(row, line)));
 
     internal int ErrorCount => rows.Count(r => !string.IsNullOrWhiteSpace(r.ErrorMessage));
 
     internal int FailedCount => rows.Sum(row => row.WorkflowLines.Count(line =>
-        string.IsNullOrWhiteSpace(row.ErrorMessage) && IsLineFailedForBranch(row, line)));
+        CountsTowardStatus(row, line) && IsLineFailedForBranch(row, line)));
 
     internal int RunningCount => rows.Sum(row => row.WorkflowLines.Count(line =>
-        string.IsNullOrWhiteSpace(row.ErrorMessage) && IsLineRunningForBranch(row, line)));
+        CountsTowardStatus(row, line) && IsLineRunningForBranch(row, line)));
 
     internal int AbortedCount => rows.Sum(row => row.WorkflowLines.Count(line =>
-        string.IsNullOrWhiteSpace(row.ErrorMessage) && IsLineAbortedForBranch(row, line)));
+        CountsTowardStatus(row, line) && IsLineAbortedForBranch(row, line)));
 
     internal int SuccessCount => rows.Sum(row => row.WorkflowLines.Count(line =>
-        string.IsNullOrWhiteSpace(row.ErrorMessage) && IsLineSuccessForBranch(row, line)));
+        CountsTowardStatus(row, line) && IsLineSuccessForBranch(row, line)));
 
     internal int NoneCount => rows.Sum(row => row.WorkflowLines.Count(line =>
-        string.IsNullOrWhiteSpace(row.ErrorMessage) && IsLineNoneForBranch(row, line)));
+        CountsTowardStatus(row, line) && IsLineNoneForBranch(row, line)));
 
-    /// <summary>
-    /// Count of AI-driven workflow lines currently known to the grid. While <see cref="Workspace.ExcludeAiWorkflows"/>
-    /// is on, AI workflows are dropped before fetch/persist (see GitHubActionsService), so this reads 0 shortly
-    /// after the next refresh rather than tracking a live count of workflows that are no longer being pulled.
-    /// </summary>
+    /// <summary>Count of AI-driven workflow lines pulled for the workspace. Shown on the AI badge even when that badge is off.</summary>
     internal int AiWorkflowCount => rows.Sum(row => row.WorkflowLines.Count(line =>
         string.IsNullOrWhiteSpace(row.ErrorMessage) && IsAiWorkflow(line.Action)));
-
-    /// <summary>True when at least one workflow line (any status) exists anywhere in the grid. Gates the "ai" chip only - unlike the status chips it is meant to show even at a count of 0, but only for a workspace that actually has GitHub Actions workflows at all.</summary>
-    internal bool HasAnyWorkflowLines => ErrorCount + FailedCount + AbortedCount + RunningCount + SuccessCount + NoneCount > 0;
 
     internal string RerunAllOverlayMessage =>
         _rerunCompleted == 0

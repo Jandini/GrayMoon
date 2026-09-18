@@ -100,13 +100,13 @@
                         }
                     </span>
                 }
-                @if (!isLoading && HasAnyWorkflowLines)
+                @if (!isLoading && AiWorkflowCount > 0)
                 {
                     <button type="button"
-                            class="gha-status-chip workspace-actions__ai-toggle @((workspace?.ExcludeAiWorkflows ?? true) ? "gha-status-chip--on" : "gha-status-chip--off")"
-                            aria-pressed="@((workspace?.ExcludeAiWorkflows ?? true) ? "true" : "false")"
-                            aria-label="Hide AI-driven workflows"
-                            title="@((workspace?.ExcludeAiWorkflows ?? true) ? "AI workflows are hidden - click to show" : "AI workflows are shown - click to hide")"
+                            class="gha-status-chip workspace-actions__ai-toggle @(IncludeAiWorkflows ? "gha-status-chip--on" : "gha-status-chip--off")"
+                            aria-pressed="@IncludeAiWorkflows"
+                            aria-label="Include AI-driven workflows"
+                            title="@(IncludeAiWorkflows ? "AI workflows are included - click to hide" : "AI workflows are hidden - click to include")"
                             disabled="@(isLoading || _isTogglingAiFilter)"
                             @onclick="ToggleExcludeAiWorkflowsAsync">
                         <span class="gha-status-chip__label action-badge action-badge-ai">ai</span>

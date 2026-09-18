@@ -13,7 +13,7 @@ public sealed partial class WorkspaceActions
             _ => ex.Message
         };
 
-    internal static int GetStatusSortOrder(WorkspaceActionRow row)
+    internal int GetStatusSortOrder(WorkspaceActionRow row)
     {
         if (!string.IsNullOrWhiteSpace(row.ErrorMessage)) return 0;
         var status = GetEffectiveStatusForSort(row);
@@ -27,12 +27,14 @@ public sealed partial class WorkspaceActions
         };
     }
 
-    private static string? GetEffectiveStatusForSort(WorkspaceActionRow row)
+    private string? GetEffectiveStatusForSort(WorkspaceActionRow row)
     {
         var order = 5;
         string? worst = null;
         foreach (var line in row.WorkflowLines)
         {
+            if (!IsLineIncludedWhenAiFiltered(line))
+                continue;
             var a = line.Action;
             if (a == null || !string.Equals(a.BranchName, row.Link.BranchName, StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -82,6 +84,16 @@ public sealed partial class WorkspaceActions
     /// <summary>Case-insensitive match on the GitHub-reported workflow name/path only - never reads workflow YAML file contents.</summary>
     internal static bool IsAiWorkflow(ActionStatusInfo? action) =>
         action != null && GrayMoon.App.Services.GitHub.AiWorkflowFilter.IsAiWorkflow(action.WorkflowName, action.WorkflowPath);
+
+    /// <summary>AI workflows stay in <see cref="WorkspaceActionRow.WorkflowLines"/> for the badge count; this decides whether they are in the grid, status chips, sort, and bulk actions.</summary>
+    internal static bool IsLineIncludedWhenAiFiltered(WorkflowActionLine line, bool includeAiWorkflows) =>
+        includeAiWorkflows || !IsAiWorkflow(line.Action);
+
+    internal bool IsLineIncludedWhenAiFiltered(WorkflowActionLine line) =>
+        IsLineIncludedWhenAiFiltered(line, IncludeAiWorkflows);
+
+    private bool CountsTowardStatus(WorkspaceActionRow row, WorkflowActionLine line) =>
+        string.IsNullOrWhiteSpace(row.ErrorMessage) && IsLineIncludedWhenAiFiltered(line);
 
     internal static bool CanRerun(WorkspaceActionRow row, WorkflowActionLine line) =>
         IsLineFailedForBranch(row, line) && (line.Action?.RunId ?? 0) > 0;

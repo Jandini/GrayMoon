@@ -96,4 +96,28 @@ public sealed class WorkspaceActionsGatingTests
         var action = new ActionStatusInfo { WorkflowName = "CI", WorkflowPath = ".github/workflows/build-app.yml" };
         Assert.False(WorkspaceActions.IsAiWorkflow(action));
     }
+
+    [Fact]
+    public void IsLineIncludedWhenAiFiltered_HidesAiWhenBadgeIsOff()
+    {
+        var ai = new WorkspaceActions.WorkflowActionLine
+        {
+            Action = new ActionStatusInfo { WorkflowName = "Copilot Code Review" }
+        };
+        var ci = new WorkspaceActions.WorkflowActionLine
+        {
+            Action = new ActionStatusInfo { WorkflowName = "CI" }
+        };
+
+        Assert.False(WorkspaceActions.IsLineIncludedWhenAiFiltered(ai, includeAiWorkflows: false));
+        Assert.True(WorkspaceActions.IsLineIncludedWhenAiFiltered(ci, includeAiWorkflows: false));
+        Assert.True(WorkspaceActions.IsLineIncludedWhenAiFiltered(ai, includeAiWorkflows: true));
+        Assert.True(WorkspaceActions.IsLineIncludedWhenAiFiltered(ci, includeAiWorkflows: true));
+    }
+
+    [Fact]
+    public void IsLineIncludedWhenAiFiltered_PlaceholderLineIsIncluded()
+    {
+        Assert.True(WorkspaceActions.IsLineIncludedWhenAiFiltered(new WorkspaceActions.WorkflowActionLine(), includeAiWorkflows: false));
+    }
 }

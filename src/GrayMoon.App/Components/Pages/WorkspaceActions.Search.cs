@@ -87,7 +87,6 @@ public sealed partial class WorkspaceActions
 
             await WorkspaceRepository.UpdateExcludeAiWorkflowsAsync(WorkspaceId, exclude);
             workspace.ExcludeAiWorkflows = exclude;
-            await LoadWorkspaceAsync();
         }
         finally
         {
@@ -103,21 +102,30 @@ public sealed partial class WorkspaceActions
         return [new WorkflowActionLine()];
     }
 
-    /// <summary>Workflow lines to render after applying status filter toggles (repo errors: all lines or none).</summary>
+    /// <summary>Workflow lines to render after applying the AI include toggle and status filter toggles (repo errors: all remaining lines or a placeholder).</summary>
     internal IEnumerable<WorkflowActionLine> LinesForGrid(WorkspaceActionRow row)
     {
         if (!string.IsNullOrWhiteSpace(row.ErrorMessage))
         {
             if (!_showErrors)
                 yield break;
+            var any = false;
             foreach (var line in LinesForDisplay(row))
+            {
+                if (!IsLineIncludedWhenAiFiltered(line))
+                    continue;
+                any = true;
                 yield return line;
+            }
+
+            if (!any)
+                yield return new WorkflowActionLine();
             yield break;
         }
 
         foreach (var line in LinesForDisplay(row))
         {
-            if (IsBucketVisible(GetLineFilterBucket(row, line)))
+            if (IsLineIncludedWhenAiFiltered(line) && IsBucketVisible(GetLineFilterBucket(row, line)))
                 yield return line;
         }
     }

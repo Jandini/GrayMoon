@@ -78,7 +78,7 @@ public sealed partial class WorkspaceActions
         {
             foreach (var line in row.WorkflowLines)
             {
-                if (IsLineFailedForBranch(row, line) && (line.Action?.RunId ?? 0) > 0)
+                if (IsLineIncludedWhenAiFiltered(line) && IsLineFailedForBranch(row, line) && (line.Action?.RunId ?? 0) > 0)
                     failedPairs.Add((row, line));
             }
         }
@@ -156,7 +156,7 @@ public sealed partial class WorkspaceActions
         {
             foreach (var line in row.WorkflowLines)
             {
-                if (IsLineFailedForBranch(row, line) && (line.Action?.RunId ?? 0) > 0)
+                if (IsLineIncludedWhenAiFiltered(line) && IsLineFailedForBranch(row, line) && (line.Action?.RunId ?? 0) > 0)
                     failedPairs.Add((row, line));
             }
         }
@@ -235,7 +235,7 @@ public sealed partial class WorkspaceActions
         {
             foreach (var line in row.WorkflowLines)
             {
-                if (CanRunAgain(row, line))
+                if (IsLineIncludedWhenAiFiltered(line) && CanRunAgain(row, line))
                     eligiblePairs.Add((row, line));
             }
         }

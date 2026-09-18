@@ -34,13 +34,7 @@ public sealed partial class WorkspaceActions
                     List<WorkflowActionLine> workflowLines;
                     if (branchMatches && persisted != null && persisted.Workflows.Count > 0)
                     {
-                        var visibleWorkflows = workspace.ExcludeAiWorkflows
-                            ? persisted.Workflows.Where(w => !IsAiWorkflow(w)).ToList()
-                            : persisted.Workflows;
-
-                        workflowLines = visibleWorkflows.Count > 0
-                            ? visibleWorkflows.Select(w => new WorkflowActionLine { Action = w }).ToList()
-                            : [new WorkflowActionLine()];
+                        workflowLines = persisted.Workflows.Select(w => new WorkflowActionLine { Action = w }).ToList();
                     }
                     else
                     {
