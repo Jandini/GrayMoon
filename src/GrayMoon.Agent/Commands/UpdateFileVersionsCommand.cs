@@ -1,9 +1,8 @@
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Jobs.Requests;
 using GrayMoon.Agent.Jobs.Response;
-
+using GrayMoon.Common.FileVersions;
 namespace GrayMoon.Agent.Commands;
-
 public sealed class UpdateFileVersionsCommand(IGitService git) : ICommandHandler<UpdateFileVersionsRequest, UpdateFileVersionsResponse>
 {
     public async Task<UpdateFileVersionsResponse> ExecuteAsync(UpdateFileVersionsRequest request, CancellationToken cancellationToken = default)
@@ -12,87 +11,48 @@ public sealed class UpdateFileVersionsCommand(IGitService git) : ICommandHandler
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
         var filePath = request.FilePath ?? throw new ArgumentException("filePath required");
         var versionPattern = request.VersionPattern;
-        var repoVersions = request.RepoVersions ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
+        var tokenValues = request.TokenValues ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (string.IsNullOrWhiteSpace(versionPattern))
             return new UpdateFileVersionsResponse { UpdatedCount = 0 };
-
         var workspacePath = git.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = Path.Combine(workspacePath, repositoryName);
         var fullFilePath = Path.Combine(repoPath, filePath.Replace('/', Path.DirectorySeparatorChar));
-
         if (!File.Exists(fullFilePath))
             return new UpdateFileVersionsResponse { UpdatedCount = 0, ErrorMessage = $"File not found: {filePath}" };
-
-        // Parse pattern lines: each is PREFIX={reponame}SUFFIX - extract (prefix, repoName, suffix) tuples
-        var patternEntries = ParsePatternLines(versionPattern);
+        var patternEntries = FileVersionTokenParser.ParsePatternLines(versionPattern);
         if (patternEntries.Count == 0)
             return new UpdateFileVersionsResponse { UpdatedCount = 0 };
-
         var fileLines = await File.ReadAllLinesAsync(fullFilePath, cancellationToken);
         var updatedCount = 0;
         var modified = false;
-
         for (var i = 0; i < fileLines.Length; i++)
         {
             var line = fileLines[i];
             var (leadingWhitespace, contentStart) = GetLeadingWhitespace(line);
             var trimmedLine = contentStart >= line.Length ? "" : line[contentStart..];
-
-            foreach (var (prefix, repoName, suffix) in patternEntries)
+            foreach (var entry in patternEntries)
             {
+                var prefix = entry.Prefix;
+                var suffix = entry.Suffix;
+                var tokenKey = entry.Token.TokenKey;
                 if (!trimmedLine.StartsWith(prefix, StringComparison.Ordinal)) continue;
-                if (!repoVersions.TryGetValue(repoName, out var version)) continue;
-                // Require line to end with suffix (if any) so we only replace the token value and preserve the rest
+                if (!tokenValues.TryGetValue(tokenKey, out var value)) continue;
                 if (suffix.Length > 0 && (trimmedLine.Length < prefix.Length + suffix.Length || !trimmedLine.EndsWith(suffix, StringComparison.Ordinal)))
                     continue;
-
-                var newLine = leadingWhitespace + prefix + version + suffix;
+                var newLine = leadingWhitespace + prefix + value + suffix;
                 if (newLine != line)
                 {
                     fileLines[i] = newLine;
                     updatedCount++;
                     modified = true;
                 }
-                break; // only one pattern can match per line
+                break;
             }
         }
-
         if (modified)
             await File.WriteAllLinesAsync(fullFilePath, fileLines, cancellationToken);
-
         return new UpdateFileVersionsResponse { UpdatedCount = updatedCount };
     }
-
-    /// <summary>
-    /// Parses pattern text into (prefix, repoName, suffix) tuples.
-    /// Each non-empty line must contain exactly one {token}; the prefix is everything before '{',
-    /// the suffix is everything after '}'. Example: "KEY={repo}" → prefix="KEY=", repoName="repo", suffix="".
-    /// Example: "Version=\"{repo}\" />" → prefix="Version=\"", repoName="repo", suffix="\" />".
-    /// </summary>
-    private static List<(string Prefix, string RepoName, string Suffix)> ParsePatternLines(string pattern)
-    {
-        var result = new List<(string, string, string)>();
-        foreach (var raw in pattern.Split('\n'))
-        {
-            var line = raw.Trim().TrimEnd('\r');
-            if (string.IsNullOrEmpty(line)) continue;
-
-            var start = line.IndexOf('{');
-            var end = line.IndexOf('}', start >= 0 ? start : 0);
-            if (start < 1 || end <= start) continue; // need at least one char before '{'
-
-            var prefix = line[..start];              // e.g. "KEY=" or "Version=\""
-            var repoName = line[(start + 1)..end];   // e.g. "repo"
-            var suffix = end + 1 < line.Length ? line[(end + 1)..] : ""; // e.g. "" or "\" />"
-            if (string.IsNullOrEmpty(prefix) || string.IsNullOrEmpty(repoName)) continue;
-
-            result.Add((prefix, repoName, suffix));
-        }
-        return result;
-    }
-
-    /// <summary>Returns the leading whitespace substring and the index of the first non-whitespace character (or line length if all whitespace).</summary>
     private static (string LeadingWhitespace, int ContentStart) GetLeadingWhitespace(string line)
     {
         var i = 0;

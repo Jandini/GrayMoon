@@ -15,11 +15,11 @@ window.versionPatternEditor = {
         return { atPos: lineStart + atIdx, query: afterAt };
     },
 
-    // Replaces the '@...' fragment at atPos..queryEnd with '{repoName}' and returns { value, caret }.
+    // Replaces the '@...' fragment at atPos..queryEnd with '{@repoName}' and returns { value, caret }.
     // queryEnd is the pre-computed end of the @query text (immune to any default-action mutations).
     insertRepo: function (el, atPos, queryEnd, repoName) {
         const val = el.value;
-        const newToken = '{' + repoName + '}';
+        const newToken = '{@' + repoName + '}';
         const newVal = val.substring(0, atPos) + newToken + val.substring(queryEnd);
         const newCaret = atPos + newToken.length;
         // Write to DOM immediately so Blazor re-render (same value) causes no visible flicker
@@ -38,7 +38,8 @@ window.versionPatternEditor = {
         el.addEventListener('keydown', function (e) {
             if (el.dataset.autocompleteActive !== 'true') return;
             if (e.key === 'Enter' || e.key === 'Tab' ||
-                e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
+                e.key === 'Escape') {
                 e.preventDefault();
             }
         }, true /* capture - fires before Blazor's listener and before browser default */);

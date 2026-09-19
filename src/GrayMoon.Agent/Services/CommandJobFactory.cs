@@ -90,6 +90,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid SelfUpdate args"),
             AgentHubMethods.CheckFileVersions => JsonSerializer.Deserialize<CheckFileVersionsRequest>(json, options)
                 ?? throw new ArgumentException("Invalid CheckFileVersions args"),
+            AgentHubMethods.GetHeadCommits => JsonSerializer.Deserialize<GetHeadCommitsRequest>(json, options)
+                ?? throw new ArgumentException("Invalid GetHeadCommits args"),
             AgentHubMethods.ResolveGeneratedPackageReferences => JsonSerializer.Deserialize<ResolveGeneratedPackageReferencesRequest>(json, options)
                 ?? throw new ArgumentException("Invalid ResolveGeneratedPackageReferences args"),
             "UpdateBranchFromDefault" => JsonSerializer.Deserialize<UpdateBranchFromDefaultRequest>(json, options)

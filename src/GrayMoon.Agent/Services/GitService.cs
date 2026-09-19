@@ -186,6 +186,19 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         return string.IsNullOrWhiteSpace(name) ? null : name;
     }
 
+    public async Task<string?> GetHeadCommitAsync(string repoPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return null;
+
+        var (exitCode, stdout, _) = await runner.RunAsync("git", ["rev-parse", "HEAD"], repoPath, null, ct);
+        if (exitCode != 0)
+            return null;
+
+        var sha = (stdout ?? "").Trim();
+        return string.IsNullOrWhiteSpace(sha) ? null : sha;
+    }
+
     public async Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))

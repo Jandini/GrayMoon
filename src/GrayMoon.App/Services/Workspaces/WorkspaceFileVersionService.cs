@@ -6,6 +6,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
+using GrayMoon.Common.FileVersions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
@@ -74,30 +75,24 @@ public sealed class WorkspaceFileVersionService(
             if (selectedRepoNames.Count == 0) return (0, 0, "No selected repositories.", []);
         }
 
-        // Collect all unique repo-name tokens used across all patterns
-        var repoNamesInUse = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var patternsForResolve = new List<string>();
         foreach (var cfg in configs)
         {
-            foreach (var token in ExtractTokens(cfg.VersionPattern))
-                repoNamesInUse.Add(token);
-        }
-        if (selectedRepoNames != null && filterPatternTokensToSelectedRepositories)
-            repoNamesInUse.IntersectWith(selectedRepoNames);
+            if (cfg.File?.Repository == null || cfg.File.IsMissingOnDisk == true) continue;
+            if (selectedRepositoryIds != null && selectedRepositoryIds.Count > 0 && !selectedRepositoryIds.Contains(cfg.File.RepositoryId))
+                continue;
 
-        // Build repo name -> version from workspace links (DB state). No GitVersion is run.
-        var repoVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var link in workspace.Repositories)
-        {
-            if (link.Repository == null || string.IsNullOrEmpty(link.GitVersion)) continue;
-            var name = link.Repository.RepositoryName;
-            if (!repoNamesInUse.Contains(name)) continue;
-            repoVersions[name] = link.GitVersion;
+            var pattern = cfg.VersionPattern;
+            if (selectedRepoNames != null && filterPatternTokensToSelectedRepositories)
+            {
+                pattern = FilterPatternLinesToRepos(cfg.VersionPattern, selectedRepoNames);
+                if (string.IsNullOrWhiteSpace(pattern)) continue;
+            }
+            patternsForResolve.Add(pattern);
         }
-        foreach (var repoName in repoNamesInUse)
-        {
-            if (!repoVersions.ContainsKey(repoName))
-                logger.LogWarning("No version in workspace for repo {RepoName}; version pattern tokens for this repo will be skipped.", repoName);
-        }
+
+        var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var tokenValues = await ResolveTokenValuesAsync(workspace, workspaceRoot, patternsForResolve, cancellationToken);
 
         // Update each configured file
         var totalUpdated = 0;
@@ -125,15 +120,14 @@ public sealed class WorkspaceFileVersionService(
 
             try
             {
-                var workspaceRoot2 = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
                 var resp = await agentBridge.SendCommandAsync("UpdateFileVersions", new
                 {
                     workspaceName = workspace.Name,
                     repositoryName = file.Repository.RepositoryName,
                     filePath = file.FilePath,
                     versionPattern = versionPatternToSend,
-                    repoVersions,
-                    workspaceRoot = workspaceRoot2
+                    tokenValues,
+                    workspaceRoot
                 }, cancellationToken);
 
                 if (resp.Success && resp.Data != null)
@@ -172,21 +166,9 @@ public sealed class WorkspaceFileVersionService(
         return (totalUpdated, totalFailed, null, updatedFiles);
     }
 
-    /// <summary>Extracts all {token} names from a version pattern string.</summary>
-    public static IReadOnlyList<string> ExtractTokens(string? pattern)
-    {
-        if (string.IsNullOrWhiteSpace(pattern)) return [];
-        var tokens = new List<string>();
-        foreach (var raw in pattern.Split('\n'))
-        {
-            var line = raw.Trim().TrimEnd('\r');
-            var start = line.IndexOf('{');
-            var end = start >= 0 ? line.IndexOf('}', start) : -1;
-            if (start >= 0 && end > start)
-                tokens.Add(line[(start + 1)..end]);
-        }
-        return tokens;
-    }
+    /// <summary>Extracts structured file-version tokens from a version pattern string.</summary>
+    public static IReadOnlyList<FileVersionToken> ExtractTokens(string? pattern)
+        => FileVersionTokenParser.ExtractTokens(pattern);
 
     /// <summary>Removes leading whitespace from each line of the version pattern. Use when saving so stored patterns match without requiring leading spaces.</summary>
     public static string NormalizePatternLeadingWhitespace(string? pattern)
@@ -198,7 +180,10 @@ public sealed class WorkspaceFileVersionService(
         return string.Join("\n", lines);
     }
 
-    /// <summary>Returns version pattern with only lines whose {repositoryName} token is in <paramref name="allowedRepoNames"/>.</summary>
+    /// <summary>
+    /// Returns version pattern with only lines whose token's <see cref="FileVersionToken.RepositoryName"/>
+    /// is in <paramref name="allowedRepoNames"/> (selectors such as <c>:commit</c> do not affect matching).
+    /// </summary>
     public static string FilterPatternLinesToRepos(string? versionPattern, IReadOnlySet<string> allowedRepoNames)
     {
         if (string.IsNullOrWhiteSpace(versionPattern) || allowedRepoNames.Count == 0) return string.Empty;
@@ -210,11 +195,130 @@ public sealed class WorkspaceFileVersionService(
             var start = line.IndexOf('{');
             var end = start >= 0 ? line.IndexOf('}', start) : -1;
             if (start < 0 || end <= start) continue;
-            var token = line[(start + 1)..end];
-            if (string.IsNullOrEmpty(token) || !allowedRepoNames.Contains(token)) continue;
+            var inner = line[(start + 1)..end];
+            if (!FileVersionTokenParser.TryParse(inner, out var token, out _) || token == null) continue;
+            if (!allowedRepoNames.Contains(token.RepositoryName)) continue;
             lines.Add(line);
         }
         return string.Join("\n", lines);
+    }
+
+    /// <summary>
+    /// Resolves all token values for the given patterns: GitVersion and branch from workspace links,
+    /// commit SHAs via one batched Agent <c>GetHeadCommits</c> call for repositories that need them.
+    /// </summary>
+    private async Task<Dictionary<string, string>> ResolveTokenValuesAsync(
+        Workspace workspace,
+        string workspaceRoot,
+        IEnumerable<string?> patterns,
+        CancellationToken cancellationToken)
+    {
+        var tokensByKey = new Dictionary<string, FileVersionToken>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pattern in patterns)
+        {
+            foreach (var token in FileVersionTokenParser.ExtractTokens(pattern))
+                tokensByKey.TryAdd(token.TokenKey, token);
+        }
+
+        var linksByName = new Dictionary<string, WorkspaceRepositoryLink>(StringComparer.OrdinalIgnoreCase);
+        foreach (var link in workspace.Repositories)
+        {
+            if (link.Repository == null || string.IsNullOrEmpty(link.Repository.RepositoryName)) continue;
+            linksByName.TryAdd(link.Repository.RepositoryName, link);
+        }
+
+        var tokenValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var commitRepos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var token in tokensByKey.Values)
+        {
+            if (!linksByName.TryGetValue(token.RepositoryName, out var link))
+            {
+                logger.LogWarning(
+                    "No workspace repository named {RepoName}; file-version token {TokenKey} will be skipped.",
+                    token.RepositoryName, token.TokenKey);
+                continue;
+            }
+
+            switch (token.Kind)
+            {
+                case FileVersionTokenKind.GitVersion:
+                    if (!string.IsNullOrEmpty(link.GitVersion))
+                        tokenValues[token.TokenKey] = link.GitVersion;
+                    else
+                        logger.LogWarning(
+                            "No GitVersion in workspace for repo {RepoName}; token {TokenKey} will be skipped.",
+                            token.RepositoryName, token.TokenKey);
+                    break;
+
+                case FileVersionTokenKind.Branch:
+                    if (!string.IsNullOrEmpty(link.BranchName))
+                        tokenValues[token.TokenKey] = link.BranchName;
+                    else
+                        logger.LogWarning(
+                            "No branch name in workspace for repo {RepoName} (detached HEAD or unset); token {TokenKey} will be skipped and the existing file value left unchanged.",
+                            token.RepositoryName, token.TokenKey);
+                    break;
+
+                case FileVersionTokenKind.Commit:
+                    commitRepos.Add(token.RepositoryName);
+                    break;
+            }
+        }
+
+        if (commitRepos.Count > 0 && agentBridge.IsAgentConnected)
+        {
+            try
+            {
+                var resp = await agentBridge.SendCommandAsync(AgentHubMethods.GetHeadCommits, new
+                {
+                    workspaceName = workspace.Name,
+                    workspaceRoot,
+                    repositoryNames = commitRepos.ToList()
+                }, cancellationToken);
+
+                if (resp.Success && resp.Data != null)
+                {
+                    var result = AgentResponseJson.DeserializeAgentResponse<GetHeadCommitsAgentResponse>(resp.Data);
+                    var commits = new Dictionary<string, string>(
+                        result?.Commits ?? [],
+                        StringComparer.OrdinalIgnoreCase);
+                    foreach (var repoName in commitRepos)
+                    {
+                        var tokenKey = new FileVersionToken(repoName, FileVersionTokenKind.Commit).TokenKey;
+                        if (commits.TryGetValue(repoName, out var sha) && !string.IsNullOrWhiteSpace(sha))
+                            tokenValues[tokenKey] = sha;
+                        else
+                            logger.LogWarning(
+                                "Could not resolve HEAD commit for repo {RepoName}; token {TokenKey} will be skipped and the existing file value left unchanged.",
+                                repoName, tokenKey);
+                    }
+                }
+                else
+                {
+                    logger.LogWarning(
+                        "GetHeadCommits failed for workspace {WorkspaceName}: {Error}. Commit tokens will be skipped.",
+                        workspace.Name, resp.Error);
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "GetHeadCommits failed for workspace {WorkspaceName}; commit tokens will be skipped.", workspace.Name);
+            }
+        }
+        else if (commitRepos.Count > 0)
+        {
+            logger.LogWarning("Agent is not connected; skipping {Count} :commit token(s).", commitRepos.Count);
+        }
+
+        return tokenValues;
+    }
+
+    private sealed class GetHeadCommitsAgentResponse
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("commits")]
+        public Dictionary<string, string>? Commits { get; set; }
     }
 
     /// <summary>
@@ -313,32 +417,32 @@ public sealed class WorkspaceFileVersionService(
             }
         }
 
-        var repoVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var link in workspace.Repositories)
-        {
-            if (link.Repository == null || string.IsNullOrEmpty(link.GitVersion)) continue;
-            repoVersions[link.Repository.RepositoryName] = link.GitVersion;
-        }
+        var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var patterns = configs
+            .Where(c => c.File?.Repository != null)
+            .Select(c => c.VersionPattern)
+            .ToList();
+        var tokenValues = await ResolveTokenValuesAsync(workspace, workspaceRoot, patterns, cancellationToken);
 
         var items = new List<object>();
         foreach (var cfg in configs)
         {
             if (cfg.File?.Repository == null) continue;
             var tokens = ExtractTokens(cfg.VersionPattern);
-            var knownVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var knownValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var token in tokens)
             {
-                if (repoVersions.TryGetValue(token, out var ver))
-                    knownVersions[token] = ver;
+                if (tokenValues.TryGetValue(token.TokenKey, out var value))
+                    knownValues[token.TokenKey] = value;
             }
-            if (knownVersions.Count == 0) continue;
+            if (knownValues.Count == 0) continue;
 
             items.Add(new
             {
                 repositoryName = cfg.File.Repository.RepositoryName,
                 filePath = cfg.File.FilePath,
                 pattern = cfg.VersionPattern,
-                expectedVersions = knownVersions
+                expectedValues = knownValues
             });
         }
 
@@ -361,8 +465,6 @@ public sealed class WorkspaceFileVersionService(
             logger.LogDebug("CheckAndPersist completed for workspace {WorkspaceId} in {ElapsedMs}ms (no items)", workspaceId, sw.ElapsedMilliseconds);
             return;
         }
-
-        var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
 
         try
         {
@@ -640,12 +742,12 @@ public sealed class WorkspaceFileVersionService(
             var dependentRepoId = cfg.File!.RepositoryId;
             foreach (var token in ExtractTokens(cfg.VersionPattern))
             {
-                if (string.IsNullOrWhiteSpace(token)) continue;
-                if (!nameToRepoId.TryGetValue(token.Trim(), out var referencedRepoId)) continue;
+                if (!nameToRepoId.TryGetValue(token.RepositoryName, out var referencedRepoId)) continue;
                 if (referencedRepoId == dependentRepoId) continue;
                 if (!result.TryGetValue(dependentRepoId, out var set))
                     result[dependentRepoId] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                set.Add(token.Trim());
+                // Deduplicate by repository name, not full token key (branch/commit are the same edge).
+                set.Add(token.RepositoryName);
             }
         }
 
@@ -664,8 +766,7 @@ public sealed class WorkspaceFileVersionService(
             var dependentRepoId = cfg.File!.RepositoryId;
             foreach (var token in ExtractTokens(cfg.VersionPattern))
             {
-                if (string.IsNullOrWhiteSpace(token)) continue;
-                if (nameToRepoId.TryGetValue(token.Trim(), out var referencedRepoId) && referencedRepoId == dependentRepoId)
+                if (nameToRepoId.TryGetValue(token.RepositoryName, out var referencedRepoId) && referencedRepoId == dependentRepoId)
                     result.Add(dependentRepoId);
             }
         }
@@ -751,12 +852,13 @@ public sealed class WorkspaceFileVersionService(
 
             foreach (var token in tokens)
             {
-                if (!repoVersionMap.TryGetValue(token, out var ver) || string.IsNullOrEmpty(ver)) continue;
+                if (token.Kind != FileVersionTokenKind.GitVersion) continue;
+                if (!repoVersionMap.TryGetValue(token.RepositoryName, out var ver) || string.IsNullOrEmpty(ver)) continue;
                 if (!result.TryGetValue(repoId, out var list))
                     result[repoId] = list = [];
                 if (!list.Any(e => string.Equals(e.FileName, fileName, StringComparison.OrdinalIgnoreCase)
-                                   && string.Equals(e.TokenName, token, StringComparison.OrdinalIgnoreCase)))
-                    list.Add((fileName, token, ver));
+                                   && string.Equals(e.TokenName, token.TokenKey, StringComparison.OrdinalIgnoreCase)))
+                    list.Add((fileName, token.TokenKey, ver));
             }
         }
 
@@ -782,10 +884,11 @@ public sealed class WorkspaceFileVersionService(
 
             foreach (var token in tokens)
             {
-                if (!repoVersionMap.TryGetValue(token, out var ver) || string.IsNullOrEmpty(ver)) continue;
+                if (token.Kind != FileVersionTokenKind.GitVersion) continue;
+                if (!repoVersionMap.TryGetValue(token.RepositoryName, out var ver) || string.IsNullOrEmpty(ver)) continue;
                 if (!list.Any(e => string.Equals(e.FileName, fileName, StringComparison.OrdinalIgnoreCase)
-                                   && string.Equals(e.TokenName, token, StringComparison.OrdinalIgnoreCase)))
-                    list.Add((fileName, token, ver));
+                                   && string.Equals(e.TokenName, token.TokenKey, StringComparison.OrdinalIgnoreCase)))
+                    list.Add((fileName, token.TokenKey, ver));
             }
         }
 
@@ -826,7 +929,7 @@ public sealed class WorkspaceFileVersionService(
                         repositoryName,
                         filePath,
                         pattern,
-                        expectedVersions = new Dictionary<string, string>()
+                        expectedValues = new Dictionary<string, string>()
                     }
                 }
             }, cancellationToken);
