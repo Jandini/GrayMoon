@@ -318,6 +318,10 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
             return new GitCommitResult { Success = false, ErrorCode = "EmptyMessage", ErrorMessage = "Commit message is required." };
         }
 
+        logger.LogInformation(
+            "Git commit starting for {RepoPath}: StageAllFirst={StageAllFirst}",
+            repoPath, request.StageAllFirst);
+
         if (request.StageAllFirst)
         {
             var (addExit, addOut, addErr) = await runner.RunAsync("git", ["add", "--all"], repoPath, null, cancellationToken);

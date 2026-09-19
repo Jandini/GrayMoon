@@ -456,6 +456,66 @@ public sealed class GitCliRepositoryGitChangesServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Commit_all_with_one_staged_and_many_unstaged_commits_everything()
+    {
+        _repo.CommitInitial("staged.txt", "s0\n");
+        _repo.WriteFile("a.txt", "a0\n");
+        _repo.WriteFile("b.txt", "b0\n");
+        _repo.RunGit("add", "a.txt", "b.txt", "staged.txt");
+        _repo.RunGit("commit", "-m", "base");
+
+        _repo.WriteFile("staged.txt", "s1\n");
+        _repo.RunGit("add", "staged.txt");
+        _repo.WriteFile("a.txt", "a1\n");
+        _repo.WriteFile("b.txt", "b1\n");
+        _repo.WriteFile("untracked.txt", "u1\n");
+
+        var commitResult = await _service.CommitAsync(
+            _repo.RepositoryPath,
+            new GitCommitOperationRequest("Commit all mixed", StageAllFirst: true),
+            2,
+            CancellationToken.None);
+
+        Assert.True(commitResult.Success);
+        Assert.Empty(commitResult.Snapshot!.Changes);
+        Assert.Equal("s1\n", _repo.ReadFile("staged.txt"));
+        Assert.Equal("a1\n", _repo.ReadFile("a.txt"));
+        Assert.Equal("b1\n", _repo.ReadFile("b.txt"));
+        Assert.Equal("u1\n", _repo.ReadFile("untracked.txt"));
+    }
+
+    [Fact]
+    public async Task Commit_staged_with_one_staged_and_many_unstaged_commits_only_staged()
+    {
+        _repo.CommitInitial("staged.txt", "s0\n");
+        _repo.WriteFile("a.txt", "a0\n");
+        _repo.WriteFile("b.txt", "b0\n");
+        _repo.RunGit("add", "a.txt", "b.txt", "staged.txt");
+        _repo.RunGit("commit", "-m", "base");
+
+        _repo.WriteFile("staged.txt", "s1\n");
+        _repo.RunGit("add", "staged.txt");
+        _repo.WriteFile("a.txt", "a1\n");
+        _repo.WriteFile("b.txt", "b1\n");
+        _repo.WriteFile("untracked.txt", "u1\n");
+
+        var commitResult = await _service.CommitAsync(
+            _repo.RepositoryPath,
+            new GitCommitOperationRequest("Commit staged only", StageAllFirst: false),
+            2,
+            CancellationToken.None);
+
+        Assert.True(commitResult.Success);
+        Assert.NotNull(commitResult.Snapshot);
+        Assert.Contains(commitResult.Snapshot.Changes, c => c.Path == "a.txt");
+        Assert.Contains(commitResult.Snapshot.Changes, c => c.Path == "b.txt");
+        Assert.Contains(commitResult.Snapshot.Changes, c => c.Path == "untracked.txt");
+        Assert.DoesNotContain(commitResult.Snapshot.Changes, c => c.Path == "staged.txt");
+        Assert.Equal("s1\n", _repo.ReadFile("staged.txt"));
+        Assert.Equal("a1\n", _repo.ReadFile("a.txt"));
+    }
+
+    [Fact]
     public async Task Commit_on_unborn_branch_creates_the_first_commit()
     {
         _repo.WriteFile("first.txt", "hello\n");

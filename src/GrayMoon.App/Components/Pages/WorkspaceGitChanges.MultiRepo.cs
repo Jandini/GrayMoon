@@ -53,7 +53,13 @@ public sealed partial class WorkspaceGitChanges
 
     private static readonly IReadOnlySet<string> EmptyPushPackageIds = new HashSet<string>();
 
-    private string CommitButtonTitle => StagedRepositoryCount > 0 ? "Commit Staged" : "Commit All";
+    /// <summary>
+    /// Mode offered/emphasized for the primary commit button on this render. The razor captures this
+    /// into a local at render time so the click handler executes that exact mode even if <c>_view</c>
+    /// mutates before the event runs (TOCTOU).
+    /// </summary>
+    private WorkspaceCommitMode OfferedCommitMode =>
+        WorkspaceCommitModeHelper.ResolveOfferedMode(StagedRepositoryCount > 0);
 
     private bool IsCommitButtonDisabled => IsJobRunning || string.IsNullOrWhiteSpace(_workspaceCommitMessage);
 
@@ -78,8 +84,10 @@ public sealed partial class WorkspaceGitChanges
     /// repositories and run commit hooks, unlike the fast single-file/folder stage/unstage actions.
     /// When <paramref name="pushAfterCommit"/> is true, a push of exactly the repositories that
     /// committed successfully runs immediately afterward, inside the same job/terminal.
+    /// <paramref name="mode"/> must be the value captured when the command was rendered/chosen - never
+    /// recompute from mutable <c>_view</c> here.
     /// </summary>
-    private void CommitWorkspaceAsync(bool stagedOnly, bool pushAfterCommit)
+    private void CommitWorkspaceAsync(WorkspaceCommitMode mode, bool pushAfterCommit)
     {
         if (string.IsNullOrWhiteSpace(_workspaceCommitMessage))
         {
@@ -99,7 +107,7 @@ public sealed partial class WorkspaceGitChanges
         }
 
         var targets = (_view?.Repositories ?? [])
-            .Where(r => stagedOnly ? r.StagedCount > 0 : (r.StagedCount > 0 || r.ChangedCount > 0))
+            .Where(r => WorkspaceCommitModeHelper.IsRepositoryTarget(mode, r.StagedCount, r.ChangedCount))
             .ToList();
 
         if (targets.Count == 0)
@@ -122,16 +130,16 @@ public sealed partial class WorkspaceGitChanges
                 repoItems,
                 () =>
                 {
-                    CommitWorkspaceCoreAsync(stagedOnly, pushAfterCommit, targets);
+                    CommitWorkspaceCoreAsync(mode, pushAfterCommit, targets);
                     return Task.CompletedTask;
                 });
             return;
         }
 
-        CommitWorkspaceCoreAsync(stagedOnly, pushAfterCommit, targets);
+        CommitWorkspaceCoreAsync(mode, pushAfterCommit, targets);
     }
 
-    private void CommitWorkspaceCoreAsync(bool stagedOnly, bool pushAfterCommit, List<WorkspaceGitChangesRepositoryView> targets)
+    private void CommitWorkspaceCoreAsync(WorkspaceCommitMode mode, bool pushAfterCommit, List<WorkspaceGitChangesRepositoryView> targets)
     {
         if (IsJobRunning)
         {
@@ -139,6 +147,7 @@ public sealed partial class WorkspaceGitChanges
         }
 
         var message = _workspaceCommitMessage;
+        var stageAllFirst = WorkspaceCommitModeHelper.StageAllFirst(mode);
         var label = $"Committing in {targets.Count} repositor{(targets.Count == 1 ? "y" : "ies")}...";
 
         StartPageJob(label, async (job, ct) =>
@@ -165,8 +174,12 @@ public sealed partial class WorkspaceGitChanges
                         return;
                     }
 
+                    Logger.LogInformation(
+                        "Workspace commit requested: Mode={Mode}, Repository={Repository}, StageAllFirst={StageAllFirst}",
+                        mode, repo.RepositoryName, stageAllFirst);
+
                     var result = await GitChangesOperations.CommitAsync(
-                        WorkspaceId, resolved.Value.RepositoryId, message, stageAllFirst: !stagedOnly, ct);
+                        WorkspaceId, resolved.Value.RepositoryId, message, stageAllFirst, ct);
 
                     await PersistMutationResultAsync(repo.WorkspaceRepositoryId, resolved.Value.RepositoryId, result.Success, result.Snapshot, result.ErrorMessage, reload: false);
 
