@@ -70,3 +70,13 @@ DI scope. That means:
 - If a Blazor page injects `AppDbContext` directly, treat that as a defect to fix
   as part of the same change, not a followup - it is a silent hazard for every
   other feature sharing that circuit, not just the one you are working on.
+
+## Commit message for the user
+
+When you finish work, or when suggesting/preparing a commit, always give a short
+commit message in a fenced code block so the user can copy it easily. Do not
+create the commit unless the user asks.
+
+```
+Short imperative summary of why the change exists.
+```

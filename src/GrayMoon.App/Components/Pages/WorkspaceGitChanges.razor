@@ -83,16 +83,36 @@
                                   @oninput="OnWorkspaceCommitMessageInput"></textarea>
                         </form>
                         <div class="git-changes-workspace-commit__actions">
+                            @{
+                                // Capture modes at render so click handlers execute the command shown,
+                                // not a later recompute of StagedRepositoryCount from mutable _view (TOCTOU).
+                                var primaryCommitMode = OfferedCommitMode;
+                                var showExplicitCommitAll = primaryCommitMode == WorkspaceCommitMode.Staged;
+                            }
                             <button type="button"
                                     class="@(string.IsNullOrWhiteSpace(_workspaceCommitMessage) ? "btn btn-sm btn-outline-primary" : "btn btn-sm btn-primary")"
                                     disabled="@IsCommitButtonDisabled"
                                     title="@(PushAfterCommit
                                                 ? "Commits, then pushes exactly the repositories that committed successfully. Ctrl+Enter from the message box."
-                                                : "Creates one commit in each applicable repository using the same message. Ctrl+Enter from the message box.")"
+                                                : primaryCommitMode == WorkspaceCommitMode.Staged
+                                                    ? "Commits only already-staged changes in each applicable repository. Ctrl+Enter from the message box."
+                                                    : "Stages all changes then commits in each applicable repository. Ctrl+Enter from the message box.")"
                                     aria-keyshortcuts="Control+Enter"
-                                    @onclick="() => CommitWorkspaceAsync(StagedRepositoryCount > 0, PushAfterCommit)">
-                                @CommitButtonTitle
+                                    @onclick="() => CommitWorkspaceAsync(primaryCommitMode, PushAfterCommit)">
+                                @WorkspaceCommitModeHelper.ButtonTitle(primaryCommitMode)
                             </button>
+                            @if (showExplicitCommitAll)
+                            {
+                                <button type="button"
+                                        class="btn btn-sm btn-outline-primary"
+                                        disabled="@IsCommitButtonDisabled"
+                                        title="@(PushAfterCommit
+                                                    ? "Stages all changes, commits, then pushes the repositories that committed successfully."
+                                                    : "Stages all changes (git add --all) then commits in each repository with changes.")"
+                                        @onclick="() => CommitWorkspaceAsync(WorkspaceCommitMode.All, PushAfterCommit)">
+                                    Commit All
+                                </button>
+                            }
                             <div class="form-check git-changes-workspace-commit__push-check @(IsCommitButtonDisabled ? "git-changes-workspace-commit__push-check--inactive" : "")">
                                 <label class="form-check-label" for="git-changes-push-after-commit">
                                     Push committed
