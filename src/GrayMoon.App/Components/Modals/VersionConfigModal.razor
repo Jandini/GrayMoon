@@ -2,6 +2,7 @@
 @using GrayMoon.App.Models.Api
 @using GrayMoon.App.Services
 @using GrayMoon.App.Api.Endpoints
+@using GrayMoon.Common.FileVersions
 @inject IJSRuntime JS
 @inject WorkspaceFileVersionService VersionService
 
@@ -12,39 +13,61 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Version Configuration <span class="text-muted fw-normal fs-6">@(File?.FileName ?? "")</span></h5>
-                    <button type="button" class="btn-close" @onclick="OnCancel"></button>
+                    <button type="button" class="btn-close" @onclick="RequestCloseAsync"></button>
                 </div>
                 <div class="modal-body">
                     <p class="text-muted small mb-3">
-                        Enter one version pattern per line. Each pattern is a line prefix followed by a <code>{repositoryname}</code> token.
-                        For example: <code>MY_SERVICE_VERSION={repositoryname}</code> will match any line starting with <code>MY_SERVICE_VERSION=</code> and replace the rest with the repository's current version.
-                        The repository name should match a workspace repository - unknown tokens are silently ignored during update.
-                        Type <kbd>@@</kbd> to autocomplete a repository name.
+                        Enter one version pattern per line. Each pattern is a line prefix followed by a token:
+                        <code>@("{@repository}")</code> (GitVersion),
+                        <code>@("{@repository:branch}")</code> (current branch), or
+                        <code>@("{@repository:commit}")</code> (current commit SHA).
+                        For example: <code>@("MY_SERVICE_VERSION={@repository}")</code> matches lines starting with <code>MY_SERVICE_VERSION=</code>
+                        and replaces the rest with the resolved value.
+                        Type <kbd>@@</kbd> to autocomplete a repository name; you can append <code>:branch</code> or <code>:commit</code> inside the token.
                     </p>
 
                     <div class="mb-3 version-config-editor-wrap">
                         <label class="form-label d-flex align-items-baseline gap-2 flex-wrap">
                             Version Pattern
-                            @if (!string.IsNullOrWhiteSpace(patternText) && (validTokenCount > 0 || invalidTokens.Count > 0))
+                            @if (!string.IsNullOrWhiteSpace(patternText) && (validTokenCount > 0 || invalidTokens.Count > 0 || unsupportedSelectors.Count > 0 || selfReferencingTokens.Count > 0))
                             {
-                                @if (invalidTokens.Count > 0)
+                                @if (invalidTokens.Count > 0 || unsupportedSelectors.Count > 0 || selfReferencingTokens.Count > 0)
                                 {
                                     <span class="version-config-error-icon">
                                         &#x26A0;
                                         <div class="version-config-error-tooltip">
-                                            <div class="version-config-error-tooltip-title">Unknown repositories:</div>
-                                            @foreach (var t in invalidTokens)
+                                            @if (selfReferencingTokens.Count > 0)
                                             {
-                                                <div>@t</div>
+                                                <div class="version-config-error-tooltip-title">Circular references:</div>
+                                                @foreach (var t in selfReferencingTokens.Select(x => x.TokenKey).Distinct(StringComparer.OrdinalIgnoreCase))
+                                                {
+                                                    <div>@t</div>
+                                                }
+                                            }
+                                            @if (invalidTokens.Count > 0)
+                                            {
+                                                <div class="version-config-error-tooltip-title">Unknown repositories:</div>
+                                                @foreach (var t in invalidTokens)
+                                                {
+                                                    <div>@t</div>
+                                                }
+                                            }
+                                            @if (unsupportedSelectors.Count > 0)
+                                            {
+                                                <div class="version-config-error-tooltip-title">Unsupported selectors:</div>
+                                                @foreach (var s in unsupportedSelectors)
+                                                {
+                                                    <div>@s</div>
+                                                }
                                             }
                                         </div>
                                     </span>
                                 }
-                                <span class="version-config-token-count @(invalidTokens.Count > 0 ? "version-config-token-count-warning" : "")">@validTokenCount token@(validTokenCount != 1 ? "s" : "") resolved</span>
+                                <span class="version-config-token-count @(invalidTokens.Count > 0 || unsupportedSelectors.Count > 0 || selfReferencingTokens.Count > 0 ? "version-config-token-count-warning" : "")">@validTokenCount token@(validTokenCount != 1 ? "s" : "") resolved</span>
                             }
                         </label>
                         <textarea class="form-control version-config-textarea font-monospace"
-                                  placeholder="GRAYMOON_VERSION={GrayMoon}"
+                                  placeholder="@("GRAYMOON_VERSION={@GrayMoon}")"
                                   spellcheck="false"
                                   value="@patternText"
                                   @oninput="OnPatternInput"
@@ -84,6 +107,17 @@
                             </div>
                         }
 
+                        @if (selfReferencingTokens.Count > 0)
+                        {
+                            <div class="mt-2 small text-danger">
+                                Circular reference: this file belongs to repository
+                                <span class="font-monospace">@(File?.RepositoryName)</span>.
+                                Tokens that reference the same repository
+                                (<code>@("{@repo}")</code>, <code>@("{@repo:branch}")</code>, or <code>@("{@repo:commit}")</code>)
+                                create a never-ending update cycle.
+                            </div>
+                        }
+
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -93,14 +127,25 @@
                             Clear
                         </button>
                     }
-                    <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">Cancel</button>
-                    <button type="button" class="btn btn-primary" data-default-action @onclick="SaveAsync">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="RequestCloseAsync">Cancel</button>
+                    <button type="button"
+                            class="btn btn-primary"
+                            data-default-action
+                            disabled="@(selfReferencingTokens.Count > 0)"
+                            @onclick="SaveAsync">
                         Save
                     </button>
                 </div>
             </div>
         </div>
     </div>
+
+    <ConfirmModal IsVisible="@_showDiscardConfirm"
+                  Message="Changes were made. Do you want to cancel them?"
+                  ConfirmButtonText="Discard"
+                  ConfirmIsDanger="true"
+                  OnConfirm="ConfirmDiscardAsync"
+                  OnCancel="CloseDiscardConfirm" />
 }
 
 @code {
@@ -113,7 +158,10 @@
     [Parameter] public EventCallback OnCancel { get; set; }
 
     private string patternText = "";
+    private string _initialPattern = "";
     private List<string> invalidTokens = new();
+    private List<string> unsupportedSelectors = new();
+    private List<FileVersionToken> selfReferencingTokens = new();
     private int validTokenCount;
     private bool _wasVisible;
     private ElementReference textareaRef;
@@ -122,6 +170,7 @@
     private IReadOnlyList<string> _notFoundInFileTokens = [];
     private bool _fileValidating;
     private CancellationTokenSource? _validateCts;
+    private bool _showDiscardConfirm;
 
     // Autocomplete state
     private bool showSuggestions;
@@ -133,13 +182,20 @@
     private double _dropdownY;
     private int _pendingCaret = -1;
     private bool _justOpened;
+    private bool _escapeClosedSuggestions;
+
+    private bool HasUnsavedChanges =>
+        !string.Equals(patternText ?? "", _initialPattern ?? "", StringComparison.Ordinal);
 
     protected override void OnParametersSet()
     {
         if (IsVisible && !_wasVisible)
         {
             patternText = CurrentPattern ?? "";
+            _initialPattern = patternText;
             showSuggestions = false;
+            _showDiscardConfirm = false;
+            _escapeClosedSuggestions = false;
             _justOpened = true;
             _notFoundInFileTokens = [];
             _fileValidating = false;
@@ -237,11 +293,12 @@
                 if (filteredRepos.Count > 0) await AcceptSuggestion(filteredRepos[suggestionIndex]);
                 return;
             }
-            if (e.Key == "Escape") { showSuggestions = false; return; }
-        }
-        else
-        {
-            if (e.Key == "Escape") await OnCancel.InvokeAsync();
+            if (e.Key == "Escape")
+            {
+                showSuggestions = false;
+                _escapeClosedSuggestions = true;
+                return;
+            }
         }
     }
 
@@ -258,15 +315,19 @@
     {
         var repoNames = WorkspaceRepos.Select(r => r.RepositoryName)
                                       .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var tokens = WorkspaceFileVersionService.ExtractTokens(patternText);
-        invalidTokens = tokens.Where(t => !repoNames.Contains(t)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        validTokenCount = tokens.Where(t => repoNames.Contains(t)).Count();
+        var result = FileVersionTokenParser.Validate(patternText, repoNames, File?.RepositoryName);
+        invalidTokens = result.UnknownRepositories.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        unsupportedSelectors = result.UnsupportedSelectors.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        selfReferencingTokens = result.SelfReferencingTokens.ToList();
+        validTokenCount = result.ValidTokens.Count;
     }
 
     private void ClearPattern()
     {
         patternText = "";
         invalidTokens.Clear();
+        unsupportedSelectors.Clear();
+        selfReferencingTokens.Clear();
         validTokenCount = 0;
         showSuggestions = false;
         CancelValidateCts();
@@ -276,13 +337,55 @@
 
     private async Task SaveAsync()
     {
+        if (selfReferencingTokens.Count > 0)
+            return;
         await OnSaved.InvokeAsync(patternText.Trim());
     }
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
-        // Escape is handled per-context in OnTextareaKeyDown; this catches modal-level escape
-        if (!showSuggestions && e.Key == "Escape") await OnCancel.InvokeAsync();
+        if (e.Key != "Escape")
+            return;
+        if (_showDiscardConfirm)
+            return;
+        // Textarea handler already closed the @ dropdown; do not treat this Escape as Cancel.
+        if (_escapeClosedSuggestions)
+        {
+            _escapeClosedSuggestions = false;
+            return;
+        }
+        if (showSuggestions)
+        {
+            showSuggestions = false;
+            return;
+        }
+        await RequestCloseAsync();
+    }
+
+    private async Task RequestCloseAsync()
+    {
+        if (showSuggestions)
+        {
+            showSuggestions = false;
+            return;
+        }
+        if (HasUnsavedChanges)
+        {
+            _showDiscardConfirm = true;
+            return;
+        }
+        await OnCancel.InvokeAsync();
+    }
+
+    private void CloseDiscardConfirm()
+    {
+        _showDiscardConfirm = false;
+    }
+
+    private async Task ConfirmDiscardAsync()
+    {
+        _showDiscardConfirm = false;
+        await OnCancel.InvokeAsync();
     }
 
     private void CancelValidateCts()
@@ -330,3 +433,4 @@
         public string? Query { get; set; }
     }
 }
+

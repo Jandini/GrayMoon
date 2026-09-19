@@ -291,8 +291,7 @@ public sealed partial class WorkspaceProjectRepository
             var tokens = WorkspaceFileVersionService.ExtractTokens(cfg.VersionPattern);
             foreach (var token in tokens)
             {
-                if (string.IsNullOrWhiteSpace(token)) continue;
-                if (!nameToRepoId.TryGetValue(token.Trim(), out var referencedRepoId)) continue;
+                if (!nameToRepoId.TryGetValue(token.RepositoryName, out var referencedRepoId)) continue;
                 if (referencedRepoId == dependentRepoId) continue;
                 fileConfigRepoEdges.Add((dependentRepoId, referencedRepoId));
             }

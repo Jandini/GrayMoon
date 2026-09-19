@@ -16,6 +16,8 @@ public interface IGitService
     Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, CancellationToken ct);
     /// <summary>Gets the current branch name (e.g. "main") with a single git call. Use instead of GetVersionAsync when only branch name is needed.</summary>
     Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct);
+    /// <summary>Returns the full SHA of HEAD via <c>git rev-parse HEAD</c>, or null when the repo is missing/unborn or the command fails.</summary>
+    Task<string?> GetHeadCommitAsync(string repoPath, CancellationToken ct);
     Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct);
     /// <summary>Fetches from origin; when <paramref name="includeTags"/> is true, fetches tags as well. Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct);

@@ -16,8 +16,8 @@ public class WorkspaceFileVersionConfig
     public WorkspaceFile? File { get; set; }
 
     /// <summary>
-    /// Multi-line pattern text. Each line is KEY={repositoryname}.
-    /// Used to match lines in the file and substitute the resolved version.
+    /// Multi-line pattern text. Each line is KEY={@repository}, KEY={@repository:branch}, or KEY={@repository:commit}.
+    /// Used to match lines in the file and substitute the resolved value.
     /// </summary>
     [Required]
     public string VersionPattern { get; set; } = string.Empty;
