@@ -28,6 +28,21 @@ public sealed class WorkspaceSyncOperations(
             updateRepoGitInfo,
             setRepoSyncStatus);
 
+    public Task<ReturnToDefaultPlan> AnalyzeReturnToDefaultAsync(
+        int workspaceId,
+        IReadOnlyList<int> repositoryIds,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+        => syncHandler.AnalyzeReturnToDefaultAsync(workspaceId, repositoryIds, progress, cancellationToken);
+
+    public Task<OperationResult> ExecuteReturnToDefaultAsync(
+        int workspaceId,
+        IReadOnlyList<int> repositoryIds,
+        ReturnToDefaultOptions options,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+        => syncHandler.ExecuteReturnToDefaultAsync(workspaceId, repositoryIds, options, progress, cancellationToken);
+
     public Task<UnattendedReturnToDefaultResult> ReturnToDefaultAsync(
         int workspaceId,
         IReadOnlyList<int> repositoryIds,
