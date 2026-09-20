@@ -25,7 +25,7 @@ public sealed class FakeRepositoryGitChangesService : IRepositoryGitChangesServi
     public int MaxConcurrentCallsForRepo(string repoPath) =>
         _maxConcurrentCallsPerRepo.GetValueOrDefault(repoPath, 0);
 
-    public async Task<GitChangeStatusResult> GetStatusAsync(string repoPath, long snapshotVersion, CancellationToken cancellationToken)
+    public async Task<GitChangeStatusResult> GetStatusAsync(string repoPath, long snapshotVersion, CancellationToken cancellationToken, bool includeLineStats = false)
     {
         Interlocked.Increment(ref CallCount);
         ObservedVersions.Enqueue(snapshotVersion);

@@ -32,7 +32,7 @@ public sealed class GetGitChangeStatusCommand(
         registry.Register(repoPath, request.WorkspaceId, request.RepositoryId);
 
         using var lease = watcherManager.Acquire(repoPath);
-        var result = await coordinator.RefreshNowAsync(repoPath, cancellationToken);
+        var result = await coordinator.RefreshNowAsync(repoPath, cancellationToken, request.IncludeLineStats);
 
         return new GetGitChangeStatusResponse
         {

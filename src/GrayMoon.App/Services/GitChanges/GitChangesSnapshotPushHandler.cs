@@ -17,7 +17,8 @@ namespace GrayMoon.App.Services.GitChanges;
 public sealed class GitChangesSnapshotPushHandler(
     IDbContextFactory<AppDbContext> dbContextFactory,
     IHubContext<WorkspaceSyncHub> hubContext,
-    ILogger<GitChangesSnapshotPushHandler> logger)
+    ILogger<GitChangesSnapshotPushHandler> logger,
+    IGitChangesLineStatsRefresh lineStatsRefresh)
 {
     public async Task HandleAsync(GitChangesSnapshotNotification notification, CancellationToken cancellationToken)
     {
@@ -72,6 +73,18 @@ public sealed class GitChangesSnapshotPushHandler(
         existing.StagedCount = stagedCount;
         existing.ChangedCount = changedCount;
         existing.ConflictCount = conflictCount;
+        existing.Insertions = snapshot.Insertions.HasValue
+            ? snapshot.Insertions
+            : changedCount == 0 ? 0 : existing.Insertions;
+        existing.Deletions = snapshot.Deletions.HasValue
+            ? snapshot.Deletions
+            : changedCount == 0 ? 0 : existing.Deletions;
+        existing.StagedInsertions = snapshot.StagedInsertions.HasValue
+            ? snapshot.StagedInsertions
+            : stagedCount == 0 ? 0 : existing.StagedInsertions;
+        existing.StagedDeletions = snapshot.StagedDeletions.HasValue
+            ? snapshot.StagedDeletions
+            : stagedCount == 0 ? 0 : existing.StagedDeletions;
         existing.AgentScannedAt = snapshot.ScannedAt;
         existing.PersistedAt = DateTimeOffset.UtcNow;
         existing.LastErrorCode = null;
@@ -103,6 +116,13 @@ public sealed class GitChangesSnapshotPushHandler(
         await transaction.CommitAsync(cancellationToken);
 
         await hubContext.Clients.All.SendAsync("GitChangesUpdated", notification.WorkspaceId, notification.RepositoryId, cancellationToken: cancellationToken);
+
+        if (!snapshot.Insertions.HasValue
+            && !snapshot.Deletions.HasValue
+            && (changedCount > 0 || stagedCount > 0))
+        {
+            lineStatsRefresh.RequestRepository(notification.WorkspaceId, notification.RepositoryId);
+        }
 
         logger.LogDebug(
             "GitChangesSnapshotUpdated persisted: workspace={WorkspaceId}, repo={RepositoryId}, version={Version}, staged={Staged}, changed={Changed}",

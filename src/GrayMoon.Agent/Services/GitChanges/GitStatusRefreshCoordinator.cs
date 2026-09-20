@@ -63,10 +63,23 @@ public sealed class GitStatusRefreshCoordinator : IDisposable
 
     /// <summary>Immediate scan for manual refresh / on-demand status requests. Bypasses any pending debounce
     /// timer but still coalesces with a scan that is already in flight for the same repository.</summary>
-    public Task<GitChangeStatusResult> RefreshNowAsync(string repoPath, CancellationToken cancellationToken)
+    public async Task<GitChangeStatusResult> RefreshNowAsync(string repoPath, CancellationToken cancellationToken, bool includeLineStats = false)
     {
         var tracker = GetOrAddTracker(repoPath);
-        return RunScanAsync(repoPath, tracker, cancellationToken);
+        var result = await RunScanAsync(repoPath, tracker, cancellationToken, includeLineStats);
+        if (includeLineStats && result.Success && result.Snapshot != null && result.Snapshot.Insertions is null)
+        {
+            var version = _snapshotCache.NextVersion(repoPath);
+            var filled = await _gitChangesService.GetStatusAsync(repoPath, version, cancellationToken, includeLineStats: true);
+            if (filled.Success && filled.Snapshot != null)
+            {
+                _snapshotCache.SetLatest(repoPath, filled.Snapshot);
+                SnapshotReady?.Invoke(repoPath, filled.Snapshot);
+                return filled;
+            }
+        }
+
+        return result;
     }
 
     public RepositoryRefreshState GetState(string repoPath) => GetOrAddTracker(repoPath).State;
@@ -102,7 +115,7 @@ public sealed class GitStatusRefreshCoordinator : IDisposable
     private RepositoryRefreshTracker GetOrAddTracker(string repoPath) =>
         _trackers.GetOrAdd(GitChangesSnapshotCache.NormalizeKey(repoPath), _ => new RepositoryRefreshTracker());
 
-    private async Task<GitChangeStatusResult> RunScanAsync(string repoPath, RepositoryRefreshTracker tracker, CancellationToken cancellationToken)
+    private async Task<GitChangeStatusResult> RunScanAsync(string repoPath, RepositoryRefreshTracker tracker, CancellationToken cancellationToken, bool includeLineStats = false)
     {
         if (!tracker.TryBeginRefresh(out var coalescedTask))
         {
@@ -114,7 +127,7 @@ public sealed class GitStatusRefreshCoordinator : IDisposable
             return new GitChangeStatusResult { Success = false, ErrorCode = "RepositoryDisposed", ErrorMessage = "Repository is no longer being monitored." };
         }
 
-        return await ExecuteScanLoopAsync(repoPath, tracker, cancellationToken);
+        return await ExecuteScanLoopAsync(repoPath, tracker, cancellationToken, includeLineStats);
     }
 
     /// <summary>
@@ -123,7 +136,7 @@ public sealed class GitStatusRefreshCoordinator : IDisposable
     /// the tracker is already in the Refreshing state at that point, so a re-check would mistake the
     /// follow-up for a duplicate concurrent caller and coalesce it into a no-op instead of running it.
     /// </summary>
-    private async Task<GitChangeStatusResult> ExecuteScanLoopAsync(string repoPath, RepositoryRefreshTracker tracker, CancellationToken cancellationToken)
+    private async Task<GitChangeStatusResult> ExecuteScanLoopAsync(string repoPath, RepositoryRefreshTracker tracker, CancellationToken cancellationToken, bool includeLineStats)
     {
         GitChangeStatusResult result;
         while (true)
@@ -132,7 +145,7 @@ public sealed class GitStatusRefreshCoordinator : IDisposable
             try
             {
                 var version = _snapshotCache.NextVersion(repoPath);
-                result = await _gitChangesService.GetStatusAsync(repoPath, version, cancellationToken);
+                result = await _gitChangesService.GetStatusAsync(repoPath, version, cancellationToken, includeLineStats);
                 if (result.Success && result.Snapshot != null)
                 {
                     _snapshotCache.SetLatest(repoPath, result.Snapshot);

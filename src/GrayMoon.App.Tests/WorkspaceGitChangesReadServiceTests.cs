@@ -50,6 +50,8 @@ public class WorkspaceGitChangesReadServiceTests
         Assert.Equal("graymoon-api", repo.RepositoryName);
         Assert.Equal("main", repo.BranchName);
         Assert.Equal(1, repo.ChangedCount);
+        Assert.Null(repo.Insertions);
+        Assert.Null(repo.Deletions);
 
         var change = Assert.Single(repo.Changes);
         Assert.Equal("file.txt", change.Path);
@@ -70,14 +72,47 @@ public class WorkspaceGitChangesReadServiceTests
         Assert.Empty(view.Repositories);
     }
 
+    [Fact]
+    public async Task Returns_persisted_line_stats()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        await PersistSnapshotAsync(ctx, factory, 1,
+            [new GitChangeEntry { Path = "file.txt", WorktreeChange = GitChangeKind.Modified }],
+            insertions: 8,
+            deletions: 3,
+            stagedInsertions: 5,
+            stagedDeletions: 1);
+
+        var readService = new WorkspaceGitChangesReadService(factory);
+        var view = await readService.GetWorkspaceAsync(ctx.WorkspaceId, CancellationToken.None);
+
+        var repo = Assert.Single(view.Repositories);
+        Assert.Equal(8, repo.Insertions);
+        Assert.Equal(3, repo.Deletions);
+        Assert.Equal(5, repo.StagedInsertions);
+        Assert.Equal(1, repo.StagedDeletions);
+    }
+
+    private static Task PersistSnapshotAsync(
+        GitChangesTestDbContext ctx,
+        GitChangesTestDbContext.TestDbContextFactory factory,
+        long version,
+        params GitChangeEntry[] changes) =>
+        PersistSnapshotAsync(ctx, factory, version, changes, insertions: null, deletions: null, stagedInsertions: null, stagedDeletions: null);
+
     private static async Task PersistSnapshotAsync(
         GitChangesTestDbContext ctx,
         GitChangesTestDbContext.TestDbContextFactory factory,
         long version,
-        params GitChangeEntry[] changes)
+        GitChangeEntry[] changes,
+        int? insertions,
+        int? deletions,
+        int? stagedInsertions = null,
+        int? stagedDeletions = null)
     {
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
-        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance);
+        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, new NoopGitChangesLineStatsRefresh());
 
         await handler.HandleAsync(new GitChangesSnapshotNotification
         {
@@ -90,6 +125,10 @@ public class WorkspaceGitChangesReadServiceTests
                 HeadCommit = "abc123",
                 Changes = changes,
                 ScannedAt = DateTimeOffset.UtcNow,
+                Insertions = insertions,
+                Deletions = deletions,
+                StagedInsertions = stagedInsertions,
+                StagedDeletions = stagedDeletions,
             },
         }, CancellationToken.None);
     }

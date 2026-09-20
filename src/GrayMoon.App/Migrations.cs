@@ -20,6 +20,7 @@ public static class Migrations
         await MigrateWorkspaceProjectsIsGeneratedAsync(dbContext);
         await MigrateDropGitHubApiUsageHourlyAsync(dbContext);
         await MigrateWorkspacesExcludeAiWorkflowsAsync(dbContext);
+        await MigrateWorkspaceGitRepositoryStatusLineStatsAsync(dbContext);
     }
 
     /// <summary>
@@ -177,5 +178,40 @@ public static class Migrations
         {
             // Table doesn't exist yet (fresh db, EnsureCreated will create it with the column already present).
         }
+    }
+
+    /// <summary>
+    /// Adds WorkspaceGitRepositoryStatus.Insertions and Deletions for local databases created before
+    /// header line stats existed. EnsureCreated() only creates missing tables, not missing columns.
+    /// </summary>
+    public static async Task MigrateWorkspaceGitRepositoryStatusLineStatsAsync(AppDbContext dbContext)
+    {
+        try
+        {
+            var conn = dbContext.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await AddNullableIntegerColumnIfMissingAsync(conn, "WorkspaceGitRepositoryStatus", "Insertions");
+            await AddNullableIntegerColumnIfMissingAsync(conn, "WorkspaceGitRepositoryStatus", "Deletions");
+            await AddNullableIntegerColumnIfMissingAsync(conn, "WorkspaceGitRepositoryStatus", "StagedInsertions");
+            await AddNullableIntegerColumnIfMissingAsync(conn, "WorkspaceGitRepositoryStatus", "StagedDeletions");
+        }
+        catch
+        {
+            // Table doesn't exist yet (fresh db, EnsureCreated will create it with the columns already present).
+        }
+    }
+
+    private static async Task AddNullableIntegerColumnIfMissingAsync(System.Data.Common.DbConnection conn, string tableName, string columnName)
+    {
+        await using var checkCmd = conn.CreateCommand();
+        checkCmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{tableName}') WHERE name = '{columnName}'";
+        if (Convert.ToInt32(await checkCmd.ExecuteScalarAsync()) > 0)
+            return;
+
+        await using var alterCmd = conn.CreateCommand();
+        alterCmd.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {columnName} INTEGER NULL";
+        await alterCmd.ExecuteNonQueryAsync();
     }
 }

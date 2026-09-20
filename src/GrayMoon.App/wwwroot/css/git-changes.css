@@ -12,9 +12,17 @@
 .git-changes-header__summary {
     display: flex;
     align-items: center;
-    flex-wrap: nowrap;
-    overflow: hidden;
+    flex-wrap: wrap;
+    overflow: visible;
     gap: 1.1rem;
+}
+
+.git-changes-header__summary .git-changes-tree__status {
+    width: auto;
+    min-width: 0;
+    font-size: inherit;
+    font-weight: inherit;
+    font-family: inherit;
 }
 
 .git-changes-header__summary-item {
