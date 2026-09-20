@@ -181,10 +181,37 @@ public sealed class GitCliRepositoryGitChangesServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Line_stats_ignore_untracked_files()
+    public async Task Line_stats_count_untracked_file_lines()
     {
         _repo.CommitInitial("file.txt", "a\n");
         _repo.WriteFile("new.txt", "lots\nof\nlines\n");
+
+        var result = await _service.GetStatusAsync(_repo.RepositoryPath, 1, CancellationToken.None, includeLineStats: true);
+
+        Assert.True(result.Success);
+        Assert.Equal(3, result.Snapshot!.Insertions);
+        Assert.Equal(0, result.Snapshot.Deletions);
+    }
+
+    [Fact]
+    public async Task Line_stats_add_untracked_lines_to_tracked_numstat()
+    {
+        _repo.CommitInitial("file.txt", "a\n");
+        _repo.WriteFile("file.txt", "a\nb\n");
+        _repo.WriteFile("new.txt", "x\ny\n");
+
+        var result = await _service.GetStatusAsync(_repo.RepositoryPath, 1, CancellationToken.None, includeLineStats: true);
+
+        Assert.True(result.Success);
+        Assert.Equal(3, result.Snapshot!.Insertions);
+        Assert.Equal(0, result.Snapshot.Deletions);
+    }
+
+    [Fact]
+    public async Task Line_stats_skip_binary_untracked_files()
+    {
+        _repo.CommitInitial("file.txt", "a\n");
+        File.WriteAllBytes(Path.Combine(_repo.RepositoryPath, "blob.bin"), [0x00, 0x01, 0x02]);
 
         var result = await _service.GetStatusAsync(_repo.RepositoryPath, 1, CancellationToken.None, includeLineStats: true);
 

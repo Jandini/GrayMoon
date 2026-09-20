@@ -72,6 +72,11 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
         var (isMerging, isRebasing, isCherryPicking) = await GetOperationStateAsync(repoPath, cancellationToken);
         var (insertions, deletions) = await ResolveLineStatsAsync(unstagedNumstatTask);
         var (stagedInsertions, stagedDeletions) = await ResolveLineStatsAsync(stagedNumstatTask);
+        if (includeLineStats)
+        {
+            insertions = (insertions ?? 0) + CountUntrackedInsertions(repoPath, parsed.Changes);
+            deletions ??= 0;
+        }
 
         var snapshot = new GitChangeSnapshot
         {
@@ -110,6 +115,78 @@ public sealed class GitCliRepositoryGitChangesService(GitProcessRunner runner, I
 
         var totals = GitNumstatParser.Parse(stdout);
         return (totals.Insertions, totals.Deletions);
+    }
+
+    /// <summary>
+    /// <c>git diff --numstat</c> ignores untracked paths. Count text lines in those files so a
+    /// newly copied file shows on <c>+</c> the same way a tracked addition would.
+    /// </summary>
+    private static int CountUntrackedInsertions(string repoPath, IReadOnlyList<GitChangeEntry> changes)
+    {
+        var insertions = 0;
+        foreach (var entry in changes)
+        {
+            if (entry.IsTracked || entry.WorktreeChange != GitChangeKind.Untracked)
+            {
+                continue;
+            }
+
+            var validation = GitRepositoryPathValidator.Validate(repoPath, entry.Path);
+            if (!validation.IsValid || validation.FullPath == null)
+            {
+                continue;
+            }
+
+            insertions += CountWorkingTreeLines(validation.FullPath);
+        }
+
+        return insertions;
+    }
+
+    private static int CountWorkingTreeLines(string fullPath)
+    {
+        try
+        {
+            var info = new FileInfo(fullPath);
+            if (!info.Exists || info.Length == 0 || info.Length > SoftSizeLimitBytes)
+            {
+                return 0;
+            }
+
+            using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            var buffer = new byte[checked((int)info.Length)];
+            var read = stream.Read(buffer, 0, buffer.Length);
+            if (read == 0)
+            {
+                return 0;
+            }
+
+            var span = buffer.AsSpan(0, read);
+            if (span.Contains((byte)0))
+            {
+                return 0;
+            }
+
+            var lines = 0;
+            for (var i = 0; i < span.Length; i++)
+            {
+                if (span[i] == (byte)'\n')
+                {
+                    lines++;
+                }
+            }
+
+            if (span[^1] != (byte)'\n')
+            {
+                lines++;
+            }
+
+            return lines;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
     }
 
     public async Task<GitDiffDocument> GetDiffAsync(string repoPath, GitDiffRequest request, CancellationToken cancellationToken)
