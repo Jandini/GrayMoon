@@ -39,6 +39,9 @@ public sealed partial class WorkspaceActions
     private string? errorMessage;
     private bool isLoading = true;
     private bool isRefreshing;
+    private int _refreshGeneration;
+    private int _refreshTotal;
+    private int _refreshCompleted;
     private bool isRerunningAll;
     private int _rerunTotal;
     private volatile int _rerunCompleted;
@@ -144,6 +147,12 @@ public sealed partial class WorkspaceActions
         _rerunCompleted == 0
             ? $"{_bulkOperationVerb} actions..."
             : $"{_bulkOperationVerb} {_rerunCompleted} of {_rerunTotal}";
+
+    /// <summary>Same wording as Git Changes' header scan indicator.</summary>
+    internal string RefreshStatusText =>
+        _refreshTotal > 0
+            ? $"Refreshing {_refreshCompleted} of {_refreshTotal} repositories..."
+            : "Refreshing repositories...";
 
     internal bool HasSearchFilter => !string.IsNullOrWhiteSpace(searchTerm);
 
