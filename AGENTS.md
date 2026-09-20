@@ -71,6 +71,21 @@ DI scope. That means:
   as part of the same change, not a followup - it is a silent hazard for every
   other feature sharing that circuit, not just the one you are working on.
 
+## Desktop README when features change
+
+When you add a user-facing feature or change how an existing one behaves,
+update the sibling `../GrayMoon.Desktop/README.md` **Recent GrayMoon changes**
+section in the same turn (that file lives in the Desktop repo, not this one).
+
+- **New feature** - add a bullet at the top of the list.
+- **Existing feature** - edit the matching bullet instead of adding a duplicate.
+- Match the existing style: `- **Short title** - one paragraph of what the
+  user sees and how it works.`
+- Skip internal-only refactors, tests, docs-only edits, or plumbing with no
+  user-visible behavior change.
+- Do not create a Desktop commit unless the user asks. If that README changed,
+  give a second short commit message labeled for GrayMoon.Desktop.
+
 ## Commit message after each task
 
 After you finish a piece of work, always give a short commit message in a
