@@ -99,7 +99,7 @@
                                 Push Updated
                             </button>
                             <button type="button"
-                                    class="btn btn-danger btn-sm dropdown-toggle dropdown-toggle-split"
+                                    class="btn btn-outline-secondary btn-sm dropdown-toggle dropdown-toggle-split"
                                     aria-label="Toggle Push Updated menu"
                                     aria-expanded="@(_openPushUpdatedMenus.Contains(n.WorkspaceId) ? "true" : "false")"
                                     disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"
@@ -219,7 +219,7 @@
                                     Push
                                 </button>
                                 <button type="button"
-                                        class="btn btn-warning btn-sm dropdown-toggle dropdown-toggle-split"
+                                        class="btn btn-outline-secondary btn-sm dropdown-toggle dropdown-toggle-split"
                                         aria-label="Toggle Push menu"
                                         aria-expanded="@(_openPushMenus.Contains(n.WorkspaceId) ? "true" : "false")"
                                         disabled="@IsWorkspaceJobRunning(n.WorkspaceId)"

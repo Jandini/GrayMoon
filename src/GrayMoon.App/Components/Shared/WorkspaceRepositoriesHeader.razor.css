@@ -41,13 +41,14 @@
 }
 
 .btn-group > .btn-danger + .btn-danger.dropdown-toggle-split,
-.btn-group > .btn-primary + .btn-primary.dropdown-toggle-split,
-.btn-group > .btn-warning + .btn-danger.dropdown-toggle-split {
+.btn-group > .btn-primary + .btn-primary.dropdown-toggle-split {
     border-left-color: rgba(255, 255, 255, 0.4);
 }
 
-/* Yellow primary (Create PR, Push) + outline caret: keep the split seam readable without restyling the caret. */
-.btn-group > .btn-warning + .btn-outline-secondary.dropdown-toggle-split {
+/* Colored primary + outline caret (Create PR, Push, Push Updated, Sync/Fetch): keep the split seam readable. */
+.btn-group > .btn-warning + .btn-outline-secondary.dropdown-toggle-split,
+.btn-group > .btn-danger + .btn-outline-secondary.dropdown-toggle-split,
+.btn-group > .btn-primary + .btn-outline-secondary.dropdown-toggle-split {
     border-left-color: rgba(0, 0, 0, 0.2);
 }
 

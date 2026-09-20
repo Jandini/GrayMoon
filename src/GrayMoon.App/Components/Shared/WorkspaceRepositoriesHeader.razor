@@ -121,7 +121,7 @@
                     Push Updated
                 </button>
                 <button type="button"
-                        class="btn btn-danger dropdown-toggle dropdown-toggle-split"
+                        class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split"
                         aria-label="Toggle Push Updated menu"
                         aria-expanded="@(_pushUpdatedMenuOpen ? "true" : "false")"
                         @onclick="TogglePushUpdatedMenu"
@@ -309,7 +309,7 @@
                     @(QuickFetchIsPrimary ? "Fetch" : "Sync")
                 </button>
                 <button type="button"
-                        class="btn @(IsOutOfSync == true ? "btn-danger" : "btn-primary") dropdown-toggle dropdown-toggle-split"
+                        class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split"
                         aria-label="Toggle Sync menu"
                         aria-expanded="@(_syncMenuOpen ? "true" : "false")"
                         @onclick="ToggleSyncMenu"
