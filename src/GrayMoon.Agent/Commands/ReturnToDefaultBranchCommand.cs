@@ -5,9 +5,9 @@ using Microsoft.Extensions.Logging;
 
 namespace GrayMoon.Agent.Commands;
 
-public sealed class SyncToDefaultBranchCommand(IGitService git, IRepositoryStateProbe stateProbe, ILogger<SyncToDefaultBranchCommand> logger) : ICommandHandler<SyncToDefaultBranchRequest, SyncToDefaultBranchResponse>
+public sealed class ReturnToDefaultBranchCommand(IGitService git, IRepositoryStateProbe stateProbe, ILogger<ReturnToDefaultBranchCommand> logger) : ICommandHandler<ReturnToDefaultBranchRequest, ReturnToDefaultBranchResponse>
 {
-    public async Task<SyncToDefaultBranchResponse> ExecuteAsync(SyncToDefaultBranchRequest request, CancellationToken cancellationToken = default)
+    public async Task<ReturnToDefaultBranchResponse> ExecuteAsync(ReturnToDefaultBranchRequest request, CancellationToken cancellationToken = default)
     {
         var workspaceName = request.WorkspaceName ?? throw new ArgumentException("workspaceName required");
         var repositoryName = request.RepositoryName ?? throw new ArgumentException("repositoryName required");
@@ -18,7 +18,7 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, IRepositoryState
 
         if (!git.DirectoryExists(repoPath))
         {
-            return new SyncToDefaultBranchResponse
+            return new ReturnToDefaultBranchResponse
             {
                 Success = false,
                 ErrorMessage = "Repository not found"
@@ -29,7 +29,7 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, IRepositoryState
         var defaultBranch = await git.GetDefaultBranchNameAsync(repoPath, cancellationToken);
         if (string.IsNullOrWhiteSpace(defaultBranch))
         {
-            return new SyncToDefaultBranchResponse
+            return new ReturnToDefaultBranchResponse
             {
                 Success = false,
                 ErrorMessage = "Could not determine default branch"
@@ -51,7 +51,7 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, IRepositoryState
         var (fetchSuccess, fetchError) = await git.FetchAsync(repoPath, includeTags: true, request.BearerToken, cancellationToken);
         if (!fetchSuccess)
         {
-            return new SyncToDefaultBranchResponse
+            return new ReturnToDefaultBranchResponse
             {
                 Success = false,
                 ErrorMessage = fetchError ?? "Failed to fetch from origin"
@@ -62,7 +62,7 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, IRepositoryState
         var (checkoutSuccess, checkoutError) = await git.CheckoutBranchAsync(repoPath, defaultBranch, cancellationToken, skipHooks: true);
         if (!checkoutSuccess)
         {
-            return new SyncToDefaultBranchResponse
+            return new ReturnToDefaultBranchResponse
             {
                 Success = false,
                 ErrorMessage = checkoutError ?? "Failed to checkout default branch"
@@ -85,7 +85,7 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, IRepositoryState
         var (pullSuccess, mergeConflict, pullError) = await git.PullAsync(repoPath, defaultBranch, request.BearerToken, cancellationToken, skipHooks: true);
         if (!pullSuccess)
         {
-            return new SyncToDefaultBranchResponse
+            return new ReturnToDefaultBranchResponse
             {
                 Success = false,
                 ErrorMessage = mergeConflict ? (pullError ?? "Merge conflict after pull.") : (pullError ?? "Failed to pull after switching to default branch"),
@@ -102,7 +102,7 @@ public sealed class SyncToDefaultBranchCommand(IGitService git, IRepositoryState
             BranchNameOverride = defaultBranch
         }, cancellationToken);
 
-        return new SyncToDefaultBranchResponse
+        return new ReturnToDefaultBranchResponse
         {
             Success = true,
             CurrentBranch = state.BranchName ?? defaultBranch,

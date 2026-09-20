@@ -5,7 +5,7 @@
     @*
         z-index drops below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while
         IsRunning so that overlay (with the live command terminal) covers the dialog for the merge and
-        optional sync-to-default - without unmounting the dialog, which would look like it closed and reopened.
+        optional return-to-default - without unmounting the dialog, which would look like it closed and reopened.
         IsCoveredByOverlay is the same drop for a job started by the drill-in single-PR dialog (stacked on top
         of this one) - kept separate from IsRunning so it never touches IsCompletedView/the footer-mode
         switches below, which must keep reflecting this dialog's own batch-run state, not the drill-in dialog's.
@@ -116,7 +116,7 @@
                                             </div>
                                         </div>
                                     </button>
-                                    @if (row.Status is BulkMergeRowStatus.Failed or BulkMergeRowStatus.SyncFailed)
+                                    @if (row.Status is BulkMergeRowStatus.Failed or BulkMergeRowStatus.ReturnFailed)
                                     {
                                         <button type="button"
                                                 class="merge-pr-status-action"
@@ -136,7 +136,7 @@
                 {
                     <div class="modal-footer bulk-merge-pr-modal-footer">
                         <div class="text-muted small bulk-merge-pr-summary">
-                            @MergedRowCount merged, @FailedRowCount failed@(SyncIssueCount > 0 ? $", {SyncIssueCount} sync issue{(SyncIssueCount == 1 ? "" : "s")}" : "")
+                            @MergedRowCount merged, @FailedRowCount failed@(ReturnIssueCount > 0 ? $", {ReturnIssueCount} return issue{(ReturnIssueCount == 1 ? "" : "s")}" : "")
                         </div>
                         <div class="bulk-merge-pr-footer-actions">
                             @if (FailedRowCount > 0)
@@ -150,10 +150,10 @@
                 else if (!IsRunning)
                 {
                     <div class="modal-footer bulk-merge-pr-modal-footer">
-                        <div class="form-check mb-0 merge-pr-sync-default-check">
-                            <input class="form-check-input" type="checkbox" id="bulk-merge-pr-sync-default"
-                                   checked="@SyncToDefaultAfterMerge" @onchange="OnSyncCheckboxChanged" />
-                            <label class="form-check-label" for="bulk-merge-pr-sync-default">Sync to default branch after merging</label>
+                        <div class="form-check mb-0 merge-pr-return-default-check">
+                            <input class="form-check-input" type="checkbox" id="bulk-merge-pr-return-default"
+                                   checked="@ReturnToDefaultAfterMerge" @onchange="OnSyncCheckboxChanged" />
+                            <label class="form-check-label" for="bulk-merge-pr-return-default">Return to default branch after merging</label>
                         </div>
                         <button type="button" class="btn merge-pr-btn-github" disabled="@(SelectedCount == 0 || AnySelectedSnapshotPending)" @onclick="() => OnMerge.InvokeAsync()">
                             Merge @SelectedCount pull request@(SelectedCount == 1 ? "" : "s")
@@ -171,8 +171,8 @@
     [Parameter] public IReadOnlyList<BulkMergePrRow> Rows { get; set; } = Array.Empty<BulkMergePrRow>();
     [Parameter] public BulkMergeMethodSelection SelectedMethod { get; set; }
     [Parameter] public EventCallback<BulkMergeMethodSelection> SelectedMethodChanged { get; set; }
-    [Parameter] public bool SyncToDefaultAfterMerge { get; set; }
-    [Parameter] public EventCallback<bool> SyncToDefaultAfterMergeChanged { get; set; }
+    [Parameter] public bool ReturnToDefaultAfterMerge { get; set; }
+    [Parameter] public EventCallback<bool> ReturnToDefaultAfterMergeChanged { get; set; }
     [Parameter] public bool IsRunning { get; set; }
     /// <summary>True while a job started by the drill-in single-PR dialog (stacked on top of this one) is running. Only affects the z-index style (see the comment above the outer div) - never <see cref="IsCompletedView"/> or the footer-mode checks, which must stay driven by this dialog's own <see cref="IsRunning"/>/<see cref="HasRun"/> state.</summary>
     [Parameter] public bool IsCoveredByOverlay { get; set; }
@@ -205,9 +205,9 @@
     /// <summary>Also true while GitHub hasn't finished computing a selected row's mergeability yet (CheckingMergeability) - Merge must wait for that to resolve for every selected PR before it can proceed, same as it already waits for the initial snapshot load.</summary>
     private bool AnySelectedSnapshotPending => Rows.Any(r => r.IsSelected && r.Status is BulkMergeRowStatus.LoadingSnapshot or BulkMergeRowStatus.CheckingMergeability);
     /// <summary>Computed from the durable per-row state, not the transient Completed/Failed progress counters (which reset on every run, including a retry) - so the finished summary describes the whole batch, not just the last retry.</summary>
-    private int MergedRowCount => Rows.Count(r => r.Status is BulkMergeRowStatus.Merged or BulkMergeRowStatus.Synced or BulkMergeRowStatus.SyncFailed);
+    private int MergedRowCount => Rows.Count(r => r.Status is BulkMergeRowStatus.Merged or BulkMergeRowStatus.ReturnedToDefault or BulkMergeRowStatus.ReturnFailed);
     private int FailedRowCount => Rows.Count(r => r.Status == BulkMergeRowStatus.Failed);
-    private int SyncIssueCount => Rows.Count(r => r.Status == BulkMergeRowStatus.SyncFailed);
+    private int ReturnIssueCount => Rows.Count(r => r.Status == BulkMergeRowStatus.ReturnFailed);
 
     protected override void OnParametersSet()
     {
@@ -263,8 +263,8 @@
     private async Task OnSyncCheckboxChanged(ChangeEventArgs e)
     {
         var val = e.Value is bool b ? b : bool.TryParse(e.Value?.ToString(), out var p) && p;
-        if (SyncToDefaultAfterMergeChanged.HasDelegate)
-            await SyncToDefaultAfterMergeChanged.InvokeAsync(val);
+        if (ReturnToDefaultAfterMergeChanged.HasDelegate)
+            await ReturnToDefaultAfterMergeChanged.InvokeAsync(val);
     }
 
     private void ToggleMethodDropdown() => _showMethodDropdown = !_showMethodDropdown;
@@ -289,9 +289,9 @@
         BulkMergeRowStatus.LoadingSnapshot or BulkMergeRowStatus.CheckingMergeability => "merge-pr-status-icon--neutral",
         BulkMergeRowStatus.Ready => GetReadyIconClass(row),
         BulkMergeRowStatus.Conflict => "merge-pr-status-icon--danger",
-        BulkMergeRowStatus.Merged or BulkMergeRowStatus.Synced => "merge-pr-status-icon--success",
+        BulkMergeRowStatus.Merged or BulkMergeRowStatus.ReturnedToDefault => "merge-pr-status-icon--success",
         BulkMergeRowStatus.Failed => "merge-pr-status-icon--danger",
-        BulkMergeRowStatus.SyncFailed => "merge-pr-status-icon--pending",
+        BulkMergeRowStatus.ReturnFailed => "merge-pr-status-icon--pending",
         _ => "merge-pr-status-icon--neutral"
     };
 
@@ -300,9 +300,9 @@
         BulkMergeRowStatus.LoadingSnapshot or BulkMergeRowStatus.CheckingMergeability => "bi-three-dots",
         BulkMergeRowStatus.Ready => GetReadyIconGlyph(row),
         BulkMergeRowStatus.Conflict => "bi-x-lg",
-        BulkMergeRowStatus.Merged or BulkMergeRowStatus.Synced => "bi-check-lg",
+        BulkMergeRowStatus.Merged or BulkMergeRowStatus.ReturnedToDefault => "bi-check-lg",
         BulkMergeRowStatus.Failed => "bi-x-lg",
-        BulkMergeRowStatus.SyncFailed => "bi-exclamation-lg",
+        BulkMergeRowStatus.ReturnFailed => "bi-exclamation-lg",
         BulkMergeRowStatus.Skipped => "bi-dash-lg",
         _ => "bi-dash-lg"
     };
@@ -350,11 +350,11 @@
         BulkMergeRowStatus.Ready => GetReadyStatusText(row),
         BulkMergeRowStatus.Conflict => "Has conflicts with base branch",
         BulkMergeRowStatus.Merging => "Merging...",
-        BulkMergeRowStatus.SyncingToDefault => "Syncing to default branch...",
+        BulkMergeRowStatus.ReturningToDefault => "Returning to default branch...",
         BulkMergeRowStatus.Merged => "Merged",
-        BulkMergeRowStatus.Synced => "Merged and synced to default",
+        BulkMergeRowStatus.ReturnedToDefault => "Merged and returned to default",
         BulkMergeRowStatus.Failed => row.ErrorMessage ?? "The merge could not be completed.",
-        BulkMergeRowStatus.SyncFailed => $"Merged, but sync to default failed: {row.ErrorMessage}",
+        BulkMergeRowStatus.ReturnFailed => $"Merged, but return to default failed: {row.ErrorMessage}",
         BulkMergeRowStatus.Skipped => "Skipped",
         BulkMergeRowStatus.Closed => "Closed without merging",
         _ => string.Empty
@@ -386,5 +386,5 @@
     }
 
     private static string? GetRowErrorTooltip(BulkMergePrRow row) =>
-        row.Status is BulkMergeRowStatus.Failed or BulkMergeRowStatus.SyncFailed ? row.ErrorMessage : null;
+        row.Status is BulkMergeRowStatus.Failed or BulkMergeRowStatus.ReturnFailed ? row.ErrorMessage : null;
 }

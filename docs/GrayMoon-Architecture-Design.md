@@ -293,7 +293,7 @@ Each POST carries a JSON body: `{ "repositoryId", "workspaceId", "repositoryPath
 | `WorkspacePushHandler` | Thin wrapper around `PushOrchestrator` with error handling; invoked from the component. |
 | `DependencyUpdateOrchestrator` | Runs the full dependency-update workflow: refresh projects → build plan → sync `.csproj` files → commit → refresh versions. |
 | `WorkspaceUpdateHandler` | Thin wrapper around `DependencyUpdateOrchestrator`. |
-| `WorkspaceBranchHandler` | Branch operations (checkout, create, delete, set-upstream, sync-to-default). |
+| `WorkspaceBranchHandler` | Branch operations (checkout, create, delete, set-upstream, return-to-default). |
 | `WorkspaceCommitSyncHandler` | Commit sync flow. |
 | `WorkspaceDependencyService` | Recomputes dependency stats without re-syncing; reads projects from DB and re-runs the level algorithm. |
 | `WorkspacePageService` | Aggregates data loading for the main repositories page. |
@@ -353,7 +353,7 @@ Two job kinds flow through a single bounded `Channel<JobEnvelope>`:
 | `CreateBranch` | Branch creation | `git checkout -b` or `git switch -c` |
 | `DeleteBranch` | Branch deletion | `git branch -d/-D` / `git push --delete` |
 | `SetUpstreamBranch` | After new branch push | `git push --set-upstream` |
-| `SyncToDefaultBranch` | After PR merge | `git checkout <default>`, prune local feature branch, `git pull` |
+| `ReturnToDefaultBranch` | After PR merge | `git checkout <default>`, prune local feature branch, `git pull` |
 | `PushRepository` | Push workflow | `git push` (with token auth via `-c http.extraHeader`) |
 | `StageAndCommit` | Dependency update commit | `git add -A`, `git commit -m` |
 | `CommitSyncRepository` | Commit sync | Git log query to compare commit state |
@@ -481,7 +481,7 @@ Single-repo and workspace-wide branch operations:
 - **Create branch:** `CreateBranch` command; optionally pattern-based across workspace.
 - **Checkout:** `CheckoutBranch` command; post-checkout hook fires and sends `SyncCommand`.
 - **Set upstream:** `SetUpstreamBranch` after first push of a new branch.
-- **Sync to default:** `SyncToDefaultBranch` - checkout default branch, prune feature branch if no drift, pull latest. Used after a PR is merged.
+- **Return to default:** `ReturnToDefaultBranch` - checkout default branch, prune feature branch if no drift, pull latest. Used after a PR is merged.
 - **Delete branch:** `DeleteBranch` with safety checks.
 - **Refresh branches:** `RefreshBranches` command; updates `RepositoryBranch` rows.
 
@@ -610,7 +610,7 @@ When a workspace has `RootPath = null`, it falls back to the global Settings val
 `WorkspaceRepository.UpdateAsync` saves only `Name` and repository links. If the user edits a workspace's root path in the UI, the change is not persisted. The edit form binds `editingWorkspaceRootPath` but it never reaches the database.
 
 ### BranchEndpoints.cs uses global root path for one call
-In the sync-to-default flow in `BranchEndpoints.cs`, one call uses `GetRootPathAsync()` (Settings) instead of `GetRootPathForWorkspaceAsync(workspace)`. This causes the wrong path to be used if the workspace has a custom `RootPath`.
+In the return-to-default flow in `BranchEndpoints.cs`, one call uses `GetRootPathAsync()` (Settings) instead of `GetRootPathForWorkspaceAsync(workspace)`. This causes the wrong path to be used if the workspace has a custom `RootPath`.
 
 ### No push retry / partial push recovery
 If the synchronized push fails mid-level (e.g. network error on repo 3 of level 2), there is no recovery mechanism. The user must resolve the failure manually and re-push.
@@ -625,7 +625,7 @@ If the synchronized push fails mid-level (e.g. network error on repo 3 of level 
 `WorkspaceRepository.UpdateAsync` should save `workspace.RootPath` so the edit-workspace UI is functional. This is a one-line fix.
 
 **Fix `BranchEndpoints` global root path**  
-Replace `GetRootPathAsync()` with `GetRootPathForWorkspaceAsync(workspace)` in the sync-to-default endpoint.
+Replace `GetRootPathAsync()` with `GetRootPathForWorkspaceAsync(workspace)` in the return-to-default endpoint.
 
 **Timeout and cleanup for `AgentResponseDelivery`**  
 Add a `CancellationToken`-linked cleanup or a background sweep to remove stale `TCS` entries that are never completed. Otherwise a lost response leaks indefinitely.

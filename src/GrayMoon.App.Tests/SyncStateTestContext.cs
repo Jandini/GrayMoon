@@ -16,7 +16,7 @@ namespace GrayMoon.App.Tests;
 
 /// <summary>
 /// Real DI container over an in-memory SQLite database, used by the write-side tests
-/// (sync command handling, sync-to-default persistence, PR refresh). The only substituted
+/// (sync command handling, return-to-default persistence, PR refresh). The only substituted
 /// dependencies are the agent transport and the SignalR hub, so the services under test run
 /// their production code paths against a real EF Core model.
 /// </summary>

@@ -6,9 +6,9 @@ namespace GrayMoon.App.Components.Pages;
 
 public sealed partial class WorkspaceRepositories
 {
-    private NewFeatureModalState _newFeatureModal = new();
+    private PrepareWorkspaceModalState _prepareWorkspaceModal = new();
 
-    private async Task ShowNewFeatureModalAsync()
+    private async Task ShowPrepareWorkspaceModalAsync()
     {
         if (workspace == null || !HasRepositories)
             return;
@@ -18,9 +18,9 @@ public sealed partial class WorkspaceRepositories
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Could not load common branches for new feature modal");
+            Logger.LogWarning(ex, "Could not load common branches for prepare workspace modal");
         }
-        _newFeatureModal = _newFeatureModal with
+        _prepareWorkspaceModal = _prepareWorkspaceModal with
         {
             IsVisible = true,
             WorkspaceName = workspace?.Name,
@@ -30,17 +30,17 @@ public sealed partial class WorkspaceRepositories
         StateHasChanged();
     }
 
-    private void CloseNewFeatureModal()
+    private void ClosePrepareWorkspaceModal()
     {
-        _newFeatureModal = _newFeatureModal with { IsVisible = false };
+        _prepareWorkspaceModal = _prepareWorkspaceModal with { IsVisible = false };
     }
 
-    private async Task HandleNewFeatureCreateAsync(NewFeatureRequest request)
+    private async Task HandlePrepareWorkspaceAsync(PrepareWorkspaceRequest request)
     {
         if (workspace == null || IsJobRunning)
             return;
 
-        CloseNewFeatureModal();
+        ClosePrepareWorkspaceModal();
 
         var allLinks = await GetAllLinksForOperationAsync();
         var tagFilteredRepoIds = request.SkipReposOnTags
@@ -48,15 +48,15 @@ public sealed partial class WorkspaceRepositories
             : (IReadOnlySet<int>?)null;
 
         // Phases 1 + 2: branch creation (hooks suppressed, state persisted inline) then optional update.
-        // NewFeatureOrchestrator guarantees all CheckedOutTag fields are null before the update
+        // PrepareWorkspaceOrchestrator guarantees all CheckedOutTag fields are null before the update
         // runs, so DependencyUpdateOrchestrator never skips previously tag-pinned repos.
         StartPageJob("Creating branches...", async (job, ct) =>
         {
             IReadOnlySet<int> syncedRepoIds = new HashSet<int>();
             try
             {
-                var updateResult = await ScopedExecutor.ExecuteAsync<IWorkspaceFeatureOperations, DependencyUpdateRunResult>(
-                    svc => svc.CreateAsync(
+                var updateResult = await ScopedExecutor.ExecuteAsync<IWorkspacePreparationOperations, DependencyUpdateRunResult>(
+                    svc => svc.PrepareAsync(
                         WorkspaceId,
                         request.NewBranchName,
                         request.BaseBranch,
@@ -87,7 +87,7 @@ public sealed partial class WorkspaceRepositories
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "New Feature: orchestration failed for workspace {WorkspaceId}", WorkspaceId);
+                Logger.LogError(ex, "Prepare Workspace: orchestration failed for workspace {WorkspaceId}", WorkspaceId);
                 SafeInvoke(() => SetLevelError(0, ex.Message));
                 throw;
             }
@@ -108,7 +108,7 @@ public sealed partial class WorkspaceRepositories
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "New Feature: failed to get push plan for workspace {WorkspaceId}", WorkspaceId);
+                Logger.LogError(ex, "Prepare Workspace: failed to get push plan for workspace {WorkspaceId}", WorkspaceId);
                 SafeInvoke(() => SetLevelError(0, ex.Message));
                 throw;
             }
@@ -119,14 +119,14 @@ public sealed partial class WorkspaceRepositories
             }
             catch (SynchronizedPushNotPossibleException ex)
             {
-                Logger.LogError(ex, "New Feature: synchronized push not possible for workspace {WorkspaceId}", WorkspaceId);
+                Logger.LogError(ex, "Prepare Workspace: synchronized push not possible for workspace {WorkspaceId}", WorkspaceId);
                 SafeInvoke(() => SetLevelError(0, ex.Message));
                 return;
             }
         }, new PageJobOptions { RefreshOnSuccess = false });
     }
 
-    private sealed record NewFeatureModalState
+    private sealed record PrepareWorkspaceModalState
     {
         public bool IsVisible { get; init; }
         public string? WorkspaceName { get; init; }

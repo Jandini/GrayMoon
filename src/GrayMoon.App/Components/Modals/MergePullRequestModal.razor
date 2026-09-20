@@ -1,7 +1,7 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services
 @using Microsoft.AspNetCore.Components.Web
-@inject MergePullRequestSyncToDefaultPreferenceService SyncToDefaultPreference
+@inject MergePullRequestReturnToDefaultPreferenceService ReturnToDefaultPreference
 @inject IJSRuntime JS
 
 @if (IsVisible)
@@ -9,7 +9,7 @@
     @*
         z-index drops below the page's BackgroundJobOverlay (.loading-overlay--page, z-index: 100) while
         IsSyncingLocalState or IsMerging so that overlay visually covers the dialog for a push/pull triggered from
-        within it, or for the merge (and optional sync-to-default) itself - without unmounting the dialog, which
+        within it, or for the merge (and optional return-to-default) itself - without unmounting the dialog, which
         would look like it closed and reopened.
     *@
     @* z-index one below ConfirmModal's 1075 so the "merge anyway?" warning confirmation (nested on top of this dialog) always wins the stacking tie. *@
@@ -301,11 +301,11 @@
                 </div>
                 @* Always visible (even mid-load) so the dialog's footprint doesn't jump once the button becomes enabled. *@
                 <div class="modal-footer merge-pr-modal-footer">
-                    <div class="form-check mb-0 merge-pr-sync-default-check">
-                        <input class="form-check-input" type="checkbox" id="merge-pr-sync-default"
-                               @bind="_syncToDefault"
+                    <div class="form-check mb-0 merge-pr-return-default-check">
+                        <input class="form-check-input" type="checkbox" id="merge-pr-return-default"
+                               @bind="_returnToDefault"
                                disabled="@(IsLoading || IsLoadingReviewDetails || IsMerging)" />
-                        <label class="form-check-label" for="merge-pr-sync-default">Sync to default branch</label>
+                        <label class="form-check-label" for="merge-pr-return-default">Return to default branch</label>
                     </div>
                     <div class="merge-pr-footer-actions">
                         <div class="btn-group merge-pr-split-btn @(IsPrimaryActionDisabled ? "merge-pr-split-btn--pending" : null)">
@@ -428,12 +428,12 @@
                                  && !string.IsNullOrWhiteSpace(_titleDraft)
                                  && !string.Equals(_titleDraft.Trim(), DisplayTitle, StringComparison.Ordinal);
 
-    /// <summary>Backed by <see cref="SyncToDefaultPreference"/> (a singleton) so the checkbox remembers the user's
+    /// <summary>Backed by <see cref="ReturnToDefaultPreference"/> (a singleton) so the checkbox remembers the user's
     /// last choice across dialog opens and page navigation, instead of resetting to unchecked every time.</summary>
-    private bool _syncToDefault
+    private bool _returnToDefault
     {
-        get => SyncToDefaultPreference.SyncToDefault;
-        set => SyncToDefaultPreference.SyncToDefault = value;
+        get => ReturnToDefaultPreference.ReturnToDefault;
+        set => ReturnToDefaultPreference.ReturnToDefault = value;
     }
     /// <summary>
     /// True once the default merge method has been preselected for the current PR. Tracked separately from
@@ -695,7 +695,7 @@
     {
         _showMethodDropdown = false;
         if (Details != null && OnMerge.HasDelegate)
-            await OnMerge.InvokeAsync(new MergePullRequestChoice(_selectedMethod, _syncToDefault));
+            await OnMerge.InvokeAsync(new MergePullRequestChoice(_selectedMethod, _returnToDefault));
     }
 
     private async Task HandleCloseClick()

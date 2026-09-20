@@ -24,8 +24,8 @@
                 <div class="gm-menu-panel level-actions-menu">
                     <div class="gm-menu-title">@(LevelKey == null ? "No dependencies" : $"Level {LevelKey}")</div>
                     <div class="gm-menu-items @(ActionsDisabled ? "gm-menu-items--disabled" : "")">
-                        <div class="gm-menu-item @(HasMergedPr ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Sync to default branch" @onclick="HandleSyncToDefault" @onclick:stopPropagation>
-                            <i class="bi bi-rewind" aria-hidden="true"></i><span>Sync To Default</span>
+                        <div class="gm-menu-item @(HasMergedPr ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Return to default branch" @onclick="HandleReturnToDefault" @onclick:stopPropagation>
+                            <i class="bi bi-rewind" aria-hidden="true"></i><span>Return to Default</span>
                         </div>
                         <div class="gm-menu-item @(HasSyncCommits ? "gm-menu-item--highlight" : "")" role="button" tabindex="0" title="Sync commits" @onclick="HandleSyncCommits" @onclick:stopPropagation>
                             <i class="bi bi-arrow-down-up" aria-hidden="true"></i><span>Sync Commits</span>
@@ -91,7 +91,7 @@
     /// <summary>Total repositories at this level (may exceed hydrated <see cref="Group"/> count under virtual scroll).</summary>
     [Parameter] public int RepositoryCount { get; set; }
     [Parameter] public bool ActionsDisabled { get; set; }
-    [Parameter] public EventCallback OnSyncToDefault { get; set; }
+    [Parameter] public EventCallback OnReturnToDefault { get; set; }
     [Parameter] public EventCallback OnSyncCommits { get; set; }
     [Parameter] public EventCallback OnOpenPr { get; set; }
     [Parameter] public EventCallback OnOpenMergePrs { get; set; }
@@ -104,7 +104,7 @@
     [Parameter] public bool HasCreatablePr { get; set; }
     /// <summary>True when at least one repository in this level has an open, non-conflicted pull request - "Merge PRs..." is highlighted.</summary>
     [Parameter] public bool HasMergeablePr { get; set; }
-    /// <summary>True when at least one repository in this level has a merged pull request - "Sync to Default" is highlighted since the default branch has moved on.</summary>
+    /// <summary>True when at least one repository in this level has a merged pull request - "Return to Default" is highlighted since the default branch has moved on.</summary>
     [Parameter] public bool HasMergedPr { get; set; }
     /// <summary>True when at least one repository in this level has incoming or outgoing commits - "Sync Commits" is highlighted. No-upstream does not count.</summary>
     [Parameter] public bool HasSyncCommits { get; set; }
@@ -121,9 +121,9 @@
               .Select(u => u!)
               .ToList() ?? [];
 
-    private async Task HandleSyncToDefault()
+    private async Task HandleReturnToDefault()
     {
-        if (!ActionsDisabled) await OnSyncToDefault.InvokeAsync();
+        if (!ActionsDisabled) await OnReturnToDefault.InvokeAsync();
     }
 
     private async Task HandleSyncCommits()

@@ -14,7 +14,7 @@ namespace GrayMoon.App.Services.Git;
 
 public sealed partial class WorkspaceGitService
 {
-    /// <summary>Runs GetCommitCounts (agent) for each repo and returns DefaultBranchAhead and HasUpstream per repo. Used to check if sync-to-default is safe (no commits ahead of default). Respects MaxParallelOperations.</summary>
+    /// <summary>Runs GetCommitCounts (agent) for each repo and returns DefaultBranchAhead and HasUpstream per repo. Used to check if return-to-default is safe (no commits ahead of default). Respects MaxParallelOperations.</summary>
     public async Task<IReadOnlyList<(int RepoId, int? DefaultAhead, bool? HasUpstream)>> GetCommitCountsForReposAsync(
         int workspaceId,
         IReadOnlyList<(int RepoId, string RepoName)> repos,
@@ -71,7 +71,7 @@ public sealed partial class WorkspaceGitService
     /// Persists the resulting state through <see cref="WorkspaceRepositoryStateWriter"/> but does not recompute workspace-wide stats or broadcast:
     /// the caller owns that boundary and must call <see cref="RecomputeAndBroadcastWorkspaceSyncedAsync"/> once after its whole batch, single-repository batches included.
     /// </summary>
-    public async Task<(bool Success, string? ErrorMessage)> SyncToDefaultDirectAsync(
+    public async Task<(bool Success, string? ErrorMessage)> ReturnToDefaultDirectAsync(
         int workspaceId,
         int repositoryId,
         string currentBranchName,
@@ -123,10 +123,10 @@ public sealed partial class WorkspaceGitService
             deleteRemoteBranch
         };
 
-        var response = await _agentBridge.SendCommandAsync("SyncToDefaultBranch", args, cancellationToken);
-        var syncResponse = AgentResponseJson.DeserializeAgentResponse<SyncToDefaultBranchResponse>(response.Data);
+        var response = await _agentBridge.SendCommandAsync("ReturnToDefaultBranch", args, cancellationToken);
+        var syncResponse = AgentResponseJson.DeserializeAgentResponse<ReturnToDefaultBranchResponse>(response.Data);
         var commandSuccess = syncResponse?.Success ?? response.Success;
-        var errorMessage = syncResponse?.ErrorMessage ?? response.Error ?? "Failed to sync to default branch";
+        var errorMessage = syncResponse?.ErrorMessage ?? response.Error ?? "Failed to return to default branch";
 
         if (!commandSuccess)
             return (false, errorMessage);
@@ -147,7 +147,7 @@ public sealed partial class WorkspaceGitService
 
         // One authoritative write of branch, version, counts, upstream, branch rows, projects and the PR
         // row, so no field of the previous branch survives the switch to the default branch.
-        var snapshot = BuildSyncToDefaultSnapshot(syncResponse);
+        var snapshot = BuildReturnToDefaultSnapshot(syncResponse);
         await _stateWriter.ApplyAsync(workspaceId, repositoryId, snapshot, new RepositoryStateWriteOptions
         {
             SyncStatus = SyncStatusWrite.Derive,
@@ -158,11 +158,11 @@ public sealed partial class WorkspaceGitService
     }
 
     /// <summary>
-    /// Builds the state snapshot for a sync-to-default response. Newer agents send an explicit snapshot
+    /// Builds the state snapshot for a return-to-default response. Newer agents send an explicit snapshot
     /// with probe markers; older ones send the flat fields, which are mapped here with the markers a
-    /// successful sync-to-default is known to satisfy.
+    /// successful return-to-default is known to satisfy.
     /// </summary>
-    private static RepositoryStateSnapshot BuildSyncToDefaultSnapshot(SyncToDefaultBranchResponse? syncResponse)
+    private static RepositoryStateSnapshot BuildReturnToDefaultSnapshot(ReturnToDefaultBranchResponse? syncResponse)
     {
         if (syncResponse == null)
             return new RepositoryStateSnapshot();

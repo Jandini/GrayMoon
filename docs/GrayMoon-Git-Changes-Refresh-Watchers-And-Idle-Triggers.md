@@ -596,7 +596,7 @@ only**, via ETagged GitHub GETs (304s are free).
 | Idle | 5_000 ms |
 | Hidden | 30_000 ms |
 
-Action-triggered refreshes (push, sync-to-default, create PR) still fire immediately with `force:
+Action-triggered refreshes (push, return-to-default, create PR) still fire immediately with `force:
 true` and do not go through this loop.
 
 #### GitHub Actions grid auto-poll (`WorkspaceActions.AutoRefresh`)

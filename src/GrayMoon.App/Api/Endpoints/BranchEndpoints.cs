@@ -7,7 +7,7 @@ public static class BranchEndpoints
         routes.MapPost("/api/branches/get", GetBranches);
         routes.MapPost("/api/branches/refresh", RefreshBranches);
         routes.MapPost("/api/branches/checkout", CheckoutBranch);
-        routes.MapPost("/api/branches/sync-to-default", SyncToDefaultBranch);
+        routes.MapPost("/api/branches/return-to-default", ReturnToDefaultBranch);
         routes.MapPost("/api/branches/common", GetCommonBranches);
         routes.MapPost("/api/branches/exists-in-workspace", BranchExistsInWorkspace);
         routes.MapPost("/api/branches/create", CreateBranch);
@@ -61,8 +61,8 @@ public static class BranchEndpoints
             cancellationToken)).ToHttpResult();
     }
 
-    private static async Task<IResult> SyncToDefaultBranch(
-        SyncToDefaultBranchApiRequest? body,
+    private static async Task<IResult> ReturnToDefaultBranch(
+        ReturnToDefaultBranchApiRequest? body,
         IWorkspaceBranchOperations operations,
         CancellationToken cancellationToken)
     {
@@ -71,7 +71,7 @@ public static class BranchEndpoints
         if (body.WorkspaceId <= 0 || body.RepositoryId <= 0 || string.IsNullOrWhiteSpace(body.CurrentBranchName))
             return Results.BadRequest("workspaceId, repositoryId, and currentBranchName are required.");
 
-        return (await operations.SyncToDefaultAsync(
+        return (await operations.ReturnToDefaultAsync(
             body.WorkspaceId,
             body.RepositoryId,
             body.CurrentBranchName,
@@ -209,7 +209,7 @@ public sealed class CheckoutBranchApiResult
     }
 }
 
-public sealed class SyncToDefaultBranchApiRequest
+public sealed class ReturnToDefaultBranchApiRequest
 {
     public int WorkspaceId { get; set; }
     public int RepositoryId { get; set; }

@@ -1,8 +1,8 @@
 namespace GrayMoon.Application;
 
-public interface IWorkspaceFeatureOperations
+public interface IWorkspacePreparationOperations
 {
-    Task<DependencyUpdateRunResult> CreateAsync(
+    Task<DependencyUpdateRunResult> PrepareAsync(
         int workspaceId,
         string newBranchName,
         string baseBranch,

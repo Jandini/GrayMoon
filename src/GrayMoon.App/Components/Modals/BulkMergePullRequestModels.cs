@@ -39,9 +39,9 @@ public enum BulkMergeRowStatus
     Merging,
     Merged,
     Failed,
-    SyncingToDefault,
-    Synced,
-    SyncFailed,
+    ReturningToDefault,
+    ReturnedToDefault,
+    ReturnFailed,
     Skipped,
     /// <summary>Closed without merging via the drill-in single-PR dialog - distinct from <see cref="Skipped"/>, which means the batch run left this row unattempted (e.g. Abort was pressed).</summary>
     Closed

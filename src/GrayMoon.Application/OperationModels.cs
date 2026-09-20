@@ -22,7 +22,7 @@ public sealed record OperationResult(
 
 /// <summary>
 /// Result of a dependency-update run. <see cref="Success"/> is false when any repo or workspace-level
-/// error was reported; chained push (New Feature / Update and Push) must not run in that case.
+/// error was reported; chained push (Prepare Workspace / Update and Push) must not run in that case.
 /// An empty <see cref="SyncedRepoIds"/> with <see cref="Success"/> true means nothing needed updating.
 /// </summary>
 public sealed record DependencyUpdateRunResult(bool Success, IReadOnlySet<int> SyncedRepoIds)

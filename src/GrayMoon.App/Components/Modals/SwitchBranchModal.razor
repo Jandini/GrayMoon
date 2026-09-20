@@ -147,7 +147,7 @@
                                                             @if (branch == currentBranchLocal)
                                                             {
                                                                 <span class="badge bg-primary ms-2">Current</span>
-                                                                @if (showSyncToDefaultButton && string.IsNullOrWhiteSpace(currentTag))
+                                                                @if (showReturnToDefaultButton && string.IsNullOrWhiteSpace(currentTag))
                                                                 {
                                                                     <span class="badge ms-2" style="background-color: #ffc107; color: #000;">Local Only</span>
                                                                 }
@@ -400,14 +400,14 @@
                                 }
                                 Fetch
                             </button>
-                            @if (showSyncToDefaultButton && !string.IsNullOrWhiteSpace(defaultBranch) && activeTab == "local" && selectedBranch == currentBranchLocal && string.IsNullOrWhiteSpace(currentTag))
+                            @if (showReturnToDefaultButton && !string.IsNullOrWhiteSpace(defaultBranch) && activeTab == "local" && selectedBranch == currentBranchLocal && string.IsNullOrWhiteSpace(currentTag))
                             {
                                 <button type="button" 
                                         class="btn btn-warning" 
-                                        @onclick="SyncToDefaultAsync"
+                                        @onclick="ReturnToDefaultAsync"
                                         disabled="@isRefreshing">
                                     <i class="bi bi-rewind me-1" aria-hidden="true"></i>
-                                    Sync to @defaultBranch
+                                    Return to @defaultBranch
                                 </button>
                             }
                         }
@@ -477,7 +477,7 @@
     [Parameter] public EventCallback OnFetchBranches { get; set; }
     [Parameter] public EventCallback OnBranchChanged { get; set; }
     [Parameter] public EventCallback<(int RepositoryId, string BranchName, bool IsTag)> OnCheckoutBranch { get; set; }
-    [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string CurrentBranchName, string DefaultBranch)> OnSyncToDefault { get; set; }
+    [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string CurrentBranchName, string DefaultBranch)> OnReturnToDefault { get; set; }
     [Parameter] public EventCallback<(int RepositoryId, string? RepositoryName, string NewBranchName, string BaseBranch, bool SetUpstream)> OnCreateBranch { get; set; }
     /// <summary>Tab to activate when the modal opens. Null defaults to "local", but callers can pass "tags" to jump straight to the Tags tab (e.g. from the upgrade badge).</summary>
     [Parameter] public string? InitialTab { get; set; }
@@ -508,7 +508,7 @@
     private bool isProcessing = false;
     private bool isRefreshing = false;
     private string? errorMessage;
-    private bool showSyncToDefaultButton = false;
+    private bool showReturnToDefaultButton = false;
     private ElementReference modalElement;
     private bool _wasVisible;
     private bool _prevVisible;
@@ -598,7 +598,7 @@
             {
                 ApplyBranchLists(outcome.Body);
                 selectedBranch = !string.IsNullOrWhiteSpace(currentTag) && activeTab == "tags" ? currentTag : currentBranchLocal;
-                showSyncToDefaultButton = remoteBranches.Count > 0 && ShouldShowSyncToDefaultButton();
+                showReturnToDefaultButton = remoteBranches.Count > 0 && ShouldShowReturnToDefaultButton();
             }
         }
         catch (Exception ex)
@@ -670,7 +670,7 @@
     {
         isLoading = true;
         errorMessage = null;
-        showSyncToDefaultButton = false;
+        showReturnToDefaultButton = false;
         StateHasChanged();
 
         try
@@ -693,7 +693,7 @@
                 }
 
                 // Show sync only when remotes are known, we are on a real non-default branch, and it is missing on remote.
-                showSyncToDefaultButton = remoteBranches.Count > 0 && ShouldShowSyncToDefaultButton();
+                showReturnToDefaultButton = remoteBranches.Count > 0 && ShouldShowReturnToDefaultButton();
 
                 // If no branches/tags were persisted, automatically fetch them (keep loading state)
                 if (localBranches.Count == 0 && remoteBranches.Count == 0 && tags.Count == 0)
@@ -731,7 +731,7 @@
             {
                 ApplyBranchLists(outcome.Body);
                 selectedBranch = !string.IsNullOrWhiteSpace(currentTag) && activeTab == "tags" ? currentTag : currentBranchLocal;
-                showSyncToDefaultButton = remoteBranches.Count > 0 && ShouldShowSyncToDefaultButton();
+                showReturnToDefaultButton = remoteBranches.Count > 0 && ShouldShowReturnToDefaultButton();
                 await OnBranchChanged.InvokeAsync();
             }
         }
@@ -872,7 +872,7 @@
     }
 
     /// <summary>True when current is a real branch that is not the default and has no remote-tracking counterpart.</summary>
-    private bool ShouldShowSyncToDefaultButton()
+    private bool ShouldShowReturnToDefaultButton()
     {
         if (!string.IsNullOrWhiteSpace(currentTag) || string.IsNullOrWhiteSpace(currentBranchLocal))
             return false;
@@ -1147,13 +1147,13 @@
         await CheckoutAsync();
     }
 
-    private async Task SyncToDefaultAsync()
+    private async Task ReturnToDefaultAsync()
     {
         if (string.IsNullOrWhiteSpace(currentBranchLocal) || string.IsNullOrWhiteSpace(defaultBranch))
             return;
 
         // Close dialog and let parent show full-page overlay and run sync
-        await OnSyncToDefault.InvokeAsync((RepositoryId, RepositoryName, currentBranchLocal, defaultBranch));
+        await OnReturnToDefault.InvokeAsync((RepositoryId, RepositoryName, currentBranchLocal, defaultBranch));
         await OnCancel.InvokeAsync();
     }
 
@@ -1209,7 +1209,7 @@
                 else
                     selectedBranch = currentBranchLocal;
 
-                showSyncToDefaultButton = ShouldShowSyncToDefaultButton();
+                showReturnToDefaultButton = ShouldShowReturnToDefaultButton();
 
                 // Refresh workspace data
                 await OnBranchChanged.InvokeAsync();

@@ -8,13 +8,13 @@ using Microsoft.Extensions.DependencyInjection;
 namespace GrayMoon.App.Tests;
 
 /// <summary>
-/// Characterisation tests for <c>WorkspaceGitService.SyncToDefaultDirectAsync</c>: after the agent
+/// Characterisation tests for <c>WorkspaceGitService.ReturnToDefaultDirectAsync</c>: after the agent
 /// reports a successful switch to the default branch, the link row and the branch rows must reflect
 /// the branch that is now checked out.
 /// </summary>
-public sealed class SyncToDefaultPersistenceTests
+public sealed class ReturnToDefaultPersistenceTests
 {
-    private static SyncToDefaultBranchResponse SuccessfulResponse() => new()
+    private static ReturnToDefaultBranchResponse SuccessfulResponse() => new()
     {
         Success = true,
         CurrentBranch = "main",
@@ -44,12 +44,12 @@ public sealed class SyncToDefaultPersistenceTests
     public async Task Successful_sync_persists_branch_version_counts_and_upstream()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("SyncToDefaultBranch", SuccessfulResponse());
+        ctx.AgentBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
 
-        var (success, error) = await git.SyncToDefaultDirectAsync(
+        var (success, error) = await git.ReturnToDefaultDirectAsync(
             ctx.WorkspaceId, ctx.RepositoryId, "feature/x",
             deleteRemoteBranch: false, allowForceDeleteLocalBranch: true, CancellationToken.None);
 
@@ -71,7 +71,7 @@ public sealed class SyncToDefaultPersistenceTests
     public async Task Successful_sync_replaces_the_branch_rows_with_the_agent_list()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("SyncToDefaultBranch", SuccessfulResponse());
+        ctx.AgentBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
 
         await using (var seedScope = ctx.CreateScope())
         {
@@ -85,7 +85,7 @@ public sealed class SyncToDefaultPersistenceTests
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-        await git.SyncToDefaultDirectAsync(
+        await git.ReturnToDefaultDirectAsync(
             ctx.WorkspaceId, ctx.RepositoryId, "feature/x",
             deleteRemoteBranch: false, allowForceDeleteLocalBranch: true, CancellationToken.None);
 
@@ -99,11 +99,11 @@ public sealed class SyncToDefaultPersistenceTests
     public async Task Successful_sync_persists_the_projects_found_on_the_default_branch()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("SyncToDefaultBranch", SuccessfulResponse());
+        ctx.AgentBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-        await git.SyncToDefaultDirectAsync(
+        await git.ReturnToDefaultDirectAsync(
             ctx.WorkspaceId, ctx.RepositoryId, "feature/x",
             deleteRemoteBranch: false, allowForceDeleteLocalBranch: true, CancellationToken.None);
 
@@ -120,15 +120,15 @@ public sealed class SyncToDefaultPersistenceTests
         bool expectedForceDelete)
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("SyncToDefaultBranch", SuccessfulResponse());
+        ctx.AgentBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-        await git.SyncToDefaultDirectAsync(
+        await git.ReturnToDefaultDirectAsync(
             ctx.WorkspaceId, ctx.RepositoryId, "feature/x",
             deleteRemoteBranch: false, allowForceDeleteLocalBranch, CancellationToken.None);
 
-        var args = ctx.AgentBridge.Calls.Single(c => c.Command == "SyncToDefaultBranch").Args;
+        var args = ctx.AgentBridge.Calls.Single(c => c.Command == "ReturnToDefaultBranch").Args;
         var force = args.GetType().GetProperty("forceDeleteLocalBranch")!.GetValue(args);
         Assert.Equal(expectedForceDelete, force);
     }
@@ -137,7 +137,7 @@ public sealed class SyncToDefaultPersistenceTests
     public async Task Failed_agent_command_reports_the_inner_error_and_leaves_the_row_untouched()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("SyncToDefaultBranch", new SyncToDefaultBranchResponse
+        ctx.AgentBridge.Respond("ReturnToDefaultBranch", new ReturnToDefaultBranchResponse
         {
             Success = false,
             ErrorMessage = "Could not determine default branch",
@@ -146,7 +146,7 @@ public sealed class SyncToDefaultPersistenceTests
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
 
-        var (success, error) = await git.SyncToDefaultDirectAsync(
+        var (success, error) = await git.ReturnToDefaultDirectAsync(
             ctx.WorkspaceId, ctx.RepositoryId, "feature/x",
             deleteRemoteBranch: false, allowForceDeleteLocalBranch: true, CancellationToken.None);
 
@@ -162,7 +162,7 @@ public sealed class SyncToDefaultPersistenceTests
     public async Task GetBranches_after_sync_in_another_scope_returns_main_not_stale_tracked_branch()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        ctx.AgentBridge.Respond("SyncToDefaultBranch", SuccessfulResponse());
+        ctx.AgentBridge.Respond("ReturnToDefaultBranch", SuccessfulResponse());
 
         await using var circuitScope = ctx.CreateScope();
         var circuitDb = circuitScope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -173,7 +173,7 @@ public sealed class SyncToDefaultPersistenceTests
         await using (var jobScope = ctx.CreateScope())
         {
             var git = jobScope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-            var (success, error) = await git.SyncToDefaultDirectAsync(
+            var (success, error) = await git.ReturnToDefaultDirectAsync(
                 ctx.WorkspaceId, ctx.RepositoryId, "feature/x",
                 deleteRemoteBranch: false, allowForceDeleteLocalBranch: true, CancellationToken.None);
             Assert.True(success);

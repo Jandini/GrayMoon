@@ -32,7 +32,7 @@
 ## Problem
 
 - **Commands** receive `WorkspaceRoot` from the app. The app is supposed to pass the root for the **specific workspace**. Most call sites use `GetRootPathForWorkspaceAsync(workspace)`, which is correct.
-- **One bug:** In **BranchEndpoints.cs** (Sync-to-default flow), the code uses `GetRootPathAsync(CancellationToken.None)` instead of `GetRootPathForWorkspaceAsync(workspace, ...)`. So that endpoint uses the **Settings** root, not the workspace’s `RootPath`. If the workspace has a different root (or Settings was changed), the repo can’t be found.
+- **One bug:** In **BranchEndpoints.cs** (Return-to-default flow), the code uses `GetRootPathAsync(CancellationToken.None)` instead of `GetRootPathForWorkspaceAsync(workspace, ...)`. So that endpoint uses the **Settings** root, not the workspace’s `RootPath`. If the workspace has a different root (or Settings was changed), the repo can’t be found.
 - **Workspaces with `RootPath == null`** (e.g. created before the column existed, or never set) always fall back to Settings. If the user then changes the Settings path, those workspaces effectively "move" to the new path and existing repos are no longer found.
 - **Edit workspace** - The Workspaces page has `editingWorkspaceRootPath` and uses it for validation and display, but **UpdateAsync does not persist RootPath**, so changes to root path in the edit modal are never saved.
 
@@ -42,7 +42,7 @@
 
 | File | Method / usage | Current source | Should use |
 |------|----------------|----------------|------------|
-| **BranchEndpoints.cs** | Sync to default branch (~L259) | `GetRootPathAsync()` | `GetRootPathForWorkspaceAsync(workspace)` |
+| **BranchEndpoints.cs** | Return to default branch (~L259) | `GetRootPathAsync()` | `GetRootPathForWorkspaceAsync(workspace)` |
 | BranchEndpoints.cs | Other branch ops | `GetRootPathForWorkspaceAsync(workspace)` | ✓ correct |
 | WorkspaceEndpoints.cs | Workspace API | `GetRootPathForWorkspaceAsync(workspace)` | ✓ correct |
 | WorkspaceGitService.cs | All agent commands | `GetRootPathForWorkspaceAsync(workspace)` | ✓ correct |
@@ -62,7 +62,7 @@
 ### 1. Fix BranchEndpoints to use workspace root (required)
 
 - **File:** `src/GrayMoon.App/Api/Endpoints/BranchEndpoints.cs`
-- **Change:** In the Sync-to-default-branch endpoint, replace `GetRootPathAsync(CancellationToken.None)` with `GetRootPathForWorkspaceAsync(workspace, CancellationToken.None)` so the root comes from the workspace (Workspaces table) when set, else Settings.
+- **Change:** In the Return-to-default-branch endpoint, replace `GetRootPathAsync(CancellationToken.None)` with `GetRootPathForWorkspaceAsync(workspace, CancellationToken.None)` so the root comes from the workspace (Workspaces table) when set, else Settings.
 - **Effort:** Small (single line change).
 
 ### 2. Backfill Workspaces.RootPath for existing rows (recommended)
@@ -94,5 +94,5 @@
 
 ## Summary
 
-- **Minimal fix:** Use `GetRootPathForWorkspaceAsync(workspace)` in BranchEndpoints (Sync-to-default) so that endpoint uses the Workspaces table (with Settings fallback) like all others.
+- **Minimal fix:** Use `GetRootPathForWorkspaceAsync(workspace)` in BranchEndpoints (Return-to-default) so that endpoint uses the Workspaces table (with Settings fallback) like all others.
 - **Robust fix:** Above + backfill `Workspaces.RootPath` for existing rows + persist `RootPath` in `UpdateAsync` and wire the edit modal so the workspace root is stored in the Workspaces table and Settings remain only the default for new workspaces.

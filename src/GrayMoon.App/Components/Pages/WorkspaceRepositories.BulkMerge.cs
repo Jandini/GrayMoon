@@ -12,15 +12,15 @@ namespace GrayMoon.App.Components.Pages;
 /// </summary>
 public sealed partial class WorkspaceRepositories
 {
-    [Inject] private MergePullRequestSyncToDefaultPreferenceService SyncToDefaultPreferenceService { get; set; } = default!;
+    [Inject] private MergePullRequestReturnToDefaultPreferenceService ReturnToDefaultPreferenceService { get; set; } = default!;
 
     private BulkMergePullRequestsModalState _bulkMergeModal = new();
 
-    /// <summary>Bound to the same singleton the single-PR dialog's own "Sync to default branch" checkbox uses, so the two remember one shared last choice.</summary>
-    private bool BulkMergeSyncToDefault
+    /// <summary>Bound to the same singleton the single-PR dialog's own "Return to default branch" checkbox uses, so the two remember one shared last choice.</summary>
+    private bool BulkMergeReturnToDefault
     {
-        get => SyncToDefaultPreferenceService.SyncToDefault;
-        set => SyncToDefaultPreferenceService.SyncToDefault = value;
+        get => ReturnToDefaultPreferenceService.ReturnToDefault;
+        set => ReturnToDefaultPreferenceService.ReturnToDefault = value;
     }
 
     private async Task OpenMergePullRequestsDialogForLevelAsync(int? levelKey)
@@ -234,9 +234,9 @@ public sealed partial class WorkspaceRepositories
         StateHasChanged();
     }
 
-    private void SetBulkMergeSyncToDefault(bool value)
+    private void SetBulkMergeReturnToDefault(bool value)
     {
-        BulkMergeSyncToDefault = value;
+        BulkMergeReturnToDefault = value;
         StateHasChanged();
     }
 
@@ -255,49 +255,49 @@ public sealed partial class WorkspaceRepositories
         if (rows.Count == 0)
             return;
 
-        // Captured once here (the "Sync to default branch" checkbox is only editable during this pre-run
+        // Captured once here (the "Return to default branch" checkbox is only editable during this pre-run
         // selection phase) rather than re-read from the shared preference singleton on every later retry -
         // otherwise a "Retry failed" click could pick up whatever that singleton now holds (e.g. changed via
         // the single-PR merge dialog in the meantime) instead of the choice this batch was actually confirmed
         // with, leaving sibling rows from the same run inconsistently synced.
-        var syncToDefault = BulkMergeSyncToDefault;
+        var returnToDefault = BulkMergeReturnToDefault;
         var methodPhrase = _bulkMergeModal.SelectedMethod.ToConfirmationPhrase();
-        var syncSuffix = syncToDefault ? " and synced to the default branch" : string.Empty;
+        var syncSuffix = returnToDefault ? " and synced to the default branch" : string.Empty;
         var message = $"Merge {rows.Count} pull request{(rows.Count == 1 ? "" : "s")} using {methodPhrase}{syncSuffix}?";
 
         ShowConfirm(message, () =>
         {
-            _bulkMergeModal.SyncToDefault = syncToDefault;
-            RunBulkMergeAndSyncAsync(rows, Array.Empty<BulkMergePrRow>());
+            _bulkMergeModal.ReturnToDefault = returnToDefault;
+            RunBulkMergeAndReturnToDefaultAsync(rows, Array.Empty<BulkMergePrRow>());
             return Task.CompletedTask;
         }, "Merge");
     }
 
-    /// <summary>Retries every currently-failed row: Failed rows re-merge (and, if the checkbox is on, sync); SyncFailed rows only re-run the sync step, since their merge already succeeded and re-issuing it would just have GitHub reject an already-merged PR.</summary>
+    /// <summary>Retries every currently-failed row: Failed rows re-merge (and, if the checkbox is on, return to default); ReturnFailed rows only re-run the return-to-default step, since their merge already succeeded and re-issuing it would just have GitHub reject an already-merged PR.</summary>
     private void RetryFailedBulkMerge()
     {
         var failedRows = _bulkMergeModal.Rows.Where(r => r.Status == BulkMergeRowStatus.Failed).ToList();
-        var syncFailedRows = _bulkMergeModal.Rows.Where(r => r.Status == BulkMergeRowStatus.SyncFailed).ToList();
-        RunBulkMergeAndSyncAsync(failedRows, syncFailedRows);
+        var returnFailedRows = _bulkMergeModal.Rows.Where(r => r.Status == BulkMergeRowStatus.ReturnFailed).ToList();
+        RunBulkMergeAndReturnToDefaultAsync(failedRows, returnFailedRows);
     }
 
-    /// <summary>Same Failed-vs-SyncFailed split as <see cref="RetryFailedBulkMerge"/>, for a single row's retry icon.</summary>
+    /// <summary>Same Failed-vs-ReturnFailed split as <see cref="RetryFailedBulkMerge"/>, for a single row's retry icon.</summary>
     private void RetryBulkMergeRow(BulkMergePrRow row) =>
-        RunBulkMergeAndSyncAsync(
-            row.Status == BulkMergeRowStatus.SyncFailed ? Array.Empty<BulkMergePrRow>() : [row],
-            row.Status == BulkMergeRowStatus.SyncFailed ? [row] : Array.Empty<BulkMergePrRow>());
+        RunBulkMergeAndReturnToDefaultAsync(
+            row.Status == BulkMergeRowStatus.ReturnFailed ? Array.Empty<BulkMergePrRow>() : [row],
+            row.Status == BulkMergeRowStatus.ReturnFailed ? [row] : Array.Empty<BulkMergePrRow>());
 
     /// <summary>
     /// Merges <paramref name="rowsToMerge"/> via the plural IWorkspacePullRequestOperations.MergeManyAsync, then
     /// syncs to default (one repo at a time) whichever of those succeed - plus, unconditionally,
-    /// <paramref name="rowsToSyncOnly"/> (rows whose merge already succeeded on an earlier run and only need
-    /// their sync step retried, regardless of the live "sync to default" checkbox state). Runs as the standard
+    /// <paramref name="rowsToReturnOnly"/> (rows whose merge already succeeded on an earlier run and only need
+    /// their sync step retried, regardless of the live "return to default" checkbox state). Runs as the standard
     /// page job so BackgroundJobOverlay's LoadingOverlay (with terminal) covers the still-mounted dialog.
     /// Reused for the primary "Merge N pull requests" button, "Retry failed (n)", and a single row's retry icon.
     /// </summary>
-    private void RunBulkMergeAndSyncAsync(IReadOnlyList<BulkMergePrRow> rowsToMerge, IReadOnlyList<BulkMergePrRow> rowsToSyncOnly)
+    private void RunBulkMergeAndReturnToDefaultAsync(IReadOnlyList<BulkMergePrRow> rowsToMerge, IReadOnlyList<BulkMergePrRow> rowsToReturnOnly)
     {
-        var touchedRows = rowsToMerge.Concat(rowsToSyncOnly).ToList();
+        var touchedRows = rowsToMerge.Concat(rowsToReturnOnly).ToList();
         if (touchedRows.Count == 0 || IsJobRunning || !_bulkMergeModal.IsVisible)
             return;
 
@@ -313,7 +313,7 @@ public sealed partial class WorkspaceRepositories
         _bulkMergeModal.Failed = 0;
         StateHasChanged();
 
-        var syncToDefault = _bulkMergeModal.SyncToDefault;
+        var returnToDefault = _bulkMergeModal.ReturnToDefault;
         var method = ToMergeMethod(_bulkMergeModal.SelectedMethod);
         var requests = rowsToMerge.Select(r => new MergePullRequestRequest
         {
@@ -327,7 +327,7 @@ public sealed partial class WorkspaceRepositories
 
         var label = mergeTotal > 0
             ? (mergeTotal == 1 ? "Merging 1 pull request..." : $"Merging {mergeTotal} pull requests...")
-            : (rowsToSyncOnly.Count == 1 ? "Synchronizing 1 repository to default..." : $"Synchronizing {rowsToSyncOnly.Count} repositories to default...");
+            : (rowsToReturnOnly.Count == 1 ? "Returning 1 repository to default..." : $"Returning {rowsToReturnOnly.Count} repositories to default...");
 
         StartPageJob(label, async (job, ct) =>
         {
@@ -353,7 +353,7 @@ public sealed partial class WorkspaceRepositories
                         });
                     });
 
-                    // Not re-thrown: rowsToSyncOnly below is an independent step (previously-merged rows only
+                    // Not re-thrown: rowsToReturnOnly below is an independent step (previously-merged rows only
                     // needing their sync retried) and must still run even if this merge phase blew up entirely,
                     // so a batch that mixes "needs re-merge" and "needs sync only" rows (RetryFailedBulkMerge)
                     // never silently drops the sync-only half. The affected rows are already marked Failed with
@@ -386,11 +386,11 @@ public sealed partial class WorkspaceRepositories
                         .ToList();
                 }
 
-                if (rowsToSyncOnly.Count > 0)
-                    await RunBulkSyncToDefaultAsync(rowsToSyncOnly, job, ct);
+                if (rowsToReturnOnly.Count > 0)
+                    await RunBulkReturnToDefaultAsync(rowsToReturnOnly, job, ct);
 
-                if (syncToDefault && succeededFromMerge.Count > 0)
-                    await RunBulkSyncToDefaultAsync(succeededFromMerge, job, ct);
+                if (returnToDefault && succeededFromMerge.Count > 0)
+                    await RunBulkReturnToDefaultAsync(succeededFromMerge, job, ct);
 
                 await InvokeAsync(async () =>
                 {
@@ -401,7 +401,7 @@ public sealed partial class WorkspaceRepositories
             finally
             {
                 // Always runs - on success, fault, and Abort-triggered cancellation alike - so the dialog can never
-                // get stuck with close disabled if a later phase (the sync step) is what actually threw/was cancelled
+                // get stuck with close disabled if a later phase (the return-to-default step) is what actually threw/was cancelled
                 // rather than the merge call itself.
                 SafeInvoke(() => FinishBulkMergeRun(touchedRows));
             }
@@ -414,18 +414,18 @@ public sealed partial class WorkspaceRepositories
     }
 
     /// <summary>
-    /// Calls SyncToDefaultAsync once per successfully-merged row, never once for the whole set -
-    /// SyncToDefaultAsync aborts its entire call on first failure with no per-repo attribution.
+    /// Calls ReturnToDefaultAsync once per successfully-merged row, never once for the whole set -
+    /// ReturnToDefaultAsync aborts its entire call on first failure with no per-repo attribution.
     /// Sequential on purpose: each unattended sync recomputes workspace-wide stats at the end, and
-    /// running those in parallel races SQLite plus the recompute (the same race SyncToDefaultLevelAsync
+    /// running those in parallel races SQLite plus the recompute (the same race ReturnToDefaultLevelAsync
     /// documents and avoids). Overlay progress goes through the standard page-job terminal.
     /// </summary>
-    private async Task RunBulkSyncToDefaultAsync(IReadOnlyList<BulkMergePrRow> succeededRows, BackgroundJobHandle job, CancellationToken ct)
+    private async Task RunBulkReturnToDefaultAsync(IReadOnlyList<BulkMergePrRow> succeededRows, BackgroundJobHandle job, CancellationToken ct)
     {
         SafeInvoke(() =>
         {
             foreach (var row in succeededRows)
-                row.Status = BulkMergeRowStatus.SyncingToDefault;
+                row.Status = BulkMergeRowStatus.ReturningToDefault;
         });
 
         var progress = job.ToOperationProgress();
@@ -433,29 +433,29 @@ public sealed partial class WorkspaceRepositories
         {
             ct.ThrowIfCancellationRequested();
 
-            UnattendedSyncToDefaultResult syncResult;
+            UnattendedReturnToDefaultResult syncResult;
             try
             {
-                syncResult = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, UnattendedSyncToDefaultResult>(
-                    svc => svc.SyncToDefaultAsync(WorkspaceId, [row.RepositoryId], progress, ct));
+                syncResult = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, UnattendedReturnToDefaultResult>(
+                    svc => svc.ReturnToDefaultAsync(WorkspaceId, [row.RepositoryId], progress, ct));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                syncResult = new UnattendedSyncToDefaultResult(false, ex.Message);
+                syncResult = new UnattendedReturnToDefaultResult(false, ex.Message);
             }
 
             SafeInvoke(() =>
             {
                 if (syncResult.Completed)
                 {
-                    row.Status = BulkMergeRowStatus.Synced;
+                    row.Status = BulkMergeRowStatus.ReturnedToDefault;
                     ClearRepositoryError(row.RepositoryId);
                 }
                 else
                 {
-                    row.Status = BulkMergeRowStatus.SyncFailed;
+                    row.Status = BulkMergeRowStatus.ReturnFailed;
                     row.ErrorMessage = syncResult.AbortReason;
-                    SetRepositoryError(row.RepositoryId, syncResult.AbortReason ?? "Failed to sync to default branch.");
+                    SetRepositoryError(row.RepositoryId, syncResult.AbortReason ?? "Failed to return to default branch.");
                 }
             });
         }
@@ -463,7 +463,7 @@ public sealed partial class WorkspaceRepositories
 
     /// <summary>
     /// Marks any row this run left in a non-terminal state as Skipped (still Merging - unattempted when Abort was
-    /// pressed) or SyncFailed (still SyncingToDefault - the merge itself already succeeded, only the sync step was
+    /// pressed) or ReturnFailed (still ReturningToDefault - the merge itself already succeeded, only the return-to-default step was
     /// interrupted), and flips the modal from running to its finished summary. Runs unconditionally from the job's
     /// own finally, so it fires whether the run finished, faulted, or was cancelled via the overlay Abort.
     /// </summary>
@@ -475,10 +475,10 @@ public sealed partial class WorkspaceRepositories
             {
                 row.Status = BulkMergeRowStatus.Skipped;
             }
-            else if (row.Status == BulkMergeRowStatus.SyncingToDefault)
+            else if (row.Status == BulkMergeRowStatus.ReturningToDefault)
             {
-                row.Status = BulkMergeRowStatus.SyncFailed;
-                row.ErrorMessage = "Sync to default branch was cancelled.";
+                row.Status = BulkMergeRowStatus.ReturnFailed;
+                row.ErrorMessage = "Return to default branch was cancelled.";
             }
         }
 
@@ -525,7 +525,7 @@ public sealed partial class WorkspaceRepositories
             return;
 
         var row = _bulkMergeModal.Rows.FirstOrDefault(r => r.RepositoryId == repositoryId);
-        if (row == null || row.Status is BulkMergeRowStatus.Merging or BulkMergeRowStatus.SyncingToDefault)
+        if (row == null || row.Status is BulkMergeRowStatus.Merging or BulkMergeRowStatus.ReturningToDefault)
             return;
 
         PullRequestMergeSnapshot? snapshot = null;
@@ -604,8 +604,8 @@ public sealed partial class WorkspaceRepositories
         public string LevelLabel { get; set; } = string.Empty;
         public List<BulkMergePrRow> Rows { get; set; } = new();
         public BulkMergeMethodSelection SelectedMethod { get; set; } = BulkMergeMethodSelection.Squash;
-        /// <summary>Sync-to-default choice frozen at the first "Merge N pull requests" confirmation, so later "Retry failed"/single-row retries within this same dialog session use the choice the batch was actually confirmed with, not whatever the shared preference singleton (<see cref="MergePullRequestSyncToDefaultPreferenceService"/>) currently holds.</summary>
-        public bool SyncToDefault { get; set; }
+        /// <summary>Return-to-default choice frozen at the first "Merge N pull requests" confirmation, so later "Retry failed"/single-row retries within this same dialog session use the choice the batch was actually confirmed with, not whatever the shared preference singleton (<see cref="MergePullRequestReturnToDefaultPreferenceService"/>) currently holds.</summary>
+        public bool ReturnToDefault { get; set; }
         public bool IsRunning { get; set; }
         public bool HasRun { get; set; }
         public int Completed { get; set; }

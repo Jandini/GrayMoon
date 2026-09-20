@@ -233,7 +233,7 @@ Notify jobs compete for the same worker pool as command jobs. A heavy burst of g
 | `CommitSyncRepository` | Stage, commit, and push dependency version bumps |
 | `GetBranches` | List local + remote branches for a repo |
 | `CheckoutBranch` | Checkout an existing or new tracking branch |
-| `SyncToDefaultBranch` | Fetch + reset to `origin/main` (or configured default) |
+| `ReturnToDefaultBranch` | Fetch + reset to `origin/main` (or configured default) |
 | `RefreshBranches` | Re-fetch branch list and update DB |
 | `CreateBranch` | Create and push a new branch |
 | `StageAndCommit` | Stage all changes and create a commit with a message |

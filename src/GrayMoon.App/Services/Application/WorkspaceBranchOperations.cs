@@ -255,7 +255,7 @@ public sealed class WorkspaceBranchOperations(
         }
     }
 
-    public async Task<BranchHttpOutcome> SyncToDefaultAsync(
+    public async Task<BranchHttpOutcome> ReturnToDefaultAsync(
         int workspaceId,
         int repositoryId,
         string? currentBranchName,
@@ -276,7 +276,7 @@ public sealed class WorkspaceBranchOperations(
         {
             await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
 
-            var (success, errorMessage) = await workspaceGitService.SyncToDefaultDirectAsync(
+            var (success, errorMessage) = await workspaceGitService.ReturnToDefaultDirectAsync(
                 workspaceId,
                 repositoryId,
                 currentBranchName,
@@ -285,7 +285,7 @@ public sealed class WorkspaceBranchOperations(
                 cancellationToken);
 
             if (!success)
-                return BranchHttpOutcome.Problem(errorMessage ?? "Failed to sync to default branch", 500);
+                return BranchHttpOutcome.Problem(errorMessage ?? "Failed to return to default branch", 500);
 
             await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
 
@@ -293,8 +293,8 @@ public sealed class WorkspaceBranchOperations(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error syncing to default branch for repository {RepositoryId}", repositoryId);
-            return BranchHttpOutcome.Problem("An error occurred while syncing to default branch", 500);
+            logger.LogError(ex, "Error returning to default branch for repository {RepositoryId}", repositoryId);
+            return BranchHttpOutcome.Problem("An error occurred while returning to default branch", 500);
         }
     }
 

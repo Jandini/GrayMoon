@@ -65,10 +65,10 @@ public sealed partial class WorkspaceRepositories
         ShowConfirmSyncCommitsLevel(ids);
     }
 
-    private async Task SyncToDefaultForLevelAsync(int? levelKey)
+    private async Task ReturnToDefaultForLevelAsync(int? levelKey)
     {
         var ids = (await GetRepositoryIdsAtLevelAsync(levelKey)).ToList();
-        await ShowConfirmSyncToDefaultLevel(ids);
+        await ShowConfirmReturnToDefaultLevel(ids);
     }
 
     private async Task SyncLevelForLevelAsync(int? levelKey)
