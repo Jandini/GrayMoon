@@ -10,13 +10,19 @@ public sealed record GitChangesWorkspaceScanProgress(string RepositoryName, bool
 
 /// <summary>
 /// The single Git Changes status-scan routine for one workspace, shared by the periodic background
-/// sweep, the on-open warm-up scan, and the manual Refresh button. Calls <c>GetGitChangeStatus</c> for
-/// every repository in the workspace with bounded parallelism, and pushes each successful result
-/// through the same <see cref="WorkspaceGitChangesWriteQueue"/> used by watcher-driven pushes.
+/// sweep, the on-open warm-up scan, the manual Refresh button, and silent +/- fill-in. Calls
+/// <c>GetGitChangeStatus</c> for every repository in the workspace (or one repository) with bounded
+/// parallelism, and pushes each successful result through the write queue or immediately when
+/// line stats were requested.
 /// </summary>
 public interface IGitChangesWorkspaceScanner
 {
-    Task ScanWorkspaceAsync(int workspaceId, CancellationToken cancellationToken, Action<GitChangesWorkspaceScanProgress>? onProgress = null, bool includeLineStats = false);
+    Task ScanWorkspaceAsync(
+        int workspaceId,
+        CancellationToken cancellationToken,
+        Action<GitChangesWorkspaceScanProgress>? onProgress = null,
+        bool includeLineStats = false,
+        int? repositoryId = null);
 }
 
 public sealed class GitChangesWorkspaceScanner(
@@ -24,7 +30,12 @@ public sealed class GitChangesWorkspaceScanner(
     IOptions<GitChangesOptions> gitChangesOptions,
     ILogger<GitChangesWorkspaceScanner> logger) : IGitChangesWorkspaceScanner
 {
-    public async Task ScanWorkspaceAsync(int workspaceId, CancellationToken cancellationToken, Action<GitChangesWorkspaceScanProgress>? onProgress = null, bool includeLineStats = false)
+    public async Task ScanWorkspaceAsync(
+        int workspaceId,
+        CancellationToken cancellationToken,
+        Action<GitChangesWorkspaceScanProgress>? onProgress = null,
+        bool includeLineStats = false,
+        int? repositoryId = null)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var agentBridge = scope.ServiceProvider.GetRequiredService<IAgentBridge>();
@@ -39,8 +50,14 @@ public sealed class GitChangesWorkspaceScanner(
         var writeQueue = scope.ServiceProvider.GetRequiredService<WorkspaceGitChangesWriteQueue>();
         var pushHandler = scope.ServiceProvider.GetRequiredService<GitChangesSnapshotPushHandler>();
 
-        var links = await dbContext.WorkspaceRepositories
-            .Where(l => l.WorkspaceId == workspaceId)
+        var linksQuery = dbContext.WorkspaceRepositories
+            .Where(l => l.WorkspaceId == workspaceId);
+        if (repositoryId.HasValue)
+        {
+            linksQuery = linksQuery.Where(l => l.RepositoryId == repositoryId.Value);
+        }
+
+        var links = await linksQuery
             .Include(l => l.Workspace)
             .Include(l => l.Repository)
             .AsNoTracking()

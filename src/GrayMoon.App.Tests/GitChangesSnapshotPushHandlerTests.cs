@@ -29,7 +29,7 @@ public class GitChangesSnapshotPushHandlerTests
         await using var ctx = await GitChangesTestDbContext.CreateAsync();
         var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
-        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance);
+        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, new NoopGitChangesLineStatsRefresh());
 
         var notification = new GitChangesSnapshotNotification
         {
@@ -58,7 +58,7 @@ public class GitChangesSnapshotPushHandlerTests
         await using var ctx = await GitChangesTestDbContext.CreateAsync();
         var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
-        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance);
+        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, new NoopGitChangesLineStatsRefresh());
 
         await handler.HandleAsync(new GitChangesSnapshotNotification
         {
@@ -88,7 +88,7 @@ public class GitChangesSnapshotPushHandlerTests
         await using var ctx = await GitChangesTestDbContext.CreateAsync();
         var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
-        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance);
+        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, new NoopGitChangesLineStatsRefresh());
 
         await handler.HandleAsync(new GitChangesSnapshotNotification
         {
@@ -130,7 +130,7 @@ public class GitChangesSnapshotPushHandlerTests
         await using var ctx = await GitChangesTestDbContext.CreateAsync();
         var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
-        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance);
+        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, new NoopGitChangesLineStatsRefresh());
 
         await handler.HandleAsync(new GitChangesSnapshotNotification
         {
@@ -157,7 +157,7 @@ public class GitChangesSnapshotPushHandlerTests
         await using var ctx = await GitChangesTestDbContext.CreateAsync();
         var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
-        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance);
+        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, new NoopGitChangesLineStatsRefresh());
 
         await handler.HandleAsync(new GitChangesSnapshotNotification
         {
@@ -176,7 +176,7 @@ public class GitChangesSnapshotPushHandlerTests
         await using var ctx = await GitChangesTestDbContext.CreateAsync();
         var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
-        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance);
+        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, new NoopGitChangesLineStatsRefresh());
 
         var snapshot = MakeSnapshot(
             1,
@@ -204,7 +204,7 @@ public class GitChangesSnapshotPushHandlerTests
         await using var ctx = await GitChangesTestDbContext.CreateAsync();
         var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
-        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance);
+        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, new NoopGitChangesLineStatsRefresh());
 
         var snapshot = MakeSnapshot(1, MakeEntry("file.txt")) with
         {
@@ -233,7 +233,7 @@ public class GitChangesSnapshotPushHandlerTests
         await using var ctx = await GitChangesTestDbContext.CreateAsync();
         var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
-        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance);
+        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, new NoopGitChangesLineStatsRefresh());
 
         await handler.HandleAsync(new GitChangesSnapshotNotification
         {
@@ -262,7 +262,7 @@ public class GitChangesSnapshotPushHandlerTests
         await using var ctx = await GitChangesTestDbContext.CreateAsync();
         var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
-        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance);
+        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, new NoopGitChangesLineStatsRefresh());
 
         await handler.HandleAsync(new GitChangesSnapshotNotification
         {
@@ -289,7 +289,7 @@ public class GitChangesSnapshotPushHandlerTests
         await using var ctx = await GitChangesTestDbContext.CreateAsync();
         var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
-        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance);
+        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, new NoopGitChangesLineStatsRefresh());
 
         await handler.HandleAsync(new GitChangesSnapshotNotification
         {
@@ -312,5 +312,87 @@ public class GitChangesSnapshotPushHandlerTests
         Assert.Equal(0, status.Deletions);
         Assert.Equal(0, status.StagedInsertions);
         Assert.Equal(0, status.StagedDeletions);
+    }
+
+    [Fact]
+    public async Task Porcelain_snapshot_with_changes_requests_background_line_stats()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        var hubContext = new FakeHubContext<WorkspaceSyncHub>();
+        var refresh = new RecordingLineStatsRefresh();
+        var handler = new GitChangesSnapshotPushHandler(
+            factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, refresh);
+
+        await handler.HandleAsync(new GitChangesSnapshotNotification
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = ctx.RepositoryId,
+            Snapshot = MakeSnapshot(1, MakeEntry("file.txt")),
+        }, CancellationToken.None);
+
+        Assert.Equal(1, refresh.RepositoryCalls);
+        Assert.Equal(ctx.WorkspaceId, refresh.LastWorkspaceId);
+        Assert.Equal(ctx.RepositoryId, refresh.LastRepositoryId);
+    }
+
+    [Fact]
+    public async Task Snapshot_with_line_stats_does_not_request_another_fill()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        var hubContext = new FakeHubContext<WorkspaceSyncHub>();
+        var refresh = new RecordingLineStatsRefresh();
+        var handler = new GitChangesSnapshotPushHandler(
+            factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, refresh);
+
+        await handler.HandleAsync(new GitChangesSnapshotNotification
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = ctx.RepositoryId,
+            Snapshot = MakeSnapshot(1, MakeEntry("file.txt")) with { Insertions = 4, Deletions = 1 },
+        }, CancellationToken.None);
+
+        Assert.Equal(0, refresh.RepositoryCalls);
+    }
+
+    [Fact]
+    public async Task Clean_porcelain_snapshot_does_not_request_line_stats()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        var hubContext = new FakeHubContext<WorkspaceSyncHub>();
+        var refresh = new RecordingLineStatsRefresh();
+        var handler = new GitChangesSnapshotPushHandler(
+            factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, refresh);
+
+        await handler.HandleAsync(new GitChangesSnapshotNotification
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = ctx.RepositoryId,
+            Snapshot = MakeSnapshot(1),
+        }, CancellationToken.None);
+
+        Assert.Equal(0, refresh.RepositoryCalls);
+    }
+
+    private sealed class RecordingLineStatsRefresh : IGitChangesLineStatsRefresh
+    {
+        public int RepositoryCalls;
+        public int? LastWorkspaceId;
+        public int? LastRepositoryId;
+
+        public IDisposable Subscribe(int workspaceId) => new NoopGitChangesLineStatsRefresh().Subscribe(workspaceId);
+
+        public void RequestWorkspace(int workspaceId)
+        {
+        }
+
+        public void RequestRepository(int workspaceId, int repositoryId)
+        {
+            LastWorkspaceId = workspaceId;
+            LastRepositoryId = repositoryId;
+            RepositoryCalls++;
+        }
     }
 }

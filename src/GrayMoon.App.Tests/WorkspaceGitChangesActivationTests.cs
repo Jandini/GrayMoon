@@ -144,7 +144,8 @@ public sealed class WorkspaceGitChangesActivationTests
             int workspaceId,
             CancellationToken cancellationToken,
             Action<GitChangesWorkspaceScanProgress>? onProgress = null,
-            bool includeLineStats = false)
+            bool includeLineStats = false,
+            int? repositoryId = null)
         {
             LastWorkspaceId = workspaceId;
             LastIncludeLineStats = includeLineStats;

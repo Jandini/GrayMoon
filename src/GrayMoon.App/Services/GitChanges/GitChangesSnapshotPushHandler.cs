@@ -17,7 +17,8 @@ namespace GrayMoon.App.Services.GitChanges;
 public sealed class GitChangesSnapshotPushHandler(
     IDbContextFactory<AppDbContext> dbContextFactory,
     IHubContext<WorkspaceSyncHub> hubContext,
-    ILogger<GitChangesSnapshotPushHandler> logger)
+    ILogger<GitChangesSnapshotPushHandler> logger,
+    IGitChangesLineStatsRefresh lineStatsRefresh)
 {
     public async Task HandleAsync(GitChangesSnapshotNotification notification, CancellationToken cancellationToken)
     {
@@ -115,6 +116,13 @@ public sealed class GitChangesSnapshotPushHandler(
         await transaction.CommitAsync(cancellationToken);
 
         await hubContext.Clients.All.SendAsync("GitChangesUpdated", notification.WorkspaceId, notification.RepositoryId, cancellationToken: cancellationToken);
+
+        if (!snapshot.Insertions.HasValue
+            && !snapshot.Deletions.HasValue
+            && (changedCount > 0 || stagedCount > 0))
+        {
+            lineStatsRefresh.RequestRepository(notification.WorkspaceId, notification.RepositoryId);
+        }
 
         logger.LogDebug(
             "GitChangesSnapshotUpdated persisted: workspace={WorkspaceId}, repo={RepositoryId}, version={Version}, staged={Staged}, changed={Changed}",

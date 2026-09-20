@@ -112,7 +112,7 @@ public class WorkspaceGitChangesReadServiceTests
         int? stagedDeletions = null)
     {
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
-        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance);
+        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, new NoopGitChangesLineStatsRefresh());
 
         await handler.HandleAsync(new GitChangesSnapshotNotification
         {
