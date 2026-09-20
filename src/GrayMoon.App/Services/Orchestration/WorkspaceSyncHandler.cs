@@ -50,9 +50,184 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
     }
 
     /// <summary>
-    /// Fetches every repository, checks that return-to-default is safe, then returns immediately with no options dialog.
-    /// Any fetch, safety, or return-to-default failure aborts the rest of the batch. Intended for post-merge and future multi-PR callers
-    /// that invoke this only after every merge in the batch succeeded.
+    /// Freshness + safety analysis for Return to Default. Shared by UX, REST, and bulk callers.
+    /// </summary>
+    public async Task<ReturnToDefaultPlan> AnalyzeReturnToDefaultAsync(
+        int workspaceId,
+        IReadOnlyList<int> repositoryIds,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(repositoryIds);
+
+        var ids = repositoryIds.Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return new ReturnToDefaultPlan(
+                workspaceId,
+                Array.Empty<ReturnToDefaultRepositoryPlan>(),
+                CanProceedAutomatically: true,
+                RequiresConfirmation: false,
+                HasBlockingRepositories: false,
+                BlockingReasons: Array.Empty<string>(),
+                PullRequestRefreshFailed: false,
+                AnalysisFailed: false,
+                AnalysisError: null);
+        }
+
+        await using var scope = serviceScopeFactory.CreateAsyncScope();
+        var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+        var prService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
+        var query = scope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
+
+        progress.Report(ids.Count == 1
+            ? "Fetching latest branch state..."
+            : $"Fetching latest branch state for {ids.Count} repositories...");
+
+        var fetchDone = 0;
+        foreach (var repoId in ids)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            bool fetched;
+            try
+            {
+                fetched = await git.RefreshBranchesForRepositoryAsync(repoId, workspaceId, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "Fetch failed during return-to-default analysis. WorkspaceId={WorkspaceId}, RepositoryId={RepositoryId}", workspaceId, repoId);
+                return ReturnToDefaultPlan.Failed(workspaceId, "Fetch failed. Return to default was aborted.");
+            }
+
+            if (!fetched)
+                return ReturnToDefaultPlan.Failed(workspaceId, "Fetch failed. Return to default was aborted.");
+
+            fetchDone++;
+            if (ids.Count > 1)
+                progress.Report($"Fetched {fetchDone} of {ids.Count}...", fetchDone, ids.Count);
+        }
+
+        var prRefreshFailed = false;
+        try
+        {
+            await prService.RefreshPullRequestsAsync(workspaceId, ids, force: true, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "PR refresh failed during return-to-default analysis. WorkspaceId={WorkspaceId}", workspaceId);
+            prRefreshFailed = true;
+        }
+
+        var repoPlans = new List<ReturnToDefaultRepositoryPlan>(ids.Count);
+        foreach (var repoId in ids)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var dto = await query.GetSnapshotAsync(workspaceId, repoId, cancellationToken);
+            if (dto == null)
+                return ReturnToDefaultPlan.Failed(workspaceId, "Repository state could not be read. Return to default was aborted.");
+
+            repoPlans.Add(ClassifyRepository(dto));
+        }
+
+        return BuildPlan(workspaceId, repoPlans, prRefreshFailed);
+    }
+
+    /// <summary>
+    /// Executes Return to Default with explicit options. Continues after per-repository failures.
+    /// </summary>
+    public async Task<OperationResult> ExecuteReturnToDefaultAsync(
+        int workspaceId,
+        IReadOnlyList<int> repositoryIds,
+        ReturnToDefaultOptions options,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(repositoryIds);
+        ArgumentNullException.ThrowIfNull(options);
+
+        var ids = repositoryIds.Distinct().ToList();
+        if (ids.Count == 0)
+            return OperationResult.Ok();
+
+        await using var scope = serviceScopeFactory.CreateAsyncScope();
+        var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+        var prService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
+        var query = scope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
+
+        progress.Report(ids.Count == 1
+            ? "Returning to default branch..."
+            : $"Returning {ids.Count} repositories to default branch...");
+
+        var repoErrors = new Dictionary<int, string>();
+        var synced = 0;
+
+        foreach (var repoId in ids)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var dto = await query.GetSnapshotAsync(workspaceId, repoId, cancellationToken);
+            if (dto == null)
+            {
+                repoErrors[repoId] = "Repository state could not be read.";
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(dto.CheckedOutTag))
+            {
+                repoErrors[repoId] = "Repository is on a tag.";
+                continue;
+            }
+
+            var needsSync = !string.IsNullOrWhiteSpace(dto.BranchName)
+                && !string.Equals(dto.BranchName, dto.DefaultBranchName, StringComparison.Ordinal);
+            if (!needsSync)
+            {
+                synced++;
+                continue;
+            }
+
+            if (options.CloseOpenPullRequest
+                && dto.PullRequestNumber is > 0
+                && IsOpenPullRequest(dto))
+            {
+                try
+                {
+                    await prService.ClosePullRequestAsync(workspaceId, repoId, dto.PullRequestNumber.Value, cancellationToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogWarning(ex, "Failed to close PR {PrNumber} for repository {RepositoryId} before return to default", dto.PullRequestNumber, repoId);
+                }
+            }
+
+            var deleteRemote = options.DeleteRemoteBranch && dto.BranchHasUpstream == true;
+            var (success, errMsg) = await git.ReturnToDefaultDirectAsync(
+                workspaceId,
+                repoId,
+                dto.BranchName!,
+                deleteRemoteBranch: deleteRemote,
+                allowForceDeleteLocalBranch: options.AllowForceDeleteLocalBranch,
+                cancellationToken);
+
+            if (!success)
+                repoErrors[repoId] = errMsg ?? "Return to default failed.";
+            else
+                synced++;
+
+            if (ids.Count > 1)
+                progress.Report($"Returned {synced + repoErrors.Count} of {ids.Count} to default branch", synced + repoErrors.Count, ids.Count);
+        }
+
+        await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
+
+        return repoErrors.Count == 0
+            ? OperationResult.Ok()
+            : OperationResult.Fail("Return to default failed for one or more repositories.", repoErrors);
+    }
+
+    /// <summary>
+    /// Unattended Return to Default: analyze, require automatic eligibility, then execute with
+    /// documented unattended options. Aborts the whole batch on the first blocker or failure.
     /// </summary>
     public async Task<UnattendedReturnToDefaultResult> ReturnToDefaultUnattendedAsync(
         int workspaceId,
@@ -66,89 +241,48 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
         if (ids.Count == 0)
             return new UnattendedReturnToDefaultResult(false, "No repositories to return to default.");
 
-        await using var scope = serviceScopeFactory.CreateAsyncScope();
-        var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-        var prService = scope.ServiceProvider.GetRequiredService<WorkspacePullRequestService>();
-        var query = scope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
-
         try
         {
-            progress.Report(ids.Count == 1
-                ? "Fetching latest branch state..."
-                : $"Fetching latest branch state for {ids.Count} repositories...");
+            var plan = await AnalyzeReturnToDefaultAsync(workspaceId, ids, progress, cancellationToken);
 
-            var fetchDone = 0;
-            foreach (var repoId in ids)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                bool fetched;
-                try
-                {
-                    fetched = await git.RefreshBranchesForRepositoryAsync(repoId, workspaceId, cancellationToken);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    logger.LogError(ex, "Fetch failed before unattended return-to-default. WorkspaceId={WorkspaceId}, RepositoryId={RepositoryId}", workspaceId, repoId);
-                    return new UnattendedReturnToDefaultResult(false, "Fetch failed. Return to default was aborted.");
-                }
+            if (plan.AnalysisFailed)
+                return new UnattendedReturnToDefaultResult(false, plan.AnalysisError ?? "Return to default was aborted.");
 
-                if (!fetched)
-                    return new UnattendedReturnToDefaultResult(false, "Fetch failed. Return to default was aborted.");
-
-                fetchDone++;
-                if (ids.Count > 1)
-                    progress.Report($"Fetched {fetchDone} of {ids.Count}...", fetchDone, ids.Count);
-            }
-
-            try
-            {
-                await prService.RefreshPullRequestsAsync(workspaceId, ids, force: true, cancellationToken);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                logger.LogError(ex, "PR refresh failed before unattended return-to-default. WorkspaceId={WorkspaceId}", workspaceId);
+            if (plan.PullRequestRefreshFailed)
                 return new UnattendedReturnToDefaultResult(false, "Could not refresh pull request state. Return to default was aborted.");
-            }
 
-            var toSync = new List<(int RepoId, string BranchName, bool HasUpstream)>();
-            foreach (var repoId in ids)
+            if (!plan.CanProceedAutomatically)
             {
-                var dto = await query.GetSnapshotAsync(workspaceId, repoId, cancellationToken);
-                if (dto == null)
-                    return new UnattendedReturnToDefaultResult(false, "Repository state could not be read. Return to default was aborted.");
-
-                if (!string.IsNullOrWhiteSpace(dto.CheckedOutTag))
-                    return new UnattendedReturnToDefaultResult(false, "Repository is on a tag. Return to default was aborted.");
-
-                var needsSync = !string.IsNullOrWhiteSpace(dto.BranchName)
-                    && !string.Equals(dto.BranchName, dto.DefaultBranchName, StringComparison.Ordinal);
-                if (!needsSync)
-                    continue;
-
-                var prMergedOrClosed = dto.PullRequestMergedAt.HasValue
-                    || string.Equals(dto.PullRequestState, "closed", StringComparison.OrdinalIgnoreCase);
-                if ((dto.DefaultBranchAheadCommits ?? 0) > 0 && !prMergedOrClosed)
-                    return new UnattendedReturnToDefaultResult(false, "Return to default is not safe. Return to default was aborted.");
-
-                toSync.Add((repoId, dto.BranchName!, dto.BranchHasUpstream == true));
+                var reason = plan.BlockingReasons.FirstOrDefault()
+                    ?? "Return to default is not safe. Return to default was aborted.";
+                return new UnattendedReturnToDefaultResult(false, reason);
             }
 
-            if (toSync.Count == 0)
+            var actionable = plan.Repositories
+                .Where(r => !r.IsAlreadyOnDefault && !r.IsOnTag)
+                .ToList();
+
+            if (actionable.Count == 0)
                 return new UnattendedReturnToDefaultResult(true, null);
 
-            progress.Report(toSync.Count == 1
+            await using var scope = serviceScopeFactory.CreateAsyncScope();
+            var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
+
+            progress.Report(actionable.Count == 1
                 ? "Returning to default branch..."
-                : $"Returning {toSync.Count} repositories to default branch...");
+                : $"Returning {actionable.Count} repositories to default branch...");
 
             var synced = 0;
-            foreach (var (repoId, branchName, hasUpstream) in toSync)
+            foreach (var repo in actionable)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                // Unattended policy: delete remote when upstream exists; always allow force-delete local; never close PRs.
                 var (success, errMsg) = await git.ReturnToDefaultDirectAsync(
                     workspaceId,
-                    repoId,
-                    branchName,
-                    deleteRemoteBranch: hasUpstream,
+                    repo.RepositoryId,
+                    repo.CurrentBranch!,
+                    deleteRemoteBranch: repo.HasUpstream,
                     allowForceDeleteLocalBranch: true,
                     cancellationToken);
 
@@ -159,8 +293,8 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
                 }
 
                 synced++;
-                if (toSync.Count > 1)
-                    progress.Report($"Returned {synced} of {toSync.Count} to default branch", synced, toSync.Count);
+                if (actionable.Count > 1)
+                    progress.Report($"Returned {synced} of {actionable.Count} to default branch", synced, actionable.Count);
             }
 
             await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, cancellationToken);
@@ -176,5 +310,152 @@ public sealed class WorkspaceSyncHandler(ILogger<WorkspaceSyncHandler> logger, I
             return new UnattendedReturnToDefaultResult(false, "Return to default failed. Return to default was aborted.");
         }
     }
-}
 
+    internal static ReturnToDefaultRepositoryPlan ClassifyRepository(WorkspaceRepositoryLinkListItemDto dto)
+    {
+        var isOnTag = !string.IsNullOrWhiteSpace(dto.CheckedOutTag);
+        var isAlreadyOnDefault = !isOnTag
+            && (string.IsNullOrWhiteSpace(dto.BranchName)
+                || string.Equals(dto.BranchName, dto.DefaultBranchName, StringComparison.Ordinal));
+
+        var ahead = dto.DefaultBranchAheadCommits ?? 0;
+        var prMergedOrClosed = dto.PullRequestMergedAt.HasValue
+            || string.Equals(dto.PullRequestState, "closed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(dto.PullRequestState, "merged", StringComparison.OrdinalIgnoreCase);
+
+        var prState = NormalizePullRequestState(dto);
+        var hasUpstream = dto.BranchHasUpstream == true;
+
+        if (isAlreadyOnDefault)
+        {
+            return new ReturnToDefaultRepositoryPlan(
+                dto.RepositoryId,
+                dto.RepositoryName,
+                dto.BranchName,
+                dto.DefaultBranchName,
+                IsAlreadyOnDefault: true,
+                IsOnTag: false,
+                CommitsAheadOfDefault: ahead,
+                HasUpstream: hasUpstream,
+                PullRequestState: prState,
+                PullRequestNumber: dto.PullRequestNumber,
+                CanDiscardLocalBranchSafely: true,
+                RemoteBranchCanBeDeleted: false,
+                RequiresExplicitDiscardConfirmation: false,
+                BlockingReason: null);
+        }
+
+        if (isOnTag)
+        {
+            return new ReturnToDefaultRepositoryPlan(
+                dto.RepositoryId,
+                dto.RepositoryName,
+                dto.BranchName,
+                dto.DefaultBranchName,
+                IsAlreadyOnDefault: false,
+                IsOnTag: true,
+                CommitsAheadOfDefault: ahead,
+                HasUpstream: hasUpstream,
+                PullRequestState: prState,
+                PullRequestNumber: dto.PullRequestNumber,
+                CanDiscardLocalBranchSafely: false,
+                RemoteBranchCanBeDeleted: false,
+                RequiresExplicitDiscardConfirmation: false,
+                BlockingReason: "Repository is on a tag. Return to default was aborted.");
+        }
+
+        var requiresExplicitDiscard = ahead > 0 && !prMergedOrClosed;
+        var canDiscardSafely = ahead == 0 || prMergedOrClosed;
+
+        return new ReturnToDefaultRepositoryPlan(
+            dto.RepositoryId,
+            dto.RepositoryName,
+            dto.BranchName,
+            dto.DefaultBranchName,
+            IsAlreadyOnDefault: false,
+            IsOnTag: false,
+            CommitsAheadOfDefault: ahead,
+            HasUpstream: hasUpstream,
+            PullRequestState: prState,
+            PullRequestNumber: dto.PullRequestNumber,
+            CanDiscardLocalBranchSafely: canDiscardSafely,
+            RemoteBranchCanBeDeleted: hasUpstream,
+            RequiresExplicitDiscardConfirmation: requiresExplicitDiscard,
+            BlockingReason: requiresExplicitDiscard
+                ? "Return to default is not safe. Return to default was aborted."
+                : null);
+    }
+
+    private static ReturnToDefaultPlan BuildPlan(
+        int workspaceId,
+        IReadOnlyList<ReturnToDefaultRepositoryPlan> repoPlans,
+        bool prRefreshFailed)
+    {
+        var blockingReasons = new List<string>();
+        var hasBlocking = false;
+        var requiresConfirmation = false;
+        var canProceedAutomatically = !prRefreshFailed;
+
+        foreach (var repo in repoPlans)
+        {
+            if (repo.IsAlreadyOnDefault)
+                continue;
+
+            if (repo.IsOnTag)
+            {
+                hasBlocking = true;
+                canProceedAutomatically = false;
+                if (repo.BlockingReason != null)
+                    blockingReasons.Add(repo.BlockingReason);
+                continue;
+            }
+
+            if (repo.RequiresExplicitDiscardConfirmation)
+            {
+                hasBlocking = true;
+                canProceedAutomatically = false;
+                requiresConfirmation = true;
+                if (repo.BlockingReason != null)
+                    blockingReasons.Add(repo.BlockingReason);
+                continue;
+            }
+
+            if (repo.RemoteBranchCanBeDeleted || repo.CommitsAheadOfDefault > 0)
+                requiresConfirmation = true;
+        }
+
+        if (prRefreshFailed)
+        {
+            hasBlocking = true;
+            blockingReasons.Insert(0, "Could not refresh pull request state. Return to default was aborted.");
+        }
+
+        return new ReturnToDefaultPlan(
+            workspaceId,
+            repoPlans,
+            CanProceedAutomatically: canProceedAutomatically,
+            RequiresConfirmation: requiresConfirmation,
+            HasBlockingRepositories: hasBlocking,
+            BlockingReasons: blockingReasons,
+            PullRequestRefreshFailed: prRefreshFailed,
+            AnalysisFailed: false,
+            AnalysisError: null);
+    }
+
+    private static string? NormalizePullRequestState(WorkspaceRepositoryLinkListItemDto dto)
+    {
+        if (dto.PullRequestMergedAt.HasValue)
+            return "merged";
+        if (string.Equals(dto.PullRequestState, "closed", StringComparison.OrdinalIgnoreCase))
+            return "closed";
+        if (string.Equals(dto.PullRequestState, "merged", StringComparison.OrdinalIgnoreCase))
+            return "merged";
+        if (string.Equals(dto.PullRequestState, "open", StringComparison.OrdinalIgnoreCase)
+            || dto.PullRequestNumber is > 0)
+            return "open";
+        return string.IsNullOrWhiteSpace(dto.PullRequestState) ? null : dto.PullRequestState;
+    }
+
+    private static bool IsOpenPullRequest(WorkspaceRepositoryLinkListItemDto dto)
+        => string.Equals(NormalizePullRequestState(dto), "open", StringComparison.OrdinalIgnoreCase);
+}
