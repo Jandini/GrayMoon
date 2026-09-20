@@ -72,25 +72,18 @@ public sealed class GitChangesSnapshotPushHandler(
         existing.StagedCount = stagedCount;
         existing.ChangedCount = changedCount;
         existing.ConflictCount = conflictCount;
-        if (snapshot.Insertions.HasValue)
-        {
-            existing.Insertions = snapshot.Insertions;
-        }
-
-        if (snapshot.Deletions.HasValue)
-        {
-            existing.Deletions = snapshot.Deletions;
-        }
-
-        if (snapshot.StagedInsertions.HasValue)
-        {
-            existing.StagedInsertions = snapshot.StagedInsertions;
-        }
-
-        if (snapshot.StagedDeletions.HasValue)
-        {
-            existing.StagedDeletions = snapshot.StagedDeletions;
-        }
+        existing.Insertions = snapshot.Insertions.HasValue
+            ? snapshot.Insertions
+            : changedCount == 0 ? 0 : existing.Insertions;
+        existing.Deletions = snapshot.Deletions.HasValue
+            ? snapshot.Deletions
+            : changedCount == 0 ? 0 : existing.Deletions;
+        existing.StagedInsertions = snapshot.StagedInsertions.HasValue
+            ? snapshot.StagedInsertions
+            : stagedCount == 0 ? 0 : existing.StagedInsertions;
+        existing.StagedDeletions = snapshot.StagedDeletions.HasValue
+            ? snapshot.StagedDeletions
+            : stagedCount == 0 ? 0 : existing.StagedDeletions;
         existing.AgentScannedAt = snapshot.ScannedAt;
         existing.PersistedAt = DateTimeOffset.UtcNow;
         existing.LastErrorCode = null;

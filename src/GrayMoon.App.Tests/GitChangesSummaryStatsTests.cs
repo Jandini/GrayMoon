@@ -102,9 +102,9 @@ public class GitChangesSummaryStatsTests
             WorkspaceId = 1,
             Repositories =
             [
-                RepoWithLines(1, "a", 10, 2),
+                RepoWithLines(1, "a", 10, 2, changedCount: 1),
                 RepoWithLines(2, "b", null, null),
-                RepoWithLines(3, "c", 1, 4),
+                RepoWithLines(3, "c", 1, 4, changedCount: 1),
             ],
         };
 
@@ -123,7 +123,7 @@ public class GitChangesSummaryStatsTests
             WorkspaceId = 1,
             Repositories =
             [
-                RepoWithLines(1, "a", 10, 2, stagedInsertions: 4, stagedDeletions: 1),
+                RepoWithLines(1, "a", 10, 2, stagedInsertions: 4, stagedDeletions: 1, changedCount: 1),
             ],
         };
 
@@ -134,19 +134,35 @@ public class GitChangesSummaryStatsTests
     }
 
     [Fact]
-    public void Computed_zero_line_stats_still_count_as_present()
+    public void Zero_line_stats_are_hidden()
     {
         var view = new WorkspaceGitChangesView
         {
             WorkspaceId = 1,
-            Repositories = [RepoWithLines(1, "a", 0, 0)],
+            Repositories = [RepoWithLines(1, "a", 0, 0, changedCount: 1)],
         };
 
         var stats = GitChangesSummaryStats.From(view);
 
-        Assert.True(stats.HasLineStats);
+        Assert.False(stats.HasLineStats);
         Assert.Equal(0, stats.Insertions);
         Assert.Equal(0, stats.Deletions);
+    }
+
+    [Fact]
+    public void Leftover_line_stats_are_hidden_when_nothing_is_changed()
+    {
+        var view = new WorkspaceGitChangesView
+        {
+            WorkspaceId = 1,
+            Repositories = [RepoWithLines(1, "a", 10, 2)],
+        };
+
+        var stats = GitChangesSummaryStats.From(view);
+
+        Assert.False(stats.HasLineStats);
+        Assert.Equal(10, stats.Insertions);
+        Assert.Equal(2, stats.Deletions);
     }
 
     [Fact]
@@ -194,7 +210,8 @@ public class GitChangesSummaryStatsTests
         int? insertions,
         int? deletions,
         int? stagedInsertions = null,
-        int? stagedDeletions = null) => new()
+        int? stagedDeletions = null,
+        int changedCount = 0) => new()
     {
         WorkspaceRepositoryId = id,
         RepositoryId = id,
@@ -203,6 +220,7 @@ public class GitChangesSummaryStatsTests
         Deletions = deletions,
         StagedInsertions = stagedInsertions,
         StagedDeletions = stagedDeletions,
+        ChangedCount = changedCount,
         Changes = [],
     };
 }

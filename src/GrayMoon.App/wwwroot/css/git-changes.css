@@ -19,7 +19,10 @@
 
 .git-changes-header__summary .git-changes-tree__status {
     width: auto;
-    min-width: 1.1rem;
+    min-width: 0;
+    font-size: inherit;
+    font-weight: inherit;
+    font-family: inherit;
 }
 
 .git-changes-header__summary-item {

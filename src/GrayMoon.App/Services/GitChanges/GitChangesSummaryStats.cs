@@ -7,7 +7,8 @@ public sealed record GitChangesKindChip(string Letter, string StatusClass, int C
 /// <summary>
 /// Workspace-level kind and line totals for the Git Changes header. Kind chips are derived from
 /// persisted unstaged (Changed) entries so they move when the user stages or unstages. Line
-/// totals come from persisted unstaged snapshot fields.
+/// totals come from persisted unstaged snapshot fields and are hidden when there are no
+/// remaining unstaged files or both totals are zero.
 /// </summary>
 public sealed record GitChangesSummaryStats(
     IReadOnlyList<GitChangesKindChip> Kinds,
@@ -59,21 +60,21 @@ public sealed record GitChangesSummaryStats(
             kinds.Add(new GitChangesKindChip(LetterOf(kind), StatusClassOf(kind), count, LabelOf(kind)));
         }
 
-        var computed = false;
         var insertions = 0;
         var deletions = 0;
+        var hasUnstagedFiles = false;
         foreach (var repo in view.Repositories)
         {
-            if (repo.Insertions.HasValue || repo.Deletions.HasValue)
-            {
-                computed = true;
-            }
-
             insertions += repo.Insertions ?? 0;
             deletions += repo.Deletions ?? 0;
+            if (repo.ChangedCount > 0 || repo.Changes.Any(c => c.IsChanged))
+            {
+                hasUnstagedFiles = true;
+            }
         }
 
-        return new GitChangesSummaryStats(kinds, insertions, deletions, computed);
+        var showLineStats = hasUnstagedFiles && (insertions > 0 || deletions > 0);
+        return new GitChangesSummaryStats(kinds, insertions, deletions, showLineStats);
     }
 
     /// <summary>Counts the kind shown in the Changed tree for this entry.

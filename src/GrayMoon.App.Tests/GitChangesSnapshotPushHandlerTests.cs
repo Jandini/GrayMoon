@@ -282,4 +282,35 @@ public class GitChangesSnapshotPushHandlerTests
         Assert.Equal(0, status.Insertions);
         Assert.Equal(0, status.Deletions);
     }
+
+    [Fact]
+    public async Task Clean_snapshot_without_line_stats_clears_persisted_totals()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        var hubContext = new FakeHubContext<WorkspaceSyncHub>();
+        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance);
+
+        await handler.HandleAsync(new GitChangesSnapshotNotification
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = ctx.RepositoryId,
+            Snapshot = MakeSnapshot(1, MakeEntry("file.txt")) with { Insertions = 10, Deletions = 2, StagedInsertions = 4, StagedDeletions = 1 },
+        }, CancellationToken.None);
+
+        await handler.HandleAsync(new GitChangesSnapshotNotification
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = ctx.RepositoryId,
+            Snapshot = MakeSnapshot(2),
+        }, CancellationToken.None);
+
+        var status = Assert.Single(ctx.DbContext.WorkspaceGitRepositoryStatuses);
+        Assert.Equal(0, status.ChangedCount);
+        Assert.Equal(0, status.StagedCount);
+        Assert.Equal(0, status.Insertions);
+        Assert.Equal(0, status.Deletions);
+        Assert.Equal(0, status.StagedInsertions);
+        Assert.Equal(0, status.StagedDeletions);
+    }
 }
