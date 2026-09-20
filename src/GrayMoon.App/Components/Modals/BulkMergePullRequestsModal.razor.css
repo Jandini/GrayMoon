@@ -57,7 +57,7 @@
    and the stale margin-top pushes the input below center. Zero both and use gap for spacing instead. */
 ::deep .bulk-merge-pr-select-all,
 ::deep .bulk-merge-pr-row__check,
-::deep .merge-pr-sync-default-check {
+::deep .merge-pr-return-default-check {
     display: flex;
     align-items: center;
     padding-left: 0;
@@ -70,20 +70,20 @@
     gap: 0.75rem;
 }
 
-::deep .merge-pr-sync-default-check {
+::deep .merge-pr-return-default-check {
     gap: 0.4rem;
 }
 
 ::deep .bulk-merge-pr-select-all .form-check-input,
 ::deep .bulk-merge-pr-row__check .form-check-input,
-::deep .merge-pr-sync-default-check .form-check-input {
+::deep .merge-pr-return-default-check .form-check-input {
     margin-left: 0;
     margin-top: 0;
 }
 
 ::deep .bulk-merge-pr-select-all .form-check-input:not(:checked),
 ::deep .bulk-merge-pr-row__check .form-check-input:not(:checked),
-::deep .merge-pr-sync-default-check .form-check-input:not(:checked) {
+::deep .merge-pr-return-default-check .form-check-input:not(:checked) {
     background-color: #6c757d;
     border-color: #6c757d;
 }
@@ -143,7 +143,7 @@
 }
 
 /* Row list: height follows content, scrolls only past the cap - same thin-scrollbar convention as
-   SyncToDefaultOptionsModal's .sync-to-default-options-scroll. */
+   ReturnToDefaultOptionsModal's .return-to-default-options-scroll. */
 ::deep .bulk-merge-pr-scroll {
     flex: 1 1 auto;
     max-height: min(26rem, calc(100vh - 20rem));
@@ -397,7 +397,7 @@
 }
 
 /* Footer, matching MergePullRequestModal's own .merge-pr-modal-footer layout/padding. Left/right bumped
-   from Bootstrap's .modal-footer default (0.75rem) to 1rem so the sync-to-default checkbox lines up with
+   from Bootstrap's .modal-footer default (0.75rem) to 1rem so the return-to-default checkbox lines up with
    the toolbar's select-all checkbox and the (now-unpadded) row checkboxes above it. */
 ::deep .bulk-merge-pr-modal-footer {
     display: flex;
@@ -409,7 +409,7 @@
     padding-right: 1rem;
 }
 
-::deep .merge-pr-sync-default-check .form-check-input:not(:checked) {
+::deep .merge-pr-return-default-check .form-check-input:not(:checked) {
     background-color: #6c757d;
     border-color: #6c757d;
 }

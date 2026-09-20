@@ -151,7 +151,7 @@ public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csPr
     /// <summary>
     /// True while HEAD is still on the branch that was pushed. The deferred notification pairs counts taken
     /// for that branch with a branch name read at send time, so once HEAD has moved - a checkout, or a
-    /// sync-to-default that deleted this very branch - the two disagree and sending would stamp one branch's
+    /// return-to-default that deleted this very branch - the two disagree and sending would stamp one branch's
     /// upstream flag and counts onto another. Whatever moved HEAD reports its own state, so this pass bails.
     /// </summary>
     private async Task<bool> StillOnPushedBranchAsync(string repoPath, string pushedBranch, int repositoryId)

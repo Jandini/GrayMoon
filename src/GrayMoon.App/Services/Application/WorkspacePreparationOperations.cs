@@ -1,8 +1,8 @@
 namespace GrayMoon.App.Services.Application;
 
-public sealed class WorkspaceFeatureOperations(NewFeatureOrchestrator orchestrator) : IWorkspaceFeatureOperations
+public sealed class WorkspacePreparationOperations(PrepareWorkspaceOrchestrator orchestrator) : IWorkspacePreparationOperations
 {
-    public Task<DependencyUpdateRunResult> CreateAsync(
+    public Task<DependencyUpdateRunResult> PrepareAsync(
         int workspaceId,
         string newBranchName,
         string baseBranch,

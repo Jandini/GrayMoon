@@ -69,13 +69,13 @@ The Agent uses `System.CommandLine`. Each agent operation implements `ICommandHa
 Three orchestrators coordinate multi-step workflows across repositories:
 - `DependencyUpdateOrchestrator` — drives level-by-level package version updates: updates `.csproj` files, runs `dotnet restore --force --no-cache`, commits each level, then moves to the next.
 - `PushOrchestrator` — synchronized push: pushes level-by-level, waits for NuGet availability between levels so downstream consumers get the correct package version before their push starts.
-- `NewFeatureOrchestrator` — automates branch creation, optional dependency update, commit, and push across selected repositories in one workflow.
+- `PrepareWorkspaceOrchestrator` — automates branch creation, optional dependency update, commit, and push across selected repositories in one workflow.
 
 ### Application facades and workspace lock
 
 Pages, modals, and API endpoints call `IWorkspace*Operations` (or Queries / `IWorkspaceGitChangesReadService`). They must not resolve `WorkspaceGitService`, orchestrators, or `IGitChangesAgentClient`. Mutations take `IProgress<OperationProgress>?` and several return `OperationResult`. `WorkspaceOperationRunner` is the process-wide one-mutation-per-workspace lock; circuit `BackgroundJobService` attaches overlay handles on top of that lock.
 
-Allowed leftovers until a later pass: `IWorkspacePageService` bag properties already on the page, `WorkspaceBranchHandler` bulk helpers, interactive Sync-to-default dialogs, and `IGitChangesAgentClient` for discard/diff only (commit/stage/unstage go through `IWorkspaceGitChangesOperations`).
+Allowed leftovers until a later pass: `IWorkspacePageService` bag properties already on the page, `WorkspaceBranchHandler` bulk helpers, interactive Return-to-default dialogs, and `IGitChangesAgentClient` for discard/diff only (commit/stage/unstage go through `IWorkspaceGitChangesOperations`).
 
 `Workspace*Handler` services remain the orchestration layer behind the facades. When adding a new user-initiated multi-step operation, add it to the matching `IWorkspace*Operations` method (and existing handler if needed) rather than calling `WorkspaceGitService` from a page or endpoint.
 

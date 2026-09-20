@@ -5,18 +5,18 @@ namespace GrayMoon.App.Components.Pages;
 
 public sealed partial class WorkspaceRepositories
 {
-    private IReadOnlyList<SyncToDefaultCheckResult>? _syncToDefaultCheckResults = null;
+    private IReadOnlyList<ReturnToDefaultCheckResult>? _returnToDefaultCheckResults = null;
 
-    private sealed record SyncToDefaultCheckResult(int RepoId, int? DefaultAhead, bool? HasUpstream);
+    private sealed record ReturnToDefaultCheckResult(int RepoId, int? DefaultAhead, bool? HasUpstream);
 
-    private async Task ShowConfirmSyncToDefaultLevel(List<int> repositoryIds)
+    private async Task ShowConfirmReturnToDefaultLevel(List<int> repositoryIds)
     {
         if (workspace == null || repositoryIds == null || repositoryIds.Count == 0)
             return;
 
         var freshLinks = await GetFreshLinkStatesAsync(repositoryIds.Distinct().ToList());
         var nonDefaultRepoIds = freshLinks.Values
-            .Where(s => s.NeedsSyncToDefault)
+            .Where(s => s.NeedsReturnToDefault)
             .Select(s => s.Link.RepositoryId)
             .ToList();
 
@@ -26,15 +26,15 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
-        await CheckBranchesAndConfirmSyncToDefaultLevel(nonDefaultRepoIds);
+        await CheckBranchesAndConfirmReturnToDefaultLevel(nonDefaultRepoIds);
     }
 
-    private async Task CheckBranchesAndConfirmSyncToDefaultLevel(List<int> repositoryIds)
+    private async Task CheckBranchesAndConfirmReturnToDefaultLevel(List<int> repositoryIds)
     {
         if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || IsJobRunning)
             return;
 
-        _syncToDefaultCheckResults = null;
+        _returnToDefaultCheckResults = null;
 
         try
         {
@@ -45,7 +45,7 @@ public sealed partial class WorkspaceRepositories
         }
         catch (Exception ex)
         {
-            Logger.LogDebug(ex, "PR refresh before sync-to-default check failed for workspace {WorkspaceId}", WorkspaceId);
+            Logger.LogDebug(ex, "PR refresh before return-to-default check failed for workspace {WorkspaceId}", WorkspaceId);
         }
 
         // Pre-check against the state just persisted by the PR refresh above; no agent call needed.
@@ -55,7 +55,7 @@ public sealed partial class WorkspaceRepositories
             .Select(repoId =>
             {
                 var state = freshLinks[repoId];
-                return new SyncToDefaultCheckResult(repoId, state.Link.DefaultBranchAheadCommits, state.Link.BranchHasUpstream);
+                return new ReturnToDefaultCheckResult(repoId, state.Link.DefaultBranchAheadCommits, state.Link.BranchHasUpstream);
             })
             .ToList();
         var safeRepoIds = checkResults
@@ -69,7 +69,7 @@ public sealed partial class WorkspaceRepositories
         foreach (var r in blocked)
         {
             var name = freshLinks[r.RepoId].Link.Repository?.RepositoryName ?? r.RepoId.ToString();
-            ToastService.Show($"{name}: skipped sync to default (commits ahead of default, PR not merged).");
+            ToastService.Show($"{name}: skipped return to default (commits ahead of default, PR not merged).");
         }
 
         if (safeRepoIds.Count == 0)
@@ -79,11 +79,11 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
-        _syncToDefaultCheckResults = checkResults.Where(r => safeRepoIds.Contains(r.RepoId)).ToList();
+        _returnToDefaultCheckResults = checkResults.Where(r => safeRepoIds.Contains(r.RepoId)).ToList();
         var safeCount = safeRepoIds.Count;
         var dialogMessage = safeCount == 1
             ? "This will checkout the default branch, remove the current branch locally, and pull the latest. Uncommitted local changes can block checkout."
-            : $"This will sync {safeCount} repositories to their default branch: checkout default, remove the current branch locally, and pull. Uncommitted local changes can block checkout for that repo.";
+            : $"This will return {safeCount} repositories to their default branch: checkout default, remove the current branch locally, and pull. Uncommitted local changes can block checkout for that repo.";
 
         JobService.StartJob(PageJobKey,
             safeCount == 1 ? "Fetching latest branch state..." : $"Fetching latest branch state for {safeCount} repositories...",
@@ -112,8 +112,8 @@ public sealed partial class WorkspaceRepositories
                     // The fetches above rewrote BranchHasUpstream, so rebuild the dialog from the database
                     // rather than from whatever the grid cache still holds.
                     var refreshed = await GetFreshLinkStatesAsync(safeRepoIds);
-                    var updatedResults = _syncToDefaultCheckResults?
-                        .Select(r => new SyncToDefaultCheckResult(
+                    var updatedResults = _returnToDefaultCheckResults?
+                        .Select(r => new ReturnToDefaultCheckResult(
                             r.RepoId,
                             r.DefaultAhead,
                             refreshed.TryGetValue(r.RepoId, out var s) ? s.Link.BranchHasUpstream : r.HasUpstream))
@@ -124,20 +124,20 @@ public sealed partial class WorkspaceRepositories
                         if (_disposed) return;
                         await RefreshFromSync();
 
-                        _syncToDefaultCheckResults = updatedResults;
+                        _returnToDefaultCheckResults = updatedResults;
                         var repoItems = updatedResults?
                             .Select(r =>
                             {
                                 refreshed.TryGetValue(r.RepoId, out var s);
-                                return new SyncToDefaultRepoItem(
+                                return new ReturnToDefaultRepoItem(
                                     s?.Link.Repository?.RepositoryName ?? r.RepoId.ToString(),
                                     s?.Link.BranchName ?? "",
                                     r.HasUpstream == true,
                                     PrState: null,
                                     CommitsAhead: 0);
                             })
-                            .ToList() ?? new List<SyncToDefaultRepoItem>();
-                        ShowSyncToDefaultOptions(dialogMessage, repoItems, (deleteRemote, allowForce) => SyncToDefaultLevelAsync(safeRepoIds, deleteRemote, allowForce));
+                            .ToList() ?? new List<ReturnToDefaultRepoItem>();
+                        ShowReturnToDefaultOptions(dialogMessage, repoItems, (deleteRemote, allowForce) => ReturnToDefaultLevelAsync(safeRepoIds, deleteRemote, allowForce));
                         StateHasChanged();
                     });
                 }
@@ -148,14 +148,14 @@ public sealed partial class WorkspaceRepositories
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogError(ex, "Error checking branches for sync to default");
-                    SafeInvoke(() => ToastService.ShowError("Failed to prepare sync to default."));
+                    Logger.LogError(ex, "Error checking branches for return to default");
+                    SafeInvoke(() => ToastService.ShowError("Failed to prepare return to default."));
                     throw;
                 }
             });
     }
 
-    private async Task SyncToDefaultFromModalAsync((int RepositoryId, string? RepositoryName, string CurrentBranchName, string DefaultBranch) request)
+    private async Task ReturnToDefaultFromModalAsync((int RepositoryId, string? RepositoryName, string CurrentBranchName, string DefaultBranch) request)
     {
         var (repositoryId, repositoryName, currentBranchName, defaultBranch) = request;
         if (workspace == null || IsJobRunning)
@@ -192,13 +192,13 @@ public sealed partial class WorkspaceRepositories
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogDebug(ex, "PR refresh before sync-to-default check failed for RepositoryId={RepositoryId}", repositoryId);
+                    Logger.LogDebug(ex, "PR refresh before return-to-default check failed for RepositoryId={RepositoryId}", repositoryId);
                 }
             }
 
             if (defaultAhead > 0 && state?.IsPullRequestMergedOrClosed != true)
             {
-                ToastService.Show("Skipped sync to default: commits ahead of default branch and PR is not merged.");
+                ToastService.Show("Skipped return to default: commits ahead of default branch and PR is not merged.");
                 return;
             }
 
@@ -210,36 +210,36 @@ public sealed partial class WorkspaceRepositories
                 var branchName = state?.Link.BranchName ?? currentBranchName;
                 var singlePr = state?.PullRequest;
                 var singlePrState = singlePr == null ? null : singlePr.IsMerged ? "merged" : singlePr.IsClosed ? "closed" : "open";
-                ShowSyncToDefaultOptions(
+                ShowReturnToDefaultOptions(
                     "This will checkout the default branch, remove the current branch locally, and pull the latest.",
-                    [new SyncToDefaultRepoItem(repositoryName!, branchName, hasUpstream, singlePrState, defaultAhead)],
-                    (deleteRemote, allowForce) => SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemote && hasUpstream, defaultBranch, allowForce));
+                    [new ReturnToDefaultRepoItem(repositoryName!, branchName, hasUpstream, singlePrState, defaultAhead)],
+                    (deleteRemote, allowForce) => ReturnToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemote && hasUpstream, defaultBranch, allowForce));
             }
             else
             {
-                await SyncToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemoteBranch: false, defaultBranch, allowForceDeleteLocalBranch: true);
+                await ReturnToDefaultSingleRepoAfterCheckAsync(repositoryId, repositoryName, currentBranchName, deleteRemoteBranch: false, defaultBranch, allowForceDeleteLocalBranch: true);
             }
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error preparing sync to default (repository {RepositoryId})", repositoryId);
-            ToastService.ShowError("Failed to prepare sync to default.");
+            Logger.LogError(ex, "Error preparing return to default (repository {RepositoryId})", repositoryId);
+            ToastService.ShowError("Failed to prepare return to default.");
         }
     }
 
-    private Task SyncToDefaultSingleRepoAfterCheckAsync(int repositoryId, string repositoryName, string currentBranchName, bool deleteRemoteBranch = false, string? defaultBranchName = null, bool allowForceDeleteLocalBranch = true)
+    private Task ReturnToDefaultSingleRepoAfterCheckAsync(int repositoryId, string repositoryName, string currentBranchName, bool deleteRemoteBranch = false, string? defaultBranchName = null, bool allowForceDeleteLocalBranch = true)
     {
         if (workspace == null || IsJobRunning)
             return Task.CompletedTask;
 
         var message = string.IsNullOrWhiteSpace(defaultBranchName)
-            ? "Synchronizing to default branch..."
-            : $"Synchronizing to {defaultBranchName}...";
+            ? "Returning to default branch..."
+            : $"Returning to {defaultBranchName}...";
 
         StartPageJob(message, async (job, ct) =>
         {
             var (success, errMsg) = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, (bool Success, string? ErrorMessage)>(
-                svc => svc.SyncToDefaultDirectAsync(WorkspaceId, repositoryId, currentBranchName, deleteRemoteBranch, allowForceDeleteLocalBranch, ct));
+                svc => svc.ReturnToDefaultDirectAsync(WorkspaceId, repositoryId, currentBranchName, deleteRemoteBranch, allowForceDeleteLocalBranch, ct));
 
             // The sync persists this repository's own state; workspace-wide dependency and file-version
             // stats are recomputed here, once, as the batch boundary for this action.
@@ -260,15 +260,15 @@ public sealed partial class WorkspaceRepositories
             RefreshOnSuccess = false,
             OnError = ex =>
             {
-                Logger.LogError(ex, "Error syncing to default branch for repository {RepositoryId}", repositoryId);
-                SafeInvoke(() => SetRepositoryError(repositoryId, "An error occurred while syncing to default branch. The GrayMoon Agent may be offline."));
+                Logger.LogError(ex, "Error returning to default branch for repository {RepositoryId}", repositoryId);
+                SafeInvoke(() => SetRepositoryError(repositoryId, "An error occurred while returning to default branch. The GrayMoon Agent may be offline."));
             }
         });
 
         return Task.CompletedTask;
     }
 
-    private Task SyncToDefaultLevelAsync(List<int> repositoryIds, bool deleteRemoteBranch = false, bool allowForceDeleteLocalBranch = true)
+    private Task ReturnToDefaultLevelAsync(List<int> repositoryIds, bool deleteRemoteBranch = false, bool allowForceDeleteLocalBranch = true)
     {
         if (workspace == null || repositoryIds == null || repositoryIds.Count == 0 || IsJobRunning)
             return Task.CompletedTask;
@@ -280,13 +280,13 @@ public sealed partial class WorkspaceRepositories
             return Task.CompletedTask;
         }
 
-        var checkResults = _syncToDefaultCheckResults;
-        _syncToDefaultCheckResults = null;
-        StartPageJob("Synchronizing to default branch...", async (job, ct) =>
+        var checkResults = _returnToDefaultCheckResults;
+        _returnToDefaultCheckResults = null;
+        StartPageJob("Returning to default branch...", async (job, ct) =>
         {
             var total = repositoryIds.Count;
             var maxParallel = Math.Max(1, WorkspaceOptions?.Value?.MaxParallelOperations ?? 16);
-            var resultByRepo = checkResults?.ToDictionary(r => r.RepoId) ?? new Dictionary<int, SyncToDefaultCheckResult>();
+            var resultByRepo = checkResults?.ToDictionary(r => r.RepoId) ?? new Dictionary<int, ReturnToDefaultCheckResult>();
             var completedCount = 0;
 
             using var semaphore = new SemaphoreSlim(maxParallel, maxParallel);
@@ -301,7 +301,7 @@ public sealed partial class WorkspaceRepositories
                 {
                     var c = Interlocked.Increment(ref completedCount);
                     if (total > 1)
-                        job.ReportProgress($"Synchronized {c} of {total} to default branch");
+                        job.ReportProgress($"Returned {c} of {total} to default branch");
                     return (repositoryId, true, (string?)null);
                 }
 
@@ -310,7 +310,7 @@ public sealed partial class WorkspaceRepositories
                 {
                     var repoHasRemote = !resultByRepo.TryGetValue(repositoryId, out var repoCheck) || repoCheck.HasUpstream == true;
                     var (success, errMsg) = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, (bool Success, string? ErrorMessage)>(
-                        svc => svc.SyncToDefaultDirectAsync(
+                        svc => svc.ReturnToDefaultDirectAsync(
                             WorkspaceId, repositoryId, currentBranchName,
                             deleteRemoteBranch && repoHasRemote, allowForceDeleteLocalBranch, ct));
 
@@ -318,15 +318,15 @@ public sealed partial class WorkspaceRepositories
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    Logger.LogError(ex, "Error syncing to default branch for repository {RepositoryId}", repositoryId);
-                    return (repositoryId, false, (string?)"Sync to default branch failed. The GrayMoon Agent may be offline.");
+                    Logger.LogError(ex, "Error returning to default branch for repository {RepositoryId}", repositoryId);
+                    return (repositoryId, false, (string?)"Return to default branch failed. The GrayMoon Agent may be offline.");
                 }
                 finally
                 {
                     semaphore.Release();
                     var c = Interlocked.Increment(ref completedCount);
                     if (total > 1)
-                        job.ReportProgress($"Synchronized {c} of {total} to default branch");
+                        job.ReportProgress($"Returned {c} of {total} to default branch");
                 }
             });
 
@@ -357,15 +357,15 @@ public sealed partial class WorkspaceRepositories
         {
             OnError = ex =>
             {
-                Logger.LogError(ex, "Error syncing to default branch for level");
-                SafeInvoke(() => SetPageError("An error occurred while syncing to default branch. The GrayMoon Agent may be offline."));
+                Logger.LogError(ex, "Error returning to default branch for level");
+                SafeInvoke(() => SetPageError("An error occurred while returning to default branch. The GrayMoon Agent may be offline."));
             }
         });
 
         return Task.CompletedTask;
     }
 
-    private async Task SyncAllToDefaultAsync()
+    private async Task ReturnAllToDefaultAsync()
     {
         if (workspace == null || IsJobRunning)
             return;
@@ -390,7 +390,7 @@ public sealed partial class WorkspaceRepositories
         var totalCount = eligibleIds.Count;
         var dialogMessage = totalCount == 1
             ? "This will checkout the default branch, remove the current branch locally, and pull the latest. Uncommitted local changes can block checkout."
-            : $"This will sync {totalCount} repositories to their default branch: checkout default, remove the current branch locally, and pull. Uncommitted local changes can block checkout for that repo.";
+            : $"This will return {totalCount} repositories to their default branch: checkout default, remove the current branch locally, and pull. Uncommitted local changes can block checkout for that repo.";
 
         JobService.StartJob(PageJobKey,
             totalCount == 1 ? "Fetching latest branch state..." : $"Fetching latest branch state for {totalCount} repositories...",
@@ -405,7 +405,7 @@ public sealed partial class WorkspaceRepositories
                     }
                     catch (Exception ex)
                     {
-                        Logger.LogDebug(ex, "PR refresh before sync-all-to-default failed for workspace {WorkspaceId}", WorkspaceId);
+                        Logger.LogDebug(ex, "PR refresh before return-all-to-default failed for workspace {WorkspaceId}", WorkspaceId);
                     }
 
                     var fetchDone = 0;
@@ -435,7 +435,7 @@ public sealed partial class WorkspaceRepositories
                             refreshed.TryGetValue(repoId, out var s);
                             var pr = s?.PullRequest;
                             var prState = pr == null ? null : pr.IsMerged ? "merged" : pr.IsClosed ? "closed" : "open";
-                            return new SyncToDefaultRepoItem(
+                            return new ReturnToDefaultRepoItem(
                                 s?.Link.Repository?.RepositoryName ?? repoId.ToString(),
                                 s?.Link.BranchName ?? "",
                                 s?.Link.BranchHasUpstream == true,
@@ -448,7 +448,7 @@ public sealed partial class WorkspaceRepositories
                     {
                         if (_disposed) return;
                         await RefreshFromSync();
-                        ShowSyncToDefaultOptions(dialogMessage, repoItems, (deleteRemote, allowForce) => ExecuteSyncAllToDefaultAsync(repoItems, deleteRemote, allowForce));
+                        ShowReturnToDefaultOptions(dialogMessage, repoItems, (deleteRemote, allowForce) => ExecuteReturnAllToDefaultAsync(repoItems, deleteRemote, allowForce));
                         StateHasChanged();
                     });
                 }
@@ -459,15 +459,15 @@ public sealed partial class WorkspaceRepositories
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogError(ex, "Error fetching branch state before sync all to default");
-                    SafeInvoke(() => ToastService.ShowError("Failed to prepare sync to default."));
+                    Logger.LogError(ex, "Error fetching branch state before return all to default");
+                    SafeInvoke(() => ToastService.ShowError("Failed to prepare return to default."));
                     throw;
                 }
             });
     }
 
-    private async Task ExecuteSyncAllToDefaultAsync(
-        IReadOnlyList<SyncToDefaultRepoItem> repoItems,
+    private async Task ExecuteReturnAllToDefaultAsync(
+        IReadOnlyList<ReturnToDefaultRepoItem> repoItems,
         bool deleteRemoteBranch,
         bool allowForceDeleteLocalBranch)
     {
@@ -492,7 +492,7 @@ public sealed partial class WorkspaceRepositories
         }
 
         var total = repoItems.Count;
-        StartPageJob("Synchronizing to default branch...", async (job, ct) =>
+        StartPageJob("Returning to default branch...", async (job, ct) =>
         {
             var maxParallel = Math.Max(1, WorkspaceOptions?.Value?.MaxParallelOperations ?? 16);
             var completedCount = 0;
@@ -529,12 +529,12 @@ public sealed partial class WorkspaceRepositories
                         }
                         catch (Exception ex)
                         {
-                            Logger.LogWarning(ex, "Failed to close PR {PrNumber} for repo {RepoName} before sync to default", prNumber, item.RepoName);
+                            Logger.LogWarning(ex, "Failed to close PR {PrNumber} for repo {RepoName} before return to default", prNumber, item.RepoName);
                         }
                     }
 
                     var (success, errMsg) = await ScopedExecutor.ExecuteAsync<WorkspaceGitService, (bool Success, string? ErrorMessage)>(
-                        svc => svc.SyncToDefaultDirectAsync(
+                        svc => svc.ReturnToDefaultDirectAsync(
                             WorkspaceId, repoId, currentBranch,
                             deleteRemoteBranch && item.HasRemote, allowForceDeleteLocalBranch, ct));
 
@@ -542,22 +542,22 @@ public sealed partial class WorkspaceRepositories
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    Logger.LogError(ex, "Error syncing to default branch for repository {RepositoryId}", repoId);
-                    return (RepoId: repoId, Success: false, ErrorMsg: (string?)"Sync to default branch failed. The GrayMoon Agent may be offline.");
+                    Logger.LogError(ex, "Error returning to default branch for repository {RepositoryId}", repoId);
+                    return (RepoId: repoId, Success: false, ErrorMsg: (string?)"Return to default branch failed. The GrayMoon Agent may be offline.");
                 }
                 finally
                 {
                     semaphore.Release();
                     var c = Interlocked.Increment(ref completedCount);
                     if (total > 1)
-                        job.ReportProgress($"Synchronized {c} of {total} to default branch");
+                        job.ReportProgress($"Returned {c} of {total} to default branch");
                 }
             });
 
             var results = await Task.WhenAll(tasks);
 
             // Recompute workspace-wide dependency/file-version stats exactly once, after every repo in this
-            // "sync all to default" batch has finished, instead of racing N concurrent per-repo recomputes.
+            // "return all to default" batch has finished, instead of racing N concurrent per-repo recomputes.
             await ScopedExecutor.ExecuteAsync<IWorkspaceUpdateOperations>(
                 svc => svc.RecomputeAndBroadcastWorkspaceSyncedAsync(WorkspaceId, ct));
 
@@ -580,14 +580,14 @@ public sealed partial class WorkspaceRepositories
                 }
 
                 if (total > 1 && failureCount == 0)
-                    ToastService.Show($"Synced {successCount} of {total} repositories to default branch.");
+                    ToastService.Show($"Returned {successCount} of {total} repositories to default branch.");
             });
         }, new PageJobOptions
         {
             OnError = ex =>
             {
-                Logger.LogError(ex, "Error syncing all repositories to default branch");
-                SafeInvoke(() => SetPageError("An error occurred while syncing to default branch. The GrayMoon Agent may be offline."));
+                Logger.LogError(ex, "Error returning all repositories to default branch");
+                SafeInvoke(() => SetPageError("An error occurred while returning to default branch. The GrayMoon Agent may be offline."));
             }
         });
 

@@ -127,7 +127,7 @@ public sealed class WorkspacePullRequestService(
                 var pr = await gitHubPullRequestService.GetPullRequestForBranchAsync(wr.Repository!, wr.Repository!.Connector, branch, cancellationToken);
                 // After GitHub auto-deletes the head branch on merge, the list-by-head lookup is empty even
                 // though GET /pulls/{number} still returns the merged PR. Fall back so post-merge
-                // sync-to-default still sees MergedAt and does not abort as "not safe".
+                // return-to-default still sees MergedAt and does not abort as "not safe".
                 if (pr == null && wr.PullRequest?.PullRequestNumber is int persistedNumber and > 0)
                 {
                     pr = await gitHubPullRequestService.GetPullRequestByNumberAsync(

@@ -315,7 +315,7 @@ public sealed partial class WorkspaceRepositories
         return false;
     }
 
-    /// <summary>True when at least one repository in the group has a merged pull request, meaning the default branch has moved on and "Sync to Default" is worth highlighting.</summary>
+    /// <summary>True when at least one repository in the group has a merged pull request, meaning the default branch has moved on and "Return to Default" is worth highlighting.</summary>
     private bool GroupHasMergedPr(IEnumerable<WorkspaceRepositoryLink> group)
     {
         foreach (var wr in group)

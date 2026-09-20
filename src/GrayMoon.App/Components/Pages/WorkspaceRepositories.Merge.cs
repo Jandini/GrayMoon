@@ -334,7 +334,7 @@ public sealed partial class WorkspaceRepositories
     /// Entry point for the modal's merge button. When the button is rendering as the orange "proceed with caution"
     /// warning (<see cref="PullRequestMergeDetails.HasMergeWarning"/> - uncommitted changes and/or unpushed/incoming
     /// commits in the local clone), interrupts with a confirm dialog that names the specific reason(s) before
-    /// continuing on to <see cref="HandleMergeRequestedAsync"/> (which may itself confirm sync-to-default), since
+    /// continuing on to <see cref="HandleMergeRequestedAsync"/> (which may itself confirm return-to-default), since
     /// that local state would otherwise silently not be reflected in the merge. Proceeds straight through when
     /// there's no warning.
     /// </summary>
@@ -432,27 +432,27 @@ public sealed partial class WorkspaceRepositories
 
     private Task HandleMergeRequestedAsync(MergePullRequestChoice choice)
     {
-        if (choice.SyncToDefault)
+        if (choice.ReturnToDefault)
         {
             var prNumber = _mergePrModal.PrNumber;
             ShowConfirm(
                 $"Merge pull request #{prNumber} and then sync to the default branch?\n\nThis will checkout the default branch, remove the current branch locally, and pull the latest.",
-                () => ExecuteMergeAsync(choice.Method, syncToDefault: true),
+                () => ExecuteMergeAsync(choice.Method, returnToDefault: true),
                 "Merge");
             return Task.CompletedTask;
         }
 
-        return ExecuteMergeAsync(choice.Method, syncToDefault: false);
+        return ExecuteMergeAsync(choice.Method, returnToDefault: false);
     }
 
     /// <summary>
-    /// Runs the merge (and optional sync-to-default) as a single page job so the standard full-page LoadingOverlay
+    /// Runs the merge (and optional return-to-default) as a single page job so the standard full-page LoadingOverlay
     /// covers both steps back-to-back without ever hiding and reappearing in between - the modal itself stays
     /// mounted throughout (see IsMerging's z-index handling in MergePullRequestModal) rather than closing the
     /// instant the merge call returns. "Merged 1 of 1 pull requests…" is written for a single PR today but keeps
     /// the same completed/total shape a future multi-PR merge would report incrementally through job.ReportProgress.
     /// </summary>
-    private Task ExecuteMergeAsync(MergeMethod method, bool syncToDefault)
+    private Task ExecuteMergeAsync(MergeMethod method, bool returnToDefault)
     {
         var repositoryId = _mergePrModal.RepositoryId;
         var prNumber = _mergePrModal.PrNumber;
@@ -501,22 +501,22 @@ public sealed partial class WorkspaceRepositories
                     if (_bulkMergeModal.DrillInRepositoryId == repositoryId)
                     {
                         ReflectBulkMergeDrillInResult(repositoryId, BulkMergeRowStatus.Merged);
-                        if (!syncToDefault)
+                        if (!returnToDefault)
                             _bulkMergeModal.DrillInRepositoryId = null;
                     }
                     StateHasChanged();
                 });
 
-                if (syncToDefault)
+                if (returnToDefault)
                 {
                     SafeInvoke(() =>
                     {
                         if (_bulkMergeModal.DrillInRepositoryId == repositoryId)
-                            ReflectBulkMergeDrillInResult(repositoryId, BulkMergeRowStatus.SyncingToDefault);
+                            ReflectBulkMergeDrillInResult(repositoryId, BulkMergeRowStatus.ReturningToDefault);
                     });
 
-                    var syncResult = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, UnattendedSyncToDefaultResult>(
-                        svc => svc.SyncToDefaultAsync(WorkspaceId, [repositoryId], job.ToOperationProgress(), ct));
+                    var syncResult = await ScopedExecutor.ExecuteAsync<IWorkspaceSyncOperations, UnattendedReturnToDefaultResult>(
+                        svc => svc.ReturnToDefaultAsync(WorkspaceId, [repositoryId], job.ToOperationProgress(), ct));
 
                     SafeInvoke(() =>
                     {
@@ -525,11 +525,11 @@ public sealed partial class WorkspaceRepositories
                         {
                             SetRepositoryError(repositoryId, syncResult.AbortReason);
                             if (isBulkMergeDrillIn)
-                                ReflectBulkMergeDrillInResult(repositoryId, BulkMergeRowStatus.SyncFailed, syncResult.AbortReason);
+                                ReflectBulkMergeDrillInResult(repositoryId, BulkMergeRowStatus.ReturnFailed, syncResult.AbortReason);
                         }
                         else if (isBulkMergeDrillIn && syncResult.Completed)
                         {
-                            ReflectBulkMergeDrillInResult(repositoryId, BulkMergeRowStatus.Synced);
+                            ReflectBulkMergeDrillInResult(repositoryId, BulkMergeRowStatus.ReturnedToDefault);
                         }
 
                         if (isBulkMergeDrillIn)
@@ -546,7 +546,7 @@ public sealed partial class WorkspaceRepositories
             catch (OperationCanceledException)
             {
                 // The merge call itself has no cancellation checkpoint until it completes - cancelling here only
-                // ever interrupts the optional sync-to-default step, never a half-completed merge.
+                // ever interrupts the optional return-to-default step, never a half-completed merge.
                 SafeInvoke(() =>
                 {
                     _mergePrModal = _mergePrModal with { IsMerging = false };

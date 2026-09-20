@@ -257,6 +257,12 @@
     margin-top: 0.4rem;
 }
 
+.git-changes-workspace-commit__buttons {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
 /* Bootstrap's .form-check pairs padding-left:1.5em on this element with margin-left:-1.5em on the
    input so the checkbox lines up under floated text - the two cancel out once float is overridden
    by display:flex here, leaving zero gap before the label. Reset both and use an explicit gap instead. */

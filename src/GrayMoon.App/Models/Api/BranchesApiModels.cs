@@ -128,8 +128,8 @@ public sealed class SetUpstreamBranchResponse
     public string? ErrorMessage { get; set; }
 }
 
-/// <summary>Agent SyncToDefaultBranch response (camelCase). Used to parse agent response.Data.</summary>
-public sealed class SyncToDefaultBranchResponse
+/// <summary>Agent ReturnToDefaultBranch response (camelCase). Used to parse agent response.Data.</summary>
+public sealed class ReturnToDefaultBranchResponse
 {
     [JsonPropertyName("success")]
     public bool Success { get; set; }

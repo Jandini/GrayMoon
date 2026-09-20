@@ -1,14 +1,14 @@
 namespace GrayMoon.App.Services.Orchestration;
 
 /// <summary>
-/// Sequences the New Feature workflow: parallel branch creation with inline state sync (hooks
+/// Sequences the Prepare Workspace workflow: parallel branch creation with inline state sync (hooks
 /// suppressed), then dependency update. By the time each phase completes, the database reflects
 /// full, consistent state - no async hook syncs to race against.
 /// </summary>
-public sealed class NewFeatureOrchestrator(
+public sealed class PrepareWorkspaceOrchestrator(
     WorkspaceBranchHandler branchHandler,
     DependencyUpdateOrchestrator dependencyUpdateOrchestrator,
-    ILogger<NewFeatureOrchestrator> logger)
+    ILogger<PrepareWorkspaceOrchestrator> logger)
 {
     public async Task<DependencyUpdateRunResult> RunAsync(
         int workspaceId,
@@ -22,7 +22,7 @@ public sealed class NewFeatureOrchestrator(
         Action<int, string> setLevelError,
         CancellationToken cancellationToken)
     {
-        logger.LogInformation("NewFeatureOrchestrator starting for workspace {WorkspaceId}: branch={Branch}, updateDeps={UpdateDeps}", workspaceId, newBranchName, updateDependencies);
+        logger.LogInformation("PrepareWorkspaceOrchestrator starting for workspace {WorkspaceId}: branch={Branch}, updateDeps={UpdateDeps}", workspaceId, newBranchName, updateDependencies);
 
         var sink = new OperationErrorSink(workspaceId, logger, setRepositoryError, setLevelError);
 
@@ -51,11 +51,11 @@ public sealed class NewFeatureOrchestrator(
                 repoIdsToUpdate: null,
                 commitMessage: commitMessage,
                 includeDepsInCommitMessage: true);
-            logger.LogInformation("NewFeatureOrchestrator completed for workspace {WorkspaceId}", workspaceId);
+            logger.LogInformation("PrepareWorkspaceOrchestrator completed for workspace {WorkspaceId}", workspaceId);
             return updateResult;
         }
 
-        logger.LogInformation("NewFeatureOrchestrator completed for workspace {WorkspaceId}", workspaceId);
+        logger.LogInformation("PrepareWorkspaceOrchestrator completed for workspace {WorkspaceId}", workspaceId);
         return DependencyUpdateRunResult.Ok();
     }
 }

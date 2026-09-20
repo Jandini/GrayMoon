@@ -11,7 +11,7 @@ public interface IWorkspaceBranchOperations
 
     Task<BranchHttpOutcome> CheckoutAsync(int workspaceId, int repositoryId, string? branchName, bool isTag, CancellationToken cancellationToken = default);
 
-    Task<BranchHttpOutcome> SyncToDefaultAsync(
+    Task<BranchHttpOutcome> ReturnToDefaultAsync(
         int workspaceId,
         int repositoryId,
         string? currentBranchName,

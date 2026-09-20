@@ -5,7 +5,7 @@ using GrayMoon.App.Models.Api;
 namespace GrayMoon.App.Services.Orchestration;
 
 /// <summary>
-/// Handles branch-related operations: common branches, create branches, checkout, and sync-to-default.
+/// Handles branch-related operations: common branches, create branches, checkout, and return-to-default.
 /// Stateless; UI state is owned by the caller. Calls <see cref="IWorkspaceBranchOperations"/> in-process.
 /// </summary>
 public sealed class WorkspaceBranchHandler(
@@ -117,7 +117,7 @@ public sealed class WorkspaceBranchHandler(
         return (false, message);
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> SyncToDefaultSingleAsync(
+    public async Task<(bool Success, string? ErrorMessage)> ReturnToDefaultSingleAsync(
         int workspaceId,
         int repositoryId,
         string? currentBranchName,
@@ -125,7 +125,7 @@ public sealed class WorkspaceBranchHandler(
         bool allowForceDeleteLocalBranch,
         CancellationToken cancellationToken)
     {
-        var outcome = await branchOperations.SyncToDefaultAsync(
+        var outcome = await branchOperations.ReturnToDefaultAsync(
             workspaceId,
             repositoryId,
             currentBranchName,
@@ -136,8 +136,8 @@ public sealed class WorkspaceBranchHandler(
         if (outcome.IsSuccessStatus)
             return (true, null);
 
-        var errMsg = outcome.ErrorText ?? $"Failed to sync to default branch: {outcome.StatusCode}";
-        logger.LogError("SyncToDefault failed for repo {RepositoryId}: {StatusCode}, {Error}", repositoryId, outcome.StatusCode, outcome.ErrorText);
+        var errMsg = outcome.ErrorText ?? $"Failed to return to default branch: {outcome.StatusCode}";
+        logger.LogError("ReturnToDefault failed for repo {RepositoryId}: {StatusCode}, {Error}", repositoryId, outcome.StatusCode, outcome.ErrorText);
         return (false, errMsg);
     }
 

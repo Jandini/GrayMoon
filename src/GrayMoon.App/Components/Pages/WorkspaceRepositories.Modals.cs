@@ -6,7 +6,7 @@ public sealed partial class WorkspaceRepositories
 {
     private ConfirmModalState _confirmModal = new();
     private DefaultBranchWarningModalState _defaultBranchWarningModal = new();
-    private SyncToDefaultOptionsModalState _syncToDefaultOptionsModal = new();
+    private ReturnToDefaultOptionsModalState _returnToDefaultOptionsModal = new();
     private OperationErrorModalState _operationErrorModal = new();
 
     private void CloseConfirmModal()
@@ -70,9 +70,9 @@ public sealed partial class WorkspaceRepositories
             await action();
     }
 
-    private void ShowSyncToDefaultOptions(string message, IReadOnlyList<SyncToDefaultRepoItem> repoItems, Func<bool, bool, Task> onProceed, bool defaultDeleteRemote = true)
+    private void ShowReturnToDefaultOptions(string message, IReadOnlyList<ReturnToDefaultRepoItem> repoItems, Func<bool, bool, Task> onProceed, bool defaultDeleteRemote = true)
     {
-        _syncToDefaultOptionsModal = _syncToDefaultOptionsModal with
+        _returnToDefaultOptionsModal = _returnToDefaultOptionsModal with
         {
             IsVisible = true,
             Message = message,
@@ -84,18 +84,18 @@ public sealed partial class WorkspaceRepositories
         StateHasChanged();
     }
 
-    private void CloseSyncToDefaultOptionsModal()
+    private void CloseReturnToDefaultOptionsModal()
     {
-        _syncToDefaultOptionsModal = _syncToDefaultOptionsModal with { IsVisible = false, PendingAction = null };
+        _returnToDefaultOptionsModal = _returnToDefaultOptionsModal with { IsVisible = false, PendingAction = null };
         StateHasChanged();
     }
 
-    private async Task OnSyncToDefaultOptionsProceedAsync()
+    private async Task OnReturnToDefaultOptionsProceedAsync()
     {
-        var action = _syncToDefaultOptionsModal.PendingAction;
-        var deleteRemote = _syncToDefaultOptionsModal.DeleteRemoteBranches;
-        var allowForce = _syncToDefaultOptionsModal.AllowForceDeleteLocalBranch;
-        CloseSyncToDefaultOptionsModal();
+        var action = _returnToDefaultOptionsModal.PendingAction;
+        var deleteRemote = _returnToDefaultOptionsModal.DeleteRemoteBranches;
+        var allowForce = _returnToDefaultOptionsModal.AllowForceDeleteLocalBranch;
+        CloseReturnToDefaultOptionsModal();
         if (action != null)
             await action(deleteRemote, allowForce);
     }
@@ -129,11 +129,11 @@ public sealed partial class WorkspaceRepositories
         public Func<Task>? PendingAction { get; init; }
     }
 
-    private sealed record SyncToDefaultOptionsModalState
+    private sealed record ReturnToDefaultOptionsModalState
     {
         public bool IsVisible { get; init; }
         public string Message { get; init; } = "";
-        public IReadOnlyList<SyncToDefaultRepoItem> RepoItems { get; init; } = Array.Empty<SyncToDefaultRepoItem>();
+        public IReadOnlyList<ReturnToDefaultRepoItem> RepoItems { get; init; } = Array.Empty<ReturnToDefaultRepoItem>();
         public bool DeleteRemoteBranches { get; init; } = true;
         public bool AllowForceDeleteLocalBranch { get; init; } = true;
         public Func<bool, bool, Task>? PendingAction { get; init; }

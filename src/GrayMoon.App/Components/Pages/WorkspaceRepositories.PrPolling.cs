@@ -9,7 +9,7 @@ namespace GrayMoon.App.Components.Pages;
 /// The interval scales with AppActivityStateService (Active/Idle/Hidden) so an actively-watched grid polls
 /// fast while a backgrounded or unattended tab backs off - and a poll fires immediately the moment the
 /// user becomes active again, rather than waiting out whatever slower delay was in flight.
-/// Action-triggered instant refreshes (push, sync-to-default, create PR) are unaffected and still fire
+/// Action-triggered instant refreshes (push, return-to-default, create PR) are unaffected and still fire
 /// immediately with force: true.
 /// </summary>
 public sealed partial class WorkspaceRepositories

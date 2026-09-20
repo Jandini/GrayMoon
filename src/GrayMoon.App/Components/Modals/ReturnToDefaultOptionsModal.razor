@@ -5,10 +5,10 @@
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
          @onkeydown="HandleKeyDown"
          @ref="_modalElement">
-        <div class="modal-dialog modal-dialog-centered modal-lg sync-to-default-options-modal">
+        <div class="modal-dialog modal-dialog-centered modal-lg return-to-default-options-modal">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Sync to Default</h5>
+                    <h5 class="modal-title">Return to Default</h5>
                     <button type="button" class="btn-close" aria-label="Close" @onclick="HandleCancelClick"></button>
                 </div>
                 <div class="modal-body">
@@ -19,12 +19,12 @@
                     }
                     @if (RepoItems.Count > 0)
                     {
-                        <div class="sync-to-default-options-scroll mb-3">
+                        <div class="return-to-default-options-scroll mb-3">
                             <ul class="list-unstyled mb-0 ps-0">
                                 @foreach (var item in RepoItems)
                                 {
                                     <li class="mb-1">
-                                        <code class="sync-to-default-repo-name">@item.RepoName</code>
+                                        <code class="return-to-default-repo-name">@item.RepoName</code>
                                         <span class="text-muted ms-2">@item.BranchName</span>
                                         @if (item.HasRemote)
                                         {
@@ -98,7 +98,7 @@
 @code {
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public string Message { get; set; } = "";
-    [Parameter] public IReadOnlyList<SyncToDefaultRepoItem> RepoItems { get; set; } = Array.Empty<SyncToDefaultRepoItem>();
+    [Parameter] public IReadOnlyList<ReturnToDefaultRepoItem> RepoItems { get; set; } = Array.Empty<ReturnToDefaultRepoItem>();
     [Parameter] public bool DeleteRemoteBranches { get; set; } = true;
     [Parameter] public EventCallback<bool> DeleteRemoteBranchesChanged { get; set; }
     [Parameter] public bool AllowForceDeleteLocalBranch { get; set; } = true;

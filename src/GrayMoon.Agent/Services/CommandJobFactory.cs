@@ -60,8 +60,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid CheckoutBranch args"),
             "CheckoutTag" => JsonSerializer.Deserialize<CheckoutTagRequest>(json, options)
                 ?? throw new ArgumentException("Invalid CheckoutTag args"),
-            "SyncToDefaultBranch" => JsonSerializer.Deserialize<SyncToDefaultBranchRequest>(json, options)
-                ?? throw new ArgumentException("Invalid SyncToDefaultBranch args"),
+            "ReturnToDefaultBranch" => JsonSerializer.Deserialize<ReturnToDefaultBranchRequest>(json, options)
+                ?? throw new ArgumentException("Invalid ReturnToDefaultBranch args"),
             "RefreshBranches" => JsonSerializer.Deserialize<RefreshBranchesRequest>(json, options)
                 ?? throw new ArgumentException("Invalid RefreshBranches args"),
             "CreateBranch" => JsonSerializer.Deserialize<CreateBranchRequest>(json, options)

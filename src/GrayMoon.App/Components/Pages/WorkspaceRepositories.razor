@@ -32,11 +32,11 @@
                                     IsRestoringPackages="@IsJobRunning"
                                     IsOverlayVisible="@IsPageOverlayVisible"
                                     OnShowRepositories="ShowRepositoriesModalAsync"
-                                    OnNewFeature="ShowNewFeatureModalAsync"
+                                    OnPrepareWorkspace="ShowPrepareWorkspaceModalAsync"
                                     OnShowBranch="() => ShowBranchModalAsync()"
                                     OnShowSwitchBranch='() => ShowBranchModalAsync("switchbranch")'
                                     OnNewPullRequest="OpenPullRequestDialogForAllRepositoriesAsync"
-                                    OnSyncAllToDefault="SyncAllToDefaultAsync"
+                                    OnReturnToDefault="ReturnAllToDefaultAsync"
                                     OnUpdate="OnUpdateClickAsync"
                                     OnUpdateFiles="OnUpdateFilesClickAsync"
                                     OnUpdateAndPush="OnUpdateAndPushClickAsync"
@@ -139,7 +139,7 @@
                                                                            Group="@levelGroup"
                                                                            RepositoryCount="@slot.LevelRepoCount"
                                                                            ActionsDisabled="@IsLevelActionsDisabled(slot.LevelKey)"
-                                                                           OnSyncToDefault="async () => await SyncToDefaultForLevelAsync(slot.LevelKey)"
+                                                                           OnReturnToDefault="async () => await ReturnToDefaultForLevelAsync(slot.LevelKey)"
                                                                            OnSyncCommits="async () => await SyncCommitsForLevelAsync(slot.LevelKey)"
                                                                            OnOpenPr="async () => await OpenPullRequestDialogForLevelAsync(slot.LevelKey)"
                                                                            OnOpenMergePrs="async () => await OpenMergePullRequestsDialogForLevelAsync(slot.LevelKey)"
@@ -258,7 +258,7 @@
                    OnFetchBranches="@FetchSwitchBranchModalAsync"
                    OnBranchChanged="@OnBranchChangedAsync"
                    OnCheckoutBranch="@CheckoutBranchAsync"
-                   OnSyncToDefault="@SyncToDefaultFromModalAsync"
+                   OnReturnToDefault="@ReturnToDefaultFromModalAsync"
                    OnCreateBranch="@CreateSingleBranchAsync" />
 
 <UpdateBranchModal IsVisible="@_updateBranchModal.IsVisible"
@@ -338,15 +338,15 @@
                          OnProceed="@OnVersionFilesCommitProceedAsync"
                          OnCancel="@CloseVersionFilesCommitModal" />
 
-<SyncToDefaultOptionsModal IsVisible="@_syncToDefaultOptionsModal.IsVisible"
-                           Message="@_syncToDefaultOptionsModal.Message"
-                           RepoItems="@_syncToDefaultOptionsModal.RepoItems"
-                           DeleteRemoteBranches="@_syncToDefaultOptionsModal.DeleteRemoteBranches"
-                           DeleteRemoteBranchesChanged="@(v => _syncToDefaultOptionsModal = _syncToDefaultOptionsModal with { DeleteRemoteBranches = v })"
-                           AllowForceDeleteLocalBranch="@_syncToDefaultOptionsModal.AllowForceDeleteLocalBranch"
-                           AllowForceDeleteLocalBranchChanged="@(v => _syncToDefaultOptionsModal = _syncToDefaultOptionsModal with { AllowForceDeleteLocalBranch = v })"
-                           OnProceed="@OnSyncToDefaultOptionsProceedAsync"
-                           OnCancel="@CloseSyncToDefaultOptionsModal" />
+<ReturnToDefaultOptionsModal IsVisible="@_returnToDefaultOptionsModal.IsVisible"
+                           Message="@_returnToDefaultOptionsModal.Message"
+                           RepoItems="@_returnToDefaultOptionsModal.RepoItems"
+                           DeleteRemoteBranches="@_returnToDefaultOptionsModal.DeleteRemoteBranches"
+                           DeleteRemoteBranchesChanged="@(v => _returnToDefaultOptionsModal = _returnToDefaultOptionsModal with { DeleteRemoteBranches = v })"
+                           AllowForceDeleteLocalBranch="@_returnToDefaultOptionsModal.AllowForceDeleteLocalBranch"
+                           AllowForceDeleteLocalBranchChanged="@(v => _returnToDefaultOptionsModal = _returnToDefaultOptionsModal with { AllowForceDeleteLocalBranch = v })"
+                           OnProceed="@OnReturnToDefaultOptionsProceedAsync"
+                           OnCancel="@CloseReturnToDefaultOptionsModal" />
 
 <NewPullRequestModal IsVisible="@_newPrModal.IsVisible"
                      IsBusy="@IsJobRunning"
@@ -361,8 +361,8 @@
                             Rows="@_bulkMergeModal.Rows"
                             SelectedMethod="@_bulkMergeModal.SelectedMethod"
                             SelectedMethodChanged="SetBulkMergeMethod"
-                            SyncToDefaultAfterMerge="@BulkMergeSyncToDefault"
-                            SyncToDefaultAfterMergeChanged="SetBulkMergeSyncToDefault"
+                            ReturnToDefaultAfterMerge="@BulkMergeReturnToDefault"
+                            ReturnToDefaultAfterMergeChanged="SetBulkMergeReturnToDefault"
                             IsRunning="@_bulkMergeModal.IsRunning"
                             IsCoveredByOverlay="@(_bulkMergeModal.DrillInRepositoryId.HasValue && IsJobRunning)"
                             HasRun="@_bulkMergeModal.HasRun"
@@ -391,14 +391,14 @@
                        OnPullRequested="HandleMergeDialogPullRequestedAsync"
                        OnTitleChanged="HandleMergeDialogTitleChangedAsync" />
 
-<NewFeatureModal IsVisible="@_newFeatureModal.IsVisible"
-                 WorkspaceName="@_newFeatureModal.WorkspaceName"
+<PrepareWorkspaceModal IsVisible="@_prepareWorkspaceModal.IsVisible"
+                 WorkspaceName="@_prepareWorkspaceModal.WorkspaceName"
                  WorkspaceId="@WorkspaceId"
-                 CommonBranchNames="@_newFeatureModal.CommonBranchNames"
-                 DefaultDisplayText="@_newFeatureModal.DefaultDisplayText"
+                 CommonBranchNames="@_prepareWorkspaceModal.CommonBranchNames"
+                 DefaultDisplayText="@_prepareWorkspaceModal.DefaultDisplayText"
                  HasTaggedRepos="@hasTaggedRepos"
-                 OnCreate="HandleNewFeatureCreateAsync"
-                 OnCancel="CloseNewFeatureModal" />
+                 OnCreate="HandlePrepareWorkspaceAsync"
+                 OnCancel="ClosePrepareWorkspaceModal" />
 
 <OperationErrorModal IsVisible="@_operationErrorModal.IsVisible"
                      Title="@_operationErrorModal.Title"

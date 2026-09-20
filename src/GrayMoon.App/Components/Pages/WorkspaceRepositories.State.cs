@@ -163,7 +163,7 @@ public sealed partial class WorkspaceRepositories
             PullRequest != null && (PullRequest.IsMerged || string.Equals(PullRequest.State, "closed", StringComparison.OrdinalIgnoreCase));
 
         /// <summary>True when the repository is on a branch other than its default and so has somewhere to sync to.</summary>
-        public bool NeedsSyncToDefault =>
+        public bool NeedsReturnToDefault =>
             !Link.IsOnTag
             && !string.IsNullOrWhiteSpace(Link.BranchName)
             && !string.Equals(Link.BranchName, Link.DefaultBranchName, StringComparison.Ordinal);

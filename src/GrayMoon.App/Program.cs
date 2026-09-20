@@ -112,7 +112,7 @@ try
     builder.Services.AddSingleton<IToastService, ToastService>();
     builder.Services.AddSingleton<MatrixOverlayPreferenceService>();
     builder.Services.AddSingleton<CommandTerminalOverlayPreferenceService>();
-    builder.Services.AddSingleton<MergePullRequestSyncToDefaultPreferenceService>();
+    builder.Services.AddSingleton<MergePullRequestReturnToDefaultPreferenceService>();
     builder.Services.AddSingleton<LoadingOverlayUiSettingsService>();
     builder.Services.AddSingleton<IGitHubRateLimitTracker, GitHubRateLimitTracker>();
     builder.Services.AddSingleton<IGitHubETagCache, GitHubETagCache>();
@@ -159,13 +159,13 @@ try
     builder.Services.AddScoped<IWorkspaceCatalogOperations, WorkspaceCatalogOperations>();
     builder.Services.AddScoped<IWorkspacePushOperations, WorkspacePushOperations>();
     builder.Services.AddScoped<IWorkspaceUpdateOperations, WorkspaceUpdateOperations>();
-    builder.Services.AddScoped<IWorkspaceFeatureOperations, WorkspaceFeatureOperations>();
+    builder.Services.AddScoped<IWorkspacePreparationOperations, WorkspacePreparationOperations>();
     builder.Services.AddScoped<IWorkspaceSyncOperations, WorkspaceSyncOperations>();
     builder.Services.AddScoped<IWorkspacePullRequestOperations, WorkspacePullRequestOperations>();
     builder.Services.AddScoped<IWorkspaceFileOperations, WorkspaceFileOperations>();
     builder.Services.AddScoped<IWorkspaceGitChangesOperations, WorkspaceGitChangesOperations>();
     builder.Services.AddScoped<WorkspaceBranchHandler>();
-    builder.Services.AddScoped<NewFeatureOrchestrator>();
+    builder.Services.AddScoped<PrepareWorkspaceOrchestrator>();
     builder.Services.AddSingleton<IWorkspaceOperationRunner, WorkspaceOperationRunner>();
     builder.Services.AddScoped<IBackgroundJobService, BackgroundJobService>();
     builder.Services.AddScoped<IWorkspacePageService, WorkspacePageService>();

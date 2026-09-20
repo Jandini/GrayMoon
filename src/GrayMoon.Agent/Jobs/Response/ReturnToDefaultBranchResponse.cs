@@ -4,7 +4,7 @@ using GrayMoon.Agent.Models;
 
 namespace GrayMoon.Agent.Jobs.Response;
 
-public sealed class SyncToDefaultBranchResponse
+public sealed class ReturnToDefaultBranchResponse
 {
     [JsonPropertyName("success")]
     public bool Success { get; set; }

@@ -68,9 +68,9 @@
                     <li>
                         <button class="dropdown-item" type="button"
                                 role="menuitem"
-                                @onclick="HandleNewFeatureClick"
+                                @onclick="HandlePrepareWorkspaceClick"
                                 disabled="@BranchActionsDisabled">
-                            New Feature
+                            Prepare Workspace
                         </button>
                     </li>
                     <li><hr class="dropdown-divider branch-menu-divider" /></li>
@@ -96,16 +96,16 @@
                                 role="menuitem"
                                 @onclick="HandleNewPullRequestClick"
                                 disabled="@BranchActionsDisabled">
-                            Create PRs...
+                            Create PRs
                         </button>
                     </li>
                     <li><hr class="dropdown-divider branch-menu-divider" /></li>
                     <li>
                         <button class="dropdown-item" type="button"
                                 role="menuitem"
-                                @onclick="HandleSyncAllToDefaultClick"
+                                @onclick="HandleReturnToDefaultClick"
                                 disabled="@BranchActionsDisabled">
-                            Sync To Default
+                            Return to Default
                         </button>
                     </li>
                 </ul>
@@ -373,11 +373,11 @@
     [Parameter] public bool IsOverlayVisible { get; set; }
 
     [Parameter] public EventCallback OnShowRepositories { get; set; }
-    [Parameter] public EventCallback OnNewFeature { get; set; }
+    [Parameter] public EventCallback OnPrepareWorkspace { get; set; }
     [Parameter] public EventCallback OnShowBranch { get; set; }
     [Parameter] public EventCallback OnShowSwitchBranch { get; set; }
     [Parameter] public EventCallback OnNewPullRequest { get; set; }
-    [Parameter] public EventCallback OnSyncAllToDefault { get; set; }
+    [Parameter] public EventCallback OnReturnToDefault { get; set; }
     [Parameter] public EventCallback OnUpdate { get; set; }
     [Parameter] public EventCallback OnUpdateFiles { get; set; }
     [Parameter] public EventCallback OnUpdateAndPush { get; set; }
@@ -529,10 +529,10 @@
         await OnShowBranch.InvokeAsync();
     }
 
-    private async Task HandleNewFeatureClick()
+    private async Task HandlePrepareWorkspaceClick()
     {
         CloseBranchMenu();
-        await OnNewFeature.InvokeAsync();
+        await OnPrepareWorkspace.InvokeAsync();
     }
 
     private async Task HandleNewBranchClick()
@@ -553,10 +553,10 @@
         await OnNewPullRequest.InvokeAsync();
     }
 
-    private async Task HandleSyncAllToDefaultClick()
+    private async Task HandleReturnToDefaultClick()
     {
         CloseBranchMenu();
-        await OnSyncAllToDefault.InvokeAsync();
+        await OnReturnToDefault.InvokeAsync();
     }
 
     private async Task OnSearchValueChangedAsync(string value)

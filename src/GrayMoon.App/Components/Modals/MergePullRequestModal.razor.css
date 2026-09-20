@@ -372,11 +372,11 @@
     padding-top: 0.5625rem;
 }
 
-::deep .merge-pr-sync-default-check {
+::deep .merge-pr-return-default-check {
     flex: 1 1 auto;
 }
 
-::deep .merge-pr-sync-default-check .form-check-input:not(:checked) {
+::deep .merge-pr-return-default-check .form-check-input:not(:checked) {
     background-color: #6c757d;
     border-color: #6c757d;
 }

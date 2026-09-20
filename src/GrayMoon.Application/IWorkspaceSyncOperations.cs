@@ -2,7 +2,7 @@ using GrayMoon.App.Models;
 
 namespace GrayMoon.Application;
 
-public sealed record UnattendedSyncToDefaultResult(bool Completed, string? AbortReason);
+public sealed record UnattendedReturnToDefaultResult(bool Completed, string? AbortReason);
 
 public interface IWorkspaceSyncOperations
 {
@@ -15,7 +15,7 @@ public interface IWorkspaceSyncOperations
         Action<int, RepoGitVersionInfo> updateRepoGitInfo,
         Action<int, RepoSyncStatus> setRepoSyncStatus);
 
-    Task<UnattendedSyncToDefaultResult> SyncToDefaultAsync(
+    Task<UnattendedReturnToDefaultResult> ReturnToDefaultAsync(
         int workspaceId,
         IReadOnlyList<int> repositoryIds,
         IProgress<OperationProgress>? progress,

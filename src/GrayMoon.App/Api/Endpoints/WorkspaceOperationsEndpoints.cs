@@ -17,9 +17,9 @@ public static class WorkspaceOperationsEndpoints
         group.MapGet("/operations", GetRunningOperation);
         group.MapPost("/update", Update);
         group.MapPost("/push", Push);
-        group.MapPost("/new-feature", NewFeature);
+        group.MapPost("/prepare-workspace", PrepareWorkspace);
         group.MapPost("/sync", Sync);
-        group.MapPost("/sync-to-default", SyncToDefault);
+        group.MapPost("/return-to-default", ReturnToDefault);
         group.MapPost("/pull", Pull);
         group.MapPost("/undo-push", UndoPush);
         group.MapPost("/restore-packages", RestorePackages);
@@ -115,10 +115,10 @@ public static class WorkspaceOperationsEndpoints
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
         }, cancellationToken);
 
-    private static Task<IResult> NewFeature(
+    private static Task<IResult> PrepareWorkspace(
         int workspaceId,
-        NewFeatureApiRequest? body,
-        IWorkspaceFeatureOperations operations,
+        PrepareWorkspaceApiRequest? body,
+        IWorkspacePreparationOperations operations,
         IWorkspacePushOperations pushOperations,
         IWorkspaceOperationRunner runner,
         CancellationToken cancellationToken)
@@ -128,7 +128,7 @@ public static class WorkspaceOperationsEndpoints
 
         return WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Creating branches...", async (progress, ct) =>
         {
-            var created = await operations.CreateAsync(
+            var created = await operations.PrepareAsync(
                 workspaceId,
                 body.NewBranchName.Trim(),
                 body.BaseBranch ?? "__default__",
@@ -173,9 +173,9 @@ public static class WorkspaceOperationsEndpoints
             return Results.Ok(new { success = true });
         }, cancellationToken);
 
-    private static Task<IResult> SyncToDefault(
+    private static Task<IResult> ReturnToDefault(
         int workspaceId,
-        SyncToDefaultApiRequest? body,
+        ReturnToDefaultApiRequest? body,
         IWorkspaceSyncOperations operations,
         IWorkspaceOperationRunner runner,
         CancellationToken cancellationToken)
@@ -183,9 +183,9 @@ public static class WorkspaceOperationsEndpoints
         if (body?.RepositoryIds is not { Count: > 0 })
             return Task.FromResult(Results.BadRequest("repositoryIds is required."));
 
-        return WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Synchronizing to default branch...", async (progress, ct) =>
+        return WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Returning to default branch...", async (progress, ct) =>
         {
-            var result = await operations.SyncToDefaultAsync(workspaceId, body.RepositoryIds, progress, ct);
+            var result = await operations.ReturnToDefaultAsync(workspaceId, body.RepositoryIds, progress, ct);
             return result.Completed ? Results.Ok(result) : Results.BadRequest(result);
         }, cancellationToken);
     }
@@ -387,7 +387,7 @@ public sealed class PushWorkspaceApiRequest
     public bool SynchronizedPush { get; set; } = true;
 }
 
-public sealed class NewFeatureApiRequest
+public sealed class PrepareWorkspaceApiRequest
 {
     public string? NewBranchName { get; set; }
     public string? BaseBranch { get; set; }
@@ -402,7 +402,7 @@ public sealed class SyncWorkspaceApiRequest
     public IReadOnlyList<int>? RepositoryIds { get; set; }
 }
 
-public sealed class SyncToDefaultApiRequest
+public sealed class ReturnToDefaultApiRequest
 {
     public IReadOnlyList<int>? RepositoryIds { get; set; }
 }
