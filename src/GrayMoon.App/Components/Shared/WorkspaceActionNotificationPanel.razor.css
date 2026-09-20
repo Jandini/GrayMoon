@@ -156,8 +156,9 @@
 }
 
 
-.btn-group > .btn-warning + .btn-danger.dropdown-toggle-split {
-    border-left-color: rgba(255, 255, 255, 0.4);
+.btn-group > .btn-warning + .btn-outline-secondary.dropdown-toggle-split,
+.btn-group > .btn-danger + .btn-outline-secondary.dropdown-toggle-split {
+    border-left-color: rgba(0, 0, 0, 0.2);
 }
 
 .branch-menu-backdrop {
