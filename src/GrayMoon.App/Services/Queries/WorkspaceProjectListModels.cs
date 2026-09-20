@@ -8,7 +8,8 @@ public sealed record WorkspaceProjectListRequest(
     int WorkspaceId,
     string? Search,
     int PageSize,
-    WorkspaceProjectListCursor? Cursor);
+    WorkspaceProjectListCursor? Cursor,
+    int? WorkspaceFeatureContextId = null);
 
 public sealed record WorkspaceProjectListItemDto(
     int ProjectId,
@@ -23,4 +24,4 @@ public sealed record WorkspaceProjectListPageResult(
     WorkspaceProjectListCursor? NextCursor,
     bool HasMore);
 
-public sealed record WorkspaceProjectListFilter(int WorkspaceId, string? Search);
+public sealed record WorkspaceProjectListFilter(int WorkspaceId, string? Search, int? WorkspaceFeatureContextId = null);

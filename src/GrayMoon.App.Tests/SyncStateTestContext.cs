@@ -4,7 +4,10 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.Features;
+using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Queries;
+using GrayMoon.Application.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -71,6 +74,13 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<WorkspaceRepositoryCustomDependencyRepository>();
 
         services.AddScoped<WorkspaceService>();
+        services.AddScoped<IWorkspaceFeatureContextResolver, WorkspaceFeatureContextResolver>();
+        services.AddScoped<IWorkspaceContextPathResolver, WorkspaceContextPathResolver>();
+        services.AddScoped<IWorkspaceSelectedFeatureContextService, WorkspaceSelectedFeatureContextService>();
+        services.AddScoped<IWorkspaceHookContextAttributor, WorkspaceHookContextAttributor>();
+        services.AddScoped<IWorkspaceFeatureOperations, WorkspaceFeatureOperations>();
+        services.AddSingleton<IWorkspaceOperationRunner, WorkspaceOperationRunner>();
+        services.AddSingleton<IWorkspaceOperationLock>(sp => (IWorkspaceOperationLock)sp.GetRequiredService<IWorkspaceOperationRunner>());
         services.AddScoped<GitHubService>();
         services.AddScoped<GitHubPullRequestService>();
         services.AddScoped<GitHubPullRequestMergeService>();
@@ -126,7 +136,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         db.Repositories.Add(repository);
         await db.SaveChangesAsync();
 
-        var workspace = new Workspace { Name = "test-ws" };
+        var workspace = new Workspace { Name = "test-ws", RootPath = @"C:\gm-test-root" };
         db.Workspaces.Add(workspace);
         await db.SaveChangesAsync();
 
@@ -147,6 +157,8 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         };
         db.WorkspaceRepositories.Add(link);
         await db.SaveChangesAsync();
+
+        await Migrations.MigrateWorkspaceFeatureContextSchemaAsync(db);
 
         WorkspaceId = workspace.WorkspaceId;
         RepositoryId = repository.RepositoryId;

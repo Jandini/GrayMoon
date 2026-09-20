@@ -2,6 +2,7 @@ using GrayMoon.Abstractions.Notifications;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
+using GrayMoon.Application.Features;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.Workspaces;
@@ -38,7 +39,9 @@ public sealed class RepositoryStateWriteOptions
 }
 
 /// <summary>
-/// The single writer of the denormalized badge columns on <see cref="WorkspaceRepositoryLink"/>.
+/// The single writer of denormalized checkout badge state for a <see cref="WorkspaceFeatureContext"/>.
+/// Special Workspace contexts also mirror onto <see cref="WorkspaceRepositoryLink"/> for legacy readers
+/// until contract cleanup; Feature contexts write context state only.
 /// </summary>
 /// <remarks>
 /// Every group of columns is written with replace semantics - a probed null really does clear the
@@ -55,9 +58,14 @@ public sealed class WorkspaceRepositoryStateWriter(
     RepositoryBranchWriter branchWriter,
     WorkspaceProjectRepository workspaceProjectRepository,
     WorkspacePullRequestService pullRequestService,
+    IWorkspaceFeatureContextResolver contextResolver,
     ILogger<WorkspaceRepositoryStateWriter> logger)
 {
-    /// <summary>Applies <paramref name="snapshot"/> to the workspace-repository link. Returns false when the link does not exist.</summary>
+    /// <summary>
+    /// Applies <paramref name="snapshot"/> to the special Workspace context (and mirrors onto the link).
+    /// Prefer <see cref="ApplyAsync(WorkspaceFeatureContextId, int, int, RepositoryStateSnapshot, RepositoryStateWriteOptions?, CancellationToken)"/>
+    /// when the caller already has an explicit context id.
+    /// </summary>
     public async Task<bool> ApplyAsync(
         int workspaceId,
         int repositoryId,
@@ -65,7 +73,30 @@ public sealed class WorkspaceRepositoryStateWriter(
         RepositoryStateWriteOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        return await ApplyAsync(contextId, workspaceId, repositoryId, snapshot, options, cancellationToken);
+    }
+
+    /// <summary>Applies <paramref name="snapshot"/> to the given Feature context. Returns false when the link does not exist.</summary>
+    public async Task<bool> ApplyAsync(
+        WorkspaceFeatureContextId contextId,
+        int workspaceId,
+        int repositoryId,
+        RepositoryStateSnapshot snapshot,
+        RepositoryStateWriteOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
         options ??= new RepositoryStateWriteOptions();
+
+        var context = await dbContext.WorkspaceFeatureContexts
+            .FirstOrDefaultAsync(c => c.WorkspaceFeatureContextId == contextId.Value, cancellationToken);
+        if (context is null || context.WorkspaceId != workspaceId)
+        {
+            logger.LogWarning(
+                "State write skipped: context {ContextId} missing or not in workspace {WorkspaceId}",
+                contextId.Value, workspaceId);
+            return false;
+        }
 
         var wr = await dbContext.WorkspaceRepositories
             .FirstOrDefaultAsync(x => x.WorkspaceId == workspaceId && x.RepositoryId == repositoryId, cancellationToken);
@@ -75,46 +106,82 @@ public sealed class WorkspaceRepositoryStateWriter(
             return false;
         }
 
-        var previousBranch = wr.BranchName;
+        var state = await dbContext.WorkspaceRepositoryContextStates
+            .FirstOrDefaultAsync(
+                s => s.WorkspaceFeatureContextId == contextId.Value && s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId,
+                cancellationToken);
+        if (state is null)
+        {
+            state = new WorkspaceRepositoryContextState
+            {
+                WorkspaceFeatureContextId = contextId.Value,
+                WorkspaceRepositoryId = wr.WorkspaceRepositoryId,
+                SyncStatus = RepoSyncStatus.NeedsSync
+            };
+            dbContext.WorkspaceRepositoryContextStates.Add(state);
+        }
 
-        ApplyIdentity(wr, snapshot);
+        var previousBranch = state.BranchName;
+        var isSpecialWorkspace = context.Kind == WorkspaceFeatureContextKind.Workspace;
+
+        ApplyIdentity(state, snapshot);
+        if (isSpecialWorkspace && snapshot.IdentityProbed)
+        {
+            MirrorIdentityToLink(wr, state);
+            if (!string.IsNullOrWhiteSpace(state.CheckedOutTag))
+            {
+                wr.BranchHasUpstream = null;
+                wr.OutgoingCommits = null;
+                wr.IncomingCommits = null;
+                wr.DefaultBranchBehindCommits = null;
+                wr.DefaultBranchAheadCommits = null;
+            }
+        }
 
         if (snapshot.GitVersionProbed)
-            wr.GitVersion = Blank(snapshot.GitVersion) ? null : snapshot.GitVersion;
+        {
+            state.GitVersion = Blank(snapshot.GitVersion) ? null : snapshot.GitVersion;
+            if (isSpecialWorkspace)
+                wr.GitVersion = state.GitVersion;
+        }
 
-        // A repository pinned to a tag has no branch to count against, so those columns stay cleared
-        // regardless of what the snapshot reports.
-        var onTag = !string.IsNullOrWhiteSpace(wr.CheckedOutTag);
+        var onTag = !string.IsNullOrWhiteSpace(state.CheckedOutTag);
         if (!onTag)
         {
-            // Only a probed group is written. An unprobed group keeps the value the grid is already showing
-            // until a flow that did probe replaces it - blanking it to "-" mid-operation reads as a bug even
-            // though the counts are about to arrive.
             if (snapshot.CommitCountsProbed)
             {
-                wr.OutgoingCommits = snapshot.OutgoingCommits;
-                wr.IncomingCommits = snapshot.IncomingCommits;
-                // Ahead/behind vs default is a separate comparison. A pair of nulls means that comparison
-                // did not finish (or was never run), not "no divergence" - writing them would flash "-"
-                // until a later snapshot arrives. 0 is a real answer and still replaces.
+                state.OutgoingCommits = snapshot.OutgoingCommits;
+                state.IncomingCommits = snapshot.IncomingCommits;
                 if (snapshot.DefaultBranchBehind.HasValue || snapshot.DefaultBranchAhead.HasValue)
                 {
-                    wr.DefaultBranchBehindCommits = snapshot.DefaultBranchBehind;
-                    wr.DefaultBranchAheadCommits = snapshot.DefaultBranchAhead;
+                    state.DefaultBranchBehindCommits = snapshot.DefaultBranchBehind;
+                    state.DefaultBranchAheadCommits = snapshot.DefaultBranchAhead;
+                }
+
+                if (isSpecialWorkspace)
+                {
+                    wr.OutgoingCommits = state.OutgoingCommits;
+                    wr.IncomingCommits = state.IncomingCommits;
+                    wr.DefaultBranchBehindCommits = state.DefaultBranchBehindCommits;
+                    wr.DefaultBranchAheadCommits = state.DefaultBranchAheadCommits;
                 }
             }
 
             if (snapshot.UpstreamProbed)
-                wr.BranchHasUpstream = snapshot.HasUpstream;
+            {
+                state.BranchHasUpstream = snapshot.HasUpstream;
+                if (isSpecialWorkspace)
+                    wr.BranchHasUpstream = state.BranchHasUpstream;
+            }
         }
 
-        // Written whenever the agent knows it, independently of any marker: every flow that can report
-        // a default branch should refresh it, otherwise a stale value keeps a synced repository looking
-        // like it is still off-default.
+        // Default branch name is repository/ref metadata shared across contexts - keep on the link.
         if (!Blank(snapshot.DefaultBranchName))
             wr.DefaultBranchName = snapshot.DefaultBranchName;
 
-        ApplySyncStatus(wr, snapshot, options);
+        ApplySyncStatus(state, snapshot, options, wr.DefaultBranchName);
+        if (isSpecialWorkspace)
+            wr.SyncStatus = state.SyncStatus;
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -131,47 +198,58 @@ public sealed class WorkspaceRepositoryStateWriter(
         }
 
         if (snapshot.ProjectsProbed)
-            await ApplyProjectsAsync(workspaceId, repositoryId, wr, snapshot, cancellationToken);
+            await ApplyProjectsAsync(contextId, workspaceId, repositoryId, wr, state, isSpecialWorkspace, snapshot, cancellationToken);
 
         if (options.ReconcilePullRequest)
-            await ReconcilePullRequestAsync(workspaceId, repositoryId, wr, previousBranch, cancellationToken);
+            await ReconcilePullRequestAsync(contextId, workspaceId, repositoryId, wr, state, previousBranch, cancellationToken);
 
         return true;
     }
 
-    private static void ApplyIdentity(WorkspaceRepositoryLink wr, RepositoryStateSnapshot snapshot)
+    private static void ApplyIdentity(WorkspaceRepositoryContextState state, RepositoryStateSnapshot snapshot)
     {
         if (!snapshot.IdentityProbed)
             return;
 
         if (!Blank(snapshot.CheckedOutTag))
         {
-            // Detached HEAD on a tag: write actions are blocked and there is no branch, so clear the
-            // branch-scoped fields rather than leaving the previous branch's badges rendered.
-            wr.CheckedOutTag = snapshot.CheckedOutTag;
-            wr.BranchName = null;
-            wr.BranchHasUpstream = null;
-            wr.OutgoingCommits = null;
-            wr.IncomingCommits = null;
-            wr.DefaultBranchBehindCommits = null;
-            wr.DefaultBranchAheadCommits = null;
+            state.CheckedOutTag = snapshot.CheckedOutTag;
+            state.BranchName = null;
+            state.BranchHasUpstream = null;
+            state.OutgoingCommits = null;
+            state.IncomingCommits = null;
+            state.DefaultBranchBehindCommits = null;
+            state.DefaultBranchAheadCommits = null;
             return;
         }
 
-        wr.CheckedOutTag = null;
-        wr.HasNewerTag = null;
-        wr.BranchName = Blank(snapshot.BranchName) || snapshot.BranchName == "-" ? null : snapshot.BranchName;
+        state.CheckedOutTag = null;
+        state.HasNewerTag = null;
+        state.BranchName = Blank(snapshot.BranchName) || snapshot.BranchName == "-" ? null : snapshot.BranchName;
     }
 
-    private static void ApplySyncStatus(WorkspaceRepositoryLink wr, RepositoryStateSnapshot snapshot, RepositoryStateWriteOptions options)
+    private static void MirrorIdentityToLink(WorkspaceRepositoryLink wr, WorkspaceRepositoryContextState state)
+    {
+        // Identity only - commit counts / upstream are mirrored only when their probe groups run,
+        // otherwise a stale context-state value would overwrite a just-mutated link field.
+        wr.CheckedOutTag = state.CheckedOutTag;
+        wr.HasNewerTag = state.HasNewerTag;
+        wr.BranchName = state.BranchName;
+    }
+
+    private static void ApplySyncStatus(
+        WorkspaceRepositoryContextState state,
+        RepositoryStateSnapshot snapshot,
+        RepositoryStateWriteOptions options,
+        string? defaultBranchName)
     {
         switch (options.SyncStatus)
         {
             case SyncStatusWrite.InSync:
-                wr.SyncStatus = RepoSyncStatus.InSync;
+                state.SyncStatus = RepoSyncStatus.InSync;
                 return;
             case SyncStatusWrite.Error:
-                wr.SyncStatus = RepoSyncStatus.Error;
+                state.SyncStatus = RepoSyncStatus.Error;
                 return;
             case SyncStatusWrite.Leave:
                 return;
@@ -179,21 +257,24 @@ public sealed class WorkspaceRepositoryStateWriter(
 
         if (options.ErrorMessageForcesInSync && !Blank(snapshot.ErrorMessage))
         {
-            wr.SyncStatus = RepoSyncStatus.InSync;
+            state.SyncStatus = RepoSyncStatus.InSync;
             return;
         }
 
-        var hasValidVersion = !Blank(wr.GitVersion) && (!Blank(wr.BranchName) || !Blank(wr.CheckedOutTag));
-        var hasDefaultBranch = !Blank(wr.DefaultBranchName);
-        wr.SyncStatus = !hasValidVersion
+        var hasValidVersion = !Blank(state.GitVersion) && (!Blank(state.BranchName) || !Blank(state.CheckedOutTag));
+        var hasDefaultBranch = !Blank(defaultBranchName);
+        state.SyncStatus = !hasValidVersion
             ? RepoSyncStatus.Error
             : hasDefaultBranch ? RepoSyncStatus.InSync : RepoSyncStatus.NeedsSync;
     }
 
     private async Task ApplyProjectsAsync(
+        WorkspaceFeatureContextId contextId,
         int workspaceId,
         int repositoryId,
         WorkspaceRepositoryLink wr,
+        WorkspaceRepositoryContextState state,
+        bool isSpecialWorkspace,
         RepositoryStateSnapshot snapshot,
         CancellationToken cancellationToken)
     {
@@ -201,49 +282,117 @@ public sealed class WorkspaceRepositoryStateWriter(
 
         // An empty list from a probed scan is meaningful: the branch now checked out genuinely has no
         // projects, so the previous branch's projects (and, by cascade, their dependency edges) go away.
-        await workspaceProjectRepository.MergeWorkspaceProjectsAsync(workspaceId, repositoryId, projects, cancellationToken);
+        await workspaceProjectRepository.MergeWorkspaceProjectsAsync(
+            workspaceId, repositoryId, projects, contextId.Value, cancellationToken);
 
-        wr.Projects = projects.Count;
-        wr.RepositoryType = ComputeRepositoryType(projects);
+        state.Projects = projects.Count;
+        state.RepositoryType = ComputeRepositoryType(projects);
+        if (isSpecialWorkspace)
+        {
+            wr.Projects = state.Projects;
+            wr.RepositoryType = state.RepositoryType;
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
 
         await workspaceProjectRepository.MergeWorkspaceProjectDependenciesAsync(
             workspaceId,
             [(repositoryId, (IReadOnlyList<SyncProjectInfo>?)projects)],
+            contextId.Value,
             persistDependencyLevel: false,
             cancellationToken);
     }
 
     private async Task ReconcilePullRequestAsync(
+        WorkspaceFeatureContextId contextId,
         int workspaceId,
         int repositoryId,
         WorkspaceRepositoryLink wr,
+        WorkspaceRepositoryContextState state,
         string? previousBranch,
         CancellationToken cancellationToken)
     {
-        // The cache is keyed by (repo, branch); leaving the old branch's entry behind would let a later
-        // checkout back onto it serve a PR state captured before the branch was merged or closed.
-        var branchChanged = !string.Equals(previousBranch, wr.BranchName, StringComparison.Ordinal);
+        // Prefer context checkout branch for PR reconciliation; mirror onto the link for special Workspace.
+        wr.BranchName = state.BranchName;
+
+        var branchChanged = !string.Equals(previousBranch, state.BranchName, StringComparison.Ordinal);
         if (branchChanged)
             pullRequestService.EvictCacheForRepository(repositoryId);
 
-        var branch = wr.BranchName;
+        var branch = state.BranchName;
         var isOnDefault = !Blank(branch) && !Blank(wr.DefaultBranchName)
             && string.Equals(branch, wr.DefaultBranchName, StringComparison.OrdinalIgnoreCase);
 
         if (Blank(branch) || isOnDefault)
         {
-            // No branch, or the default branch - GitHub cannot have a pull request from a branch to
-            // itself, so clear the row directly instead of making a call that could fail and leave the
-            // previous branch's merged badge on screen.
             await pullRequestService.ClearPullRequestAsync(workspaceId, repositoryId, cancellationToken);
+            await ClearContextPullRequestAsync(contextId, wr.WorkspaceRepositoryId, cancellationToken);
             return;
         }
 
-        // Only force a fresh GitHub call when the branch actually changed (cache was just evicted for it).
-        // Otherwise every hook sync (e.g. a plain commit on the same branch) would bypass the 60s cache and
-        // hit the API even though the PR state for this branch could not have changed.
         await pullRequestService.RefreshPullRequestsAsync(workspaceId, [repositoryId], force: branchChanged, cancellationToken);
+        await MirrorPullRequestToContextAsync(contextId, wr.WorkspaceRepositoryId, cancellationToken);
+    }
+
+    private async Task ClearContextPullRequestAsync(
+        WorkspaceFeatureContextId contextId,
+        int workspaceRepositoryId,
+        CancellationToken cancellationToken)
+    {
+        var row = await dbContext.WorkspaceRepositoryContextPullRequests
+            .FirstOrDefaultAsync(
+                pr => pr.WorkspaceFeatureContextId == contextId.Value && pr.WorkspaceRepositoryId == workspaceRepositoryId,
+                cancellationToken);
+        if (row is not null)
+        {
+            dbContext.WorkspaceRepositoryContextPullRequests.Remove(row);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    private async Task MirrorPullRequestToContextAsync(
+        WorkspaceFeatureContextId contextId,
+        int workspaceRepositoryId,
+        CancellationToken cancellationToken)
+    {
+        var legacy = await dbContext.WorkspaceRepositoryPullRequests
+            .AsNoTracking()
+            .FirstOrDefaultAsync(pr => pr.WorkspaceRepositoryId == workspaceRepositoryId, cancellationToken);
+
+        var row = await dbContext.WorkspaceRepositoryContextPullRequests
+            .FirstOrDefaultAsync(
+                pr => pr.WorkspaceFeatureContextId == contextId.Value && pr.WorkspaceRepositoryId == workspaceRepositoryId,
+                cancellationToken);
+
+        if (legacy is null)
+        {
+            if (row is not null)
+            {
+                dbContext.WorkspaceRepositoryContextPullRequests.Remove(row);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            return;
+        }
+
+        if (row is null)
+        {
+            row = new WorkspaceRepositoryContextPullRequest
+            {
+                WorkspaceFeatureContextId = contextId.Value,
+                WorkspaceRepositoryId = workspaceRepositoryId
+            };
+            dbContext.WorkspaceRepositoryContextPullRequests.Add(row);
+        }
+
+        row.PullRequestNumber = legacy.PullRequestNumber;
+        row.State = legacy.State;
+        row.Mergeable = legacy.Mergeable;
+        row.MergeableState = legacy.MergeableState;
+        row.HtmlUrl = legacy.HtmlUrl;
+        row.MergedAt = legacy.MergedAt;
+        row.ChangedFiles = legacy.ChangedFiles;
+        row.LastCheckedAt = legacy.LastCheckedAt;
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>Dominant project type for the repository: Service &gt; Package &gt; Executable &gt; Library &gt; Test.</summary>

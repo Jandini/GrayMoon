@@ -3,6 +3,8 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.GitChanges;
+using GrayMoon.App.Services.Features;
+using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -18,6 +20,11 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     /// <summary>Prefills the filter from `?q=` (e.g. the Workflow Repositories changed-files badge links here with `repo:Name`).</summary>
     [SupplyParameterFromQuery(Name = "q")]
     public string? IncomingFilterQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "context")]
+    public int? ContextQuery { get; set; }
+
+    private WorkspaceFeatureContextId? _selectedContextId;
 
     [Inject] private IWorkspaceGitChangesReadService ReadService { get; set; } = default!;
     [Inject] private IWorkspaceGitChangesOperations GitChangesOperations { get; set; } = default!;
@@ -35,6 +42,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Inject] private WorkspaceGitChangesPushAfterCommitMemory PushAfterCommitMemory { get; set; } = default!;
     [Inject] private IScopedServiceExecutor ScopedExecutor { get; set; } = default!;
     [Inject] private IJSRuntime Js { get; set; } = default!;
+    [Inject] private WorkspaceContextNavigationService ContextNavigation { get; set; } = default!;
 
     private Workspace? _workspace;
     private WorkspaceGitChangesView? _view;
@@ -69,8 +77,7 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         ApplyIncomingFilterQuery();
         EnsureActivitySubscription();
         RestoreWorkspaceCommitMessage();
-        StartInitialLoadJob();
-        return Task.CompletedTask;
+        return ResolveContextAndStartLoadAsync();
     }
 
     /// <summary>Idempotently applies `?q=` to the filter box. Guarding on `_appliedFilterQuery` keeps this
@@ -151,7 +158,10 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
             {
                 _workspace = await db.Workspaces.AsNoTracking().FirstOrDefaultAsync(w => w.WorkspaceId == WorkspaceId);
             }
-            _view = await ReadService.GetWorkspaceAsync(WorkspaceId, CancellationToken.None);
+            if (_selectedContextId is WorkspaceFeatureContextId ctxId)
+                _view = await ReadService.GetContextAsync(WorkspaceId, ctxId, CancellationToken.None);
+            else
+                _view = await ReadService.GetWorkspaceAsync(WorkspaceId, CancellationToken.None);
             RebuildRows();
             await ClearSelectionIfStaleAsync();
         }
@@ -711,5 +721,18 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         {
             await _hubConnection.DisposeAsync();
         }
+    }
+    private async Task ResolveContextAndStartLoadAsync()
+    {
+        var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
+        _selectedContextId = info.ContextId;
+        StartInitialLoadJob();
+    }
+
+    private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
+    {
+        _selectedContextId = contextId;
+        StartInitialLoadJob();
+        await InvokeAsync(StateHasChanged);
     }
 }

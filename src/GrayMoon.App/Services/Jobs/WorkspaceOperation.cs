@@ -1,10 +1,12 @@
+using GrayMoon.Application.Features;
+
 namespace GrayMoon.App.Services.Jobs;
 
 /// <summary>
 /// One in-flight workspace mutation owned by <see cref="WorkspaceOperationRunner"/>.
 /// Circuit job handles attach to this instance for overlay, progress, and abort.
 /// </summary>
-public sealed class WorkspaceOperation
+public sealed class WorkspaceOperation : IWorkspaceLockedOperation
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly TaskCompletionSource _completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -14,6 +16,8 @@ public sealed class WorkspaceOperation
 
     public Guid Id { get; } = Guid.NewGuid();
     public int WorkspaceId { get; }
+    public WorkspaceFeatureContextId? ContextId { get; }
+    public bool IsStructural { get; }
     public string OperationKind { get; }
     public string OverlayKey { get; }
     public JobTerminalBuffer Terminal { get; } = new();
@@ -34,12 +38,20 @@ public sealed class WorkspaceOperation
 
     public event Action? Changed;
 
-    internal WorkspaceOperation(int workspaceId, string operationKind, string overlayKey, string displayMessage)
+    internal WorkspaceOperation(
+        int workspaceId,
+        string operationKind,
+        string overlayKey,
+        string displayMessage,
+        WorkspaceFeatureContextId? contextId = null,
+        bool isStructural = true)
     {
         WorkspaceId = workspaceId;
         OperationKind = operationKind;
         OverlayKey = overlayKey;
         _displayMessage = displayMessage;
+        ContextId = contextId;
+        IsStructural = isStructural;
     }
 
     public void ReportProgress(string message)

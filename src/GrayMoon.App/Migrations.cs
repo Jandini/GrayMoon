@@ -11,7 +11,7 @@ namespace GrayMoon.App;
 /// checks) to bring existing installed databases up to date - see CLAUDE.md "Database schema" for the pattern.
 /// This class otherwise only runs one-time data seeding.
 /// </summary>
-public static class Migrations
+public static partial class Migrations
 {
     public static async Task RunAllAsync(AppDbContext dbContext)
     {
@@ -21,6 +21,7 @@ public static class Migrations
         await MigrateDropGitHubApiUsageHourlyAsync(dbContext);
         await MigrateWorkspacesExcludeAiWorkflowsAsync(dbContext);
         await MigrateWorkspaceGitRepositoryStatusLineStatsAsync(dbContext);
+        await MigrateWorkspaceFeatureContextSchemaAsync(dbContext);
     }
 
     /// <summary>

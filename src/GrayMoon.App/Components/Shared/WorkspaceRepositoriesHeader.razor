@@ -1,4 +1,6 @@
 @using Microsoft.AspNetCore.Components.Web
+@using GrayMoon.App.Components.Features
+@using GrayMoon.Application.Features
 
 <div class="workspace-repos-header">
     <div class="workspace-repos-title-row">
@@ -35,6 +37,14 @@
         }
     </div>
     <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
+        @if (WorkspaceId > 0)
+        {
+            <WorkspaceFeatureSelector WorkspaceId="WorkspaceId"
+                                     SelectedContextId="SelectedContextId"
+                                     SelectedContextIdChanged="OnSelectedContextChanged"
+                                     OnRequestCreateFeature="OnRequestCreateFeature"
+                                     Disabled="@(IsSyncing || IsUpdating || IsPushing)" />
+        }
         <div class="workspace-grid-search-wrapper">
             <FilterSearchInput Value="@(SearchTerm ?? string.Empty)"
                                ValueChanged="OnSearchValueChangedAsync"
@@ -65,32 +75,35 @@
                 <div class="branch-menu-backdrop" @onclick="CloseBranchMenu"></div>
                 <ul class="dropdown-menu show shadow branch-menu-list workspace-repository-actions-menu"
                     role="menu">
-                    <li>
-                        <button class="dropdown-item" type="button"
-                                role="menuitem"
-                                @onclick="HandlePrepareWorkspaceClick"
-                                disabled="@BranchActionsDisabled">
-                            Prepare Workspace
-                        </button>
-                    </li>
-                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
-                    <li>
-                        <button class="dropdown-item" type="button"
-                                role="menuitem"
-                                @onclick="HandleNewBranchClick"
-                                disabled="@BranchActionsDisabled">
-                            New Branch
-                        </button>
-                    </li>
-                    <li>
-                        <button class="dropdown-item" type="button"
-                                role="menuitem"
-                                @onclick="HandleSwitchBranchClick"
-                                disabled="@BranchActionsDisabled">
-                            Switch Branch
-                        </button>
-                    </li>
-                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                    @if (!IsFeatureContext)
+                    {
+                        <li>
+                            <button class="dropdown-item" type="button"
+                                    role="menuitem"
+                                    @onclick="HandlePrepareWorkspaceClick"
+                                    disabled="@BranchActionsDisabled">
+                                Prepare Workspace
+                            </button>
+                        </li>
+                        <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                        <li>
+                            <button class="dropdown-item" type="button"
+                                    role="menuitem"
+                                    @onclick="HandleNewBranchClick"
+                                    disabled="@BranchActionsDisabled">
+                                New Branch
+                            </button>
+                        </li>
+                        <li>
+                            <button class="dropdown-item" type="button"
+                                    role="menuitem"
+                                    @onclick="HandleSwitchBranchClick"
+                                    disabled="@BranchActionsDisabled">
+                                Switch Branch
+                            </button>
+                        </li>
+                        <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                    }
                     <li>
                         <button class="dropdown-item" type="button"
                                 role="menuitem"
@@ -99,15 +112,30 @@
                             Create PR
                         </button>
                     </li>
-                    <li><hr class="dropdown-divider branch-menu-divider" /></li>
-                    <li>
-                        <button class="dropdown-item" type="button"
-                                role="menuitem"
-                                @onclick="HandleReturnToDefaultClick"
-                                disabled="@BranchActionsDisabled">
-                            Return to Default
-                        </button>
-                    </li>
+                    @if (!IsFeatureContext)
+                    {
+                        <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                        <li>
+                            <button class="dropdown-item" type="button"
+                                    role="menuitem"
+                                    @onclick="HandleReturnToDefaultClick"
+                                    disabled="@BranchActionsDisabled">
+                                Return to Default
+                            </button>
+                        </li>
+                    }
+                    @if (IsFeatureContext)
+                    {
+                        <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                        <li>
+                            <button class="dropdown-item" type="button"
+                                    role="menuitem"
+                                    @onclick="HandleRemoveFeatureClick"
+                                    disabled="@BranchActionsDisabled">
+                                Remove Feature
+                            </button>
+                        </li>
+                    }
                 </ul>
             }
         </div>
@@ -356,6 +384,12 @@
 
 @code {
     [Parameter] public string? WorkspaceName { get; set; }
+    [Parameter] public int WorkspaceId { get; set; }
+    [Parameter] public WorkspaceFeatureContextId? SelectedContextId { get; set; }
+    [Parameter] public bool IsFeatureContext { get; set; }
+    [Parameter] public EventCallback<WorkspaceFeatureContextId> OnSelectedContextChanged { get; set; }
+    [Parameter] public EventCallback<string> OnRequestCreateFeature { get; set; }
+    [Parameter] public EventCallback OnRemoveFeature { get; set; }
     [Parameter] public int RepositoriesCount { get; set; }
     [Parameter] public bool HasFilter { get; set; }
     [Parameter] public int FilteredCount { get; set; }
@@ -562,6 +596,12 @@
     {
         CloseBranchMenu();
         await OnReturnToDefault.InvokeAsync();
+    }
+
+    private async Task HandleRemoveFeatureClick()
+    {
+        CloseBranchMenu();
+        await OnRemoveFeature.InvokeAsync();
     }
 
     private async Task OnSearchValueChangedAsync(string value)

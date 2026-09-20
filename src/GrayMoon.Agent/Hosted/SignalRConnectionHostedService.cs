@@ -37,7 +37,7 @@ public sealed class SignalRConnectionHostedService(
 {
     /// <summary>Commands that only read repository state (never touch the index or working tree) and can
     /// run on the dedicated read pool instead of queuing behind long-running writes.</summary>
-    private static readonly HashSet<string> ReadOnlyCommands = ["GetGitChangeStatus"];
+    private static readonly HashSet<string> ReadOnlyCommands = ["GetGitChangeStatus", AgentHubMethods.ListGitWorktrees];
 
     /// <summary>Diff commands get their own dedicated pool, separate from <see cref="ReadOnlyCommands"/>,
     /// so opening a diff never queues behind a workspace status rescan (which can fan out many

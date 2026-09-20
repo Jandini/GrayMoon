@@ -56,14 +56,14 @@ public sealed partial class WorkspaceGitService
         var completedCount = 0;
         var totalCount = repos.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
 
         var syncResults = await Task.WhenAll(repos.Select(async repo =>
         {
             await semaphore.WaitAsync(cancellationToken);
             try
             {
-                var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot, maxParallelOperations = _maxConcurrent };
+                var args = new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot, maxParallelOperations = _maxConcurrent };
                 var response = await _agentBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
                 if (!response.Success)
                 {
@@ -130,8 +130,8 @@ public sealed partial class WorkspaceGitService
         if (!string.IsNullOrWhiteSpace(linkForWorkspace?.CheckedOutTag))
             return false;
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
-        var args = new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot, maxParallelOperations = _maxConcurrent };
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
+        var args = new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot, maxParallelOperations = _maxConcurrent };
         var response = await _agentBridge.SendCommandAsync("RefreshRepositoryProjects", args, cancellationToken);
         if (!response.Success)
         {
@@ -248,7 +248,7 @@ public sealed partial class WorkspaceGitService
         var totalCount = toSync.Count;
         var failedRepoIds = new ConcurrentDictionary<int, bool>();
         var syncedRepoIds = new ConcurrentDictionary<int, bool>();
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
 
         var repoTasks = toSync.Select(async repo =>
         {
@@ -264,7 +264,7 @@ public sealed partial class WorkspaceGitService
 
             var args = new
             {
-                workspaceName = workspace.Name,
+                workspaceName = workspaceFolderName,
                 repositoryName = repo.RepoName,
                 projectUpdates,
                 workspaceRoot

@@ -1,6 +1,7 @@
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Common.Git;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Services.Application;
 
@@ -8,7 +9,9 @@ public sealed class WorkspaceGitChangesOperations(
     IWorkspaceGitChangesReadService readService,
     IGitChangesAgentClient agentClient,
     WorkspaceRepository workspaceRepository,
-    WorkspaceService workspaceService) : IWorkspaceGitChangesOperations
+    WorkspaceService workspaceService,
+    IWorkspaceFeatureContextResolver contextResolver,
+    IWorkspaceContextPathResolver pathResolver) : IWorkspaceGitChangesOperations
 {
     public async Task<WorkspaceGitChangesView?> GetAsync(int workspaceId, CancellationToken cancellationToken)
     {
@@ -62,11 +65,12 @@ public sealed class WorkspaceGitChangesOperations(
         if (string.IsNullOrWhiteSpace(repoName))
             return Fail<T>("Repository is not in the given workspace.");
 
-        var root = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var special = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        var (root, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(special, cancellationToken);
         if (string.IsNullOrWhiteSpace(root))
             return Fail<T>("Workspace root is not configured.");
 
-        return await action(root, workspace.Name, repoName);
+        return await action(root, workspaceFolderName, repoName);
     }
 
     private static T Fail<T>(string error) where T : new()

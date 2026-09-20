@@ -41,7 +41,7 @@ public sealed partial class WorkspaceGitService
             return reposToCommit.Select(r => (r.RepoId, false, (string?)"Workspace not found.")).ToList();
 
         var total = reposToCommit.Count;
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
         var completed = 0;
         var semaphore = new SemaphoreSlim(_maxConcurrent);
 
@@ -81,7 +81,7 @@ public sealed partial class WorkspaceGitService
 
                 var args = new
                 {
-                    workspaceName = workspace.Name,
+                    workspaceName = workspaceFolderName,
                     repositoryName = repo.RepoName,
                     commitMessage,
                     pathsToStage,
@@ -135,7 +135,7 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             return reposAndPaths.Select(r => (r.RepoId, false, (string?)"Workspace not found.")).ToList();
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
         var total = reposAndPaths.Count;
         var completed = 0;
         var semaphore = new SemaphoreSlim(_maxConcurrent);
@@ -157,7 +157,7 @@ public sealed partial class WorkspaceGitService
                     : commitMessageOverride.Trim();
                 var args = new
                 {
-                    workspaceName = workspace.Name,
+                    workspaceName = workspaceFolderName,
                     repositoryName = repo.RepoName,
                     commitMessage,
                     pathsToStage,

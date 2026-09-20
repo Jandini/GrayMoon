@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using GrayMoon.Agent.Abstractions;
 using GrayMoon.Agent.Models;
 using GrayMoon.Agent.Services.GitChanges;
+using GrayMoon.Common.Git;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -1158,24 +1159,222 @@ public sealed class GitService(IOptions<AgentOptions> options, ILogger<GitServic
         var hooksDir = Path.Combine(repoPath, ".git", "hooks");
         Directory.CreateDirectory(hooksDir);
 
-        var jsonPayload = JsonSerializer.Serialize(new { repositoryId, workspaceId, repositoryPath = repoPath });
-        var escapedPayload = jsonPayload.Replace("'", "'\\''");
-        var header = "-H \"Content-Type: application/json\"";
-        var curlFlags = "-s --connect-timeout 1 --max-time 2";
-        var commitCurl = $"curl {curlFlags} -X POST \"http://127.0.0.1:{_listenPort}/hook/commit\"   {header} -d '{escapedPayload}' || true";
-        var checkoutCurl = $"curl {curlFlags} -X POST \"http://127.0.0.1:{_listenPort}/hook/checkout\" {header} -d '{escapedPayload}' || true";
-        var mergeCurl = $"curl {curlFlags} -X POST \"http://127.0.0.1:{_listenPort}/hook/merge\"    {header} -d '{escapedPayload}' || true";
-        var pushCurl = $"curl {curlFlags} -X POST \"http://127.0.0.1:{_listenPort}/hook/push\"     {header} -d '{escapedPayload}' || true";
-
+        // Context-agnostic hooks: resolve the executing worktree root at runtime so linked
+        // Feature worktrees attribute correctly. Do not embed a static Feature context id.
         var utf8 = new UTF8Encoding(false);
         var comment = $"# Created by GrayMoon.Agent at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}Z\n";
+        var resolveBody =
+            "REPO_PATH=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0\n" +
+            "REPO_JSON=$(printf '%s' \"$REPO_PATH\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g')\n" +
+            $"PAYLOAD=\"{{\\\"repositoryId\\\":{repositoryId},\\\"workspaceId\\\":{workspaceId},\\\"repositoryPath\\\":\\\"$REPO_JSON\\\"}}\"\n";
+        var header = "-H \"Content-Type: application/json\"";
+        var curlFlags = "-s --connect-timeout 1 --max-time 2";
 
-        WriteHookFile(Path.Combine(hooksDir, "post-commit"), "#!/bin/sh\n" + comment + commitCurl + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "post-checkout"), "#!/bin/sh\n" + comment + "[ \"$3\" = \"1\" ] && " + checkoutCurl.TrimEnd() + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "post-merge"), "#!/bin/sh\n" + comment + mergeCurl + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "post-update"), "#!/bin/sh\n" + comment + commitCurl + "\n", utf8);
-        WriteHookFile(Path.Combine(hooksDir, "pre-push"), "#!/bin/sh\n" + comment + pushCurl + "\n", utf8);
+        string Curl(string hookPath) =>
+            $"curl {curlFlags} -X POST \"http://127.0.0.1:{_listenPort}/hook/{hookPath}\" {header} -d \"$PAYLOAD\" || true";
+
+        WriteHookFile(Path.Combine(hooksDir, "post-commit"),
+            "#!/bin/sh\n" + comment + resolveBody + Curl("commit") + "\n", utf8);
+        WriteHookFile(Path.Combine(hooksDir, "post-checkout"),
+            "#!/bin/sh\n" + comment + "[ \"$3\" = \"1\" ] || exit 0\n" + resolveBody + Curl("checkout") + "\n", utf8);
+        WriteHookFile(Path.Combine(hooksDir, "post-merge"),
+            "#!/bin/sh\n" + comment + resolveBody + Curl("merge") + "\n", utf8);
+        WriteHookFile(Path.Combine(hooksDir, "post-update"),
+            "#!/bin/sh\n" + comment + resolveBody + Curl("commit") + "\n", utf8);
+        WriteHookFile(Path.Combine(hooksDir, "pre-push"),
+            "#!/bin/sh\n" + comment + resolveBody + Curl("push") + "\n", utf8);
         logger.LogDebug("Sync hooks written for repo {RepoId} in workspace {WorkspaceId}", repositoryId, workspaceId);
+    }
+
+    public async Task<(bool Success, IReadOnlyList<GitWorktreeInfo> Worktrees, string? ErrorCode, string? ErrorMessage)> ListWorktreesAsync(
+        string mainRepositoryPath,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(mainRepositoryPath) || !Directory.Exists(mainRepositoryPath))
+            return (false, [], "RepositoryNotFound", "Repository not found.");
+
+        var (exitCode, stdout, stderr) = await runner.RunAsync(
+            "git",
+            ["worktree", "list", "--porcelain"],
+            mainRepositoryPath,
+            null,
+            ct,
+            GitLockIntent.Read);
+
+        if (exitCode != 0)
+        {
+            var error = CombineOutput(stdout, stderr) ?? "git worktree list failed";
+            logger.LogError("Git worktree list failed for {RepoPath}. ExitCode={ExitCode}", mainRepositoryPath, exitCode);
+            return (false, [], "GitFailed", error);
+        }
+
+        return (true, GitWorktreePorcelainParser.Parse(stdout), null, null);
+    }
+
+    public async Task<(bool Success, GitWorktreeInfo? Worktree, bool AlreadyExisted, string? ErrorCode, string? ErrorMessage)> CreateWorktreeAsync(
+        string mainRepositoryPath,
+        string worktreePath,
+        string branchName,
+        string baseCommitSha,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(mainRepositoryPath) || !Directory.Exists(mainRepositoryPath))
+            return (false, null, false, "RepositoryNotFound", "Repository not found.");
+        if (string.IsNullOrWhiteSpace(worktreePath))
+            return (false, null, false, "InvalidWorktreePath", "worktreePath is required.");
+        if (string.IsNullOrWhiteSpace(branchName))
+            return (false, null, false, "InvalidBranchName", "branchName is required.");
+        if (string.IsNullOrWhiteSpace(baseCommitSha))
+            return (false, null, false, "InvalidBaseCommit", "baseCommitSha is required.");
+
+        string canonicalWorktreePath;
+        try
+        {
+            canonicalWorktreePath = Path.GetFullPath(worktreePath);
+        }
+        catch (Exception ex)
+        {
+            return (false, null, false, "InvalidWorktreePath", ex.Message);
+        }
+
+        var (listOk, worktrees, listCode, listError) = await ListWorktreesAsync(mainRepositoryPath, ct);
+        if (!listOk)
+            return (false, null, false, listCode, listError);
+
+        var existingAtPath = GitWorktreeOccupancy.FindByPath(worktrees, canonicalWorktreePath);
+        if (existingAtPath != null)
+        {
+            if (GitWorktreeOccupancy.MatchesExpected(existingAtPath, branchName))
+            {
+                logger.LogInformation(
+                    "Worktree already exists at {WorktreePath} on branch {Branch}; treating create as idempotent success.",
+                    canonicalWorktreePath, branchName);
+                return (true, existingAtPath, true, null, null);
+            }
+
+            return (false, existingAtPath, false, "WorktreePathConflict",
+                $"Path already hosts a worktree on branch '{existingAtPath.BranchName ?? "(detached)"}'.");
+        }
+
+        var branchOccupied = GitWorktreeOccupancy.FindByBranch(worktrees, branchName);
+        if (branchOccupied != null)
+        {
+            return (false, branchOccupied, false, "BranchOccupied",
+                $"Branch '{branchName}' is already checked out at '{branchOccupied.WorktreePath}'.");
+        }
+
+        if (Directory.Exists(canonicalWorktreePath) || File.Exists(canonicalWorktreePath))
+        {
+            return (false, null, false, "PathExists",
+                $"Worktree path already exists on disk: {canonicalWorktreePath}");
+        }
+
+        var parent = Path.GetDirectoryName(canonicalWorktreePath);
+        if (!string.IsNullOrWhiteSpace(parent) && !Directory.Exists(parent))
+        {
+            Directory.CreateDirectory(parent);
+            logger.LogInformation("Created worktree parent directory: {Path}", parent);
+        }
+
+        // Offline-safe: start from local commit SHA; never --force for normal creation.
+        var (exitCode, stdout, stderr) = await runner.RunAsync(
+            "git",
+            ["worktree", "add", "-b", branchName, canonicalWorktreePath, baseCommitSha],
+            mainRepositoryPath,
+            null,
+            ct);
+
+        if (exitCode != 0)
+        {
+            var error = CombineOutput(stdout, stderr) ?? "git worktree add failed";
+            logger.LogError(
+                "Git worktree add failed for {RepoPath}. Branch={Branch}, Path={WorktreePath}, ExitCode={ExitCode}",
+                mainRepositoryPath, branchName, canonicalWorktreePath, exitCode);
+            return (false, null, false, "GitFailed", error);
+        }
+
+        var (verifyOk, after, verifyCode, verifyError) = await ListWorktreesAsync(mainRepositoryPath, ct);
+        if (!verifyOk)
+            return (false, null, false, verifyCode, verifyError);
+
+        var created = GitWorktreeOccupancy.FindByPath(after, canonicalWorktreePath)
+            ?? GitWorktreeOccupancy.FindByBranch(after, branchName);
+        if (created == null)
+        {
+            return (false, null, false, "VerifyFailed",
+                "Worktree was created but could not be found in git worktree list.");
+        }
+
+        logger.LogInformation(
+            "Git worktree created for {RepoPath}. Branch={Branch}, Path={WorktreePath}, Head={Head}",
+            mainRepositoryPath, created.BranchName, created.WorktreePath, created.HeadSha);
+        return (true, created, false, null, null);
+    }
+
+    public async Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage)> RemoveWorktreeAsync(
+        string mainRepositoryPath,
+        string worktreePath,
+        bool force,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(mainRepositoryPath) || !Directory.Exists(mainRepositoryPath))
+            return (false, false, "RepositoryNotFound", "Repository not found.");
+        if (string.IsNullOrWhiteSpace(worktreePath))
+            return (false, false, "InvalidWorktreePath", "worktreePath is required.");
+
+        string canonicalWorktreePath;
+        try
+        {
+            canonicalWorktreePath = Path.GetFullPath(worktreePath);
+        }
+        catch (Exception ex)
+        {
+            return (false, false, "InvalidWorktreePath", ex.Message);
+        }
+
+        var (listOk, worktrees, listCode, listError) = await ListWorktreesAsync(mainRepositoryPath, ct);
+        if (!listOk)
+            return (false, false, listCode, listError);
+
+        var existing = GitWorktreeOccupancy.FindByPath(worktrees, canonicalWorktreePath);
+        if (existing == null)
+        {
+            logger.LogInformation("Worktree {WorktreePath} already absent from inventory; treating remove as success.", canonicalWorktreePath);
+            return (true, true, null, null);
+        }
+
+        // Never remove the main (first / primary) worktree via this primitive.
+        var primary = worktrees.FirstOrDefault(w => !w.IsBare && !string.IsNullOrWhiteSpace(w.WorktreePath));
+        if (primary != null && GitWorktreeOccupancy.PathsEqual(primary.WorktreePath, canonicalWorktreePath))
+        {
+            return (false, false, "CannotRemovePrimary", "Cannot remove the primary repository worktree.");
+        }
+
+        var args = force
+            ? new[] { "worktree", "remove", "--force", canonicalWorktreePath }
+            : new[] { "worktree", "remove", canonicalWorktreePath };
+
+        var (exitCode, stdout, stderr) = await runner.RunAsync("git", args, mainRepositoryPath, null, ct);
+        if (exitCode != 0)
+        {
+            var error = CombineOutput(stdout, stderr) ?? "git worktree remove failed";
+            logger.LogError(
+                "Git worktree remove failed for {RepoPath}. Path={WorktreePath}, Force={Force}, ExitCode={ExitCode}",
+                mainRepositoryPath, canonicalWorktreePath, force, exitCode);
+            return (false, false, "GitFailed", error);
+        }
+
+        var (verifyOk, after, verifyCode, verifyError) = await ListWorktreesAsync(mainRepositoryPath, ct);
+        if (!verifyOk)
+            return (false, false, verifyCode, verifyError);
+
+        if (GitWorktreeOccupancy.FindByPath(after, canonicalWorktreePath) != null)
+        {
+            return (false, false, "VerifyFailed", "Worktree remove reported success but path is still listed.");
+        }
+
+        logger.LogInformation("Git worktree removed for {RepoPath}. Path={WorktreePath}, Force={Force}", mainRepositoryPath, canonicalWorktreePath, force);
+        return (true, false, null, null);
     }
 
     private static void WriteHookFile(string path, string content, Encoding encoding)

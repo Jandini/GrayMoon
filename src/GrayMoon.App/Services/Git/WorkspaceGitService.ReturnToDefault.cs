@@ -27,7 +27,7 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             return Array.Empty<(int, int?, bool?)>();
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
         var maxParallel = _maxConcurrent;
 
         using var semaphore = new SemaphoreSlim(maxParallel, maxParallel);
@@ -41,7 +41,7 @@ public sealed partial class WorkspaceGitService
                 {
                     var response = await _agentBridge.SendCommandAsync("GetCommitCounts", new
                     {
-                        workspaceName = workspace.Name,
+                        workspaceName = workspaceFolderName,
                         repositoryName = repoName,
                         workspaceRoot
                     }, cancellationToken);
@@ -111,10 +111,10 @@ public sealed partial class WorkspaceGitService
         // A merged or closed pull request stays an independent reason the branch is safe to drop.
         var forceDeleteLocalBranch = allowForceDeleteLocalBranch || prInfo?.IsMerged == true || prInfo?.IsClosed == true;
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
         var args = new
         {
-            workspaceName = workspace.Name,
+            workspaceName = workspaceFolderName,
             repositoryName = repo.RepositoryName,
             currentBranchName,
             bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),

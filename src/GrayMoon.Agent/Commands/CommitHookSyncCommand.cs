@@ -70,6 +70,7 @@ public sealed class CommitHookSyncCommand(IGitService git, ICsProjFileService cs
             {
                 WorkspaceId = payload.WorkspaceId,
                 RepositoryId = payload.RepositoryId,
+                RepositoryPath = payload.RepositoryPath,
                 Version = version,
                 Branch = branch,
                 Tag = currentTag,

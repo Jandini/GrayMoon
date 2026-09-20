@@ -5,6 +5,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
+using GrayMoon.Application.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
@@ -22,6 +23,8 @@ public sealed class WorkspaceBranchOperations(
     IHubContext<WorkspaceSyncHub> hubContext,
     ConnectorHealthService connectorHealthService,
     WorkspaceBranchUpdateHandler updateHandler,
+    IWorkspaceFeatureContextResolver contextResolver,
+    IWorkspaceContextPathResolver pathResolver,
     ILogger<WorkspaceBranchOperations> logger) : IWorkspaceBranchOperations
 {
     public async Task<BranchHttpOutcome> GetBranchesAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
@@ -107,10 +110,11 @@ public sealed class WorkspaceBranchOperations(
 
         try
         {
-            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+            var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
             var args = new
             {
-                workspaceName = workspace.Name,
+                workspaceName = workspaceFolderName,
                 repositoryId = repo.RepositoryId,
                 repositoryName = repo.RepositoryName,
                 workspaceRoot
@@ -181,13 +185,14 @@ public sealed class WorkspaceBranchOperations(
 
         try
         {
-            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+            var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
 
             if (isTag)
             {
                 var tagArgs = new
                 {
-                    workspaceName = workspace.Name,
+                    workspaceName = workspaceFolderName,
                     repositoryId = repo.RepositoryId,
                     repositoryName = repo.RepositoryName,
                     tagName = branchName,
@@ -214,7 +219,7 @@ public sealed class WorkspaceBranchOperations(
 
             var args = new
             {
-                workspaceName = workspace.Name,
+                workspaceName = workspaceFolderName,
                 repositoryId = repo.RepositoryId,
                 repositoryName = repo.RepositoryName,
                 branchName,
@@ -443,10 +448,11 @@ public sealed class WorkspaceBranchOperations(
                 baseBranchName = baseBranch;
             }
 
-            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+            var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
             var args = new
             {
-                workspaceName = workspace.Name,
+                workspaceName = workspaceFolderName,
                 repositoryName = repo.RepositoryName,
                 newBranchName,
                 baseBranchName,
@@ -507,10 +513,11 @@ public sealed class WorkspaceBranchOperations(
 
         try
         {
-            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+            var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
             var args = new
             {
-                workspaceName = workspace.Name,
+                workspaceName = workspaceFolderName,
                 repositoryName = repo.RepositoryName,
                 branchName,
                 workspaceRoot,
@@ -584,10 +591,11 @@ public sealed class WorkspaceBranchOperations(
 
         try
         {
-            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+            var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
             var args = new
             {
-                workspaceName = workspace.Name,
+                workspaceName = workspaceFolderName,
                 repositoryName = repo.RepositoryName,
                 branchName,
                 isRemote,

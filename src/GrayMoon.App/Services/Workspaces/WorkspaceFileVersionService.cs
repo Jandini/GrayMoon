@@ -6,6 +6,8 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.Features;
+using GrayMoon.Application.Features;
 using GrayMoon.Common.FileVersions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -20,23 +22,26 @@ public sealed class WorkspaceFileVersionService(
     WorkspaceFileVersionConfigRepository versionConfigRepository,
     AppDbContext dbContext,
     IHubContext<WorkspaceSyncHub> hubContext,
+    IWorkspaceContextPathResolver pathResolver,
+    IWorkspaceFeatureContextResolver contextResolver,
     ILogger<WorkspaceFileVersionService> logger)
 {
-    private static readonly ConcurrentDictionary<int, object> CheckLocks = new();
-    private static readonly ConcurrentDictionary<int, Task?> InFlightChecks = new();
+    private static readonly ConcurrentDictionary<string, object> CheckLocks = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, Task?> InFlightChecks = new(StringComparer.Ordinal);
+
+    private static string CheckKey(int workspaceId, int contextId) => $"{workspaceId}:{contextId}";
 
     /// <summary>
-    /// Removes the per-workspace check-coalescing gate for <paramref name="workspaceId"/> from <see cref="CheckLocks"/>.
-    /// Call when a workspace is deleted so this static, process-lifetime dictionary does not grow unbounded.
-    /// Safe even if a check is mid-flight: the task already holds its own reference to the (now-unlisted) gate
-    /// object, so an in-progress lock is unaffected; a later caller for the same (deleted) workspace id would only
-    /// mint a fresh gate via <c>GetOrAdd</c>, and <see cref="CheckAndPersistFileVersionStatusCoreAsync"/> already
-    /// no-ops once the workspace is gone. <see cref="InFlightChecks"/> needs no corresponding call - it already
-    /// self-prunes in <see cref="AwaitAndClearInFlightAsync"/>'s <c>finally</c> block.
+    /// Removes coalescing gates for every context of <paramref name="workspaceId"/>.
+    /// Call when a workspace is deleted.
     /// </summary>
     public static void RemoveWorkspaceCheckLock(int workspaceId)
     {
-        CheckLocks.TryRemove(workspaceId, out _);
+        var prefix = $"{workspaceId}:";
+        foreach (var key in CheckLocks.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList())
+            CheckLocks.TryRemove(key, out _);
+        foreach (var key in InFlightChecks.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList())
+            InFlightChecks.TryRemove(key, out _);
     }
 
     /// <summary>
@@ -51,6 +56,19 @@ public sealed class WorkspaceFileVersionService(
     /// </summary>
     public async Task<(int Updated, int Failed, string? Error, IReadOnlyList<(int RepositoryId, string RepoName, string FilePath)> UpdatedFiles)> UpdateAllVersionsAsync(
         int workspaceId,
+        IReadOnlySet<int>? selectedRepositoryIds = null,
+        bool filterPatternTokensToSelectedRepositories = true,
+        Action<string>? onFileUpdated = null,
+        CancellationToken cancellationToken = default)
+    {
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        return await UpdateAllVersionsAsync(
+            workspaceId, contextId, selectedRepositoryIds, filterPatternTokensToSelectedRepositories, onFileUpdated, cancellationToken);
+    }
+
+    public async Task<(int Updated, int Failed, string? Error, IReadOnlyList<(int RepositoryId, string RepoName, string FilePath)> UpdatedFiles)> UpdateAllVersionsAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
         IReadOnlySet<int>? selectedRepositoryIds = null,
         bool filterPatternTokensToSelectedRepositories = true,
         Action<string>? onFileUpdated = null,
@@ -91,8 +109,8 @@ public sealed class WorkspaceFileVersionService(
             patternsForResolve.Add(pattern);
         }
 
-        var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
-        var tokenValues = await ResolveTokenValuesAsync(workspace, workspaceRoot, patternsForResolve, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
+        var tokenValues = await ResolveTokenValuesAsync(workspace, contextId, workspaceRoot, workspaceFolderName, patternsForResolve, cancellationToken);
 
         // Update each configured file
         var totalUpdated = 0;
@@ -122,7 +140,7 @@ public sealed class WorkspaceFileVersionService(
             {
                 var resp = await agentBridge.SendCommandAsync("UpdateFileVersions", new
                 {
-                    workspaceName = workspace.Name,
+                    workspaceName = workspaceFolderName,
                     repositoryName = file.Repository.RepositoryName,
                     filePath = file.FilePath,
                     versionPattern = versionPatternToSend,
@@ -209,7 +227,9 @@ public sealed class WorkspaceFileVersionService(
     /// </summary>
     private async Task<Dictionary<string, string>> ResolveTokenValuesAsync(
         Workspace workspace,
+        WorkspaceFeatureContextId contextId,
         string workspaceRoot,
+        string workspaceFolderName,
         IEnumerable<string?> patterns,
         CancellationToken cancellationToken)
     {
@@ -227,6 +247,16 @@ public sealed class WorkspaceFileVersionService(
             linksByName.TryAdd(link.Repository.RepositoryName, link);
         }
 
+        var contextInfo = await contextResolver.GetRequiredAsync(contextId, workspace.WorkspaceId, cancellationToken);
+        Dictionary<int, WorkspaceRepositoryContextState>? contextStates = null;
+        if (!contextInfo.IsSpecialWorkspace)
+        {
+            contextStates = await dbContext.WorkspaceRepositoryContextStates
+                .AsNoTracking()
+                .Where(s => s.WorkspaceFeatureContextId == contextId.Value)
+                .ToDictionaryAsync(s => s.WorkspaceRepositoryId, cancellationToken);
+        }
+
         var tokenValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var commitRepos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -240,11 +270,20 @@ public sealed class WorkspaceFileVersionService(
                 continue;
             }
 
+            var gitVersion = link.GitVersion;
+            var branchName = link.BranchName;
+            if (contextStates != null
+                && contextStates.TryGetValue(link.WorkspaceRepositoryId, out var state))
+            {
+                gitVersion = state.GitVersion ?? gitVersion;
+                branchName = state.BranchName ?? branchName;
+            }
+
             switch (token.Kind)
             {
                 case FileVersionTokenKind.GitVersion:
-                    if (!string.IsNullOrEmpty(link.GitVersion))
-                        tokenValues[token.TokenKey] = link.GitVersion;
+                    if (!string.IsNullOrEmpty(gitVersion))
+                        tokenValues[token.TokenKey] = gitVersion;
                     else
                         logger.LogWarning(
                             "No GitVersion in workspace for repo {RepoName}; token {TokenKey} will be skipped.",
@@ -252,8 +291,8 @@ public sealed class WorkspaceFileVersionService(
                     break;
 
                 case FileVersionTokenKind.Branch:
-                    if (!string.IsNullOrEmpty(link.BranchName))
-                        tokenValues[token.TokenKey] = link.BranchName;
+                    if (!string.IsNullOrEmpty(branchName))
+                        tokenValues[token.TokenKey] = branchName;
                     else
                         logger.LogWarning(
                             "No branch name in workspace for repo {RepoName} (detached HEAD or unset); token {TokenKey} will be skipped and the existing file value left unchanged.",
@@ -272,7 +311,7 @@ public sealed class WorkspaceFileVersionService(
             {
                 var resp = await agentBridge.SendCommandAsync(AgentHubMethods.GetHeadCommits, new
                 {
-                    workspaceName = workspace.Name,
+                    workspaceName = workspaceFolderName,
                     workspaceRoot,
                     repositoryNames = commitRepos.ToList()
                 }, cancellationToken);
@@ -329,19 +368,30 @@ public sealed class WorkspaceFileVersionService(
     /// </summary>
     public async Task CheckAndPersistFileVersionStatusAsync(int workspaceId, CancellationToken cancellationToken = default, bool forceFresh = false)
     {
-        var gate = CheckLocks.GetOrAdd(workspaceId, _ => new object());
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        await CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken, forceFresh);
+    }
+
+    public async Task CheckAndPersistFileVersionStatusAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken = default,
+        bool forceFresh = false)
+    {
+        var key = CheckKey(workspaceId, contextId.Value);
+        var gate = CheckLocks.GetOrAdd(key, _ => new object());
 
         if (forceFresh)
         {
             Task? inFlight = null;
             lock (gate)
             {
-                if (InFlightChecks.TryGetValue(workspaceId, out var existing) && existing is { IsCompleted: false })
+                if (InFlightChecks.TryGetValue(key, out var existing) && existing is { IsCompleted: false })
                     inFlight = existing;
             }
             if (inFlight != null)
             {
-                logger.LogDebug("CheckAndPersist forceFresh: awaiting prior in-flight check for workspace {WorkspaceId}", workspaceId);
+                logger.LogDebug("CheckAndPersist forceFresh: awaiting prior in-flight check for workspace {WorkspaceId} context {ContextId}", workspaceId, contextId.Value);
                 try
                 {
                     await inFlight.ConfigureAwait(false);
@@ -356,22 +406,22 @@ public sealed class WorkspaceFileVersionService(
         Task checkTask;
         lock (gate)
         {
-            if (!forceFresh && InFlightChecks.TryGetValue(workspaceId, out var existing) && existing is { IsCompleted: false })
+            if (!forceFresh && InFlightChecks.TryGetValue(key, out var existing) && existing is { IsCompleted: false })
             {
-                logger.LogDebug("CheckAndPersist coalesced: joining in-flight check for workspace {WorkspaceId}", workspaceId);
+                logger.LogDebug("CheckAndPersist coalesced: joining in-flight check for workspace {WorkspaceId} context {ContextId}", workspaceId, contextId.Value);
                 checkTask = existing;
             }
             else
             {
-                checkTask = CheckAndPersistFileVersionStatusCoreAsync(workspaceId, cancellationToken);
-                InFlightChecks[workspaceId] = checkTask;
+                checkTask = CheckAndPersistFileVersionStatusCoreAsync(workspaceId, contextId, cancellationToken);
+                InFlightChecks[key] = checkTask;
             }
         }
 
-        await AwaitAndClearInFlightAsync(workspaceId, checkTask, gate).ConfigureAwait(false);
+        await AwaitAndClearInFlightAsync(key, checkTask, gate).ConfigureAwait(false);
     }
 
-    private static async Task AwaitAndClearInFlightAsync(int workspaceId, Task checkTask, object gate)
+    private static async Task AwaitAndClearInFlightAsync(string key, Task checkTask, object gate)
     {
         try
         {
@@ -381,22 +431,27 @@ public sealed class WorkspaceFileVersionService(
         {
             lock (gate)
             {
-                if (InFlightChecks.TryGetValue(workspaceId, out var current) && ReferenceEquals(current, checkTask))
-                    InFlightChecks.TryRemove(workspaceId, out _);
+                if (InFlightChecks.TryGetValue(key, out var current) && ReferenceEquals(current, checkTask))
+                    InFlightChecks.TryRemove(key, out _);
             }
         }
     }
 
-    private async Task CheckAndPersistFileVersionStatusCoreAsync(int workspaceId, CancellationToken cancellationToken)
+    private async Task CheckAndPersistFileVersionStatusCoreAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
-        logger.LogDebug("CheckAndPersist starting for workspace {WorkspaceId}", workspaceId);
+        logger.LogDebug("CheckAndPersist starting for workspace {WorkspaceId} context {ContextId}", workspaceId, contextId.Value);
 
         if (!agentBridge.IsAgentConnected)
             return;
 
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return;
+
+        var contextInfo = await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken);
 
         if (await SyncGeneratedPackageDependenciesAsync(workspaceId, cancellationToken))
             await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
@@ -417,12 +472,12 @@ public sealed class WorkspaceFileVersionService(
             }
         }
 
-        var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(contextId, cancellationToken);
         var patterns = configs
             .Where(c => c.File?.Repository != null)
             .Select(c => c.VersionPattern)
             .ToList();
-        var tokenValues = await ResolveTokenValuesAsync(workspace, workspaceRoot, patterns, cancellationToken);
+        var tokenValues = await ResolveTokenValuesAsync(workspace, contextId, workspaceRoot, workspaceFolderName, patterns, cancellationToken);
 
         var items = new List<object>();
         foreach (var cfg in configs)
@@ -452,17 +507,21 @@ public sealed class WorkspaceFileVersionService(
         {
             await ApplyFileConfigLinkCountersAsync(
                 workspaceId,
+                contextId,
+                contextInfo.IsSpecialWorkspace,
                 configs,
                 nameToRepoId,
                 repoOutOfDateTokens: new Dictionary<int, HashSet<string>>(),
                 cancellationToken);
 
             await dbContext.WorkspaceFileLineStatuses
-                .Where(s => s.WorkspaceId == workspaceId)
+                .Where(s => s.WorkspaceId == workspaceId && s.WorkspaceFeatureContextId == contextId.Value)
                 .ExecuteDeleteAsync(cancellationToken);
 
-            await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
-            logger.LogDebug("CheckAndPersist completed for workspace {WorkspaceId} in {ElapsedMs}ms (no items)", workspaceId, sw.ElapsedMilliseconds);
+            await hubContext.Clients.All.SendAsync("ContextSynced", workspaceId, contextId.Value, cancellationToken);
+            if (contextInfo.IsSpecialWorkspace)
+                await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
+            logger.LogDebug("CheckAndPersist completed for workspace {WorkspaceId} context {ContextId} in {ElapsedMs}ms (no items)", workspaceId, contextId.Value, sw.ElapsedMilliseconds);
             return;
         }
 
@@ -471,7 +530,7 @@ public sealed class WorkspaceFileVersionService(
             var agentSw = Stopwatch.StartNew();
             var resp = await agentBridge.SendCommandAsync("CheckFileVersions", new
             {
-                workspaceName = workspace.Name,
+                workspaceName = workspaceFolderName,
                 workspaceRoot,
                 files = items
             }, cancellationToken);
@@ -533,6 +592,7 @@ public sealed class WorkspaceFileVersionService(
                     newStatuses.Add(new WorkspaceFileLineStatus
                     {
                         WorkspaceId = workspaceId,
+                        WorkspaceFeatureContextId = contextId.Value,
                         RepositoryId = repoId,
                         FilePath = fileResult.FilePath ?? "",
                         FileName = fileResult.FileName ?? "",
@@ -552,7 +612,7 @@ public sealed class WorkspaceFileVersionService(
             }
 
             await dbContext.WorkspaceFileLineStatuses
-                .Where(s => s.WorkspaceId == workspaceId)
+                .Where(s => s.WorkspaceId == workspaceId && s.WorkspaceFeatureContextId == contextId.Value)
                 .ExecuteDeleteAsync(cancellationToken);
 
             if (newStatuses.Count > 0)
@@ -560,13 +620,16 @@ public sealed class WorkspaceFileVersionService(
                 dbContext.WorkspaceFileLineStatuses.AddRange(newStatuses);
             }
 
-            await ApplyFileConfigLinkCountersAsync(workspaceId, configs, nameToRepoId, repoOutOfDateTokens, cancellationToken);
+            await ApplyFileConfigLinkCountersAsync(
+                workspaceId, contextId, contextInfo.IsSpecialWorkspace, configs, nameToRepoId, repoOutOfDateTokens, cancellationToken);
 
             if (missingFlagChanged)
                 await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);
 
-            await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
-            logger.LogDebug("CheckAndPersist completed for workspace {WorkspaceId} in {ElapsedMs}ms", workspaceId, sw.ElapsedMilliseconds);
+            await hubContext.Clients.All.SendAsync("ContextSynced", workspaceId, contextId.Value, cancellationToken);
+            if (contextInfo.IsSpecialWorkspace)
+                await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
+            logger.LogDebug("CheckAndPersist completed for workspace {WorkspaceId} context {ContextId} in {ElapsedMs}ms", workspaceId, contextId.Value, sw.ElapsedMilliseconds);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -615,7 +678,8 @@ public sealed class WorkspaceFileVersionService(
             }
         }
 
-        var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
 
         var requestItems = csprojConfigs
             .Select(cfg => new
@@ -630,7 +694,7 @@ public sealed class WorkspaceFileVersionService(
         {
             var resp = await agentBridge.SendCommandAsync(AgentHubMethods.ResolveGeneratedPackageReferences, new
             {
-                workspaceName = workspace.Name,
+                workspaceName = workspaceFolderName,
                 workspaceRoot,
                 files = requestItems
             }, cancellationToken);
@@ -703,6 +767,8 @@ public sealed class WorkspaceFileVersionService(
 
     private async Task ApplyFileConfigLinkCountersAsync(
         int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        bool isSpecialWorkspace,
         IReadOnlyList<WorkspaceFileVersionConfig> configs,
         Dictionary<string, int> nameToRepoId,
         Dictionary<int, HashSet<string>> repoOutOfDateTokens,
@@ -717,15 +783,42 @@ public sealed class WorkspaceFileVersionService(
 
         foreach (var link in allLinks)
         {
-            link.OutOfDateFileRepos = repoOutOfDateTokens.TryGetValue(link.RepositoryId, out var tokens) && tokens.Count > 0
+            var outOfDate = repoOutOfDateTokens.TryGetValue(link.RepositoryId, out var tokens) && tokens.Count > 0
                 ? tokens.Count
-                : null;
-            link.OutOfDateFileLines = null;
-            link.TotalFileLines = null;
-            link.TotalFileConfigRepos = totalConfigRepos.TryGetValue(link.RepositoryId, out var total) && total.Count > 0
+                : (int?)null;
+            var totalConfig = totalConfigRepos.TryGetValue(link.RepositoryId, out var total) && total.Count > 0
                 ? total.Count
-                : null;
-            link.HasSelfFileVersionToken = selfReferencingRepoIds.Contains(link.RepositoryId) ? true : null;
+                : (int?)null;
+            var hasSelf = selfReferencingRepoIds.Contains(link.RepositoryId) ? true : (bool?)null;
+
+            if (isSpecialWorkspace)
+            {
+                link.OutOfDateFileRepos = outOfDate;
+                link.OutOfDateFileLines = null;
+                link.TotalFileLines = null;
+                link.TotalFileConfigRepos = totalConfig;
+                link.HasSelfFileVersionToken = hasSelf;
+            }
+
+            var state = await dbContext.WorkspaceRepositoryContextStates
+                .FirstOrDefaultAsync(
+                    s => s.WorkspaceFeatureContextId == contextId.Value && s.WorkspaceRepositoryId == link.WorkspaceRepositoryId,
+                    cancellationToken);
+            if (state is null)
+            {
+                state = new WorkspaceRepositoryContextState
+                {
+                    WorkspaceFeatureContextId = contextId.Value,
+                    WorkspaceRepositoryId = link.WorkspaceRepositoryId
+                };
+                dbContext.WorkspaceRepositoryContextStates.Add(state);
+            }
+
+            state.OutOfDateFileRepos = outOfDate;
+            state.OutOfDateFileLines = null;
+            state.TotalFileLines = null;
+            state.TotalFileConfigRepos = totalConfig;
+            state.HasSelfFileVersionToken = hasSelf;
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -917,10 +1010,11 @@ public sealed class WorkspaceFileVersionService(
 
         try
         {
-            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+            var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
             var resp = await agentBridge.SendCommandAsync("CheckFileVersions", new
             {
-                workspaceName = workspace.Name,
+                workspaceName = workspaceFolderName,
                 workspaceRoot,
                 files = new[]
                 {

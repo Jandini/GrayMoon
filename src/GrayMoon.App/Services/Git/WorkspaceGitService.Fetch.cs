@@ -33,7 +33,7 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
 
         var links = workspace.Repositories
             .Where(l => l.Repository != null && (repositoryIds == null || repositoryIds.Contains(l.RepositoryId)))
@@ -56,7 +56,7 @@ public sealed partial class WorkspaceGitService
             {
                 var args = new
                 {
-                    workspaceName = workspace.Name,
+                    workspaceName = workspaceFolderName,
                     repositoryId = repo.RepositoryId,
                     repositoryName = repo.RepositoryName,
                     bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),

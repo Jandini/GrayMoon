@@ -4,6 +4,9 @@
 @using GrayMoon.App.Repositories
 @using GrayMoon.App.Services
 @using GrayMoon.App.Components.Shared
+@using GrayMoon.App.Components.Features
+@using GrayMoon.Application.Features
+@using GrayMoon.App.Services.Features
 @using Microsoft.AspNetCore.Components.Web
 @inject WorkspaceRepository WorkspaceRepository
 @inject WorkspaceProjectRepository WorkspaceProjectRepository
@@ -36,7 +39,10 @@
                 </p>
                 <span class="workspace-repos-title-spacer"></span>
             </div>
-            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
+            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions flex-wrap">
+                <WorkspaceContextBar WorkspaceId="WorkspaceId"
+                                     SelectedContextId="_selectedContextId"
+                                     SelectedContextIdChanged="OnSelectedContextChangedAsync" />
                 <div class="workspace-grid-search-wrapper">
                     <FilterSearchInput @bind-Value="searchTerm"
                                        InputId="workspace-packages-search"
@@ -123,6 +129,12 @@
 @code {
     [Parameter] public int WorkspaceId { get; set; }
 
+    [SupplyParameterFromQuery(Name = "context")]
+    public int? ContextQuery { get; set; }
+
+    [Inject] private WorkspaceContextNavigationService ContextNavigation { get; set; } = default!;
+
+    private WorkspaceFeatureContextId? _selectedContextId;
     private WorkspaceModel? workspace;
     private List<WorkspaceProject> packages = new();
     private string? errorMessage;
@@ -166,6 +178,14 @@
 
     protected override async Task OnInitializedAsync()
     {
+        var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
+        _selectedContextId = info.ContextId;
+        await LoadAsync();
+    }
+
+    private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
+    {
+        _selectedContextId = contextId;
         await LoadAsync();
     }
 
@@ -183,6 +203,8 @@
                 return;
             }
             packages = await WorkspaceProjectRepository.GetPackagesByWorkspaceIdAsync(WorkspaceId);
+            if (_selectedContextId is WorkspaceFeatureContextId ctx)
+                packages = packages.Where(p => p.WorkspaceFeatureContextId == ctx.Value).ToList();
         }
         catch (Exception ex)
         {

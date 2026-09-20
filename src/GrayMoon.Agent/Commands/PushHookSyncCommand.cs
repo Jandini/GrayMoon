@@ -47,6 +47,7 @@ public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csPr
             {
                 WorkspaceId = payload.WorkspaceId,
                 RepositoryId = payload.RepositoryId,
+                RepositoryPath = payload.RepositoryPath,
                 Version = version,
                 Branch = branch,
                 Tag = currentTag,
@@ -123,6 +124,7 @@ public sealed class PushHookSyncCommand(IGitService git, ICsProjFileService csPr
                 {
                     WorkspaceId = payload.WorkspaceId,
                     RepositoryId = payload.RepositoryId,
+                    RepositoryPath = payload.RepositoryPath,
                     Version = finalVersion,
                     Branch = finalBranch,
                     Tag = finalTag,

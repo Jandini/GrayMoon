@@ -1,4 +1,4 @@
-using GrayMoon.App.Hubs;
+﻿using GrayMoon.App.Hubs;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Common.Git;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -112,7 +112,7 @@ public class WorkspaceGitChangesReadServiceTests
         int? stagedDeletions = null)
     {
         var hubContext = new FakeHubContext<WorkspaceSyncHub>();
-        var handler = new GitChangesSnapshotPushHandler(factory, hubContext, NullLogger<GitChangesSnapshotPushHandler>.Instance, new NoopGitChangesLineStatsRefresh());
+        var handler = GitChangesPushHandlerTestFactory.Create(ctx, hubContext);
 
         await handler.HandleAsync(new GitChangesSnapshotNotification
         {

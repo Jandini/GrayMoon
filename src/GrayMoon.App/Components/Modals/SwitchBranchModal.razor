@@ -1,7 +1,10 @@
 @using GrayMoon.App.Models
 @using GrayMoon.App.Models.Api
 @using GrayMoon.App.Services
+@using GrayMoon.App.Services.Features
+@using GrayMoon.Application.Features
 @inject IWorkspaceBranchOperations BranchOperations
+@inject IWorkspaceBranchOccupancyService OccupancyService
 @inject IJSRuntime JSRuntime
 @inject ILogger<SwitchBranchModal> Logger
 
@@ -150,6 +153,17 @@
                                                                 @if (showReturnToDefaultButton && string.IsNullOrWhiteSpace(currentTag))
                                                                 {
                                                                     <span class="badge ms-2" style="background-color: #ffc107; color: #000;">Local Only</span>
+                                                                }
+                                                            }
+                                                            else if (TryGetOccupancy(branch, out var occ))
+                                                            {
+                                                                @if (occ.Kind == BranchOccupancyKind.Feature)
+                                                                {
+                                                                    <span class="badge bg-info ms-2" title="@occ.FeatureName">Feature</span>
+                                                                }
+                                                                else if (occ.Kind == BranchOccupancyKind.Worktree)
+                                                                {
+                                                                    <span class="badge bg-secondary ms-2" title="@occ.WorktreePath">Worktree</span>
                                                                 }
                                                             }
                                                         </span>
@@ -470,6 +484,8 @@
     [Parameter] public bool IsBusy { get; set; }
     [Parameter] public int WorkspaceId { get; set; }
     [Parameter] public int RepositoryId { get; set; }
+    [Parameter] public int WorkspaceRepositoryId { get; set; }
+    [Parameter] public WorkspaceFeatureContextId? ViewingContextId { get; set; }
     [Parameter] public string? RepositoryName { get; set; }
     [Parameter] public string? CurrentBranch { get; set; }
     [Parameter] public string? RepositoryUrl { get; set; }
@@ -500,6 +516,7 @@
     private List<string> localBranches = new();
     private List<string> remoteBranches = new();
     private List<string> tags = new();
+    private IReadOnlyDictionary<string, BranchOccupancyBadge> _occupancy = new Dictionary<string, BranchOccupancyBadge>(StringComparer.OrdinalIgnoreCase);
     private string? selectedBranch;
     private string? currentBranchLocal;
     private string? currentTag;
@@ -679,6 +696,7 @@
             if (outcome.IsSuccessStatus)
             {
                 ApplyBranchLists(outcome.Body);
+                await LoadOccupancyAsync();
 
                 // Default the selection: tag tab pre-selects the current tag, otherwise pre-select the current branch.
                 if (!string.IsNullOrWhiteSpace(currentTag))
@@ -857,7 +875,34 @@
             return true;
         if (activeTab == "tags")
             return selectedBranch == currentTag;
+        if (TryGetOccupancy(selectedBranch, out var occ)
+            && (occ.RequiresFeatureCleanup || occ.RequiresExternalCleanup || !occ.AllowCheckout))
+            return true;
         return selectedBranch == currentBranchLocal;
+    }
+
+    private async Task LoadOccupancyAsync()
+    {
+        _occupancy = new Dictionary<string, BranchOccupancyBadge>(StringComparer.OrdinalIgnoreCase);
+        if (WorkspaceRepositoryId <= 0 || ViewingContextId is null)
+            return;
+        try
+        {
+            _occupancy = await OccupancyService.GetBadgesForRepositoryAsync(
+                WorkspaceId, WorkspaceRepositoryId, ViewingContextId.Value);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Worktree occupancy load failed for repo {RepositoryId}", RepositoryId);
+        }
+    }
+
+    private bool TryGetOccupancy(string branch, out BranchOccupancyBadge badge)
+    {
+        if (_occupancy.TryGetValue(branch, out badge!))
+            return true;
+        badge = null!;
+        return false;
     }
 
     /// <summary>True if the current branch exists on remote (exact match or origin/currentBranch).</summary>

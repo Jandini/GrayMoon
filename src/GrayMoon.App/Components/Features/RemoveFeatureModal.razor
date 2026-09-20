@@ -1,0 +1,155 @@
+﻿@using GrayMoon.Application
+@using GrayMoon.Application.Features
+@inject IWorkspaceFeatureOperations FeatureOperations
+@inject ILogger<RemoveFeatureModal> Logger
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1085;">
+        <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Remove Feature</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="Cancel" disabled="@_busy"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(_error))
+                    {
+                        <div class="gm-callout gm-callout--error mb-3" role="alert">@_error</div>
+                    }
+                    @if (_plan is null)
+                    {
+                        <p class="mb-0 text-muted">Analyzing Feature…</p>
+                    }
+                    else
+                    {
+                        <p class="mb-2">@_plan.Summary</p>
+                        <p class="mb-3">Classification: <strong>@_plan.Classification</strong></p>
+                        <ul class="list-unstyled mb-3">
+                            @foreach (var repo in _plan.Repositories)
+                            {
+                                <li class="mb-1">
+                                    <strong>@repo.RepositoryName</strong>
+                                    - @(repo.WorktreeExists ? "worktree present" : "worktree missing")
+                                    @if (repo.OutgoingCommits is int outGo && outGo > 0)
+                                    {
+                                        <span>; @outGo outgoing</span>
+                                    }
+                                    @if (!string.IsNullOrEmpty(repo.Warning))
+                                    {
+                                        <span class="text-warning">; @repo.Warning</span>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                        @if (!_plan.IsAutomaticallySafe)
+                        {
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="allow-discard" @bind="_allowDiscard" disabled="@_busy" />
+                                <label class="form-check-label" for="allow-discard">Allow discard of uncommitted changes</label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="allow-force" @bind="_allowForce" disabled="@_busy" />
+                                <label class="form-check-label" for="allow-force">Allow force-delete local Feature branches</label>
+                            </div>
+                        }
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="Cancel" disabled="@_busy">Cancel</button>
+                    <button type="button" class="btn btn-danger" @onclick="RemoveAsync"
+                            disabled="@(_busy || _plan is null || (!_plan.IsAutomaticallySafe && !_allowDiscard && !_allowForce))">
+                        @if (_busy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                        }
+                        Remove Feature
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public WorkspaceFeatureContextId? FeatureContextId { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback OnRemoved { get; set; }
+
+    private RemoveFeaturePlan? _plan;
+    private string? _error;
+    private bool _busy;
+    private bool _allowDiscard;
+    private bool _allowForce;
+    private int? _analyzedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!IsVisible || FeatureContextId is null)
+            return;
+        if (_analyzedFor == FeatureContextId.Value.Value && _plan is not null)
+            return;
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            _plan = await FeatureOperations.AnalyzeRemoveFeatureAsync(FeatureContextId.Value);
+            _analyzedFor = FeatureContextId.Value.Value;
+            if (!_plan.Success)
+                _error = _plan.Error;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "AnalyzeRemoveFeature failed");
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RemoveAsync()
+    {
+        if (FeatureContextId is null)
+            return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            var result = await FeatureOperations.RemoveFeatureAsync(
+                FeatureContextId.Value,
+                new RemoveFeatureOptions
+                {
+                    AllowDiscardUncommitted = _allowDiscard,
+                    AllowForceDeleteLocalBranches = _allowForce
+                });
+            if (!result.Success)
+            {
+                _error = result.Error ?? "Remove Feature failed.";
+                return;
+            }
+            _plan = null;
+            _analyzedFor = null;
+            await OnRemoved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Remove Feature failed");
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task Cancel()
+    {
+        _plan = null;
+        _analyzedFor = null;
+        return OnCancel.InvokeAsync();
+    }
+}

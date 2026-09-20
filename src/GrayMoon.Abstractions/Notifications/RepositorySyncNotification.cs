@@ -25,6 +25,18 @@ public sealed class RepositorySyncNotification
     public List<string>? RemoteTags { get; init; }
 
     /// <summary>
+    /// Absolute worktree/checkout path that produced this sync (from hook
+    /// <c>git rev-parse --show-toplevel</c>). Used by the App for context attribution.
+    /// </summary>
+    public string? RepositoryPath { get; init; }
+
+    /// <summary>
+    /// Optional Agent-claimed context id. The App always re-validates against
+    /// <see cref="RepositoryPath"/> and never trusts this alone.
+    /// </summary>
+    public int? WorkspaceFeatureContextId { get; init; }
+
+    /// <summary>
     /// Authoritative state with per-group probe markers. Agents that predate this field send null,
     /// in which case the app falls back to merging the individual nullable fields above.
     /// </summary>

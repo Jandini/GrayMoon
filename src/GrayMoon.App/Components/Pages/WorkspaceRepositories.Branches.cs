@@ -21,6 +21,7 @@ public sealed partial class WorkspaceRepositories
         {
             IsVisible = true,
             RepositoryId = repositoryId,
+            WorkspaceRepositoryId = wr?.WorkspaceRepositoryId ?? 0,
             RepositoryName = repo.RepositoryName,
             CurrentBranch = currentBranch,
             RepositoryUrl = cloneUrl ?? repo.CloneUrl
@@ -408,6 +409,7 @@ public sealed partial class WorkspaceRepositories
     {
         public bool IsVisible { get; init; }
         public int RepositoryId { get; init; }
+        public int WorkspaceRepositoryId { get; init; }
         public string? RepositoryName { get; init; }
         public string? CurrentBranch { get; init; }
         public string? RepositoryUrl { get; init; }

@@ -5,6 +5,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
+using GrayMoon.Application.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
@@ -25,6 +26,8 @@ public sealed class WorkspacePushService(
     WorkspaceStateRecomputeScope recomputeScope,
     AppDbContext dbContext,
     Microsoft.Extensions.Options.IOptions<WorkspaceOptions> workspaceOptions,
+    IWorkspaceFeatureContextResolver contextResolver,
+    IWorkspaceContextPathResolver pathResolver,
     ILogger<WorkspacePushService> logger,
     IHubContext<WorkspaceSyncHub>? hubContext = null,
     PackageRegistrySyncService? packageRegistrySyncService = null,
@@ -43,6 +46,8 @@ public sealed class WorkspacePushService(
     private readonly WorkspaceRepositoryStateWriter _stateWriter = stateWriter ?? throw new ArgumentNullException(nameof(stateWriter));
     private readonly WorkspaceStateRecomputeScope _recomputeScope = recomputeScope ?? throw new ArgumentNullException(nameof(recomputeScope));
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly IWorkspaceFeatureContextResolver _contextResolver = contextResolver ?? throw new ArgumentNullException(nameof(contextResolver));
+    private readonly IWorkspaceContextPathResolver _pathResolver = pathResolver ?? throw new ArgumentNullException(nameof(pathResolver));
     private readonly ILogger<WorkspacePushService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 16);
     private readonly IHubContext<WorkspaceSyncHub>? _hubContext = hubContext;
@@ -99,7 +104,7 @@ public sealed class WorkspacePushService(
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
         await _workspaceService.CreateDirectoryAsync(workspace.Name, workspaceRoot, cancellationToken);
 
         if (!packageRegistriesAlreadySynced)
@@ -432,7 +437,7 @@ public sealed class WorkspacePushService(
             return (false, "Repository is pinned to a tag. Checkout a branch before pushing.");
 
         var repo = link.Repository;
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
 
         onProgressMessage?.Invoke(link.BranchHasUpstream == true ? "Pushing..." : "Pushing upstream...");
 
@@ -441,7 +446,7 @@ public sealed class WorkspacePushService(
 
         var args = new
         {
-            workspaceName = workspace.Name,
+            workspaceName = workspaceFolderName,
             repositoryId = repo.RepositoryId,
             repositoryName = repo.RepositoryName,
             bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
@@ -825,7 +830,7 @@ public sealed class WorkspacePushService(
         var finished = 0;
         var total = repos.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
         var rejectedRepos = new System.Collections.Concurrent.ConcurrentBag<(int RepoId, string RepoName)>();
         var failures = new System.Collections.Concurrent.ConcurrentBag<(int RepoId, string Error)>();
         var pushTasks = repos.Select(async repo =>
@@ -840,7 +845,7 @@ public sealed class WorkspacePushService(
 
                     var args = new
                     {
-                        workspaceName = workspace.Name,
+                        workspaceName = workspaceFolderName,
                         repositoryId = repo.RepoId,
                         repositoryName = repo.RepoName,
                         bearerToken = bearerByRepoId.GetValueOrDefault(repo.RepoId),
@@ -947,7 +952,7 @@ public sealed class WorkspacePushService(
             wr.BranchHasUpstream = true;
         }
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
 
         var tagPinnedInLinks = links
             .Where(l => !string.IsNullOrWhiteSpace(l.CheckedOutTag))
@@ -961,7 +966,7 @@ public sealed class WorkspacePushService(
             {
                 var response = await _agentBridge.SendCommandAsync("GetCommitCounts", new
                 {
-                    workspaceName = workspace.Name,
+                    workspaceName = workspaceFolderName,
                     repositoryName = repo.RepoName,
                     workspaceRoot
                 }, cancellationToken);
@@ -995,5 +1000,14 @@ public sealed class WorkspacePushService(
 
         await _recomputeScope.CompleteAsync(workspaceId, cancellationToken);
     }
-}
 
+    private async Task<(string WorkspaceRoot, string WorkspaceFolderName)> ResolveAgentPathArgsAsync(
+        int workspaceId,
+        CancellationToken cancellationToken,
+        WorkspaceFeatureContextId? contextId = null)
+    {
+        var id = contextId
+            ?? await _contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        return await _pathResolver.GetAgentWorkspaceArgsAsync(id, cancellationToken);
+    }
+}

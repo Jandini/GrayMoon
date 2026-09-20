@@ -8,6 +8,8 @@ using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
+using GrayMoon.Application.Features;
+
 namespace GrayMoon.App.Services.Orchestration;
 
 /// <summary>
@@ -24,6 +26,8 @@ public sealed class WorkspaceBranchUpdateHandler(
     AppDbContext dbContext,
     WorkspaceRepositoryStateWriter stateWriter,
     IHubContext<WorkspaceSyncHub> hubContext,
+    IWorkspaceFeatureContextResolver contextResolver,
+    IWorkspaceContextPathResolver pathResolver,
     ILogger<WorkspaceBranchUpdateHandler> logger)
 {
     public async Task<UpdateBranchFromDefaultResult> UpdateBranchFromDefaultAsync(
@@ -51,7 +55,8 @@ public sealed class WorkspaceBranchUpdateHandler(
         {
             await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
 
-            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+            var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
             var defaultBranchName = await dbContext.RepositoryBranches
                 .Where(rb => rb.WorkspaceRepositoryId == wr.WorkspaceRepositoryId && rb.IsDefault && !rb.IsTag)
                 .Select(rb => rb.BranchName)
@@ -59,7 +64,7 @@ public sealed class WorkspaceBranchUpdateHandler(
 
             var args = new
             {
-                workspaceName = workspace.Name,
+                workspaceName = workspaceFolderName,
                 repositoryName = repo.RepositoryName,
                 currentBranchName = wr.BranchName,
                 defaultBranchName,

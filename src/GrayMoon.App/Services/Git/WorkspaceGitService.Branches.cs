@@ -27,10 +27,10 @@ public sealed partial class WorkspaceGitService
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null) return false;
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
         var response = await _agentBridge.SendCommandAsync("RefreshBranches", new
         {
-            workspaceName = workspace.Name,
+            workspaceName = workspaceFolderName,
             repositoryId = repo.RepositoryId,
             repositoryName = repo.RepositoryName,
             workspaceRoot
@@ -120,7 +120,7 @@ public sealed partial class WorkspaceGitService
         var completedCount = 0;
         var totalCount = links.Count;
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
 
         // Prefetch all default branches before the parallel section to avoid concurrent DbContext reads
         Dictionary<int, string>? defaultBranchByWrId = null;
@@ -157,7 +157,7 @@ public sealed partial class WorkspaceGitService
 
                 var args = new
                 {
-                    workspaceName = workspace.Name,
+                    workspaceName = workspaceFolderName,
                     repositoryName = repo.RepositoryName,
                     newBranchName,
                     baseBranchName,

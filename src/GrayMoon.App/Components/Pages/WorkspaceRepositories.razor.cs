@@ -1,5 +1,6 @@
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.Queries;
+using GrayMoon.Application.Features;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
@@ -7,6 +8,7 @@ namespace GrayMoon.App.Components.Pages;
 public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposable
 {
     [Parameter] public int WorkspaceId { get; set; }
+    [SupplyParameterFromQuery(Name = "context")] public int? ContextQuery { get; set; }
     [Inject] private IWorkspacePageService WorkspacePageService { get; set; } = default!;
     [Inject] private IServiceScopeFactory ServiceScopeFactory { get; set; } = default!;
     [Inject] private NavigationManager NavigationManager { get; set; } = default!;
@@ -25,6 +27,15 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     [Inject] private IWorkspaceRepositoryLinkListQueryService LinkListQueryService { get; set; } = default!;
     [Inject] private WorkspacePendingActionsService PendingActionsService { get; set; } = default!;
     [Inject] private AppActivityStateService ActivityStateService { get; set; } = default!;
+    [Inject] private IWorkspaceFeatureContextResolver FeatureContextResolver { get; set; } = default!;
+    [Inject] private IWorkspaceSelectedFeatureContextService SelectedFeatureContextService { get; set; } = default!;
+
+    private WorkspaceFeatureContextId? _selectedContextId;
+    private bool _isFeatureContext;
+    private bool _createFeatureModalVisible;
+    private string? _createFeatureInitialName;
+    private bool _removeFeatureModalVisible;
+    private WorkspaceFeatureContextId? _removeFeatureContextId;
 
     private const string SyncModeStorageKey = "graymoon:sync-mode";
     private bool _quickFetchIsPrimary;
@@ -37,10 +48,99 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         EnsureGitChangesActivation();
         var storedMode = await JSRuntime.InvokeAsync<string?>("graymoonStorageGet", SyncModeStorageKey);
         _quickFetchIsPrimary = storedMode == "quick-fetch";
+        await ResolveSelectedContextAsync();
         await LoadPendingRestoreScrollTopAsync();
         await LoadWorkspaceAsync();
         ApplySyncStateFromLoadedItems();
         StartPrPollingLoop();
+    }
+
+    private async Task ResolveSelectedContextAsync()
+    {
+        try
+        {
+            if (ContextQuery is int q && q > 0)
+            {
+                var info = await FeatureContextResolver.GetRequiredAsync(new WorkspaceFeatureContextId(q), WorkspaceId);
+                _selectedContextId = info.ContextId;
+                _isFeatureContext = !info.IsSpecialWorkspace;
+                await SelectedFeatureContextService.SetSelectedAsync(WorkspaceId, info.ContextId);
+                return;
+            }
+
+            var preferred = await SelectedFeatureContextService.GetSelectedAsync(WorkspaceId);
+            if (preferred is WorkspaceFeatureContextId preferredId)
+            {
+                var info = await FeatureContextResolver.GetRequiredAsync(preferredId, WorkspaceId);
+                _selectedContextId = info.ContextId;
+                _isFeatureContext = !info.IsSpecialWorkspace;
+                if (_isFeatureContext)
+                {
+                    var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
+                    NavigationManager.NavigateTo($"{path}?context={preferredId.Value}", replace: true);
+                }
+                return;
+            }
+
+            var special = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
+            _selectedContextId = special;
+            _isFeatureContext = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to resolve Feature context for workspace {WorkspaceId}", WorkspaceId);
+            var special = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
+            _selectedContextId = special;
+            _isFeatureContext = false;
+        }
+    }
+
+    private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
+    {
+        var info = await FeatureContextResolver.GetRequiredAsync(contextId, WorkspaceId);
+        _selectedContextId = info.ContextId;
+        _isFeatureContext = !info.IsSpecialWorkspace;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task OnRequestCreateFeatureAsync(string name)
+    {
+        _createFeatureInitialName = name;
+        _createFeatureModalVisible = true;
+        return Task.CompletedTask;
+    }
+
+    private Task OnRemoveFeatureAsync()
+    {
+        if (_isFeatureContext && _selectedContextId is WorkspaceFeatureContextId ctx)
+        {
+            _removeFeatureContextId = ctx;
+            _removeFeatureModalVisible = true;
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task OnFeatureCreatedAsync(CreateFeatureResult result)
+    {
+        _createFeatureModalVisible = false;
+        if (result.ContextId is WorkspaceFeatureContextId created)
+        {
+            await OnSelectedContextChangedAsync(created);
+            var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
+            NavigationManager.NavigateTo($"{path}?context={created.Value}", replace: true);
+            ToastService.Show($"Feature created.");
+        }
+    }
+
+    private async Task OnFeatureRemovedAsync()
+    {
+        _removeFeatureModalVisible = false;
+        var special = await FeatureContextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(WorkspaceId);
+        await SelectedFeatureContextService.SetSelectedAsync(WorkspaceId, special);
+        await OnSelectedContextChangedAsync(special);
+        var path = new Uri(NavigationManager.Uri).GetLeftPart(UriPartial.Path);
+        NavigationManager.NavigateTo(path, replace: true);
+        ToastService.Show("Feature removed.");
     }
 
     /// <summary>Reads the saved tbody scroll offset for the current WorkspaceId from sessionStorage, consumed by the next ResetAndLoadFromTopAsync(restoreScroll: true) call. Best-effort: malformed or missing storage falls back to no restore (top of grid), matching current behavior.</summary>

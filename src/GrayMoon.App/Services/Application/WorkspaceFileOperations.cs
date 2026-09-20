@@ -1,6 +1,8 @@
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 
+using GrayMoon.Application.Features;
+
 namespace GrayMoon.App.Services.Application;
 
 public sealed class WorkspaceFileOperations(
@@ -9,7 +11,9 @@ public sealed class WorkspaceFileOperations(
     WorkspaceService workspaceService,
     IAgentBridge agentBridge,
     WorkspaceFileVersionService fileVersionService,
-    WorkspaceGitService workspaceGitService) : IWorkspaceFileOperations
+    WorkspaceGitService workspaceGitService,
+    IWorkspaceFeatureContextResolver contextResolver,
+    IWorkspaceContextPathResolver pathResolver) : IWorkspaceFileOperations
 {
     public async Task<List<WorkspaceFileDto>?> ListAsync(int workspaceId, CancellationToken cancellationToken)
     {
@@ -69,11 +73,12 @@ public sealed class WorkspaceFileOperations(
         if (!agentBridge.IsAgentConnected)
             return (true, false, null, "Agent not connected. Start GrayMoon.Agent to search files.");
 
-        var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
         var searchPattern = string.IsNullOrWhiteSpace(pattern) ? "*" : pattern.Trim();
         var response = await agentBridge.SendCommandAsync("SearchFiles", new
         {
-            workspaceName = workspace.Name,
+            workspaceName = workspaceFolderName,
             repositoryName = string.IsNullOrWhiteSpace(repositoryName) ? null : repositoryName.Trim(),
             searchPattern,
             workspaceRoot

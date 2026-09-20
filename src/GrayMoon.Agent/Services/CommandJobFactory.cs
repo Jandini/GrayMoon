@@ -110,6 +110,12 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid DiscardGitChanges args"),
             "CommitGitChanges" => JsonSerializer.Deserialize<CommitGitChangesRequest>(json, options)
                 ?? throw new ArgumentException("Invalid CommitGitChanges args"),
+            AgentHubMethods.ListGitWorktrees => JsonSerializer.Deserialize<ListGitWorktreesRequest>(json, options)
+                ?? throw new ArgumentException("Invalid ListGitWorktrees args"),
+            AgentHubMethods.CreateGitWorktree => JsonSerializer.Deserialize<CreateGitWorktreeRequest>(json, options)
+                ?? throw new ArgumentException("Invalid CreateGitWorktree args"),
+            AgentHubMethods.RemoveGitWorktree => JsonSerializer.Deserialize<RemoveGitWorktreeRequest>(json, options)
+                ?? throw new ArgumentException("Invalid RemoveGitWorktree args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

@@ -5,21 +5,40 @@ namespace GrayMoon.App.Repositories;
 
 public sealed partial class WorkspaceProjectRepository
 {
-    /// <summary>Merges projects for a repository in a workspace by ProjectName. Removes persisted projects not in <paramref name="projects"/>; adds new; updates existing.</summary>
-    public async Task MergeWorkspaceProjectsAsync(int workspaceId, int repositoryId, IReadOnlyList<SyncProjectInfo> projects, CancellationToken cancellationToken = default)
+    /// <summary>Merges projects for a repository in a workspace Feature context by ProjectName. Removes persisted projects not in <paramref name="projects"/>; adds new; updates existing.</summary>
+    public async Task MergeWorkspaceProjectsAsync(
+        int workspaceId,
+        int repositoryId,
+        IReadOnlyList<SyncProjectInfo> projects,
+        CancellationToken cancellationToken = default)
+    {
+        var contextId = await ResolveSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        await MergeWorkspaceProjectsAsync(workspaceId, repositoryId, projects, contextId, cancellationToken);
+    }
+
+    public async Task MergeWorkspaceProjectsAsync(
+        int workspaceId,
+        int repositoryId,
+        IReadOnlyList<SyncProjectInfo> projects,
+        int workspaceFeatureContextId,
+        CancellationToken cancellationToken = default)
     {
         // Generated (virtual/inferred) package rows are owned by SyncGeneratedPackageDependenciesAsync, not by
         // this per-repo sync reconciliation - a real repo's own project scan must never delete a generated
         // package row it happens to "produce" (it has no physical .csproj producing it, so it never appears here).
         var existing = await dbContext.WorkspaceProjects
-            .Where(p => p.WorkspaceId == workspaceId && p.RepositoryId == repositoryId && !p.IsGenerated)
+            .Where(p =>
+                p.WorkspaceId == workspaceId
+                && p.RepositoryId == repositoryId
+                && p.WorkspaceFeatureContextId == workspaceFeatureContextId
+                && !p.IsGenerated)
             .ToListAsync(cancellationToken);
 
-        var (removed, addedOrUpdated) = MergeProjectsForRepository(workspaceId, repositoryId, projects, existing);
+        var (removed, addedOrUpdated) = MergeProjectsForRepository(workspaceId, repositoryId, workspaceFeatureContextId, projects, existing);
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        logger.LogInformation("Persistence: WorkspaceProjects. Action=Merge, WorkspaceId={WorkspaceId}, RepositoryId={RepositoryId}, Removed={Removed}, AddedOrUpdated={Count}",
-            workspaceId, repositoryId, removed, addedOrUpdated);
+        logger.LogInformation("Persistence: WorkspaceProjects. Action=Merge, WorkspaceId={WorkspaceId}, ContextId={ContextId}, RepositoryId={RepositoryId}, Removed={Removed}, AddedOrUpdated={Count}",
+            workspaceId, workspaceFeatureContextId, repositoryId, removed, addedOrUpdated);
     }
 
     /// <summary>
@@ -33,11 +52,24 @@ public sealed partial class WorkspaceProjectRepository
         IReadOnlyList<(int RepositoryId, IReadOnlyList<SyncProjectInfo> Projects)> repoProjects,
         CancellationToken cancellationToken = default)
     {
+        var contextId = await ResolveSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        await MergeWorkspaceProjectsBatchAsync(workspaceId, repoProjects, contextId, cancellationToken);
+    }
+
+    public async Task MergeWorkspaceProjectsBatchAsync(
+        int workspaceId,
+        IReadOnlyList<(int RepositoryId, IReadOnlyList<SyncProjectInfo> Projects)> repoProjects,
+        int workspaceFeatureContextId,
+        CancellationToken cancellationToken = default)
+    {
         if (repoProjects == null || repoProjects.Count == 0) return;
 
         var repoIds = repoProjects.Select(r => r.RepositoryId).ToHashSet();
         var existingAll = await dbContext.WorkspaceProjects
-            .Where(p => p.WorkspaceId == workspaceId && repoIds.Contains(p.RepositoryId) && !p.IsGenerated)
+            .Where(p => p.WorkspaceId == workspaceId
+                        && p.WorkspaceFeatureContextId == workspaceFeatureContextId
+                        && repoIds.Contains(p.RepositoryId)
+                        && !p.IsGenerated)
             .ToListAsync(cancellationToken);
         var existingByRepo = existingAll.ToLookup(p => p.RepositoryId);
 
@@ -45,20 +77,22 @@ public sealed partial class WorkspaceProjectRepository
         var totalAddedOrUpdated = 0;
         foreach (var (repositoryId, projects) in repoProjects)
         {
-            var (removed, addedOrUpdated) = MergeProjectsForRepository(workspaceId, repositoryId, projects, existingByRepo[repositoryId].ToList());
+            var (removed, addedOrUpdated) = MergeProjectsForRepository(
+                workspaceId, repositoryId, workspaceFeatureContextId, projects, existingByRepo[repositoryId].ToList());
             totalRemoved += removed;
             totalAddedOrUpdated += addedOrUpdated;
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        logger.LogInformation("Persistence: WorkspaceProjects. Action=MergeBatch, WorkspaceId={WorkspaceId}, RepoCount={RepoCount}, Removed={Removed}, AddedOrUpdated={Count}",
-            workspaceId, repoProjects.Count, totalRemoved, totalAddedOrUpdated);
+        logger.LogInformation("Persistence: WorkspaceProjects. Action=MergeBatch, WorkspaceId={WorkspaceId}, ContextId={ContextId}, RepoCount={RepoCount}, Removed={Removed}, AddedOrUpdated={Count}",
+            workspaceId, workspaceFeatureContextId, repoProjects.Count, totalRemoved, totalAddedOrUpdated);
     }
 
     /// <summary>Merges one repo's incoming projects against its already-loaded existing rows: stages Remove/Add on <c>dbContext</c> and mutates tracked entities in place. Caller saves. Returns (Removed, AddedOrUpdated) for logging.</summary>
     private (int Removed, int AddedOrUpdated) MergeProjectsForRepository(
         int workspaceId,
         int repositoryId,
+        int workspaceFeatureContextId,
         IReadOnlyList<SyncProjectInfo> projects,
         IReadOnlyList<WorkspaceProject> existing)
     {
@@ -73,7 +107,7 @@ public sealed partial class WorkspaceProjectRepository
         if (toRemove.Count > 0)
         {
             dbContext.WorkspaceProjects.RemoveRange(toRemove);
-            logger.LogDebug("WorkspaceProjects merge: WorkspaceId={WorkspaceId}, RepositoryId={RepositoryId}, removed {Count} by name", workspaceId, repositoryId, toRemove.Count);
+            logger.LogDebug("WorkspaceProjects merge: WorkspaceId={WorkspaceId}, ContextId={ContextId}, RepositoryId={RepositoryId}, removed {Count} by name", workspaceId, workspaceFeatureContextId, repositoryId, toRemove.Count);
         }
 
         foreach (var p in existing.Where(p => incomingNames.Contains(p.ProjectName)))
@@ -84,6 +118,7 @@ public sealed partial class WorkspaceProjectRepository
                 p.ProjectFilePath = info.ProjectFilePath;
                 p.TargetFramework = info.TargetFramework;
                 p.PackageId = string.IsNullOrWhiteSpace(info.PackageId) ? null : info.PackageId;
+                p.WorkspaceFeatureContextId = workspaceFeatureContextId;
             }
         }
 
@@ -95,6 +130,7 @@ public sealed partial class WorkspaceProjectRepository
             dbContext.WorkspaceProjects.Add(new WorkspaceProject
             {
                 WorkspaceId = workspaceId,
+                WorkspaceFeatureContextId = workspaceFeatureContextId,
                 RepositoryId = repositoryId,
                 ProjectName = name,
                 ProjectType = info.ProjectType,
@@ -107,6 +143,33 @@ public sealed partial class WorkspaceProjectRepository
         return (toRemove.Count, byName.Count);
     }
 
+    private async Task<int> ResolveSpecialWorkspaceContextIdAsync(int workspaceId, CancellationToken cancellationToken)
+    {
+        var existing = await dbContext.WorkspaceFeatureContexts
+            .AsNoTracking()
+            .Where(c => c.WorkspaceId == workspaceId && c.Kind == WorkspaceFeatureContextKind.Workspace)
+            .Select(c => c.WorkspaceFeatureContextId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (existing != 0)
+            return existing;
+
+        var workspace = await dbContext.Workspaces.AsNoTracking()
+            .FirstOrDefaultAsync(w => w.WorkspaceId == workspaceId, cancellationToken)
+            ?? throw new InvalidOperationException($"Workspace {workspaceId} was not found.");
+
+        var context = new WorkspaceFeatureContext
+        {
+            WorkspaceId = workspaceId,
+            Kind = WorkspaceFeatureContextKind.Workspace,
+            CreatedAt = DateTime.UtcNow,
+            LastSyncedAt = workspace.LastSyncedAt,
+            IsInSync = workspace.IsInSync
+        };
+        dbContext.WorkspaceFeatureContexts.Add(context);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return context.WorkspaceFeatureContextId;
+    }
+
     /// <summary>Replaces project dependencies for workspace projects from sync results. Only dependencies where the referenced package is a workspace project are persisted. When <paramref name="persistDependencyLevel"/> is true, levels are recomputed from the full DB graph (not the partial merge batch). When false, callers such as <c>WorkspaceGitService.PersistVersionsAsync</c> follow with <c>RecomputeAndPersistRepositoryDependencyStatsAsync</c>.</summary>
     public async Task MergeWorkspaceProjectDependenciesAsync(
         int workspaceId,
@@ -114,9 +177,20 @@ public sealed partial class WorkspaceProjectRepository
         bool persistDependencyLevel = true,
         CancellationToken cancellationToken = default)
     {
+        var contextId = await ResolveSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        await MergeWorkspaceProjectDependenciesAsync(workspaceId, syncResults, contextId, persistDependencyLevel, cancellationToken);
+    }
+
+    public async Task MergeWorkspaceProjectDependenciesAsync(
+        int workspaceId,
+        IReadOnlyList<(int RepoId, IReadOnlyList<SyncProjectInfo>? ProjectsDetail)> syncResults,
+        int workspaceFeatureContextId,
+        bool persistDependencyLevel = true,
+        CancellationToken cancellationToken = default)
+    {
         var workspaceProjects = await dbContext.WorkspaceProjects
             .AsNoTracking()
-            .Where(p => p.WorkspaceId == workspaceId)
+            .Where(p => p.WorkspaceId == workspaceId && p.WorkspaceFeatureContextId == workspaceFeatureContextId)
             .ToListAsync(cancellationToken);
         if (workspaceProjects.Count == 0) return;
 
@@ -178,8 +252,8 @@ public sealed partial class WorkspaceProjectRepository
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        logger.LogInformation("Persistence: ProjectDependencies. WorkspaceId={WorkspaceId}, DependentCount={Count}, EdgeCount={Edges}",
-            workspaceId, dependentProjectIds.Count, uniqueEdges.Count);
+        logger.LogInformation("Persistence: ProjectDependencies. WorkspaceId={WorkspaceId}, ContextId={ContextId}, DependentCount={Count}, EdgeCount={Edges}",
+            workspaceId, workspaceFeatureContextId, dependentProjectIds.Count, uniqueEdges.Count);
 
         if (persistDependencyLevel)
             await RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, cancellationToken);

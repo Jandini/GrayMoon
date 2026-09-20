@@ -5,6 +5,7 @@
 @using GrayMoon.App.Services
 @using GrayMoon.App.Services.Queries
 @using GrayMoon.App.Components.Shared
+@using GrayMoon.App.Components.Features
 @using static GrayMoon.App.Components.Shared.VirtualScrollUi
 @using Microsoft.AspNetCore.Components.Web
 @inject WorkspaceRepository WorkspaceRepository
@@ -37,7 +38,10 @@
                 </p>
                 <span class="workspace-repos-title-spacer"></span>
             </div>
-            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
+            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions flex-wrap">
+                <WorkspaceContextBar WorkspaceId="WorkspaceId"
+                                     SelectedContextId="_selectedContextId"
+                                     SelectedContextIdChanged="OnSelectedContextChangedAsync" />
                 <div class="workspace-grid-search-wrapper">
                     <FilterSearchInput Value="@searchTerm"
                                        ValueChanged="OnSearchTermChangedAsync"

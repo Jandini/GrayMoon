@@ -60,7 +60,7 @@ public sealed class GitChangesTestDbContext : IAsyncDisposable
         DbContext.Repositories.Add(repository);
         await DbContext.SaveChangesAsync();
 
-        var workspace = new Workspace { Name = "test-workspace" };
+        var workspace = new Workspace { Name = "test-workspace", RootPath = @"C:\gm-test-root" };
         DbContext.Workspaces.Add(workspace);
         await DbContext.SaveChangesAsync();
 
@@ -71,6 +71,8 @@ public sealed class GitChangesTestDbContext : IAsyncDisposable
         };
         DbContext.WorkspaceRepositories.Add(link);
         await DbContext.SaveChangesAsync();
+
+        await Migrations.MigrateWorkspaceFeatureContextSchemaAsync(DbContext);
 
         WorkspaceId = workspace.WorkspaceId;
         RepositoryId = repository.RepositoryId;

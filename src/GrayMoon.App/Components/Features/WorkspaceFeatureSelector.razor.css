@@ -1,0 +1,16 @@
+﻿.workspace-feature-selector { min-width: 12rem; max-width: 18rem; }
+.workspace-feature-selector__input { min-width: 10rem; }
+.workspace-feature-selector__menu {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 100%;
+  z-index: 1060;
+  max-height: 16rem;
+  overflow: auto;
+  min-width: 100%;
+}
+.workspace-feature-selector__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1055;
+}

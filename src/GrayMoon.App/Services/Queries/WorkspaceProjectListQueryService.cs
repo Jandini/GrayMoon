@@ -16,7 +16,7 @@ public sealed class WorkspaceProjectListQueryService(AppDbContext dbContext) : I
         WorkspaceProjectListRequest request,
         CancellationToken cancellationToken = default)
     {
-        var filter = new WorkspaceProjectListFilter(request.WorkspaceId, request.Search);
+        var filter = new WorkspaceProjectListFilter(request.WorkspaceId, request.Search, request.WorkspaceFeatureContextId);
         var query = ApplyFilters(_dbContext.WorkspaceProjects.AsNoTracking(), filter);
         query = ApplySort(query);
         query = ApplyKeyset(query, request.Cursor);
@@ -95,6 +95,8 @@ public sealed class WorkspaceProjectListQueryService(AppDbContext dbContext) : I
     private static IQueryable<WorkspaceProject> ApplyFilters(IQueryable<WorkspaceProject> query, WorkspaceProjectListFilter filter)
     {
         query = query.Where(p => p.WorkspaceId == filter.WorkspaceId);
+        if (filter.WorkspaceFeatureContextId is int contextId)
+            query = query.Where(p => p.WorkspaceFeatureContextId == contextId);
         return query.ApplySearch(filter.Search, WorkspaceProjectSearchExpressions.BuildTermPredicate);
     }
 

@@ -6,6 +6,7 @@
 @using GrayMoon.App.Services.Queries
 @using GrayMoon.App.Components.Shared
 @using GrayMoon.App.Components.Modals
+@using GrayMoon.App.Components.Features
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.AspNetCore.SignalR.Client
 @using System.Text.Json
@@ -16,6 +17,12 @@
 <div class="container-fluid page-container grid-page">
     <div class="grid-page-header">
         <WorkspaceRepositoriesHeader WorkspaceName="@(workspace?.Name)"
+                                    WorkspaceId="WorkspaceId"
+                                    SelectedContextId="_selectedContextId"
+                                    IsFeatureContext="_isFeatureContext"
+                                    OnSelectedContextChanged="OnSelectedContextChangedAsync"
+                                    OnRequestCreateFeature="OnRequestCreateFeatureAsync"
+                                    OnRemoveFeature="OnRemoveFeatureAsync"
                                     RepositoriesCount="@(_headerState?.TotalCount ?? 0)"
                                     HasFilter="@HasSearchFilter"
                                     FilteredCount="@(totalCount ?? 0)"
@@ -56,6 +63,15 @@
                                     OnSearchChanged="OnSearchChanged"
                                     OnClearSearch="ClearSearchFilter"
                                     OnSearchKeyDown="OnSearchKeyDown" />
+        <CreateFeatureModal IsVisible="_createFeatureModalVisible"
+                            WorkspaceId="WorkspaceId"
+                            InitialName="_createFeatureInitialName"
+                            OnCancel="() => _createFeatureModalVisible = false"
+                            OnCreated="OnFeatureCreatedAsync" />
+        <RemoveFeatureModal IsVisible="_removeFeatureModalVisible"
+                            FeatureContextId="_removeFeatureContextId"
+                            OnCancel="() => _removeFeatureModalVisible = false"
+                            OnRemoved="OnFeatureRemovedAsync" />
         @if (errorMessage != null)
         {
             <div class="page-error-callout repo-error-line" role="alert">@errorMessage</div>
@@ -250,6 +266,8 @@
 <SwitchBranchModal IsVisible="@_switchBranchModal.IsVisible"
                    WorkspaceId="@WorkspaceId"
                    RepositoryId="@_switchBranchModal.RepositoryId"
+                   WorkspaceRepositoryId="@_switchBranchModal.WorkspaceRepositoryId"
+                   ViewingContextId="@_selectedContextId"
                    RepositoryName="@_switchBranchModal.RepositoryName"
                    CurrentBranch="@_switchBranchModal.CurrentBranch"
                    RepositoryUrl="@_switchBranchModal.RepositoryUrl"

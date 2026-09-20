@@ -1,0 +1,113 @@
+﻿@using GrayMoon.Application
+@using GrayMoon.Application.Features
+@inject IWorkspaceFeatureOperations FeatureOperations
+@inject ILogger<CreateFeatureModal> Logger
+
+@if (IsVisible)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1085;"
+         @onkeydown="HandleKeyDown"
+         @ref="_modalElement">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create Feature</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="Cancel" disabled="@_busy"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(_error))
+                    {
+                        <div class="gm-callout gm-callout--error mb-3" role="alert">@_error</div>
+                    }
+                    <div class="mb-3">
+                        <label class="form-label" for="create-feature-name">Feature name</label>
+                        <input id="create-feature-name"
+                               class="form-control"
+                               @bind="_name"
+                               @bind:event="oninput"
+                               disabled="@_busy"
+                               autocomplete="off" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="create-feature-base">Based on</label>
+                        <select id="create-feature-base" class="form-select" disabled>
+                            <option selected>Current Workspace</option>
+                        </select>
+                    </div>
+                    <div class="gm-callout gm-callout--info mb-0" role="note">
+                        The Feature starts from the current committed state. Uncommitted changes in Workspace are not copied and remain in Workspace.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="Cancel" disabled="@_busy">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="CreateAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_name))">
+                        @if (_busy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                        }
+                        Create Feature
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public int WorkspaceId { get; set; }
+    [Parameter] public string? InitialName { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback<CreateFeatureResult> OnCreated { get; set; }
+
+    private ElementReference _modalElement;
+    private string _name = "";
+    private string? _error;
+    private bool _busy;
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !_busy)
+        {
+            _name = InitialName?.Trim() ?? _name;
+            _error = null;
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var result = await FeatureOperations.CreateFeatureAsync(
+                WorkspaceId,
+                _name.Trim(),
+                WorkspaceFeatureBaseKindApplication.CurrentWorkspace);
+            if (!result.Success)
+            {
+                _error = result.Error ?? result.Condition ?? "Feature creation failed.";
+                return;
+            }
+
+            await OnCreated.InvokeAsync(result);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Create Feature failed");
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task Cancel() => OnCancel.InvokeAsync();
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && !_busy)
+            await Cancel();
+    }
+}

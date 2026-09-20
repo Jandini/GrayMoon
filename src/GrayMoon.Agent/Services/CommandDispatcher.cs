@@ -44,8 +44,11 @@ public sealed class CommandDispatcher(
     ICommandHandler<StageGitChangesRequest, GitMutationResponse> stageGitChangesCommand,
     ICommandHandler<UnstageGitChangesRequest, GitMutationResponse> unstageGitChangesCommand,
     ICommandHandler<DiscardGitChangesRequest, GitMutationResponse> discardGitChangesCommand,
-    ICommandHandler<CommitGitChangesRequest, CommitGitChangesResponse> commitGitChangesCommand) : ICommandDispatcher
-{
+    ICommandHandler<CommitGitChangesRequest, CommitGitChangesResponse> commitGitChangesCommand,
+    ICommandHandler<ListGitWorktreesRequest, ListGitWorktreesResponse> listGitWorktreesCommand,
+    ICommandHandler<CreateGitWorktreeRequest, CreateGitWorktreeResponse> createGitWorktreeCommand,
+    ICommandHandler<RemoveGitWorktreeRequest, RemoveGitWorktreeResponse> removeGitWorktreeCommand) : ICommandDispatcher
+    {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
     {
         ["SyncRepository"] = async (req, ct) => await syncRepositoryCommand.ExecuteAsync((SyncRepositoryRequest)req, ct),
@@ -87,6 +90,9 @@ public sealed class CommandDispatcher(
         ["UnstageGitChanges"] = async (req, ct) => await unstageGitChangesCommand.ExecuteAsync((UnstageGitChangesRequest)req, ct),
         ["DiscardGitChanges"] = async (req, ct) => await discardGitChangesCommand.ExecuteAsync((DiscardGitChangesRequest)req, ct),
         ["CommitGitChanges"] = async (req, ct) => await commitGitChangesCommand.ExecuteAsync((CommitGitChangesRequest)req, ct),
+        [AgentHubMethods.ListGitWorktrees] = async (req, ct) => await listGitWorktreesCommand.ExecuteAsync((ListGitWorktreesRequest)req, ct),
+        [AgentHubMethods.CreateGitWorktree] = async (req, ct) => await createGitWorktreeCommand.ExecuteAsync((CreateGitWorktreeRequest)req, ct),
+        [AgentHubMethods.RemoveGitWorktree] = async (req, ct) => await removeGitWorktreeCommand.ExecuteAsync((RemoveGitWorktreeRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

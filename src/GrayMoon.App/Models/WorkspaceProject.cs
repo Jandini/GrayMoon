@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace GrayMoon.App.Models;
 
-/// <summary>Persisted .csproj project within a repository for a specific workspace. Merge key: WorkspaceId + RepositoryId + ProjectName.</summary>
+/// <summary>Persisted .csproj project within a repository for a specific workspace Feature context. Merge key: WorkspaceFeatureContextId + RepositoryId + ProjectName.</summary>
 [Table("WorkspaceProjects")]
 public class WorkspaceProject
 {
@@ -14,6 +14,12 @@ public class WorkspaceProject
 
     [ForeignKey(nameof(WorkspaceId))]
     public Workspace? Workspace { get; set; }
+
+    /// <summary>Owning Feature context. Null until backfill/context merge assigns the special Workspace context.</summary>
+    public int? WorkspaceFeatureContextId { get; set; }
+
+    [ForeignKey(nameof(WorkspaceFeatureContextId))]
+    public WorkspaceFeatureContext? WorkspaceFeatureContext { get; set; }
 
     [Required]
     public int RepositoryId { get; set; }

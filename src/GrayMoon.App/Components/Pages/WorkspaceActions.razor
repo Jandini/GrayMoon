@@ -2,6 +2,7 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using GrayMoon.App.Models
 @using GrayMoon.App.Components.Shared
+@using GrayMoon.App.Components.Features
 @using Microsoft.AspNetCore.Components.Web
 @using WorkspaceModel = GrayMoon.App.Models.Workspace
 
@@ -129,7 +130,10 @@
                     </div>
                 }
             </div>
-            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
+            <div class="d-flex gap-2 align-items-center workspace-repos-header-actions flex-wrap">
+                <WorkspaceContextBar WorkspaceId="WorkspaceId"
+                                     SelectedContextId="_selectedContextId"
+                                     SelectedContextIdChanged="OnSelectedContextChangedAsync" />
                 <div class="workspace-grid-search-wrapper">
                     <FilterSearchInput @bind-Value="searchTerm"
                                        InputId="workspace-actions-search"

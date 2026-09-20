@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Data;
 
-public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
     public DbSet<Connector> Connectors => Set<Connector>();
     public DbSet<Repository> Repositories => Set<Repository>();
@@ -21,6 +21,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Setting> Settings => Set<Setting>();
     public DbSet<WorkspaceGitRepositoryStatus> WorkspaceGitRepositoryStatuses => Set<WorkspaceGitRepositoryStatus>();
     public DbSet<WorkspaceGitChangeEntry> WorkspaceGitChangeEntries => Set<WorkspaceGitChangeEntry>();
+    public DbSet<WorkspaceFeature> WorkspaceFeatures => Set<WorkspaceFeature>();
+    public DbSet<WorkspaceFeatureContext> WorkspaceFeatureContexts => Set<WorkspaceFeatureContext>();
+    public DbSet<WorkspaceFeatureRepository> WorkspaceFeatureRepositories => Set<WorkspaceFeatureRepository>();
+    public DbSet<WorkspaceRepositoryContextState> WorkspaceRepositoryContextStates => Set<WorkspaceRepositoryContextState>();
+    public DbSet<WorkspaceSelectedFeatureContext> WorkspaceSelectedFeatureContexts => Set<WorkspaceSelectedFeatureContext>();
+    public DbSet<WorkspaceRepositoryContextPullRequest> WorkspaceRepositoryContextPullRequests => Set<WorkspaceRepositoryContextPullRequest>();
+    public DbSet<WorkspaceRepositoryContextAction> WorkspaceRepositoryContextActions => Set<WorkspaceRepositoryContextAction>();
+    public DbSet<WorkspaceGitContextRepositoryStatus> WorkspaceGitContextRepositoryStatuses => Set<WorkspaceGitContextRepositoryStatus>();
+    public DbSet<WorkspaceGitContextChangeEntry> WorkspaceGitContextChangeEntries => Set<WorkspaceGitContextChangeEntry>();
+    public DbSet<WorkspaceFileContextState> WorkspaceFileContextStates => Set<WorkspaceFileContextState>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -130,6 +140,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             entity.Property(workspace => workspace.ExcludeAiWorkflows)
                 .HasDefaultValue(true);
+
+            entity.Property(workspace => workspace.ManagedFeatureStorageRoot)
+                .HasMaxLength(1000);
         });
 
         modelBuilder.Entity<WorkspaceRepositoryLink>(entity =>
@@ -210,8 +223,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<WorkspaceProject>(entity =>
         {
             entity.HasKey(p => p.ProjectId);
+            entity.HasIndex(p => new { p.WorkspaceFeatureContextId, p.RepositoryId, p.ProjectName })
+                .IsUnique()
+                .HasDatabaseName("IX_WorkspaceProjects_Context_Repo_Name");
+
             entity.HasIndex(p => new { p.WorkspaceId, p.RepositoryId, p.ProjectName })
-                .IsUnique();
+                .HasDatabaseName("IX_WorkspaceProjects_Workspace_Repo_Name");
 
             entity.HasIndex(p => new { p.WorkspaceId, p.ProjectName, p.ProjectId })
                 .HasDatabaseName("IX_WorkspaceProjects_WorkspaceId_ProjectName_ProjectId");
@@ -239,6 +256,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasOne(p => p.Workspace)
                 .WithMany()
                 .HasForeignKey(p => p.WorkspaceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(p => p.WorkspaceFeatureContext)
+                .WithMany()
+                .HasForeignKey(p => p.WorkspaceFeatureContextId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasOne(p => p.Repository)
@@ -352,7 +374,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.ToTable("WorkspaceFileLineStatuses");
             entity.HasKey(s => s.StatusId);
             entity.Property(s => s.StatusId).ValueGeneratedOnAdd();
-            entity.HasIndex(s => new { s.WorkspaceId, s.RepositoryId, s.FilePath, s.TokenName }).IsUnique();
+            entity.HasIndex(s => new { s.WorkspaceFeatureContextId, s.RepositoryId, s.FilePath, s.TokenName }).IsUnique()
+                .HasDatabaseName("IX_WorkspaceFileLineStatuses_Context_Repo_Path_Token");
             entity.Property(s => s.FilePath).IsRequired().HasMaxLength(2000);
             entity.Property(s => s.FileName).IsRequired().HasMaxLength(260);
             entity.Property(s => s.TokenName).IsRequired().HasMaxLength(260);
@@ -418,5 +441,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(e => e.WorkspaceRepositoryId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+
+        ConfigureFeatureEntities(modelBuilder);
     }
 }

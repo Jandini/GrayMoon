@@ -203,6 +203,12 @@ public sealed class WorkspaceRepository(
 
     public async Task AddRepositoriesAsync(int workspaceId, IReadOnlyCollection<int> repositoryIds, CancellationToken cancellationToken = default)
     {
+        if (await _dbContext.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId, cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "Cannot add Workspace repositories while Features exist. Remove Features first.");
+        }
+
         var workspace = await _dbContext.Workspaces
             .Include(w => w.Repositories)
             .FirstOrDefaultAsync(w => w.WorkspaceId == workspaceId, cancellationToken);
@@ -232,6 +238,12 @@ public sealed class WorkspaceRepository(
 
     private async Task ReplaceRepositoriesAsync(AppDbContext db, int workspaceId, IReadOnlyCollection<int> repositoryIds)
     {
+        if (await db.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId))
+        {
+            throw new InvalidOperationException(
+                "Cannot change Workspace repository membership while Features exist. Remove Features first.");
+        }
+
         await using var transaction = await db.Database.BeginTransactionAsync();
 
         var current = await db.WorkspaceRepositories

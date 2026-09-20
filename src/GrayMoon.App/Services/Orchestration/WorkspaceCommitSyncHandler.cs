@@ -7,6 +7,8 @@ using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
+using GrayMoon.Application.Features;
+
 namespace GrayMoon.App.Services.Orchestration;
 
 /// <summary>
@@ -24,6 +26,8 @@ public sealed class WorkspaceCommitSyncHandler(
     WorkspaceRepositoryStateWriter stateWriter,
     IHubContext<WorkspaceSyncHub> hubContext,
     IServiceScopeFactory serviceScopeFactory,
+    IWorkspaceFeatureContextResolver contextResolver,
+    IWorkspaceContextPathResolver pathResolver,
     ILogger<WorkspaceCommitSyncHandler> logger)
 {
     public async Task CommitSyncAsync(
@@ -59,10 +63,11 @@ public sealed class WorkspaceCommitSyncHandler(
         try
         {
             await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
-            var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+            var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
             var args = new
             {
-                workspaceName = workspace.Name,
+                workspaceName = workspaceFolderName,
                 repositoryId = repo.RepositoryId,
                 repositoryName = repo.RepositoryName,
                 bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),
@@ -130,7 +135,8 @@ public sealed class WorkspaceCommitSyncHandler(
             return;
         }
 
-        var workspaceRoot = await workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspace.WorkspaceId, cancellationToken);
+            var (workspaceRoot, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(specialContextId, cancellationToken);
         var total = repositoryIds.Count;
         var completedCount = 0;
 
@@ -156,7 +162,7 @@ public sealed class WorkspaceCommitSyncHandler(
 
                 var args = new
                 {
-                    workspaceName = workspace.Name,
+                    workspaceName = workspaceFolderName,
                     repositoryId = repo.RepositoryId,
                     repositoryName = repo.RepositoryName,
                     bearerToken = ConnectorHelpers.UnprotectToken(repo.Connector?.UserToken),

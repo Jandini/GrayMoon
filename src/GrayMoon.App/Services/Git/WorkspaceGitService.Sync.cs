@@ -29,8 +29,9 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
-        await _workspaceService.CreateDirectoryAsync(workspace.Name, workspaceRoot, cancellationToken);
+        var configuredRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        await _workspaceService.CreateDirectoryAsync(workspace.Name, configuredRoot, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
 
         var repos = workspace.Repositories
             .Select(link => link.Repository)
@@ -64,7 +65,7 @@ public sealed partial class WorkspaceGitService
             {
                 var args = new
                 {
-                    workspaceName = workspace.Name,
+                    workspaceName = workspaceFolderName,
                     repositoryId = repo.RepositoryId,
                     repositoryName = repo.RepositoryName,
                     cloneUrl = repo.CloneUrl,
@@ -134,8 +135,8 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             return (false, "Workspace not found.");
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
-        var response = await _agentBridge.SendCommandAsync("RefreshRepositoryVersion", new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, repositoryId = repo.RepositoryId, workspaceRoot }, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
+        var response = await _agentBridge.SendCommandAsync("RefreshRepositoryVersion", new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, repositoryId = repo.RepositoryId, workspaceRoot }, cancellationToken);
         if (!response.Success)
         {
             var err = response.Error ?? "Refresh version failed.";
@@ -178,14 +179,14 @@ public sealed partial class WorkspaceGitService
         if (workspaceRepos.Count == 0)
             return result;
 
-        var workspaceRoot = await _workspaceService.GetRootPathForWorkspaceAsync(workspace, cancellationToken);
+        var (workspaceRoot, workspaceFolderName) = await ResolveAgentPathArgsAsync(workspace.WorkspaceId, cancellationToken);
         foreach (var wr in workspaceRepos)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var repo = wr.Repository;
             if (repo == null) continue;
 
-            var response = await _agentBridge.SendCommandAsync("GetRepositoryVersion", new { workspaceName = workspace.Name, repositoryName = repo.RepositoryName, workspaceRoot }, cancellationToken);
+            var response = await _agentBridge.SendCommandAsync("GetRepositoryVersion", new { workspaceName = workspaceFolderName, repositoryName = repo.RepositoryName, workspaceRoot }, cancellationToken);
             RepoSyncStatus status;
             if (!response.Success || response.Data == null)
                 status = RepoSyncStatus.Error;

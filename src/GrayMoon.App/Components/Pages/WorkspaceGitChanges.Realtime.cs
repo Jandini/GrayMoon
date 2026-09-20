@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR.Client;
+using GrayMoon.Application.Features;
 
 namespace GrayMoon.App.Components.Pages;
 
@@ -18,6 +19,16 @@ public sealed partial class WorkspaceGitChanges
                 {
                     return;
                 }
+
+                await InvokeAsync(LoadAsync);
+            });
+
+            _hubConnection.On<int, int>("ContextGitChangesUpdated", async (workspaceId, contextId) =>
+            {
+                if (workspaceId != WorkspaceId || _disposed)
+                    return;
+                if (_selectedContextId is WorkspaceFeatureContextId selected && selected.Value != contextId)
+                    return;
 
                 await InvokeAsync(LoadAsync);
             });

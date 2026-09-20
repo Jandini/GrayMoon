@@ -42,10 +42,10 @@ public sealed class GitChangesSnapshotPublisher : IHostedService, IDisposable
             return;
         }
 
-        _ = PublishAsync(workspaceId, repositoryId, snapshot);
+        _ = PublishAsync(workspaceId, repositoryId, repoPath, snapshot);
     }
 
-    private async Task PublishAsync(int workspaceId, int repositoryId, GitChangeSnapshot snapshot)
+    private async Task PublishAsync(int workspaceId, int repositoryId, string repositoryPath, GitChangeSnapshot snapshot)
     {
         var connection = _hubProvider.Connection;
         if (connection?.State != HubConnectionState.Connected)
@@ -59,6 +59,7 @@ public sealed class GitChangesSnapshotPublisher : IHostedService, IDisposable
             {
                 WorkspaceId = workspaceId,
                 RepositoryId = repositoryId,
+                RepositoryPath = repositoryPath,
                 Snapshot = snapshot,
             };
             await connection.InvokeAsync(AgentHubMethods.GitChangesSnapshotUpdated, notification);

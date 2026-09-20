@@ -1,4 +1,5 @@
 using GrayMoon.Agent.Models;
+using GrayMoon.Common.Git;
 
 namespace GrayMoon.Agent.Abstractions;
 
@@ -77,4 +78,30 @@ public interface IGitService
     bool DirectoryExists(string path);
     string[] GetDirectories(string path);
     void WriteSyncHooks(string repoPath, int workspaceId, int repositoryId);
+
+    /// <summary>Lists worktrees for the repository at <paramref name="mainRepositoryPath"/> via <c>git worktree list --porcelain</c>.</summary>
+    Task<(bool Success, IReadOnlyList<GitWorktreeInfo> Worktrees, string? ErrorCode, string? ErrorMessage)> ListWorktreesAsync(
+        string mainRepositoryPath,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Creates a linked worktree with a new branch from <paramref name="baseCommitSha"/> (offline-safe).
+    /// Never passes <c>--force</c>. Idempotent when the expected path already has the expected branch.
+    /// </summary>
+    Task<(bool Success, GitWorktreeInfo? Worktree, bool AlreadyExisted, string? ErrorCode, string? ErrorMessage)> CreateWorktreeAsync(
+        string mainRepositoryPath,
+        string worktreePath,
+        string branchName,
+        string baseCommitSha,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Removes a linked worktree. When <paramref name="force"/> is false uses a clean remove;
+    /// force is only for callers that have already authorized discard of dirty state.
+    /// </summary>
+    Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage)> RemoveWorktreeAsync(
+        string mainRepositoryPath,
+        string worktreePath,
+        bool force,
+        CancellationToken ct);
 }

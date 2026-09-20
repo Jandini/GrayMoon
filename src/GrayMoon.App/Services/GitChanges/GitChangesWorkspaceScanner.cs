@@ -1,4 +1,5 @@
 using GrayMoon.App.Data;
+using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -45,7 +46,8 @@ public sealed class GitChangesWorkspaceScanner(
         }
 
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var workspaceService = scope.ServiceProvider.GetRequiredService<WorkspaceService>();
+        var contextResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
+        var pathResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceContextPathResolver>();
         var agentClient = scope.ServiceProvider.GetRequiredService<IGitChangesAgentClient>();
         var writeQueue = scope.ServiceProvider.GetRequiredService<WorkspaceGitChangesWriteQueue>();
         var pushHandler = scope.ServiceProvider.GetRequiredService<GitChangesSnapshotPushHandler>();
@@ -63,6 +65,9 @@ public sealed class GitChangesWorkspaceScanner(
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
+        var special = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        var (root, workspaceFolderName) = await pathResolver.GetAgentWorkspaceArgsAsync(special, cancellationToken);
+
         var targets = new List<MonitorTarget>();
         foreach (var link in links)
         {
@@ -71,13 +76,12 @@ public sealed class GitChangesWorkspaceScanner(
                 continue;
             }
 
-            var root = await workspaceService.GetRootPathForWorkspaceAsync(link.Workspace, cancellationToken);
             if (string.IsNullOrWhiteSpace(root))
             {
                 continue;
             }
 
-            targets.Add(new MonitorTarget(root, link.Workspace.Name, link.Repository.RepositoryName, link.WorkspaceId, link.RepositoryId));
+            targets.Add(new MonitorTarget(root, workspaceFolderName, link.Repository.RepositoryName, link.WorkspaceId, link.RepositoryId));
         }
 
         if (targets.Count == 0)
@@ -107,6 +111,7 @@ public sealed class GitChangesWorkspaceScanner(
                     {
                         WorkspaceId = target.WorkspaceId,
                         RepositoryId = target.RepositoryId,
+                        RepositoryPath = target.Root,
                         Snapshot = result.Snapshot,
                     };
 
