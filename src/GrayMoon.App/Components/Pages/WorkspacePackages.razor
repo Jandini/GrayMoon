@@ -42,8 +42,7 @@
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions flex-wrap">
                 <WorkspaceContextBar WorkspaceId="WorkspaceId"
                                      SelectedContextId="_selectedContextId"
-                                     SelectedContextIdChanged="OnSelectedContextChangedAsync" />
-                <div class="workspace-grid-search-wrapper">
+                                     SelectedContextIdChanged="OnSelectedContextChangedAsync">
                     <FilterSearchInput @bind-Value="searchTerm"
                                        InputId="workspace-packages-search"
                                        InputAdditionalClass="workspace-grid-search"
@@ -51,7 +50,7 @@
                                        Disabled="@(isLoading || packages.Count == 0)"
                                        OnKeyDown="OnSearchKeyDown"
                                        OnClear="ClearSearchFilter" />
-                </div>
+                </WorkspaceContextBar>
                 <button class="btn btn-outline-primary"
                         @onclick="SyncRegistriesAsync"
                         disabled="@(isSyncingRegistries || packages.Count == 0)">

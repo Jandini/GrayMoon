@@ -1,63 +1,71 @@
 ﻿@using GrayMoon.Application.Features
 @inject IWorkspaceFeatureContextResolver ContextResolver
-@inject IWorkspaceFeatureOperations FeatureOperations
 @inject IWorkspaceSelectedFeatureContextService SelectedContextService
 @inject IWorkspaceNativeLaunchService NativeLaunch
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 
-<div class="workspace-feature-selector d-flex align-items-center gap-1">
-    <label class="form-label mb-0 text-muted small text-nowrap" for="@InputId">Context</label>
-    <div class="position-relative flex-grow-1">
-        <input id="@InputId"
-               class="form-control form-control-sm workspace-feature-selector__input"
-               value="@_filter"
-               placeholder="Workspace or Feature…"
-               disabled="@Disabled"
-               autocomplete="off"
-               @oninput="OnFilterInput"
-               @onfocus="OpenDropdown"
-               @onkeydown="OnKeyDown"
-               @onclick:stopPropagation />
-        @if (_open)
-        {
-            <div class="workspace-feature-selector__backdrop" @onclick="CloseDropdown"></div>
-            <ul class="dropdown-menu show shadow workspace-feature-selector__menu" role="listbox">
-                @foreach (var option in FilteredOptions)
-                {
-                    <li>
-                        <button type="button"
-                                class="dropdown-item @(option.ContextId.Value == SelectedContextId?.Value ? "active" : "")"
-                                role="option"
-                                @onclick="() => SelectAsync(option)">
-                            @(option.IsSpecialWorkspace ? "Workspace" : option.FeatureName)
-                            @if (!option.IsSpecialWorkspace && !string.IsNullOrEmpty(option.LifecycleState) && option.LifecycleState != "Ready")
-                            {
-                                <span class="text-muted small"> (@option.LifecycleState)</span>
-                            }
-                        </button>
-                    </li>
-                }
-                @if (CanOfferCreate)
-                {
-                    <li><hr class="dropdown-divider" /></li>
-                    <li>
-                        <button type="button" class="dropdown-menu-item dropdown-item" @onclick="RequestCreate">
-                            Create Feature "@_filter.Trim()"…
-                        </button>
-                    </li>
-                }
-                @if (_desktopAvailable && SelectedContextId is not null)
-                {
-                    <li><hr class="dropdown-divider" /></li>
-                    <li><button type="button" class="dropdown-item" @onclick='() => LaunchAsync("openInCursor")'>Open in Cursor</button></li>
-                    <li><button type="button" class="dropdown-item" @onclick='() => LaunchAsync("openInVsCode")'>Open in VS Code</button></li>
-                    <li><button type="button" class="dropdown-item" @onclick='() => LaunchAsync("openInTerminal")'>Open in Terminal</button></li>
-                    <li><button type="button" class="dropdown-item" @onclick='() => LaunchAsync("showInExplorer")'>Show in Explorer</button></li>
-                }
-            </ul>
-        }
-    </div>
+<div class="btn-group position-relative workspace-feature-selector">
+    <button type="button"
+            id="@InputId"
+            class="workspace-feature-selector__trigger@(_open ? " is-open" : "")"
+            disabled="@Disabled"
+            aria-label="Context"
+            aria-expanded="@_open"
+            aria-haspopup="menu"
+            @onclick="ToggleDropdown"
+            @onclick:stopPropagation>
+        <span class="workspace-feature-selector__label">@SelectedLabel</span>
+        <span class="workspace-feature-selector__caret" aria-hidden="true"></span>
+    </button>
+    @if (_open)
+    {
+        <div class="workspace-feature-selector__backdrop" @onclick="CloseDropdown"></div>
+        <ul class="dropdown-menu show shadow branch-menu-list workspace-repository-actions-menu workspace-feature-selector__menu"
+            role="menu">
+            @foreach (var option in _options)
+            {
+                <li>
+                    <button type="button"
+                            class="dropdown-item @(IsSelected(option) ? "active" : "")"
+                            role="menuitem"
+                            disabled="@(!CanSelect(option))"
+                            @onclick="() => SelectAsync(option)">
+                        @DisplayName(option)
+                        @if (!option.IsSpecialWorkspace && !string.IsNullOrEmpty(option.LifecycleState) && option.LifecycleState != "Ready")
+                        {
+                            <span class="text-muted small"> (@option.LifecycleState)</span>
+                        }
+                    </button>
+                </li>
+            }
+            @if (OnRequestCreateFeature.HasDelegate)
+            {
+                <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                <li>
+                    <button type="button" class="dropdown-item" role="menuitem" @onclick="RequestCreate">
+                        Create Feature...
+                    </button>
+                </li>
+            }
+            @if (_desktopAvailable && SelectedContextId is not null)
+            {
+                <li><hr class="dropdown-divider branch-menu-divider" /></li>
+                <li class="workspace-feature-selector__flyout">
+                    <button type="button" class="dropdown-item workspace-feature-selector__flyout-item" role="menuitem">
+                        Open
+                        <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                    </button>
+                    <ul class="dropdown-menu show shadow workspace-feature-selector__submenu" role="menu">
+                        <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("openInCursor")'>Open in Cursor</button></li>
+                        <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("openInVsCode")'>Open in VS Code</button></li>
+                        <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("openInTerminal")'>Open in Terminal</button></li>
+                        <li><button type="button" class="dropdown-item" role="menuitem" @onclick='() => LaunchAsync("showInExplorer")'>Show in Explorer</button></li>
+                    </ul>
+                </li>
+            }
+        </ul>
+    }
 </div>
 
 @code {
@@ -69,38 +77,18 @@
     [Parameter] public string InputId { get; set; } = "workspace-feature-selector";
 
     private readonly List<WorkspaceFeatureContextInfo> _options = [];
-    private string _filter = "";
     private bool _open;
     private bool _loaded;
     private bool _desktopAvailable;
 
-    private IEnumerable<WorkspaceFeatureContextInfo> FilteredOptions
+    private string SelectedLabel
     {
         get
         {
-            if (string.IsNullOrWhiteSpace(_filter))
-                return _options;
-            var q = _filter.Trim();
-            return _options.Where(o =>
-                o.IsSpecialWorkspace
-                    ? "Workspace".Contains(q, StringComparison.OrdinalIgnoreCase)
-                    : (o.FeatureName?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false));
-        }
-    }
-
-    private bool CanOfferCreate
-    {
-        get
-        {
-            var name = _filter.Trim();
-            if (string.IsNullOrWhiteSpace(name))
-                return false;
-            if (_options.Any(o => !o.IsSpecialWorkspace && string.Equals(o.FeatureName, name, StringComparison.OrdinalIgnoreCase)))
-                return false;
-            return name.IndexOfAny([' ', '~', '^', ':', '?', '*', '[', '\\']) < 0
-                   && !name.Contains("..", StringComparison.Ordinal)
-                   && !name.StartsWith('/')
-                   && !name.EndsWith('/');
+            var selected = _options.FirstOrDefault(o => IsSelected(o));
+            if (selected is null)
+                return "Context";
+            return DisplayName(selected);
         }
     }
 
@@ -111,8 +99,6 @@
             await ReloadAsync();
             _loaded = true;
         }
-
-        SyncFilterLabel();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -130,6 +116,25 @@
             _desktopAvailable = false;
         }
     }
+
+    private void ToggleDropdown()
+    {
+        if (Disabled)
+            return;
+        _open = !_open;
+    }
+
+    private void CloseDropdown() => _open = false;
+
+    private bool IsSelected(WorkspaceFeatureContextInfo option) =>
+        SelectedContextId is not null && option.ContextId.Value == SelectedContextId.Value.Value;
+
+    private static string DisplayName(WorkspaceFeatureContextInfo option) =>
+        option.IsSpecialWorkspace ? "Workspace" : (option.FeatureName ?? "Feature");
+
+    private static bool CanSelect(WorkspaceFeatureContextInfo option) =>
+        option.IsSpecialWorkspace
+        || string.Equals(option.LifecycleState, "Ready", StringComparison.OrdinalIgnoreCase);
 
     private async Task LaunchAsync(string method)
     {
@@ -149,72 +154,22 @@
         CloseDropdown();
     }
 
-    private void SyncFilterLabel()
-    {
-        if (_open)
-            return;
-        var selected = _options.FirstOrDefault(o => SelectedContextId is not null && o.ContextId.Value == SelectedContextId.Value.Value);
-        _filter = selected is null
-            ? ""
-            : selected.IsSpecialWorkspace ? "Workspace" : (selected.FeatureName ?? "");
-    }
-
     private async Task ReloadAsync()
     {
         _options.Clear();
         var all = await ContextResolver.ListForWorkspaceAsync(WorkspaceId);
         _options.AddRange(all.Where(c => c.IsSpecialWorkspace || string.Equals(c.LifecycleState, "Ready", StringComparison.OrdinalIgnoreCase)
                                                                || string.Equals(c.LifecycleState, "NeedsRepair", StringComparison.OrdinalIgnoreCase)));
-        SyncFilterLabel();
-    }
-
-    private void OnFilterInput(ChangeEventArgs e)
-    {
-        _filter = e.Value?.ToString() ?? "";
-        _open = true;
-    }
-
-    private void OpenDropdown() => _open = true;
-    private void CloseDropdown()
-    {
-        _open = false;
-        SyncFilterLabel();
-    }
-
-    private async Task OnKeyDown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Escape")
-        {
-            CloseDropdown();
-            return;
-        }
-
-        if (e.Key != "Enter")
-            return;
-
-        var exact = FilteredOptions.FirstOrDefault(o =>
-            o.IsSpecialWorkspace
-                ? string.Equals(_filter.Trim(), "Workspace", StringComparison.OrdinalIgnoreCase)
-                : string.Equals(o.FeatureName, _filter.Trim(), StringComparison.OrdinalIgnoreCase));
-        if (exact is not null)
-        {
-            await SelectAsync(exact);
-            return;
-        }
-
-        if (CanOfferCreate)
-            await RequestCreate();
     }
 
     private async Task SelectAsync(WorkspaceFeatureContextInfo option)
     {
-        if (!option.IsSpecialWorkspace && !string.Equals(option.LifecycleState, "Ready", StringComparison.OrdinalIgnoreCase))
+        if (!CanSelect(option))
             return;
 
         await SelectedContextService.SetSelectedAsync(WorkspaceId, option.ContextId);
         await SelectedContextIdChanged.InvokeAsync(option.ContextId);
         _open = false;
-        SyncFilterLabel();
 
         var uri = new Uri(Navigation.Uri);
         var path = uri.GetLeftPart(UriPartial.Path);
@@ -226,9 +181,8 @@
 
     private async Task RequestCreate()
     {
-        var name = _filter.Trim();
         _open = false;
-        await OnRequestCreateFeature.InvokeAsync(name);
+        await OnRequestCreateFeature.InvokeAsync("");
     }
 
     public Task RefreshAsync() => ReloadAsync();

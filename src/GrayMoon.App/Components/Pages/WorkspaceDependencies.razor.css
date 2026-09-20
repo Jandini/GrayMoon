@@ -39,7 +39,8 @@
     min-width: 0;
 }
 
-.workspace-dependencies-header .workspace-grid-search-wrapper {
+.workspace-dependencies-header .workspace-grid-search-wrapper,
+.workspace-dependencies-header .workspace-context-search {
     min-width: 0;
     flex: 1 1 0%;
 }

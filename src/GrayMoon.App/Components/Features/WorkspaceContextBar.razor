@@ -1,7 +1,7 @@
 ﻿@using GrayMoon.Application.Features
 @using GrayMoon.App.Components.Features
 
-<div class="workspace-context-bar d-flex gap-2 align-items-center flex-wrap">
+<div class="workspace-context-search">
     @if (WorkspaceId > 0)
     {
         <WorkspaceFeatureSelector WorkspaceId="WorkspaceId"
@@ -10,7 +10,12 @@
                                  OnRequestCreateFeature="OnRequestCreateFeature"
                                  Disabled="Disabled" />
     }
-    @ChildContent
+    @if (ChildContent is not null)
+    {
+        <div class="workspace-context-search__field">
+            @ChildContent
+        </div>
+    }
 </div>
 
 @code {

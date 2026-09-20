@@ -133,8 +133,7 @@
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions flex-wrap">
                 <WorkspaceContextBar WorkspaceId="WorkspaceId"
                                      SelectedContextId="_selectedContextId"
-                                     SelectedContextIdChanged="OnSelectedContextChangedAsync" />
-                <div class="workspace-grid-search-wrapper">
+                                     SelectedContextIdChanged="OnSelectedContextChangedAsync">
                     <FilterSearchInput @bind-Value="searchTerm"
                                        InputId="workspace-actions-search"
                                        InputAdditionalClass="workspace-grid-search"
@@ -142,7 +141,7 @@
                                        Disabled="@(isLoading || rows.Count == 0)"
                                        OnKeyDown="OnSearchKeyDown"
                                        OnClear="ClearSearchFilter" />
-                </div>
+                </WorkspaceContextBar>
                 @if (HasFailedRows)
                 {
                     <div class="btn-group position-relative">

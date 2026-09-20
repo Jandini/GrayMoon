@@ -49,8 +49,7 @@
             <div class="d-flex gap-2 align-items-center workspace-repos-header-actions deps-header-actions flex-wrap">
                 <WorkspaceContextBar WorkspaceId="WorkspaceId"
                                      SelectedContextId="_selectedContextId"
-                                     SelectedContextIdChanged="OnSelectedContextChangedAsync" />
-                <div class="workspace-grid-search-wrapper">
+                                     SelectedContextIdChanged="OnSelectedContextChangedAsync">
                     <FilterSearchInput Value="@searchTerm"
                                        ValueChanged="OnSearchValueChangedAsync"
                                        InputId="workspace-dependencies-search"
@@ -59,7 +58,7 @@
                                        Disabled="@(isLoading || graph == null || graph.Nodes.Count == 0)"
                                        OnKeyDown="OnSearchKeyDown"
                                        OnClear="ClearSearchFilter" />
-                </div>
+                </WorkspaceContextBar>
                 @if (graph != null && graph.Nodes.Count > 0)
                 {
                     <div class="deps-filter-dropdown @(showFilterMenu ? "show" : "")">

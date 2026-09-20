@@ -1025,7 +1025,9 @@ input[list] {
     color: var(--text-primary);
 }
 
-.dropdown-item:hover {
+.dropdown-item:hover,
+.dropdown-item:focus,
+.dropdown-item:focus-visible {
     background-color: var(--bg-hover);
     color: var(--text-primary);
 }

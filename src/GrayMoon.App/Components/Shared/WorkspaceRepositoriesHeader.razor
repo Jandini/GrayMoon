@@ -37,15 +37,11 @@
         }
     </div>
     <div class="d-flex gap-2 align-items-center workspace-repos-header-actions">
-        @if (WorkspaceId > 0)
-        {
-            <WorkspaceFeatureSelector WorkspaceId="WorkspaceId"
-                                     SelectedContextId="SelectedContextId"
-                                     SelectedContextIdChanged="OnSelectedContextChanged"
-                                     OnRequestCreateFeature="OnRequestCreateFeature"
-                                     Disabled="@(IsSyncing || IsUpdating || IsPushing)" />
-        }
-        <div class="workspace-grid-search-wrapper">
+        <WorkspaceContextBar WorkspaceId="WorkspaceId"
+                             SelectedContextId="SelectedContextId"
+                             SelectedContextIdChanged="OnSelectedContextChanged"
+                             OnRequestCreateFeature="OnRequestCreateFeature"
+                             Disabled="@(IsSyncing || IsUpdating || IsPushing)">
             <FilterSearchInput Value="@(SearchTerm ?? string.Empty)"
                                ValueChanged="OnSearchValueChangedAsync"
                                InputId="workspace-repos-search"
@@ -53,7 +49,7 @@
                                Placeholder="Search repositories…"
                                OnKeyDown="OnSearchKeyDown"
                                OnClear="OnClearSearch" />
-        </div>
+        </WorkspaceContextBar>
         <div class="btn-group position-relative">
             <button class="btn @(HasCreatablePr ? "btn-warning" : "btn-outline-secondary")"
                     @onclick="HandleBranchPrimaryClick"
