@@ -46,13 +46,9 @@
     border-left-color: rgba(255, 255, 255, 0.4);
 }
 
-/* Create PR (yellow) + Branch dropdown (outline): keep the split seam readable without restyling the caret. */
+/* Yellow primary (Create PR, Push) + outline caret: keep the split seam readable without restyling the caret. */
 .btn-group > .btn-warning + .btn-outline-secondary.dropdown-toggle-split {
     border-left-color: rgba(0, 0, 0, 0.2);
-}
-
-.btn-group > .btn-warning + .btn-warning.dropdown-toggle-split {
-    border-left-color: #000;
 }
 
 .dropdown-item--level-only,
