@@ -31,6 +31,16 @@ public static class WorkspaceJobKeys
     public static string RepositoriesOverlayKey(int workspaceId)
         => NormalizeOverlayKey($"/workspaces/{workspaceId}");
 
+    public static string GitChangesPageKey(int workspaceId)
+        => NormalizeOverlayKey($"/workspaces/{workspaceId}/changes");
+
+    /// <summary>
+    /// Non-overlay status-scan key shared by Repositories and Changes so an on-open warm-up
+    /// and a later Changes Refresh coalesce instead of running two scans.
+    /// </summary>
+    public static string GitChangesScanKey(int workspaceId)
+        => GitChangesPageKey(workspaceId) + ":scan";
+
     public static bool OverlayMatches(string overlayKey, WorkspaceOperation operation)
         => TryGetWorkspaceId(overlayKey, out var workspaceId)
            && workspaceId == operation.WorkspaceId

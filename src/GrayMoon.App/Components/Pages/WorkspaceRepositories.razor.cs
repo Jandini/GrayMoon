@@ -34,6 +34,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         AgentQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         JobService.Changed += OnJobServiceChanged;
         _loadedWorkspaceId = WorkspaceId;
+        EnsureGitChangesActivation();
         var storedMode = await JSRuntime.InvokeAsync<string?>("graymoonStorageGet", SyncModeStorageKey);
         _quickFetchIsPrimary = storedMode == "quick-fetch";
         await LoadPendingRestoreScrollTopAsync();
@@ -71,6 +72,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         {
             return;
         }
+        EnsureGitChangesActivation();
         CancelBackgroundWork();
         await DetachVirtualScrollAsync();
         _loadedWorkspaceId = WorkspaceId;
@@ -97,6 +99,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         }
 
         _disposed = true;
+        ReleaseGitChangesActivation();
         StopPrPollingLoop();
         CancelBackgroundWork();
         AgentQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);

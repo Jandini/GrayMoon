@@ -71,12 +71,16 @@ DI scope. That means:
   as part of the same change, not a followup - it is a silent hazard for every
   other feature sharing that circuit, not just the one you are working on.
 
-## Commit message for the user
+## Commit message after each task
 
-When you finish work, or when suggesting/preparing a commit, always give a short
-commit message in a fenced code block so the user can copy it easily. Do not
-create the commit unless the user asks.
+After you finish a piece of work, always give a short commit message in a
+fenced code block so the user can copy it. Do this at the end of the reply,
+even if they did not ask for a commit. Do not create the commit unless they
+ask.
+
+Write one imperative sentence that says why the change exists, matching the
+repo's recent style (`Fix …`, `Add …`, `Keep …`).
 
 ```
-Short imperative summary of why the change exists.
+Fix the race that left the shared DbContext unusable after a failed merge
 ```

@@ -6,7 +6,7 @@ namespace GrayMoon.App.Services.GitChanges;
 /// <summary>
 /// Owns the Git Changes background monitoring policy. Per the feature's design, a repository's
 /// Agent-side <c>FileSystemWatcher</c> lease belongs to the workspace background service, not the
-/// browser page - opening or closing the Git Changes page must never directly start or stop
+/// browser page - opening or closing Repositories or Changes must never directly start or stop
 /// monitoring. This sweep periodically calls <c>GetGitChangeStatus</c> for every repository in every
 /// <i>actively viewed</i> workspace (per <see cref="IWorkspaceGitChangesActivityTracker"/>) - not every
 /// workspace in the database - which both seeds/renews the Agent's <c>GitRepositoryWatcherManager</c>

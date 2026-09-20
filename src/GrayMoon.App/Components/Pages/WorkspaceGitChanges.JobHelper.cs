@@ -1,4 +1,5 @@
 using GrayMoon.App.Services;
+using GrayMoon.App.Services.GitChanges;
 
 namespace GrayMoon.App.Components.Pages;
 
@@ -19,10 +20,10 @@ public sealed partial class WorkspaceGitChanges
     /// <summary>
     /// Sibling of <see cref="PageJobKey"/> that does not match the URL path, so BackgroundJobOverlay
     /// never shows LoadingOverlay for any Git Changes status rescan (empty-state, on-open warm-up, or
-    /// manual Refresh) - all three share this job key so the panel/tree stays visible the whole time,
-    /// and StartJob idempotency coalesces overlapping requests.
+    /// manual Refresh). Shared with Repositories via <see cref="WorkspaceJobKeys.GitChangesScanKey"/>
+    /// so StartJob idempotency coalesces overlapping requests.
     /// </summary>
-    private string ScanJobKey => PageJobKey + ":scan";
+    private string ScanJobKey => WorkspaceJobKeys.GitChangesScanKey(WorkspaceId);
 
     private bool IsJobRunning => JobService.IsRunning(PageJobKey);
     private bool IsScanRunning => JobService.IsRunning(ScanJobKey);
@@ -83,9 +84,9 @@ public sealed partial class WorkspaceGitChanges
     }
 
     /// <summary>
-    /// Non-overlay workspace scan under ScanJobKey - used by the empty-state Refresh, the on-open
-    /// warm-up scan, and the manual Refresh button, regardless of whether the tree already has
-    /// content. Survives page navigation (circuit-scoped BackgroundJobService); the empty-state UI
+    /// Non-overlay workspace scan under ScanJobKey - used by the empty-state Refresh and the
+    /// manual Refresh button (on-open warm-up is started by <see cref="IWorkspaceGitChangesActivation"/>).
+    /// Survives page navigation (circuit-scoped BackgroundJobService); the empty-state UI
     /// and the header's scan indicator both bind to IsScanRunning / ScanStatus when the page is
     /// mounted, so the panel is never fully hidden behind a rescan.
     /// </summary>
