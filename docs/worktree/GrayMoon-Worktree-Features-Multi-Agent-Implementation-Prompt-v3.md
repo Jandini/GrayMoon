@@ -1,4 +1,4 @@
-# GrayMoon Worktree Features — Multi-Agent Implementation Prompt
+# GrayMoon Worktree Features - Multi-Agent Implementation Prompt
 
 ## Role
 
@@ -131,17 +131,17 @@ Workspace import/repository management
 
 # Implementation Strategy
 
-Do NOT implement Features in one large pass.
+Implement Features as one continuous delivery. There is no product feature flag and no ship-Workspace-only-first gate.
 
-Use the waves from:
+Waves from the detailed design remain an internal sequencing aid only:
 
 ```text
 GrayMoon-Worktree-Features-Detailed-Implementation-Design.md
 ```
 
-A later wave must not start until the previous wave passes its gate.
+A later wave should not start until the previous wave's technical gate is satisfied within the same continuous effort.
 
-The Feature UI remains disabled until the existing special Workspace has been fully migrated and manually verified through the new context architecture.
+Sequence context migration ahead of Feature worktrees/UX for correctness, but complete both in the same continuous Features delivery.
 
 ---
 
@@ -150,7 +150,7 @@ The Feature UI remains disabled until the existing special Workspace has been fu
 Implement in this order:
 
 ```text
-Wave 0  baseline + feature flag
+Wave 0  baseline references (no product feature flag)
 Wave 1  additive schema + special Workspace context backfill
 Wave 2  context/path resolver + explicit application context
 Wave 3  context repository state writer + repository queries
@@ -160,7 +160,7 @@ Wave 6  Files/version-file observations
 Wave 7  PR/Actions/Git Changes/notifications/SignalR
 Wave 8  hierarchical operation locking
 Wave 9  all current Workspace pages through context architecture
-         STOP: full manual Workspace regression gate
+         full manual Workspace regression gate (same continuous delivery)
 Wave 10 Agent worktree primitives + backend Feature lifecycle + external worktree cleanup
 Wave 11 Feature UX + worktree-aware Branch dialog
 Wave 12 Desktop native launch actions
@@ -176,7 +176,7 @@ Do not move Feature creation earlier.
 
 ## Foundational waves are sequential
 
-Waves 1–4 have heavy overlap in:
+Waves 1-4 have heavy overlap in:
 
 ```text
 AppDbContext
@@ -947,23 +947,19 @@ Do not create parallel `Mcp*Service` domain logic.
 
 ---
 
-# Feature Flag
+# No Product Feature Flag
 
-Keep user-creatable Features disabled until Wave 11.
+There is no `WorkspaceFeaturesOptions.Enabled` (or equivalent) product flag.
 
-Foundational context migration must ship/run internally with:
+Do not add Wave 0 feature-flag scaffolding.
 
-```text
-Workspace only
-```
+Do not ship or leave Features disabled behind a config switch while foundational waves complete.
 
-through the new architecture first.
-
-Do not expose half-migrated Features.
+Implement Features in one continuous effort; waves are sequencing only.
 
 ---
 
-# Required Search Audit Before Enabling Features
+# Required Search Audit Before Feature Worktrees/UX
 
 Perform and report searches for:
 

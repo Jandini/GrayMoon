@@ -372,13 +372,13 @@ Important invariant:
 
 External Git-created collisions are treated as validation/reconciliation/recovery behavior. GrayMoon must not use force tricks to bypass Git's worktree branch protections.
 
-## Persistence strategy — approved
+## Persistence strategy - approved
 
 Use a low-risk **expand → migrate → switch → contract** approach.
 
 Do not mutate the existing model destructively in one step.
 
-The special Workspace should migrate onto the same context architecture **before actual Features are enabled**. This allows the new context model to be proven with existing behavior first.
+Within one continuous Features delivery, migrate the special Workspace onto the same context architecture before introducing Feature worktrees/UX. This proves the context model with existing behavior first. There is no product feature flag.
 
 ## Target persistence shape
 
@@ -511,26 +511,26 @@ Exact implementation may account for SQLite null semantics and the final table d
 
 ## Migration waves
 
-### Wave A — additive schema
+### Wave A - additive schema
 
 - add new context/Feature tables;
 - create one Workspace context row for every existing Workspace;
 - backfill context-state from current `WorkspaceRepositoryLink` mutable state;
 - do not change runtime behavior yet.
 
-### Wave B — execution-context abstraction
+### Wave B - execution-context abstraction
 
 Introduce context-aware identity/path resolution while the only active context is still Workspace. Existing behavior should remain identical.
 
-### Wave C — context-scoped persistence
+### Wave C - context-scoped persistence
 
 Move runtime reads/writes of mutable repository state to context-scoped state. Avoid indefinite dual-write.
 
-### Wave D — actual Feature enablement
+### Wave D - Feature worktrees and UX
 
-Only after Workspace behavior is proven through the new context architecture should `Kind = Feature` become available to users.
+Within the same continuous delivery, after Workspace behavior runs through the new context architecture, add `Kind = Feature` worktrees and user-facing Feature creation.
 
-This makes Features additive instead of rewriting GrayMoon and introducing worktrees simultaneously.
+This keeps Features additive instead of rewriting GrayMoon and introducing worktrees simultaneously. There is no separate product feature flag between Wave C and Wave D.
 
 ## Concurrency is per WorkspaceFeatureContext
 
@@ -552,7 +552,7 @@ Some structural operations still require a Workspace-wide lock, for example chan
 
 The design should explicitly support both **Workspace lock** and **WorkspaceFeatureContext lock** scopes.
 
-## Git Changes — reuse the merged architecture
+## Git Changes - reuse the merged architecture
 
 The merged Git Changes implementation already provides the right primitives for Features. The Agent has path-keyed `FileSystemWatcher` ownership, per-repository refresh trackers, debounce/coalescing, bounded scan concurrency, `GitChangesSnapshotUpdated` push back to the App, watcher lease/grace behavior, and activity-based monitoring rather than permanent global scanning.
 
@@ -704,7 +704,7 @@ These are not blockers for the master design but may be refined during implement
 - exact remote branch collision recovery UX;
 - exact repair/import flow for GrayMoon-managed worktrees with missing DB metadata;
 - whether Desktop remembers a preferred external launch tool;
-- exact inactive Feature watcher grace duration — initial direction is to reuse the existing Git Changes grace mechanism.
+- exact inactive Feature watcher grace duration - initial direction is to reuse the existing Git Changes grace mechanism.
 
 ## Core product model
 
@@ -750,7 +750,7 @@ GrayMoon simply selects which context it is currently showing. Switching the sel
 #
 # 49. Git Hook Attribution Is Context-Critical
 
-Git hook driven synchronization is a core GrayMoon behavior and must become Feature-context aware before Features are enabled.
+Git hook driven synchronization is a core GrayMoon behavior and must become Feature-context aware before Feature worktrees are used.
 
 Today, hook-driven sync effectively identifies a repository by:
 
@@ -862,7 +862,7 @@ The exact physical schema can be refined during detailed design, but the followi
 3. Workspace-level custom dependency declarations remain shared.
 4. Context-specific graph computation must merge shared custom dependencies with context-specific discovered/package/version-file-derived edges.
 5. Push, Update, Restore, and version synchronization must always use the selected `WorkspaceFeatureContext` graph.
-6. Existing Workspace behavior must be migrated first and remain functionally identical before actual Features are enabled.
+6. Existing Workspace behavior must be migrated first and remain functionally identical before Feature worktrees/UX land in the same continuous delivery.
 7. Generated package handling must be reviewed explicitly because some generated dependencies are configuration-derived while others depend on the current checked-out file graph.
 
 This is a **core implementation requirement**, not an optimization.
@@ -1011,10 +1011,10 @@ At minimum, the detailed design should contain dedicated work for:
 7. context-aware PR / Actions / Git Changes persistence
 8. context-aware job locking and notifications
 9. migration of existing Workspace runtime onto the new context architecture
-10. only then enable real Feature creation/worktrees
+10. Feature creation/worktrees as the next sequenced step in the same continuous delivery
 ```
 
-No Feature should be user-creatable until existing Workspace behavior has successfully run through the new context-aware state, hook, and project/dependency infrastructure.
+Sequence Feature creation/worktrees after existing Workspace behavior has successfully run through the new context-aware state, hook, and project/dependency infrastructure. There is no product feature flag; this is technical ordering within one continuous Features delivery.
 
 
 
@@ -1529,7 +1529,7 @@ The detailed implementation design may proceed under these fixed constraints:
 5. Feature worktrees live under GrayMoon-managed .graymoon infrastructure.
 6. Workspace configuration is shared; checkout-derived state is context-specific.
 7. WorkspaceFeatureContext is the authoritative execution context.
-8. Existing Workspace is migrated onto the new context model before real Features are enabled.
+8. Existing Workspace is migrated onto the new context model before Feature worktrees/UX land (same continuous delivery; no product feature flag).
 9. Mutable repository state, projects, dependency graph, PRs, Actions, Git Changes, version-file observations, and pending notifications are context-specific.
 10. Git ref inventory is separated from context-specific HEAD/checkout state.
 11. Git hooks and Agent sync notifications are context-attributed.
@@ -1547,7 +1547,7 @@ The detailed implementation design may proceed under these fixed constraints:
 23. non-GM linked worktree branches are shown as `Worktree` and use a safe external-worktree cleanup flow.
 ```
 
-No user-creatable worktree Feature should be enabled until the special Workspace has been successfully migrated to and exercised through the context-aware architecture.
+Implement Features as one continuous delivery: migrate the special Workspace onto the context-aware architecture, then land Feature worktrees/UX in the same effort. There is no product feature flag and no ship-Workspace-only-first gate.
 
 The next document should be the detailed implementation design and migration plan.
 

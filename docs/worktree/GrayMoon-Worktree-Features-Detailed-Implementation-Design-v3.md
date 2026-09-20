@@ -1,4 +1,4 @@
-# GrayMoon Worktree Features — Detailed Implementation Design
+# GrayMoon Worktree Features - Detailed Implementation Design
 
 **Status:** Implementation design  
 **Code baseline reviewed through:** `43f79b6484a3a99c65a04a3a55c80f7b615527be`  
@@ -639,7 +639,7 @@ Do not automatically move existing linked worktrees during ordinary Workspace re
 
 # 7. Migration Strategy
 
-## 7.1 Migration Wave A — additive context schema
+## 7.1 Migration Wave A - additive context schema
 
 Add:
 
@@ -672,7 +672,7 @@ all existing tests pass
 no UI behavior changes
 ```
 
-## 7.2 Migration Wave B — additive context projection tables
+## 7.2 Migration Wave B - additive context projection tables
 
 Add/backfill:
 
@@ -685,7 +685,7 @@ file context state
 context file line status
 ```
 
-Still do not enable Feature UI.
+Feature UI is not wired yet in this migration wave; it follows later in the same continuous delivery.
 
 Acceptance gate:
 
@@ -959,9 +959,9 @@ Feature branch identity is immutable during the normal Feature lifecycle.
 
 ---
 
-# 13. Git Hooks — Worktree-Safe Attribution
+# 13. Git Hooks - Worktree-Safe Attribution
 
-This area must be implemented before Features are enabled.
+This area must be implemented before Feature worktrees are used.
 
 Git linked worktrees have independent `HEAD`s but use the repository's common Git data for shared refs and hooks.
 
@@ -1751,7 +1751,7 @@ Use Git commands for worktree lifecycle.
 
 ---
 
-# 27. Feature Removal — Analyze → Authorize → Execute
+# 27. Feature Removal - Analyze → Authorize → Execute
 
 Implement Feature removal from day one using the Return-to-Default pattern.
 
@@ -2306,23 +2306,15 @@ The browser/App context remains authoritative for its own commands.
 
 ---
 
-# 35. Workspace Features Feature Flag
+# 35. No Product Feature Flag
 
-Do not expose Feature creation UI while migration waves are incomplete.
+There is no product feature flag such as `WorkspaceFeaturesOptions.Enabled`.
 
-Add an internal configuration/option gate such as:
+Features work proceeds as one continuous implementation effort.
 
-```text
-WorkspaceFeaturesOptions.Enabled
-```
+Waves in this document are an internal sequencing aid for schema, context migration, worktrees, and UX. They are not a ship-Workspace-only-first product gate, and Feature creation is not held behind a config switch until a later enablement PR.
 
-Default false during foundational waves.
-
-The special Workspace must run through the new context architecture while Feature creation remains hidden.
-
-Enable only after the Workspace regression gate is passed.
-
-The final product default can be switched deliberately in the enablement PR.
+Preserve Workspace regression quality through wave gates while completing Feature worktrees and UX in the same continuous delivery.
 
 ---
 
@@ -2332,16 +2324,15 @@ Each wave should be a separate reviewable PR or clearly isolated commit series.
 
 Do not parallelize agents across files with overlapping ownership unless explicitly coordinated.
 
-## Wave 0 — baseline and guardrails
+## Wave 0 - baseline references
 
 Goals:
 
 - freeze baseline commit/reference;
-- ensure both companion docs are in implementation folder;
-- add/update architectural tests where useful;
-- add Feature flag default false.
+- ensure companion docs are in the implementation folder;
+- add/update architectural tests where useful.
 
-No behavior change.
+No product feature flag. No behavior change required beyond documentation/baseline scaffolding if needed.
 
 Gate:
 
@@ -2351,9 +2342,9 @@ full tests
 manual Workspace smoke test
 ```
 
-## Wave 1 — schema expand/backfill
+## Wave 1 - schema expand/backfill
 
-Implement §6 and Migration Wave A.
+Implement section 6 and Migration Wave A.
 
 Runtime still old.
 
@@ -2361,7 +2352,7 @@ Add migration tests/backfill tests.
 
 Gate: no behavior change.
 
-## Wave 2 — context resolver/path resolver/application identity
+## Wave 2 - context resolver/path resolver/application identity
 
 Implement:
 
@@ -2378,7 +2369,7 @@ Begin converting application contracts to explicit ContextId where safe.
 
 Gate: all existing Workspace paths identical to baseline.
 
-## Wave 3 — context repository state writer
+## Wave 3 - context repository state writer
 
 Switch `WorkspaceRepositoryStateWriter` and mutable repository state consumers to context state.
 
@@ -2386,7 +2377,6 @@ Special Workspace only.
 
 Update repository grid query DTOs to join special context state.
 
-Keep Feature flag false.
 
 Gate:
 
@@ -2394,7 +2384,7 @@ Gate:
 - branch/tag/current-version/count/status display unchanged;
 - hook/sync baseline unchanged.
 
-## Wave 4 — hook attribution + shared ref split
+## Wave 4 - hook attribution + shared ref split
 
 Implement path-attributed common hooks and context-aware `SyncCommandHandler`.
 
@@ -2402,9 +2392,8 @@ Confirm `RepositoryBranches` remains shared.
 
 Gate with hook tests for post-commit/post-checkout/post-merge/pre-push.
 
-Feature flag false.
 
-## Wave 5 — projects/packages/dependency graph
+## Wave 5 - projects/packages/dependency graph
 
 Contextualize project persistence and dependency computations.
 
@@ -2425,7 +2414,7 @@ to special Workspace context.
 
 Gate against entire dependency section of baseline appendix.
 
-## Wave 6 — files/version observations
+## Wave 6 - files/version observations
 
 Contextualize:
 
@@ -2439,7 +2428,7 @@ file search/content path resolution
 
 Gate Files + dependency badges + configured-file update.
 
-## Wave 7 — PR + Actions + Git Changes + notifications
+## Wave 7 - PR + Actions + Git Changes + notifications
 
 Contextualize:
 
@@ -2451,11 +2440,10 @@ pending notifications
 SignalR event identity
 ```
 
-Feature flag still false.
 
 Gate all respective baseline pages.
 
-## Wave 8 — hierarchical operation runner
+## Wave 8 - hierarchical operation runner
 
 Replace Workspace-only mutation lock with structural/context scopes.
 
@@ -2463,19 +2451,17 @@ Run existing operation tests plus new concurrency matrix.
 
 Special Workspace must remain functionally identical.
 
-## Wave 9 — Workspace UI through context architecture
+## Wave 9 - Workspace UI through context architecture
 
-Add `WorkspaceContextBar` and Feature selector framework but only Workspace item while flag false if helpful.
+Add `WorkspaceContextBar` and Feature selector framework. Early in this wave the selector may only list Workspace until Feature contexts exist later in the same continuous delivery.
 
 All Workspace pages resolve explicit special ContextId and pass it to commands/queries.
 
-This is the **critical migration gate**.
+This is the **critical Workspace regression gate** within the continuous Features delivery.
 
-Manual test every item in the baseline appendix.
+Manual test every item in the baseline appendix before proceeding to Feature worktrees/UX.
 
-No Feature creation yet.
-
-## Wave 10 — Agent worktree primitives + Feature lifecycle backend
+## Wave 10 - Agent worktree primitives + Feature lifecycle backend
 
 Implement:
 
@@ -2492,11 +2478,11 @@ AnalyzeRemoveFeature
 RemoveFeature
 ```
 
-Still keep UI hidden until backend tests pass.
+Complete backend Feature lifecycle tests, then wire Feature UX in Wave 11 of the same continuous delivery.
 
-## Wave 11 — Feature UX enablement
+## Wave 11 - Feature UX
 
-Enable:
+Ship:
 
 ```text
 selector listing Features
@@ -2511,13 +2497,13 @@ context navigation persistence
 
 Run full isolation matrix with at least two Features.
 
-## Wave 12 — Desktop native actions
+## Wave 12 - Desktop native actions
 
 Implement Desktop-only launch actions.
 
 No core behavior dependency.
 
-## Wave 13 — hardening / recovery
+## Wave 13 - hardening / recovery
 
 Test:
 
@@ -2536,7 +2522,7 @@ remote unavailable
 Workspace rename/root change detection
 ```
 
-## Wave 14 — contract cleanup
+## Wave 14 - contract cleanup
 
 After user/manual approval:
 
@@ -2739,7 +2725,7 @@ Use matrix in §21.3.
 
 Use a temporary set of real Git repositories.
 
-## Scenario A — two Features
+## Scenario A - two Features
 
 ```text
 Workspace RepoA -> main
@@ -2759,7 +2745,7 @@ project discovery
 dependency stats
 ```
 
-## Scenario B — cross-repo dependency
+## Scenario B - cross-repo dependency
 
 Feature A changes package producer version/project reference.
 
@@ -2769,7 +2755,7 @@ Feature B graph stays baseline.
 
 Feature A Update/Push plan changes.
 
-## Scenario C — hook isolation
+## Scenario C - hook isolation
 
 Commit in Feature A.
 
@@ -2777,7 +2763,7 @@ Wait for hook/sync.
 
 Only Feature A state changes.
 
-## Scenario D — Actions/PR
+## Scenario D - Actions/PR
 
 Publish Feature A only.
 
@@ -2785,13 +2771,13 @@ Feature A gets upstream/PR/Actions.
 
 Workspace and Feature B remain independent.
 
-## Scenario E — concurrent operations
+## Scenario E - concurrent operations
 
 Run long operation in Feature A and another in Feature B.
 
 Both proceed subject to Agent bounded concurrency.
 
-## Scenario F — crash recovery
+## Scenario F - crash recovery
 
 Kill App/Agent between worktree 1 and worktree N creation.
 
@@ -2838,13 +2824,13 @@ At minimum:
 - tags;
 - offline local operation.
 
-Do not enable Feature creation if this gate fails.
+Do not proceed to Feature worktrees/UX if this Workspace regression gate fails. There is no product feature flag; fix the regression gap first.
 
 ---
 
 # 41. Manual Feature Acceptance Gate
 
-After UI enablement, test at least:
+After Feature UX lands, test at least:
 
 ```text
 Workspace
@@ -3054,5 +3040,5 @@ Do not attempt to "add worktrees" directly to the current single-checkout model.
 
 The central success criterion is not merely that `git worktree add` works.
 
-It is that GrayMoon's existing multi-repository intelligence — dependency graph, version files, Git Changes, PRs, Actions, hooks, package synchronization, restore, push orchestration, and safety workflows — becomes **context-correct** before worktree-backed Features are exposed.
+It is that GrayMoon's existing multi-repository intelligence - dependency graph, version files, Git Changes, PRs, Actions, hooks, package synchronization, restore, push orchestration, and safety workflows - becomes **context-correct** before worktree-backed Features are exposed.
 

@@ -1708,13 +1708,13 @@ For a selected Feature:
 
 > **The same applicable Workspace capabilities should operate on that Feature's isolated files and persisted context state, while Workspace-shared configuration remains shared.**
 
-Any implementation wave that cannot satisfy these two rules should not enable user-creatable Features yet.
+Any implementation wave that cannot satisfy these two rules must not proceed to Feature worktrees/UX until the regression gap is fixed. There is no product feature flag; this is a technical sequencing rule within one continuous delivery.
 
 ---
 
 # 51. Detailed Design Gate
 
-Before the first real worktree Feature can be enabled, the implementation plan should demonstrate concrete migration coverage for:
+Before Feature worktrees/UX land in the continuous Features delivery, the implementation plan should demonstrate concrete migration coverage for:
 
 ```text
 WorkspaceFeatureContext schema/backfill
@@ -1739,7 +1739,7 @@ The safest sequencing remains:
 1. introduce context schema
 2. migrate the existing Workspace onto it
 3. prove all existing Workspace behavior
-4. only then create additional worktree Feature contexts
+4. then create additional worktree Feature contexts in the same continuous delivery
 ```
 
-This appendix should be used as the acceptance baseline for step 3.
+This appendix should be used as the acceptance baseline for step 3. There is no product feature flag between these steps.
