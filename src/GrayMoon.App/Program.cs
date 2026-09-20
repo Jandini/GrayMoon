@@ -180,6 +180,7 @@ try
     builder.Services.AddScoped<WorkspaceGitChangesPushAfterCommitMemory>();
     builder.Services.AddSingleton<IWorkspaceGitChangesActivityTracker, WorkspaceGitChangesActivityTracker>();
     builder.Services.AddSingleton<IGitChangesWorkspaceScanner, GitChangesWorkspaceScanner>();
+    builder.Services.AddScoped<IWorkspaceGitChangesActivation, WorkspaceGitChangesActivation>();
 
     builder.Services.AddSingleton<ICommandLineService, CommandLineService>();
     builder.Services.AddSingleton<IScopedServiceExecutor, ScopedServiceExecutor>();

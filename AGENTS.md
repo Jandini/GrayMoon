@@ -71,12 +71,31 @@ DI scope. That means:
   as part of the same change, not a followup - it is a silent hazard for every
   other feature sharing that circuit, not just the one you are working on.
 
-## Commit message for the user
+## Desktop README when features change
 
-When you finish work, or when suggesting/preparing a commit, always give a short
-commit message in a fenced code block so the user can copy it easily. Do not
-create the commit unless the user asks.
+When you add a user-facing feature or change how an existing one behaves,
+update the sibling `../GrayMoon.Desktop/README.md` **Recent GrayMoon changes**
+section in the same turn (that file lives in the Desktop repo, not this one).
+
+- **New feature** - add a bullet at the top of the list.
+- **Existing feature** - edit the matching bullet instead of adding a duplicate.
+- Match the existing style: `- **Short title** - one paragraph of what the
+  user sees and how it works.`
+- Skip internal-only refactors, tests, docs-only edits, or plumbing with no
+  user-visible behavior change.
+- Do not create a Desktop commit unless the user asks. If that README changed,
+  give a second short commit message labeled for GrayMoon.Desktop.
+
+## Commit message after each task
+
+After you finish a piece of work, always give a short commit message in a
+fenced code block so the user can copy it. Do this at the end of the reply,
+even if they did not ask for a commit. Do not create the commit unless they
+ask.
+
+Write one imperative sentence that says why the change exists, matching the
+repo's recent style (`Fix …`, `Add …`, `Keep …`).
 
 ```
-Short imperative summary of why the change exists.
+Fix the race that left the shared DbContext unusable after a failed merge
 ```

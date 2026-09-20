@@ -88,6 +88,8 @@ public sealed class WorkspaceOperationRunnerTests
         Assert.True(WorkspaceJobKeys.IsMutationKey("/workspaces/3/changes", out var changesId));
         Assert.Equal(3, changesId);
 
+        Assert.Equal("/workspaces/3/changes", WorkspaceJobKeys.GitChangesPageKey(3));
+        Assert.Equal("/workspaces/3/changes:scan", WorkspaceJobKeys.GitChangesScanKey(3));
         Assert.False(WorkspaceJobKeys.IsMutationKey("/workspaces/3/changes:scan", out _));
         Assert.False(WorkspaceJobKeys.IsMutationKey("/connectors", out _));
     }

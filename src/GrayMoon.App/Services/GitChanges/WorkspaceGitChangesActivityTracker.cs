@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 namespace GrayMoon.App.Services.GitChanges;
 
 /// <summary>
-/// Tracks which workspaces currently have an open Git Changes page, so background monitoring only
+/// Tracks which workspaces currently have Repositories or Changes open, so background monitoring only
 /// sweeps repositories the user is actually looking at instead of every repository in the database.
 /// Ref-counted per workspace like <c>GitRepositoryWatcherManager</c>'s Agent-side watcher lease, but with
 /// time-based expiry on top: a workspace stays "active" for a grace period after its last viewer leaves,
