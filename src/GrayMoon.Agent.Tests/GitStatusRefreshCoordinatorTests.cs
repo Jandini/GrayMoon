@@ -162,6 +162,78 @@ public class GitStatusRefreshCoordinatorTests
         Assert.Equal(1, fake.CallCount);
     }
 
+    [Fact]
+    public async Task Cancelled_owner_scan_does_not_leave_repository_stuck()
+    {
+        var fake = new FakeRepositoryGitChangesService { Delay = TimeSpan.FromMilliseconds(500) };
+        using var coordinator = CreateCoordinator(fake);
+        const string repoPath = @"C:\repo-cancel-stuck";
+
+        using var ownerCts = new CancellationTokenSource();
+        var owner = coordinator.RefreshNowAsync(repoPath, ownerCts.Token);
+        await Task.Delay(50); // ensure the scan is in flight (Refreshing)
+        ownerCts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => owner);
+
+        // Without AbortRefresh the tracker stayed Refreshing forever and this hung until process death.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var result = await coordinator.RefreshNowAsync(repoPath, timeout.Token);
+
+        Assert.True(result.Success);
+        Assert.Equal(RepositoryRefreshState.Clean, coordinator.GetState(repoPath));
+    }
+
+    [Fact]
+    public async Task Cancel_while_dirty_unblocks_coalesced_waiters_and_allows_later_refresh()
+    {
+        var fake = new FakeRepositoryGitChangesService { Delay = TimeSpan.FromMilliseconds(400) };
+        var options = new GitChangesOptions { WatcherDebounceMilliseconds = 20 };
+        using var coordinator = CreateCoordinator(fake, options);
+        const string repoPath = @"C:\repo-cancel-dirty";
+
+        using var ownerCts = new CancellationTokenSource();
+        var owner = coordinator.RefreshNowAsync(repoPath, ownerCts.Token);
+        await Task.Delay(40);
+        coordinator.MarkDirty(repoPath); // RefreshingAndDirty + coalesced pending completion
+
+        using var coalescedCts = new CancellationTokenSource();
+        var coalesced = coordinator.RefreshNowAsync(repoPath, coalescedCts.Token);
+
+        ownerCts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => owner);
+
+        // Coalesced waiter must be completed (canceled) by AbortRefresh, not hang.
+        using var coalesceWait = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => coalesced.WaitAsync(coalesceWait.Token));
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var result = await coordinator.RefreshNowAsync(repoPath, timeout.Token);
+        Assert.True(result.Success);
+    }
+
+    [Fact]
+    public async Task Coalesced_caller_cancellation_does_not_abort_owner_scan()
+    {
+        var fake = new FakeRepositoryGitChangesService { Delay = TimeSpan.FromMilliseconds(250) };
+        using var coordinator = CreateCoordinator(fake);
+        const string repoPath = @"C:\repo-coalesce-cancel";
+
+        var owner = coordinator.RefreshNowAsync(repoPath, CancellationToken.None);
+        await Task.Delay(30);
+
+        using var coalescedCts = new CancellationTokenSource();
+        var coalesced = coordinator.RefreshNowAsync(repoPath, coalescedCts.Token);
+        coalescedCts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => coalesced);
+        var ownerResult = await owner.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(ownerResult.Success);
+        Assert.True(fake.CallCount >= 1);
+    }
+
     private static async Task<bool> WaitForAsync(Func<bool> condition, TimeSpan timeout)
     {
         var start = DateTime.UtcNow;
